@@ -1,144 +1,115 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "./fixtures";
-import { scaledTimeout } from "../e2e-timing";
+import { expect, publish, test } from "./fixtures";
 
-// Manual regression round: drives every operational surface of the SPA against
-// a real orchestrator (see e2e/serve.py). Assumes the same fixture server as
-// chain.spec.ts.
+// Every area's write path, the way the new UI writes it: Templates and
+// Policy/Auto-intake edit a server-side draft and publish it; Access,
+// Notifications and Appearance save on change. Each test reads the result
+// back from the API (or after a reload), not from the control it just set.
 
-test("settings: connect a repo", async ({ page }) => {
-  // A fresh repo, not REPO: earlier specs file items in REPO, and a repo with a
-  // live item can't be disconnected (409), so it can't be taken off to re-drive
-  // the Add repo flow. The server stores the resolved path, so match by suffix.
-  const dir = join(mkdtempSync(join(tmpdir(), "kraft-e2e-connect-")), "connect-me");
-  mkdirSync(dir);
-  execFileSync("git", ["init", "-q", dir]);
-  const name = "connect-me";
-  await page.goto("/settings/repos");
-  await page.getByRole("button", { name: /connect a repo|add repo|connect/i }).first().click();
-  const dlg = page.getByRole("dialog", { name: "Add repo" });
-  await dlg.getByRole("textbox").first().fill(dir);
-  // probe is debounced; the submit button unlocks once it lands
-  await expect(dlg.getByRole("button", { name: /add|connect/i })).toBeEnabled({ timeout: scaledTimeout(15_000) });
-  await dlg.getByRole("button", { name: /add|connect/i }).click();
-  await expect(dlg).toBeHidden();
-  // the row navigates into the detail pane, not just the list. By data-repo,
-  // not text: the name also appears in the probe note and other repos' rows.
-  await page.locator(`[data-repo$="/${name}"]`).click();
-  await expect(page.getByRole("heading", { name })).toBeVisible();
-  // No item uses it, so disconnecting is allowed.
+/** A cell that reads "<label>, <value>. Edit": click, type, Enter. */
+async function editCell(page: import("@playwright/test").Page, label: RegExp, value: string) {
+  await page.getByRole("button", { name: label }).click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type(value);
+  await page.keyboard.press("Enter");
+}
+
+test("repos: connect a repo and publish it", async ({ page }) => {
+  // A repo of this run's own, so connecting is never a no-op.
+  const repo = mkdtempSync(join(tmpdir(), "kraft-e2e-connect-"));
+  execFileSync("git", ["init", "-q", "-b", "main", repo]);
+  execFileSync("git", ["-C", repo, "-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+  await page.goto("/templates/repos");
+  await page.getByRole("button", { name: "Connect repo" }).click();
+  const dialog = page.getByRole("dialog", { name: "Connect a repo" });
+  await dialog.getByRole("textbox", { name: "Path to a git repository" }).fill(repo);
+  await dialog.getByRole("button", { name: "Check" }).click();
+  await dialog.getByRole("button", { name: "Connect" }).click();
+  await expect(dialog).toBeHidden();
+  await publish(page);
+
   const { repos } = await (await page.request.get("/api/repos")).json();
-  const stored = repos.find((r: { path: string }) => r.path.endsWith(`/${name}`));
-  expect((await page.request.delete(`/api/repos?path=${encodeURIComponent(stored.path)}`)).status()).toBe(204);
+  expect(repos.map((r: { path: string }) => r.path.split("/").pop())).toContain(repo.split("/").pop());
 });
 
-test("settings: chain templates page loads the chain file and resolves it", async ({ page }) => {
-  await page.goto("/settings/chains");
-  await expect(page.getByRole("heading", { name: "default" })).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await expect(page.getByText("verification", { exact: true })).toBeVisible();
-  const yaml = page.getByLabel("chain yaml");
-  await expect(yaml).toHaveValue(/id: default/);
-  await expect(page.getByText("valid", { exact: true })).toBeVisible();
+test("chains: a change to a chain publishes to its file", async ({ page }) => {
+  const description = `e2e ${Date.now()}`;
+  await page.goto("/templates/chains/quick-task");
+  const field = page.getByRole("textbox", { name: "description" });
+  await field.fill(description);
+  await field.press("Tab");
+  // The draft is saved per pause; the header leaves "published" once it is.
+  await expect(page.getByRole("banner").getByText(/^DRAFT/)).toBeVisible();
+  await publish(page);
+
+  const { text } = await (await page.request.get("/api/templates/chains/quick-task")).json();
+  expect(text).toContain(description);
 });
 
-test("settings: library shows a component's chains, and a chain links back to it", async ({ page }) => {
-  await page.goto("/settings/library?c=tasks.implementer");
-  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await expect(page.getByLabel("library yaml")).toHaveValue(/implementer:/);
-  await page.getByRole("link", { name: "quick-task", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "quick-task" })).toBeVisible();
-  await page.getByRole("link", { name: "tasks.implementer" }).first().click();
-  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
+test("library: a component lists the chains that use it, and links to them", async ({ page }) => {
+  await page.goto("/templates/library/tasks.implementer");
+  await page.getByRole("link", { name: "quick-task" }).click();
+  await expect(page).toHaveURL(/\/templates\/chains\/quick-task\/nodes\/implementation$/);
 });
 
-test("settings: a library task links to its harness profile, and the profile back to it", async ({ page }) => {
-  await page.goto("/settings/library?c=tasks.implementer");
-  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await page.getByRole("link", { name: "claude", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "claude", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /^provider / })).toBeVisible();
-  // The harness profile's own link: the agent profiles panel beside it
-  // (`strong`) links the same task too.
-  await page.locator(".template-draft").getByRole("link", { name: "tasks.implementer" }).click();
-  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
+test("harnesses: a harness lists the tasks it runs, and links to them", async ({ page }) => {
+  await page.goto("/templates/harnesses");
+  await page.getByRole("region", { name: "claude" }).getByRole("link", { name: /^default › implementation\.main\.implement\. Open in Chains$/ }).click();
+  await expect(page).toHaveURL(/\/templates\/chains\/default\/nodes\/implementation$/);
 });
 
-test("settings: policy edit saves", async ({ page }) => {
+test("policy: a cap edited and published", async ({ page }) => {
+  const usd = 50 + (Date.now() % 40);
   await page.goto("/settings/policy");
-  const attempts = page.getByLabel(/attempts/).first();
-  await expect(attempts).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await attempts.fill("4");
-  const maxConcurrent = page.getByLabel(/max concurrent/i);
-  await maxConcurrent.fill("4");
-  await page.getByRole("button", { name: "Save" }).click();
-  await page.reload();
-  await expect(page.getByLabel(/attempts/).first()).toHaveValue("4");
-  await expect(page.getByLabel(/max concurrent/i)).toHaveValue("4");
+  await editCell(page, /^per day, .+\. Edit$/, String(usd));
+  await publish(page);
+
+  const policy = await (await page.request.get("/api/policy")).json();
+  expect(policy.budget.daily_usd).toBe(usd);
 });
 
-test("settings: steering profiles are edited on the Library, and the old Steering address opens it", async ({
-  page,
-}) => {
-  await page.goto("/settings/steering");
-  await expect(page).toHaveURL(/\/settings\/library/, { timeout: scaledTimeout(15_000) });
-  await expect(page.getByLabel("library yaml")).toBeEditable({ timeout: scaledTimeout(15_000) });
-  // The seeded library's one steering profile, the same store repos.yaml names.
-  await page.locator(".facet-opt", { hasText: "project-standards" }).click();
-  await expect(page.getByText(/frozen into an item at intake/)).toBeVisible();
+test("auto-intake: the interval edited and published", async ({ page }) => {
+  await page.goto("/settings/auto-intake");
+  const before = (await (await page.request.get("/api/intake")).json()).interval_s;
+  const minutes = before === 420 ? 6 : 7;
+  await editCell(page, /^check every, minutes, \d+ min\. Edit$/, String(minutes));
+  await publish(page);
+
+  expect((await (await page.request.get("/api/intake")).json()).interval_s).toBe(minutes * 60);
 });
 
-test("settings: access shows the bind, and allowed-hosts tags round-trip", async ({ page }) => {
+test("access: the port saves on change and survives a reload", async ({ page }) => {
   await page.goto("/settings/access");
-  await expect(page.getByText("127.0.0.1").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  const input = page.getByPlaceholder(/add a host or ip/i);
-  await expect(input).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await input.fill("e2e.kraft.local");
-  await input.press("Enter");
-  const chip = page.locator(".chip", { hasText: "e2e.kraft.local" });
-  await expect(chip).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await editCell(page, /^Port \d+, edit$/, "8766");
+  await expect(page.getByRole("button", { name: "Port 8766, edit" })).toBeVisible();
   await page.reload();
-  await expect(page.locator(".chip", { hasText: "e2e.kraft.local" })).toBeVisible({
-    timeout: scaledTimeout(15_000),
-  });
-  await page.locator(".chip", { hasText: "e2e.kraft.local" }).click();
-  await expect(page.locator(".chip", { hasText: "e2e.kraft.local" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Port 8766, edit" })).toBeVisible();
+  expect((await (await page.request.get("/api/access")).json()).port).toBe(8766);
+  await page.request.put("/api/access", { data: { port: 8765 } });
 });
 
-test("settings: notify send a test reports a result", async ({ page }) => {
-  await page.goto("/settings/notify");
-  await page.getByLabel(/webhook url/i).fill("https://ntfy.sh/kraft-e2e-test");
-  await page.getByRole("button", { name: "Save" }).first().click();
-  const send = page.getByRole("button", { name: /send a test/i });
-  await expect(send).toBeEnabled({ timeout: scaledTimeout(15_000) });
-  await send.click();
-  // The receiver may not exist, but the row must report *something* --
-  // status/latency or a clear failure -- never stay on "never sent".
-  await expect(page.getByText(/never sent/i)).toBeHidden({ timeout: scaledTimeout(15_000) });
+test("notifications: send a test reports a result", async ({ page }) => {
+  await page.goto("/settings/notifications");
+  const webhook = page.getByRole("region", { name: "Webhook" });
+  // Nothing listens on port 9: the result is a failure with its reason.
+  await webhook.getByRole("textbox", { name: "Webhook URL" }).fill("http://127.0.0.1:9/hook");
+  await webhook.getByRole("textbox", { name: "Webhook URL" }).press("Enter");
+  await webhook.getByRole("button", { name: "Send a test" }).click();
+  await expect(webhook.getByText(/last attempt .*failed: /)).toBeVisible();
 });
 
-test("settings: appearance density and board prefs persist after reload", async ({ page }) => {
+test("appearance: density and open-in persist after a reload", async ({ page }) => {
   await page.goto("/settings/appearance");
-  // The radios' checked state and their onChange handlers are both gated on
-  // the theme GET having landed (`theme && preview(...)`). Under load that
-  // GET can still be in flight right after goto() resolves (goto only waits
-  // for `load`, not for in-page fetches); a click before then is a silent
-  // no-op forever, and Save never leaves disabled=true. Let it settle first.
-  await page.waitForLoadState("networkidle");
-  // By label text, not getByRole("radio"): the input is visually hidden behind
-  // the segmented control, so a real browser won't click it.
-  await page.getByRole("radiogroup", { name: "density" }).getByText("Comfortable", { exact: true }).click();
-  await page.getByRole("radiogroup", { name: "group by" }).getByText("repo", { exact: true }).click();
-  await page.getByRole("button", { name: "Save" }).click();
-  // Same race as the steering test above: wait for the async save (PUT, then
-  // a theme reload) to finish before the hard reload, or a slow save gets
-  // cancelled mid-flight and nothing persists.
-  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled({
-    timeout: scaledTimeout(15_000),
-  });
+  await page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" }).check();
+  await page.getByRole("radiogroup", { name: "Open items in" }).getByRole("radio", { name: "Full page" }).check();
+  await expect.poll(async () => (await (await page.request.get("/api/theme")).json()).board.open_in).toBe("full");
   await page.reload();
-  await expect(page.getByRole("radio", { name: "Comfortable" })).toBeChecked();
-  await expect(page.getByRole("radio", { name: "repo" })).toBeChecked();
+  await expect(page.getByRole("radiogroup", { name: "Density" }).getByRole("radio", { name: "Comfortable" })).toBeChecked();
+  await expect(page.getByRole("radiogroup", { name: "Open items in" }).getByRole("radio", { name: "Full page" })).toBeChecked();
+  // The other specs click rows expecting the peek.
+  await page.request.put("/api/theme", { data: { density: "compact", board: { open_in: "peek" } } });
 });
