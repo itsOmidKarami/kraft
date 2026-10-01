@@ -63,12 +63,12 @@ and a key the file leaves out takes its default.
 |---|---|---|
 | `surface` | `graphite`, `slate`, `ink`, `sand` or `moss`: the base colours of the page. | `ink` |
 | `accent` | `none`, `blue`, `violet`, `green`, `amber` or `rose`. | `violet`; with a `surface` set and no `accent`, `none` |
-| `colour_amount` | `mono`, `subtle` or `full`: scales the tint of the surfaces, the accent and the status colours together; `mono` leaves only grey. `mono` takes only `accent: none`, and a file that pairs them is refused. | `full`; with a `surface` set and no amount, `subtle` |
+| `colour_amount` | `mono`, `subtle` or `full`: how much colour the surfaces, the accent and the status colours carry; `mono` leaves only grey. `mono` takes only `accent: none`, and a file that pairs them is refused. | `full`; with a `surface` set and no amount, `subtle` |
 | `mode` | `light`, `dark` or `system`. | `dark` |
-| `density` | `compact` or `comfortable` (2px more row padding and 1px more body type). | `compact` |
-| `code_scheme` | `light`: `auto`, `none` or `solarized-light`; `dark`: `auto`, `none`, `solarized-dark`, `monokai` or `dracula`. The syntax colours in review diffs. `auto` follows `colour_amount`, and `none` is a single colour. | `auto` for both |
-| `diff` | The review page's diff: `layout` (`unified` or `split`), `colours` (`theme` for the status colours, `safe` for colour-blind-safe blue and orange, or `plain` for marks only), and the switches `show_whitespace` (`true`), `word_highlight` (`true`), `wrap_lines` (`false`) and `one_file_at_a_time` (`true`). | as shown |
-| `board` | `group_by` (`status`, `repo` or `template`), `show_done` (the Done group's size, at least `1`; `5`) and `open_in` (`peek` or `full`: what a row click does, the side panel or the item page, where ⌘-click always opens the page; `peek`). | as shown |
+| `density` | `compact` or `comfortable`: how tightly rows and text are spaced. | `compact` |
+| `code_scheme` | `light`: `auto`, `none` or `solarized-light`; `dark`: `auto`, `none`, `solarized-dark`, `monokai` or `dracula`. The syntax colours in review diffs, chosen separately for light and dark. | `auto` for both |
+| `diff` | The review page's diff: `layout` (`unified` or `split`), `colours` (`theme`, `safe` or `plain`), and the switches `show_whitespace` (`true`), `word_highlight` (`true`), `wrap_lines` (`false`) and `one_file_at_a_time` (`true`). | as shown |
+| `board` | `group_by` (`status`, `repo` or `template`), `show_done` (the Done group's size, at least `1`; `5`) and `open_in` (`peek` or `full`: whether opening an item shows the side panel or the item page; `peek`). | as shown |
 
 ### `palette` is legacy
 
