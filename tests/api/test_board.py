@@ -1146,3 +1146,63 @@ def test_stop_kind_falls_back_on_a_pre_migration_row(client, repo, status, node,
     assert client.get(f"/api/work-items/{wid}").json()["stop"]["kind"] == expected
     row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
     assert row["stop"]["kind"] == expected
+
+
+# ── daily total (B10) ───────────────────────────────────────────────────────
+
+
+def _session_with_cost(wid: str, *, cost_usd: float, created_at: str) -> None:
+    """A worker_sessions row with just enough to be counted by `budget_spend`
+    -- not a real dispatch, so a test can control `created_at` and `cost_usd`
+    directly rather than racing a fake agent for them."""
+    _run(
+        lambda c: store.create_session(
+            c,
+            id=f"s-{created_at}",
+            work_item_id=wid,
+            node_id="n",
+            hook_point="n.main.n",
+            log_path="/l",
+            result_path="/r",
+        )
+    )
+    _run(
+        lambda c: c.execute(
+            "UPDATE worker_sessions SET cost_usd = ?, created_at = ? WHERE id = ?",
+            (cost_usd, created_at, f"s-{created_at}"),
+        )
+    )
+
+
+def test_budget_cap_daily_counts_only_since_local_midnight(client, repo):
+    wid = _paused_item(client, repo)
+    midnight = store.local_midnight_utc()
+    yesterday = "2020-01-01T00:00:00+00:00"
+    assert yesterday < midnight
+    _session_with_cost(wid, cost_usd=2.0, created_at=midnight)
+    _session_with_cost(wid, cost_usd=99.0, created_at=yesterday)
+
+    daily = client.get(f"/api/work-items/{wid}").json()["budget_cap"]["daily"]
+    assert daily["spent_usd"] == 2.0
+
+
+def test_budget_today_with_and_without_daily_cap(client, repo):
+    wid = _paused_item(client, repo)
+    _session_with_cost(wid, cost_usd=3.0, created_at=store.local_midnight_utc())
+
+    body = client.get("/api/budget/today").json()
+    assert body == {"spent_usd": 3.0, "cap_usd": 50.0}  # templates/policy.yaml's shipped default
+
+
+@pytest.mark.api_client(edit_templates=lambda tdir: _set_daily_usd(tdir, None))
+def test_budget_today_with_no_daily_cap_configured(client):
+    assert client.get("/api/budget/today").json()["cap_usd"] is None
+
+
+def _set_daily_usd(templates_dir, value) -> None:
+    import yaml
+
+    path = templates_dir / "policy.yaml"
+    data = yaml.safe_load(path.read_text())
+    data.setdefault("budget", {})["daily_usd"] = value
+    path.write_text(yaml.safe_dump(data))

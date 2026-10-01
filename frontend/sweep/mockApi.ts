@@ -44,10 +44,23 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
 
     let m: RegExpMatchArray | null;
 
+    /* budget */
+    if (p === "/budget/today") return json(route, { spent_usd: 8.3, cap_usd: 50 });
+
     /* work items */
     if (p === "/work-items" && method === "GET") {
       const list = q.get("archived") === "true" ? S.archived : S.items;
       return json(route, { items: list, cursor: 4242 });
+    }
+    if (p === "/work-items" && method === "POST" && q.get("dry_run")) {
+      const nodes = S.items[0]?.chain_definition?.nodes ?? [];
+      return json(route, {
+        dry_run: true,
+        nodes,
+        skipped: [],
+        gates: nodes.filter((n: any) => n.gate_after === n.id).map((n: any) => n.id),
+        caps: { budget_usd: 5, budget_source: "policy", daily_usd: 50, nodes: {} },
+      });
     }
     if (p === "/work-items" && method === "POST") return json(route, { id: S.items[0]?.id ?? "00000000000000000000000000000000" });
     if ((m = p.match(/^\/work-items\/([^/]+)$/))) {

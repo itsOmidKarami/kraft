@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from kraft import config as config_mod
 from kraft import executor, store
+from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board, gates
@@ -23,7 +24,7 @@ from kraft.overrides import (
 )
 from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.templates.environment import RootPointerPolicy
-from kraft.templates.models import MaterializedChain, ResolvedChain
+from kraft.templates.models import ExecNode, GateNode, MaterializedChain, ResolvedChain
 
 
 class Attachment(BaseModel):
@@ -183,8 +184,74 @@ def _validated_attachments(
     return out
 
 
+def _dry_run_response(
+    st,
+    body: NewWorkItem,
+    chain: ResolvedChain,
+    materialized: MaterializedChain,
+    attachment_kinds: frozenset[str],
+) -> dict:
+    """B33: what `?dry_run=1` answers instead of filing -- the chain
+    `create_work_item` would file, which nodes its attachments or
+    `skip_nodes` dropped and why, the gates that will run, and each fix-loop
+    node's attempts/wall clock resolved the same way `walk.walk_node` resolves
+    them (`fix_loop_cap`, the node's own policy scope, its item-wide override
+    and its `node_overrides` entry) -- so a node's own override and an
+    item-wide value each show where they apply.
+
+    Takes `materialized` rather than rebuilding a row: a dry run has no row to
+    read a snapshot back from, and `MaterializedChain.policy_for` and
+    `.item_policy` already answer exactly what a row-backed lookup would.
+    """
+    nodes = materialized.chain.nodes  # already trimmed by attachments/skip_nodes
+    skipped = []
+    covered = {n.id: n.covered_by for n in chain.nodes if n.covered_by in attachment_kinds}
+    for n in chain.nodes:
+        if n.id in covered:
+            skipped.append({"node": n.id, "why": "covered_by", "kind": covered[n.id]})
+        elif n.id in body.skip_nodes:
+            skipped.append({"node": n.id, "why": "skip"})
+
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    budget_row = {
+        "budget_set": "budget_usd" in body.model_fields_set,
+        "budget_usd": body.budget_usd,
+    }
+    budget_usd, budget_source = store.effective_work_item_cap(budget_row, budget)
+
+    node_caps = {}
+    for n in nodes:
+        loop = n.node.fix_loop if isinstance(n.node, ExecNode) else None
+        if loop is None:
+            continue
+        cap = executor.fix_loop_cap(
+            st.policy,
+            executor.walk._loop_key(n),
+            materialized.policy_for(n),
+            loop.max_attempts,
+            {
+                **executor.walk._item_cap(materialized.item_policy, n.id),
+                **(body.node_overrides.get(n.id) or {}),
+            },
+        )
+        node_caps[n.id] = {"attempts": cap.attempts, "wall_clock_s": cap.wall_clock_s}
+
+    return {
+        "dry_run": True,
+        "nodes": [store.node_view(n) for n in nodes],
+        "skipped": skipped,
+        "gates": [n.id for n in nodes if isinstance(n.node, GateNode)],
+        "caps": {
+            "budget_usd": budget_usd,
+            "budget_source": budget_source,
+            "daily_usd": budget.daily_usd,
+            "nodes": node_caps,
+        },
+    }
+
+
 @api_router.post("/work-items", status_code=201)
-async def create_work_item(body: NewWorkItem, request: Request):
+async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
     st = request.app.state
     if st.invalid_policy:
         # Spec §9: a malformed policy.yaml makes the process refuse work, same
@@ -243,17 +310,14 @@ async def create_work_item(body: NewWorkItem, request: Request):
     per_repository = deps.repository_policies_or_422(st, target)
     repo_steering = deps.repository_steering_or_422(st, body.repo, target)
     try:
-        item_policy = (
-            chain.materialize(
-                target=target,
-                effective_policy=policy,
-                repository_policies=per_repository,
-                attachment_kinds=attachment_kinds,
-                skip_nodes=frozenset(body.skip_nodes),
-            )
-            .with_item_policy(body.policy)
-            .item_policy
-        )
+        materialized = chain.materialize(
+            target=target,
+            effective_policy=policy,
+            repository_policies=per_repository,
+            attachment_kinds=attachment_kinds,
+            skip_nodes=frozenset(body.skip_nodes),
+        ).with_item_policy(body.policy)
+        item_policy = materialized.item_policy
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     _check_node_overrides(
@@ -262,6 +326,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
         {n.id: n for n in chain.nodes},
         deps.instance_policy(st).maxima,
     )
+    if dry_run:
+        # B33: every check up to and including `_check_node_overrides` has run;
+        # nothing is written -- no row, no bead, no attachment copy, no spawn.
+        # 200, not this route's default 201: nothing was created.
+        content = _dry_run_response(st, body, chain, materialized, attachment_kinds)
+        return JSONResponse(status_code=200, content=content)
     # Read before this item exists, so it cannot find itself. Warned, not
     # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
     # the usual reason to re-file, a revised spec, now has its own door.

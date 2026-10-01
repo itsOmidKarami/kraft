@@ -142,6 +142,19 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
     return executor.gate_artifact(st.run_dirs, row, gate)
 
 
+@api_router.get("/budget/today")
+async def budget_today(request: Request):
+    """The instance's spend since local midnight against `policy.budget.daily_usd`
+    (B10) -- the same window and cap the daily budget stop already uses
+    (`intake.py`, `executor/stops.py`), surfaced for a UI with no single work
+    item in view."""
+    st = request.app.state
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    since = store.local_midnight_utc()
+    _item, spent_usd = st.db.read(lambda c: store.budget_spend(c, "", since=since))
+    return {"spent_usd": spent_usd, "cap_usd": budget.daily_usd}
+
+
 @api_router.get("/work-items")
 async def list_work_items(request: Request):
     st = request.app.state
@@ -596,7 +609,8 @@ async def get_work_item(wid: str, request: Request):
     node_overrides = store.node_overrides_of(row)
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)
-    spent_usd, _daily = st.db.read(lambda c: store.budget_spend(c, wid))
+    since = store.local_midnight_utc()
+    spent_usd, daily_spent_usd = st.db.read(lambda c: store.budget_spend(c, wid, since=since))
     progress = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid)
     return {
         **{k: row[k] for k in row.keys()},
@@ -620,7 +634,12 @@ async def get_work_item(wid: str, request: Request):
         # where it comes from -- and reusing the name would make every GET
         # response's truthy `budget` object read as "the item is stopped for
         # budget" even when it is running fine under its cap.
-        "budget_cap": {"cap_usd": cap_usd, "source": cap_source, "spent_usd": spent_usd},
+        "budget_cap": {
+            "cap_usd": cap_usd,
+            "source": cap_source,
+            "spent_usd": spent_usd,
+            "daily": {"spent_usd": daily_spent_usd, "cap_usd": budget.daily_usd},
+        },
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],

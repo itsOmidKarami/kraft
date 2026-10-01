@@ -288,7 +288,12 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     steerable: true,
     node_overrides: long ? { review: { auto_escalate: false } } : {},
     node_overrides_count: long ? 1 : 0,
-    budget_cap: { cap_usd: long ? 25 : 5, source: long ? "item" : "policy", spent_usd: 2.41 },
+    budget_cap: {
+      cap_usd: long ? 25 : 5,
+      source: long ? "item" : "policy",
+      spent_usd: 2.41,
+      daily: { spent_usd: 8.3, cap_usd: 50 },
+    },
     root_merge_policy: "bump",
     worktree_path: `/Users/dev/.kraft/worktrees/${id.slice(0, 12)}`,
     head_sha: hex(seed + 77).slice(0, 40),
@@ -435,7 +440,12 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       startCurrent("failed");
       ev("work_item_needs_human", { node_id: currentNode, reason: "spend cap reached", budget: { scope: "work_item", spent_usd: 5.12, cap_usd: 5 } }, 2);
       item.status = "needs_human"; item.stop_reason = "spend cap reached";
-      item.budget_cap = { cap_usd: 5, source: "policy", spent_usd: 5.12 };
+      item.budget_cap = {
+        cap_usd: 5,
+        source: "policy",
+        spent_usd: 5.12,
+        daily: { spent_usd: 31.4, cap_usd: 50 },
+      };
       item.display_status = "needs_you";
       item.stop = mkStop("budget", { reason: item.stop_reason });
       break;

@@ -71,6 +71,18 @@ export interface BudgetCap {
   cap_usd: number | null;
   source: "item" | "policy";
   spent_usd: number;
+  /** The instance's spend since local midnight against `policy.budget.daily_usd`
+   *  (B10, `GET /budget/today`'s own shape) -- optional/unused by the shipped
+   *  UI, which has no daily total anywhere yet. */
+  daily?: { spent_usd: number; cap_usd: number | null };
+}
+
+/** `GET /budget/today` (B10): the instance's spend since local midnight
+ *  against `policy.budget.daily_usd`, with no single work item in view.
+ *  Optional/unused by the shipped UI. */
+export interface BudgetToday {
+  spent_usd: number;
+  cap_usd: number | null;
 }
 
 export interface ChainDefinition {
@@ -172,6 +184,24 @@ export interface BulkResult {
   ok: boolean;
   status?: WorkItemStatus;
   error?: string;
+}
+
+/** `POST /work-items?dry_run=1` (B33): what create would do, without doing
+ *  it. Additive: not read by the shipped UI yet. */
+export interface CreateDryRun {
+  dry_run: true;
+  nodes: ChainNode[];
+  skipped: (
+    | { node: string; why: "covered_by"; kind: string }
+    | { node: string; why: "skip" }
+  )[];
+  gates: string[];
+  caps: {
+    budget_usd: number | null;
+    budget_source: "item" | "policy";
+    daily_usd: number | null;
+    nodes: Record<string, { attempts: number; wall_clock_s: number }>;
+  };
 }
 
 /** The breach a spend-cap stop recorded (`kraft.caps.Breach`), tagged on
