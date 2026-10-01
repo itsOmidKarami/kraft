@@ -43,6 +43,12 @@ const ALLOWED = [
   "templates/draft/types",
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
+  "harnesses/model", // the harnesses draft's resolve, as types and pure helpers
+  "harnesses/ops", // entryOp: the one set_profile patch
+  "harnesses/useProviders", // the providers' accepted efforts and models
+  "templates/repos/fields", // the Repos rows: label, parse, patch, source
+  "templates/repos/types", // reposOf, runningOf, problemsOf
+  "templates/repos/RepoConfig", // setRepo only: the preview-checked set_repo
   "library/rows", // listRows: the library draft's rows, as data
   "library/types", // the four sections and the ref grammar
   "shell/useDraftCounts", // the draft dots of More
