@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from kraft import events
 from kraft.db import Database
@@ -10,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class Client:
-    __slots__ = ("queue", "dropped")
+    __slots__ = ("queue", "dropped", "live")
 
-    def __init__(self, maxsize: int) -> None:
+    def __init__(self, maxsize: int, live: bool = False) -> None:
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
         self.dropped: bool = False
+        self.live = live
 
 
 class Broadcaster:
@@ -57,8 +59,27 @@ class Broadcaster:
     def notify(self) -> None:
         self._wakeup.set()
 
-    def register(self) -> Client:
-        client = Client(self._maxsize)
+    def publish(self, type: str, payload: dict) -> None:
+        """A live-only message: no `events` row, no seq, no replay. It is a
+        `{frame: "live"}` frame, not an event row, and only a client that
+        registered with `live=True` is sent one: the shipped board applies
+        every message it reads as an event and would take it for a cursor."""
+        frame = {
+            "frame": "live",
+            "type": type,
+            "payload": payload,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        for client in self._clients:
+            if client.live and not client.dropped:
+                try:
+                    client.queue.put_nowait(frame)
+                except asyncio.QueueFull:
+                    client.dropped = True
+                    logger.warning("ws client queue overflow; dropping client")
+
+    def register(self, *, live: bool = False) -> Client:
+        client = Client(self._maxsize, live)
         self._clients.add(client)
         return client
 

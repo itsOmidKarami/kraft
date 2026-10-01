@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 49
+SCHEMA_VERSION = 50
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -357,6 +357,18 @@ CREATE TABLE item_drafts (
   -- the item's latest event seq when the draft was created
   base_seq     INTEGER NOT NULL,
   updated_at   TEXT NOT NULL
+)
+;
+
+CREATE TABLE intake_checks (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  at      TEXT NOT NULL,
+  -- beads `bd ready` listed across the polled repos
+  ready   INTEGER NOT NULL,
+  -- [work item id]
+  started TEXT NOT NULL DEFAULT '[]',
+  -- [{bead, reason}]
+  skipped TEXT NOT NULL DEFAULT '[]'
 )
 """
 
@@ -1070,6 +1082,19 @@ FROM worker_sessions""",
   -- the item's latest event seq when the draft was created
   base_seq     INTEGER NOT NULL,
   updated_at   TEXT NOT NULL
+)"""
+    ],
+    # One row per auto-intake poll, newest 500 kept (UX V2 W13 G).
+    49: [
+        """CREATE TABLE intake_checks (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  at      TEXT NOT NULL,
+  -- beads `bd ready` listed across the polled repos
+  ready   INTEGER NOT NULL,
+  -- [work item id]
+  started TEXT NOT NULL DEFAULT '[]',
+  -- [{bead, reason}]
+  skipped TEXT NOT NULL DEFAULT '[]'
 )"""
     ],
 }

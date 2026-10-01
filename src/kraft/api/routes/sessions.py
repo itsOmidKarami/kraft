@@ -313,7 +313,7 @@ async def permission_hook(sid: str, body: HookCall, request: Request):
 
 
 @api_router.websocket("/ws/events")
-async def ws_events(websocket: WebSocket, after_seq: int = 0):
+async def ws_events(websocket: WebSocket, after_seq: int = 0, live: bool = False):
     if not perimeter._origin_ok(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return
@@ -351,7 +351,7 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
             return
     st = websocket.app.state
     bc = st.broadcaster
-    client = bc.register()
+    client = bc.register(live=live)
     live_start = bc.cursor
     await websocket.accept()
     # Uvicorn's graceful shutdown asks every open connection to close and then
@@ -376,7 +376,7 @@ async def ws_events(websocket: WebSocket, after_seq: int = 0):
                 ev = await asyncio.wait_for(client.queue.get(), timeout=1.0)
             except TimeoutError:
                 continue
-            if ev["seq"] <= live_start:
+            if ev.get("frame") != "live" and ev["seq"] <= live_start:
                 continue
             await websocket.send_json(ev)
     except WebSocketDisconnect:

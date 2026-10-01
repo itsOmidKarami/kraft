@@ -9,6 +9,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -608,3 +609,138 @@ async def test_an_auto_intaken_bead_records_the_repo_as_its_bd_workspace(
         ).fetchone()
     )
     assert row["bead_cwd"] == row["repo"]
+
+
+# ── the check records (UX V2 W13 G) ──
+
+
+def _checks(app) -> list[dict]:
+    return app.state.db.read(store.intake_checks)
+
+
+async def _hand_active(app):
+    await _file(app, bead_id="HAND-1", status="active")
+
+
+async def _hand_known(app):
+    await _file(app, bead_id="B-1", status="needs_human")
+
+
+async def _overspent(app):
+    await _spend(app, 5.0)
+
+
+_SKIP_CASES = [
+    pytest.param(
+        [{"id": "B-1", "title": "t", "priority": 1}],
+        {},
+        None,
+        "above_priority_ceiling",
+        id="ceiling",
+    ),
+    pytest.param(
+        [{"id": "B-1", "title": "t", "priority": 3}], {}, _hand_known, "already_item", id="item"
+    ),
+    pytest.param(
+        [{"id": "B-1", "title": "t", "priority": 3, "issue_type": "epic"}],
+        {},
+        None,
+        "epic",
+        id="epic",
+    ),
+    pytest.param(
+        [{"id": "B-1", "title": "t", "priority": 3}],
+        {"max_concurrent": 1},
+        _hand_active,
+        "max_concurrent",
+        id="max-concurrent",
+    ),
+    pytest.param(
+        [{"id": "B-1", "title": "t", "priority": 3}],
+        {"budget": policy.Budget(daily_usd=1.0)},
+        _overspent,
+        "daily_budget",
+        id="daily-budget",
+    ),
+]
+
+
+@pytest.mark.parametrize(("rows", "state", "before", "reason"), _SKIP_CASES)
+async def test_a_poll_records_why_it_passed_a_bead_over(
+    tmp_path, monkeypatch, stub_app, rows, state, before, reason
+):
+    monkeypatch.setattr(intake_mod.beads, "ready", _ready(rows))
+    app = stub_app(**_state(tmp_path, **{"max_concurrent": 5, **state}))
+    if before:
+        await before(app)
+
+    assert await intake_mod.tick(app) == []
+    (check,) = _checks(app)
+    assert (check["ready"], check["started"], check["skipped"]) == (
+        1,
+        [],
+        [{"bead": "B-1", "reason": reason}],
+    )
+
+
+async def test_an_unloadable_policy_is_recorded_as_invalid_config(tmp_path, monkeypatch, stub_app):
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
+    )
+    app = stub_app(**{**_state(tmp_path), "invalid_policy": ["max_concurrent: nope"]})
+
+    assert await intake_mod.tick(app) == []
+    (check,) = _checks(app)
+    assert check["skipped"] == [{"bead": None, "reason": "invalid_config"}]
+
+
+async def test_a_poll_records_what_it_started_beside_what_it_skipped(
+    tmp_path, monkeypatch, stub_app
+):
+    monkeypatch.setattr(
+        intake_mod.beads,
+        "ready",
+        _ready(
+            [{"id": "B-1", "title": "t", "priority": 3}, {"id": "B-2", "title": "u", "priority": 0}]
+        ),
+    )
+    app = stub_app(**_state(tmp_path, max_concurrent=5))
+
+    started = await intake_mod.tick(app)
+    (check,) = _checks(app)
+    assert (check["ready"], check["started"]) == (2, started)
+    assert check["skipped"] == [{"bead": "B-2", "reason": "above_priority_ceiling"}]
+
+
+async def test_a_poll_with_nothing_ready_is_recorded_and_not_broadcast(
+    tmp_path, monkeypatch, stub_app
+):
+    monkeypatch.setattr(intake_mod.beads, "ready", _ready([]))
+    sent = []
+    spy = SimpleNamespace(publish=lambda type, payload: sent.append((type, payload)))
+    app = stub_app(**_state(tmp_path), broadcaster=spy)
+
+    await intake_mod.tick(app)
+    assert [(c["ready"], c["started"], c["skipped"]) for c in _checks(app)] == [(0, [], [])]
+    assert sent == []
+
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 0}])
+    )
+    await intake_mod.tick(app)
+    assert [t for t, _ in sent] == ["intake_checked"]
+    assert sent[0][1]["skipped"] == [{"bead": "B-1", "reason": "above_priority_ceiling"}]
+
+
+async def test_the_checks_keep_the_newest_500(database):
+    def insert(n):
+        def run(c):
+            for i in range(n):
+                store.record_intake_check(c, ready=i, started=[], skipped=[])
+
+        return run
+
+    await database.write(insert(store.CHECKS_KEPT + 2))
+    rows = database.read(lambda c: store.intake_checks(c, limit=1000))
+    assert len(rows) == store.CHECKS_KEPT
+    assert (rows[0]["ready"], rows[-1]["ready"]) == (store.CHECKS_KEPT + 1, 2)

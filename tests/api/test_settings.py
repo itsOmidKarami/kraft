@@ -3,10 +3,15 @@
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from pathlib import Path
+
 import pytest
 import yaml
 
-from kraft import config
+from kraft import config, store
+from kraft.paths import RunDirs
 
 #: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
 pytestmark = pytest.mark.api_client(default_setup=False)
@@ -223,6 +228,23 @@ def test_get_intake_returns_the_defaults_when_no_file_was_written(client):
     body = client.get("/api/intake").json()
     assert body["enabled"] is False
     assert body["interval_s"] == config.INTAKE_DEFAULT["interval_s"]
+
+
+def test_intake_checks_are_newest_first_and_limited(client):
+    conn = sqlite3.connect(RunDirs(Path(os.environ["KRAFT_RUN_DIR"])).db)
+    for n in range(3):
+        store.record_intake_check(
+            conn, ready=n, started=[f"w{n}"], skipped=[{"bead_id": "B", "reason": "epic"}]
+        )
+    conn.commit()
+    conn.close()
+    rows = client.get("/api/intake/checks").json()
+    assert [r["ready"] for r in rows] == [2, 1, 0]
+    assert set(rows[0]) == {"id", "at", "ready", "started", "skipped"}
+    assert rows[0]["started"] == ["w2"]
+    assert [r["ready"] for r in client.get("/api/intake/checks?limit=2").json()] == [2, 1]
+    assert client.get("/api/intake/checks?limit=101").status_code == 422
+    assert client.get("/api/intake/checks?limit=0").status_code == 422
 
 
 def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir):

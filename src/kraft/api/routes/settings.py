@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 import yaml
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from kraft import auth as auth_mod
@@ -559,6 +559,12 @@ async def get_intake(request: Request):
     data["repo_pickups"] = repo_pickups
     data["recent_pickups"] = st.db.read(store.recent_auto_pickups)
     return data
+
+
+@api_router.get("/intake/checks")
+async def get_intake_checks(request: Request, limit: int = Query(20, ge=1, le=100)):
+    """What each recent poll found, started and left alone, newest first."""
+    return request.app.state.db.read(lambda c: store.intake_checks(c, limit))
 
 
 @api_router.put("/intake")

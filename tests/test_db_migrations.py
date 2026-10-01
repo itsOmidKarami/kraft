@@ -221,7 +221,12 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- node but does not name it in the payload.",
             "CREATE INDEX idx_events_node",
         )
-    for since, table in ((47, "review_viewed"), (48, "config_drafts"), (49, "item_drafts")):
+    for since, table in (
+        (47, "review_viewed"),
+        (48, "config_drafts"),
+        (49, "item_drafts"),
+        (50, "intake_checks"),
+    ):
         if version < since:
             skip_stmts = (*skip_stmts, table)
     schema = "\n".join(

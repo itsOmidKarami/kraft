@@ -396,6 +396,10 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/theme") return json(route, method === "PUT" ? Object.assign(st.theme, req.postDataJSON(), { derived: false }) : st.theme);
     if (p === "/steering") return json(route, st.steering);
     if ((m = p.match(/^\/steering\/([^/]+)$/))) return method === "DELETE" ? json(route, { deleted: m[1] }) : json(route, st.steeringBody(decodeURIComponent(m[1])));
+    if (p === "/intake/checks") return json(route, [
+      { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
+      { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
+    ]);
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
     if (p === "/notify") return json(route, st.notify);

@@ -96,6 +96,43 @@ def test_broadcaster_fans_committed_events_to_all_clients(tmp_path):
     asyncio.run(scenario())
 
 
+def test_publish_reaches_only_a_live_client_and_is_not_replayed(tmp_path):
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        bc = Broadcaster(database)
+        try:
+            live, plain = bc.register(live=True), bc.register()
+            bc.publish("intake_checked", {"ready": 2})
+            frame = live.queue.get_nowait()
+            assert frame["frame"] == "live" and "seq" not in frame
+            assert (frame["type"], frame["payload"]) == ("intake_checked", {"ready": 2})
+            assert plain.queue.empty()
+            # A client that connects later learns the state from a GET, not a replay.
+            assert bc.register(live=True).queue.empty()
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_ws_sends_a_live_frame_only_to_a_client_that_asked_for_it(tmp_path, client):
+    bc = client.app.state.broadcaster
+    with (
+        client.websocket_connect("/api/ws/events?live=1") as live,
+        client.websocket_connect("/api/ws/events") as plain,
+    ):
+        bc.publish("intake_checked", {"ready": 1})
+        assert live.receive_json()["frame"] == "live"
+        bc.publish("apply_changed", {})
+        assert live.receive_json()["type"] == "apply_changed"
+        # The board's own socket gets nothing it would take for an event row.
+        client.post(
+            "/api/work-items",
+            json={"autostart": True, "title": "make the failing test pass", "repo": str(tmp_path)},
+        )
+        assert "frame" not in plain.receive_json()
+
+
 def test_broadcaster_drops_only_the_overflowing_client(tmp_path):
     async def scenario():
         bc_holder = {}
