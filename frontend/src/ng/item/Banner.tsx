@@ -46,7 +46,8 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
   if (compact)
     return (
       <div className="item-banner is-question" role="status">
-        <span className="item-banner-text item-one-line">
+        {/* Decisions §4: in a node view the question is one line; the whole of it is in the title (README allowlist #10). */}
+        <span className="item-banner-text item-one-line" data-allow-ellipsis="" title={q}>
           {item.stop.task ? `${taskName(item.stop.task)} is` : "The agent is"} asking you{where && <> on <code>{where}</code></>}: “{q}”
         </span>
         <Button variant="primary" onClick={onOpenThread}>Open thread</Button>
