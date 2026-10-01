@@ -411,6 +411,7 @@ const FLOWS: Flow[] = [
   { name: "ng-item-draft-leave", widths: [1280], mock: { itemDraft: "changes" }, start: ngItem("running"), steps: [
     { name: "leave", run: async (p) => { await p.getByRole("link", { name: "Board" }).first().click(); await expect(p.getByRole("dialog", { name: "You have unapplied changes to this item" })).toBeVisible(); await expect(p).toHaveURL(/\/work-items\//); } },
     { name: "stay", run: async (p) => { await p.getByRole("button", { name: "Stay" }).click(); await expect(p.getByRole("dialog")).toHaveCount(0); await expect(p.getByText("DRAFT · 3 CHANGES")).toBeVisible(); } },
+  ] },
   // W12 H (R47): a component moves into the library, the review shows both files, and one publish writes both.
   { name: "ng-move-to-library", widths: [1280], start: chains("default"), steps: [
     { name: "select-node", run: async (p) => { await p.getByRole("button", { name: "spec, node" }).click(); await expect(p.getByRole("button", { name: "Move to library…" })).toBeVisible(); } },
