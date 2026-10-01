@@ -11,6 +11,7 @@
 .ph-brief { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ph-brief.ph-is-open { -webkit-line-clamp: 20; }
 .ph-linkbtn { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; min-width: 44px; padding: 0; border: 0; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
+.ph-brief + .ph-linkbtn { margin: -10px 0; }
 .ph-underline { text-decoration: underline; text-underline-offset: 3px; }
 .ph-add { color: var(--ok); }
 .ph-del { color: var(--bad); }

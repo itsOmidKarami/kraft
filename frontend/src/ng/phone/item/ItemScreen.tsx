@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
-import { detailOf, jsonBody, request } from "../../http";
 import { actionPath } from "../../item/paths";
 import { act } from "../../item/actions";
 import { isEscalation } from "../../item/nodeGraph";
@@ -199,7 +198,7 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
         onClose={sheet.close}
       />
     );
-  if (sheet.is("raise-cap")) return <RaiseCapSheet item={item} node={node} sheet={sheet} reload={reload} />;
+  if (sheet.is("raise-cap")) return <RaiseCapSheet item={item} sheet={sheet} reload={reload} />;
   if (sheet.is("raise-amount"))
     return (
       <EditSheet
@@ -223,7 +222,7 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
 }
 
 /** Raise the limit that stopped the item, then retry (R73): one number, the same two calls the desktop's editor makes. */
-function RaiseCapSheet({ item, node, sheet, reload }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
+function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
   const limit = stopLimitOf(item);
   const { busy, run } = useDo(reload);
   const [error, setError] = useState<string | null>(null);
@@ -236,10 +235,9 @@ function RaiseCapSheet({ item, node, sheet, reload }: { item: ItemDetail; node: 
     if (n <= limit.value) return setError(`It has to be above the current ${limit.value}.`);
     if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${limit.maximum}.`);
     setError(null);
-    const patched = await request(`/work-items/${encodeURIComponent(item.id)}`, jsonBody("PATCH", limitPatch(limit, n)));
-    if (patched.status >= 300) return setError(detailOf(patched.body));
-    const nodeNow = item.chain_definition.nodes.find((x) => x.id === node);
-    const r = await run(act.retry(item.id, nodeNow ? { path: actionPath(nodeNow, item.stop?.task) } : {}), "Raised. Retrying.");
+    const patched = await act.patch(item.id, limitPatch(limit, n));
+    if (!patched.ok) return setError(patched.error);
+    const r = await run(act.retry(item.id), "Raised. Retrying.");
     if (r.ok) sheet.close();
     else {
       reload();

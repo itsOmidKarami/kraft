@@ -297,6 +297,7 @@ describe("raising the cap that stopped the item (R73)", () => {
     await type("600");
     await waitFor(() => expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]));
     expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ policy: { time_cap_minutes: 600 } });
+    expect(calls.find((c) => c.path === "/work-items/w1/retry")!.body).toEqual({});
   });
 
   it("a node's own limit goes under policy.paths", async () => {
