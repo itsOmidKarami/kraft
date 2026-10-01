@@ -10,6 +10,7 @@ import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
 import { NodeConfig, NodeOverview } from "./NodePane";
+import { GateBody, GateFooter } from "./GatePane";
 import { Log } from "./Log";
 import { PathFooter } from "./PathFooter";
 import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
@@ -34,6 +35,8 @@ export type PaneArgs = {
   setAttempt: (attempt: number) => void;
   docs: WorkItemDocument[];
   onDoc: (d: WorkItemDocument) => void;
+  /** Open the pending gate's document (GET /artifact). */
+  onArtifact: () => void;
 };
 export type PaneContent = {
   crumbs: { label: string; onClick?: () => void }[];
@@ -68,6 +71,17 @@ export function paneContent(a: PaneArgs): PaneContent {
         : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} />,
     };
   const node = item.chain_definition.nodes.find((n) => n.id === sel.node)!;
+  if (sel.kind === "node" && node.kind === "gate") {
+    const pending = item.pending_gate === node.id;
+    return {
+      crumbs: [toChain],
+      gate: true,
+      title: node.id,
+      sub: `gate node · ${pending ? "waiting for you" : stateWord(a.graph.find((g) => g.id === node.id)?.state)}`,
+      body: <GateBody item={item} gate={node} events={a.events} />,
+      footer: pending ? <GateFooter item={item} gate={node} reload={a.reload} onRead={a.onArtifact} /> : undefined,
+    };
+  }
   const toNode = { label: node.id, onClick: () => a.pick({ kind: "node", node: node.id }) };
   if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, toNode]);
   if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);

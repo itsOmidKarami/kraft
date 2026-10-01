@@ -97,11 +97,10 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
   );
 }
 
-/** `N files +A −D · Review changes` (the prototype's diff line); hidden with no diff. */
-export function DiffLine({ id, version }: { id: string; version: string }) {
+/** The item's changed files, landed (base..HEAD) and in flight (HEAD..worktree), one row per path. */
+export function useDiffFiles(id: string, version: string): DiffFile[] | null {
   const [files, setFiles] = useState<DiffFile[] | null>(null);
   useEffect(() => {
-    // Landed (base..HEAD) and in flight (HEAD..worktree), one row per path.
     api.getWorkItemDiff(id).then((d) => {
       const by = new Map<string, DiffFile>();
       for (const f of [...(d.landed?.files ?? []), ...d.files]) {
@@ -111,9 +110,16 @@ export function DiffLine({ id, version }: { id: string; version: string }) {
       setFiles([...by.values()]);
     }, () => setFiles(null));
   }, [id, version]);
+  return files;
+}
+
+export const totals = (files: DiffFile[]) => ({ add: files.reduce((a, f) => a + f.insertions, 0), del: files.reduce((a, f) => a + f.deletions, 0) });
+
+/** `N files +A −D · Review changes` (the prototype's diff line); hidden with no diff. */
+export function DiffLine({ id, version }: { id: string; version: string }) {
+  const files = useDiffFiles(id, version);
   if (!files?.length) return null;
-  const add = files.reduce((a, f) => a + f.insertions, 0);
-  const del = files.reduce((a, f) => a + f.deletions, 0);
+  const { add, del } = totals(files);
   return (
     <p className="item-diffline">
       {files.length} {files.length === 1 ? "file" : "files"} <span className="item-add">+{add}</span> <span className="item-del">−{del}</span>

@@ -438,6 +438,11 @@ const CASES: Case[] = [
   { screen: "ng-item-task", variant: "output", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.checks.lint&tab=output" }) },
   { screen: "ng-item-task", variant: "thread", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-you", { tail: "/nodes/verification?sel=verification.escalation.escalation" }) },
   { screen: "ng-item-step", variant: "parallel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.checks" }) },
+  // ux2-W5 I: the gate's pane (decision card) and its node view.
+  { screen: "ng-item-gate", variant: "pane", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-gate", { tail: "?sel=final_review" }) },
+  { screen: "ng-item-gate", variant: "view", data: "default", widths: [1024, 1280], run: (c) => ngItem(c, "needs-gate", { tail: "/nodes/final_review" }) },
+  { screen: "ng-item-gate", variant: "passed", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "?sel=plan_approval" }) },
+  { screen: "ng-item-gate", variant: "reject", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-gate", { tail: "?sel=final_review", then: async (p) => { await p.getByRole("button", { name: "Reject…" }).click(); } }) },
   // The header's floating parts, opened the way a keyboard user would.
   { screen: "ng-item", variant: "panel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); } }) },
   { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },

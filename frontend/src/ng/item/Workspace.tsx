@@ -7,11 +7,14 @@ import { openingView } from "../graph/camera";
 import { Inspector } from "../graph/Inspector";
 import { StageGraph } from "../graph/StageGraph";
 import { ChainStrip } from "../graph/ChainStrip";
+import { GateView } from "../graph/GateView";
 import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
 import { paneReducer, type PaneAction, type PaneState, type Sel } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { chainGraph } from "./graph";
+import { gateView } from "./gateView";
 import { nodeGraph } from "./nodeGraph";
+import { taskName } from "./paths";
 import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
@@ -42,6 +45,7 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
   const events = useEvents(item.id, item.updated_at);
   const docs = useDocuments(item.id, item.updated_at);
   const [, setDoc] = useState<WorkItemDocument | null>(null);
+  const [, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
@@ -96,6 +100,7 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
     onDoc: setDoc,
+    onArtifact: () => setArtifact(true),
   });
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
   const inside = viewing && nodeGraph(item, viewing, now);
@@ -105,7 +110,13 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     <div className="item-canvas" ref={frame}>
       {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
       <div className="item-area" ref={areaRef}>
-        {viewing && inside ? (
+        {viewing?.kind === "gate" ? (
+          <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
+            onGate={() => pick({ kind: "node", node: viewing.id })}
+            onReviewer={() => { const t = viewing.tasks[0]; if (t) pick({ kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) }); }}
+            onBackground={() => dispatch({ type: "background" })}
+          />
+        ) : viewing && inside ? (
           <NodeGraph
             name={viewing.id}
             steps={inside.steps}
