@@ -6,7 +6,10 @@ import type { ChainNode } from "../../graph/layout";
  *  44px high, the label wrapping instead of cutting (R10), the current one scrolled into view. */
 export function Strip({ nodes, current, onPick }: { nodes: ChainNode[]; current: string; onPick: (id: string) => void }) {
   const on = useRef<HTMLButtonElement>(null);
-  useEffect(() => on.current?.scrollIntoView?.({ inline: "center", block: "nearest" }), [current]);
+  useEffect(() => {
+    // A block, not an expression: an effect must return nothing or a cleanup, and a browser's scrollIntoView returns its own value.
+    on.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [current]);
   return (
     <div className="ph-strip" role="group" aria-label="Chain">
       {nodes.map((n) => (

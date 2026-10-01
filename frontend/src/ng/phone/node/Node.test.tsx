@@ -123,6 +123,18 @@ describe("the node screen (D)", () => {
   });
 });
 
+describe("the strip", () => {
+  it("scrolls the current chip into view and unmounts cleanly when the browser's scrollIntoView returns a value", async () => {
+    const spy = vi.fn(() => ({ not: "a function" }));
+    Element.prototype.scrollIntoView = spy as never;
+    mount(item("running"), "/work-items/w1/nodes/verification");
+    await screen.findByRole("heading", { level: 1, name: "verification" });
+    expect(spy).toHaveBeenCalled();
+    document.body.innerHTML = "";
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+});
+
 describe("the node's actions (D.6)", () => {
   it("Pause asks, then pauses; Skip asks and names the node", async () => {
     const calls = mount(item("running"), "/work-items/w1/nodes/verification");
