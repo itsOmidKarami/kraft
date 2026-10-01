@@ -451,6 +451,9 @@ const CASES: Case[] = [
   { screen: "ng-item", variant: "cancel-card", data: "default", widths: [1280], run: (c) => ngItem(c, "mr-closed", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); await p.getByRole("menuitem", { name: /Cancel/ }).click(); await p.getByText(/stays on the ledger/).waitFor(); } }) },
   ...NG_SCENARIOS.map<Case>((sc) => ({ screen: "ng-item", variant: `${sc}-long`, data: "long", widths: [1280], run: (c) => ngItem(c, sc) })),
 
+  // ux2-W8: the review page and the gate review overlay.
+  { screen: "ng-review", variant: "default", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-gate", { tail: "/review" }) },
+
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },
   { screen: "login", variant: "filled", data: "default", widths: [390, 1280], locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 600); await c.page.locator('input[type="password"]').fill("hunter2").catch(() => {}); await settle(c.page); } },

@@ -249,6 +249,13 @@ export interface WorkItem {
   /** Where a request-changes review at the pending gate restarts the chain,
    *  null with no gate pending. `round` is the one a rejection now would start. */
   fix_target?: FixTarget | null;
+  /** The pending gate's attempts, oldest first; empty with no gate pending
+   *  (the compare picker's `attempt:N` answers only then, R43). */
+  attempts?: GateAttempt[];
+  /** HEAD at the last submitted review (R20: the instance's, no identity); null before one. */
+  last_review_sha?: string | null;
+  /** A gateless request-changes waiting to be honoured at its target node. */
+  pending_rewind?: { seq: number; review_id: string; target: string; note?: string } | null;
   /** The `launch_fallback` payload when the item's current or last launch ran
    *  on a fallback candidate (Kraft-0a3h8); null otherwise. */
   fallback?: Record<string, unknown> | null;
@@ -455,6 +462,13 @@ export interface LogLine {
   /** present only on the marker row (`n: -1`) a reader gets in place of the
    *  lines it skipped, when the log is over the server's read cap */
   truncated?: { lines: number; bytes: number };
+}
+
+export interface GateAttempt {
+  n: number;
+  sha: string;
+  base_sha: string;
+  at: string;
 }
 
 export interface FixTarget {

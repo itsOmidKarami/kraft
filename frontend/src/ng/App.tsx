@@ -4,6 +4,7 @@ import { BoardPage } from "./board/BoardPage";
 import { Gallery } from "./graph/Gallery";
 import { ItemPage } from "./item/ItemPage";
 import { AppearancePage } from "./settings/AppearancePage";
+import { ReviewPage } from "./review/ReviewPage";
 import { resumeSession } from "./session";
 import { Placeholder } from "./shell/Placeholder";
 import { ROUTES } from "./shell/routes";
@@ -33,8 +34,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           ))}
           <Route path="/work-items/:id" element={<ItemPage />} />
           <Route path="/work-items/:id/nodes/:node" element={<ItemPage />} />
-          {/* The review page is W8's; until then the placeholder links to the shipped Changes tab. */}
-          <Route path="/work-items/:id/review" element={<Placeholder label="Work item" />} />
+          <Route path="/work-items/:id/review" element={<ReviewPage />} />
           <Route path="/_tokens" element={<TokenSheet />} />
           <Route path="*" element={<Placeholder label="Not found" note="There is no page at this address in the new UI." />} />
         </Route>

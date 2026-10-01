@@ -2,6 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import * as api from "../api";
 import * as session from "./session";
 
 vi.mock("./session", () => ({ resumeSession: vi.fn(async () => {}), startEvents: vi.fn() }));
@@ -42,5 +43,13 @@ describe("ng App", () => {
     expect(await screen.findByRole("heading", { name: "Chains" })).toBeInTheDocument();
     expect(session.resumeSession).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
+  });
+
+  it("routes /work-items/:id/review to the review page", async () => {
+    vi.spyOn(api, "getWorkItem").mockResolvedValue({ id: "abc", title: "Cache embeddings", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] } } as never);
+    window.history.pushState({}, "", "/ng/work-items/abc/review");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Review changes: Cache embeddings" })).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 });
