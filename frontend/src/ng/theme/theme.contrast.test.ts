@@ -80,7 +80,10 @@ describe("theme.css", () => {
       for (const r of ["--text", "--text-sub", "--text-muted"]) at(r, g, 4.5);
       at("--text-faint", g, 3);
     }
-    for (const g of ["--bg", "--surface"]) at("--accent", g, 4.5);
+    for (const g of ["--bg", "--surface"]) {
+      at("--accent", g, 4.5);
+      at("--stroke", g, 3);
+    }
     for (const r of ["--ok", "--warn", "--bad", "--info"]) {
       at(r, "--bg", 3);
       at(r, "--surface", 4.5);
@@ -94,5 +97,21 @@ describe("review.css scheme hook", () => {
   const review = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../review/review.css"), "utf-8");
   it.each([["kw", "info"], ["str", "ok"], ["num", "warn"], ["com", "text-muted"], ["name", "text"]])(".tok-%s reads --tok-%s fallback", (k, fb) => {
     expect(review).toContain(`.tok-${k} { color: var(--tok-${k}, var(--${fb}));`);
+  });
+});
+
+describe("ui.css .btn-danger", () => {
+  // The hover tint is 14% --bad over the pane; --bad itself falls to 3.7 on it, --text stays above 8.
+  const ui = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../ui/ui.css"), "utf-8");
+  const hover = ui.match(/^\.btn-danger:not\(:disabled\):is\(:hover, :focus-visible\) \{([^}]*)\}/m)?.[1] ?? "";
+  const over = (fg: string, bg: string) =>
+    "#" + [1, 3, 5].map((i) => Math.round(0.14 * parseInt(fg.slice(i, i + 2), 16) + 0.86 * parseInt(bg.slice(i, i + 2), 16)).toString(16).padStart(2, "0")).join("");
+  it("hover/focus colours its label with --text", () => {
+    expect(hover).toContain("color-mix(in oklab, var(--bad) 14%, transparent)");
+    expect(hover).toMatch(/color:\s*var\(--text\)/);
+  });
+  it.each(combos)("%s %s %s accent %s: the label clears 4.5 on the tinted pane", (s, m, a, x) => {
+    const t = tokens(s, m, a, x);
+    for (const g of ["--bg", "--side", "--surface"]) expect(contrast(t["--text"], over(t["--bad"], t[g]))).toBeGreaterThanOrEqual(4.5);
   });
 });

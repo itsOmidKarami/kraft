@@ -6,7 +6,7 @@
 .btn-secondary { border-color: var(--border); color: var(--text-sub); }
 .btn-secondary:not(:disabled):is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 .btn-danger { border-color: var(--bad); color: var(--bad); }
-.btn-danger:not(:disabled):is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
+.btn-danger:not(:disabled):is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); color: var(--text); }
 
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--text-sub); cursor: pointer; }
 .icon-btn:not(:disabled):is(:hover, :focus-visible), .icon-btn[aria-expanded="true"] { background: var(--line); color: var(--text); }

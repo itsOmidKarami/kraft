@@ -3,14 +3,14 @@
 
 /* NodeGlyph (NodeGlyph.dc.html) */
 .glyph { position: relative; display: flex; align-items: center; justify-content: center; flex: none; }
-.glyph-box { position: relative; box-sizing: border-box; display: flex; align-items: center; justify-content: center; flex: none; transition: border-color .12s, box-shadow .12s; border: 1px solid var(--border); background: var(--bg); color: var(--text-sub); }
+.glyph-box { position: relative; box-sizing: border-box; display: flex; align-items: center; justify-content: center; flex: none; transition: border-color .12s, box-shadow .12s; border: 1px solid var(--stroke); background: var(--bg); color: var(--text-sub); }
 .glyph-exec .glyph-box, .glyph-slot .glyph-box { width: 100%; height: 100%; }
 .glyph-box.is-done { color: var(--text-muted); }
 .glyph-box.is-current { border: 1.5px solid var(--text-sub); background: var(--surface-2); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-sub) 12%, transparent); }
-.glyph-box.is-todo { border: 1px dashed var(--border); color: var(--text-faint); }
+.glyph-box.is-todo { border: 1px dashed var(--stroke); color: var(--text-faint); }
 .glyph-box.is-failed { border-color: var(--bad); color: var(--bad); }
 .glyph-box.is-esc { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); color: var(--warn); }
-.glyph-box.is-ghost { border: 1px dashed var(--border); color: var(--text-faint); }
+.glyph-box.is-ghost { border: 1px dashed var(--stroke); color: var(--text-faint); }
 .glyph-box.is-amber { border: 1.5px solid var(--warn); color: var(--warn); }
 .glyph-box.mark-add { border: 1.5px dashed var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--bg)); color: var(--ok); }
 .glyph-box.mark-add.is-prob { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--bg)); color: var(--bad); }
@@ -22,10 +22,10 @@
 .glyph-box.is-skipped { opacity: .45; border-style: dashed; }
 /* Gates: the rotated square. */
 .glyph-gate .glyph-box { transform: rotate(45deg); border: 1.5px solid var(--text-muted); background: var(--surface-2); }
-.glyph-gate .glyph-box.is-done { border-color: var(--border); background: var(--border); }
+.glyph-gate .glyph-box.is-done { border-color: var(--stroke); background: var(--stroke); }
 .glyph-gate .glyph-box.is-current { border-color: var(--warn); box-shadow: none; }
-.glyph-gate .glyph-box.is-todo { border: 1.5px dashed var(--border); background: var(--bg); }
-.glyph-gate .glyph-box.is-ghost { border: 1.5px dashed var(--border); }
+.glyph-gate .glyph-box.is-todo { border: 1.5px dashed var(--stroke); background: var(--bg); }
+.glyph-gate .glyph-box.is-ghost { border: 1.5px dashed var(--stroke); }
 .glyph-gate .glyph-box.mark-add { border: 1.5px dashed var(--ok); }
 .glyph-gate .glyph-box.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
 .glyph-light { aspect-ratio: 1; border-radius: 50%; background: var(--ok); }
@@ -57,21 +57,20 @@
 .canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .canvas-svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .canvas-zoom { position: absolute; bottom: 12px; z-index: 4; }
-.edge { stroke: var(--border); stroke-width: 2; fill: none; }
-.edge.is-todo { stroke: var(--line); stroke-dasharray: 4 4; }
-.dot { fill: var(--border); }
-.dot.is-todo { fill: var(--line); }
+.edge { stroke: var(--stroke); stroke-width: 2; fill: none; }
+.edge.is-todo { stroke-dasharray: 4 4; }
+.dot { fill: var(--stroke); }
 .arc path { stroke-width: 1.5; fill: none; }
 .arc path.is-dashed { stroke-dasharray: 4 3; }
-.arc.tone-idle path { stroke: var(--border); }
+.arc.tone-idle path { stroke: var(--stroke); }
 .arc.tone-active path { stroke: var(--warn); }
 .arc.tone-red path, .arc.tone-reject path { stroke: var(--bad); }
 .arc-label { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; background: var(--bg); font-size: 10.5px; white-space: nowrap; color: var(--text-sub); pointer-events: none; }
 .arc-label.tone-active { color: var(--warn); }
 .arc-label.tone-red, .arc-label.tone-reject { color: var(--bad); }
 .arc-label.tone-reject { font-family: ui-monospace, Menlo, monospace; }
-.mark-start { position: absolute; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--border); color: var(--text-sub); display: flex; align-items: center; justify-content: center; font-size: 8px; background: var(--bg); }
-.mark-end { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); }
+.mark-start { position: absolute; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--stroke); color: var(--text-sub); display: flex; align-items: center; justify-content: center; font-size: 8px; background: var(--bg); }
+.mark-end { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; border: 1px solid var(--stroke); background: var(--surface); }
 
 /* A node or task: glyph, label, meta. Words sit on --bg so the dotted grid never lowers their contrast. */
 .graph-node { position: absolute; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
@@ -138,8 +137,8 @@
 .strip-scroll::-webkit-scrollbar { display: none; }
 .strip-world { position: relative; margin: 0 auto; }
 .strip-world svg { position: absolute; left: 0; top: 0; }
-.strip-edge { stroke: var(--border); stroke-width: 1.5; fill: none; }
-.strip-edge.is-todo { stroke: var(--line); stroke-dasharray: 3 3; }
+.strip-edge { stroke: var(--stroke); stroke-width: 1.5; fill: none; }
+.strip-edge.is-todo { stroke-dasharray: 3 3; }
 .strip-node { position: absolute; width: 90px; display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none; z-index: 1; }
 .strip-btn { display: flex; margin: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; pointer-events: auto; }
 .strip-btn:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
@@ -158,7 +157,7 @@
 .gateview-chip.tone-green { background: color-mix(in srgb, var(--ok) 18%, var(--bg)); color: var(--ok); }
 .gateview-chip.tone-red { background: color-mix(in srgb, var(--bad) 20%, var(--bg)); color: var(--bad); }
 .gateview-chip.tone-amber { background: color-mix(in srgb, var(--warn) 18%, var(--bg)); color: var(--warn); }
-.gateview-line { width: 56px; flex: none; margin-top: 27px; height: 0; border-top: 2px dashed var(--border); }
+.gateview-line { width: 56px; flex: none; margin-top: 27px; height: 0; border-top: 2px dashed var(--stroke); }
 .gateview-line.is-ran { border-top-style: solid; }
 .gateview-msg { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: 12.5px; line-height: 1.6; color: var(--text-sub); text-wrap: pretty; }
 .gateview-msg.is-empty { color: var(--text-muted); }
