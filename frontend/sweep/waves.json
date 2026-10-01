@@ -196,7 +196,7 @@
   },
   "ux2-W6": {
     "title": "UX V2 board: list, menus, states, bulk, peek, composer, draft item page, archived",
-    "screens": ["ng-board", "ng-board-peek", "ng-new-item", "flow-ng-board-select-bulk", "flow-ng-peek-open", "flow-ng-composer-create"],
+    "screens": ["ng-board", "ng-board-peek", "ng-new-item", "ng-draft-item", "flow-ng-board-select-bulk", "flow-ng-peek-open", "flow-ng-composer-create"],
     "specs": ["sweep.spec.ts", "interactions.spec.ts"],
     "rules": [
       { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(board|board-peek|new-item|draft-item|archived)/" },

@@ -57,6 +57,14 @@ describe("crumbsFor", () => {
     expect(at("done")?.text).toBe("!142 merged ↗");
   });
 
+  it("names the draft item page Board › repo › new item, the repo linking back to the board filtered to it", () => {
+    const [board, repo, cur] = crumbsFor("/work-items/new", (id) => (id === "new" ? { repo: "/code/kraft-plugins", title: "" } : undefined));
+    expect(board).toMatchObject({ text: "Board", to: "/" });
+    expect(repo).toMatchObject({ text: "kraft-plugins", to: "/?repo=%2Fcode%2Fkraft-plugins" });
+    expect(cur).toMatchObject({ text: "new item", kind: "current" });
+    expect(texts("/work-items/new")).toEqual(["Board", "new item"]);
+  });
+
   it("says Not found for a path it does not know", () => {
     expect(texts("/nope")).toEqual(["Not found"]);
     expect(texts("/_tokens")).toEqual(["Tokens"]);

@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import { NG_CHAINS, NG_REPOS, ngDryRun } from "./ngBoard";
+import { NG_CHAINS, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 import { ngThreads } from "./ngItems";
 
@@ -293,7 +293,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     /* settings */
     const st = S.settings;
     if (p === "/repos") {
-      if (method === "GET") return json(route, { repos: opts.ngBoard && opts.ngBoard !== "empty" ? NG_REPOS : st.repos });
+      if (method === "GET") return json(route, opts.ngBoard && opts.ngBoard !== "empty" ? { repos: NG_REPOS, workspaces: NG_WORKSPACES } : { repos: st.repos });
       if (method === "DELETE") return route.fulfill({ status: 204 });
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }

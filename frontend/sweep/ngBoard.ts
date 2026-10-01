@@ -88,9 +88,16 @@ export const NG_CHAINS = [
   { id: "default", nodes: v1(NG_NODES.map((n) => n.id)), gates: 4 },
   { id: "docs_only", nodes: v1(["spec", "spec_approval", "implementation", "work_brief", "merge_request"]), gates: 1 },
 ].map((c) => ({ ...c, gates: c.nodes.filter((n) => n.kind === "gate").length }));
-export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs"].map((name, i) => ({
-  ...repo(R(name), i), enabled: true, default_chain_template: name === "kraft-docs" ? "docs_only" : "default",
+export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs", "kraft-lite", "vendor-schemas"].map((name, i) => ({
+  ...repo(R(name), i), id: name, enabled: true, default_chain_template: name === "kraft-docs" ? "docs_only" : "default",
 }));
+/** kraft-plugins roots a workspace with two members: the draft page's cross-repo picker (G.5). */
+export const NG_WORKSPACES = {
+  "plugins-ws": { id: "plugins-ws", root: "kraft-plugins", root_pointer_default: "ignore", members: {
+    "kraft-lite": { repository: "kraft-lite", path: "plugins/kraft-lite" },
+    schemas: { repository: "vendor-schemas", path: "vendor/schemas" },
+  } },
+};
 
 /** B33's dry run over NG_CHAINS: what attachments cover and what skip_nodes drop. */
 export function ngDryRun(body: { chain_template?: string; attachments?: { kind: string; path: string }[]; skip_nodes?: string[] }) {

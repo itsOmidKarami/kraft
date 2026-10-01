@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { ChainNode, TemplateSummary } from "../../types";
@@ -12,6 +13,8 @@ const REPOS = [
   { path: "/code/kraft-docs", default_chain_template: "docs_only", enabled: true },
 ] as never;
 
+/** Where More options landed, and what it carried. */
+const Carried = () => <pre data-testid="carried">{JSON.stringify(useLocation().state)}</pre>;
 type Call = { url: string; method: string; body: unknown };
 const DRY_OK = { nodes: DEFAULT, skipped: [], gates: ["spec_approval", "final_review"] };
 /** Answers the create, the dry run (told apart by its query) and anything else with {}; records each call. */
@@ -31,7 +34,7 @@ const dryRuns = (calls: Call[]) => calls.filter((c) => c.url.includes("dry_run=1
 const mount = (dry?: [number, unknown], props: { repoFilter?: string } = {}) => {
   const calls = stubFetch(dry);
   const h = { onClose: vi.fn(), onCreated: vi.fn() };
-  render(<Composer repoFilter={props.repoFilter ?? ""} {...h} />);
+  render(<MemoryRouter initialEntries={["/?new=1"]}><Routes><Route path="/" element={<Composer repoFilter={props.repoFilter ?? ""} {...h} />} /><Route path="/work-items/new" element={<Carried />} /></Routes></MemoryRouter>);
   return { calls, ...h };
 };
 
@@ -141,5 +144,24 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
     await settle();
     expect((creates(calls).at(-1)?.body as { attachments: unknown }).attachments).toEqual([{ kind: "spec", path: "docs/specs/cache.md" }, { kind: "plan", path: "docs/plans/x.md" }]);
+  });
+
+  it("hands title, brief, repo, chain and both attachments to the draft page with More options", async () => {
+    vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [] });
+    const { onClose } = mount();
+    await settle();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Cache it" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Brief" }), { target: { value: "By hash." } });
+    for (const [k, p] of [["spec", "docs/specs/a.md"], ["plan", "docs/plans/a.md"]]) {
+      fireEvent.click(screen.getByRole("button", { name: `+ ${k}` }));
+      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`Search ${k}s`) }), { target: { value: p } });
+      await settle();
+      fireEvent.keyDown(screen.getByRole("textbox", { name: new RegExp(`Search ${k}s`) }), { key: "Enter" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "More options ⤢" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(JSON.parse(screen.getByTestId("carried").textContent!)).toEqual({
+      draft: { title: "Cache it", brief: "By hash.", repo: "/code/kraft-plugins", chain: "default", spec: "docs/specs/a.md", plan: "docs/plans/a.md" }, members: false,
+    });
   });
 });

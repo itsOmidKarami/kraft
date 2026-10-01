@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { BoardPage } from "./board/BoardPage";
+import { DraftItemPage } from "./board/draft/DraftItemPage";
 import { Gallery } from "./graph/Gallery";
 import { ItemPage } from "./item/ItemPage";
 import { AppearancePage } from "./settings/AppearancePage";
@@ -32,6 +33,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           {ROUTES.map((r) => (
             <Route key={r.path} path={r.path} element={r.built ? BUILT[r.path] : <Placeholder label={r.label} />} />
           ))}
+          <Route path="/work-items/new" element={<DraftItemPage />} />
           <Route path="/work-items/:id" element={<ItemPage />} />
           <Route path="/work-items/:id/nodes/:node" element={<ItemPage />} />
           <Route path="/work-items/:id/review" element={<ReviewPage />} />

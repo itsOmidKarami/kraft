@@ -162,3 +162,46 @@
 .composer-attach { display: flex; flex-direction: column; gap: 2px; width: 320px; }
 .composer-attach input { margin: 2px 2px 4px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: 12px; color: var(--text); }
 .composer-attach input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.composer-cross { border-color: var(--border); color: var(--text-sub); }
+
+/* The draft item page (NewItemDraft.dc.html): the item page for an item that does not exist yet. */
+.draft-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; padding: 18px 24px 20px; }
+.draft-tag { flex: none; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; white-space: nowrap; color: var(--warn); }
+.draft-tag.is-ok { color: var(--ok); }
+.draft-title { flex: none; max-width: 900px; box-sizing: border-box; padding: 1px 6px; margin: -1px -6px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 500 20px/1.25 Inter, system-ui, sans-serif; letter-spacing: -.01em; color: var(--text); }
+.draft-brief { flex: none; max-width: 720px; min-height: 64px; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font: 12.5px/1.55 Inter, system-ui, sans-serif; color: var(--text-sub); }
+.draft-title::placeholder, .draft-brief::placeholder { color: var(--text-muted); }
+.draft-title:focus-visible, .draft-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.draft-chips { flex: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-muted); }
+.draft-gap { width: 6px; }
+.draft-slot { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.draft-skips { color: var(--text-muted); }
+.draft-canvas { position: relative; flex: 1 1 0; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.draft-canvas-head { position: absolute; top: 12px; left: 14px; z-index: 3; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text-sub); }
+.draft-chain-btn { background: var(--bg); }
+.draft-pane-body { display: flex; flex-direction: column; gap: 14px; }
+.draft-section { display: flex; flex-direction: column; gap: 4px; }
+.draft-h { margin: 6px 0 2px; padding: 0; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.draft-p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--text-sub); }
+.draft-repo { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.draft-repo-path { font: 12px ui-monospace, Menlo, monospace; color: var(--text); }
+.draft-repo-sub { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-muted); }
+.draft-role { font: 600 9.5px/15px ui-monospace, Menlo, monospace; letter-spacing: .04em; padding: 0 5px; border-radius: 4px; background: var(--surface-2); color: var(--text-sub); }
+.draft-add { align-self: flex-start; margin-top: 7px; }
+.draft-add-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 9px; }
+.draft-add-list input { margin: 2px 2px 4px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: 12px; color: var(--text); }
+.draft-add-row { display: flex; align-items: center; gap: 9px; }
+.draft-pointer { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px; }
+.draft-row { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.draft-row.is-dim { opacity: .55; }
+.draft-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.draft-row-label { font-size: 12.5px; color: var(--text); }
+.draft-row-hint { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.draft-input { flex: none; width: 132px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: 12px ui-monospace, Menlo, monospace; color: var(--text); }
+.draft-input::placeholder { color: var(--text-muted); }
+.draft-input:focus-visible, .draft-add-list input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.draft-amber { color: var(--warn); }
+.draft-yaml { margin: 0; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); font: 11.5px/1.65 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
+.draft-ask { position: absolute; left: 24px; top: 12px; z-index: 29; width: 340px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12px; color: var(--text-sub); box-shadow: 0 14px 36px color-mix(in oklab, var(--side) 60%, transparent); }
+.draft-ask b { font-weight: 500; color: var(--text); }
+@media (max-width: 1023px) { .draft-page { padding: 14px 16px; } }
