@@ -11,7 +11,9 @@ import { GateView } from "../graph/GateView";
 import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
 import { paneReducer, type PaneAction, type PaneState, type Sel } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
+import { AddNodeMenu } from "./draft/AddNodeMenu";
 import { useDraft } from "./draft/context";
+import { useApplied } from "./draft/useApplied";
 import { markNodes, markSteps } from "./draft/draftGraph";
 import { chainGraph } from "./graph";
 import { DocViewer } from "./DocViewer";
@@ -44,6 +46,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const [search] = useSearchParams();
   const nodes = item.chain_definition.nodes ?? [];
   const place = readPlace(nodeParam, search, nodes);
+  const applied = useApplied(item.id, item.updated_at, place.tab === "config");
   const { pane: pane_, setPane } = usePaneMemory();
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
@@ -54,6 +57,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
+  const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -110,6 +114,8 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
     setAttempt: (attempt) => go({ ...place, attempt }),
     onDoc: setDoc,
     onArtifact: () => setArtifact(true),
+    canEdit: draft?.editable,
+    applied,
   });
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
   const plain = viewing && nodeGraph(item, viewing, now);
@@ -146,6 +152,8 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
             name={item.chain_template}
             nodes={graph.nodes}
             arcs={graph.arcs(selectedNode)}
+            seams={draft?.seams}
+            onSeam={draft ? (at, seam) => setAdding({ at, seam }) : undefined}
             selected={selectedNode}
             opening={openingView(item.display_status ?? "", hasCurrent)}
             reserve={reserve}
@@ -179,6 +187,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
           {pane.body}
         </Inspector>
       </div>
+      {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
       {doc && <DocViewer source={{ kind: "document", id: doc.document_id, by: [doc.node_id, doc.hook_point?.split(".").at(-1), doc.attempt ? `attempt ${doc.attempt}` : ""].filter(Boolean).join(" › ") }} onClose={() => setDoc(null)} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id }} onClose={() => setArtifact(false)} />}
     </div>

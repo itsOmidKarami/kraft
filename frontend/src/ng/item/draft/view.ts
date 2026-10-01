@@ -53,6 +53,8 @@ export function setField(ops: Op[], path: string, group: Group, field: string, v
 
 export const addNode = (ops: Op[], after: string, id: string, base: string): Op[] => [...ops, { op: "add_node", after, node: { id, extends: base } }];
 export const moveAfter = (ops: Op[], index: number, after: string): Op[] => ops.map((o, i) => (i === index && o.op === "add_node" ? { ...o, after } : o));
+/** Take an added node out of the draft with every op that acts inside it. */
+export const removeNode = (ops: Op[], id: string): Op[] => ops.filter((o) => nodeOf(o) !== id);
 export const removeAt = (ops: Op[], index: number): Op[] => ops.filter((_, i) => i !== index);
 export const stripPassed = (ops: (Op | MarkedOp)[]): Op[] => ops.map((o) => {
   const { passed: _passed, ...rest } = o as MarkedOp;
@@ -93,5 +95,5 @@ export function seams(item: ItemLike, nodes: ChainNode[]): Seam[] {
   const cur = standing(item, nodes);
   if (cur === null) return [];
   const from = Math.max(cur + 1, 1);
-  return Array.from({ length: Math.max(0, nodes.length - from + 1) }, (_, k) => ({ at: from + k }));
+  return Array.from({ length: Math.max(0, nodes.length - from + 1) }, (_, k) => ({ at: from + k, title: "Add a library node here" }));
 }

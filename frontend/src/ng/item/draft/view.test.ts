@@ -95,8 +95,9 @@ describe("editable and seams", () => {
     expect(seams(item("build", "cancelled"), NODES)).toEqual([]);
   });
   it("puts seams after the current node and every later one, never before it", () => {
-    expect(seams(item("build"), NODES)).toEqual([{ at: 2 }, { at: 3 }, { at: 4 }]);
-    expect(seams(item("ship"), NODES)).toEqual([{ at: 4 }]);
-    expect(seams(item(null), NODES)).toEqual([{ at: 1 }, { at: 2 }, { at: 3 }, { at: 4 }]);
+    const at = (i: string | null) => seams(item(i), NODES).map((s) => s.at);
+    expect(at("build")).toEqual([2, 3, 4]);
+    expect(at("ship")).toEqual([4]);
+    expect(at(null)).toEqual([1, 2, 3, 4]);
   });
 });

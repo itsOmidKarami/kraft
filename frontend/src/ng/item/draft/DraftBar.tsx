@@ -1,10 +1,8 @@
 import { useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import { HeaderTail } from "../../shell/HeaderActions";
 import { Button } from "../../ui/Button";
-import { usePaneMemory } from "../Workspace";
-import { placeUrl } from "../url";
 import { useDraft } from "./context";
+import { useSelect } from "./select";
 import "./draft.css";
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -14,17 +12,15 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
  *  `N PROBLEMS`, which steps through them. Nothing without a draft. */
 export function DraftState() {
   const d = useDraft();
-  const navigate = useNavigate();
-  const setPane = usePaneMemory((s) => s.setPane);
+  const select = useSelect(d?.raw.id ?? "");
   const next = useRef(0);
   if (!d || (!d.ops.length && !d.issues.length)) return null;
   const onCanvas = new Set(d.shown.chain_definition.nodes.map((n) => n.id));
   const step = () => {
     const at = d.issues[next.current++ % d.issues.length];
     if (!at) return;
-    setPane({ open: true, userCollapsed: false });
     // A passed added node is not on the canvas: its row is in the chain pane.
-    navigate(placeUrl(d.raw.id, { sel: onCanvas.has(at.node) ? { kind: "node", node: at.node } : { kind: "chain" } }));
+    select(onCanvas.has(at.node) ? at.node : null);
   };
   return (
     <HeaderTail>

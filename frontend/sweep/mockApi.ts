@@ -16,7 +16,41 @@ export interface MockOptions {
   boardState?: "loading" | "offline";
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
+  /** ux2-W11: the running /ng item's chain draft. Unset: it has none. `applied`: none, but its applied draft is in the events. */
+  itemDraft?: "changes" | "problems" | "passed" | "applied";
 }
+
+/** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
+const ITEM_DRAFT_SEEDS: Record<string, any[]> = {
+  changes: [
+    { op: "override", path: "merge_request.open.open_draft", task_config: { model: "opus" } },
+    { op: "override", path: "mr_checks", policy: { time_cap_minutes: 45 } },
+    { op: "add_node", after: "work_brief", node: { id: "security_scan", extends: "security_scan" } },
+  ],
+  problems: [{ op: "override", path: "merge_request.open.open_draft", task_config: { command: "make" } }],
+  passed: [
+    { op: "add_node", after: "implementation", node: { id: "security_scan", extends: "security_scan" } },
+    { op: "override", path: "verification.test.unit_tests", task_config: { model: "opus" } },
+  ],
+};
+
+/** The server's `passed` rule (src/kraft/drafts/item.py): an op is passed once the run stands at or after where it acts. */
+const draftPassed = (op: any, nodes: any[], cur: string | null) => {
+  if (!cur) return false;
+  const ids = nodes.map((n) => n.id);
+  if (!ids.includes(cur)) return true;
+  const node = op.op === "add_node" ? op.after : op.op === "remove_node" ? op.node : op.path.split(".")[0];
+  if (!ids.includes(node)) return false;
+  return op.op === "add_node" ? ids.indexOf(node) < ids.indexOf(cur) : ids.indexOf(node) <= ids.indexOf(cur);
+};
+/** The one refusal the mock knows: a `command` override on a builtin task. */
+const draftProblems = (ops: any[]) => ops.flatMap((op, i) => (!op.passed && op.op === "override" && op.task_config?.command && /open_draft/.test(op.path) ? [{ op: i, message: "task_config.command: not a field of a builtin task" }] : []));
+/** The chain with each added node placed after its `after`. */
+const draftChain = (nodes: any[], ops: any[]) => {
+  const out = [...nodes];
+  for (const op of ops) if (op.op === "add_node") out.splice(out.findIndex((n) => n.id === op.after) + 1, 0, { id: op.node.id, kind: "exec", tasks: [`${op.node.id}.scan.run`], steps: [[`${op.node.id}.scan.run`]], gate_after: null });
+  return out;
+};
 
 /** A chain file as its author would write it: one mapping per node, nulls left out. */
 const chainYaml = (nodes: Record<string, unknown>[]) =>
@@ -86,6 +120,12 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
   let listReads = 0;
+  const itemDrafts = new Map<string, any[]>();
+  // ux2-W11: an applied draft already on the running item, as its event.
+  if (opts.itemDraft === "applied" && S.ng?.running) {
+    const b = S.bundles[S.ng.running];
+    b?.events.push({ seq: Math.max(0, ...b.events.map((e: any) => e.seq)) + 1, work_item_id: S.ng.running, type: "chain_revised", payload: { gate: null, changes: ITEM_DRAFT_SEEDS.changes.slice(0, 2), diff: [], source: "draft" }, node_id: null, created_at: NG_NOW });
+  }
 
   const viewedMarks = new Set<string>();
   // ux2-W8: review threads per item, seeded for a needs-gate /ng item on first read.
@@ -278,20 +318,38 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
       return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
     }
-    /* the item chain draft (B15): its first op is passed, so apply answers 409 */
+    /* the item chain draft (B15, ux2-W11): none unless `opts.itemDraft` seeds the running item's; then a small stateful server */
     if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
       const b = S.bundles[m[1]];
       if (!b) return json(route, { detail: "work item not found" }, 404);
-      if (method === "DELETE") return route.fulfill({ status: 204 });
-      if (m[2]) return json(route, { detail: "the item has moved past some of this draft's ops; remove them or move them after the current node", passed: [0] }, 409);
-      const ops = method === "PUT"
-        ? (req.postDataJSON()?.ops ?? []).map((op: any, i: number) => ({ ...op, passed: i === 0 }))
-        : [
-            { op: "override", path: "implement.main.implement", task_config: { model: "opus" }, passed: true },
-            { op: "skip", path: "verify.main.lint", passed: false },
-          ];
-      const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
-      return json(route, { ops, problems: [], checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd } }, nodes: b.item.chain_definition?.nodes ?? [], base_seq: 42, updated_at: "2026-10-01T09:12:00Z" });
+      const cur = b.item.current_node_id ?? null;
+      const stored = (): any[] => {
+        if (!itemDrafts.has(m![1])) itemDrafts.set(m![1], opts.itemDraft && opts.itemDraft !== "applied" && m![1] === S.ng.running ? clone(ITEM_DRAFT_SEEDS[opts.itemDraft]) : []);
+        return itemDrafts.get(m![1])!;
+      };
+      const answer = (ops: any[]) => {
+        const nodes = b.item.chain_definition?.nodes ?? [];
+        const marked = ops.map((op) => ({ ...op, passed: draftPassed(op, nodes, cur) }));
+        const problems = draftProblems(marked);
+        const live = marked.filter((op, i) => !op.passed && !problems.some((x) => x.op === i));
+        const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
+        return { ops: marked, problems, checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd } }, nodes: draftChain(nodes, live), base_seq: ops.length ? 42 : null, updated_at: ops.length ? "2026-10-01T09:12:00Z" : null };
+      };
+      if (method === "DELETE") { const had = stored().length > 0; itemDrafts.set(m[1], []); return had ? route.fulfill({ status: 204 }) : json(route, { detail: "this work item has no draft" }, 404); }
+      if (method === "PUT") { itemDrafts.set(m[1], req.postDataJSON()?.ops ?? []); return json(route, answer(stored())); }
+      if (m[2]) {
+        const ops = stored();
+        if (!ops.length) return json(route, { detail: "this work item has no draft" }, 404);
+        const v = answer(ops);
+        const passed = v.ops.flatMap((op: any, i: number) => (op.passed ? [i] : []));
+        if (passed.length) return json(route, { detail: "the item has moved past some of this draft's ops; remove them or move them after the current node", passed }, 409);
+        if (v.problems.length) return json(route, { detail: `${v.problems.length} problem(s) to fix before applying`, problems: v.problems }, 422);
+        b.item.chain_definition.nodes = v.nodes;
+        b.events.push({ seq: Math.max(0, ...b.events.map((e: any) => e.seq)) + 1, work_item_id: m[1], type: "chain_revised", payload: { gate: null, changes: ops, diff: [], source: "draft" }, node_id: null, created_at: NG_NOW });
+        itemDrafts.set(m[1], []);
+        return json(route, answer([]));
+      }
+      return json(route, answer(stored()));
     }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
