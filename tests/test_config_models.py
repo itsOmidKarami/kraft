@@ -137,3 +137,112 @@ def test_theme_with_a_surface_alone_defaults_to_no_accent_at_subtle():
 
     eff = config.Theme(palette="forest", surface="moss").effective()
     assert (eff["accent"], eff["colour_amount"], eff["derived"]) == ("none", "subtle", False)
+
+
+def _look(theme_file):
+    from kraft import config
+
+    # What the new UI paints from: every key but `derived` and the legacy
+    # `palette` itself, which the shipped UI read and the new one does not.
+    eff = config.Theme.load(theme_file).effective()
+    del eff["derived"], eff["palette"]
+    return eff
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "palette: nocturne\n",
+        "palette: rose\n",
+        "palette: forest\n",
+        "palette: amber\n",
+        "palette: slate\n",
+        "palette: forest\nmode: light\ndensity: comfortable\n"
+        "board:\n  group_by: repo\n  show_done: 9\n  open_in: full\n",
+        "palette: amber\ncolour_amount: mono\n",
+        "palette: slate\naccent: rose\n",
+        "palette: forest\nsurface: graphite\naccent: blue\n",
+        "palette: rose\ncode_scheme:\n  dark: monokai\n"
+        "diff:\n  layout: split\n  wrap_lines: true\n",
+    ],
+    ids=[
+        "nocturne-alone",
+        "rose-alone",
+        "forest-alone",
+        "amber-alone",
+        "slate-alone",
+        "with-mode-density-board",
+        "at-mono",
+        "with-its-own-accent",
+        "with-its-own-surface",
+        "with-code-scheme-and-diff",
+    ],
+)
+def test_theme_migration_keeps_the_look(tmp_path, before):
+    """The cutover rewrites a user's theme.yaml without `palette` (spec §11.3)
+    and must not change how the UI looks (kickoff §4.5). A file with only
+    `palette` is the common case: every V2 key there was derived."""
+    import yaml
+
+    from kraft import config
+
+    p = tmp_path / "theme.yaml"
+    p.write_text(before)
+    look = _look(p)
+
+    assert config.migrate_theme(p) is True
+
+    after = yaml.safe_load(p.read_text())
+    assert "palette" not in after
+    assert _look(p) == look
+    kept = {k: v for k, v in yaml.safe_load(before).items() if k != "palette"}
+    assert {k: after[k] for k in kept} == kept
+    assert (tmp_path / "theme.yaml.pre-ux2").read_text() == before
+
+
+@pytest.mark.parametrize(
+    "before",
+    [None, "mode: light\nsurface: moss\n", "palette: [unclosed\n", "palette: cerulean\n"],
+    ids=["missing", "no-palette", "unreadable", "unknown-palette"],
+)
+def test_theme_migration_leaves_files_without_palette_alone(tmp_path, before):
+    from kraft import config
+
+    p = tmp_path / "theme.yaml"
+    if before is not None:
+        p.write_text(before)
+
+    assert config.migrate_theme(p) is False
+
+    assert p.exists() is (before is not None)
+    if before is not None:
+        assert p.read_text() == before
+    assert not (tmp_path / "theme.yaml.pre-ux2").exists()
+
+
+def test_theme_migration_runs_once(tmp_path):
+    from kraft import config
+
+    p = tmp_path / "theme.yaml"
+    backup = tmp_path / "theme.yaml.pre-ux2"
+    p.write_text("palette: forest\n")
+    assert config.migrate_theme(p) is True
+    migrated = p.read_bytes()
+
+    assert config.migrate_theme(p) is False
+    assert p.read_bytes() == migrated
+
+    # A palette written back later (an old tab) migrates again; the first
+    # backup, the one that holds the user's original file, is kept.
+    p.write_text("palette: amber\nsurface: sand\n")
+    assert config.migrate_theme(p) is True
+    assert backup.read_text() == "palette: forest\n"
+
+
+def test_a_theme_with_no_palette_or_surface_keeps_the_nocturne_look():
+    """What a user with no theme.yaml sees, before and after the cutover."""
+    from kraft import config
+
+    for theme in (config.Theme(), config.Theme.model_validate({"mode": "light"})):
+        eff = theme.effective()
+        assert (eff["surface"], eff["accent"], eff["colour_amount"]) == ("ink", "violet", "full")
