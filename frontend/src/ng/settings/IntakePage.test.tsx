@@ -7,6 +7,7 @@ import * as http from "../http";
 import { useStore } from "../../store";
 import { Shell } from "../shell/Shell";
 import * as d from "../templates/draft/draftApi";
+import { onLiveFrame } from "../live";
 import { INTAKE, intakeView } from "./intake/fixture";
 import { IntakePage } from "./IntakePage";
 
@@ -75,7 +76,19 @@ describe("Auto-intake page", () => {
     expect(await screen.findByText("No checks yet.")).toBeInTheDocument();
   });
 
-  it("refetches the checks every 30 seconds, because the live frame never reaches the client", async () => {
+  it("prepends a live intake_checked frame to the list, once", async () => {
+    mount();
+    const list = await screen.findByRole("region", { name: "Recent checks" });
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(2));
+    const frame = { id: 4, at: "2026-10-01T10:10:00Z", ready: 2, started: ["kraft-new"], skipped: [] };
+    act(() => onLiveFrame({ type: "intake_checked", payload: frame }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("2 ready · started kraft-new");
+    act(() => onLiveFrame({ type: "intake_checked", payload: frame }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("still refetches the checks every 30 seconds, as the fallback for a frame it missed", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mount();

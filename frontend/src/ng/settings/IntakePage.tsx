@@ -9,6 +9,7 @@ import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDr
 import type { Change, Op, Problem } from "../templates/draft/types";
 import { ValueCell } from "../templates/draft/ValueCell";
 import { Kv } from "../templates/panes/controls";
+import { subscribeLive } from "../live";
 import { checkText, hhmm } from "./intake/checks";
 import { describeCron } from "./intake/cron";
 import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSchedule } from "./intake/types";
@@ -43,6 +44,11 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const [repos, setRepos] = useState<{ path: string; name?: string | null }[]>([]);
   const [chains, setChains] = useState<string[]>([]);
 
+  // A live `intake_checked` frame is the check, prepended; the refetch below is the fallback for a missed frame.
+  useEffect(() => subscribeLive("intake_checked", (payload) => {
+    const c = payload as Check;
+    if (c && typeof c === "object" && "ready" in c) setChecks((prev) => [c, ...(prev ?? []).filter((x) => x.id !== c.id)].slice(0, 20));
+  }), []);
   useEffect(() => {
     let live = true;
     const load = () => void request<Check[]>("/intake/checks?limit=20").then((a) => { if (live && a.status === 200 && Array.isArray(a.body)) setChecks(a.body); });
