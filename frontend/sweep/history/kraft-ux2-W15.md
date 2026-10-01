@@ -1,12 +1,12 @@
 # ux2-W15 · Repos, Policy and Auto-intake
 
-Branch `ux2/W15` pushed as `kraft/ux2-W15`, on `dd5a2e1d8` (W11 #372). Backend half: #365 (merged).
+Branch `ux2/W15` pushed as `kraft/ux2-W15`, on `ae13f8416` (W12 #374, after W11, W14 A and W16). Backend half: #365 (merged).
 
-**Sweep port: 4395** for the baseline and both end runs. The baseline is `node sweep/wave.mjs all --baseline` shot from a clean detached checkout of `dd5a2e1d8` (1574 cells), copied to `e2e-shots/baseline/all` and `…/ux2-W15`, so nothing of this branch is in it.
+**Sweep port: 4395** for the baseline and both end runs. The baseline is `node sweep/wave.mjs all --baseline` shot from a clean detached checkout of `ae13f8416` (1712 cells), copied to `e2e-shots/baseline/all` and `…/ux2-W15`, so nothing of this branch is in it.
 
 ## `node sweep/wave.mjs ux2-W15`
 
-6/6 rules pass · 88 cells in scope · 72 new, 0 cleared, 0 regressions.
+6/6 rules pass · 88 cells in scope · 83 changed (72 new, 11 `ng-shell` cells that opened Policy as a placeholder and now open it for real), 0 cleared, 0 regressions.
 
 | Rule | Result |
 |---|---|
@@ -21,7 +21,7 @@ New cells: `ng-repos` 13, `ng-policy` 29, `ng-intake` 10, flows `ng-repo-connect
 
 ## `node sweep/wave.mjs all`
 
-1/1 rule passes · 1646 cells · 72 new · 0 newly flagged. One existing cell moved: `flow-log-maximize/03-wheel-up-pauses-follow@1280` (4.74%, a 1px shift of the shipped log header). It moves between any two runs of `main` itself: a clean checkout of `dd5a2e1d8` re-shot on its own baseline gives the same 4.74%. No shipped cell changed otherwise; no cell's clock text changed. The `ng-chains/review-stale` pixels moved by less than the 0.05% threshold (its stale box tint went from 8% to 5% so "Discard draft" clears 4.5:1).
+1/1 rule passes · 1784 cells · 72 new · 36 existing cells changed · 0 newly flagged. 35 of the 36 are `ng-` cells that used `/ng/settings/policy` as a convenient unbuilt page and now show the real Policy page (mocked): `ng-shell/{pinned,rail,revealed,placeholder}`, `ng-search/*`, the `flow-ng-sidebar-*` and `flow-ng-search-keyboard` rows. The `placeholder` cell moved to the not-found route, which stays a placeholder when every page is built. The 36th is shipped: `flow-log-maximize/03-wheel-up-pauses-follow@1280` (4.74%, a 1px shift of the log header); it moves between any two runs of `main` itself, since a clean checkout re-shot against its own baseline gives the same 4.74%. No shipped cell changed otherwise; no cell's clock text changed. `ng-chains/review-stale` moved by less than the 0.05% threshold (its stale box tint went from 8% to 5% so "Discard draft" clears 4.5:1).
 
 ## Exit test (real server)
 
@@ -38,7 +38,7 @@ Policy cells take a value that creates a problem into the draft and show it in r
 
 ## Shared files touched, additively
 
-`ng/templates/ReviewPane.tsx` (optional `area`), `YamlView.tsx` (optional `file`), `panes/panes.css` (`.tpl-rv-stale` tint 8% → 5%), `ng/ui/Menu.tsx` + `ui.css` (item `dot` and `icon`), `shell/{Sidebar,useDraftCounts,crumbs,routes}`, `ng/App.tsx`. W10's tests pass unchanged except where this PR adds cases.
+`ng/templates/ReviewPane.tsx` (optional `area`), `YamlView.tsx` (optional `file`), `panes/panes.css` (`.tpl-rv-stale` tint 8% → 5%), `ng/ui/Menu.tsx` + `ui.css` (item `dot` and `icon`), `shell/{Sidebar,useDraftCounts,crumbs,routes}`, `ng/App.tsx`, `ng/session.ts` (the one socket's `onLive` is now `ng/live.ts`'s dispatcher: `apply_changed` to the chip, other frames to `subscribeLive` listeners). `ReviewPane` and `YamlView` are W12's shapes with the optional `area`/`file` added; `AreaFrame` hands a page `yaml(file)` for W14. W10's tests pass unchanged except where this PR adds cases.
 
 ## Beads (under Kraft-9d8b2)
 
