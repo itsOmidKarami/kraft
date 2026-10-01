@@ -98,9 +98,9 @@ describe("the canvas", () => {
     expect(canvas.style.paddingRight).toBe("");
   });
 
-  it("lanes are 520px wide, or what the canvas has when that is less", () => {
+  it("lanes are 520px wide", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "harnesses.css"), "utf-8");
-    expect(css).toMatch(/\.hn-lane \{[^}]*width: min\(520px, 100%\)/);
+    expect(css).toMatch(/\.hn-lane \{[^}]*width: 520px/);
     expect(css).toMatch(/\.hn-lane \{[^}]*flex: none/);
   });
 });
