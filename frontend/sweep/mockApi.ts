@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { NG_CHAINS, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 import { NG_NOW, ngThreads } from "./ngItems";
@@ -21,6 +22,42 @@ export interface MockOptions {
 const chainYaml = (nodes: Record<string, unknown>[]) =>
   "nodes:\n" + nodes.map((n) => Object.entries(n).filter(([, v]) => v != null)
     .map(([k, v], i) => `${i ? "    " : "  - "}${k}: ${Array.isArray(v) ? `[${v.join(", ")}]` : v}`).join("\n")).join("\n") + "\n";
+
+/** Real W9 answers for the Chains editor (the shipped default chain on a test
+ *  server): `default` with a change, an added gate and a removed one; `broken`
+ *  with an empty exec node; `yaml-error`; and the 409 a stale publish answers. */
+const DRAFTS = JSON.parse(readFileSync(new URL("./draftViews.json", import.meta.url), "utf8"));
+const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+/** The `default` view under another key: `stale` is it with a publish that 409s. */
+const chainView = (key: string) => {
+  // A new chain before its first node: what `new_chain` leaves (no node, nothing resolves yet).
+  if (key === "empty") return { area: "chains", key, draft: true, files: { "chains/empty.yaml": "id: empty\ndescription: ''\nnodes: []\n" }, base: { "chains/empty.yaml": null }, updated_at: null, result: { ...clone(DRAFTS.views.broken.result), model: { "chains/empty.yaml": { id: "empty", description: "", nodes: [] } }, resolved: null, sources: {}, problems: [], changes: [], warnings: [] } };
+  const v = DRAFTS.views[key] ?? DRAFTS.views.default;
+  if (DRAFTS.views[key]) return clone(v);
+  const s = JSON.stringify(v).replaceAll("chains/default.yaml", `chains/${key}.yaml`);
+  const out = JSON.parse(s);
+  out.key = key;
+  out.result.model[`chains/${key}.yaml`].id = key;
+  return out;
+};
+/** An op answered as the server would, for the ops the sweep's flows send. */
+function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknown>[]) {
+  const file = `chains/${view.key}.yaml`;
+  const nodes = view.result.model[file].nodes as Record<string, unknown>[];
+  for (const o of ops) {
+    if (o.op === "add_node") {
+      nodes.splice(Number(o.at), 0, o.kind === "gate" ? { id: o.id, kind: "gate" } : { id: o.id, kind: "exec", steps: [] });
+      view.result.changes.push({ path: o.id, kind: "add", summary: "added" });
+      if (o.kind !== "gate") {
+        view.result.problems.push({ path: o.id, field: null, message: "Value error, 'steps' must not be empty", file, line: 3, col: 5 });
+        view.result.resolved = null;
+        view.result.sources = {};
+      }
+    }
+  }
+  view.draft = true;
+  return view;
+}
 
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -319,45 +356,51 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       { id: "claude", label: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: [], capabilities: {} },
       { id: "codex", label: "codex", executable: "codex", executable_found: false, efforts: [], models: [], capabilities: {} },
     ]);
-    /* config drafts: one static answer per key; `stale` publishes to a 409, `yaml-error` refuses ops */
-    if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
-      const [, area, key, action, file] = m;
-      const name = area === "library" ? "library.yaml" : `chains/${key}.yaml`;
-      const text = file ? req.postDataJSON()?.text : area === "library" ? "tasks: {}\n" : chainYaml(st.templates[0]?.nodes ?? []);
-      const change = { path: "implement.main.implement", kind: "change", summary: "model", fields: ["model"] };
-      const result = {
-        model: { [name]: { nodes: st.templates[0]?.nodes ?? [] } },
-        resolved: null, warnings: [],
-        sources: area === "chains" ? { "implement.main.implement": {
-          model: { value: "opus", source: "chain" },
-          harness: { value: "claude", source: "library:tasks.implementer" },
-          "policy.time_cap_minutes": { value: 120, source: "library:tasks.implementer" },
-          "policy.budget_usd": { value: 2, source: "policy" },
-          effort: { value: null, source: "default" },
-        } } : {},
-        policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
-        impact: area === "chains" ? { running: 2, repos: ["/Users/me/code/kraft"] } : { chains: ["default", "quick-task"], repos: ["/Users/me/code/kraft"] },
-        problems: key === "broken" ? [{ path: "implement.main.implement", field: "bogus", message: "Extra inputs are not permitted", file: name, line: 7, col: 9 }] : [],
-        changes: key === "library" ? [
-          { path: "tasks.implementer", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
-          { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
-        ] : [change],
-        ...(key === "yaml-error" ? { yaml_error: { file: name, line: 4, col: 3, message: "expected ',' or ']', but got '<stream end>'" } } : {}),
-      };
+    /* config drafts. Chains: the real answers above; ops apply the few the flows send; `stale` publishes to a 409. */
+    if ((m = p.match(/^\/drafts\/chains\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
+      const [, key, action, file] = m;
       if (method === "DELETE") return route.fulfill({ status: 204 });
       if (action === "fragment") return json(route, { path: new URL(req.url()).searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
       if (action === "publish") {
-        if (key === "stale") return json(route, { detail: `published since this draft began: ${name}`, files: { [name]: { published: text, draft: text, diff: `--- published/${name}\n+++ draft/${name}\n@@ -3 +3 @@\n-    model: sonnet\n+    model: opus\n` } } }, 409);
-        return json(route, { published: [name], result: { ...result, changes: [] } });
+        if (key === "stale") return json(route, DRAFTS.stale409, 409);
+        if (key === "broken" || key === "yaml-error") return json(route, { detail: "1 problem(s) to fix before publishing", problems: chainView(key).result.problems }, 422);
+        return json(route, { published: [`chains/${key}.yaml`], result: { ...chainView(key).result, changes: [] } });
       }
-      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result };
+      const view = chainView(key);
+      if (file) view.files[file] = req.postDataJSON()?.text ?? "";
       if (action === "ops") {
         if (key === "yaml-error") return json(route, { detail: "fix the YAML first" }, 409);
-        const ops: { op: string }[] = req.postDataJSON()?.ops ?? [];
-        return json(route, { ...view, ops: ops.map((o) => ({ op: o.op })) });
+        const ops: Record<string, unknown>[] = req.postDataJSON()?.ops ?? [];
+        if (q.get("preview")) return json(route, { ...view, ops: ops.map((o) => ({ op: o.op })) });
+        return json(route, { ...applyOps(view, ops), ops: ops.map((o) => ({ op: o.op })) });
       }
       return json(route, view);
     }
+    /* the library draft: one static answer */
+    if ((m = p.match(/^\/drafts\/(library)\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
+      const [, area, key, action, file] = m;
+      const name = "library.yaml";
+      const text = file ? req.postDataJSON()?.text : "tasks: {}\n";
+      const result = {
+        model: { [name]: { tasks: {} } }, resolved: null, warnings: [], sources: {},
+        policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+        impact: { chains: ["default", "quick-task"], repos: ["/Users/me/code/kraft"] },
+        problems: [],
+        changes: [
+          { path: "tasks.implementer", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
+          { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
+        ],
+      };
+      if (method === "DELETE") return route.fulfill({ status: 204 });
+      if (action === "fragment") return json(route, { path: new URL(req.url()).searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
+      if (action === "publish") return json(route, { published: [name], result: { ...result, changes: [] } });
+      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result };
+      if (action === "ops") return json(route, { ...view, ops: (req.postDataJSON()?.ops ?? []).map((o: { op: string }) => ({ op: o.op })) });
+      return json(route, view);
+    }
+    /* the agent task's choices in the Chains editor (real answers, sweep/draftViews.json) */
+    if (p === "/harnesses/profiles" && method === "GET") return json(route, DRAFTS.harnesses);
+    if (p === "/harnesses/providers") return json(route, DRAFTS.providers);
     if (p === "/drafts") return json(route, ["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" })));
     if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
@@ -376,6 +419,9 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes });
     }
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
+      // For the /ng Chains editor, `default` is the real shipped file, the draft views' published side.
+      // The shipped Settings pages keep the scenario's chain (settings-chains/default reads this route).
+      if (m[1] === "default" && (req.headers()["referer"] ?? "").includes("/ng/")) return json(route, DRAFTS.published);
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1])) ?? st.templates[0];
       if (!tpl) return json(route, { detail: "template not found" }, 404);
       // The real route returns the file's text, which is what the Chains editor shows.

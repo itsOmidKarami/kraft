@@ -1,0 +1,94 @@
+/** W9's config-draft answers, field for field (docsite 4.reference/7.http-api.md "Drafts"). */
+
+export type Area = "chains" | "library";
+
+/** A chain file as its author wrote it, shorthand normalised: every container has `steps`. */
+export type Authored = Record<string, unknown>;
+
+export interface Problem {
+  path: string;
+  field: string | null;
+  message: string;
+  file: string;
+  line: number | null;
+  col: number | null;
+  fix?: string;
+}
+
+export interface Change {
+  path: string;
+  kind: "add" | "change" | "remove";
+  summary: string;
+  fields?: string[];
+}
+
+export interface Source {
+  value: unknown;
+  /** `chain`, `library:<section>.<name>`, `policy` or `default`. */
+  source: string;
+}
+
+/** `GET /templates/chains/{id}/resolved`'s shape: the chain with `extends` expanded. */
+export interface ResolvedView {
+  id: string;
+  chain: Authored;
+  task_paths: string[];
+  steering: Record<string, unknown>;
+  nodes: { id: string; kind: "exec" | "gate"; icon: string | null }[];
+  /** Per gate, the document kinds the exec nodes before it produce. */
+  documents: Record<string, string[]>;
+}
+
+export interface Result {
+  /** Per file, the last mapping that parsed. */
+  model: Record<string, Authored>;
+  resolved: ResolvedView | null;
+  problems: Problem[];
+  sources: Record<string, Record<string, Source>>;
+  changes: Change[];
+  impact: { running?: number; repos?: string[]; chains?: string[] };
+  warnings: { file: string; message: string }[];
+  policy_values: { auto_escalate_delay_s: number; auto_review_attempts: number };
+  yaml_error?: { file: string; line: number; col: number; message: string };
+}
+
+export interface DraftView {
+  area: Area;
+  key: string;
+  draft: boolean;
+  /** Per file, its text: null when the publish deletes it. */
+  files: Record<string, string | null>;
+  base: Record<string, string | null>;
+  updated_at: string | null;
+  result: Result;
+}
+
+export interface DraftSummary {
+  area: Area;
+  key: string;
+  files: string[];
+  changes: number;
+  problems: number;
+  updated_at: string;
+}
+
+export type Op = { op: string } & Record<string, unknown>;
+
+/** `POST …/ops` adds each op's own answer. */
+export type OpsView = DraftView & { ops: { op: string; result?: Record<string, unknown> }[] };
+
+/** The 409 a publish answers when a file changed under the draft. */
+export interface StaleBody {
+  detail: string;
+  files: Record<string, { published: string; draft: string; diff: string }>;
+}
+
+export interface RefusalBody {
+  detail: string;
+  /** The index of the op that failed (422 on ops). */
+  op?: number;
+  /** A publish refused for problems (422). */
+  problems?: Problem[];
+  line?: number;
+  col?: number;
+}

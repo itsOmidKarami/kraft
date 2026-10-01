@@ -105,6 +105,13 @@ async function composer(c: Ctx, st: DisplayState, open: RegExp, fill: boolean) {
     await settle(c.page);
   }
 }
+/** The /ng Chains editor on one of the mock's drafts, sidebar pinned, once the canvas has drawn. */
+async function ngChains(c: Ctx, key: string, node?: string) {
+  await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
+  await c.page.goto(`/ng/templates/chains/${key}${node ? `/nodes/${node}` : ""}`);
+  await c.page.locator(".canvas, .tpl-note").first().waitFor({ timeout: 8000 });
+  await settle(c.page, 700);
+}
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
 async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
@@ -178,7 +185,7 @@ async function ngComment(p: Page, text: string) {
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
   if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
   if (opts.docsError) await c.page.route("**/api/search*", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"index unavailable"}' }));
-  await ng(c, "/ng/templates/chains", {}, { side: "pinned" });
+  await ng(c, "/ng/settings/access", {}, { side: "pinned" });
   await c.page.keyboard.press("Control+k");
   const box = c.page.getByRole("combobox", { name: /search/i });
   await box.waitFor({ timeout: 4000 });
@@ -335,12 +342,12 @@ const CASES: Case[] = [
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
   { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
   // W2 A: an unbuilt page inside the shell.
-  { screen: "ng-shell", variant: "placeholder-chains", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}) },
+  { screen: "ng-shell", variant: "placeholder", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}) },
   // W2 B: the sidebar. Pinned and rail by stored choice; "revealed" is the pointer over the rail.
-  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
-  { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail" }) },
-  { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail", hover: true }) },
-  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}, { side: "rail" }) },
+  { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}, { side: "rail", hover: true }) },
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/settings/access", {}, { side: "pinned" }) },
   { screen: "ng-shell", variant: "long-crumb", data: "long", widths: [1024], run: (c) => ng(c, `/ng/work-items/${idOf(c.S, "gate")}`, {}, { side: "rail" }) },
   { screen: "ng-shell", variant: "actions", data: "default", widths: [1280], run: (c) => ng(c, "/ng/_tokens", {}, { side: "pinned" }) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
@@ -511,6 +518,85 @@ const CASES: Case[] = [
   // The gate review overlay: the needs-gate item's document beside its changes (a draft pending, a must-fix open).
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { tail: "?doc=1", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
+  // W10: the Chains editor on the mock's real draft answers (sweep/draftViews.json).
+  { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
+  { screen: "ng-chains", variant: "pane-gate", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec_approval, gate" }).click();
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "pane-config", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "implementation, node" }).click();
+    await c.page.getByRole("tab", { name: "Config" }).click();
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "node", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default", "verification") },
+  { screen: "ng-chains", variant: "node-task", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("button", { name: "code_review, agent task" }).click();
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "node-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "broken", "lint") },
+  { screen: "ng-chains", variant: "gate", data: "default", widths: [1280], run: (c) => ngChains(c, "default", "spec_approval") },
+  { screen: "ng-chains", variant: "task-menu", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("button", { name: "Add a parallel task" }).first().click();
+    await c.page.getByRole("menuitem", { name: "From the library…" }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "bottom", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("tab", { name: "Fix loop" }).click();
+    await settle(c.page, 400);
+  } },
+  { screen: "ng-chains", variant: "bottom-empty", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("tab", { name: "Escalation" }).click();
+    await settle(c.page, 400);
+  } },
+  { screen: "ng-chains", variant: "bottom-handler", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "merge_request_feedback");
+    await c.page.getByRole("tab", { name: "On failure" }).click();
+    await settle(c.page, 400);
+  } },
+  { screen: "ng-chains", variant: "review", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "Review & publish" }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "review-yaml", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "Review & publish" }).click();
+    await c.page.getByRole("tab", { name: "YAML diff" }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "review-stale", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "stale");
+    await c.page.getByRole("button", { name: "Review & publish" }).click();
+    await c.page.getByRole("button", { name: "Publish", exact: true }).click();
+    await c.page.getByText("Published since this draft began", { exact: true }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "review-problems", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "broken");
+    await c.page.getByRole("button", { name: "Review & publish" }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
+  { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.locator(".seam").nth(3).click();
+    await c.page.getByRole("menuitem", { name: /Exec node/ }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "seam-id", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.locator(".seam").nth(3).click();
+    await c.page.getByRole("menuitem", { name: /Exec node/ }).click();
+    await c.page.keyboard.type("spec");
+    await settle(c.page, 300);
+  } },
 
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },

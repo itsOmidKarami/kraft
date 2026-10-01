@@ -29,8 +29,9 @@ type Props = {
   onExpand?: (s: NodeSel) => void;
   onEscape?: () => void;
   onBackground?: () => void;
-  onSlot?: (step: string) => void;
-  onSeam?: (where: "below" | "before" | "after", at: string | number) => void;
+  /** The slot's or seam's own button comes last, for a menu anchored to it. */
+  onSlot?: (step: string, el: HTMLElement) => void;
+  onSeam?: (where: "below" | "before" | "after", at: string | number, el: HTMLElement) => void;
 };
 
 const taskKey = (s: string, t: string) => `t:${s}/${t}`;
@@ -82,8 +83,8 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
   const isSel = (s: NodeSel) => selected?.step === s.step && selected?.task === s.task;
   const last = lay.cols[lay.cols.length - 1];
 
-  const seam = (key: string, x: number, y: number, title: string, fire: () => void) => (
-    <button key={key} type="button" className="seam is-node" aria-label={title} title={title} style={{ left: x - 10, top: y - 10 }} onClick={fire}><span aria-hidden="true">+</span></button>
+  const seam = (key: string, x: number, y: number, title: string, fire: (el: HTMLElement) => void) => (
+    <button key={key} type="button" className="seam is-node" aria-label={title} title={title} style={{ left: x - 10, top: y - 10 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span></button>
   );
   const taskButton = (s: NodeSel, t: GraphItem, x: number, y: number, kind: string, extra = "") => {
     const key = taskKey(s.step, t.id), sel = isSel(s);
@@ -95,7 +96,7 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
         tabIndex={roving.tabIndex(key)}
         aria-label={accessibleName(t, kind)}
         aria-pressed={sel}
-        className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${extra}`}
+        className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${t.pending ? " is-pending" : ""}${extra}`}
         style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
         onFocus={() => { roving.go(key); camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
         onClick={() => onSelect?.(s)}
@@ -152,18 +153,18 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
             </button>,
             ...st.tasks.map((t, i) => taskButton({ step: st.id, task: t.id }, t, cx, ys[i], `${t.taskKind ?? "agent"} task`)),
             !st.tasks.length && st.slot && (
-              <button key={`slot${st.id}`} type="button" className="graph-node is-task is-slot" style={{ left: cx - G.COL / 2, top: ys[0] - G.BOX / 2, width: G.COL }} onClick={() => onSlot?.(st.id)}>
+              <button key={`slot${st.id}`} type="button" className="graph-node is-task is-slot" style={{ left: cx - G.COL / 2, top: ys[0] - G.BOX / 2, width: G.COL }} onClick={(e) => onSlot?.(st.id, e.currentTarget)}>
                 <NodeGlyph kind="slot" size="md" />
                 <span className="graph-label">{st.slot.label ?? "add a task"}</span>
               </button>
             ),
-            st.seamBelow && seam(`sb${st.id}`, cx, ys[ys.length - 1] + G.BOX / 2 + 56, "Add a parallel task", () => onSeam?.("below", st.id)),
-            st.seamBefore && seam(`sf${st.id}`, k === 0 ? (G.startX + 18 + cx - G.BOX / 2) / 2 : (lay.cols[k - 1].cx + cx) / 2, lay.TY, "Add a step here", () => onSeam?.("before", k)),
+            st.seamBelow && seam(`sb${st.id}`, cx, ys[ys.length - 1] + G.BOX / 2 + 56, "Add a parallel task", (el) => onSeam?.("below", st.id, el)),
+            st.seamBefore && seam(`sf${st.id}`, k === 0 ? (G.startX + 18 + cx - G.BOX / 2) / 2 : (lay.cols[k - 1].cx + cx) / 2, lay.TY, "Add a step here", (el) => onSeam?.("before", k, el)),
           ];
         })}
         {sb && side && taskButton({ step: "escalation", task: side.id }, { ...side, state: side.state ?? "esc" }, sb.x, sb.y, "escalation task", " is-side")}
         {onFailure && <span className="node-footer" style={{ left: G.startX, top: lay.footerY }}>on failure · {onFailure}</span>}
-        {seamAfter && seam("after", last ? (last.cx + G.BOX / 2 + lay.endX) / 2 : (G.startX + 18 + lay.endX) / 2, lay.TY, "Add a step here", () => onSeam?.("after", steps.length))}
+        {seamAfter && seam("after", last ? (last.cx + G.BOX / 2 + lay.endX) / 2 : (G.startX + 18 + lay.endX) / 2, lay.TY, "Add a step here", (el) => onSeam?.("after", steps.length, el))}
       </div>
       <div className="canvas-zoom" style={{ right: reserve + 12 }}>
         <ZoomControls scale={cam.s} mode={camera.mode} onIn={camera.zoomIn} onOut={camera.zoomOut} onReset={camera.reset} onFit={camera.fit} fitLabel="Fit the node" />

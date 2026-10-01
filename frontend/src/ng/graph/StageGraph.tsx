@@ -1,4 +1,5 @@
 import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
+import type { FitRule } from "./camera";
 import { arcShapes, L, layout, seamX, type ChainArc, type ChainNode, type Seam } from "./layout";
 import { NodeGlyph } from "./NodeGlyph";
 import { accessibleName, breakable } from "./types";
@@ -19,24 +20,27 @@ type Props = {
   reserve?: number;
   /** Px an overlaid pane covers on the right: the current-node framing keeps clear of it (Kraft-gvfm2). */
   cover?: number;
+  /** The editor's fit (Templates prototype `fit1`): see `FitRule`. */
+  fit?: FitRule;
   onSelect?: (id: string) => void;
   onOpen?: (id: string) => void;
   onFocusNode?: (id: string) => void;
   onEscape?: () => void;
   onBackground?: () => void;
-  onSeam?: (at: number) => void;
+  /** The seam's own button, for a menu anchored to it. */
+  onSeam?: (at: number, el: HTMLElement) => void;
 };
 
 const nodeKey = (id: string) => `n:${id}`;
 const seamKey = (at: number) => `s:${at}`;
 
 /** The chain canvas: every node of a chain in one row (StageGraph.dc.html). */
-export function StageGraph({ name, nodes, selected, arcs = [], seams = [], opening = "fit", reserve = 0, cover = 0, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
+export function StageGraph({ name, nodes, selected, arcs = [], seams = [], opening = "fit", reserve = 0, cover = 0, fit, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
   const lay = useMemo(() => layout(nodes), [nodes]);
   const shapes = useMemo(() => arcShapes(lay, arcs), [lay, arcs]);
   // Where the run stands: the running node, else the one it stopped on (failed) or waits at (a gate).
   const cur = lay.items.find((i) => i.node.state === "current") ?? lay.items.find((i) => i.node.state === "failed" || i.node.state === "amber");
-  const camera = useCamera({ canvas: "chain", world: lay, opening, reserve, cover, current: cur && { cx: cur.cx, cy: L.CY } });
+  const camera = useCamera({ canvas: "chain", world: lay, opening, reserve, cover, fit, current: cur && { cx: cur.cx, cy: L.CY } });
 
   // Keyboard stops in visual order: a seam at `at` sits before node `at`.
   const stops = useMemo(() => {
@@ -101,7 +105,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               tabIndex={roving.tabIndex(key)}
               aria-label={accessibleName(n, n.kind === "gate" ? "gate" : "node")}
               aria-pressed={n.id === selected}
-              className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}`}
+              className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.faded ? " is-faded" : ""}`}
               style={{ left: cx - w / 2, top: L.CY - L.BOX / 2, width: w }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: cx - w / 2, x1: cx + w / 2, y0: L.CY - L.BOX / 2, y1: L.CY + L.BOX / 2 + 40 }); }}
               onClick={() => onSelect?.(n.id)}
@@ -129,7 +133,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               className={`seam${s.open ? " is-open" : ""}${s.always ? " is-always" : ""}`}
               style={{ left: x - 10, top: L.CY - 10 }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: x - 10, x1: x + 10, y0: L.CY - 10, y1: L.CY + 10 }); }}
-              onClick={() => onSeam?.(s.at)}
+              onClick={(e) => onSeam?.(s.at, e.currentTarget)}
             >
               <span aria-hidden="true">+</span>
             </button>

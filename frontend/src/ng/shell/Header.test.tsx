@@ -65,4 +65,18 @@ describe("Header", () => {
     expect(parts).toEqual(["ng-crumbs-nav", "ng-header-tail", "ng-header-actions"]);
     expect(banner.querySelector(".ng-header-tail")).toHaveTextContent("all repos");
   });
+
+  it("links Chains on a chain's page, where the page's tail goes on after it", () => {
+    let tail: HTMLDivElement | null = null;
+    render(
+      <MemoryRouter initialEntries={["/templates/chains/default"]}>
+        <Header actionsRef={() => {}} tailRef={(el) => void (tail = el)} />
+      </MemoryRouter>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(nav).getByRole("link", { name: "Chains" })).toHaveAttribute("href", "/templates/chains");
+    expect(within(nav).queryByText("default")).toBeNull();
+    expect(tail).not.toBeNull();
+    expect(nav.nextElementSibling).toBe(tail);
+  });
 });

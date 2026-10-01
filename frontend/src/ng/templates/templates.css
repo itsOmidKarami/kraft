@@ -1,0 +1,80 @@
+/* The Templates areas (Chains first). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+.tpl-note { padding: 28px 24px; font-size: 12.5px; color: var(--text-sub); }
+.tpl-note h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; color: var(--text); }
+.tpl-page { position: relative; height: calc(100vh - 44px); overflow: hidden; }
+.tpl-area { position: absolute; inset: 0; }
+.tpl-empty-chain { position: absolute; left: 50%; top: 54%; transform: translateX(-50%); margin: 0; font-size: 12.5px; color: var(--text-muted); pointer-events: none; }
+
+/* Header tail (brief Decided 8): the chain, its node, the draft state, the problems badge. */
+.tpl-crumb-sep { color: var(--text-muted); }
+.tpl-crumb-chain, .tpl-crumb-node { font: 12px ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.tpl-draft { flex: none; margin-left: 4px; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); }
+.tpl-published { flex: none; margin-left: 4px; font-size: 11px; color: var(--text-muted); }
+.tpl-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
+.tpl-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
+
+/* The seam menu (Decisions §9 Adding a node). */
+.seam-menu { min-width: 220px; }
+.seam-item { display: flex; align-items: center; gap: 10px; }
+.seam-item > span:last-child { display: flex; flex-direction: column; }
+.seam-item-name { color: var(--text); }
+.seam-item-sub { font-size: 11px; color: var(--text-muted); }
+.seam-diamond { width: 10px; height: 10px; margin: 0 2px; transform: rotate(45deg); border: 1.5px solid currentColor; border-radius: 2px; flex: none; }
+.seam-id { width: 300px; padding: 4px; }
+
+/* An id field and its button (Decisions §9 Invalid id). */
+.idrow { display: flex; flex-direction: column; gap: 6px; }
+.idrow-line { display: flex; gap: 6px; }
+.idrow-input { flex: 1; min-width: 0; min-height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 12px ui-monospace, Menlo, monospace; }
+.idrow-input.is-bad { border-color: var(--bad); }
+.idrow-err { margin: 0; font-size: 11.5px; color: var(--bad); }
+
+/* Task, extend and id menus. */
+.task-menu { width: 280px; padding: 4px; }
+.menu-title { margin: 2px 6px 6px; font-size: 11.5px; font-weight: 600; color: var(--text); }
+.tpl-menu-note { margin: 0 6px 8px; font-size: 11px; color: var(--text-muted); }
+.picklist { display: flex; flex-direction: column; gap: 4px; }
+.picklist-q { min-height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 12px; }
+.picklist-items { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; }
+.picklist-item { display: flex; align-items: flex-start; gap: 8px; }
+.picklist-item > span { display: flex; flex-direction: column; min-width: 0; }
+.picklist-name { font: 12px ui-monospace, Menlo, monospace; color: var(--text); }
+.picklist-sub { font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.picklist-empty { margin: 6px; font-size: 11.5px; color: var(--text-muted); }
+
+/* The node view: the strip on top, the node's canvas under it. */
+.tpl-area > .strip { position: absolute; left: 0; right: 0; top: 0; z-index: 3; }
+/* In a node view the side pane starts under the strip, as on the item page (W3 Workbench). */
+.tpl-area.has-strip > .pane, .tpl-area.has-strip > .pane-rail { top: 64px; }
+.tpl-node-area { position: absolute; left: 0; right: 0; top: 64px; bottom: 0; }
+/* The canvas keeps its zoom bar above the bottom pane's tab bar; the open pane overlays it (no reflow). */
+.tpl-area.has-bottom .tpl-node-area { bottom: 38px; }
+.tpl-empty-node { position: absolute; left: 40px; top: 48px; max-width: 460px; padding: 22px 24px; border: 1.5px dashed var(--border); border-radius: 12px; font-size: 13px; line-height: 1.6; color: var(--text-sub); }
+.tpl-empty-node p { margin: 0; }
+.tpl-phrase { padding: 0; border: 0; background: none; font: inherit; color: var(--ok); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.tpl-phrase:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.tpl-extends-pill { position: absolute; left: 16px; top: 12px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 10px; font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); background: var(--surface); }
+
+/* The bottom pane (Decisions §9 Bottom pane): docked under the node canvas, up to the side pane. */
+.bp { position: absolute; left: 0; bottom: 0; z-index: 5; display: flex; flex-direction: column; box-sizing: border-box; border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 -10px 24px color-mix(in srgb, var(--bg) 50%, transparent); }
+.bp-handle { position: absolute; left: 0; right: 0; top: -4px; height: 8px; z-index: 3; cursor: row-resize; touch-action: none; }
+.bp-handle:is(:hover, :focus-visible) { background: linear-gradient(180deg, transparent 3px, var(--text-muted) 3px, var(--text-muted) 5px, transparent 5px); outline: none; }
+.bp-bar { flex: none; display: flex; align-items: center; gap: 2px; height: 37px; padding: 0 10px 0 6px; border-bottom: 1px solid var(--line); }
+.bp-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; }
+.bp-tab { display: flex; align-items: center; gap: 6px; padding: 9px 8px; border: 0; background: none; font-size: 12px; color: var(--text-muted); white-space: nowrap; cursor: pointer; }
+.bp-tab:is(:hover, :focus-visible) { color: var(--text); background: var(--surface-2); }
+.bp-tab.is-on { color: var(--text); box-shadow: inset 0 -1.5px 0 var(--text-sub); }
+.bp-gap { flex: 1; }
+.bp-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.bp-path { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 14px 0; font-size: 11.5px; color: var(--text-muted); }
+.bp-path-seg { display: inline-flex; align-items: center; gap: 6px; }
+.bp-level { padding: 1px 6px; border: 0; border-radius: 5px; background: none; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
+.bp-level.is-on { color: var(--text); background: var(--surface-2); }
+.bp-canvas { position: relative; flex: 1; min-height: 0; }
+.bp-judge { position: absolute; left: 14px; top: 8px; z-index: 3; }
+.bp-judge-btn { padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
+.bp-judge-btn.is-sel { border-color: var(--text); color: var(--text); }
+.bp-judge-btn.is-slot { border-style: dashed; border-color: var(--ok); color: var(--ok); }
+.bp-empty { position: absolute; inset: 0; padding: 14px; overflow: auto; }
+.bp-empty-box { max-width: 560px; margin: 0 0 7px; padding: 14px 16px; border: 1.5px dashed var(--border); border-radius: 10px; background: var(--bg); font-size: 12.5px; line-height: 1.6; color: var(--text-sub); }
+.bp-empty-note { margin: 0; font-size: 11.5px; color: var(--text-muted); }

@@ -17,6 +17,9 @@ describe("camera maths", () => {
   });
   it("keeps the fitted node canvas 20px off the left edge", () => {
     expect(fitCam({ W: 10000, H: 100 }, { w: 1000, h: 500 }, "node").tx).toBe(20);
+    // An editor's fit (Templates prototype fit1): an 80% floor, a long chain starting 12px in.
+    expect(fitCam({ W: 2600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.8, left: 12 })).toEqual({ s: 0.8, tx: 12, ty: (700 - 200) / 2 - 10 });
+    expect(fitCam({ W: 400, H: 250 }, { w: 1000, h: 700 }, "chain", { floor: 0.8, left: 12 }).tx).toBe(300);
   });
   it("centres the current node across and 30% down at 100%", () => {
     expect(currentCam(500, 96, { w: 800, h: 401 })).toEqual({ s: 1, tx: -100, ty: 120 - 96 });

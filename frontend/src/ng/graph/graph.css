@@ -84,6 +84,10 @@
 .graph-node.is-ghost .glyph { opacity: .55; }
 .graph-node.is-add .graph-label { color: var(--ok); }
 .graph-node.is-bad .graph-label { color: var(--bad); }
+.graph-node.is-pending .glyph { opacity: .5; }
+/* W3 rule 2: faded dims the glyph, never the label text. */
+.graph-node.is-faded .glyph { opacity: .35; }
+.graph-node.is-faded .graph-label { color: var(--text-muted); }
 .graph-meta, .graph-sub { margin-top: -4px; padding: 0 3px; border-radius: 3px; background: var(--bg); font-size: 10.5px; white-space: nowrap; color: var(--text-muted); }
 .graph-meta.tone-red { color: var(--bad); }
 .graph-meta.tone-amber { color: var(--warn); }

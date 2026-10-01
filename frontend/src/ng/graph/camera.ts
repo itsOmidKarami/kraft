@@ -21,11 +21,18 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
   return { s, tx: px - (px - cam.tx) * k, ty: py - (py - cam.ty) * k };
 }
 
+/** How an editor fits (the Templates prototype's `fit1`): never under `floor`,
+ *  and a world wider than the view starts `left` px from the left edge. */
+export type FitRule = { floor: number; left: number };
+/** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
+export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
+
 /** The whole world in view, never above 100% or below 30%, centred; the chain
  *  sits 10px above centre, and the node canvas keeps 20px off the left edge. */
-export function fitCam(world: { W: number; H: number }, view: Size, canvas: CanvasKind): Cam {
-  const s = Math.max(0.3, Math.min(1, (view.w - 40) / world.W, (view.h - 40) / world.H));
-  const tx = (view.w - world.W * s) / 2;
+export function fitCam(world: { W: number; H: number }, view: Size, canvas: CanvasKind, rule?: FitRule): Cam {
+  const s = Math.max(rule?.floor ?? 0.3, Math.min(1, (view.w - 40) / world.W, (view.h - 40) / world.H));
+  const mid = (view.w - world.W * s) / 2;
+  const tx = rule ? Math.max(rule.left, mid) : mid;
   const ty = (view.h - world.H * s) / 2;
   return canvas === "chain" ? { s, tx, ty: ty - 10 } : { s, tx: Math.max(20, tx), ty };
 }

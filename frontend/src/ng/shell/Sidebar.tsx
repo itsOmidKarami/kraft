@@ -6,9 +6,11 @@ import { useStore } from "../../store";
 import * as api from "../../api";
 import type { Health } from "../../types";
 import { NAV_ICON } from "../icons";
+import { isTextField } from "../keys";
 import { legacyPath } from "../legacyPath";
 import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
+import { useDraftCounts } from "./useDraftCounts";
 
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
@@ -25,9 +27,6 @@ function useHealth(): Health | null {
   return health;
 }
 
-const isTextField = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
-
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const [mode, setMode] = useState<SidebarMode>(currentSidebar);
   // Escape in a revealed rail closes it even while the pointer is still over it.
@@ -36,6 +35,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   // The server's badge (R16): the board's own Needs you count, failed included.
   const needsYou = useStore((s) => Object.values(s.workItems).filter((i) => i.display_status === "needs_you" || i.display_status === "failed").length);
   const health = useHealth();
+  const drafts = useDraftCounts();
   const location = useLocation();
   const ref = useRef<HTMLElement>(null);
 
@@ -63,18 +63,31 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
 
   const row = (r: NgRoute) => {
     const board = r.path === "/";
-    const label = board && needsYou > 0 ? `Board, ${needsYou} need you` : r.label;
+    const area = drafts[r.path];
+    const label = board && needsYou > 0
+      ? `Board, ${needsYou} need you`
+      : area ? [r.label, "unpublished draft", area.problems ? `${area.problems} problem${area.problems === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ") : r.label;
     return (
       <NavLink
         key={r.path}
         to={r.path}
-        end
+        // A templates area has pages under its row (/templates/chains/default).
+        end={r.group !== "templates"}
         aria-label={label}
         className={({ isActive }) => `ng-side-row${isActive || (board && location.pathname === "/archived") ? " active" : ""}`}
       >
-        <r.icon size={16} aria-hidden />
+        <span className="ng-side-ico">
+          <r.icon size={16} aria-hidden />
+          {area && <span className={`ng-side-mark${area.problems ? " is-bad" : ""}`} aria-hidden />}
+        </span>
         <span className="ng-side-label" aria-hidden>{r.label}</span>
         {board && needsYou > 0 && <span className="ng-side-dot" aria-hidden />}
+        {area && (
+          <span className="ng-side-badges ng-side-label" aria-hidden>
+            <span className="ng-side-dot" />
+            {area.problems > 0 && <span className="ng-side-count">{area.problems}</span>}
+          </span>
+        )}
       </NavLink>
     );
   };

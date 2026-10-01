@@ -31,12 +31,12 @@
    its first await; with the attribute absent the 1280 query decides. The
    custom properties carry the pinned state so the reveal and the dismissed
    cases each need one rule. */
-:root { --ng-side-w: 210px; --ng-side-label: visible; }
-:root[data-sidebar="rail"] { --ng-side-w: 40px; --ng-side-label: hidden; }
-@media (max-width: 1279px) { :root:not([data-sidebar]) { --ng-side-w: 40px; --ng-side-label: hidden; } }
+:root { --ng-side-w: 210px; --ng-side-label: visible; --ng-side-mark: hidden; }
+:root[data-sidebar="rail"] { --ng-side-w: 40px; --ng-side-label: hidden; --ng-side-mark: visible; }
+@media (max-width: 1279px) { :root:not([data-sidebar]) { --ng-side-w: 40px; --ng-side-label: hidden; --ng-side-mark: visible; } }
 .ng-side { position: relative; flex: none; width: var(--ng-side-w); }
 .ng-sidebar { position: absolute; inset: 0 auto 0 0; z-index: 20; box-sizing: border-box; width: var(--ng-sb-w, var(--ng-side-w)); display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: 12.5px; transition: width 120ms ease 180ms; }
-.ng-side:not([data-dismissed]) .ng-sidebar:is(:hover, :focus-within) { --ng-sb-w: 210px; --ng-sb-label: visible; transition-delay: 0s; box-shadow: 0 0 0 1px var(--line), 8px 0 18px -8px var(--line); }
+.ng-side:not([data-dismissed]) .ng-sidebar:is(:hover, :focus-within) { --ng-sb-w: 210px; --ng-sb-label: visible; --ng-sb-mark: hidden; transition-delay: 0s; box-shadow: 0 0 0 1px var(--line), 8px 0 18px -8px var(--line); }
 .ng-side-label { visibility: var(--ng-sb-label, var(--ng-side-label)); white-space: nowrap; transition: visibility 0s linear 180ms; }
 .ng-sidebar:is(:hover, :focus-within) .ng-side-label { transition-delay: 0s; }
 .ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px; border-bottom: 1px solid var(--line); }
@@ -54,6 +54,14 @@
 .ng-side-kbd { margin-left: auto; }
 .ng-side-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: auto; position: relative; }
 .ng-sidebar .ng-side-row { position: relative; }
+/* A draft area's row (Decisions §10): an amber dot and a red problem count at
+   the right; on the rail, where the label is hidden, one dot on the icon. */
+.ng-side-ico { position: relative; display: inline-flex; flex: none; }
+.ng-side-mark { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 1.5px var(--side); visibility: var(--ng-sb-mark, var(--ng-side-mark)); }
+.ng-side-mark.is-bad { background: var(--bad); }
+.ng-side-badges { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.ng-side-badges .ng-side-dot { margin-left: 0; }
+.ng-side-count { min-width: 14px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--bad); }
 .ng-side-group { flex: none; margin-top: 6px; padding: 8px 12px 4px; border-top: 1px solid var(--line); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
 .ng-side-foot { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 6px 0 8px; border-top: 1px solid var(--line); }
 .ng-side-meta { display: block; padding: 3px 12px; font-size: 11.5px; color: var(--text-muted); text-decoration: none; }

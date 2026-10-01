@@ -1381,3 +1381,13 @@ Baseline on `main` `06da92d39`, shot from a clean worktree: 1479 cells, 235 flag
 
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 0 newly flagged, 41 changed on the first shot (313 on the re-shot after the rebase, a slower machine; every shot is clock text and sub-pixel offsets, none newly flagged). Shooting `main` against its own baseline changes 79 cells, 40 of these 41 among them (wall-clock text, caret and scroll offsets); the one other, `el-gate-card/rate_limited-tasks-long@1280`, differs in a 244x13 px line of text. The branch changes no `/ng` or shipped screen source (`ws.ts` only ignores a new frame).
 - No `/ng` screens and no `waves.json` key: a backend wave. `mockApi.ts` gained a mock for every new route: `/harnesses`, the `/drafts/{area}/{key}` routes for the config areas, `/intake/checks`, `/apply`, `/apply/reload`, `/apply/restart`, `/update`, `/update/check`.
+## ux2-W10 — Chains editor, PR 1: canvas, panes, publish (`ux2/W10`)
+
+Rebased onto `main` `06da92d39` (W9 #347 merged; W5, W6, W8 on main). Baseline shot on `origin/main` itself: 1479 cells. Full notes: `e2e-shots/DIFF-ux2-W10.md`.
+
+- `node sweep/wave.mjs ux2-W10`: **6/6 rules pass** (no contrast, offscreen, clipped-v or console flag on `^ng-`, review-stale's own 409 excepted; both chain flows complete; no newly flagged cells).
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 0 newly flagged. 213 changed: 43 new W10 cells; 134 shipped cells, wall-clock text ("17d 21h" → "17d 22h"; checked by crop) plus W9's known `flow-log-maximize/03` scroll flake; 24 `/ng` cells for the sidebar's Chains dot and count and the header tail; 12 `ng-draft-item` cells for the editor fit and the real `default.yaml` in its YAML tab.
+- **Caught on the rebase:** W10's CSS styled `.rv-diff`, `.rv-file`, `.pf` and `.menu-note`, names W8 and W1 use; /ng is one bundle, so W8's `flow-ng-review-request-changes` diff moved 12px (3.96%). Bisected to W10 F; renamed to `tpl-*`; back to 0.00%. `ng/css.collision.test.ts` now holds every ng/ folder to its own classes (R59); it found `item.css` styling ui's `.dialog`, now `.dv-dialog`.
+- **New screen:** `ng-chains` (29 cells on real W9 answers in `sweep/draftViews.json`); flows `flow-ng-chain-add-node`, `flow-ng-chain-publish`. **New key:** `ux2-W10`. `ng-shell`'s cells moved to `/ng/settings/access`; `placeholder-chains` became `placeholder`.
+- **Mock:** real draft answers for the chains branch; the real chain file and library for `/ng` referers only; the harness routes.
+- **Process:** the port is contended (Kraft-kfw1e); every sweep here ran in a loop that waits for the port and retries on "already used".

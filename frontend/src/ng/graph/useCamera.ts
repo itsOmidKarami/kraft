@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type MouseEvent as RMouseEvent } from "react";
-import { currentCam, DRAG_THRESHOLD, fitCam, revealCam, STEP_IN, STEP_OUT, wheelFactor, zoomAt, type Cam, type CanvasKind, type Size } from "./camera";
+import { currentCam, DRAG_THRESHOLD, fitCam, revealCam, STEP_IN, STEP_OUT, wheelFactor, zoomAt, type Cam, type CanvasKind, type FitRule, type Size } from "./camera";
 
 export type CameraMode = "fit" | "current" | "free";
 type Opts = {
@@ -14,11 +14,13 @@ type Opts = {
    *  current-node framing keeps clear of it, so the node stays visible beside
    *  the pane; fit and panning keep the full width (Kraft-gvfm2). */
   cover?: number;
+  /** An editor's fit: a floor and a left margin instead of centring (the Templates prototype). */
+  fit?: FitRule;
 };
 
 /** Pan and zoom for one canvas viewport: pinch or ⌘-scroll zooms at the cursor,
  *  scroll or a background drag pans, fit and current re-frame. */
-export function useCamera({ canvas, world, current, opening, reserve = 0, cover = 0 }: Opts) {
+export function useCamera({ canvas, world, current, opening, reserve = 0, cover = 0, fit }: Opts) {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [cam, setCam] = useState<Cam>({ tx: 0, ty: 0, s: 1 });
@@ -42,7 +44,7 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
   const cx = current?.cx, cy = current?.cy;
   useEffect(() => {
     if (!view || mode === "free") return;
-    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, view, canvas));
+    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, view, canvas, fit));
   }, [mode, view?.w, view?.h, world.W, world.H, cx, cy, canvas, cover]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Non-passive, on the viewport only: preventDefault stops the page zooming or scrolling.

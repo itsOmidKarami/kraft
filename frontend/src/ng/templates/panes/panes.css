@@ -1,0 +1,69 @@
+/* The Chains side pane's body. Colours only through theme.css tokens. */
+.pane-group { margin: 14px 0 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pane-group:first-child { margin-top: 0; }
+.pane-note { margin: 4px 0 8px; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+.pane-note.is-bad { color: var(--bad); }
+
+/* A labelled field (Overview). */
+.tpl-pf { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.tpl-pf-label { font-size: 11.5px; color: var(--text-muted); }
+.tpl-pf-line { display: flex; align-items: center; gap: 10px; }
+.tpl-pf-input, .tpl-pf-select { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 12.5px/1.45 inherit; }
+.tpl-pf-select { flex: 1; min-width: 0; width: auto; font: 11.5px ui-monospace, Menlo, monospace; cursor: pointer; }
+.tpl-pf-input.is-long { resize: vertical; }
+.tpl-pf-input.is-mono { font: 11.5px ui-monospace, Menlo, monospace; }
+.tpl-pf-input.is-bad, .tpl-pf-select.is-bad { border-color: var(--bad); }
+.tpl-pf-sub { margin: 0; font-size: 11px; color: var(--text-muted); }
+.tpl-pf-sub.is-bad { color: var(--bad); }
+.tpl-pf-check { display: flex; align-items: center; gap: 5px; flex: none; font-size: 11.5px; color: var(--text-sub); cursor: pointer; }
+
+/* A key and its value (Overview). */
+.pkv { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 24px; }
+.pkv-k { flex: none; font-size: 11.5px; color: var(--text-muted); }
+.pkv-v { min-width: 0; text-align: right; overflow-wrap: anywhere; font-size: 12px; color: var(--text); }
+.pkv-v.is-mono { font: 11.5px ui-monospace, Menlo, monospace; }
+.pkv-v.is-muted { color: var(--text-muted); }
+.pkv-v.is-link { margin: -1px -5px; padding: 1px 5px; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
+.pkv-v.is-link:is(:hover, :focus-visible) { background: var(--surface-2); }
+
+/* Config rows (Decisions §9 Inherited vs overridden). */
+.cfg { display: flex; flex-direction: column; gap: 2px; }
+.cfg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; padding: 2px 4px; border-radius: 6px; font-size: 12px; }
+.cfg-k { flex: 0 0 104px; color: var(--text-muted); }
+.cfg-v { flex: 1; min-width: 0; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); overflow-wrap: anywhere; }
+.cfg-v.is-prose { font: 12px/1.45 inherit; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.cfg-v.is-unset { color: var(--text-muted); }
+.cfg-row.is-own .cfg-v, .cfg-row.is-own .cfg-k { color: var(--text); }
+.cfg-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text); }
+.cfg-chip { flex: none; padding: 0 6px; border-radius: 4px; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.cfg-chip.is-own { background: var(--surface-2); color: var(--text); }
+.cfg-row .icon-btn { min-width: 22px; min-height: 22px; }
+.cfg-gap { flex: none; width: 22px; }
+.cfg-lock { flex: none; font-size: 10.5px; color: var(--text-muted); }
+.cfg-edit { flex: 1; min-width: 0; min-height: 24px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; }
+.cfg-edit.is-long { flex-basis: 100%; font: 12px/1.45 inherit; }
+.cfg-err { flex-basis: 100%; margin: 0; font-size: 11px; color: var(--bad); }
+
+/* Review & publish (Decisions §9 Publish). */
+.tpl-rv-change { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 4px 4px; border: 0; border-radius: 6px; background: none; text-align: left; font-size: 12px; color: var(--text-sub); cursor: pointer; }
+.tpl-rv-change:is(:hover, :focus-visible) { background: var(--surface-2); }
+.tpl-rv-sign { flex: none; width: 12px; font: 600 12px ui-monospace, Menlo, monospace; }
+.tpl-rv-sign.is-add { color: var(--ok); }
+.tpl-rv-sign.is-change { color: var(--warn); }
+.tpl-rv-sign.is-remove { color: var(--bad); }
+.tpl-rv-path { font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+.tpl-rv-sum { margin-left: auto; font-size: 11.5px; color: var(--text-muted); text-align: right; }
+.tpl-rv-prob { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; padding: 6px 8px; border-left: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); font-size: 12px; color: var(--text); }
+.tpl-rv-prob > span:nth-child(2) { flex-basis: 100%; }
+.tpl-rv-fix { margin-left: auto; padding: 0 6px; border: 0; border-radius: 4px; background: none; font-size: 11.5px; color: var(--text); text-decoration: underline; cursor: pointer; }
+.tpl-rv-diff { margin: 4px 0 8px; padding: 6px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 11px/17px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.tpl-rv-line { display: block; padding: 0 8px; white-space: pre; }
+.tpl-rv-line.is-add { color: var(--text); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.tpl-rv-line.is-del { color: var(--text); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.tpl-rv-line.is-gap { color: var(--text-muted); }
+.tpl-rv-stale { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.tpl-rv-stale-head { margin: 0 0 4px; font-weight: 600; font-size: 12.5px; color: var(--text); }
+.tpl-rv-stale-text { margin: 0 0 8px; font-size: 12px; color: var(--text-sub); }
+.tpl-rv-file { margin: 6px 0 2px; font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.tpl-rv-stale-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tpl-rv-ask { font-size: 12px; color: var(--text); }

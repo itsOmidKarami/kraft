@@ -79,6 +79,14 @@ describe("DraftItemPage", () => {
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 
+  it("opens its chain readable, as the Chains editor does: no smaller than 80% (W10's editor fit)", async () => {
+    stub();
+    mount({ draft: { title: "Cache it", brief: "", repo: "/code/kraft-plugins", chain: "default", spec: "", plan: "" } });
+    await settle();
+    // jsdom has no layout, so a plain fit would floor at 30%.
+    expect((document.querySelector(".draft-canvas .canvas-world") as HTMLElement).style.transform).toContain("scale(0.8)");
+  });
+
   it("asks for a title before it can create", async () => {
     stub();
     mount();

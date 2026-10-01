@@ -19,7 +19,7 @@ export interface NgRoute {
 export const ROUTES: NgRoute[] = [
   { path: "/", label: "Board", icon: NAV_ICON.board, group: "top", built: true },
   { path: "/analytics", label: "Analytics", icon: NAV_ICON.analytics, group: "top", built: false },
-  { path: "/templates/chains", label: "Chains", icon: NAV_ICON.chains, group: "templates", built: false },
+  { path: "/templates/chains", label: "Chains", icon: NAV_ICON.chains, group: "templates", built: true },
   { path: "/templates/library", label: "Library", icon: NAV_ICON.library, group: "templates", built: false },
   { path: "/templates/harnesses", label: "Harnesses", icon: NAV_ICON.harnesses, group: "templates", built: false },
   { path: "/templates/repos", label: "Repos", icon: NAV_ICON.repos, group: "templates", built: false },

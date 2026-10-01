@@ -69,4 +69,10 @@ describe("crumbsFor", () => {
     expect(texts("/nope")).toEqual(["Not found"]);
     expect(texts("/_tokens")).toEqual(["Tokens"]);
   });
+
+  it("gives a chain's page Templates and a link back to Chains; the page adds the rest", () => {
+    const cs = crumbsFor("/templates/chains/default/nodes/spec", none);
+    expect(cs.map((c) => c.text)).toEqual(["Templates", "Chains"]);
+    expect(cs[1].to).toBe("/templates/chains");
+  });
 });

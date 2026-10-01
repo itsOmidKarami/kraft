@@ -76,7 +76,7 @@ describe("StageGraph", () => {
     expect(cb.onFocusNode).toHaveBeenLastCalledWith("spec");
     expect(cb.onSelect).toHaveBeenCalledWith("spec");
     await user.click(screen.getByRole("button", { name: "Add a node or gate here" }));
-    expect(cb.onSeam).toHaveBeenCalledWith(4);
+    expect(cb.onSeam).toHaveBeenCalledWith(4, expect.any(HTMLButtonElement));
   });
 
   it("calls onBackground for a click on empty canvas, not for a drag", () => {
