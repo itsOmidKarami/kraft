@@ -124,3 +124,27 @@ def test_publish_applies_the_interval_and_schedules_with_one_poller_restart(
     assert restarts == [90]
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["interval_s"] == 90
     assert [t.title for t in client.app.state.policy.triggers] == ["Weekly sweep"]
+
+
+# ── changes at key level (W15 A.2) ──
+
+
+def test_an_intake_draft_lists_each_changed_key_and_a_schedule_by_its_index(client, connected):
+    body = resolved(
+        client,
+        {"op": "set_intake", "patch": {"interval_s": 90, "max_concurrent": 2}},
+        schedule(connected),
+    )
+    by_path = {(c["file"], c["path"]): c for c in body["changes"]}
+    assert ("intake.yaml", "interval_s") in by_path
+    assert by_path[("intake.yaml", "interval_s")]["summary"].endswith("→ 90")
+    assert by_path[("policy.yaml", "max_concurrent")]["summary"].endswith("→ 2")
+    assert by_path[("policy.yaml", "triggers.0.cron")]["kind"] == "add"
+    assert by_path[("policy.yaml", "triggers.0.title")]["summary"] == "not set → Weekly sweep"
+    # No file-level row alongside.
+    assert {c["path"] for c in body["changes"]}.isdisjoint({"intake.yaml", "policy.yaml"})
+
+
+def test_max_concurrent_is_one_key_whichever_draft_writes_it(client):
+    resolved(client, {"op": "set_intake", "patch": {"max_concurrent": 4}})
+    assert written(client, "policy.yaml")["max_concurrent"] == 4

@@ -117,7 +117,7 @@ def _schedule_problems(st, index: int, entry: dict, chains: set) -> list[dict]:
 
 
 def resolve(st, key, raw, files, published) -> dict:
-    out = config.resolve_files(st, files, published, FILES)
+    out = config.resolve_files(st, files, published, FILES, keyed=True)
     data = raw.get(INTAKE) if isinstance(raw.get(INTAKE), dict) else {}
     try:
         intake = config_mod.Intake.model_validate(data)

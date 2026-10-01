@@ -120,12 +120,68 @@ def file_changes(
     return out
 
 
-def resolve_files(st, files, published, names, checks=None) -> dict:
+def _leaves(value: object, prefix: str = "") -> dict[str, object]:
+    """Dotted key → value. A mapping descends; a list of mappings (`triggers:`)
+    descends by index; anything else, a list of scalars too, is one leaf."""
+    if isinstance(value, dict):
+        out: dict[str, object] = {}
+        for k, v in value.items():
+            out |= _leaves(v, f"{prefix}.{k}" if prefix else str(k))
+        return out
+    if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
+        out = {}
+        for i, v in enumerate(value):
+            out |= _leaves(v, f"{prefix}.{i}")
+        return out
+    return {prefix: value}
+
+
+def _shown(path: str, value: object) -> str:
+    if value is None:
+        return "no bound" if path.startswith("maxima.") else "not set"
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value) or "none"
+    return str(value)
+
+
+def key_changes(files: Mapping[str, str | None], published: Mapping[str, str | None]) -> list[dict]:
+    """One change per dotted key that differs, `{path, kind, summary, file}`,
+    `summary` reading "was → now" (a missing value is "not set", a missing
+    maximum "no bound"). A file that does not parse, or is new or removed, is
+    `file_changes`' one file-level row, so a draft in error still says so."""
+    out = []
+    for name in sorted(files):
+        draft, was = files[name], published.get(name)
+        try:
+            after, before = authored.parse(draft), authored.parse(was)
+            whole = draft is None and was is not None
+        except yaml.YAMLError:
+            whole = True
+        if whole:
+            out += [{**c, "file": name} for c in file_changes({name: draft}, {name: was})]
+            continue
+        gone, now = _leaves(before or {}), _leaves(after or {})
+        for path in sorted(gone.keys() | now.keys()):
+            if path in gone and path in now and gone[path] == now[path]:
+                continue
+            kind = "add" if path not in gone else "remove" if path not in now else "change"
+            out.append(
+                {
+                    "path": path,
+                    "kind": kind,
+                    "summary": f"{_shown(path, gone.get(path))} → {_shown(path, now.get(path))}",
+                    "file": name,
+                }
+            )
+    return out
+
+
+def resolve_files(st, files, published, names, checks=None, *, keyed: bool = False) -> dict:
     """The result keys every config-file area answers with: its files'
     problems and their changes. An area adds `resolved`, `impact` and more."""
     return {
         "problems": problems(st, files, names, checks),
-        "changes": file_changes(files, published),
+        "changes": key_changes(files, published) if keyed else file_changes(files, published),
         "impact": None,
     }
 

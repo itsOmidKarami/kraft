@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 
+import yaml
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
@@ -17,9 +18,10 @@ from pydantic import BaseModel, ValidationError
 from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import store as items
-from kraft.api import api_router, deps
+from kraft.api import api_router, config_check, deps
 from kraft.api.routes import board
-from kraft.drafts import authored, item, ops, resolve, store
+from kraft.drafts import authored, item, ops, policy_caps, resolve, store
+from kraft.policy import PolicyError
 from kraft.templates import revision
 from kraft.templates.library import LIBRARY_FILE
 
@@ -67,6 +69,7 @@ def _view(st, area: str, key: str, files: dict, published: dict, result: dict) -
         "draft": draft is not None,
         "files": files,
         "base": draft["base"] if draft else {f: store.digest(t) for f, t in published.items()},
+        "published": published,
         "updated_at": draft["updated_at"] if draft else None,
         "result": result,
     }
@@ -291,6 +294,30 @@ async def rebase_draft(area: str, key: str, request: Request):
     return _view(st, area, key, files, published, result)
 
 
+@api_router.get("/drafts/policy/{key}/preview")
+async def get_policy_preview(key: str, request: Request, chain: str):
+    """A published chain's effective caps under the policy draft: per scope the
+    value it runs under, the layer that set it and the maximum bounding it. A
+    read; the draft is not changed."""
+    st = request.app.state
+    _area("policy", key)
+    draft = st.db.read(lambda c: store.get(c, "policy", key))
+    files, _, _ = _state(st, "policy", key, draft, draft["history"] if draft else [])
+    try:
+        parsed, _policy = config_check.validate_policy(
+            authored.parse(files.get("policy.yaml")) or {}
+        )
+    except (PolicyError, yaml.YAMLError) as exc:
+        raise HTTPException(422, f"policy.yaml does not load: {exc}") from exc
+    library = deps.library_or_503(st)
+    if chain not in library.chain_ids:
+        raise HTTPException(404, f"unknown chain template {chain!r}")
+    scopes = policy_caps.chain_scopes(st, chain, parsed.instance_policy())
+    if scopes is None:
+        raise HTTPException(422, f"chain {chain!r} does not resolve")
+    return {"chain": chain, "scopes": scopes}
+
+
 @api_router.get("/drafts/{area}/{key}/fragment")
 async def get_draft_fragment(area: str, key: str, request: Request, path: str | None = None):
     """The authored component at a canonical `path` as YAML (the serializer a
@@ -305,6 +332,17 @@ async def get_draft_fragment(area: str, key: str, request: Request, path: str | 
     if not files:
         raise HTTPException(404, f"no {area} {key!r}")
     model = result["model"]
+    if area == "repos":
+        # Read-only: the entry whose `path` is `path`, as `repos.yaml` writes it.
+        listed = (model.get("repos.yaml") or {}).get("repos")
+        entry = next(
+            (e for e in listed or () if isinstance(e, dict) and e.get("path") == path), None
+        )
+        if entry is None:
+            raise HTTPException(404, f"nothing at {path!r} in {area} {key!r}")
+        return {"path": path, "text": authored.dump(entry)}
+    if area not in ("chains", "library"):
+        raise HTTPException(404, f"{area} drafts have no fragments")
     library = model.get(LIBRARY_FILE)
     if library is None:
         library = authored.load(resolve.published(st.templates_dir, [LIBRARY_FILE])[LIBRARY_FILE])

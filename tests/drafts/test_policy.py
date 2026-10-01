@@ -187,3 +187,89 @@ def test_set_loop_and_remove_loop_write_the_entry(client):
     ops(client, {"op": "remove_loop", "key": "plainn.fix_loop"})
     assert written(client)["loops"] == {}
     assert ops(client, {"op": "remove_loop", "key": "plainn.fix_loop"}).status_code == 422
+
+
+# ── the keys the shipped Policy page edits (W15 A.1) ──
+
+
+def test_the_default_loop_block_housekeeping_and_findings_keys_write_and_prune(client):
+    body = resolved(
+        client,
+        set_value("loops", "default.attempts", 4),
+        set_value("loops", "default.wall_clock_s", 900),
+        set_value("housekeeping", "max_concurrent", 7),
+        set_value("housekeeping", "archive.after_days", 14),
+        set_value("findings", "findings.loop_severities", ["critical", "minor"]),
+    )
+    data = written(client)
+    assert data["default"]["attempts"] == 4 and data["default"]["wall_clock_s"] == 900
+    assert data["max_concurrent"] == 7
+    assert data["archive"] == {"after_days": 14}
+    assert data["findings"] == {"loop_severities": ["critical", "minor"]}
+    r = body["resolved"]
+    assert r["housekeeping"] == {
+        "max_concurrent": {"value": 7, "source": "policy"},
+        "archive_after_days": {"value": 14, "source": "policy"},
+    }
+    assert r["findings"]["loop_severities"] == {"value": ["critical", "minor"], "source": "policy"}
+    assert r["loops"]["default"] == {"attempts": 4, "wall_clock_s": 900}
+
+    resolved(
+        client,
+        set_value("housekeeping", "archive.after_days", None),
+        set_value("findings", "findings.loop_severities", None),
+    )
+    data = written(client)
+    assert "archive" not in data and "findings" not in data
+
+
+@pytest.mark.parametrize(
+    ("scope", "key", "value", "group"),
+    [
+        ("housekeeping", "archive.after_days", -1, "housekeeping"),
+        ("housekeeping", "max_concurrent", 0, "housekeeping"),
+        ("findings", "findings.loop_severities", ["info"], "loops"),
+    ],
+)
+def test_a_value_put_policy_refuses_is_a_problem_in_its_group(client, scope, key, value, group):
+    body = resolved(client, set_value(scope, key, value))
+    assert group in {p["scope"] for p in body["problems"]}
+    assert client.post(f"{URL}/publish").status_code == 422
+
+
+def test_a_key_outside_the_new_scopes_is_refused(client):
+    r = ops(client, set_value("housekeeping", "forge_cli_timeout_s", 5))
+    assert r.status_code == 422
+    r = ops(client, set_value("loops", "default.attempts.x", 5))
+    assert r.status_code == 422
+
+
+# ── changes at key level (W15 A.2) ──
+
+
+def test_a_policy_draft_lists_each_changed_key_as_was_to_now_and_no_file_row(client):
+    body = resolved(
+        client,
+        set_value("limits", "maxima.tasks.time_cap_minutes", 30),
+        set_value("housekeeping", "max_concurrent", 9),
+    )
+    changes = {c["path"]: c for c in body["changes"]}
+    assert "policy.yaml" not in changes
+    assert changes["maxima.tasks.time_cap_minutes"] == {
+        "path": "maxima.tasks.time_cap_minutes",
+        "kind": "add",
+        "summary": "no bound → 30",
+        "file": "policy.yaml",
+    }
+    assert changes["max_concurrent"]["kind"] in ("add", "change")
+    assert changes["max_concurrent"]["summary"].endswith("→ 9")
+    # The sidebar's count is the same rows.
+    (row,) = client.get("/api/drafts").json()
+    assert row["changes"] == len(body["changes"])
+
+
+def test_removing_a_key_reads_as_now_not_set(client):
+    resolved(client, set_value("limits", "maxima.tasks.time_cap_minutes", 30))
+    # Published is untouched: removing what the draft added leaves no draft at all.
+    body = resolved(client, set_value("limits", "maxima.tasks.time_cap_minutes", None))
+    assert body["changes"] == []

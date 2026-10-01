@@ -11,9 +11,10 @@ import re
 
 from kraft.api import config_check
 from kraft.cap_levels import CAP_LEVELS, SCOPE_CAP_FIELDS
-from kraft.drafts import config, harnesses, store
+from kraft.drafts import config, harnesses, policy_caps, store
 from kraft.drafts.ops import OpError
 from kraft.executor.walk import _loop_key
+from kraft.findings import SEVERITIES
 from kraft.policy import PolicyError
 from kraft.templates.models import PATH_SEPARATOR, ExecNode
 
@@ -28,6 +29,11 @@ ESCALATION = (
     "auto_review_attempts",
 )
 RETRIES = ("rate_limit_retries", "forge_cli_timeout_s")
+#: The `default:` block, `max_concurrent` and `archive`, which the shipped Policy
+#: page edits and `defaults:`/`maxima:` do not hold, and the findings that burn a cycle.
+LOOP_DEFAULT = ("default.attempts", "default.wall_clock_s")
+HOUSEKEEPING = ("max_concurrent", "archive.after_days")
+FINDINGS = ("findings.loop_severities",)
 SECTION_FIELDS = ("max_attempts", "timeout_minutes")
 HARNESS_FIELDS = ("allowed_harnesses", "allowed_tools", "escalation_harness", "escalation_grants")
 
@@ -45,6 +51,12 @@ def _editable(scope: str, key: str) -> bool:
         return key in ESCALATION
     if scope == "retries":
         return key in RETRIES
+    if scope == "loops":
+        return key in LOOP_DEFAULT
+    if scope == "housekeeping":
+        return key in HOUSEKEEPING
+    if scope == "findings":
+        return key in FINDINGS
     if scope != "limits":
         return False
     if parts[0] == "budget":
@@ -138,6 +150,7 @@ def _caps(parsed) -> dict:
                     "value": bound[1] if bound else None,
                     "source": bound[0] if bound else None,
                 },
+                "below": [],
             }
     return out
 
@@ -220,8 +233,10 @@ def _group(field: str | None) -> tuple[str, str | None]:
     parts = (field or "").split(PATH_SEPARATOR)
     top = parts[0]
     level = parts[1] if len(parts) > 1 and parts[1] in CAP_LEVELS else None
-    if top in ("loops", "default"):
+    if top in ("loops", "default", "findings"):
         return "loops", None
+    if top in ("max_concurrent", "archive"):
+        return "housekeeping", None
     if top in ESCALATION:
         return "escalation", None
     if top in RETRIES:
@@ -248,7 +263,7 @@ def _problem(field: str, message: str, scope: str) -> dict:
 
 
 def resolve(st, key, raw, files, published) -> dict:
-    out = config.resolve_files(st, files, published, FILES)
+    out = config.resolve_files(st, files, published, FILES, keyed=True)
     for p in out["problems"]:
         # A cross-field refusal has no field, but its message names the key.
         named = _KEY_IN_MESSAGE.search(p["message"])
@@ -271,9 +286,12 @@ def resolve(st, key, raw, files, published) -> dict:
     def scalar(name: str) -> dict:
         return _leaf(data, getattr(policy, name), name)
 
+    caps = _caps(parsed)
+    for (level, cap), layers in policy_caps.below_for(st, parsed.instance_policy()).items():
+        caps[level][cap]["below"] = layers
     out["resolved"] = {
         "limits": {
-            "caps": _caps(parsed),
+            "caps": caps,
             "work_item_usd": _work_item_usd(parsed),
             "daily_usd": _leaf(data, policy.budget.daily_usd, "budget", "daily_usd"),
             **{
@@ -302,6 +320,18 @@ def resolve(st, key, raw, files, published) -> dict:
         },
         "escalation": {k: scalar(k) for k in ESCALATION},
         "retries": {k: scalar(k) for k in RETRIES},
+        "housekeeping": {
+            "max_concurrent": scalar("max_concurrent"),
+            "archive_after_days": _leaf(data, policy.archive_after_days, "archive", "after_days"),
+        },
+        "findings": {
+            "loop_severities": _leaf(
+                data,
+                [s for s in SEVERITIES if s in policy.loop_severities],
+                "findings",
+                "loop_severities",
+            )
+        },
         "harnesses": {
             "defaults": parsed.defaults.model_dump(include=set(HARNESS_FIELDS)),
             "maxima": parsed.maxima.model_dump(include=set(HARNESS_FIELDS)),
