@@ -594,7 +594,8 @@ enforced-by: tests/templates/test_materialization.py::test_the_resolved_chain_is
 
 A materialized chain SHALL contain effective policy values and intake-specific
 decisions for one work item and SHALL NOT change as that item executes, except
-by an approved chain revision (`revised-chain-is-what-every-later-reader-sees`).
+by an approved chain revision or an applied item draft
+(`revised-chain-is-what-every-later-reader-sees`).
 enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row, tests/executor/test_gates.py::test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot, tests/executor/test_dispatch.py::test_editing_the_library_after_intake_does_not_change_a_running_items_steering, tests/executor/test_dispatch.py::test_a_snapshot_without_frozen_steering_stops_for_a_human, tests/templates/test_item_policy.py::test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stored
 
 ## REQ steer-can-address-paused-agent-tasks-individually
@@ -884,9 +885,13 @@ origin: src/kraft/executor/gates.py §maybe_gate
 WHEN a chain revision is approved, the system SHALL replace the chain the item
 runs with the revised chain, in one transaction with a `chain_revised` event
 carrying the change set and its diff, and every later walk, resume, retry fork
-and chain view SHALL read the revised chain.
-enforced-by: tests/executor/test_chain_revision.py::test_an_approved_revision_is_the_chain_every_later_reader_sees, tests/executor/test_chain_revision.py::test_a_resume_after_an_approved_revision_runs_the_revised_chain, tests/executor/test_chain_revision.py::test_a_retry_after_a_revision_keeps_it, tests/executor/test_chain_revision.py::test_a_revision_after_a_retry_revises_the_forks_chain, tests/executor/test_chain_revision.py::test_approving_a_revision_twice_applies_it_once
-origin: src/kraft/store/chain.py §revise_chain
+and chain view SHALL read the revised chain. A chain revised while a walk runs
+(an applied item draft) SHALL take effect at that walk's next node boundary,
+never inside the node running, with the walk's place found by node id; IF the
+node before that place is no longer where the walk left it, THEN the system
+SHALL stop the item for a person rather than continue.
+enforced-by: tests/executor/test_walk_revised.py::test_a_running_walk_runs_the_nodes_a_revision_changed_after_it, tests/executor/test_walk_revised.py::test_the_node_running_keeps_the_steps_it_started_with, tests/executor/test_walk_revised.py::test_a_walk_whose_place_left_the_chain_stops_for_a_person[gone], tests/executor/test_walk_revised.py::test_a_walk_whose_place_left_the_chain_stops_for_a_person[moved], tests/executor/test_chain_revision.py::test_an_approved_revision_is_the_chain_every_later_reader_sees, tests/executor/test_chain_revision.py::test_a_resume_after_an_approved_revision_runs_the_revised_chain, tests/executor/test_chain_revision.py::test_a_retry_after_a_revision_keeps_it, tests/executor/test_chain_revision.py::test_a_revision_after_a_retry_revises_the_forks_chain, tests/executor/test_chain_revision.py::test_approving_a_revision_twice_applies_it_once
+origin: src/kraft/store/chain.py §revise_chain; the walk's re-read is src/kraft/executor/walk.py §run_once (UX V2 W9 G).
 
 ## REQ gate-auto-review-is-explicit-and-bounded
 
