@@ -74,7 +74,7 @@ def select(names: Sequence[str], profiles: Mapping[str, str], *, where: str) -> 
         raise SteeringError(
             f"{where}: steering {missing[0]!r} is not a steering profile in "
             "templates/library.yaml; define it under `steering:` there "
-            "(Settings > Library), or remove the name"
+            "(Templates > Library), or remove the name"
         )
     selected = {n: profiles[n] for n in names}
     Steering.check_budget(list(selected.values()), where=where)
