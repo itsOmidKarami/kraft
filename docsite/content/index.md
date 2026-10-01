@@ -46,7 +46,7 @@ description: Read what the agent wrote, then approve, or reject with a note that
 orientation: horizontal
 reverse: true
 ---
-![A spec an agent wrote, waiting for your approval in the item's detail view](/assets/gate.png)
+![A spec an agent wrote, waiting for your approval on the item's page](/assets/gate.png)
 ::
 
 ::u-page-section
