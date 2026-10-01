@@ -52,7 +52,9 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
   // A library component: the page adds its name in the header's tail.
   if (pathname.startsWith("/templates/library/")) return [mid("Templates"), mid("Library", { to: "/templates/library" })];
 
-  const route = ROUTES.find((r) => r.path === pathname);
+  // Repos and Policy have pages under their row; the section or the selected repo is the page's own (W15).
+  const base = pathname.replace(/^(\/templates\/repos|\/settings\/policy)\/.+$/, "$1");
+  const route = ROUTES.find((r) => r.path === base);
   if (route?.group === "templates" || route?.group === "settings" || pathname === "/settings/about")
     return [mid(GROUP_HEAD[pathname.startsWith("/templates") ? "templates" : "settings"]), current(route!.label)];
   if (route) return [current(route.label)];

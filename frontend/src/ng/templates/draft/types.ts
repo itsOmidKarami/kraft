@@ -1,6 +1,6 @@
 /** W9's config-draft answers, field for field (docsite 4.reference/7.http-api.md "Drafts"). */
 
-export type Area = "chains" | "library";
+export type Area = "chains" | "library" | "repos" | "policy" | "intake";
 
 /** What a config draft edits: an area and its key (a chain id, or `library`). */
 export type Scope = { area: Area; key: string };
@@ -20,6 +20,10 @@ export interface Problem {
   chain?: string | null;
   repo?: string | null;
   component?: string | null;
+  /** The settings areas add what each problem is about: a schedule's index (intake), a group and cap level (policy); a repo's path (repos) is `repo`. */
+  schedule?: number;
+  scope?: string;
+  level?: string | null;
 }
 
 export interface Change {
@@ -29,6 +33,8 @@ export interface Change {
   fields?: string[];
   /** On the library draft: the ids of the chains that use the component. */
   reaches?: string[];
+  /** The settings areas (`policy`, `intake`) name the file each key row is in. */
+  file?: string;
 }
 
 export interface Source {
@@ -51,6 +57,7 @@ export interface ResolvedView {
 export interface Result {
   /** Per file, the last mapping that parsed. */
   model: Record<string, Authored>;
+  /** The chain's for `chains`; the `repos`, `policy` and `intake` areas answer their own shape (each page types it). */
   resolved: ResolvedView | null;
   problems: Problem[];
   sources: Record<string, Record<string, Source>>;
@@ -68,6 +75,8 @@ export interface DraftView {
   /** Per file, its text: null when the publish deletes it. */
   files: Record<string, string | null>;
   base: Record<string, string | null>;
+  /** Each file as it is on disk (null: not there yet): the left side of a YAML diff. */
+  published?: Record<string, string | null>;
   updated_at: string | null;
   result: Result;
 }
