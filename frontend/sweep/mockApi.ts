@@ -14,9 +14,9 @@ export interface MockOptions {
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
    *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
   boardState?: "loading" | "offline";
-  /** ux2-W16: what GET /apply answers. Unset keeps W13's fixture (a restart item beside a refused policy).
+  /** ux2-W16: what GET /apply answers. Unset answers nothing pending, so the shell's apply chip stays out of every other cell; `both` is a restart item beside a refused policy.
    *  After POST /apply/restart it answers nothing pending and /health fails twice, as a server coming back does. */
-  apply?: "none" | "reload" | "restart" | "problem" | "unmanaged";
+  apply?: "none" | "reload" | "restart" | "problem" | "unmanaged" | "both";
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
   /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
@@ -533,8 +533,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const port = { id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" };
       const disk = { id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded" };
       const bad = { ...disk, problem: "defaults: Input should be a valid dictionary" };
-      const by = { none: [[], []], reload: [[], [disk]], restart: [[port], []], problem: [[], [bad]], unmanaged: [[port], []], default: [[port], [bad]] } as const;
-      const [restart, reload] = restarted ? [[], []] : by[opts.apply ?? "default"];
+      const by = { none: [[], []], reload: [[], [disk]], restart: [[port], []], problem: [[], [bad]], unmanaged: [[port], []], both: [[port], [bad]] } as const;
+      const [restart, reload] = restarted ? [[], []] : by[opts.apply ?? "none"];
       return json(route, { restart, reload, managed: opts.apply !== "unmanaged" });
     }
     if (p === "/apply/restart") { restarted = 1; return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) }); }
