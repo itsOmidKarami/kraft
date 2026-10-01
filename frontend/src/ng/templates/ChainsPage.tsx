@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Inspector } from "../graph/Inspector";
 import { usePaneSelection } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { detailOf } from "../http";
@@ -10,6 +9,7 @@ import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { ChainCanvas } from "./ChainCanvas";
+import { ChainPane } from "./panes/ChainPane";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, counts, kindOf } from "./draft/view";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
@@ -173,18 +173,16 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         ) : (
           <div className="tpl-note">{s.node}</div>
         )}
-        <Inspector
-          id="chains-pane"
+        <ChainPane
+          draft={draft}
+          chain={chain}
+          path={selPath}
           open={s.open}
           size={size}
-          crumbs={sel.kind === "chain" ? [{ label: "Chains" }] : [{ label: chain, onClick: () => goTo("") }]}
-          gate={isGate}
-          icon={sel.kind === "chain" ? "workflow" : typeof selNode?.icon === "string" ? selNode.icon : undefined}
-          title={sel.kind === "chain" ? chain : selPath.split(".").pop()!}
-          sub={sel.kind === "chain" ? `chain · ${nodes.length} nodes` : isGate ? "gate" : sel.kind}
           onCollapse={() => dispatch({ type: "collapse" })}
           onExpand={() => dispatch({ type: "expand" })}
           onFocus={s.level === "chain" && sel.kind === "node" && !isGate ? () => focusNode(sel.node) : undefined}
+          goTo={goTo}
         />
       </div>
     </div>

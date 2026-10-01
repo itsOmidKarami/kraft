@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VIEW } from "./fixture.default";
 import type { Result } from "./types";
-import { authoredNodes, changeAt, counts, kindOf, normalise, problemsAt, resolvedNode, sourceRows, sourceWord } from "./view";
+import { authoredAt, authoredNodes, changeAt, counts, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, sourceRows, sourceWord, valueAt } from "./view";
 
 const R = DEFAULT_VIEW.result;
 const withR = (extra: Partial<Result>): Result => ({ ...R, ...extra });
@@ -60,5 +60,23 @@ describe("draft view", () => {
 
   it("words a source the way the chip shows it", () => {
     expect(["chain", "library:tasks.implementer", "policy", "default"].map(sourceWord)).toEqual(["this chain", "library", "policy", "default"]);
+  });
+});
+
+describe("walk", () => {
+  it("finds a component by canonical path: shorthand main steps, steps, the fix loop and its judge", () => {
+    const r = DEFAULT_VIEW.result;
+    expect(authoredAt(r, "default", "spec.main.author")).toEqual({ id: "author", extends: "spec_author" });
+    expect(resolvedAt(r, "verification.review.code_review")?.kind).toBe("agent");
+    expect(resolvedAt(r, "verification.fix_loop.judge")?.id).toBe("judge");
+    expect(resolvedAt(r, "verification.fix_loop.main.repair")?.profile).toBe("strong");
+    expect(resolvedAt(r, "verification.nope")).toBeNull();
+    expect(authoredAt(r, "default", "")?.id).toBe("default");
+  });
+
+  it("reads a value from the sources, else from the model", () => {
+    const r = DEFAULT_VIEW.result;
+    expect(valueAt(r, "default", "implementation.main.implement", "profile")).toBe("strong");
+    expect(valueAt({ ...r, sources: {}, resolved: null }, "default", "spec_approval", "message")).toBe("Review and approve the specification.");
   });
 });

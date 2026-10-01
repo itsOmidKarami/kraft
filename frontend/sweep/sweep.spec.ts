@@ -520,6 +520,17 @@ const CASES: Case[] = [
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   // W10: the Chains editor on the mock's real draft answers (sweep/draftViews.json).
   { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
+  { screen: "ng-chains", variant: "pane-gate", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec_approval, gate" }).click();
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "pane-config", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "implementation, node" }).click();
+    await c.page.getByRole("tab", { name: "Config" }).click();
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");

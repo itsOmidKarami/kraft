@@ -59,3 +59,42 @@ export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.p
 
 /** "library:tasks.implementer" → "library"; the chip's word (Decisions §9 Config tab). */
 export const sourceWord = (source: string) => (source === "chain" ? "this chain" : source.startsWith("library:") ? "library" : source);
+
+/** Named containers inside a node (W9's canonical segments). */
+const SLOTS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_conflict", "auto_review", "judge"]);
+
+/** The component at a canonical path in a node tree (authored or resolved),
+ *  walking steps, tasks and the named containers; null when it isn't there. */
+export function walk(nodes: NodeA[], path: string): Authored | null {
+  const [id, ...rest] = path.split(".");
+  let at: Authored | null = nodes.find((n) => n.id === id) ?? null;
+  for (const seg of rest) {
+    if (!at) return null;
+    if (SLOTS.has(seg) && at[seg] !== undefined) {
+      at = (at[seg] as Authored | null) ?? null;
+      continue;
+    }
+    // A step's task; ids never collide with `main`, which is reserved.
+    const task = Array.isArray(at.tasks) ? (at.tasks as Task[]).find((t) => t.id === seg) : undefined;
+    if (task) { at = task; continue; }
+    const step = normalise(at)?.steps.find((s) => s.id === seg);
+    if (step) { at = step; continue; }
+    // The escalation slot holds one task, addressed by its own id.
+    if (at.id === seg) continue;
+    return null;
+  }
+  return at;
+}
+
+/** The authored component at a path: what this chain itself writes there. */
+export const authoredAt = (r: Result, key: string, path: string): Authored | null => (path ? walk(authoredNodes(r, key), path) : authoredChain(r, key));
+/** The resolved component at a path (extends expanded), when the draft resolves. */
+export const resolvedAt = (r: Result, path: string): Authored | null => (r.resolved ? (path ? walk(r.resolved.chain.nodes as NodeA[], path) : r.resolved.chain) : null);
+
+/** A field's value at a path: the resolved one from `sources`, else what the file writes. */
+export function valueAt(r: Result, key: string, path: string, field: string): unknown {
+  const s = r.sources[path]?.[field];
+  if (s) return s.value;
+  const a = resolvedAt(r, path) ?? authoredAt(r, key, path);
+  return field.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Authored)[k] : undefined), a);
+}

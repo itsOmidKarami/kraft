@@ -1,0 +1,45 @@
+/* The Chains side pane's body. Colours only through theme.css tokens. */
+.pane-group { margin: 14px 0 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pane-group:first-child { margin-top: 0; }
+.pane-note { margin: 4px 0 8px; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+.pane-note.is-bad { color: var(--bad); }
+
+/* A labelled field (Overview). */
+.pf { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.pf-label { font-size: 11.5px; color: var(--text-muted); }
+.pf-line { display: flex; align-items: center; gap: 10px; }
+.pf-input, .pf-select { box-sizing: border-box; width: 100%; min-height: 28px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 12.5px/1.45 inherit; }
+.pf-select { flex: 1; min-width: 0; width: auto; font: 11.5px ui-monospace, Menlo, monospace; cursor: pointer; }
+.pf-input.is-long { resize: vertical; }
+.pf-input.is-mono { font: 11.5px ui-monospace, Menlo, monospace; }
+.pf-input.is-bad, .pf-select.is-bad { border-color: var(--bad); }
+.pf-sub { margin: 0; font-size: 11px; color: var(--text-muted); }
+.pf-sub.is-bad { color: var(--bad); }
+.pf-check { display: flex; align-items: center; gap: 5px; flex: none; font-size: 11.5px; color: var(--text-sub); cursor: pointer; }
+
+/* A key and its value (Overview). */
+.pkv { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 24px; }
+.pkv-k { flex: none; font-size: 11.5px; color: var(--text-muted); }
+.pkv-v { min-width: 0; text-align: right; overflow-wrap: anywhere; font-size: 12px; color: var(--text); }
+.pkv-v.is-mono { font: 11.5px ui-monospace, Menlo, monospace; }
+.pkv-v.is-muted { color: var(--text-muted); }
+.pkv-v.is-link { margin: -1px -5px; padding: 1px 5px; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
+.pkv-v.is-link:is(:hover, :focus-visible) { background: var(--surface-2); }
+
+/* Config rows (Decisions §9 Inherited vs overridden). */
+.cfg { display: flex; flex-direction: column; gap: 2px; }
+.cfg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 26px; padding: 2px 4px; border-radius: 6px; font-size: 12px; }
+.cfg-k { flex: 0 0 104px; color: var(--text-muted); }
+.cfg-v { flex: 1; min-width: 0; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); overflow-wrap: anywhere; }
+.cfg-v.is-prose { font: 12px/1.45 inherit; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.cfg-v.is-unset { color: var(--text-muted); }
+.cfg-row.is-own .cfg-v, .cfg-row.is-own .cfg-k { color: var(--text); }
+.cfg-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text); }
+.cfg-chip { flex: none; padding: 0 6px; border-radius: 4px; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.cfg-chip.is-own { background: var(--surface-2); color: var(--text); }
+.cfg-row .icon-btn { min-width: 22px; min-height: 22px; }
+.cfg-gap { flex: none; width: 22px; }
+.cfg-lock { flex: none; font-size: 10.5px; color: var(--text-muted); }
+.cfg-edit { flex: 1; min-width: 0; min-height: 24px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; }
+.cfg-edit.is-long { flex-basis: 100%; font: 12px/1.45 inherit; }
+.cfg-err { flex-basis: 100%; margin: 0; font-size: 11px; color: var(--bad); }
