@@ -11,6 +11,7 @@ cannot accept a profile a launch would refuse."""
 from __future__ import annotations
 
 import re
+import shutil
 
 import yaml
 from fastapi import HTTPException, Request
@@ -178,6 +179,26 @@ def _provider_view(h: harness_mod.Harness) -> dict:
             for name, c in h.capabilities.items()
         },
     }
+
+
+@api_router.get("/harnesses")
+async def harness_status():
+    """One entry per provider, in the table's order, with whether its CLI is on
+    the daemon's PATH. A worker's PATH is an allowlist, so a worker that cannot
+    find the CLI is a launch problem and not this flag. No `version`: the probe's
+    output is not cached anywhere this route can read (Kraft-ewd5x)."""
+    return [
+        {
+            "id": h.id,
+            "label": h.id,
+            "executable": h.command[0],
+            "executable_found": shutil.which(h.command[0]) is not None,
+            "efforts": _literals(h, "effort"),
+            "models": _literals(h, "model"),
+            "capabilities": _provider_view(h)["capabilities"],
+        }
+        for h in harness_mod.load(None).valid.values()
+    ]
 
 
 # Profiles and providers each have their own prefix (the Ruling 204 shape), so

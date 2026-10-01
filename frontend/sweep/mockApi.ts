@@ -313,6 +313,10 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
+    if (p === "/harnesses") return json(route, [
+      { id: "claude", label: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: [], capabilities: {} },
+      { id: "codex", label: "codex", executable: "codex", executable_found: false, efforts: [], models: [], capabilities: {} },
+    ]);
     /* config drafts: one static answer per key; `stale` publishes to a 409, `yaml-error` refuses ops */
     if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
       const [, area, key, action, file] = m;

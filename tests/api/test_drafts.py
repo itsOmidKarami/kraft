@@ -317,15 +317,19 @@ def policy_text(templates_dir, old="rate_limit_retries: 5", new="rate_limit_retr
         ("intake", "policy.yaml"),
     ],
 )
-def test_each_config_area_keeps_a_draft_of_its_files(client, area, file):
+def test_each_config_area_keeps_a_draft_of_its_files(client, templates_dir, area, file):
     text = (
         "enabled: true\ninterval_s: 60\npriority_ceiling: 2\n"
         if file == "intake.yaml"
+        # The harnesses area reads the file for its profiles; keep them.
+        else (templates_dir / file).read_text().replace("effort: low", "effort: medium")
+        if area == "harnesses" and file == "harnesses.yaml"
         else "x: 1\n"
     )
     got = put_file(client, area, file, text).json()
     assert (got["area"], got["draft"], got["files"][file]) == (area, True, text)
-    assert [c["path"] for c in got["result"]["changes"]] == [file]
+    paths = [c["path"] for c in got["result"]["changes"]]
+    assert paths[0] == file and all(p.startswith("profiles.") for p in paths[1:])
     assert client.get(f"/api/drafts/{area}/{area}").json()["files"][file] == text
 
 
@@ -349,7 +353,9 @@ def test_a_harnesses_draft_shows_a_problem_the_file_already_had(client, template
     """`PUT /harnesses` only refuses what an edit newly breaks; a draft shows
     everything, so a profile that is already unusable blocks the publish."""
     path = templates_dir / "harnesses.yaml"
-    path.write_text(path.read_text() + "\nprofiles:\n  broken: {model: {nosuch: x}}\n")
+    data = yaml.safe_load(path.read_text())
+    data["profiles"]["broken"] = {"model": {"nosuch": "x"}}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
     got = put_file(client, "harnesses", "harnesses.yaml", path.read_text() + "\n# touched\n")
     assert [p["file"] for p in got.json()["result"]["problems"]] == ["harnesses.yaml"]
 
