@@ -22,6 +22,11 @@ describe("ng/phone CSS (W17 brief 0.1)", () => {
     expect(bad).toEqual([]);
   });
 
+  it("never cuts text with an ellipsis: identifiers wrap (R10, brief 0.4)", () => {
+    const bad = cssFiles(here).filter((p) => /text-overflow\s*:/.test(readFileSync(p, "utf-8")));
+    expect(bad.map((p) => relative(here, p))).toEqual([]);
+  });
+
   it("catches a class without the prefix", () => {
     expect(foreign(".ph-a { x: 1 } .board-row .ph-b:hover, .menu-note { y: 2 }")).toEqual(["board-row", "menu-note"]);
   });

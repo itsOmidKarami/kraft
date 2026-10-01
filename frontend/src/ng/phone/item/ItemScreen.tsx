@@ -14,10 +14,11 @@ import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { LogLines } from "../log/LogLines";
 import { useLog } from "../log/useLog";
-import { ChoiceSheet, ConfirmSheet, EditSheet, useSheet } from "../nav/Sheet";
+import { ChoiceSheet, EditSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block } from "../ui/Rows";
 import { ChainList } from "./ChainList";
+import { PauseSheet } from "./PauseSheet";
 import { cardOf, kebabOf, pairOf, type Act, type ActId } from "./model";
 import { useDo } from "./useDo";
 import "./item.css";
@@ -145,24 +146,7 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
   const cap = item.budget_cap?.cap_usd ?? 0;
   const kebab = useMemo(() => kebabOf(item), [item]);
 
-  if (sheet.is("pause"))
-    return (
-      <ConfirmSheet
-        title="Pause this item?"
-        text={`The running attempt${node ? ` on ${node}` : ""} stops now and its work is lost. Nothing runs until you resume.`}
-        busy={busy}
-        error={error}
-        confirm={{
-          label: "Pause now",
-          run: async () => {
-            const r = await run(act.pause(item.id), node ? `Paused at ${node}.` : "Paused.");
-            if (r.ok) sheet.close();
-            else setError(r.error);
-          },
-        }}
-        onClose={sheet.close}
-      />
-    );
+  if (sheet.is("pause")) return <PauseSheet item={item} node={node} sheet={sheet} reload={reload} />;
   if (sheet.is("kebab"))
     return (
       <ChoiceSheet
