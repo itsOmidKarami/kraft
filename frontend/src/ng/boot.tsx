@@ -1,3 +1,4 @@
+import "@fontsource-variable/inter/wght.css";
 import "./theme/theme.css";
 import "./theme/base.css";
 import React from "react";
