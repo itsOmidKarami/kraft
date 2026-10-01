@@ -1374,3 +1374,10 @@ Baseline on `main` `60fae1ef4`: 1170 cells, 179 flagged. Final on `ux2/W9` `b2cd
 
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 1170 cells, 179 flagged, 0 newly flagged, 171 changed: wall-clock text (largest 0.58%, "waiting 17d 11h" → "17d 13h") and a one-pixel scroll offset in `flow-log-maximize/03-wheel-up-pauses-follow` (4.7%). No shipped cell changed because of W9.
 - No `/ng` screens and no `waves.json` key: a backend wave. `mockApi.ts` gained a mock for every new route (drafts, item drafts, steering preview) and `used_by_paths`/`description` on the library and chain fixtures.
+
+## ux2-W13 — Backend: the config areas (`ux2/W13`)
+
+Baseline on `main` `06da92d39`, shot from a clean worktree: 1479 cells, 235 flagged. Final on `ux2/W13` rebased onto `main` `b92aad162`. Full notes: `e2e-shots/DIFF-ux2-W13.md`.
+
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 0 newly flagged, 41 changed on the first shot (313 on the re-shot after the rebase, a slower machine; every shot is clock text and sub-pixel offsets, none newly flagged). Shooting `main` against its own baseline changes 79 cells, 40 of these 41 among them (wall-clock text, caret and scroll offsets); the one other, `el-gate-card/rate_limited-tasks-long@1280`, differs in a 244x13 px line of text. The branch changes no `/ng` or shipped screen source (`ws.ts` only ignores a new frame).
+- No `/ng` screens and no `waves.json` key: a backend wave. `mockApi.ts` gained a mock for every new route: `/harnesses`, the `/drafts/{area}/{key}` routes for the config areas, `/intake/checks`, `/apply`, `/apply/reload`, `/apply/restart`, `/update`, `/update/check`.
