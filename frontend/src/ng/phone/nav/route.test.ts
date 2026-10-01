@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+import { backLabel, parentOf, screenKey, tabOf } from "./route";
+
+describe("parentOf", () => {
+  it("has no parent on a tab's own page", () => {
+    for (const r of ["/", "/search", "/analytics", "/more"]) expect(parentOf(r)).toBeNull();
+  });
+
+  it("walks the work item's stack: task, node, item, board", () => {
+    expect(parentOf("/work-items/a/nodes/verification?sel=verification.review.code_review&tab=log&attempt=2")).toBe("/work-items/a/nodes/verification");
+    expect(parentOf("/work-items/a/nodes/verification?tab=log")).toBe("/work-items/a");
+    expect(parentOf("/work-items/a")).toBe("/");
+    expect(parentOf("/work-items/a/review?gate=final_review")).toBe("/work-items/a");
+    expect(parentOf("/work-items/new")).toBe("/");
+  });
+
+  it("puts a document or the YAML view over its own screen", () => {
+    expect(parentOf("/work-items/a/nodes/n?sel=n.s.t&doc=spec")).toBe("/work-items/a/nodes/n?sel=n.s.t");
+    expect(parentOf("/settings/access?yaml=1")).toBe("/settings/access");
+  });
+
+  it("walks the areas back to More", () => {
+    expect(parentOf("/templates/chains")).toBe("/more");
+    expect(parentOf("/templates/chains/default")).toBe("/templates/chains");
+    expect(parentOf("/templates/chains/default/nodes/verification")).toBe("/templates/chains/default");
+    expect(parentOf("/templates/library/implementation")).toBe("/templates/library");
+    expect(parentOf("/templates/harnesses/profiles/strong")).toBe("/templates/harnesses");
+    expect(parentOf("/settings/policy/loops")).toBe("/more");
+    expect(parentOf("/settings/about")).toBe("/more");
+  });
+});
+
+describe("backLabel", () => {
+  it("names the parent", () => {
+    expect(backLabel("/work-items/a")).toBe("Board");
+    expect(backLabel("/work-items/a/nodes/n")).toBe("Chain");
+    expect(backLabel("/work-items/a/nodes/n?sel=n.s.t")).toBe("Node");
+    expect(backLabel("/work-items/a/review")).toBe("Back");
+    expect(backLabel("/work-items/a?doc=x")).toBe("Back");
+    expect(backLabel("/templates/chains")).toBe("More");
+    expect(backLabel("/templates/chains/default")).toBe("Chains");
+  });
+});
+
+describe("tabOf", () => {
+  it("shows the bar on the four roots and the areas, hides it elsewhere", () => {
+    expect(tabOf("/")).toBe("board");
+    expect(tabOf("/search")).toBe("search");
+    expect(tabOf("/templates/repos/kraft")).toBe("more");
+    expect(tabOf("/settings/access")).toBe("more");
+    for (const r of ["/work-items/a", "/work-items/a/nodes/n", "/work-items/a/review", "/work-items/new"]) expect(tabOf(r)).toBeNull();
+  });
+});
+
+describe("screenKey", () => {
+  it("tells a task from its node by sel, and ignores the rest of the query", () => {
+    expect(screenKey("/work-items/a/nodes/n?tab=log")).toBe(screenKey("/work-items/a/nodes/n"));
+    expect(screenKey("/work-items/a/nodes/n?sel=n.s.t")).not.toBe(screenKey("/work-items/a/nodes/n"));
+  });
+});

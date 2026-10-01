@@ -1,0 +1,50 @@
+/* The phone app's frame, tab bar, header, sheet and toaster (W17 A). Every class is ph-; colours are W1 tokens. */
+.ph-app { display: flex; flex-direction: column; height: 100dvh; background: var(--bg); color: var(--text); }
+.ph-screen { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: 0; }
+.ph-content { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.ph-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: clip; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.ph-title { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
+.ph-link { color: var(--accent); min-height: 44px; display: inline-flex; align-items: center; }
+.ph-spacer { flex: 1; }
+
+.ph-header { flex: none; display: flex; align-items: center; gap: 4px; min-height: 48px; padding: 2px 8px 0; }
+.ph-back { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px 0 4px; border: 0; background: transparent; font-size: 14px; color: var(--text-sub); cursor: pointer; }
+.ph-header-id { font: 12px ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-root-header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px 6px; }
+
+.ph-tabs { flex: none; display: flex; padding: 4px 8px calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
+.ph-tab { flex: 1; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10.5px; text-decoration: none; color: var(--text-muted); }
+.ph-tab.ph-is-active { color: var(--text); }
+.ph-tab-icon { position: relative; display: flex; }
+.ph-badge { position: absolute; top: -4px; right: -10px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--warn); color: var(--bg); font: 600 10px/16px system-ui, sans-serif; text-align: center; }
+
+.ph-btn.btn { min-height: 48px; padding: 0 18px; border-radius: 10px; font-size: 15px; justify-content: center; }
+.ph-btn-primary.btn { font-weight: 500; }
+
+.ph-input { box-sizing: border-box; width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 16px; }
+.ph-input-area { min-height: 140px; padding: 12px 14px; line-height: 1.5; resize: none; }
+
+.ph-scrim { position: fixed; inset: 0; z-index: 95; background: color-mix(in oklab, var(--bg) 55%, transparent); }
+.ph-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 96; max-height: 80%; overflow-y: auto; box-sizing: border-box; padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; border-top: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 6px; outline: 0; }
+.ph-sheet-grip { align-self: center; width: 36px; height: 4px; border-radius: 2px; margin-bottom: 8px; background: var(--border); }
+.ph-sheet-title { margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.ph-sheet-text { margin: 0 0 8px; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); }
+.ph-sheet-error { margin: 0; font-size: 12.5px; color: var(--bad); }
+.ph-sheet-pair { display: flex; gap: 8px; margin-top: 6px; }
+.ph-sheet-pair > .ph-btn { flex: 1; }
+.ph-sheet-edit { display: flex; gap: 8px; }
+.ph-sheet-edit > .ph-input { flex: 1; width: auto; }
+.ph-sheet-options { list-style: none; margin: 0; padding: 0; }
+.ph-sheet-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 50px; padding: 0; border: 0; border-top: 1px solid var(--line); background: transparent; text-align: left; font-size: 15px; cursor: pointer; }
+.ph-sheet-option.ph-is-danger { color: var(--bad); }
+.ph-sheet-check { width: 16px; flex: none; }
+.ph-sheet-label { flex: 1; overflow-wrap: anywhere; }
+.ph-sheet-hint { font-size: 12px; color: var(--text-muted); }
+
+.ph-toasts { position: fixed; left: 16px; right: 16px; bottom: calc(52px + 24px + env(safe-area-inset-bottom)); z-index: 98; pointer-events: none; }
+.ph-toast { pointer-events: auto; display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 13.5px; line-height: 1.4; }
+.ph-toast > span { flex: 1; overflow-wrap: anywhere; }
+.ph-toast-action { min-height: 44px; padding: 0 8px; border: 0; background: transparent; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }
+
+.ph-soon { padding-top: 12px; }
+.ph-soon p { margin: 0; color: var(--text-sub); }
