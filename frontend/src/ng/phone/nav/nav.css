@@ -48,6 +48,4 @@
 .ph-toast > span { flex: 1; overflow-wrap: anywhere; }
 .ph-toast-action { min-height: 44px; padding: 0 8px; border: 0; background: transparent; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }
 
-.ph-soon { padding-top: 12px; }
-.ph-soon p { margin: 0; color: var(--text-sub); }
 .ph-badge-dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: -2px; right: -4px; }

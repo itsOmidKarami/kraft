@@ -16,7 +16,6 @@ const ALLOWED = [
   "icons",
   "http",
   "live",
-  "legacyPath", // the Soon placeholder's link to the shipped page
   "shell/aliases", // the shipped addresses that moved, and the #hash fixer (W18 PR 1)
   "item/useItem",
   "item/useEvents",

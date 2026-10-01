@@ -18,7 +18,7 @@ import { GateReviewRoute } from "./review/GateReview";
 import { NewItem } from "./new/NewItem";
 import { NodeRoute } from "./node/NodeRoute";
 import { Alias, ALIASES, ShippedHash } from "../shell/aliases";
-import { Soon } from "./nav/Soon";
+import { NotFound } from "./nav/NotFound";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
 import { useTrail } from "./nav/trail";
@@ -63,7 +63,7 @@ export function PhoneApp() {
           <Route path="/templates/harnesses/:id" element={<HarnessView />} />
           <Route path="/templates/repos" element={<ReposList />} />
           <Route path="/templates/repos/:repo" element={<RepoView />} />
-          <Route path="/templates/*" element={<Soon title="Templates" />} />
+          <Route path="/templates/*" element={<NotFound />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/policy" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/policy/:section" element={<PolicyScreen />} />
@@ -74,10 +74,10 @@ export function PhoneApp() {
           <Route path="/settings/access" element={<AccessScreen />} />
           <Route path="/settings/appearance" element={<AppearanceScreen />} />
           <Route path="/settings/about" element={<AboutScreen />} />
-          <Route path="/settings/*" element={<Soon title="Settings" />} />
+          <Route path="/settings/*" element={<NotFound />} />
           {/* The shipped addresses that moved (spec §11.2), after the screens: /search is a phone screen and wins over its alias to the board. */}
           {ALIASES.map(([from, to]) => <Route key={from} path={from} element={<Alias to={to} />} />)}
-          <Route path="*" element={<Soon title="Not found" />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
       <Toaster />
