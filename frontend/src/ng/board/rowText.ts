@@ -24,7 +24,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
       case "failed": return `failed at ${node}`;
       case "paused": return i.current_node_id ? `paused at ${node}` : "created paused";
       case "running":
-        if (i.step) return `${i.step.index} of ${i.step.count} · ${i.step.name} › ${i.step.task}`;
+        if (i.step) return i.step.name && i.step.task ? `${i.step.index} of ${i.step.count} · ${i.step.name} › ${i.step.task}` : `${node} · step ${i.step.index} of ${i.step.count}`;
         return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
       case "waiting": {
         const at = i.stop?.resume_at ?? i.retry_at;

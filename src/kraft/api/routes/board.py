@@ -625,8 +625,9 @@ def _step_of(row, chain: dict, task: str | None, *, with_task: bool = False) -> 
     step = {"index": index + 1, "count": len(steps)}
     if not with_task:
         return step
-    _node, name, leaf = task.split(".", 2)
-    return {**step, "name": name, "task": leaf}
+    parts = task.split(".", 2)
+    # A path with no step or task segment (a hand-written chain) names neither.
+    return {**step, "name": parts[1], "task": parts[2]} if len(parts) == 3 else step
 
 
 def _summary(st, wid: str, row, chain: dict, sessions) -> dict:

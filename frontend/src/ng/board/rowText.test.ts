@@ -20,6 +20,7 @@ describe("reasonTail", () => {
       [row("running"), "verification"],
       [row("running", { progress: { current: 2, total: 3, title: "x" } as WorkItem["progress"] }), "verification · task 2 of 3"],
       [row("running", { step: { index: 2, count: 3, name: "review", task: "code_review" }, progress: { current: 2, total: 3, title: "x" } as WorkItem["progress"] }), "2 of 3 · review › code_review"],
+      [row("running", { step: { index: 2, count: 3 } }), "verification · step 2 of 3"],
       [row("waiting", { stop: stop("rate_limit", { resume_at: "2026-09-13T10:04:00Z" }) }), "retry in 4m"],
       [row("waiting", { stop: stop("wait") }), "waiting at verification"],
       [row("escalated"), "escalation running"],

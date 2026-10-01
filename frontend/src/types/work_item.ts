@@ -339,9 +339,9 @@ export interface WorkItem {
    *  endpoint. Additive, unread by the shipped UI. */
   summary?: WorkItemSummary;
   /** The current node's step out of its steps, with the step's id and the
-   *  latest task's, when the node declares more than one step and a session
+   *  latest task's (absent when the task's path has no step or task segment), when the node declares more than one step and a session
    *  has run. List only; `summary.step` is the detail's. */
-  step?: { index: number; count: number; name: string; task: string } | null;
+  step?: { index: number; count: number; name?: string; task?: string } | null;
 }
 
 /** `GET /work-items/{id}`'s `summary` (B13): nodes done out of the frozen

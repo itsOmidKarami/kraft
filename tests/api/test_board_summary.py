@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from pathlib import Path
+
 import pytest
 from support.harness import v1_chain
 
 from kraft import store
 
-from .test_board import _append
+from .test_board import _append, _seed_events, _seed_repo, _seed_session
 from .test_board_stop import _paused_item, _run
 
 # ── daily total (B10) ───────────────────────────────────────────────────────
@@ -165,3 +169,115 @@ def test_summary_step_is_null_for_a_single_step_node(client, repo):
 
     summary = client.get(f"/api/work-items/{wid}").json()["summary"]
     assert summary["step"] is None
+
+
+# ── the list row's step and mr_ref ──────────────────────────────────────────
+
+
+def test_the_list_row_carries_mr_ref_like_the_detail(client, repo):
+    """The board draws "merged !N" from the list, so the row must name the same
+    merge request the detail does, single-repo (latest `mr_opened`) and
+    multi-repo (the root row's own) alike."""
+
+    def new():
+        return client.post(
+            "/api/work-items",
+            json={
+                "repo": str(repo),
+                "title": "t",
+                "chain_template": "quick-task",
+                "autostart": False,
+            },
+        ).json()["id"]
+
+    def listed(wid):
+        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+
+    single, multi = new(), new()
+    assert listed(single)["mr_ref"] is None
+    for url in ("https://forge.example/mr/12", "https://forge.example/mr/12?refresh"):
+        _seed_events(client, single, [{"number": 12, "url": url}], event_type="mr_opened")
+    assert listed(single)["mr_ref"] == {"number": 12, "url": "https://forge.example/mr/12?refresh"}
+
+    _seed_repo(
+        client,
+        multi,
+        repo_path="/wt/pkg",
+        role="submodule",
+        merge_rank=0,
+        mr_ref={"number": 1, "url": "https://forge.example/mr/1"},
+    )
+    _seed_repo(
+        client,
+        multi,
+        repo_path="/wt",
+        role="root",
+        merge_rank=1,
+        mr_ref={"number": 2, "url": "https://forge.example/mr/2"},
+    )
+    _seed_events(
+        client, multi, [{"number": 3, "url": "https://forge.example/mr/3"}], event_type="mr_opened"
+    )
+    assert (
+        listed(multi)["mr_ref"]["number"]
+        == 2
+        == client.get(f"/api/work-items/{multi}").json()["mr_ref"]["number"]
+    )
+
+
+def test_the_list_row_carries_the_current_step_and_its_task(client, repo):
+    """`default`'s verification node has two steps (tests, review). The row's
+    `step` is the step of the node's latest non-escalation session; an item
+    with no session yet, or on a single-step node, has none."""
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.execute("UPDATE work_items SET current_node_id = 'verification' WHERE id = ?", (wid,))
+    conn.commit()
+    conn.close()
+
+    def step():
+        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)[
+            "step"
+        ]
+
+    assert step() is None
+    _seed_session(
+        client,
+        wid,
+        session_id="a",
+        hook_point="verification.tests.test_changed_scopes",
+        node_id="verification",
+    )
+    assert step() == {"index": 1, "count": 2, "name": "tests", "task": "test_changed_scopes"}
+    _seed_session(
+        client,
+        wid,
+        session_id="b",
+        hook_point="verification.review.code_review",
+        node_id="verification",
+    )
+    _seed_session(client, wid, session_id="c", hook_point="escalation", node_id="verification")
+    assert step() == {"index": 2, "count": 2, "name": "review", "task": "code_review"}
+    assert client.get(f"/api/work-items/{wid}").json()["summary"]["step"] == {
+        "index": 2,
+        "count": 2,
+    }
+
+
+def test_step_of_a_task_path_without_step_and_task_segments_has_no_name():
+    """One hand-written chain with a short task path must not 500 the whole
+    list: the row gets the position, without a name or task."""
+    from kraft.api.routes.board import _step_of
+
+    chain = {"nodes": [{"id": "verify", "steps": [["verify.a.b"], ["verify.c"]]}]}
+    row = {"current_node_id": "verify"}
+    assert _step_of(row, chain, "verify.c", with_task=True) == {"index": 2, "count": 2}
+    assert _step_of(row, chain, "verify.a.b", with_task=True) == {
+        "index": 1,
+        "count": 2,
+        "name": "a",
+        "task": "b",
+    }
