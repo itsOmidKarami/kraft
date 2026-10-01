@@ -372,3 +372,69 @@ def test_stop_kind_falls_back_on_a_pre_migration_row(client, repo, status, node,
     assert client.get(f"/api/work-items/{wid}").json()["stop"]["kind"] == expected
     row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
     assert row["stop"]["kind"] == expected
+
+
+def _capped_item(client, repo, maxima: dict, limit: dict | None) -> dict:
+    from support.harness import v1_resolved
+
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import WorkItemTarget
+
+    nodes = [
+        {
+            "id": "implement",
+            "kind": "exec",
+            "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
+        }
+    ]
+    chain = v1_resolved(nodes).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(
+            InstancePolicyInput.model_validate({"maxima": maxima})
+        ),
+    )
+    wid = _paused_item(client, repo, materialized_chain=chain.to_json())
+    _run(lambda c: store.mark_needs_human(c, wid, "implement", "capped", kind="cap", limit=limit))
+    return client.get(f"/api/work-items/{wid}").json()["stop"]
+
+
+@pytest.mark.parametrize(
+    ("maxima", "limit", "maximum"),
+    [
+        pytest.param(
+            {"max_attempts": 7},
+            {"path": "implement", "key": "max_attempts", "value": 3},
+            7,
+            id="fix-loop-attempts",
+        ),
+        pytest.param(
+            {"timeout_minutes": 90},
+            {"path": "implement", "key": "timeout_minutes", "value": 30},
+            90,
+            id="fix-loop-wall-clock",
+        ),
+        pytest.param(
+            {"work_item": {"time_cap_minutes": 300}},
+            {"path": "", "key": "time_cap_minutes", "value": 60},
+            300,
+            id="work-item-cap",
+        ),
+        pytest.param(
+            {"work_item": {"time_cap_minutes": 300}, "tasks": {"time_cap_minutes": 100}},
+            {"path": "", "key": "time_cap_minutes", "value": 60},
+            300,
+            id="a-narrower-levels-maximum-does-not-bound-the-work-item",
+        ),
+        pytest.param(
+            {}, {"path": "", "key": "total_time_cap_minutes", "value": 60}, None, id="no-maximum"
+        ),
+    ],
+)
+def test_a_cap_stop_names_the_limit_that_raises_it_with_the_administrator_maximum(
+    client, repo, maxima, limit, maximum
+):
+    assert _capped_item(client, repo, maxima, limit)["limit"] == {**limit, "maximum": maximum}
+
+
+def test_a_cap_stop_with_no_raisable_limit_has_no_limit_key(client, repo):
+    assert "limit" not in _capped_item(client, repo, {}, None)

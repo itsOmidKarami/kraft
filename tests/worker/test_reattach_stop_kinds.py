@@ -57,3 +57,8 @@ async def test_a_capped_adopted_session_is_stopped_for_a_human(item_on, database
     assert item.status() == "needs_human"
     assert item.row()["stop_kind"] == "cap"
     assert item.sessions()[0]["status"] == "capped_out"
+    assert item.events("work_item_needs_human")[-1]["payload"]["limit"] == {
+        "path": "",
+        "key": "time_cap_minutes",
+        "value": 1,
+    }

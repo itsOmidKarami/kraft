@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -446,6 +447,8 @@ class _Stuck:
     bundle: dict | None = None
     #: `stops.suggestion`: what the node's last session said to do next.
     suggested: dict | None = None
+    #: A cap stop's `limit`, where an item override can raise it.
+    limit: dict | None = None
 
 
 #: The round a stuck escalation's session is written under. Distinct from every
@@ -474,6 +477,7 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
             bundle=stuck.bundle,
             stuck=True,
             suggested=stuck.suggested,
+            limit=stuck.limit,
         )
     )
     return "needs_human"
@@ -757,6 +761,23 @@ def fix_loop_cap(
     if loop_attempts is not None:
         cap = replace(cap, attempts=loop_attempts)
     return _policy.with_cap_override(cap, override)
+
+
+def _fix_loop_limit(row, node_id: str, cap: _policy.Cap, *, attempts_ran_out: bool) -> dict | None:
+    """The item-policy field that raises the bound a node's fix loop stopped on:
+    the node's `max_attempts` or, when the clock ran out, its `timeout_minutes`.
+    None when the older `node_overrides` door set that bound, which wins over
+    the policy override, so raising the policy would change nothing."""
+    door = store.node_overrides_of(row).get(node_id) or {}
+    if attempts_ran_out:
+        return (
+            None
+            if "attempts" in door
+            else {"path": node_id, "key": "max_attempts", "value": cap.attempts}
+        )
+    if "wall_clock_s" in door:
+        return None
+    return {"path": node_id, "key": "timeout_minutes", "value": math.ceil(cap.wall_clock_s / 60)}
 
 
 def _item_cap(item: _policy.WorkItemPolicy | None, node_id: str) -> dict:
@@ -1386,7 +1407,12 @@ async def _walk_node_once(
                 )
             )
             return _Stuck(
-                reason, kind="cap", capped={"cycles": count - 1, "attempts": cap.attempts}
+                reason,
+                kind="cap",
+                capped={"cycles": count - 1, "attempts": cap.attempts},
+                limit=_fix_loop_limit(
+                    override_row, node.id, cap, attempts_ran_out=count > cap.attempts
+                ),
             )
 
         if prints and fix_ran:

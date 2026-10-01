@@ -426,7 +426,9 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
             caps.REACHED,
             hit.payload(node_id=row["node_id"], task=row["hook_point"], session_id=session_id),
         )
-        store.mark_needs_human(c, row["work_item_id"], row["node_id"], hit.reason, kind="cap")
+        store.mark_needs_human(
+            c, row["work_item_id"], row["node_id"], hit.reason, kind="cap", limit=hit.limit
+        )
 
     await db.write(_capped)
 

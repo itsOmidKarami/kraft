@@ -288,7 +288,10 @@ async def stop_for_time_cap(db, work_item_id: str, node: ResolvedNode) -> str:
     cap of N minutes". Not a failure: no recovery, no fix attempt, and not in
     the stuck set, so no escalation turn answers it."""
     reason = db.read(lambda c: _caps.reason_of(c, work_item_id))
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="cap"))
+    limit = db.read(lambda c: _caps.reached_limit(c, work_item_id))
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="cap", limit=limit)
+    )
     return "needs_human"
 
 
