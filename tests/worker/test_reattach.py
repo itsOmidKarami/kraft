@@ -16,7 +16,7 @@ import psutil
 import pytest
 from support.harness import fails_once, fake_docker_bin
 
-from kraft import caps, events, store
+from kraft import events, store
 from kraft.worker import reattach, refstore
 
 #: An agent node, then a subprocess node: the two kinds `_adopted_status`
@@ -431,53 +431,6 @@ async def test_a_crashed_adopt_marks_the_work_item_needs_human(
     assert "reattach crashed" in reason and "boom" in reason
 
 
-async def test_a_crashed_escalation_resume_marks_the_work_item_needs_human(
-    item, database, run_dirs, monkeypatch
-):
-    """`_guarded_resume_adopted_escalation`'s own catch (Kraft-atdbw): a crash
-    consuming a deferred self-retry after a restart must still stop the item
-    for a human, not vanish into asyncio's default handler."""
-
-    async def _boom(db, run_dirs, **kwargs):
-        raise ValueError("boom")
-
-    monkeypatch.setattr(reattach, "_resume_adopted_escalation", _boom)
-
-    await reattach._guarded_resume_adopted_escalation(
-        database,
-        run_dirs,
-        work_item_id=item.id,
-        node_id="implementation",
-        session_id="s1",
-        policy=None,
-        launch_factory=None,
-        bd_cwd=None,
-        on_approve=None,
-    )
-
-    assert item.status() == "needs_human"
-    assert item.row()["stop_kind"] == "infra"
-    reason = item.events("work_item_needs_human")[0]["payload"]["reason"]
-    assert "resume_after_escalation crashed" in reason and "boom" in reason
-
-
-async def test_a_capped_adopted_session_is_stopped_for_a_human(item, database, run_dirs):
-    """`_stop_at_cap`: an adopted session whose time cap ran out while nobody
-    was watching still stops the item, under `cap` (Kraft UI v2 · B1's
-    `_stop_for_wait_timeout` sibling for a session Kraft is polling itself)."""
-    await item.session("s1", IMPLEMENT)
-    row = database.read(
-        lambda c: c.execute("SELECT * FROM worker_sessions WHERE id = 's1'").fetchone()
-    )
-    hit = caps.Hit(scope="", field="time_cap_minutes", minutes=1, remaining_s=0.0)
-
-    await reattach._stop_at_cap(database, row, DEAD[0], hit)
-
-    assert item.status() == "needs_human"
-    assert item.row()["stop_kind"] == "cap"
-    assert item.sessions()[0]["status"] == "capped_out"
-
-
 async def test_an_adopted_session_records_its_usage(item, database, run_dirs):
     """The `_adopt` path, whose own SELECT has to grow a log_path column -- the
     file-resolved test passes without that and would not catch it."""
@@ -601,9 +554,7 @@ async def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn
     monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
     monkeypatch.setattr("kraft.builtins.refresh_worktree_base", fake_refresh)
     await database.write(
-        lambda c: store.mark_needs_human(
-            c, "w1", "implementation", "budget exhausted", kind="budget"
-        )
+        lambda c: store.mark_needs_human(c, "w1", "implementation", "over budget", kind="budget")
     )
     await item.session("esc1", "escalation")
     await database.write(

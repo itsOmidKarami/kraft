@@ -16,6 +16,12 @@ from support.harness import isolated_bd, v1_seeded_chain, write_harness_profiles
 from kraft import events, executor, policy, store
 
 
+def _cap(detail: dict) -> dict:
+    """`budget_cap`'s three original keys, dropping `daily` (W4 G, additive)
+    so a test pinned to the pre-existing shape isn't broken by it."""
+    return {k: v for k, v in detail["budget_cap"].items() if k != "daily"}
+
+
 def _mark_started(wid: str, node_id: str) -> None:
     """Write the `node_started` event `store.chain.node_started` looks for,
     without walking the chain for real."""
@@ -352,7 +358,7 @@ def test_intake_node_overrides_and_budget_round_trip(client, repo):
     wid = r.json()["id"]
     detail = client.get(f"/api/work-items/{wid}").json()
     assert detail["node_overrides"] == {"plan": {"auto_escalate_stuck": False}}
-    assert detail["budget_cap"] == {"cap_usd": 7.5, "source": "item", "spent_usd": 0.0}
+    assert _cap(detail) == {"cap_usd": 7.5, "source": "item", "spent_usd": 0.0}
 
 
 def test_intake_node_overrides_accepts_attempts_and_wall_clock_s(client, repo):
@@ -378,7 +384,7 @@ def test_intake_budget_usd_null_is_an_explicit_no_cap(client, repo):
         json={"title": "t", "repo": str(repo), "budget_usd": None, "autostart": False},
     ).json()["id"]
     detail = client.get(f"/api/work-items/{wid}").json()
-    assert detail["budget_cap"] == {"cap_usd": None, "source": "item", "spent_usd": 0.0}
+    assert _cap(detail) == {"cap_usd": None, "source": "item", "spent_usd": 0.0}
 
 
 def test_no_budget_usd_at_intake_defers_to_the_policy_default(client, repo):
@@ -559,7 +565,7 @@ def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, clie
     assert r.status_code == 200, r.text
 
     detail = client.get(f"/api/work-items/{wid}").json()
-    assert detail["budget_cap"] == {"cap_usd": 50.0, "source": "item", "spent_usd": 0.0}
+    assert _cap(detail) == {"cap_usd": 50.0, "source": "item", "spent_usd": 0.0}
     evts = client.get(f"/api/work-items/{wid}/events").json()
     assert any(e["type"] == "budget_raised" and e["payload"]["budget_usd"] == 50.0 for e in evts)
 
@@ -658,13 +664,13 @@ def test_patch_budget_usd_sets_and_clears_the_cap(client, repo):
     r = client.patch(f"/api/work-items/{wid}", json={"budget_usd": 12.0})
     assert r.status_code == 200, r.text
     detail = client.get(f"/api/work-items/{wid}").json()
-    assert detail["budget_cap"] == {"cap_usd": 12.0, "source": "item", "spent_usd": 0.0}
+    assert _cap(detail) == {"cap_usd": 12.0, "source": "item", "spent_usd": 0.0}
 
     # explicit null: an item-set "no cap", distinct from "never customized"
     r2 = client.patch(f"/api/work-items/{wid}", json={"budget_usd": None})
     assert r2.status_code == 200, r2.text
     detail2 = client.get(f"/api/work-items/{wid}").json()
-    assert detail2["budget_cap"] == {"cap_usd": None, "source": "item", "spent_usd": 0.0}
+    assert _cap(detail2) == {"cap_usd": None, "source": "item", "spent_usd": 0.0}
 
 
 def _reviewed_chain(tdir):
