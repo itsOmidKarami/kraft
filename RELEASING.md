@@ -48,12 +48,13 @@ after the smoke test passes, so a failed build leaves nothing behind.
 
 ## Plugin manifest versions
 
-`plugins/kraft/.claude-plugin/plugin.json` and
-`plugins/kraft-lite/.claude-plugin/plugin.json` carry their own `version` field, shown in `/plugin list`. You never edit this by
-hand and pull requests never touch it: `release.yml` stamps both files with
+Each plugin carries its own `version` field in `.claude-plugin/plugin.json`
+(shown in `/plugin list`) and in `.cursor-plugin/plugin.json`, for
+`plugins/kraft` and `plugins/kraft-lite`. You never edit these by
+hand and pull requests never touch them: `release.yml` stamps all four with
 `dev/stamp_plugin_versions.py` right after it tags a release, writes the
 release notes into `CHANGELOG.md`, then opens and auto-merges a
-`release::none` pull request with both. Doing this on a
+`release::none` pull request with all of them. Doing this on a
 release, rather than asking every in-flight pull request to predict its own
 future version, is what a hand-stamped file could never do without conflicting
 with every other open pull request the moment a release lands.
@@ -65,7 +66,7 @@ forever. `release.yml` mints a short-lived token from a GitHub App installed
 on this repo instead (`RELEASE_BOT_CLIENT_ID` / `RELEASE_BOT_PRIVATE_KEY`),
 scoped to just contents and pull-request writes on `kraft`.
 
-So the tagged commit lags its own release by design: at `vX.Y.Z` both
+So the tagged commit lags its own release by design: at `vX.Y.Z` the
 `plugin.json` files, `vscode/package.json` and `CHANGELOG.md` still describe the
 release before it. The artifacts don't lag. The wheel's version comes from the
 tag through setuptools-scm, and the `.vsix` gets its version from the

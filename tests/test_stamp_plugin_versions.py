@@ -1,6 +1,6 @@
-"""Writing the release version into both plugin manifests.
+"""Writing the release version into every plugin manifest.
 
-Both plugins are meant to move together: one release, one version, in both
+Every manifest is meant to move together: one release, one version, in each
 files. Getting it wrong publishes a marketplace whose versions describe
 nothing.
 """

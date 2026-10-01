@@ -118,7 +118,8 @@ them unless you use the same tools:
 | Directory | What it is | Do you need it? |
 |---|---|---|
 | `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
-| `.claude-plugin/` | the marketplace manifest that publishes `plugins/` | Only to rename a plugin or add one |
+| `.claude-plugin/` | the marketplace manifest that publishes `plugins/` to Claude Code and Codex | Only to rename a plugin or add one |
+| `.cursor-plugin/` | the same marketplace for Cursor | Only to rename a plugin or add one |
 | `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`) | Only with Claude Code |
 | `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
 | `.agents/` | a beads skill for agent sessions | No |
