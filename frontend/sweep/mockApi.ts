@@ -38,10 +38,14 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   const viewedMarks = new Set<string>();
   // ux2-W8: review threads per item, seeded for a needs-gate /ng item on first read.
   const threads: Record<string, any[]> = {};
+  // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
   const threadsOf = (wid: string) =>
-    (threads[wid] ??= S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
-      ? ngThreads(wid, compareFor(wid, S.variant).files.map((f: { path: string }) => f.path).sort(treeOrder))
-      : []);
+    (threads[wid] ??= [
+      ...(S.bundles[wid]?.threads ?? []).map((t: any) => ({ anchor_sha: "9c8d7e6", resolved_at: null, draft: false, ...t, comments: t.comments.map((c: any) => ({ thread_id: t.id, review_id: "r1", attempt: null, suggestion: null, claim: null, draft: false, ...c })) })),
+      ...(S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
+        ? ngThreads(wid, compareFor(wid, S.variant).files.map((f: { path: string }) => f.path).sort(treeOrder))
+        : []),
+    ]);
   // The review tree's order: by folder, the top level last, so the seeded threads land on the file shown first.
   const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "\uffff");
   const treeOrder = (a: string, b: string) => dirOf(a).localeCompare(dirOf(b)) || a.localeCompare(b);
@@ -141,7 +145,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(route, diffFor(m[1], S.variant));
-    if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/)) && method === "GET") return json(route, S.bundles[m[1]]?.threads ?? []);
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
       return json(route, compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
     }
