@@ -5,7 +5,7 @@ navigation:
 description: Which agent CLIs Kraft runs, what each supports, and how a task picks one.
 ---
 
-A harness is one agent runtime described as data; this page lists the six Kraft ships and what each supports.
+A harness is one agent runtime described as data; this page lists the seven Kraft ships and what each supports.
 
 ## In this section
 
