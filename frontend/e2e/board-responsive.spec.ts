@@ -1,4 +1,4 @@
-import { createItem, expect, test } from "./fixtures";
+import { createdId, expect, openComposer, test } from "./fixtures";
 
 // The peek (W6 C.2, R7): docked from 1024, so the list's right edge moves in
 // by the pane's width and nothing sits under the pane; overlaid below 1024,
@@ -11,7 +11,11 @@ for (const width of [1440, 1100, 900]) {
     // A row click opens the peek only while Appearance says so; another spec
     // on this server may have set Full page, and the board grouped by repo.
     await page.request.put("/api/theme", { data: { board: { group_by: "status", open_in: "peek" } } });
-    await createItem(page, title, "quick-task");
+    // Paused, not started: a started item finishes in about two seconds and its
+    // row moves from Running to Done, a new element, which a measurement in
+    // flight reads as null. The layout is the subject, not the run.
+    await (await openComposer(page, title, "quick-task")).getByRole("button", { name: "Create paused" }).click();
+    await createdId(page);
     await page.setViewportSize({ width, height: 800 });
     await page.goto("/");
     const row = page.getByRole("button", { name: new RegExp(`^${title} `) });
