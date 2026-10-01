@@ -380,6 +380,7 @@ const FLOWS: Flow[] = [
     { name: "switcher", run: async (p) => { await p.getByRole("button", { name: "Chain default, switch chain" }).click(); await expect(p.getByRole("option").first()).toBeVisible(); } },
     { name: "pick-other", run: async (p) => { await p.getByRole("option").filter({ hasNotText: /^default/ }).first().click(); await expect(p.getByRole("dialog", { name: "You have unpublished changes" })).toBeVisible(); } },
     { name: "stay", run: async (p) => { await p.getByRole("button", { name: "Stay" }).click(); await expect(p.getByRole("dialog", { name: "You have unpublished changes" })).toHaveCount(0); expect(new URL(p.url()).pathname).toBe("/ng/templates/chains/default"); } },
+  ] },
   // ux2-W11 C: a + seam after the current node by keyboard → a library node → its id → Create & open → it lands in the draft.
   { name: "ng-item-draft-add-node", widths: [1280], keyboard: true, mock: { itemDraft: "none" }, start: ngItem("running"), steps: [
     { name: "seam", run: async (p) => { await p.getByRole("button", { name: "Add a library node here" }).first().focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("textbox", { name: "Search library nodes" })).toBeFocused(); }, kbd: true },
