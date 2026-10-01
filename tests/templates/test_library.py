@@ -297,6 +297,25 @@ def test_extends_cannot_change_a_kind_inherited_further_up_the_chain(tmp_path):
         write(tmp_path, library, chain).resolve_chain("default")
 
 
+def test_a_gates_auto_review_expands_its_extends(tmp_path):
+    """Kraft-67yp8. Mutate: drop the `auto_review` branch in `_Resolution._node`
+    and the reviewer stays `{id, extends}`, failing the gate's validation."""
+    library = {"tasks": {"base": agent_task(effort="high")}}
+    chain = {
+        "id": "default",
+        "nodes": [
+            {"id": "g", "kind": "gate", "auto_review": {"id": "reviewer", "extends": "base"}}
+        ],
+    }
+    resolved = write(tmp_path, library, chain).resolve_chain("default")
+    review = resolved.nodes[0].auto_review
+    assert (review.path, review.task.id, review.task.effort) == (
+        "g.auto_review",
+        "reviewer",
+        "high",
+    )
+
+
 def test_extends_rejects_more_than_one_parent(tmp_path):
     library = {"tasks": {"a": agent_task(), "b": agent_task()}}
     chain = {

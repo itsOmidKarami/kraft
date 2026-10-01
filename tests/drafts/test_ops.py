@@ -105,14 +105,25 @@ async def test_add_task_makes_its_id_unique_and_fills_a_named_slot(st):
     assert "spec.escalation.escalate" in r.paths
 
 
+async def test_add_task_gives_a_gate_a_reviewer_that_extends_a_library_task(st):
+    """Kraft-67yp8. Mutate: restore the refusal in `add_task`, or drop the
+    `auto_review` expansion in `_Resolution._node`, and this fails."""
+    r = apply(
+        st, ("add_task", {"slot": "auto_review", "node": "spec_approval", "extends": "code_review"})
+    )
+    assert r.answers == [{"path": "spec_approval.auto_review"}]
+    assert r.nodes["spec_approval"]["auto_review"] == {"id": "reviewer", "extends": "code_review"}
+    assert r.problems == []
+    assert "spec_approval.auto_review" in r.paths
+
+
 @pytest.mark.parametrize(
     ("fields", "why"),
     [
         ({"container": "spec", "step": "main", "kind": "agent", "extends": "x"}, "exactly one"),
         ({"slot": "judge", "node": "spec", "kind": "agent"}, "no fix loop"),
-        ({"slot": "auto_review", "node": "spec_approval", "extends": "code_review"}, "reviewer"),
     ],
-    ids=["kind-and-extends", "judge-without-a-fix-loop", "reviewer-extends"],
+    ids=["kind-and-extends", "judge-without-a-fix-loop"],
 )
 async def test_add_task_refuses(st, fields, why):
     assert why in refused(st, ("add_task", fields))

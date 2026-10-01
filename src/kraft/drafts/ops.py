@@ -528,9 +528,6 @@ def add_task(
     if slot is not None:
         if slot not in _SLOT_IDS or node is None:
             raise OpError("a slot is judge, escalation or auto_review, with its node")
-        if slot == AUTO_REVIEW_SEGMENT and extends is not None:
-            # The library does not expand a gate's reviewer (Kraft-67yp8).
-            raise OpError("a gate's reviewer cannot extend a library task yet; give its kind")
         task = _new_task(_SLOT_IDS[slot], kind, extends, ())
         if slot == JUDGE_SEGMENT:
             if not isinstance(d.own(node, "fix_loop"), dict):

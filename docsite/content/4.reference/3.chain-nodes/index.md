@@ -78,7 +78,7 @@ suggests `retry`.
 | `artifact_required` | `true` refuses approval while the `artifact` document is missing, with a `422` that says to retry the node that owes it. Needs an `artifact`. Default `false`. |
 | `reject_to` | The node a rejection re-enters, with the reviewer's note. It must be an exec node before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
 | `timeout` | How long the gate waits for a decision. It may not exceed the `total_time_cap_minutes` around it. |
-| `auto_review` | An agent task that may report a verdict first. It takes no `fallback`. |
+| `auto_review` | An agent task that may report a verdict first. It takes no `fallback`, and may `extends` a library task. |
 | `chain_finalized` | `true` marks the final review. |
 
 A `chain_finalized` gate cannot be approved without its document either,

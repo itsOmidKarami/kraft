@@ -29,6 +29,7 @@ from kraft import skill as _skill
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import positions
 from kraft.templates.models import (
+    AUTO_REVIEW_SEGMENT,
     JUDGE_SEGMENT,
     MAIN_STEP,
     PATH_SEPARATOR,
@@ -610,6 +611,13 @@ class _Resolution:
         if isinstance(expanded.get("escalation"), Mapping):
             expanded["escalation"] = self._task(
                 expanded["escalation"], f"{path}{PATH_SEPARATOR}escalation", (*loc, "escalation")
+            )
+        if isinstance(expanded.get("auto_review"), Mapping):
+            expanded["auto_review"] = self._task(
+                expanded["auto_review"],
+                path,
+                (*loc, AUTO_REVIEW_SEGMENT),
+                segment=AUTO_REVIEW_SEGMENT,
             )
         base_change = expanded.get("on_base_changed")
         if isinstance(base_change, Mapping) and isinstance(base_change.get("on_conflict"), Mapping):
