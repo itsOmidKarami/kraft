@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
@@ -78,6 +78,10 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   // Leaving a chain with a draft asks first (Decisions §9 Unpublished changes, brief Decided 5).
   const [pendingGo, setPendingGo] = useState<SwitchTo | null>(null);
   const [dupTick, setDupTick] = useState(0);
+  // The nodes an open remove card lists, marked red on the canvas (Decisions §9 Remove).
+  const [marked, setMarked] = useState<string[]>([]);
+  const [strip, setStrip] = useState<{ ok: boolean; text: string } | null>(null);
+  const [renameNow, setRenameNow] = useState<{ el: HTMLElement; tick: number } | null>(null);
   // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
@@ -116,6 +120,18 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, [undo]);
+
+  // ⌥←/⌥→ moves the selected node, or step in a node view, one place (Decisions §9 Reorder).
+  const moveSel = useRef<(dir: -1 | 1) => void>(() => {});
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || isTextField(e.target)) return;
+      e.preventDefault();
+      moveSel.current(e.key === "ArrowLeft" ? -1 : 1);
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, []);
 
   const focusNode = useCallback((id: string, sel?: TSel) => {
     dispatch({ type: "focus", node: id, sel });
@@ -206,6 +222,28 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     return true;
   };
 
+  /** A move, checked first with ?preview=1: a refusal says why and saves nothing. */
+  const move = async (path: string, to: number) => {
+    const op = { op: "move", path, to };
+    const check = await draft.ops([op], { preview: true });
+    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`);
+    await draft.ops([op]);
+  };
+  moveSel.current = (dir) => {
+    const cur = s.sel as TSel;
+    if (review || surface !== "canvas") return;
+    if (s.level === "chain" && cur.kind === "node") {
+      const i = authoredNodes(r, chain).findIndex((x) => x.id === cur.node);
+      const to = i + dir;
+      if (i >= 0 && to >= 0 && to < authoredNodes(r, chain).length) void move(cur.node, to);
+    } else if (s.level === "node" && cur.kind === "step" && s.node) {
+      const steps = draft.resolvedNode(s.node)?.steps ?? [];
+      const i = steps.findIndex((x) => `${s.node}.${x.id}` === pathOf(cur));
+      const to = i + dir;
+      if (i >= 0 && to >= 0 && to < steps.length) void move(pathOf(cur), to);
+    }
+  };
+
   const n = counts(r);
   const paneOpen = review ? reviewOpen : s.open;
   const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
@@ -267,13 +305,33 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             pending={draft.pending}
             reserve={reserve}
             refused={refused}
-            onSelect={(id) => (review ? setHighlight(id) : dispatch({ type: "pick", sel: selOf(id) }))}
+            onSelect={(id) => {
+              if (review) return setHighlight(id);
+              // A click on the selected node's name while its pane is open renames it (Decisions §9 Rename).
+              const btn = document.querySelector<HTMLElement>(`.graph-node[aria-label^="${id}, "]`);
+              if (sel.kind === "node" && sel.node === id && s.open && btn) return setRenameNow((p) => ({ el: btn, tick: (p?.tick ?? 0) + 1 }));
+              dispatch({ type: "pick", sel: selOf(id) });
+            }}
             onOpen={(id) => (review ? setHighlight(id) : dispatch({ type: "expand", sel: selOf(id) }))}
             onFocusNode={(id) => !review && focusNode(id)}
             onEscape={onEscape}
             onBackground={() => (review ? setHighlight(undefined) : dispatch({ type: "background" }))}
             onAdd={add}
             review={review ? { published: published?.nodes ?? [], highlight } : undefined}
+            marked={marked}
+            strip={strip}
+            onDrag={{
+              over: async (id, to) => {
+                setStrip({ ok: true, text: `Move ${id} here` });
+                const a = await draft.ops([{ op: "move", path: id, to }], { preview: true });
+                setStrip(a.status === 200 ? { ok: true, text: `Move ${id} here` } : { ok: false, text: `Can't move ${id}: ${detailOf(a.body)}` });
+              },
+              drop: (id, to) => {
+                const i = authoredNodes(r, chain).findIndex((x) => x.id === id);
+                if (i !== to) void move(id, to);
+              },
+              end: () => setStrip(null),
+            }}
           />
         ) : (
           <NodeView
@@ -329,6 +387,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
               goTo(p);
             }}
             onDone={endReview}
+            onGone={(to) => navigate(to ? chainUrl(to) : "/templates/chains")}
           />
         ) : (
           <ChainPane
@@ -343,6 +402,22 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             goTo={goTo}
             onDuplicate={() => setDupTick((k) => k + 1)}
             onDeleted={startReview}
+            onMarking={setMarked}
+            renameNow={renameNow}
+            onRemoved={() => {
+              if (s.level === "node" && pathOf(s.sel as TSel) === s.node) {
+                // Removing the node you're in returns to the chain's rail (Decisions §9 Removing).
+                dispatch({ type: "back" });
+                navigate(chainUrl(chain));
+              } else dispatch({ type: "removed" });
+            }}
+            onRenamed={(from, to) => {
+              const sel2 = selOf(to, taskPaths);
+              if (s.level === "node" && from === s.node) {
+                dispatch({ type: "focus", node: to, sel: sel2 });
+                navigate(nodeUrl(chain, to));
+              } else if (from) dispatch({ type: "pick", sel: sel2 });
+            }}
           />
         )}
       </div>

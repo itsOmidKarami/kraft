@@ -9,8 +9,16 @@ export type NodeA = Container & { id: string; kind?: "exec" | "gate"; extends?: 
 
 export const chainFile = (key: string) => `chains/${key}.yaml`;
 
+/** The chain file a draft edits: its key's, unless a chain `rename` moved the
+ *  text to `chains/<new id>.yaml` (the draft keeps its old key, W9). */
+export function liveChainFile(files: Record<string, unknown>, key: string): string {
+  const own = chainFile(key);
+  if (files[own] !== null) return own;
+  return Object.keys(files).find((f) => f !== own && f.startsWith("chains/") && files[f] !== null) ?? own;
+}
+
 /** The chain's authored mapping: the last that parsed. */
-export const authoredChain = (r: Result, key: string): Authored => r.model[chainFile(key)] ?? {};
+export const authoredChain = (r: Result, key: string): Authored => r.model[liveChainFile(r.model, key)] ?? r.model[chainFile(key)] ?? {};
 export const authoredNodes = (r: Result, key: string): NodeA[] => (authoredChain(r, key).nodes as NodeA[] | undefined) ?? [];
 
 /** `tasks:` is one step `main` (the model's own rule); every container gets `steps`. */

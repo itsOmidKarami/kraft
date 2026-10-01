@@ -385,7 +385,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       if (action === "ops") {
         if (key === "yaml-error") return json(route, { detail: "fix the YAML first" }, 409);
         const ops: Record<string, unknown>[] = req.postDataJSON()?.ops ?? [];
-        if (q.get("preview")) return json(route, { ...view, ops: ops.map((o) => ({ op: o.op })) });
+        // change_base's preview: what the new base keeps and drops (W9's {kept, dropped}).
+        if (q.get("preview")) return json(route, { ...view, ops: ops.map((o) => ({ op: o.op, result: o.op === "change_base" ? { kept: ["skippable"], dropped: [{ key: "steps", why: `${o.base} has no step tests` }] } : undefined })) });
         return json(route, { ...applyOps(view, ops), ops: ops.map((o) => ({ op: o.op })) });
       }
       return json(route, view);
@@ -442,6 +443,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { id: tpl.id, file: `templates/chains/${tpl.id}.yaml`, text: chainYaml(tpl.nodes), chain: { nodes: tpl.nodes }, nodes: tpl.nodes });
     }
     // The Library screen (where Settings > Steering redirects): the scenario's hooks as its tasks.
+    // The /ng editors' pickers read the real shipped library; the shipped Library page keeps the scenario's.
+    if (p === "/templates/library" && method === "GET" && (req.headers()["referer"] ?? "").includes("/ng/")) return json(route, DRAFTS.library);
     if (p === "/templates/library" && method === "GET") {
       const hooks = Object.entries(st.hooks);
       const components = hooks.map(([name, definition]) => ({

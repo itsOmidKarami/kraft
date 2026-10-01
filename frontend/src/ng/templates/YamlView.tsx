@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "../ui/Button";
 import { gutter } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
-import { chainFile } from "./draft/view";
+import { liveChainFile } from "./draft/view";
 import { problemText } from "./problems";
 
 const LINE = 18;
@@ -23,8 +23,8 @@ export function jumpTo(ta: HTMLTextAreaElement | null, scroller: HTMLElement | n
  *  and in a docked pane, a syntax error keeping the canvas on the last valid
  *  draft. No autocomplete; Tab inserts two spaces. */
 export function YamlView({ draft, chain, published }: { draft: ConfigDraft; chain: string; published: string | null | undefined }) {
-  const file = chainFile(chain);
   const view = draft.view!;
+  const file = liveChainFile(view.files, chain);
   const r = view.result;
   const stored = view.files[file] ?? "";
   const [text, setText] = useState(stored);

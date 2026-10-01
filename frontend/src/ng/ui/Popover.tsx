@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import "./ui.css";
 
-/** The one floating surface (Menu builds on it). Placed under its anchor,
- *  right-aligned when it would run off the viewport; Escape and a press
+/** The one floating surface (Menu builds on it). Placed under its anchor
+ *  (above it when there is no room below), right-aligned when it would run off the viewport; Escape and a press
  *  outside both it and the anchor close it. */
 export function Popover({ anchor, open, onClose, children, role, label }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -12,8 +12,10 @@ export function Popover({ anchor, open, onClose, children, role, label }: { anch
   useLayoutEffect(() => {
     if (!open || !anchor.current || !ref.current) return setPos(null);
     const a = anchor.current.getBoundingClientRect();
-    const w = ref.current.offsetWidth;
-    setPos({ top: a.bottom + 4, left: a.left + w > window.innerWidth - 8 ? Math.max(8, a.right - w) : a.left });
+    const w = ref.current.offsetWidth, h = ref.current.offsetHeight;
+    // Above the anchor when it would run off the bottom (a pane footer's card).
+    const top = a.bottom + 4 + h > window.innerHeight - 8 && a.top - 4 - h >= 8 ? a.top - 4 - h : a.bottom + 4;
+    setPos({ top, left: a.left + w > window.innerWidth - 8 ? Math.max(8, a.right - w) : a.left });
   }, [open, anchor]);
 
   useEffect(() => {

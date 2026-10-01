@@ -1,4 +1,5 @@
-import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { DRAG_THRESHOLD } from "./camera";
 import type { FitRule } from "./camera";
 import { arcShapes, L, layout, seamX, type ChainArc, type ChainNode, type Seam } from "./layout";
 import { NodeGlyph } from "./NodeGlyph";
@@ -27,6 +28,9 @@ type Props = {
   onFocusNode?: (id: string) => void;
   onEscape?: () => void;
   onBackground?: () => void;
+  /** Drag to reorder (the editor's, Decisions §9 Reorder): `to` is the index in
+   *  the list without the dragged node, as a move op takes it. */
+  onDrag?: { over: (id: string, to: number) => void; drop: (id: string, to: number) => void; end: () => void };
   /** The seam's own button, for a menu anchored to it. */
   onSeam?: (at: number, el: HTMLElement) => void;
 };
@@ -35,7 +39,7 @@ const nodeKey = (id: string) => `n:${id}`;
 const seamKey = (at: number) => `s:${at}`;
 
 /** The chain canvas: every node of a chain in one row (StageGraph.dc.html). */
-export function StageGraph({ name, nodes, selected, arcs = [], seams = [], opening = "fit", reserve = 0, cover = 0, fit, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
+export function StageGraph({ name, nodes, selected, arcs = [], seams = [], opening = "fit", reserve = 0, cover = 0, fit, onDrag, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
   const lay = useMemo(() => layout(nodes), [nodes]);
   const shapes = useMemo(() => arcShapes(lay, arcs), [lay, arcs]);
   // Where the run stands: the running node, else the one it stopped on (failed) or waits at (a gate).
@@ -77,9 +81,56 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
     if (!(e.target as Element).closest("button")) onBackground?.();
   };
   const { cam } = camera;
+  const [drag, setDrag] = useState<{ id: string; to: number } | null>(null);
+  const dragged = useRef(false);
+  const viewport = useRef<HTMLElement | null>(null);
+  const setCamEl = camera.bind.ref;
+  const bindRef = useCallback((el: HTMLDivElement | null) => {
+    setCamEl(el);
+    viewport.current = el;
+  }, [setCamEl]);
+  /** A node pressed and moved past the camera's threshold lifts; release drops it. */
+  const startDrag = (e: PointerEvent<HTMLButtonElement>, id: string) => {
+    if (!onDrag || e.button !== 0) return;
+    e.stopPropagation();
+    const x0 = e.clientX, y0 = e.clientY;
+    const others = lay.items.filter((i) => i.node.id !== id);
+    let at = -1;
+    dragged.current = false;
+    const move = (ev: globalThis.PointerEvent) => {
+      if (!dragged.current && Math.hypot(ev.clientX - x0, ev.clientY - y0) <= DRAG_THRESHOLD) return;
+      dragged.current = true;
+      const rect = viewport.current!.getBoundingClientRect();
+      const wx = (ev.clientX - rect.left - cam.tx) / cam.s;
+      const to = others.filter((o) => o.cx < wx).length;
+      if (to !== at) {
+        at = to;
+        setDrag({ id, to });
+        onDrag.over(id, to);
+      }
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDrag(null);
+      if (dragged.current && at >= 0) onDrag.drop(id, at);
+      onDrag.end();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const dropX = drag ? (() => {
+    const others = lay.items.filter((i) => i.node.id !== drag.id);
+    const a = others[drag.to - 1], b = others[drag.to];
+    return a && b ? (a.cx + a.w / 2 + b.cx - b.w / 2) / 2 : a ? a.cx + a.w / 2 + 10 : b ? b.cx - b.w / 2 - 10 : L.PAD;
+  })() : null;
 
   return (
-    <div role="group" aria-label={name} className="canvas" data-pan {...camera.bind} onClick={onClick} onKeyDown={onKeyDown}>
+    <div role="group" aria-label={name} className="canvas" data-pan {...camera.bind} ref={bindRef} onClick={onClick} onKeyDown={onKeyDown} onClickCapture={(e) => {
+      // A drag is never a click (W3 rule B.2), for a node drag as for a pan.
+      if (dragged.current) { e.stopPropagation(); dragged.current = false; return; }
+      camera.bind.onClickCapture(e);
+    }}>
       <div className="canvas-world" style={{ width: lay.W, height: lay.H, transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
         <svg className="canvas-svg" width={lay.W} height={lay.H} aria-hidden="true">
           {lay.edges.map((e, i) => <path key={`e${i}`} d={e.d} className={e.todo ? "edge is-todo" : "edge"} />)}
@@ -105,11 +156,12 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               tabIndex={roving.tabIndex(key)}
               aria-label={accessibleName(n, n.kind === "gate" ? "gate" : "node")}
               aria-pressed={n.id === selected}
-              className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.faded ? " is-faded" : ""}`}
+              className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.faded ? " is-faded" : ""}${drag?.id === n.id ? " is-dragging" : ""}`}
               style={{ left: cx - w / 2, top: L.CY - L.BOX / 2, width: w }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: cx - w / 2, x1: cx + w / 2, y0: L.CY - L.BOX / 2, y1: L.CY + L.BOX / 2 + 40 }); }}
               onClick={() => onSelect?.(n.id)}
               onDoubleClick={() => onFocusNode?.(n.id)}
+              onPointerDown={onDrag ? (e) => startDrag(e, n.id) : undefined}
             >
               <NodeGlyph {...n} size="lg" sel={n.id === selected} />
               <span className="graph-label" style={{ maxWidth: w - 8 }}>{breakable(n.label ?? n.id)}</span>
@@ -118,6 +170,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
             </button>
           );
         })}
+        {dropX !== null && <span className="drop-slot" style={{ left: dropX - 1, top: L.CY - 30 }} aria-hidden="true" />}
         {seams.map((s) => {
           const x = seamX(lay, s.at);
           if (x == null) return null;

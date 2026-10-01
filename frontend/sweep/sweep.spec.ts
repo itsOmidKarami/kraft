@@ -617,6 +617,39 @@ const CASES: Case[] = [
     await c.page.getByRole("dialog", { name: "You have unpublished changes" }).waitFor({ timeout: 4000 });
     await settle(c.page, 300);
   } },
+  { screen: "ng-chains", variant: "rename", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    const spec = c.page.getByRole("button", { name: "spec, node" });
+    await spec.click();
+    await spec.click();
+    await c.page.getByRole("dialog", { name: "Rename node" }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "remove", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec, node" }).click();
+    await c.page.getByRole("button", { name: "Remove node" }).click();
+    await c.page.getByRole("dialog", { name: "Remove node" }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "reorder", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    const b = (await c.page.getByRole("button", { name: "plan, node" }).boundingBox())!;
+    await c.page.mouse.move(b.x + b.width / 2, b.y + 20);
+    await c.page.mouse.down();
+    await c.page.mouse.move(b.x + b.width / 2 + 120, b.y + 20, { steps: 6 });
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "change-base", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    // Under the pane at 1280: focus pans it into view, Enter opens its pane.
+    await c.page.getByRole("button", { name: "verification, node" }).focus();
+    await c.page.keyboard.press("Enter");
+    await c.page.getByRole("button", { name: "Change base…" }).click();
+    await c.page.getByRole("option").first().click();
+    await c.page.getByRole("dialog", { name: /^Change base of/ }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");
