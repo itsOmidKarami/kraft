@@ -84,6 +84,8 @@ When a case records `setupError`, fix the selector or fixture in `sweep/`, never
 
 The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the keys `ux2-W<n>` in `waves.json` (the plain `W0`–`W14` keys are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
 
+W2 screens: `ng-shell` (frame, sidebar pinned/rail/revealed), `ng-search` (the ⌘K overlay), `ng-login` (sign-in; the mock's `login` option picks the 401 or 429 answer, and the clock is fixed so the countdown reads the same), `ng-firstrun` (the board with no repo; the page clock is installed after load so the probe rows' reveal is stepped by the cell), and the flows `flow-ng-search-keyboard`, `flow-ng-sidebar-pin` (1280) and `flow-ng-sidebar-rail` (1024). Flow steps assert; a failed assertion is that step's error, which `flow-completes` reports.
+
 ## History and briefs
 
 - `sweep/HISTORY.md`: the receipts of W0–W14. For each wave: its rules, the cells it changed, cleared or regressed, its commits, open questions and MRs. A new wave appends here.

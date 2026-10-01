@@ -38,6 +38,19 @@ const btn = (name: RegExp) => async (p: Page) => { await p.getByRole("button", {
 const key = (k: string, n = 1) => async (p: Page) => { for (let i = 0; i < n; i++) await p.keyboard.press(k); };
 const NOTE = "Add an invalidation section for blob_sha changes mid-query.";
 
+// UX V2 /ng shell flows. Assertions throw inside a step, which the manifest records as that step's error, so flow-completes fails on them.
+const ng = (url: string) => async (p: Page) => { await p.goto(url); await p.locator("main h1").first().waitFor({ timeout: 8000 }); await settle(p, 600); };
+const sideWidth = async (p: Page) => (await p.locator(".ng-sidebar").boundingBox())!.width;
+const sideIs = async (p: Page, mode: "pinned" | "rail") => {
+  expect(await p.evaluate(() => document.documentElement.dataset.sidebar)).toBe(mode);
+  // The width animates; poll until it settles.
+  if (mode === "pinned") await expect.poll(() => sideWidth(p)).toBeGreaterThan(150); else await expect.poll(() => sideWidth(p)).toBeLessThan(100);
+};
+const reloadNg = async (p: Page) => { await p.reload(); await p.locator("main h1").first().waitFor({ timeout: 8000 }); await settle(p, 500); };
+let focusBefore = "";
+const activeId = (p: Page) => p.evaluate(() => { const a = document.activeElement as HTMLElement; return a ? `${a.tagName}#${a.id}.${a.className}` : ""; });
+const searchBox = (p: Page) => p.getByRole("combobox", { name: "Search" });
+
 const FLOWS: Flow[] = [
   { name: "peek-open-close", widths: [1280, 390], start: board, steps: [
     { name: "click-row", run: async (p, S) => { const row = p.locator('[data-testid="board-card"]').first(); if (p.viewportSize()!.width < 768) { const b = (await row.boundingBox())!; await p.mouse.move(b.x + 40, b.y + 20); await p.mouse.down(); await p.waitForTimeout(650); await p.mouse.up(); } else await row.click(); } },
@@ -156,6 +169,41 @@ const FLOWS: Flow[] = [
     { name: "chains-editor", run: async (p) => { await p.goto("/settings/chains"); await settle(p, 600); await p.locator(".chain-pill", { hasText: /^verify/ }).first().click(); await settle(p, 500); } },
     { name: "yaml-toggle", run: async (p) => { await p.getByRole("button", { name: /yaml/i }).first().click().catch(() => {}); } },
     { name: "add-node", run: async (p) => { await p.getByRole("button", { name: /add node/i }).first().click().catch(() => {}); } },
+  ] },
+  { name: "ng-search-keyboard", widths: [1280], start: ng("/ng/templates/chains"), steps: [
+    { name: "open", run: async (p) => { focusBefore = await activeId(p); await p.keyboard.press("Control+k"); await expect(searchBox(p)).toBeVisible(); await expect(searchBox(p)).toBeFocused(); }, kbd: true },
+    { name: "type", run: async (p) => { await searchBox(p).fill("gate"); await p.waitForTimeout(700); await expect(p.getByRole("option").first()).toBeVisible(); }, kbd: true, wait: 200 },
+    { name: "down-down-up", run: async (p) => {
+      const at = () => searchBox(p).getAttribute("aria-activedescendant");
+      const start = await at();
+      await p.keyboard.press("ArrowDown"); const one = await at();
+      await p.keyboard.press("ArrowDown"); const two = await at();
+      await p.keyboard.press("ArrowUp"); const back = await at();
+      expect(new Set([start, one, two]).size).toBe(3);
+      expect(back).toBe(one);
+      await expect(searchBox(p)).toBeFocused();
+    }, kbd: true },
+    { name: "escape-returns-focus", run: async (p) => { await p.keyboard.press("Escape"); await expect(searchBox(p)).toHaveCount(0); expect(await activeId(p)).toBe(focusBefore); }, kbd: true },
+    { name: "reopen-enter-goes", run: async (p) => {
+      const url = p.url();
+      await p.keyboard.press("Control+k"); await searchBox(p).fill("analytics"); await p.waitForTimeout(500);
+      await p.keyboard.press("Enter");
+      await expect(searchBox(p)).toHaveCount(0);
+      await expect.poll(() => p.url()).not.toBe(url);
+    }, kbd: true, wait: 700 },
+  ] },
+  { name: "ng-sidebar-pin", widths: [1280], start: ng("/ng/templates/chains"), steps: [
+    { name: "default-pinned", run: async (p) => { await sideIs(p, "pinned"); } },
+    { name: "unpin-with-shortcut", run: async (p) => { await p.keyboard.press("Control+\\"); await sideIs(p, "rail"); }, kbd: true },
+    { name: "reload-stays-rail", run: async (p) => { await reloadNg(p); await sideIs(p, "rail"); } },
+    { name: "pin-with-shortcut", run: async (p) => { await p.keyboard.press("Control+\\"); await sideIs(p, "pinned"); }, kbd: true },
+    { name: "reload-stays-pinned", run: async (p) => { await reloadNg(p); await sideIs(p, "pinned"); } },
+  ] },
+  { name: "ng-sidebar-rail", widths: [1024], start: ng("/ng/templates/chains"), steps: [
+    { name: "rail-by-default", run: async (p) => { await sideIs(p, "rail"); } },
+    { name: "hover-reveals", run: async (p) => { await p.mouse.move(20, 300); await expect.poll(() => sideWidth(p)).toBeGreaterThan(150); } },
+    { name: "leaving-collapses", run: async (p) => { await p.mouse.move(700, 450); await expect.poll(() => sideWidth(p)).toBeLessThan(100); } },
+    { name: "focus-reveals", run: async (p) => { await p.getByRole("button", { name: "Search" }).first().focus(); await expect.poll(() => sideWidth(p)).toBeGreaterThan(150); }, kbd: true },
   ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
