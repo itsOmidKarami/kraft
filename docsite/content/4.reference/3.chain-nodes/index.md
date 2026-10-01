@@ -161,8 +161,8 @@ schema error.
 
 A kebab-case name that Kraft's Lucide version does not have still loads, and
 the chain runs. `kraft admin templates lint` and a draft's problems report it
-as `unknown icon`, at the component that sets it, and a save on the Settings
-screens refuses it like any other issue. The board draws the kind's default
+as `unknown icon`, at the component that sets it, and a save in Templates, Chains
+or Library refuses it like any other issue. The board draws the kind's default
 icon in its place.
 
 ## The library and extends

@@ -35,7 +35,7 @@ repos:
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `id` | — | The repository id a workspace names this entry by (`[a-z][a-z0-9_-]*`, unique). Only a workspace's root and members need one; connecting a repo with submodules writes it for them. |
 | `enabled` | `true` | Set `false` to take this repo out of service without disconnecting it: new items can't target it and auto-intake skips it, while running items keep going. An absent key counts as enabled. Kraft refuses an edit that would leave an enabled repo with neither a `test_command` nor `test_scopes`. |
-| `managed` | `true` | Keeps a human-connected repo out of Settings' "Detected" section; auto-connected submodules are written with `managed: false`. |
+| `managed` | `true` | Keeps a human-connected repo out of Templates, Repos' "Detected · not connected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly, however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake. Unset, it is `default`. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. A legacy `gitlab_project` key still reads. |
@@ -264,9 +264,9 @@ the task's, in the agent's system prompt under a `## Project standards`
 heading, 8 KB at most together.
 
 A name the library doesn't define is refused when the repository is saved
-(Settings, Repos) and when an item is filed, and a
+(Templates, Repos) and when an item is filed, and a
 library save that removes a profile a repository still names is refused too.
-You write profiles on Settings, Library, which edits `library.yaml`.
+You write profiles in Templates, Library, which edits `library.yaml`.
 
 A `templates/steering/*.md` directory from an older release is folded into `library.yaml` as steering profiles of the same name on first start. The old directory is kept as `templates/steering.pre-1.0/`.
 
