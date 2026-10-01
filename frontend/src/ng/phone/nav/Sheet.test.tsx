@@ -95,6 +95,25 @@ describe("a sheet is a history entry", () => {
     expect(screen.getByLabelText("where")).toHaveTextContent("/work-items/a");
   });
 
+  it("ignores a close that arrives after the sheet is already closed, so a late confirm cannot pop the screen under it", async () => {
+    window.history.replaceState(null, "", "/");
+    window.history.pushState(null, "", "/work-items/a");
+    let close = () => {};
+    function Late() {
+      const sheet = useSheet();
+      close = sheet.close;
+      return <><output aria-label="where">{useLocation().pathname}</output><button type="button" onClick={() => sheet.open("pause")}>open</button>{sheet.is("pause") && <ConfirmSheet title="Pause?" confirm={{ label: "Pause", run: () => {} }} onClose={sheet.close} />}</>;
+    }
+    render(<BrowserRouter><Routes><Route path="*" element={<Late />} /></Routes></BrowserRouter>);
+    await userEvent.click(screen.getByRole("button", { name: "open" }));
+    const lateClose = close;
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    lateClose();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByLabelText("where")).toHaveTextContent("/work-items/a");
+  });
+
   it("leaves the sheet's entry behind when an action goes elsewhere, so Back reaches the screen under it", async () => {
     window.history.replaceState(null, "", "/work-items/a");
     mount();
