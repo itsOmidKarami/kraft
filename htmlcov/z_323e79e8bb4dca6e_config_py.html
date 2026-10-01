@@ -54,8 +54,8 @@
             </div>
         </aside>
         <h2>
-            <span class="text">488 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">472<span class="text"> run</span></button>
+            <span class="text">505 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">489<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">16<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">2<span class="text"> excluded</span></button>
         </h2>
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_config_schemas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-01 14:47 +0000
+            created at 2026-10-01 14:57 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1192,6 +1192,34 @@
     <p class="run"><span class="n"><a id="t1110" href="#t1110">1110</a></span><span class="t">        <span class="nam">out</span><span class="op">[</span><span class="str">&quot;accent&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="nam">self</span><span class="op">.</span><span class="nam">accent</span> <span class="key">or</span> <span class="op">(</span><span class="str">&quot;none&quot;</span> <span class="key">if</span> <span class="nam">amount</span> <span class="op">==</span> <span class="str">&quot;mono&quot;</span> <span class="key">else</span> <span class="nam">accent</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1111" href="#t1111">1111</a></span><span class="t">        <span class="nam">out</span><span class="op">[</span><span class="str">&quot;derived&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="nam">derived</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1112" href="#t1112">1112</a></span><span class="t">        <span class="key">return</span> <span class="nam">out</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1113" href="#t1113">1113</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1114" href="#t1114">1114</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1115" href="#t1115">1115</a></span><span class="t"><span class="key">def</span> <span class="nam">migrate_theme</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="nam">Path</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">bool</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1116" href="#t1116">1116</a></span><span class="t">    <span class="str">&quot;&quot;&quot;UX V2 cutover (spec &#167;11.3): write the look `palette` stands for as the</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1117" href="#t1117">1117</a></span><span class="t"><span class="str">    file&#x27;s own `surface`, `accent` and `colour_amount`, then drop `palette`.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1118" href="#t1118">1118</a></span><span class="t"><span class="str">    All three are written: a file with its own surface defaults to no accent at</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1119" href="#t1119">1119</a></span><span class="t"><span class="str">    subtle, so `surface` alone would change the look. `effective()` answers the</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1120" href="#t1120">1120</a></span><span class="t"><span class="str">    same before and after, which is the point (kickoff &#167;4.5: silent).</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1121" href="#t1121">1121</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1122" href="#t1122">1122</a></span><span class="t"><span class="str">    The original bytes go to `theme.yaml.pre-ux2` first, never overwriting an</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1123" href="#t1123">1123</a></span><span class="t"><span class="str">    earlier copy. A missing, unreadable or invalid file, or one without</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1124" href="#t1124">1124</a></span><span class="t"><span class="str">    `palette`, is left alone. True when the file was rewritten.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1125" href="#t1125">1125</a></span><span class="t">    <span class="nam">path</span> <span class="op">=</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1126" href="#t1126">1126</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1127" href="#t1127">1127</a></span><span class="t">        <span class="nam">data</span> <span class="op">=</span> <span class="nam">read_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1128" href="#t1128">1128</a></span><span class="t">        <span class="nam">look</span> <span class="op">=</span> <span class="nam">Theme</span><span class="op">.</span><span class="nam">model_validate</span><span class="op">(</span><span class="nam">data</span><span class="op">)</span><span class="op">.</span><span class="nam">effective</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1129" href="#t1129">1129</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">ConfigError</span><span class="op">,</span> <span class="nam">ValidationError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1130" href="#t1130">1130</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1131" href="#t1131">1131</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;palette&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1132" href="#t1132">1132</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1133" href="#t1133">1133</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;surface&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1134" href="#t1134">1134</a></span><span class="t">        <span class="nam">data</span><span class="op">.</span><span class="nam">update</span><span class="op">(</span><span class="op">{</span><span class="nam">key</span><span class="op">:</span> <span class="nam">look</span><span class="op">[</span><span class="nam">key</span><span class="op">]</span> <span class="key">for</span> <span class="nam">key</span> <span class="key">in</span> <span class="nam">THEME_V2_KEYS</span><span class="op">}</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1135" href="#t1135">1135</a></span><span class="t">    <span class="key">del</span> <span class="nam">data</span><span class="op">[</span><span class="str">&quot;palette&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1136" href="#t1136">1136</a></span><span class="t">    <span class="nam">backup</span> <span class="op">=</span> <span class="nam">path</span><span class="op">.</span><span class="nam">with_name</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">name</span> <span class="op">+</span> <span class="str">&quot;.pre-ux2&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1137" href="#t1137">1137</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">backup</span><span class="op">.</span><span class="nam">exists</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1138" href="#t1138">1138</a></span><span class="t">        <span class="nam">backup</span><span class="op">.</span><span class="nam">write_bytes</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">read_bytes</span><span class="op">(</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1139" href="#t1139">1139</a></span><span class="t">    <span class="nam">write_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">data</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1140" href="#t1140">1140</a></span><span class="t">    <span class="key">return</span> <span class="key">True</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -1201,7 +1229,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_config_schemas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-01 14:47 +0000
+            created at 2026-10-01 14:57 +0000
         </p>
     </div>
 </footer>
