@@ -356,3 +356,38 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
     assert (r.status_code == 403) is refused, r.text
     if refused:
         assert "cannot act on its own work item (w1)" in r.json()["detail"]
+
+
+def test_a_missing_worktree_says_removed_once_the_item_has_run(client, repo):
+    """An item that never started has no worktree "yet"; one that ran and
+    lost its directory must not read the same, on all four routes that need it,
+    and the detail says which it is."""
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task", "autostart": False},
+    ).json()["id"]
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.execute("UPDATE work_items SET base_ref = 'abc' WHERE id = ?", (wid,))
+    conn.commit()
+
+    def refusals():
+        calls = [
+            client.get(f"/api/work-items/{wid}/diff"),
+            client.get(f"/api/work-items/{wid}/compare"),
+            client.post(f"/api/work-items/{wid}/open-worktree", json={"editor": None}),
+            client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]}),
+        ]
+        assert [r.status_code for r in calls] == [404] * 4
+        return {r.json()["detail"] for r in calls}
+
+    assert not client.get(f"/api/work-items/{wid}").json()["worktree_exists"]
+    assert refusals() == {"this work item has not started, so it has no worktree yet"}
+
+    conn.execute("UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,))
+    conn.commit()
+    conn.close()
+    assert refusals() == {"this work item's worktree was removed from disk"}
+
+    worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])
+    worktree.mkdir(parents=True)
+    assert client.get(f"/api/work-items/{wid}").json()["worktree_exists"]

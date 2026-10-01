@@ -65,6 +65,7 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ended = ENDED.has(item.display_status ?? "");
+  const gone = item.worktree_exists === false;
 
   const run = async (p: Promise<{ ok: boolean; error?: string }>) => {
     setBusy(true);
@@ -97,7 +98,7 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   const menu: MenuItem[] = [
     { label: "Review changes", onSelect: () => navigate(`/work-items/${encodeURIComponent(item.id)}/review`) },
     { label: "Item settings", onSelect: onSettings },
-    { label: "Open worktree in editor", onSelect: () => void run(act.openWorktree(item.id)) },
+    { label: "Open worktree in editor", onSelect: () => void run(act.openWorktree(item.id)), ...(gone && { disabled: true, sub: ended ? "worktree removed" : "worktree removed · Retry recreates it" }) },
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },

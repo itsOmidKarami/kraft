@@ -84,6 +84,25 @@ describe("ItemHeader", () => {
     expect(await screen.findByText("Review changes", { selector: '[aria-current="page"]' })).toBeInTheDocument();
   });
 
+  it("disables Open worktree once the worktree is gone, and says Retry brings it back only on a live item", async () => {
+    const calls = stubFetch({});
+    const open = async () => {
+      await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+      return screen.getByRole("menuitem", { name: /Open worktree/ });
+    };
+    const { unmount } = show({ worktree_exists: false });
+    const live = await open();
+    expect(live).toBeDisabled();
+    expect(live).toHaveTextContent("worktree removed · Retry recreates it");
+    await userEvent.click(live);
+    expect(writes(calls)).toEqual([]);
+    unmount();
+    show({ worktree_exists: false, display_status: "done" });
+    const ended = await open();
+    expect(ended).toBeDisabled();
+    expect(ended).toHaveTextContent(/^Open worktree in editorworktree removed$/);
+  });
+
   it("offers Duplicate on an ended item and opens the copy", async () => {
     stubFetch({ "POST /work-items/w1/duplicate": [201, { id: "w2", status: "paused" }] });
     show({ display_status: "cancelled" });

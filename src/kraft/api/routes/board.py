@@ -825,6 +825,9 @@ async def get_work_item(wid: str, request: Request):
         "escalation_threads": st.db.read(lambda c: store.escalation_threads(c, wid)),
         # local-only: the checkout the agents are editing, for "Open worktree"
         "worktree_path": str(st.run_dirs.worktrees / wid),
+        # Whether that directory is there: a reclaimed or deleted worktree
+        # leaves the path above pointing at nothing.
+        "worktree_exists": (st.run_dirs.worktrees / wid).is_dir(),
         # What the *diff on screen* is, so the gate can tell a measurement taken
         # on this commit from one taken three commits ago (Kraft-lu2).
         # `git_read` returns None for a worktree that does not exist yet.

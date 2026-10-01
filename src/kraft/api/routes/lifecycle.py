@@ -795,10 +795,10 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
     machine, which is why the UI only offers this when the server can act on it.
     """
     st = request.app.state
-    deps._work_item_row(st, wid)
+    row = deps._work_item_row(st, wid)
     path = st.run_dirs.worktrees / wid
     if not path.is_dir():
-        raise HTTPException(404, "this work item has no worktree yet")
+        raise deps.worktree_missing(row)
     return search._launch_editor(request, body.editor, path)
 
 
@@ -1716,7 +1716,7 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     row = deps._work_item_row(st, wid)
     worktree = st.run_dirs.worktrees / wid
     if not worktree.is_dir():
-        raise HTTPException(404, "this work item has no worktree yet")
+        raise deps.worktree_missing(row)
     labels = tuple(label.strip() for label in body.labels if label.strip())
     if not labels:
         raise HTTPException(422, "no labels given")
