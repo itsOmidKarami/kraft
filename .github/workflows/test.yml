@@ -1,10 +1,11 @@
-# Everything runs on every pull request. The GitLab config this replaced gated
-# each job behind `changes:` rules because free-tier minutes were scarce -- see
-# its own header comment. Public repositories have unlimited Actions minutes on
-# standard runners, so the gating bought nothing and cost two hazards: a fully
-# path-gated change could produce zero jobs (which broke auto-merge, and needed
-# an unconditional job to work around), and a required check that never runs
-# blocks a pull request forever under branch protection.
+# Everything runs on every pull request, except that a docs-only one skips the
+# heavy jobs (see `changes`). The GitLab config this replaced gated each job
+# behind `changes:` rules because free-tier minutes were scarce. Public
+# repositories have unlimited Actions minutes, so the reason now is wall-clock
+# and runner queue, not cost. Gating is per job, by `if:`, never by a
+# workflow-level `paths:` filter: a filtered workflow reports no checks at all,
+# and a required check that never reports blocks a pull request forever. A job
+# skipped by its own `if:` reports "skipped", which satisfies a required check.
 name: test
 
 on:
@@ -33,6 +34,33 @@ env:
   UV_PYTHON: "3.14"
 
 jobs:
+  changes:
+    # `code` is false only for a pull request whose every changed path is
+    # prose nothing in the heavy jobs reads: root-level *.md, docsite/ (docs.yml
+    # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
+    # the test job checks). Pushes to main run everything, and so does a PR if
+    # this job fails: the heavy jobs skip only on an explicit 'false'. The one
+    # unit test that reads README.md also runs in lint, which never skips.
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            files=$(git diff --name-only "$BASE" HEAD)
+            if [ -z "$(printf '%s\n' "$files" | grep -vE '^([^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*)$')" ]; then
+              code=false
+            fi
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +78,9 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run python dev/check_docs_coverage.py
       - run: uv run python dev/check_tests.py
+      # Reads README.md, which a docs-only pull request may change while the
+      # test matrix skips.
+      - run: uv run pytest tests/test_distribution_surface.py -q
 
   test:
     # The unit tier on every supported Python (`requires-python` in pyproject.toml
@@ -58,6 +89,8 @@ jobs:
     # the PR comment come from the newest leg only: one report, not three.
     # fail-fast off, so one version's failure doesn't hide another's.
     name: test (python ${{ matrix.python-version }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -140,16 +173,20 @@ jobs:
     # `if: always()` is load-bearing. A job skipped because its `needs` failed
     # reports "skipped", and a skipped required check passes -- so without it a
     # red matrix would leave this check green. The shell test below is what
-    # turns a failed or cancelled matrix into a failed check.
+    # turns a failed or cancelled matrix into a failed check. A skipped matrix
+    # passes only when `changes` said docs-only.
     name: test
-    needs: test
+    needs: [changes, test]
     if: always()
     runs-on: ubuntu-latest
     env:
+      CODE: ${{ needs.changes.outputs.code }}
       MATRIX_RESULT: ${{ needs.test.result }}
     steps:
       - run: |
-          if [ "$MATRIX_RESULT" != "success" ]; then
+          if [ "$CODE" = false ] && [ "$MATRIX_RESULT" = skipped ]; then
+            echo "docs-only change: test matrix skipped"
+          elif [ "$MATRIX_RESULT" != "success" ]; then
             echo "::error::the test matrix finished '$MATRIX_RESULT', not 'success'"
             exit 1
           fi
@@ -164,6 +201,8 @@ jobs:
     # ref-store test against a real container each. The paid
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -215,6 +254,8 @@ jobs:
 
   frontend:
     name: frontend
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,6 +273,8 @@ jobs:
 
   vscode:
     name: vscode
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -273,6 +316,8 @@ jobs:
     # frontend/package.json's exact "@playwright/test" pin must move together:
     # the image ships only the browsers its own version expects.
     name: playwright
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
