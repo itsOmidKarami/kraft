@@ -207,6 +207,14 @@ describe("the other composers (C.7)", () => {
 
 describe("Raise budget (C.6)", () => {
   const stopped = () => item("needs_you", stop("budget", { reason: "The budget ran out." }));
+  it("ends the reason with one full stop, not two (Kraft-9d8b2.55)", async () => {
+    mount(stopped());
+    await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
+    const text = screen.getByRole("dialog", { name: "Raise budget" }).textContent ?? "";
+    expect(text).toContain("The budget ran out. Raising it applies to this item only");
+    expect(text).not.toContain("..");
+  });
+
   it("offers steps above the cap, and raising resumes through the budget route", async () => {
     const calls = mount(stopped());
     await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));

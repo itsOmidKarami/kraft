@@ -15,12 +15,13 @@ import os
 from mcp.server.mcpserver import MCPServer
 
 from kraft import client
+from kraft.update import installed
 
 
 def build() -> MCPServer:
     """The server, tools registered. Split from `serve_stdio` so a test can list
     the tools without owning a transport."""
-    server = MCPServer("kraft")
+    server = MCPServer("kraft", version=installed())
 
     @server.tool()
     async def list_work_items(status: str | None = None) -> list[dict]:

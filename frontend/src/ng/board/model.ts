@@ -40,7 +40,7 @@ export interface Filter {
   chain: string;
 }
 
-export const chainOf = (i: Pick<WorkItem, "chain_template">) => i.chain_template ?? "default";
+export const chainOf = (i: Pick<WorkItem, "chain_template"> & { chain_definition?: { template_id?: string } | null }) => (i.chain_template || i.chain_definition?.template_id) ?? "default";
 
 export function matches(i: WorkItem, f: Filter): boolean {
   if (f.repo && i.repo !== f.repo) return false;

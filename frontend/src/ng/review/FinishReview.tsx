@@ -55,10 +55,17 @@ function useFixTarget(item: Item, atGate: boolean, open: boolean) {
 }
 
 /** The row under the diff (prototype 496–503). */
-export function BottomBar({ item, gate, threads, onFinish, submit }: { item: Item; gate: string | null; threads: ReviewThread[]; onFinish: (o?: ReviewOutcome) => void; submit: ReturnType<typeof useSubmit> }) {
+export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: { item: Item; gate: string | null; threads: ReviewThread[]; readOnly?: boolean; onFinish: (o?: ReviewOutcome) => void; submit: ReturnType<typeof useSubmit> }) {
   const [error, setError] = useState<string | null>(null);
   const bar = barText(threads, item, gate);
   const block = approveBlock(item, gate, threads);
+  if (readOnly)
+    return (
+      <div className="rv-bar">
+        <span className="rv-bar-title">Read only</span>
+        <span className="rv-muted">This item has ended; its review is closed to new comments.</span>
+      </div>
+    );
   return (
     <div className="rv-bar">
       <span className="rv-bar-title">{bar.title}</span>

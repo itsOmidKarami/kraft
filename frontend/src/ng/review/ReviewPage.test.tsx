@@ -38,6 +38,27 @@ describe("ReviewPage", () => {
   });
 });
 
+describe("an ended item's review", () => {
+  it.each(["done", "cancelled", "archived"])("is read only when the item is %s: no comment on a file, no Finish review (Kraft-9d8b2.51)", async (display_status) => {
+    vi.mocked(api.getWorkItem).mockResolvedValue({ ...ITEM, display_status, pending_gate: null } as never);
+    const patch = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1,2 @@\n x = 1\n+y = 2\n";
+    vi.spyOn(http, "request").mockImplementation(async (p) =>
+      String(p).includes("/compare")
+        ? { status: 200, body: { from: { target: "base", sha: "b" }, to: { target: "latest", sha: "h" }, rebased: false, files: [{ path: "a.py", insertions: 1, deletions: 0, touched_by: [], viewed: false }], groups: [], diff: patch, untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 1000 } }
+        : { status: 200, body: [] },
+    );
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/review"]}>
+        <Routes><Route path="/work-items/:id/review" element={<ReviewPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Read only")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "a.py" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Comment on this file" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finish review" })).toBeNull();
+  });
+});
+
 describe("useDiffPrefs", () => {
   it("saves the whole diff object on each change, and takes it back on a refusal", async () => {
     const req = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });

@@ -1,0 +1,19 @@
+{
+  "title": "UX V2 fixes from the rc6 test: an ended item's review is read only, a null chain is named, a line number click then Enter",
+  "screens": [
+    "ng-review/read-only",
+    "ng-item/chain-unnamed",
+    "flow-ng-review-number-click-then-enter"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "interactions.spec.ts"
+  ],
+  "rules": [
+    { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(review|item)/(read-only|chain-unnamed)" },
+    { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-(review|item)/(read-only|chain-unnamed)" },
+    { "kind": "no-flag", "flag": "contrast", "match": "^ng-(review|item)/(read-only|chain-unnamed)" },
+    { "kind": "no-console", "match": "^ng-(review|item)/(read-only|chain-unnamed)" },
+    { "kind": "flow-completes", "match": "^flow-ng-review-number-click-then-enter" }
+  ]
+}

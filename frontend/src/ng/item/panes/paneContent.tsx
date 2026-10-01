@@ -19,6 +19,7 @@ import { Log } from "./Log";
 import { PathFooter } from "./PathFooter";
 import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
+import { chainName } from "../chainName";
 
 export type PaneArgs = {
   item: ItemDetail;
@@ -66,12 +67,12 @@ const OVERVIEW_CONFIG = [{ value: "overview", label: "Overview" }, { value: "con
 /** What the side pane shows for the selection (Decisions §5): the chain, a node, a step or a task. */
 export function paneContent(a: PaneArgs): PaneContent {
   const { item, sel } = a;
-  const toChain = { label: item.chain_template, onClick: () => a.pick({ kind: "chain" }) };
+  const toChain = { label: chainName(item), onClick: () => a.pick({ kind: "chain" }) };
   if (sel.kind === "chain")
     return {
       crumbs: [{ label: item.bead_id || shortId(item.id) }],
       icon: "workflow",
-      title: item.chain_template,
+      title: chainName(item),
       sub: `this item's chain · ${item.chain_definition.nodes.length} nodes · frozen at intake`,
       tabs: OVERVIEW_CONFIG,
       body: (
