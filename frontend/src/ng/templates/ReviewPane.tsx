@@ -17,9 +17,9 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 /** A unified diff's lines, tinted (the 409's server diff, or the YAML diff tab). */
 function DiffLines({ lines }: { lines: { t: string; s: string }[] }) {
   return (
-    <pre className="rv-diff">
+    <pre className="tpl-rv-diff">
       {lines.map((l, i) => (
-        <span key={i} className={`rv-line${l.t === "+" ? " is-add" : l.t === "-" ? " is-del" : l.t === "…" ? " is-gap" : ""}`}>{l.t === "…" ? "⋯" : `${l.t} ${l.s}`}{"\n"}</span>
+        <span key={i} className={`tpl-rv-line${l.t === "+" ? " is-add" : l.t === "-" ? " is-del" : l.t === "…" ? " is-gap" : ""}`}>{l.t === "…" ? "⋯" : `${l.t} ${l.s}`}{"\n"}</span>
       ))}
     </pre>
   );
@@ -81,7 +81,7 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
 
   const footer = asking ? (
     <>
-      <span className="rv-ask">Discard {plural(n.changes, "change")}?</span>
+      <span className="tpl-rv-ask">Discard {plural(n.changes, "change")}?</span>
       <span className="bp-gap" />
       <Button onClick={() => setAsking(false)}>Keep</Button>
       <Button variant="danger" onClick={discard}>Discard</Button>
@@ -111,16 +111,16 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
       footer={footer}
     >
       {stale && (
-        <div className="rv-stale" role="alert">
-          <p className="rv-stale-head">Published since this draft began</p>
-          <p className="rv-stale-text">{stale.detail}. Publishing now would overwrite it, so nothing was written; your draft is kept.</p>
+        <div className="tpl-rv-stale" role="alert">
+          <p className="tpl-rv-stale-head">Published since this draft began</p>
+          <p className="tpl-rv-stale-text">{stale.detail}. Publishing now would overwrite it, so nothing was written; your draft is kept.</p>
           {Object.entries(stale.files).map(([file, f]) => (
             <div key={file}>
-              <p className="rv-file">{file}</p>
+              <p className="tpl-rv-file">{file}</p>
               <DiffLines lines={serverDiff(f.diff)} />
             </div>
           ))}
-          <div className="rv-stale-acts">
+          <div className="tpl-rv-stale-acts">
             <Button onClick={copy}>Copy draft YAML</Button>
             <Button variant="danger" onClick={() => setAsking(true)}>Discard draft</Button>
             <Button variant="primary" disabled={blocked} onClick={async () => {
@@ -137,12 +137,12 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
       {(problems.length > 0 || r.yaml_error) && (
         <>
           <Head>Problems</Head>
-          {r.yaml_error && <div className="rv-prob"><span className="rv-path">{r.yaml_error.file}, line {r.yaml_error.line}</span><span>{r.yaml_error.message}</span></div>}
+          {r.yaml_error && <div className="tpl-rv-prob"><span className="tpl-rv-path">{r.yaml_error.file}, line {r.yaml_error.line}</span><span>{r.yaml_error.message}</span></div>}
           {problems.map((p, i) => (
-            <div key={i} className="rv-prob">
-              <span className="rv-path">{p.path || chain}{p.field ? ` · ${p.field}` : ""}</span>
+            <div key={i} className="tpl-rv-prob">
+              <span className="tpl-rv-path">{p.path || chain}{p.field ? ` · ${p.field}` : ""}</span>
               <span>{problemText(p)}</span>
-              <button type="button" className="rv-fix" onClick={() => onFix(p.path)}>Fix →</button>
+              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path)}>Fix →</button>
             </div>
           ))}
         </>
@@ -152,10 +152,10 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
           <Head>Changes</Head>
           {!r.changes.length && <Note>{published === null ? "A new chain with no nodes yet." : "No changes."}</Note>}
           {r.changes.map((c, i) => (
-            <button key={i} type="button" className="rv-change" onClick={() => onHighlight(c.path)}>
-              <span className={`rv-sign is-${c.kind}`} aria-label={c.kind}>{c.kind === "add" ? "+" : c.kind === "remove" ? "−" : "~"}</span>
-              <span className="rv-path">{c.path}</span>
-              <span className="rv-sum">{c.summary}</span>
+            <button key={i} type="button" className="tpl-rv-change" onClick={() => onHighlight(c.path)}>
+              <span className={`tpl-rv-sign is-${c.kind}`} aria-label={c.kind}>{c.kind === "add" ? "+" : c.kind === "remove" ? "−" : "~"}</span>
+              <span className="tpl-rv-path">{c.path}</span>
+              <span className="tpl-rv-sum">{c.summary}</span>
             </button>
           ))}
           <Head>Who it affects</Head>

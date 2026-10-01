@@ -26,7 +26,7 @@ function mount(o: { result?: Partial<Result>; stale?: StaleBody | null; publishe
   return { draft, ...cb };
 }
 /** A diff line by its exact text (each ends with its newline). */
-const line = (text: string) => [...document.querySelectorAll(".rv-line")].find((e) => e.textContent === `${text}\n`);
+const line = (text: string) => [...document.querySelectorAll(".tpl-rv-line")].find((e) => e.textContent === `${text}\n`);
 const CHANGES = [{ path: "implementation.main.implement", kind: "change" as const, summary: "model" }, { path: "security_approval", kind: "add" as const, summary: "added" }];
 
 beforeEach(() => vi.restoreAllMocks());

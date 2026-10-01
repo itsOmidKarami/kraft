@@ -10,7 +10,7 @@ export function IdCard({ anchor, title, initial, taken, go, refused, note, onGo,
       <div className="seam-id">
         <p className="menu-title">{title}</p>
         <IdRow label={title} initial={initial} taken={taken} go={go} refused={refused} onGo={onGo} />
-        {note && <div className="menu-note">{note}</div>}
+        {note && <div className="tpl-menu-note">{note}</div>}
       </div>
     </Popover>
   );

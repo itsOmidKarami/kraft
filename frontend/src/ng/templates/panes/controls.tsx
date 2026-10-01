@@ -29,7 +29,7 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
     autoFocus,
     "aria-required": required || undefined,
     "aria-invalid": bad || undefined,
-    className: `pf-input${long ? " is-long" : ""}${mono ? " is-mono" : ""}${bad ? " is-bad" : ""}`,
+    className: `tpl-pf-input${long ? " is-long" : ""}${mono ? " is-mono" : ""}${bad ? " is-bad" : ""}`,
     onFocus: () => void (focused.current = true),
     onBlur: () => {
       focused.current = false;
@@ -41,10 +41,10 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
     },
   };
   return (
-    <div className="pf">
-      <label htmlFor={id} className="pf-label">{label}</label>
+    <div className="tpl-pf">
+      <label htmlFor={id} className="tpl-pf-label">{label}</label>
       {long ? <textarea rows={rows} {...props} /> : <input spellCheck={false} {...props} />}
-      {sub && <p className={`pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}
+      {sub && <p className={`tpl-pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}
     </div>
   );
 }
@@ -63,20 +63,20 @@ export function SelectRow({ label, value, options, onPick, sub, bad, check }: {
 }) {
   const id = useId();
   return (
-    <div className="pf">
-      <label htmlFor={id} className="pf-label">{label}</label>
-      <div className="pf-line">
-        <select id={id} className={`pf-select${bad ? " is-bad" : ""}`} value={value} onChange={(e) => onPick(e.target.value)}>
+    <div className="tpl-pf">
+      <label htmlFor={id} className="tpl-pf-label">{label}</label>
+      <div className="tpl-pf-line">
+        <select id={id} className={`tpl-pf-select${bad ? " is-bad" : ""}`} value={value} onChange={(e) => onPick(e.target.value)}>
           {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
         </select>
         {check && (
-          <label className="pf-check">
+          <label className="tpl-pf-check">
             <input type="checkbox" checked={check.on} onChange={check.onToggle} />
             {check.label}
           </label>
         )}
       </div>
-      {sub && <p className={`pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}
+      {sub && <p className={`tpl-pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}
     </div>
   );
 }

@@ -17,7 +17,7 @@ export function ExtendMenu({ anchor, title = "Extend a library node", note = "Ed
     <Popover anchor={anchor} open onClose={onClose} role="dialog" label={title}>
       <div className="task-menu">
         <p className="menu-title">{title}</p>
-        <p className="menu-note">{note}</p>
+        <p className="tpl-menu-note">{note}</p>
         {library === "failed" ? <p className="picklist-empty">Couldn't load the library.</p> : (
           <PickList
             placeholder="Search library nodes"
