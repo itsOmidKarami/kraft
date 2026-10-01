@@ -25,6 +25,7 @@ const ROWS: Row[] = [
   { sc: "paused", title: "Trim the review prompts for the docs chain", repo: "kraft-docs", bead: "kraft-4e19", age: 75, chain: "docs_only" },
   { sc: "running", title: "Bump the VS Code extension to schema v4", repo: "kraft-vscode", bead: "kraft-91bc", age: 6, tweak: (i) => {
     i.progress = { current: 2, total: 3, title: "Thread findings into the prompt" };
+    i.step = { index: 2, count: 3, name: "review", task: "code_review" };
   } },
   { sc: "waiting", title: "Document the policy sandbox settings", repo: "kraft-docs", bead: "kraft-e410", age: 14, chain: "docs_only" },
   { sc: "escalated", title: "Lint fan-out for multi-repo chains", repo: "kraft-plugins", bead: "kraft-2c77", age: 31 },

@@ -160,7 +160,7 @@ def _seed_repo(client, wid, **kwargs):
         conn.close()
 
 
-def _seed_session(client, wid, *, session_id, hook_point):
+def _seed_session(client, wid, *, session_id, hook_point, node_id="verify"):
     """Write a `worker_sessions` row directly — same reasoning as `_seed_repo`:
     a judge session normally comes from `dispatch.launch_hook`, which a
     detail-payload test needs no more than it needs `ensure_worktree`."""
@@ -171,7 +171,7 @@ def _seed_session(client, wid, *, session_id, hook_point):
             conn,
             id=session_id,
             work_item_id=wid,
-            node_id="verify",
+            node_id=node_id,
             hook_point=hook_point,
             log_path=f"/tmp/{session_id}.log",
             result_path=f"/tmp/{session_id}.json",
@@ -365,6 +365,99 @@ def test_mr_ref_on_a_multi_repo_item_is_the_root_row_s_own(client, repo, root_mr
     )
     mr_ref = client.get(f"/api/work-items/{wid}").json()["mr_ref"]
     assert (mr_ref or {}).get("number") == expected
+
+
+def test_the_list_row_carries_mr_ref_like_the_detail(client, repo):
+    """The board draws "merged !N" from the list, so the row must name the same
+    merge request the detail does, single-repo (latest `mr_opened`) and
+    multi-repo (the root row's own) alike."""
+
+    def new():
+        return client.post(
+            "/api/work-items",
+            json={
+                "repo": str(repo),
+                "title": "t",
+                "chain_template": "quick-task",
+                "autostart": False,
+            },
+        ).json()["id"]
+
+    def listed(wid):
+        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+
+    single, multi = new(), new()
+    assert listed(single)["mr_ref"] is None
+    for url in ("https://forge.example/mr/12", "https://forge.example/mr/12?refresh"):
+        _seed_events(client, single, [{"number": 12, "url": url}], event_type="mr_opened")
+    assert listed(single)["mr_ref"] == {"number": 12, "url": "https://forge.example/mr/12?refresh"}
+
+    _seed_repo(
+        client,
+        multi,
+        repo_path="/wt/pkg",
+        role="submodule",
+        merge_rank=0,
+        mr_ref={"number": 1, "url": "https://forge.example/mr/1"},
+    )
+    _seed_repo(
+        client,
+        multi,
+        repo_path="/wt",
+        role="root",
+        merge_rank=1,
+        mr_ref={"number": 2, "url": "https://forge.example/mr/2"},
+    )
+    _seed_events(
+        client, multi, [{"number": 3, "url": "https://forge.example/mr/3"}], event_type="mr_opened"
+    )
+    assert (
+        listed(multi)["mr_ref"]["number"]
+        == 2
+        == client.get(f"/api/work-items/{multi}").json()["mr_ref"]["number"]
+    )
+
+
+def test_the_list_row_carries_the_current_step_and_its_task(client, repo):
+    """`default`'s verification node has two steps (tests, review). The row's
+    `step` is the step of the node's latest non-escalation session; an item
+    with no session yet, or on a single-step node, has none."""
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.execute("UPDATE work_items SET current_node_id = 'verification' WHERE id = ?", (wid,))
+    conn.commit()
+    conn.close()
+
+    def step():
+        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)[
+            "step"
+        ]
+
+    assert step() is None
+    _seed_session(
+        client,
+        wid,
+        session_id="a",
+        hook_point="verification.tests.test_changed_scopes",
+        node_id="verification",
+    )
+    assert step() == {"index": 1, "count": 2, "name": "tests", "task": "test_changed_scopes"}
+    _seed_session(
+        client,
+        wid,
+        session_id="b",
+        hook_point="verification.review.code_review",
+        node_id="verification",
+    )
+    _seed_session(client, wid, session_id="c", hook_point="escalation", node_id="verification")
+    assert step() == {"index": 2, "count": 2, "name": "review", "task": "code_review"}
+    assert client.get(f"/api/work-items/{wid}").json()["summary"]["step"] == {
+        "index": 2,
+        "count": 2,
+    }
 
 
 def test_stop_reason_reaches_the_detail_payload(client, repo):
