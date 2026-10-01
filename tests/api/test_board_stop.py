@@ -258,16 +258,76 @@ def test_stop_detail_rate_limited(client, repo):
     assert "fallback" not in stop["facts"]  # no AgentTask to resolve: no chain was loaded
 
 
-def test_display_status_escalated_after_stop(client, repo):
-    """An `escalation_message` landing after the stop's boundary event turns
-    `needs_you`/`failed` into `escalated` -- even a kind that would otherwise
-    read as `failed` (B.1 rule 1.5's escalated check runs first)."""
+def _stopped_item(client, repo) -> str:
     wid = _paused_item(client, repo)
     _run(lambda c: store.load_chain(c, wid, "implement"))
     _run(lambda c: store.mark_needs_human(c, wid, "implement", "task failed", kind="failed"))
-    _run(lambda c: events.append(c, wid, "escalation_message", {"session_id": "e1"}))
+    return wid
 
-    assert client.get(f"/api/work-items/{wid}").json()["display_status"] == "escalated"
+
+def _escalation_turn(wid: str, session: str | None, status: str = "pending") -> None:
+    """An `escalation_message` after the stop, and the turn's session (none
+    yet when `session` is None) in `status`."""
+    _run(lambda c: events.append(c, wid, "escalation_message", {"session_id": "e1", "thread": 1}))
+    if session is None:
+        return
+    _run(
+        lambda c: store.create_session(
+            c,
+            id="e1",
+            work_item_id=wid,
+            node_id="implement",
+            hook_point="escalation",
+            log_path="/l",
+            result_path="/r",
+        )
+    )
+    _run(lambda c: c.execute("UPDATE worker_sessions SET status = ? WHERE id = 'e1'", (status,)))
+
+
+def _displays(client, wid: str) -> tuple[str, str]:
+    """`display_status` on the detail and on the list: they must agree."""
+    detail = client.get(f"/api/work-items/{wid}").json()["display_status"]
+    row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    return detail, row["display_status"]
+
+
+@pytest.mark.parametrize("status", ["pending", "running"])
+def test_display_status_escalated_while_the_turn_is_working(client, repo, status):
+    """An `escalation_message` after the stop turns it `escalated` -- even a
+    kind that would otherwise read as `failed` (B.1 rule 1.5's check runs first)
+    -- for as long as the turn's session is pending or running."""
+    wid = _stopped_item(client, repo)
+    _escalation_turn(wid, "e1", status)
+
+    assert _displays(client, wid) == ("escalated", "escalated")
+
+
+@pytest.mark.parametrize("status", ["failed", "done", "capped_out", "needs_context"])
+def test_display_status_is_the_stops_own_once_the_escalation_turn_has_exited(client, repo, status):
+    """An escalation whose agent has exited leaves nothing running: the item is
+    back with the person, under the stop's own status, so it offers Retry
+    (Kraft-9d8b2.48)."""
+    wid = _stopped_item(client, repo)
+    _escalation_turn(wid, "e1", status)
+
+    assert _displays(client, wid) == ("failed", "failed")
+
+
+def test_a_turn_with_no_session_row_yet_reads_escalated_only_while_it_is_new(client, repo):
+    """The message is recorded before the turn launches, and the session row
+    follows: a fresh message with no row is a turn starting; an old one is not."""
+    wid = _stopped_item(client, repo)
+    _escalation_turn(wid, None)
+    assert _displays(client, wid) == ("escalated", "escalated")
+
+    _run(
+        lambda c: c.execute(
+            "UPDATE events SET created_at = '2020-01-01T00:00:00+00:00' "
+            "WHERE type = 'escalation_message'"
+        )
+    )
+    assert _displays(client, wid) == ("failed", "failed")
 
 
 def test_display_status_escalation_before_stop_does_not_count(client, repo):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from fastapi import HTTPException, Request
 
@@ -71,14 +72,31 @@ _STOP_BOUNDARY = (
 )
 
 
+#: How long an `escalation_message` with no session row yet still reads as a
+#: turn that is starting: the message is recorded before the turn launches, and
+#: a launch that fails writes its own (failed) session row.
+_LAUNCH_WINDOW_S = 60.0
+
+
+def _turn_live(session_status: str | None, message_at: str) -> bool:
+    """Whether the escalation turn an `escalation_message` announced is still
+    working: its session is pending or running, or has no row yet and the
+    message is new. A turn that exited (failed, done, asked a question) is
+    not live: the item is back with the person."""
+    if session_status is not None:
+        return session_status in ("pending", "running")
+    age = datetime.fromisoformat(store._now()) - datetime.fromisoformat(message_at)
+    return age.total_seconds() < _LAUNCH_WINDOW_S
+
+
 def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
     """The `work_item_needs_human` payload of the stop the item is *currently*
     sitting on (or None if anything in `_STOP_BOUNDARY` superseded it), and
-    whether an `escalation_message` landed after that boundary event -- the
-    same episode the shipped UI's `deriveState` bounded client-side (an escalation from an
-    earlier, already-superseded stop must not read as live). One event scan
-    for both, so `display_status` costs the detail route nothing beyond what
-    `_current_stop` already read."""
+    whether an escalation turn is working on it: an `escalation_message` landed
+    after that boundary event (an escalation from an earlier, already-superseded
+    stop must not read as live) and that turn's session has not exited. One
+    event scan for both, so `display_status` costs the detail route nothing
+    beyond what `_current_stop` already read."""
     evs = st.db.read(lambda c: events.read_after(c, 0, wid))
     boundary = None
     for e in reversed(evs):
@@ -90,9 +108,16 @@ def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
         if boundary is not None and boundary["type"] == "work_item_needs_human"
         else None
     )
-    escalated = boundary is not None and any(
-        e["type"] == "escalation_message" and e["seq"] > boundary["seq"] for e in evs
-    )
+    last = next((e for e in reversed(evs) if e["type"] == "escalation_message"), None)
+    escalated = False
+    if boundary is not None and last is not None and last["seq"] > boundary["seq"]:
+        session = st.db.read(
+            lambda c: c.execute(
+                "SELECT status FROM worker_sessions WHERE id = ?",
+                (last["payload"].get("session_id"),),
+            ).fetchone()
+        )
+        escalated = _turn_live(session["status"] if session else None, last["created_at"])
     return stop, escalated
 
 
@@ -226,8 +251,10 @@ async def list_work_items(request: Request):
             _STOP_BOUNDARY,
         ).fetchall()
         escalations = c.execute(
-            "SELECT work_item_id, MAX(seq) AS seq FROM events "
-            "WHERE type = 'escalation_message' GROUP BY work_item_id"
+            "SELECT e.work_item_id, e.seq, e.created_at, s.status AS session_status FROM events e "
+            "LEFT JOIN worker_sessions s ON s.id = json_extract(e.payload, '$.session_id') "
+            "WHERE e.seq IN (SELECT MAX(seq) FROM events WHERE type = 'escalation_message' "
+            "GROUP BY work_item_id)"
         ).fetchall()
         # `mr_ref` and the step's task: the same grouped-query trade as the
         # rest, so the list stays one pass instead of `_mr_ref`'s per-item scan.
@@ -265,14 +292,19 @@ async def list_work_items(request: Request):
         if g["type"] == "gate_requested"
     }
     boundary_by_item = {b["work_item_id"]: b for b in boundary_rows}
-    escalation_seq_by_item = {e["work_item_id"]: e["seq"] for e in escalation_rows}
+    escalation_by_item = {e["work_item_id"]: e for e in escalation_rows}
     mr_event_by_item = {e["work_item_id"]: json.loads(e["payload"]) for e in mr_event_rows}
     root_mr_by_item = {r["work_item_id"]: r["mr_ref"] for r in root_rows}
     task_by_item = {t["work_item_id"]: t["hook_point"] for t in task_rows}  # latest wins
 
     def _list_escalated(wid: str) -> bool:
-        boundary = boundary_by_item.get(wid)
-        return boundary is not None and escalation_seq_by_item.get(wid, -1) > boundary["seq"]
+        boundary, last = boundary_by_item.get(wid), escalation_by_item.get(wid)
+        return (
+            boundary is not None
+            and last is not None
+            and last["seq"] > boundary["seq"]
+            and _turn_live(last["session_status"], last["created_at"])
+        )
 
     chains = {r["id"]: store.chain_view(r) for r in rows}
     items = [
