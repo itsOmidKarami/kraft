@@ -209,7 +209,7 @@
   },
   "ux2-W8": {
     "title": "UX V2 review page and gate review",
-    "screens": ["ng-review"],
+    "screens": ["ng-review", "ng-gate-review"],
     "specs": ["sweep.spec.ts"],
     "rules": [
       { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(gate-)?review" },

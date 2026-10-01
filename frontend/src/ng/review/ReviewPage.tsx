@@ -11,6 +11,7 @@ import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
 import { DiffView, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
+import { GateReview } from "./GateReview";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
 import { byNodes, folders, unresolved } from "./model";
 import { parsePatch } from "./patch";
@@ -143,6 +144,22 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           {compare.state === "ready" && comments.elsewhere}
         </section>
       </div>
+      {place.doc && place.gate && item.pending_gate === place.gate && item.gate_artifact && (
+        <GateReview
+          item={item}
+          gate={place.gate}
+          files={files}
+          threads={threadList}
+          isViewed={viewed.isViewed}
+          approve={() => submit("approve", "")}
+          onReviewChanges={(file) => setPlace({ doc: false, ...(file && { file }) })}
+          onRequestChanges={() => {
+            setPlace({ doc: false });
+            setFinish({ outcome: "request_changes" });
+          }}
+          onClose={() => toItem({ sel: { kind: "chain" } })}
+        />
+      )}
       <BottomBar item={item} gate={place.gate} threads={threadList} onFinish={(outcome) => setFinish({ outcome })} submit={submit} />
       {finish && <FinishDialog item={item} gate={place.gate} threads={threadList} initial={finish.outcome} submit={submit} onClose={() => setFinish(null)} />}
     </div>

@@ -13,7 +13,8 @@ export function FileTree(p: {
   selected: string | null;
   isViewed: (path: string) => boolean;
   onSelect: (path: string) => void;
-  onViewed: (path: string, viewed: boolean) => void;
+  /** Absent: the marks are shown, not changed (the gate review's list). */
+  onViewed?: (path: string, viewed: boolean) => void;
   error: string | null;
 }) {
   const [filter, setFilter] = useState("");
@@ -52,9 +53,13 @@ export function FileTree(p: {
                 const n = open(f.path);
                 return (
                   <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}`}>
-                    <button type="button" className={`rv-viewed${v ? " is-on" : ""}`} aria-pressed={v} aria-label={`Viewed ${f.path}`} title={v ? "Viewed" : "Mark viewed"} onClick={() => p.onViewed(f.path, !v)}>
-                      {v ? "✓" : "○"}
-                    </button>
+                    {p.onViewed ? (
+                      <button type="button" className={`rv-viewed${v ? " is-on" : ""}`} aria-pressed={v} aria-label={`Viewed ${f.path}`} title={v ? "Viewed" : "Mark viewed"} onClick={() => p.onViewed!(f.path, !v)}>
+                        {v ? "✓" : "○"}
+                      </button>
+                    ) : (
+                      <span className={`rv-viewed${v ? " is-on" : ""}`} title={v ? "Viewed" : "Not viewed"} aria-label={v ? "viewed" : undefined}>{v ? "✓" : "○"}</span>
+                    )}
                     <button type="button" className="rv-file-name" aria-current={p.selected === f.path ? "true" : undefined} title={f.path} onClick={() => p.onSelect(f.path)}>
                       <span className="rv-mono">{f.path.slice(dir.length)}</span>
                       {p.notShown.has(f.path) && <span className="rv-muted"> not shown</span>}

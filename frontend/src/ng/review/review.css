@@ -1,6 +1,6 @@
 /* The review page and the gate review overlay (W8). Colours only from W1 tokens. */
 
-.review-page { display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; }
+.review-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; }
 .review-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Syntax (C.4): the five classes on W1 status tokens, so `auto` follows the
@@ -159,3 +159,26 @@
 .rv-outcome-text { display: flex; flex-direction: column; gap: 3px; }
 .rv-outcome-label { color: var(--text); font-weight: 500; font-size: 13px; }
 .rv-outcome-sub { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+/* Gate review overlay (prototype 292–321): a layer over the review page. */
+.rv-gate { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
+.rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.rv-gate-name { color: var(--text); font-size: 13px; }
+.rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
+.rv-gate-body { flex: 1 1 0; min-height: 0; display: flex; }
+.rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: 13.5px; line-height: 1.65; }
+.rv-gate-doc > .md { max-width: 760px; }
+.rv-gate-doc-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+.rv-gate-doc-title { color: var(--text); font-size: 16px; font-weight: 600; }
+.rv-gate-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
+.rv-gate-side-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 6px; font-size: 12px; color: var(--text-sub); }
+.rv-gate-side-head > span:first-child { font-size: 11px; letter-spacing: .06em; color: var(--text-muted); }
+.rv-gate-side > .rv-tree { flex: 1 1 0; width: auto; border-right: 0; }
+.rv-gate-side > .rv-tree .rv-tree-head { display: none; }
+.rv-gate-side-foot { padding: 10px 12px; border-top: 1px solid var(--line); }
+.rv-gate-side-foot .btn { width: 100%; justify-content: center; }
+@media (max-width: 1023px) {
+  .rv-gate-body { flex-direction: column; }
+  .rv-gate-doc { flex: 1 1 0; padding: 16px; }
+  .rv-gate-side { width: auto; flex: 0 1 45%; border-left: 0; border-top: 1px solid var(--line); }
+}

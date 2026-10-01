@@ -484,6 +484,9 @@ const CASES: Case[] = [
   { screen: "ng-review", variant: "finish", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: "Request changes" }).click(); } }) },
   { screen: "ng-review", variant: "finish-gateless", data: "default", widths: [1280], run: (c) => ngReview(c, { sc: "running", then: async (p) => { await p.getByRole("button", { name: "Finish review" }).click(); await p.getByText("Why this node").waitFor(); } }) },
   { screen: "ng-review", variant: "long", data: "long", widths: [1280, 1920], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
+  // The gate review overlay: the needs-gate item's document beside its changes (a draft pending, a must-fix open).
+  { screen: "ng-gate-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { tail: "?doc=1", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
+  { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
 
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },
