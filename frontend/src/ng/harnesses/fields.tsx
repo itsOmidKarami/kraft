@@ -4,9 +4,12 @@ export const PAUSE_MS = 800;
 
 /** A text field that commits on Enter, on blur and 800 ms after typing stops
  *  (the Chains pause rule); it follows the server's value while not focused.
- *  `changed` draws it amber until published. */
-export function ModelField({ label, value, suggestions = [], changed, onCommit, autoFocus }: {
+ *  `changed` draws it amber until published. An empty text is not committed
+ *  unless `clearable`: then it clears the value. */
+export function ModelField({ label, value, suggestions = [], changed, clearable, placeholder, onCommit, autoFocus }: {
   label: string;
+  clearable?: boolean;
+  placeholder?: string;
   value: string;
   suggestions?: string[];
   changed?: boolean;
@@ -26,7 +29,7 @@ export function ModelField({ label, value, suggestions = [], changed, onCommit, 
   const commit = (v: string) => {
     clearTimeout(timer.current);
     const next = v.trim();
-    if (next && next !== last.current) {
+    if ((next || clearable) && next !== last.current) {
       last.current = next;
       onCommit(next);
     }
@@ -38,6 +41,7 @@ export function ModelField({ label, value, suggestions = [], changed, onCommit, 
         id={id}
         className={`hn-input${changed ? " is-changed" : ""}`}
         spellCheck={false}
+        placeholder={placeholder}
         autoFocus={autoFocus}
         list={suggestions.length ? `${id}-s` : undefined}
         value={text}

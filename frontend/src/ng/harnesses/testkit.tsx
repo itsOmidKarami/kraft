@@ -67,7 +67,7 @@ export function view(r: Resolved, opts: { problems?: Problem[]; changes?: { path
 }
 
 export const STATUS = [
-  { id: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: ["sonnet", "opus", "haiku"], capabilities: { effort: { cli: ["--effort", "{value}"], values: [] } } },
+  { id: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: ["sonnet", "opus", "haiku"], capabilities: { effort: { cli: ["--effort", "{value}"], values: [] }, permission_mode: { cli: ["--permission-mode", "{value}"], values: ["default", "acceptEdits", "plan"] } } },
   { id: "codex", executable: "codex", executable_found: true, efforts: ["minimal", "low", "medium", "high"], models: [], capabilities: {} },
   { id: "cursor", executable: "cursor-agent", executable_found: true, efforts: [], models: [], capabilities: {} },
   { id: "gemini", executable: "gemini", executable_found: false, efforts: [], models: [], capabilities: {} },

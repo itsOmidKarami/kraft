@@ -5,6 +5,7 @@ import type { ConfigDraft } from "../templates/draft/useConfigDraft";
 import { problemText } from "../templates/problems";
 import { Segmented } from "../ui/Segmented";
 import { Button } from "../ui/Button";
+import { Switch } from "../ui/Switch";
 import { useState } from "react";
 import { ModelField } from "./fields";
 import { ACCESS, type Access, type EntryView, type HarnessView, type HProblem, type Resolved } from "./model";
@@ -75,6 +76,47 @@ export function AddEntry({ draft, profile, provider, status }: { draft: ConfigDr
   );
 }
 
+/** The harness's own fields (`set_harness`): enabled, executable and the defaults a launch applies when a task names none. */
+function HarnessFields({ draft, h, status, changed, onYaml }: { draft: ConfigDraft; h: HarnessView; status?: ProviderStatus; changed: boolean; onYaml?: (file: string) => void }) {
+  const { run, error } = useRun(draft);
+  const patch = (p: Record<string, unknown>) => void run({ op: "set_harness", id: h.id, patch: p });
+  const setDefault = (key: string, value: string) => patch({ defaults: { [key]: value || null } });
+  const efforts = status?.efforts ?? [];
+  const modes = status?.capabilities.permission_mode?.values ?? [];
+  const hasMode = !!status?.capabilities.permission_mode || !!h.defaults.permission_mode;
+  const mark = changed ? " is-changed" : "";
+  return (
+    <>
+      <div className="hn-field">
+        <span className="hn-field-label">enabled</span>
+        <div className="hn-switch-row">
+          <Switch checked={h.enabled} onChange={(enabled) => patch({ enabled })} label={`${h.enabled ? "Disable" : "Enable"} ${h.id}`} />
+          <span className={`hn-field-help${mark}`}>{h.enabled ? "enabled" : "disabled: a task selecting it stops for a human"}</span>
+        </div>
+      </div>
+      <ModelField label="executable" value={h.executable ?? ""} placeholder={status?.executable ?? "the provider's own"} changed={changed} clearable onCommit={(v) => patch({ executable: v || null })} />
+      <div className="hn-field"><p className="hn-field-help"><span className={`hn-chip${h.executable_found ? "" : " is-bad"}`}>{h.executable_found ? "found" : "not on PATH"}</span> provider {h.provider ?? "unknown"}</p></div>
+      <ModelField label="default model" value={h.defaults.model ?? ""} suggestions={status?.models} changed={changed} clearable onCommit={(v) => setDefault("model", v)} />
+      {(efforts.length > 0 || h.defaults.effort) && (
+        <div className="hn-field">
+          <span className="hn-field-label">default effort</span>
+          <Segmented label="Default effort" options={[{ value: "", label: "not set" }, ...efforts.map((e) => ({ value: e, label: e }))]} value={h.defaults.effort ?? ""} onChange={(v) => setDefault("effort", v)} />
+        </div>
+      )}
+      {hasMode && (modes.length > 0 ? (
+        <div className="hn-field">
+          <span className="hn-field-label">permission mode</span>
+          <Segmented label="Permission mode" options={[{ value: "", label: "not set" }, ...modes.map((m) => ({ value: m, label: m }))]} value={h.defaults.permission_mode ?? ""} onChange={(v) => setDefault("permission_mode", v)} />
+        </div>
+      ) : (
+        <ModelField label="permission mode" value={h.defaults.permission_mode ?? ""} changed={changed} clearable onCommit={(v) => setDefault("permission_mode", v)} />
+      ))}
+      {error && <p className="hn-error" role="alert">{error}</p>}
+      {onYaml && <Note><button type="button" className="hn-link" onClick={() => onYaml("harnesses.yaml")}>Edit in YAML</button> for the rest of the file.</Note>}
+    </>
+  );
+}
+
 /** The pane of one harness (Decisions §11 Harness selected): its fields, Access, what the provider accepts. */
 export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common & {
   h: HarnessView;
@@ -123,13 +165,7 @@ export function HarnessPane({ h, lane, onLane, onProfile, onYaml, ...c }: Common
       onExpand={c.onExpand}
     >
       <Head>Harness</Head>
-      <Kv k="enabled" v={h.enabled ? "yes" : "no"} mono />
-      <Kv k="provider" v={h.provider ?? "unknown"} mono />
-      <Kv k="executable" v={<>{h.executable ?? status?.executable ?? "the provider's own"} <span className={`hn-chip${h.executable_found ? "" : " is-bad"}`}>{h.executable_found ? "found" : "not on PATH"}</span></>} mono />
-      <Kv k="default model" v={h.defaults.model ?? "not set"} mono />
-      <Kv k="default effort" v={h.defaults.effort ?? "not set"} mono />
-      <Kv k="permission mode" v={h.defaults.permission_mode ?? "not set"} mono />
-      <Note>Read from harnesses.yaml. {onYaml ? <button type="button" className="hn-link" onClick={() => onYaml("harnesses.yaml")}>Edit in YAML</button> : null}</Note>
+      <HarnessFields draft={c.draft} h={h} status={status} changed={c.changes.has(`harnesses.${h.id}`)} onYaml={onYaml} />
 
       <Head>Access</Head>
       <div className="hn-field">

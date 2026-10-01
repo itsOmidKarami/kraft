@@ -327,3 +327,79 @@ def test_an_unset_escalation_harness_is_claude_so_never_on_claude_is_a_problem(c
 def test_the_effective_escalation_harness_follows_the_file(client):
     result = resolved(client, {"op": "set_escalation", "harness": "codex", "grants": None})
     assert result["resolved"]["escalation_effective"] == {"harness": "codex", "set": True}
+
+
+# ── set_harness (Kraft-9d8b2.15) ──
+
+
+def harness_entry(client, name="claude"):
+    return written(client, "harnesses.yaml")["harnesses"][name]
+
+
+def test_set_harness_writes_its_own_fields_and_merges_defaults(client):
+    """Mutate: have `set_harness` replace `defaults` instead of merging, and
+    claude's `model` is lost; or drop the `executable` branch, and it is never written."""
+    r = ops(
+        client,
+        {
+            "op": "set_harness",
+            "id": "claude",
+            "patch": {
+                "enabled": False,
+                "executable": " /opt/bin/claude ",
+                "defaults": {"effort": "high", "permission_mode": "plan"},
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert harness_entry(client) == {
+        "provider": "fake",
+        "enabled": False,
+        "executable": "/opt/bin/claude",
+        "defaults": {"model": "sonnet", "effort": "high", "permission_mode": "plan"},
+    }
+    ops(
+        client,
+        {
+            "op": "set_harness",
+            "id": "claude",
+            "patch": {"executable": None, "defaults": {"effort": None, "permission_mode": ""}},
+        },
+    )
+    assert harness_entry(client) == {
+        "provider": "fake",
+        "enabled": False,
+        "defaults": {"model": "sonnet"},
+    }
+    ops(client, {"op": "set_harness", "id": "claude", "patch": {"defaults": {"model": None}}})
+    assert "defaults" not in harness_entry(client)
+
+
+@pytest.mark.parametrize(
+    ("batch", "says"),
+    [
+        ({"id": "nope", "patch": {"enabled": True}}, "no harness 'nope'"),
+        ({"id": "claude", "patch": {}}, "mapping of the keys"),
+        ({"id": "claude", "patch": {"provider": "claude"}}, "a harness has"),
+        ({"id": "claude", "patch": {"enabled": "no"}}, "true or false"),
+        ({"id": "claude", "patch": {"executable": ""}}, "command name"),
+        ({"id": "claude", "patch": {"defaults": {"effort": 3}}}, "option to text"),
+    ],
+)
+def test_set_harness_refuses(client, batch, says):
+    r = ops(client, {"op": "set_harness", **batch})
+    assert r.status_code == 422 and says in r.json()["detail"], r.text
+
+
+def test_set_harness_shows_in_resolve_and_changes_and_a_bad_default_is_a_problem(client):
+    """Mutate: skip the `harnesses` section in the change list, and no `harnesses.claude`
+    change appears; a bad option value is reported by the table's own load."""
+    body = resolved(
+        client,
+        {"op": "set_harness", "id": "claude", "patch": {"enabled": False, "defaults": {"x": "y"}}},
+    )
+    view = next(h for h in body["resolved"]["harnesses"] if h["id"] == "claude")
+    assert view["enabled"] is False and view["defaults"] == {"model": "sonnet", "x": "y"}
+    change = next(c for c in body["changes"] if c["path"] == "harnesses.claude")
+    assert (change["kind"], change["fields"]) == ("change", ["defaults", "enabled"])
+    assert any("'x' is not a capability" in p["message"] for p in body["problems"])
