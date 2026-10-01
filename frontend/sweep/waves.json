@@ -219,5 +219,17 @@
       { "kind": "flow-completes", "match": "^flow-ng-review" },
       { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-(gate-)?review" }
     ]
+  },
+  "ux2-W10": {
+    "title": "UX V2 Chains editor: canvas, panes, drafts, publish; sidebar draft dots",
+    "screens": ["ng-chains", "ng-shell", "flow-ng-chain-add-node", "flow-ng-chain-publish"],
+    "specs": ["sweep.spec.ts", "interactions.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
+      { "kind": "no-console", "match": "^ng-" },
+      { "kind": "flow-completes", "match": "^flow-ng-chain-" }
+    ]
   }
 }

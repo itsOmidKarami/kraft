@@ -1,0 +1,4 @@
+/* The Templates areas (Chains first). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+.tpl-note { padding: 28px 24px; font-size: 12.5px; color: var(--text-sub); }
+.tpl-note h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; color: var(--text); }
+.tpl-page { position: relative; height: calc(100vh - 44px); overflow: hidden; }

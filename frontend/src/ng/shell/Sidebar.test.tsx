@@ -9,6 +9,7 @@ import { legacyPath } from "../legacyPath";
 import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 import { SIDEBAR_KEY } from "./sidebarPref";
+import * as drafts from "../templates/draft/draftApi";
 
 const ITEM: WorkItem = {
   id: "wi_1",
@@ -38,6 +39,7 @@ beforeEach(() => {
   delete document.documentElement.dataset.sidebar;
   vi.restoreAllMocks();
   vi.spyOn(api, "getHealth").mockResolvedValue(HEALTH as never);
+  vi.spyOn(drafts, "listDrafts").mockResolvedValue({ status: 200, body: [] });
   useStore.setState({ workItems: {}, sessionsByItem: {}, eventsByItem: {}, connection: "open" } as never);
 });
 
@@ -158,5 +160,29 @@ describe("ng Sidebar", () => {
       "href",
       legacyPath({ pathname: "/ng/templates/chains", search: "" }),
     );
+  });
+});
+
+describe("ng Sidebar draft dots", () => {
+  const draft = (area: "chains" | "library", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
+
+  it("marks an area with an open draft and counts its problems, from GET /drafts", async () => {
+    vi.mocked(drafts.listDrafts).mockResolvedValue({ status: 200, body: [draft("chains", "default", 0), draft("chains", "broken", 2), draft("library", "library", 0)] });
+    mount("/templates/chains/default");
+    const chains = await within(nav()).findByRole("link", { name: "Chains, unpublished draft, 2 problems" });
+    expect(chains).toHaveAttribute("aria-current", "page");
+    expect(chains.querySelector(".ng-side-count")).toHaveTextContent("2");
+    expect(chains.querySelector(".ng-side-mark.is-bad")).not.toBeNull();
+    const library = within(nav()).getByRole("link", { name: "Library, unpublished draft" });
+    expect(library.querySelector(".ng-side-count")).toBeNull();
+    expect(within(nav()).getByRole("link", { name: "Harnesses" }).querySelector(".ng-side-dot")).toBeNull();
+  });
+
+  it("reads the drafts again when one changes", async () => {
+    mount();
+    await within(nav()).findByRole("link", { name: "Chains" });
+    vi.mocked(drafts.listDrafts).mockResolvedValue({ status: 200, body: [draft("chains", "default", 1)] });
+    act(() => drafts.draftsChanged());
+    await within(nav()).findByRole("link", { name: "Chains, unpublished draft, 1 problem" });
   });
 });

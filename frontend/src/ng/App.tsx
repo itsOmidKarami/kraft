@@ -12,11 +12,13 @@ import { Placeholder } from "./shell/Placeholder";
 import { ROUTES } from "./shell/routes";
 import { Shell } from "./shell/Shell";
 import { SignIn } from "./shell/SignIn";
+import { ChainsIndex } from "./templates/ChainsIndex";
+import { ChainsPage } from "./templates/ChainsPage";
 import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/settings/appearance": <AppearancePage /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/settings/appearance": <AppearancePage />, "/templates/chains": <ChainsIndex /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);
@@ -38,6 +40,8 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           <Route path="/work-items/:id" element={<ItemPage />} />
           <Route path="/work-items/:id/nodes/:node" element={<ItemPage />} />
           <Route path="/work-items/:id/review" element={<ReviewPage />} />
+          <Route path="/templates/chains/:chain" element={<ChainsPage />} />
+          <Route path="/templates/chains/:chain/nodes/:node" element={<ChainsPage />} />
           <Route path="/_tokens" element={<TokenSheet />} />
           <Route path="*" element={<Placeholder label="Not found" note="There is no page at this address in the new UI." />} />
         </Route>

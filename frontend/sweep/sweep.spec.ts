@@ -178,7 +178,7 @@ async function ngComment(p: Page, text: string) {
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
   if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
   if (opts.docsError) await c.page.route("**/api/search*", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"index unavailable"}' }));
-  await ng(c, "/ng/templates/chains", {}, { side: "pinned" });
+  await ng(c, "/ng/settings/access", {}, { side: "pinned" });
   await c.page.keyboard.press("Control+k");
   const box = c.page.getByRole("combobox", { name: /search/i });
   await box.waitFor({ timeout: 4000 });
@@ -335,12 +335,12 @@ const CASES: Case[] = [
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
   { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
   // W2 A: an unbuilt page inside the shell.
-  { screen: "ng-shell", variant: "placeholder-chains", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}) },
+  { screen: "ng-shell", variant: "placeholder", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}) },
   // W2 B: the sidebar. Pinned and rail by stored choice; "revealed" is the pointer over the rail.
-  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
-  { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail" }) },
-  { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail", hover: true }) },
-  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}, { side: "rail" }) },
+  { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/access", {}, { side: "rail", hover: true }) },
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/settings/access", {}, { side: "pinned" }) },
   { screen: "ng-shell", variant: "long-crumb", data: "long", widths: [1024], run: (c) => ng(c, `/ng/work-items/${idOf(c.S, "gate")}`, {}, { side: "rail" }) },
   { screen: "ng-shell", variant: "actions", data: "default", widths: [1280], run: (c) => ng(c, "/ng/_tokens", {}, { side: "pinned" }) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
