@@ -1,0 +1,34 @@
+/* The phone board (W17 B). */
+.ph-offline { font-size: 12px; color: var(--warn); }
+.ph-pill { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 22px; background: transparent; font-size: 12.5px; color: var(--text-sub); cursor: pointer; }
+.ph-fab { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 22px; background: var(--text); color: var(--bg); }
+.ph-chips { flex: none; display: flex; gap: 8px; padding: 6px 16px 12px; overflow-x: auto; }
+.ph-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 22px; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
+.ph-chip.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.ph-chip-n { font-size: 11px; opacity: .7; }
+.ph-board { gap: 6px; padding-top: 0; }
+.ph-group { display: flex; flex-direction: column; gap: 6px; }
+.ph-group-head { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 12px 2px 2px; font-size: 12px; font-weight: 500; color: var(--text-sub); }
+.ph-group-head > span { font-weight: 400; color: var(--text-muted); }
+.ph-group-head.ph-is-hot { color: var(--warn); }
+.ph-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.ph-card-main { display: flex; flex-direction: column; gap: 9px; min-height: 44px; padding: 0; border: 0; background: transparent; text-align: left; color: inherit; cursor: pointer; }
+.ph-card-head { display: flex; gap: 10px; align-items: flex-start; }
+.ph-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ph-card-title { font-size: 14.5px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+.ph-card-meta { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-ticks { display: flex; align-items: center; gap: 2px; padding-left: 40px; }
+.ph-tick { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.ph-tick-done { background: var(--text-muted); }
+.ph-tick-current, .ph-tick-run { background: var(--info); }
+.ph-tick-hot { background: var(--warn); }
+.ph-tick-gate { flex: none; width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg); }
+.ph-card-tail { padding-left: 40px; font-size: 12.5px; color: var(--text-sub); overflow-wrap: anywhere; }
+.ph-card-tail.ph-is-hot { color: var(--warn); }
+.ph-card-actions { display: flex; gap: 8px; padding-left: 40px; }
+.ph-card-btn.btn { flex: 1; min-height: 44px; font-size: 14px; }
+.ph-card-error { margin: 0; padding-left: 40px; font-size: 12.5px; color: var(--bad); }
+.ph-more-row { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
+.ph-empty { margin: 24px 2px; font-size: 13.5px; color: var(--text-muted); }
+.ph-skeleton { display: flex; flex-direction: column; gap: 10px; }
+.ph-skeleton > span { height: 96px; border-radius: 12px; background: var(--surface); }

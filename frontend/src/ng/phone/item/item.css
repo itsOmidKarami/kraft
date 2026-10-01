@@ -1,0 +1,46 @@
+/* The phone item screen, composers and the chain list (W17 C). */
+.ph-item-top { display: flex; flex-direction: column; gap: 10px; }
+.ph-item-tagline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ph-tag { flex: none; padding: 3px 8px; border-radius: 5px; font: 600 10.5px system-ui, sans-serif; letter-spacing: .06em; border: 1px solid currentColor; background: transparent; color: var(--text-sub); }
+.ph-tag-info { color: var(--info); }
+.ph-tag-warn { color: var(--warn); }
+.ph-tag-bad { color: var(--bad); }
+.ph-tag-ok { color: var(--ok); }
+.ph-item-meta { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
+.ph-item-title { margin: 0; font-size: 21px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.ph-brief { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ph-brief.ph-is-open { -webkit-line-clamp: 20; }
+.ph-linkbtn { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; min-width: 44px; padding: 0; border: 0; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
+.ph-underline { text-decoration: underline; text-underline-offset: 3px; }
+.ph-add { color: var(--ok); }
+.ph-del { color: var(--bad); }
+.ph-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--text-sub); cursor: pointer; }
+
+.ph-statecard { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.ph-statecard.ph-tone-warn { border-color: color-mix(in oklab, var(--warn) 50%, transparent); background: color-mix(in oklab, var(--warn) 7%, var(--bg)); }
+.ph-statecard.ph-tone-bad { border-color: color-mix(in oklab, var(--bad) 50%, transparent); background: color-mix(in oklab, var(--bad) 7%, var(--bg)); }
+.ph-statecard.ph-tone-info { border-color: color-mix(in oklab, var(--info) 50%, transparent); background: color-mix(in oklab, var(--info) 7%, var(--bg)); }
+.ph-statecard.ph-tone-ok { border-color: color-mix(in oklab, var(--ok) 50%, transparent); }
+.ph-statecard-title { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.ph-statecard-where { margin: 0; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-statecard-text { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); overflow-wrap: anywhere; }
+
+.ph-ticks-flush { padding-left: 0; }
+.ph-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.ph-done-toggle { min-height: 44px; font-size: 13px; color: var(--text-sub); }
+.ph-node-row .ph-row-label { font-size: 13.5px; }
+.ph-mono { font-family: ui-monospace, Menlo, monospace; }
+.ph-tone-warn.ph-row-hint { color: var(--warn); }
+.ph-tone-info.ph-row-hint { color: var(--info); }
+.ph-tone-bad.ph-row-hint { color: var(--bad); }
+.ph-pillbadge { padding: 2px 7px; border-radius: 5px; font-size: 11px; color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
+.ph-chev { flex: none; color: var(--text-faint); }
+.ph-log-path { margin: 0; font: 12px ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
+
+.ph-composer-head { flex: none; display: flex; align-items: center; min-height: 48px; padding: 2px 8px 0; }
+.ph-composer-head .ph-back { padding: 0 10px; }
+.ph-composer-title { flex: 1; margin: 0; text-align: center; font-size: 15px; font-weight: 600; }
+.ph-composer-pad { width: 64px; }
+.ph-help { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); overflow-wrap: anywhere; }
+.ph-target { margin: 0; font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-error { margin: 0; font-size: 12.5px; color: var(--bad); overflow-wrap: anywhere; }

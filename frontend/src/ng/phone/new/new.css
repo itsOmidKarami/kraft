@@ -1,0 +1,8 @@
+.ph-new-title { min-height: 52px; font-size: 17px; font-weight: 600; }
+.ph-field { display: flex; flex-direction: column; gap: 6px; }
+.ph-field > span { font-size: 12px; color: var(--text-muted); }
+.ph-select { appearance: auto; }
+.ph-attaches { display: flex; gap: 8px; flex-wrap: wrap; }
+.ph-attach { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border: 1px dashed color-mix(in oklab, var(--ok) 60%, transparent); border-radius: 8px; background: transparent; font-size: 13px; color: var(--ok); cursor: pointer; }
+.ph-attach.ph-is-set { border-style: solid; color: var(--text-sub); max-width: 100%; }
+.ph-attach-path { min-width: 0; font: 12px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; text-align: left; }

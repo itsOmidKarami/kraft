@@ -5,15 +5,11 @@ import { createRoot } from "react-dom/client";
 import * as api from "../api";
 import { useStore } from "../store";
 import { App } from "./App";
-import { legacyPath } from "./legacyPath";
 import { startEvents } from "./session";
 import { applyInitialSidebar } from "./shell/sidebarPref";
 import { applyTheme, cachedLook, DEFAULT_LOOK, lookOf } from "./theme/applyTheme";
 
-// The shipped UI stays the phone experience until the phone wave (spec §2.6).
-const phone = matchMedia("(max-width: 767px)").matches;
-if (phone) location.replace(legacyPath(location));
-else void boot();
+void boot();
 
 // The shipped boot's order (../boot.tsx): public /health, then the theme
 // fetch as the session probe, then bootstrap and the event socket.

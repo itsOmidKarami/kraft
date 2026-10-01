@@ -1,0 +1,194 @@
+import { ChevronRight } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import type { KraftEvent, WorkItemDocument } from "../../../types";
+import { NodeGlyph } from "../../graph/NodeGlyph";
+import { act } from "../../item/actions";
+import { chainGraph, rejectTarget } from "../../item/graph";
+import { escalationsOf, ESCALATION, nodeGraph, stateWord } from "../../item/nodeGraph";
+import { stepsOf, taskName } from "../../item/paths";
+import { placeUrl, type Place } from "../../item/url";
+import type { ItemDetail } from "../../item/useItem";
+import { Button } from "../../ui/Button";
+import { LogLines } from "../log/LogLines";
+import { useLogs } from "../log/useLogs";
+import { PauseSheet } from "../item/PauseSheet";
+import { useDo } from "../item/useDo";
+import { nodeSub } from "../item/model";
+import { ConfirmSheet, useSheet } from "../nav/Sheet";
+import { ScreenHeader } from "../nav/ScreenHeader";
+import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
+import { nodeBar, overrideWords, reviewPath, type NodeAct } from "./model";
+import { Strip } from "./Strip";
+import "./node.css";
+
+export type NodeTab = "overview" | "log" | "config";
+const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
+const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
+
+export interface PlaceProps {
+  item: ItemDetail;
+  events: KraftEvent[];
+  docs: WorkItemDocument[];
+  place: Place;
+  node: string;
+  now: number;
+  reload: () => void;
+  setPlace: (patch: Partial<Place>) => void;
+}
+
+/** `/work-items/:id/nodes/:node` (W17 brief D): the strip, Overview / Log / Config, and the node's one pair. */
+export function NodeScreen({ item, events, docs, place, node: nodeId, now, reload, setPlace }: PlaceProps) {
+  const navigate = useNavigate();
+  const sheet = useSheet();
+  const { busy, run } = useDo(reload);
+  const api = item.chain_definition.nodes.find((n) => n.id === nodeId)!;
+  const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
+  const graph = nodes.find((n) => n.id === nodeId)!;
+  const gate = api.kind === "gate";
+  const sub = nodeSub(graph);
+  const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
+  const bar = nodeBar(item, api, graph);
+  const next = item.chain_definition.nodes[item.chain_definition.nodes.findIndex((n) => n.id === nodeId) + 1];
+  const { steps, side, loop } = useMemo(() => nodeGraph(item, api, now), [item, api, now]);
+  const paths = stepsOf(api).steps;
+  const escalations = escalationsOf(item, nodeId);
+  const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task } }));
+  const doc = docs.find((d) => d.path === item.gate_artifact);
+
+  const act1 = (a: NodeAct) => {
+    switch (a.id) {
+      case "pause": return sheet.open("pause");
+      case "skip": return sheet.open("skip");
+      case "retry-from": return sheet.open("rewind");
+      case "retry-node": return void run(act.retry(item.id, { path: nodeId }), `Retrying ${nodeId} from its first step.`);
+      case "review": return navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(nodeId)}`);
+    }
+  };
+  const btn = (a: NodeAct | null, primary: boolean) => a && <Button key={a.id} className={`ph-btn${primary ? " ph-btn-primary" : ""}`} variant={primary ? "primary" : "secondary"} disabled={busy} onClick={() => act1(a)}>{a.label}</Button>;
+
+  return (
+    <>
+      <ScreenHeader id={item.bead_id ?? item.id.slice(0, 8)} />
+      <Strip nodes={nodes} current={nodeId} onPick={(id) => setPlace({ node: id, sel: { kind: "node", node: id }, tab: undefined, attempt: undefined })} />
+      <div className="ph-content">
+        <div className="ph-node-head">
+          <h1 className="ph-node-title">{nodeId}</h1>
+          <p className={`ph-node-sub ph-tone-${sub.tone}`}>{gate ? "gate" : "exec node"} · {sub.text}</p>
+        </div>
+        <TabStrip label="Node" tabs={TABS} value={tab} onChange={(t) => setPlace({ tab: t === "overview" ? undefined : t })} />
+        {tab === "overview" && (
+          <>
+            <Facts rows={[
+              ["status", `${gate ? "gate" : "exec node"} · ${sub.text}`],
+              ...(gate
+                ? ([
+                    ...(doc ? [["document", <button key="d" type="button" className="ph-linkbtn ph-mono" onClick={() => navigate(`${placeUrl(item.id, { node: nodeId, sel: { kind: "node", node: nodeId } })}?doc=${encodeURIComponent(doc.document_id)}`)}>{doc.path.split("/").at(-1)}</button>]] as [string, React.ReactNode][] : []),
+                    ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
+                  ] as [string, React.ReactNode][])
+                : ([
+                    ...(api.fix_loop ? [["fix loop", <span key="f" className="ph-mono">{api.fix_loop}</span>]] : []),
+                    ...(api.on_failure?.length ? [["on failure", <span key="o" className="ph-mono">{api.on_failure.map(taskName).join(", ")}</span>]] : []),
+                  ] as [string, React.ReactNode][])),
+              ...(next ? ([["then", <button key="n" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: next.id, sel: { kind: "node", node: next.id } })}>{next.id}</button>]] as [string, React.ReactNode][]) : []),
+            ]} />
+            {gate && (
+              <Block title="Review path">
+                <ol className="ph-path">
+                  {reviewPath(item, api, events).map((r) => (
+                    <li key={r.title} className="ph-path-step">
+                      <span className="ph-path-title">{r.title}{r.chip && <span className={`ph-chip-word ph-tone-${r.chip.tone}`}>{r.chip.word}</span>}</span>
+                      <span className="ph-path-text">{r.text}</span>
+                    </li>
+                  ))}
+                </ol>
+              </Block>
+            )}
+            {!gate && steps.map((st, i) => (
+              <Block key={st.id} title={`${st.id}${st.tasks.length > 1 ? ` · ${st.tasks.length} tasks in parallel` : ""}`}>
+                <div className="ph-list">
+                  {st.tasks.map((t, j) => (
+                    <button key={t.id} type="button" className="ph-row ph-task-row" onClick={() => openTask(st.id, t.id)}>
+                      <NodeGlyph kind="exec" size="sm" state={t.state} taskKind={t.taskKind} running={t.running} paused={t.paused} attempt={t.attempt} attemptStopped={t.attemptStopped} />
+                      <span className="ph-row-text">
+                        <span className="ph-row-label ph-mono">{taskName(paths[i]?.tasks[j] ?? t.id)}</span>
+                        <span className="ph-row-hint">{t.meta ?? stateWord(t.state)}</span>
+                      </span>
+                      <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </Block>
+            ))}
+            {!gate && (side || loop) && (
+              <Block title="Handlers">
+                <div className="ph-list">
+                  {loop && <div className="ph-row"><span className="ph-row-text"><span className="ph-row-label ph-mono">fix loop</span><span className="ph-row-hint">{loop.label}</span></span></div>}
+                  {side && (
+                    <button type="button" className="ph-row ph-task-row" onClick={() => openTask(ESCALATION, ESCALATION)}>
+                      <NodeGlyph kind="exec" size="sm" state={side.state} icon="siren" />
+                      <span className="ph-row-text"><span className="ph-row-label ph-mono">escalation</span><span className="ph-row-hint">{side.meta}{escalations.length > 1 ? ` · ${escalations.length} turns` : ""}</span></span>
+                      <ChevronRight size={16} className="ph-chev" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              </Block>
+            )}
+          </>
+        )}
+        {tab === "log" && <NodeLog item={item} node={nodeId} />}
+        {tab === "config" && (
+          <>
+            <Facts rows={[
+              ["chain", `${item.chain_template} · frozen at intake`],
+              ...(api.fix_loop ? ([["fix loop", <span key="f" className="ph-mono">{api.fix_loop}</span>]] as [string, React.ReactNode][]) : []),
+              ["on failure", api.on_failure?.length ? api.on_failure.map(taskName).join(", ") : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
+              ["overrides", overrideWords(item, nodeId) ? `${overrideWords(item, nodeId)} · changed for this item` : "none"],
+            ]} />
+            <p className="ph-note">{overrideWords(item, nodeId) ? "An override applies to this item only. The chain file is unchanged." : "No item override on this node."}</p>
+          </>
+        )}
+      </div>
+      {(bar.secondary || bar.primary) && <ActionBar>{btn(bar.secondary, false)}{btn(bar.primary, true)}</ActionBar>}
+      {sheet.is("pause") && <PauseSheet item={item} node={nodeId} sheet={sheet} reload={reload} />}
+      {sheet.is("skip") && (
+        <ConfirmSheet
+          title={`Skip ${nodeId}?`}
+          text="The node is marked skipped without running. The chain carries on at the next node."
+          busy={busy}
+          confirm={{ label: "Skip node", run: async () => { const r = await run(act.skip(item.id, nodeId), `Skipped ${nodeId}.`); if (r.ok) sheet.close(); } }}
+          onClose={sheet.close}
+        />
+      )}
+      {sheet.is("rewind") && (
+        <ConfirmSheet
+          title={`Retry from ${nodeId}?`}
+          text={`The item rewinds to ${nodeId} and runs it again from its first step. Every node after it runs again afterwards.`}
+          busy={busy}
+          confirm={{ label: "Rewind and retry", danger: true, run: async () => { const r = await run(act.retry(item.id, { path: nodeId }), `Rewound to ${nodeId}.`); if (r.ok) sheet.close(); } }}
+          onClose={sheet.close}
+        />
+      )}
+    </>
+  );
+}
+
+/** Every task's latest attempt on the node, one list, a task after the other. */
+function NodeLog({ item, node }: { item: ItemDetail; node: string }) {
+  const [src, setSrc] = useState<(typeof SOURCES)[number]>("all");
+  const latest = new Map<string, ItemDetail["worker_sessions"][number]>();
+  for (const s of item.worker_sessions.filter((x) => x.node_id === node).sort((a, b) => a.created_at.localeCompare(b.created_at))) latest.set(s.hook_point, s);
+  const sessions = [...latest.values()].map((s) => ({ id: s.id, who: taskName(s.hook_point), running: s.status === "running" || s.status === "pending" }));
+  const lines = useLogs(sessions);
+  const shown = (lines ?? []).filter((l) => src === "all" || l.src === src);
+  return (
+    <>
+      <div className="ph-chips ph-chips-inline" role="group" aria-label="Sources">
+        {SOURCES.map((s) => <button key={s} type="button" className={`ph-chip${src === s ? " ph-is-on" : ""}`} aria-pressed={src === s} onClick={() => setSrc(s)}>{s}</button>)}
+        <span className="ph-spacer" />
+        <span className="ph-count">{lines ? `${lines.length} lines` : "Reading…"}</span>
+      </div>
+      <LogLines lines={shown} empty="No lines to show. Clear the filter, or the node has not started." />
+    </>
+  );
+}
