@@ -1947,7 +1947,7 @@ async def run_once(
                     await _report_if_undelivered(db, work_item_id, carried)
                     await db.write(
                         lambda c, node_id=anchor, why=reason: store.mark_needs_human(
-                            c, work_item_id, node_id, why
+                            c, work_item_id, node_id, why, kind="config"
                         )
                     )
                     return "needs_human"

@@ -128,3 +128,4 @@ async def test_a_walk_whose_place_left_the_chain_stops_for_a_person(item_on, scr
     assert script.calls == ["a"]
     [stop] = it.events("work_item_needs_human")
     assert "'first'" in stop["payload"]["reason"] and where in stop["payload"]["reason"]
+    assert stop["payload"]["kind"] == it.row()["stop_kind"] == "config"
