@@ -9,6 +9,7 @@ import { Menu, type MenuItem } from "../../ui/Menu";
 import { Popover } from "../../ui/Popover";
 import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
+import { DraftState, ReviewButton } from "../draft/DraftBar";
 import { actionPath } from "../paths";
 import { archivable, headerState, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
@@ -108,7 +109,10 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
 
   const endedAt = ended ? item.updated_at : null;
   return (
+    <>
+    <DraftState />
     <HeaderActions>
+      <ReviewButton />
       {others > 0 && (
         // The /ng board (W6 makes it the landing page; its stub renders until then).
         <Link className="item-others" to="/">
@@ -131,5 +135,6 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
       {escalating && <EscalateDialog id={item.id} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
       {completing && <CompleteDialog id={item.id} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); }} />}
     </HeaderActions>
+    </>
   );
 }

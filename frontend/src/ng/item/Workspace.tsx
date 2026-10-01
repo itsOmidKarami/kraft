@@ -11,6 +11,10 @@ import { GateView } from "../graph/GateView";
 import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
 import { paneReducer, type PaneAction, type PaneState, type Sel } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
+import { AddNodeMenu } from "./draft/AddNodeMenu";
+import { useDraft } from "./draft/context";
+import { useApplied } from "./draft/useApplied";
+import { markNodes, markSteps } from "./draft/draftGraph";
 import { chainGraph } from "./graph";
 import { DocViewer } from "./DocViewer";
 import { gateView } from "./gateView";
@@ -34,12 +38,15 @@ export const usePaneMemory = create<{ pane: { open: boolean; userCollapsed: bool
 /** The canvas and its side pane. The URL holds where the person is (node
  *  view, selection, tab, attempt: spec §6.2); this keeps only whether the pane
  *  is open, which survives moving between items within a session. */
-export function Workspace({ item, reload }: { item: ItemDetail; reload: () => void }) {
+export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () => void }) {
+  const draft = useDraft();
+  const item = draft?.shown ?? raw;
   const navigate = useNavigate();
   const { node: nodeParam } = useParams();
   const [search] = useSearchParams();
   const nodes = item.chain_definition.nodes ?? [];
   const place = readPlace(nodeParam, search, nodes);
+  const applied = useApplied(item.id, item.updated_at, place.tab === "config");
   const { pane: pane_, setPane } = usePaneMemory();
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
@@ -50,6 +57,7 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
+  const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -86,7 +94,11 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     return () => cancelAnimationFrame(f);
   }, [place.node]);
 
-  const graph = useMemo(() => chainGraph(item, events, now), [item, events, now]);
+  const marks = useMemo(() => ({ view: draft?.draft.view ?? null, pending: draft?.draft.pending ?? null, own: new Set(raw.chain_definition.nodes.map((n) => n.id)) }), [draft?.draft.view, draft?.draft.pending, raw]);
+  const graph = useMemo(() => {
+    const g = chainGraph(item, events, now);
+    return draft ? { ...g, nodes: markNodes(g.nodes, marks) } : g;
+  }, [item, events, now, draft, marks]);
   const selectedNode = place.sel.kind === "chain" ? undefined : place.sel.node;
   const reserve = size.overlay ? 0 : pane_.open ? size.width : 40;
   const cover = size.overlay && pane_.open ? size.width : 0;
@@ -102,9 +114,12 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     setAttempt: (attempt) => go({ ...place, attempt }),
     onDoc: setDoc,
     onArtifact: () => setArtifact(true),
+    canEdit: draft?.editable,
+    applied,
   });
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
-  const inside = viewing && nodeGraph(item, viewing, now);
+  const plain = viewing && nodeGraph(item, viewing, now);
+  const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
   return (
@@ -137,6 +152,8 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
             name={item.chain_template}
             nodes={graph.nodes}
             arcs={graph.arcs(selectedNode)}
+            seams={draft?.seams}
+            onSeam={draft ? (at, seam) => setAdding({ at, seam }) : undefined}
             selected={selectedNode}
             opening={openingView(item.display_status ?? "", hasCurrent)}
             reserve={reserve}
@@ -170,6 +187,7 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
           {pane.body}
         </Inspector>
       </div>
+      {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
       {doc && <DocViewer source={{ kind: "document", id: doc.document_id, by: [doc.node_id, doc.hook_point?.split(".").at(-1), doc.attempt ? `attempt ${doc.attempt}` : ""].filter(Boolean).join(" › ") }} onClose={() => setDoc(null)} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id }} onClose={() => setArtifact(false)} />}
     </div>

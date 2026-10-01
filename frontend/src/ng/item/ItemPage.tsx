@@ -3,6 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { Banner, QuestionCard } from "./Banner";
+import { ItemDraftProvider } from "./draft/context";
+import { LeaveGuard } from "./draft/LeaveDialog";
+import { ReviewDialog } from "./draft/ReviewDialog";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
 import { PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title } from "./Top";
@@ -25,7 +28,13 @@ export function ItemPage() {
   if (loaded.state === "loading") return <div className="item-page" aria-busy="true" />;
   if (loaded.state === "missing")
     return <Placeholder label="Work item not found" note={`There is no work item ${id}. It may have been removed.`} />;
-  return <Item item={loaded.item} reload={loaded.reload} />;
+  return (
+    <ItemDraftProvider item={loaded.item} reload={loaded.reload}>
+      <Item item={loaded.item} reload={loaded.reload} />
+      <ReviewDialog />
+      <LeaveGuard />
+    </ItemDraftProvider>
+  );
 }
 
 function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {

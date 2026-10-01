@@ -5,6 +5,10 @@ import type { ChainNode as GraphNode } from "../../graph/layout";
 import type { Sel } from "../../graph/usePaneSelection";
 import type { TaskKind } from "../../icons";
 import { act } from "../actions";
+import type { Applied } from "../draft/applied";
+import { AppliedRows } from "../draft/AppliedRows";
+import { DraftConfig } from "../draft/DraftConfig";
+import { DraftNotes } from "../draft/DraftNotes";
 import { ESCALATION, escalationsOf, footerState, isEscalation, lookWord, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
@@ -37,6 +41,10 @@ export type PaneArgs = {
   onDoc: (d: WorkItemDocument) => void;
   /** Open the pending gate's document (GET /artifact). */
   onArtifact: () => void;
+  /** Whether the item draft may override this node (W11): true only after the node the run stands on. */
+  canEdit?: (node: string) => boolean;
+  /** What applied drafts set, by path (W11): shown in Config as "changed for this item". */
+  applied?: Record<string, Applied>;
 };
 export type PaneContent = {
   crumbs: { label: string; onClick?: () => void }[];
@@ -66,9 +74,14 @@ export function paneContent(a: PaneArgs): PaneContent {
       title: item.chain_template,
       sub: `this item's chain · ${item.chain_definition.nodes.length} nodes · frozen at intake`,
       tabs: OVERVIEW_CONFIG,
-      body: a.tab === "config"
-        ? <ChainConfig item={item} policy={a.policy} reload={a.reload} editBudget={a.editBudget} onEditBudget={a.setEditBudget} />
-        : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} />,
+      body: (
+        <>
+          <DraftNotes />
+          {a.tab === "config"
+            ? <ChainConfig item={item} policy={a.policy} reload={a.reload} editBudget={a.editBudget} onEditBudget={a.setEditBudget} applied={a.applied} />
+            : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} />}
+        </>
+      ),
     };
   const node = item.chain_definition.nodes.find((n) => n.id === sel.node)!;
   if (sel.kind === "node" && node.kind === "gate") {
@@ -97,9 +110,14 @@ export function paneContent(a: PaneArgs): PaneContent {
     // A node the run stands on but that isn't running says why ("needs you", "paused").
     sub: `${node.kind === "gate" ? "gate" : "exec"} node · ${drawn?.state === "current" && !live && drawn.sub ? drawn.sub : stateWord(drawn?.state)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
     tabs: OVERVIEW_CONFIG,
-    body: a.tab === "config"
-      ? <NodeConfig item={item} node={node} onReset={async () => { const r = await act.patch(item.id, { node_overrides: { [node.id]: {} } }); if (r.ok) a.reload(); }} />
-      : <NodeOverview item={item} node={node} onStep={(step) => a.pick({ kind: "step", node: node.id, step })} onNode={(n) => a.pick({ kind: "node", node: n })} />,
+    body: (
+      <>
+        <DraftNotes node={node.id} />
+        {a.tab === "config"
+          ? <><NodeConfig item={item} node={node} onReset={async () => { const r = await act.patch(item.id, { node_overrides: { [node.id]: {} } }); if (r.ok) a.reload(); }} /><AppliedRows applied={a.applied} path={node.id} /><DraftConfig path={node.id} /></>
+          : <NodeOverview item={item} node={node} onStep={(step) => a.pick({ kind: "step", node: node.id, step })} onNode={(n) => a.pick({ kind: "node", node: n })} />}
+      </>
+    ),
     footer: footerOf(item, node.id, "node", footerState(item, sessions), a.reload),
   };
 }
@@ -123,9 +141,13 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     sub: `step ${k + 1} of ${steps.length}`,
     tabs: OVERVIEW_CONFIG,
     body: a.tab === "config" ? (
-      <dl className="item-facts ip-facts">
-        {step.tasks.map((p) => <div key={p}><dt>task</dt><dd className="is-mono">{p}</dd></div>)}
-      </dl>
+      <>
+        <dl className="item-facts ip-facts">
+          {step.tasks.map((p) => <div key={p}><dt>task</dt><dd className="is-mono">{p}</dd></div>)}
+        </dl>
+        <AppliedRows applied={a.applied} path={`${node.id}.${stepId}`} />
+        <DraftConfig path={`${node.id}.${stepId}`} />
+      </>
     ) : (
       <>
         <dl className="item-facts ip-facts">
@@ -170,7 +192,16 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
   const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task · ${look.running ? (look.meta ?? "running") : lookWord(look)}` };
-  if (!at) return { ...head, body: <p className="item-muted">Not started. Its tabs fill in once it runs.</p>, footer: undefined };
+  if (!at) {
+    // A task that has not run has only its Config, and only while the draft may override it (W11).
+    const edit = !esc && !!a.canEdit?.(node.id);
+    return {
+      ...head,
+      tabs: edit ? OVERVIEW_CONFIG : undefined,
+      body: edit && a.tab === "config" ? <DraftConfig path={path} /> : <p className="item-muted">Not started. Its tabs fill in once it runs.</p>,
+      footer: undefined,
+    };
+  }
   const current = item.current_node_id === node.id;
   const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={a.setAttempt} now={a.now} />;
   const bodies: Record<string, ReactNode> = {
@@ -179,7 +210,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
     log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} />,
-    config: <TaskConfig path={path} s={at} />,
+    config: <><TaskConfig path={path} s={at} /><AppliedRows applied={a.applied} path={path} /></>,
   };
   const live = sessions.some((s) => ["running", "pending"].includes(s.status));
   return {

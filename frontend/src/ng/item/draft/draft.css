@@ -1,0 +1,44 @@
+/* The item draft (W11): the header state, passed and problem blocks, the review and leave dialogs. */
+.idr-chip { flex: none; margin-left: 4px; padding: 0; border: 0; background: none; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); cursor: pointer; }
+.idr-chip:is(:hover, :focus-visible) { text-decoration: underline; }
+.idr-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
+.idr-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
+
+.idr-add-id { padding: 8px; min-width: 280px; }
+.idr-hint { color: var(--text-muted); }
+
+/* Review & apply (Decisions §5) */
+.idr-review { width: min(540px, 100%); }
+.idr-sub, .idr-note { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.idr-note { margin: 10px 0 0; font-size: 11.5px; }
+.idr-probs { margin: 0 0 10px; padding: 6px; list-style: none; border-radius: 8px; border-left: 2px solid var(--bad); background: color-mix(in oklab, var(--bad) 8%, transparent); }
+.idr-prob { display: block; width: 100%; padding: 3px 6px; border: 0; border-radius: 5px; background: none; text-align: left; font-size: 12px; color: var(--text); cursor: pointer; }
+.idr-prob:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
+.idr-lines { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); font: 12px/1.7 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-sub); }
+.idr-line.is-add { color: var(--ok); }
+.idr-line.is-change { color: var(--warn); }
+.idr-line.is-remove { color: var(--bad); }
+.idr-h { margin: 0 0 4px; font-size: 11.5px; color: var(--text-muted); }
+.idr-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.idr-checks .is-ok { color: var(--ok); }
+.idr-checks .is-bad { color: var(--bad); }
+.idr-moved { margin: 10px 0 0; font-size: 12px; color: var(--bad); }
+.idr-ask { flex: 1; align-self: center; font-size: 12px; color: var(--text-sub); }
+.idr-danger { border-color: var(--bad); color: var(--bad); }
+.idr-left { margin-right: auto; }
+
+/* Problems and passed edits in a pane */
+.idr-issue { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; border-left: 2px solid var(--bad); background: color-mix(in oklab, var(--bad) 8%, transparent); }
+.idr-issue-op { margin: 0 0 2px; font-size: 11.5px; color: var(--text); overflow-wrap: anywhere; }
+.idr-issue-msg { margin: 0 0 6px; font-size: 12px; line-height: 1.5; color: var(--text); }
+.idr-issue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.idr-added { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.idr-added-line { flex: 1 1 auto; margin: 0; font-size: 12px; color: var(--text-sub); }
+
+/* Under 1280 the header is crowded: the chip gives way to the count on the Review button, and the badge shortens; names stay whole (aria-label). */
+.idr-short { display: none; }
+@media (max-width: 1279px) {
+  .idr-chip { display: none; }
+  .idr-full { display: none; }
+  .idr-short { display: inline; }
+}
