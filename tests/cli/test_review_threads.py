@@ -167,3 +167,34 @@ def test_view_compare_forwards_targets_and_stats_the_files(app, monkeypatch, cap
     cli.main(["view", "compare", "w1", "--from", "attempt:1", "--to", "latest", "--stat"])
     out = capsys.readouterr().out
     assert "attempt:1 -> latest" in out and "a.py" in out and "implementation" in out
+
+
+@pytest.mark.parametrize("verb, fn", [("compare", "compare"), ("diff", "diff")])
+def test_view_ignore_whitespace_reaches_the_client_only_when_asked(app, monkeypatch, verb, fn):
+    seen = []
+
+    async def fake(*args, **kwargs):
+        seen.append(kwargs.get("ignore_whitespace", False))
+        return {"files": [], "diff": "", "untracked": [], "truncated": False, "base_ref": "a"}
+
+    monkeypatch.setattr(client, fn, fake)
+    for flag in ([], ["--ignore-whitespace"], ["-w"]):
+        cli.main(["view", verb, "w1", "--name-only", *flag])
+    assert seen == [False, True, True]
+
+
+def test_client_sends_ignore_whitespace_only_when_set(monkeypatch):
+    import asyncio
+
+    sent = []
+
+    async def fake_get(path, **params):
+        sent.append((path, params.get("ignore_whitespace")))
+        return {}
+
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    asyncio.run(client.compare("w1", ignore_whitespace=True))
+    asyncio.run(client.compare("w1"))
+    asyncio.run(client.diff("w1", ignore_whitespace=True))
+    asyncio.run(client.diff("w1"))
+    assert [v for _, v in sent] == [True, None, True, None]

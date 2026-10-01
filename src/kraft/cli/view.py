@@ -231,8 +231,12 @@ def _render_docs(rows: list[dict]) -> str:
     return render.table(rows, _DOC_COLUMNS)
 
 
+def _ws(ns: argparse.Namespace) -> dict:
+    return {"ignore_whitespace": True} if ns.ignore_whitespace else {}
+
+
 def _cmd_diff(ns: argparse.Namespace) -> None:
-    payload = asyncio.run(client.diff(ns.id))
+    payload = asyncio.run(client.diff(ns.id, **_ws(ns)))
     if ns.json:
         common.emit(payload, str, True)
         return
@@ -265,7 +269,7 @@ def _cmd_threads(ns: argparse.Namespace) -> None:
 
 
 def _cmd_compare(ns: argparse.Namespace) -> None:
-    payload = asyncio.run(client.compare(ns.id, ns.from_, ns.to, ns.nodes))
+    payload = asyncio.run(client.compare(ns.id, ns.from_, ns.to, ns.nodes, **_ws(ns)))
     if ns.json:
         common.emit(payload, str, True)
         return
@@ -359,6 +363,9 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     diff.add_argument("id", nargs="?")
     diff.add_argument("--stat", action="store_true", help="per-file counts only")
     diff.add_argument("--name-only", action="store_true", help="changed and untracked paths")
+    diff.add_argument(
+        "--ignore-whitespace", "-w", action="store_true", help="leave out whitespace-only changes"
+    )
     diff.add_argument("--no-pager", action="store_true")
     diff.set_defaults(func=_cmd_diff)
 
@@ -378,6 +385,9 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     compare.add_argument("--nodes", help="comma-separated node ids: only files they touched")
     compare.add_argument("--stat", action="store_true", help="per-file counts only")
     compare.add_argument("--name-only", action="store_true", help="changed and untracked paths")
+    compare.add_argument(
+        "--ignore-whitespace", "-w", action="store_true", help="leave out whitespace-only changes"
+    )
     compare.add_argument("--no-pager", action="store_true")
     compare.set_defaults(func=_cmd_compare)
 

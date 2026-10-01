@@ -287,7 +287,11 @@ def test_submit_review_says_only_a_human_should_decide():
     "tool, client_fn, args",
     [
         ("list_threads", "threads", {"work_item_id": "w1", "open_only": True}),
-        ("compare_changes", "compare", {"work_item_id": "w1", "from_": "base", "to": "latest"}),
+        (
+            "compare_changes",
+            "compare",
+            {"work_item_id": "w1", "from_": "base", "to": "latest", "ignore_whitespace": True},
+        ),
         (
             "add_review_comment",
             "add_review_comment",

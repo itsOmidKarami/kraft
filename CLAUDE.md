@@ -67,7 +67,7 @@ kraft item mr-label LABEL...                # label this item's merge request
 kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked
-kraft view compare [ID] --from T --to T [--nodes a,b] [--stat|--name-only]  # T: base|attempt:N|last_review|latest
+kraft view compare [ID] --from T --to T [--nodes a,b] [--stat|--name-only] [-w]  # T: base|attempt:N|last_review|latest
 kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new]] [--label must-fix|question|nit] [--suggest "..."]
 kraft item comment --reply THREAD --body "..."
 kraft item resolve THREAD / kraft item reopen THREAD
@@ -76,7 +76,7 @@ kraft view search "query"
 kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
 kraft view events [ID] [--after N] [--type T]
 kraft view watch                            # live board, needs a terminal
-kraft view diff [ID] [--stat|--name-only]   # truncation and untracked always shown
+kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown
 kraft view docs [ID] / kraft view doc DOC_ID [--open [EDITOR]]
 kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in

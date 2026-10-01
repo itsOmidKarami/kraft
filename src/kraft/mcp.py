@@ -360,11 +360,13 @@ def build() -> MCPServer:
         from_: str = "base",
         to: str = "latest",
         nodes: str | None = None,
+        ignore_whitespace: bool = False,
     ) -> dict:
         """Diff two review targets of a Kraft work item: base, attempt:N (needs a
         pending gate), last_review, or latest (the working tree). `nodes` limits
-        the diff to files those node ids touched, comma-separated."""
-        return await client.compare(work_item_id, from_, to, nodes)
+        the diff to files those node ids touched, comma-separated.
+        `ignore_whitespace` leaves out whitespace-only changes."""
+        return await client.compare(work_item_id, from_, to, nodes, ignore_whitespace)
 
     @server.tool()
     async def add_review_comment(
