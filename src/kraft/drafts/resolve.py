@@ -19,6 +19,7 @@ import yaml
 from kraft import config as config_mod
 from kraft.api import config_check, deps
 from kraft.api.routes import settings
+from kraft.drafts import authored
 from kraft.store import ENDED
 from kraft.templates import positions
 from kraft.templates.library import (
@@ -50,11 +51,14 @@ def resolve(
     history: Sequence[dict] = (),
     serialized: Sequence[str] = (),
 ) -> dict:
+    # `raw` is what the checks validate; `model`, the same text with the
+    # shorthand normalised, is what the canvas and the ops address.
+    raw: dict[str, object] = {}
     model: dict[str, object] = {}
     yaml_error = None
     for name, text in files.items():
         try:
-            model[name] = _load(text)
+            raw[name] = authored.parse(text)
         except yaml.YAMLError as exc:
             line, col = positions.yaml_mark(exc) or (1, 1)
             yaml_error = yaml_error or {
@@ -63,7 +67,9 @@ def resolve(
                 "col": col,
                 "message": getattr(exc, "problem", None) or str(exc),
             }
-            model[name] = _last_valid(name, history, published)
+            text = _last_valid(name, history, published)
+            raw[name] = authored.parse(text)
+        model[name] = authored.load(text)
     result = {
         "model": model,
         "resolved": None,
@@ -76,31 +82,24 @@ def resolve(
             for f in serialized
             if _COMMENT.search(published.get(f) or "")
         ],
-        **_AREAS[area](st, key, model, files, published),
+        **_AREAS[area](st, key, raw, files, published),
     }
     if yaml_error is not None:
         result["yaml_error"] = yaml_error
     return result
 
 
-def _load(text: str | None) -> object:
-    """Raises `yaml.YAMLError`."""
-    if text is None:
-        return None
-    data = yaml.safe_load(text)
-    return {} if data is None else data
-
-
-def _last_valid(name: str, history, published) -> object:
-    """The newest undo entry whose text for `name` parses, else the published
-    file (Decisions §9: keep the last valid model). An entry without `name`
+def _last_valid(name: str, history, published) -> str | None:
+    """The newest undo entry's text for `name` that parses, else the published
+    file's (Decisions §9: keep the last valid model). An entry without `name`
     held its published text."""
     texts = [e["files"].get(name, published.get(name)) for e in reversed(history)]
     for text in (*texts, published.get(name)):
         try:
-            return _load(text)
+            authored.parse(text)
         except yaml.YAMLError:
             continue
+        return text
     return None
 
 
@@ -148,13 +147,13 @@ def _expand(library: TemplateLibrary | None, path: Path, key: str, data: object)
         return data, resolution
 
 
-def _chains(st, key: str, model: dict, files: dict, published: dict) -> dict:
+def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
     name = f"chains/{key}.yaml"
     path = st.templates_dir / name
     library = getattr(st, "library", None)
-    data = model.get(name)
+    data = raw.get(name)
     try:
-        before = _load(published.get(name))
+        before = authored.parse(published.get(name))
     except yaml.YAMLError:
         before = None
     before, _ = _expand(library, path, key, before)
@@ -328,10 +327,10 @@ def changes(before: dict[str, dict], after: dict[str, dict]) -> list[dict]:
 # ── the library ──
 
 
-def _library(st, key: str, model: dict, files: dict, published: dict) -> dict:
+def _library(st, key: str, raw: dict, files: dict, published: dict) -> dict:
     """`library.yaml` alone (F adds the chains it pulls in, used-by paths and
     the change list): its problems, which are the library save's own."""
-    data = model.get(LIBRARY_FILE)
+    data = raw.get(LIBRARY_FILE)
     if not isinstance(data, dict):
         return {"problems": [_not_a_mapping(LIBRARY_FILE)]}
     path = st.templates_dir / LIBRARY_FILE

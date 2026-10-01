@@ -7,9 +7,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-import yaml
 
-from kraft.drafts import resolve
+from kraft.drafts import authored, resolve
 from kraft.templates.library import TemplateLibrary
 
 CHAIN = "chains/scratch.yaml"
@@ -52,7 +51,7 @@ async def test_a_yaml_error_keeps_the_newest_model_that_parses(st):
     good = SCRATCH.replace("id: run", "id: kept")
     history = [{"files": {CHAIN: good}}, {"files": {CHAIN: "nodes: [\n"}}]
     result = scratch(st, "id: scratch\nnodes:\n  - {id: [\n", published=SCRATCH, history=history)
-    assert result["model"][CHAIN] == yaml.safe_load(good)
+    assert result["model"][CHAIN] == authored.load(good)
     assert result["yaml_error"]["file"] == CHAIN
     assert (result["yaml_error"]["line"], result["yaml_error"]["col"]) == (4, 1)
 
