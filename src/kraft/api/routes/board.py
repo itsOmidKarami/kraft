@@ -692,6 +692,23 @@ async def get_fix_target(
     }
 
 
+def budget_cap(st, row) -> dict:
+    """The item's effective dollar cap, where it comes from, its spend, and the
+    instance's spend today against the daily cap."""
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    cap_usd, source = store.effective_work_item_cap(row, budget)
+    since = store.local_midnight_utc()
+    spent_usd, daily_spent_usd = st.db.read(
+        lambda c: store.budget_spend(c, row["id"], since=since)
+    )
+    return {
+        "cap_usd": cap_usd,
+        "source": source,
+        "spent_usd": spent_usd,
+        "daily": {"spent_usd": daily_spent_usd, "cap_usd": budget.daily_usd},
+    }
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -709,10 +726,6 @@ async def get_work_item(wid: str, request: Request):
     # merely not crashing. `steerable` below reads the frozen snapshot directly.
     chain = store.chain_view(row)
     node_overrides = store.node_overrides_of(row)
-    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
-    cap_usd, cap_source = store.effective_work_item_cap(row, budget)
-    since = store.local_midnight_utc()
-    spent_usd, daily_spent_usd = st.db.read(lambda c: store.budget_spend(c, wid, since=since))
     progress = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid)
     return {
         **{k: row[k] for k in row.keys()},
@@ -736,12 +749,7 @@ async def get_work_item(wid: str, request: Request):
         # where it comes from -- and reusing the name would make every GET
         # response's truthy `budget` object read as "the item is stopped for
         # budget" even when it is running fine under its cap.
-        "budget_cap": {
-            "cap_usd": cap_usd,
-            "source": cap_source,
-            "spent_usd": spent_usd,
-            "daily": {"spent_usd": daily_spent_usd, "cap_usd": budget.daily_usd},
-        },
+        "budget_cap": budget_cap(st, row),
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],

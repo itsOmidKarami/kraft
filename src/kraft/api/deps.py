@@ -236,7 +236,7 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
     """403 when the caller names a worker session of `wid` itself: design §6
     rule 2, a worker does not approve, reject, pause, resume, skip, abandon,
     retry, complete, cancel or escalate its own item, nor revise its
-    attachments, agent or node overrides or policy. Review comments and
+    attachments, agent or node overrides, policy or chain draft. Review comments and
     submit-review need no call here: `routes.review._refuse_agents` refuses
     any session header there outright.
 

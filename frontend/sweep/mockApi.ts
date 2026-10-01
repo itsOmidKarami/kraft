@@ -226,6 +226,21 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
       return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
     }
+    /* the item chain draft (B15): its first op is passed, so apply answers 409 */
+    if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json(route, { detail: "work item not found" }, 404);
+      if (method === "DELETE") return route.fulfill({ status: 204 });
+      if (m[2]) return json(route, { detail: "the item has moved past some of this draft's ops; remove them or move them after the current node", passed: [0] }, 409);
+      const ops = method === "PUT"
+        ? (req.postDataJSON()?.ops ?? []).map((op: any, i: number) => ({ ...op, passed: i === 0 }))
+        : [
+            { op: "override", path: "implement.main.implement", task_config: { model: "opus" }, passed: true },
+            { op: "skip", path: "verify.main.lint", passed: false },
+          ];
+      const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
+      return json(route, { ops, problems: [], checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd } }, nodes: b.item.chain_definition?.nodes ?? [], base_seq: 42, updated_at: "2026-10-01T09:12:00Z" });
+    }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
     // below stays a static 200.

@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 48
+SCHEMA_VERSION = 49
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -347,6 +347,16 @@ CREATE TABLE config_drafts (
   problems   INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (area, key)
+)
+;
+
+CREATE TABLE item_drafts (
+  work_item_id TEXT PRIMARY KEY REFERENCES work_items(id),
+  -- [{op, ...}]: a person's unapplied edits to the item's chain (`kraft.drafts.item`)
+  ops          TEXT NOT NULL,
+  -- the item's latest event seq when the draft was created
+  base_seq     INTEGER NOT NULL,
+  updated_at   TEXT NOT NULL
 )
 """
 
@@ -1049,6 +1059,17 @@ FROM worker_sessions""",
   problems   INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (area, key)
+)"""
+    ],
+    # The item chain draft (UX V2 W9 G).
+    48: [
+        """CREATE TABLE item_drafts (
+  work_item_id TEXT PRIMARY KEY REFERENCES work_items(id),
+  -- [{op, ...}]: a person's unapplied edits to the item's chain (`kraft.drafts.item`)
+  ops          TEXT NOT NULL,
+  -- the item's latest event seq when the draft was created
+  base_seq     INTEGER NOT NULL,
+  updated_at   TEXT NOT NULL
 )"""
     ],
 }

@@ -122,7 +122,7 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
     chain = executor.chain_of(row)
     try:
         changes = revision.parse(read[0])
-        revised = revision.revise(chain, changes, gate=gate, library=getattr(st, "library", None))
+        revised = revision.revise(chain, changes, at=gate, library=getattr(st, "library", None))
     except revision.RevisionError as exc:
         return f"{gate}: {exc}"
     if revised is chain:

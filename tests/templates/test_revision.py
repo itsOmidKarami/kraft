@@ -186,7 +186,7 @@ def _override(**values):
 
 
 def _revise(chain, **kw):
-    return revision.revise(chain, _changes(**kw), gate=GATE, library=LIBRARY)
+    return revision.revise(chain, _changes(**kw), at=GATE, library=LIBRARY)
 
 
 def test_an_empty_change_set_changes_nothing():
@@ -255,6 +255,22 @@ def test_a_change_set_skips_adds_and_overrides_only_what_it_names():
 def test_a_revision_changes_only_the_nodes_after_its_gate(change, match):
     with pytest.raises(revision.RevisionError, match=match):
         _revise(_chain(), **change)
+
+
+def test_at_none_freezes_nothing():
+    """An item that has not started (an item draft's `at=None`): its first node
+    may change too."""
+    after = revision.revise(
+        _chain(),
+        _changes(
+            add=[_add("plan", {"id": "early", "extends": "extra_check"})],
+            overrides={"plan.main.run": _override(time_cap_minutes=5)},
+        ),
+        at=None,
+        library=LIBRARY,
+    )
+    assert [n.id for n in after.chain.nodes][:3] == ["plan", "early", GATE]
+    assert after.chain.nodes[0].steps[0].tasks[0].task.policy.time_cap_minutes == 5
 
 
 @pytest.mark.parametrize(
@@ -337,7 +353,7 @@ def test_adding_a_node_needs_the_library():
         revision.revise(
             _chain(),
             _changes(add=[_add("build", {"id": "x", "extends": "extra_check"})]),
-            gate=GATE,
+            at=GATE,
             library=None,
         )
 
@@ -471,7 +487,7 @@ def test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request(node)
 
     with pytest.raises(revision.RevisionError, match="merge request"):
         revision.revise(
-            chain, _changes(skip=[_skip(node)]), gate="chain_revision_approval", library=library
+            chain, _changes(skip=[_skip(node)]), at="chain_revision_approval", library=library
         )
 
 

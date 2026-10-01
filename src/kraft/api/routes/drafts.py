@@ -1,7 +1,10 @@
 """Config drafts (spec §6.3, W9 A): the Templates editor's unpublished edits,
 one per (area, key), kept here rather than in the browser. Every read and
 write answers with the resolve result (`kraft.drafts.resolve`); a publish
-writes the files only if none changed since it joined the draft (R18)."""
+writes the files only if none changed since it joined the draft (R18).
+
+Item drafts (W9 G): a person's unapplied edits to one work item's chain
+(`kraft.drafts.item`), applied whole or refused."""
 
 from __future__ import annotations
 
@@ -9,11 +12,14 @@ import difflib
 
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from kraft import config as config_mod
+from kraft import store as items
 from kraft.api import api_router, deps
-from kraft.drafts import ops, resolve, store
+from kraft.api.routes import board
+from kraft.drafts import item, ops, resolve, store
+from kraft.templates import revision
 
 
 def _area(area: str, key: str) -> store.Area:
@@ -256,3 +262,123 @@ async def discard_draft(area: str, key: str, request: Request):
     if not await st.db.write(lambda c: store.delete(c, area, key)):
         raise HTTPException(404, f"no draft of {area} {key!r}")
     return Response(status_code=204)
+
+
+# ── the item chain draft (W9 G, B15) ──
+
+
+def _item_row(st, request: Request, wid: str):
+    """A door onto the item's chain: never its own worker's (an escalation may,
+    as it may retry with an override), never an ended item's."""
+    deps.forbid_self_action(st, request, wid)
+    return deps._live_work_item_row(st, wid)
+
+
+def _chain(row):
+    chain = items.materialized_chain_of(row)
+    if chain is None:
+        raise HTTPException(409, "this work item has no materialized chain to draft against")
+    return chain
+
+
+def _item_view(st, row, draft: dict | None) -> dict:
+    evaluated = item.evaluate(
+        _chain(row), row["current_node_id"], draft["ops"] if draft else [], st.library
+    )
+    cap = board.budget_cap(st, row)
+    return {
+        "ops": evaluated.ops,
+        "problems": evaluated.problems,
+        "checks": {"budget": {"spent_usd": cap["spent_usd"], "cap_usd": cap["cap_usd"]}},
+        "nodes": [items.node_view(n) for n in evaluated.chain.chain.nodes],
+        "base_seq": draft["base_seq"] if draft else None,
+        "updated_at": draft["updated_at"] if draft else None,
+    }
+
+
+@api_router.get("/work-items/{wid}/draft")
+async def get_item_draft(wid: str, request: Request):
+    """The item's draft, each op marked `passed` or not, with the chain the
+    ops not passed make; with no draft, `ops: []` and the item's own chain."""
+    st = request.app.state
+    row = _item_row(st, request, wid)
+    return _item_view(st, row, st.db.read(lambda c: store.get_item(c, wid)))
+
+
+@api_router.put("/work-items/{wid}/draft")
+async def put_item_draft(wid: str, body: Ops, request: Request):
+    """Replace the whole op list (an empty one deletes the draft)."""
+    st = request.app.state
+    row = _item_row(st, request, wid)
+    try:
+        ops_ = item.OPS.dump_python(
+            item.OPS.validate_python(body.ops), mode="json", exclude_none=True
+        )
+    except ValidationError as exc:
+        raise HTTPException(422, str(exc)) from None
+    await st.db.write(lambda c: store.put_item(c, wid, ops_) if ops_ else store.delete_item(c, wid))
+    return _item_view(st, row, st.db.read(lambda c: store.get_item(c, wid)))
+
+
+@api_router.delete("/work-items/{wid}/draft", status_code=204)
+async def discard_item_draft(wid: str, request: Request):
+    st = request.app.state
+    _item_row(st, request, wid)
+    if not await st.db.write(lambda c: store.delete_item(c, wid)):
+        raise HTTPException(404, "this work item has no draft")
+    return Response(status_code=204)
+
+
+@api_router.post("/work-items/{wid}/draft/apply")
+async def apply_item_draft(wid: str, request: Request):
+    """Apply the draft whole, in one write transaction: refused (409, with the
+    op indexes) if the item has moved past any op since, 422 on any problem.
+    Otherwise the revised chain replaces the item's (`chain_revised`, `source:
+    "draft"`), each `skip` is recorded as `scope_skipped`, and the draft goes."""
+    st = request.app.state
+    _item_row(st, request, wid)
+    library = st.library
+
+    def apply(c) -> tuple[int, dict | None]:
+        row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+        if row["status"] in items.ENDED:
+            return 409, {"detail": f"work item is {row['status']}; its chain does not run again"}
+        draft = store.get_item(c, wid)
+        if draft is None:
+            return 404, {"detail": "this work item has no draft"}
+        chain = _chain(row)
+        evaluated = item.evaluate(chain, row["current_node_id"], draft["ops"], library)
+        if evaluated.passed:
+            return 409, {
+                "detail": "the item has moved past some of this draft's ops; remove them or "
+                "move them after the current node",
+                "passed": evaluated.passed,
+            }
+        if evaluated.problems:
+            return 422, {
+                "detail": f"{len(evaluated.problems)} problem(s) to fix before applying",
+                "problems": evaluated.problems,
+            }
+        if any(op["op"] != "skip" for op in draft["ops"]):
+            payload = {
+                "gate": None,
+                "changes": draft["ops"],
+                "diff": revision.diff(chain.chain, evaluated.chain.chain),
+                "source": "draft",
+            }
+            items.revise_chain(
+                c,
+                wid,
+                evaluated.chain.to_json(),
+                payload,
+                seen=(row["materialized_chain"], row["run_chain"]),
+            )
+        for path in evaluated.skips:
+            items.skip_scope(c, wid, path, item.EVIDENCE)
+        store.delete_item(c, wid)
+        return 200, None
+
+    status, refusal = await st.db.write(apply)
+    if refusal is not None:
+        return JSONResponse(status_code=status, content=refusal)
+    return _item_view(st, deps._work_item_row(st, wid), None)

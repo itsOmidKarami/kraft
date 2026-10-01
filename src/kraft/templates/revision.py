@@ -227,27 +227,29 @@ _MAX_BYTES = 1_000_000
 
 
 def revise(
-    chain: MaterializedChain, changes: ChangeSet, *, gate: str, library: TemplateLibrary | None
+    chain: MaterializedChain, changes: ChangeSet, *, at: str | None, library: TemplateLibrary | None
 ) -> MaterializedChain:
     """`chain` with `changes` applied, or `RevisionError` naming why not.
 
-    Only the nodes after `gate` -- the revision's own gate, the node the item
-    stands on when it is approved -- may change: everything at or before it has
-    run. A gate never changes, whatever its position. Every added node comes out
-    of `library` by `extends`, and the result is re-validated whole, by the
-    model intake uses: `Chain`'s own rules (unique ids, backward reject and
-    restart targets, nothing published before the final gate), each override
-    through the retry override's bounds (`validate_retry_override`: the
-    ratchet, the maxima, a cap under its parent's), and every scope under the
-    item's own policy (`check_scopes`). So an invalid change set never reaches
-    the chain: nothing here writes anything.
+    Only the nodes after `at` -- the node the item stands on: a revision's own
+    gate when it is approved, or wherever an item draft is applied -- may
+    change: everything at or before it has run. `None`, an item that has not
+    started, freezes nothing. A gate never changes, whatever its position.
+    Every added node comes out of `library` by `extends`, and the result is
+    re-validated whole, by the model intake uses: `Chain`'s own rules (unique
+    ids, backward reject and restart targets, nothing published before the
+    final gate), each override through the retry override's bounds
+    (`validate_retry_override`: the ratchet, the maxima, a cap under its
+    parent's), and every scope under the item's own policy (`check_scopes`).
+    So an invalid change set never reaches the chain: nothing here writes
+    anything.
     """
     if changes.empty:
         return chain
     ids = [n.id for n in chain.chain.nodes]
-    if gate not in ids:
-        raise RevisionError(f"this chain has no gate {gate!r}")
-    frozen = set(ids[: ids.index(gate) + 1])
+    if at is not None and at not in ids:
+        raise RevisionError(f"this chain has no node {at!r}")
+    frozen = set(ids[: ids.index(at) + 1]) if at is not None else set()
 
     def open_node(nodes: tuple[ResolvedNode, ...], id: str, what: str) -> ResolvedNode:
         node = next((n for n in nodes if n.id == id), None)
@@ -255,7 +257,7 @@ def revise(
             raise RevisionError(f"{what}: this chain has no node {id!r}")
         if id in frozen:
             raise RevisionError(
-                f"{what}: {id!r} is at or before {gate!r} and has already run; "
+                f"{what}: {id!r} is at or before {at!r} and has already run; "
                 "a revision changes only the nodes after it"
             )
         if isinstance(node.node, GateNode):
@@ -284,9 +286,9 @@ def revise(
             # Right after the revision's own gate is the earliest a node can run.
             if add.after not in ids:
                 raise RevisionError(f"add {add.node.id}: this chain has no node {add.after!r}")
-            if add.after in frozen and add.after != gate:
+            if add.after in frozen and add.after != at:
                 raise RevisionError(
-                    f"add {add.node.id}: {add.after!r} is before {gate!r} and has already run; "
+                    f"add {add.node.id}: {add.after!r} is before {at!r} and has already run; "
                     "a revision adds nodes only after it"
                 )
             if add.after in skipped:
@@ -336,7 +338,7 @@ def revise(
             untrimmed=None,
         )
         revised = replace(
-            revised, untrimmed=revise(whole, changes, gate=gate, library=library).chain.chain
+            revised, untrimmed=revise(whole, changes, at=at, library=library).chain.chain
         )
     return revised
 
@@ -447,7 +449,7 @@ def render(
     if changes.empty:
         lines.append("None: the chain stays as it is.")
     try:
-        revised = revise(chain, changes, gate=gate, library=library)
+        revised = revise(chain, changes, at=gate, library=library)
     except RevisionError as exc:
         return "\n".join(
             [*lines, "", "## Cannot be applied", "", f"**{exc}**", "", _REJECT, ""]
@@ -485,7 +487,7 @@ def artifact_digest(
     """
     try:
         changes = parse(text)
-        revised = revise(chain, changes, gate=gate, library=library)
+        revised = revise(chain, changes, at=gate, library=library)
     except RevisionError:
         return None
     if revised is chain:

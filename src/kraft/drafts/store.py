@@ -1,8 +1,9 @@
 """`config_drafts` rows: one draft per (area, key), each a map of the files it
 changes, the hash each file had when it joined (the publish's stale check),
-and an undo stack of one entry per request.
+and an undo stack of one entry per request. Every file name is relative to
+`templates_dir`.
 
-Every file name is relative to `templates_dir`.
+`item_drafts` rows: one per work item, its op list (`kraft.drafts.item`).
 """
 
 from __future__ import annotations
@@ -169,4 +170,30 @@ def undo(
     files = entry["files"]
     return _store(
         conn, area, key, files, published, old["base"], entry["serialized"], history, counts
+    )
+
+
+def get_item(conn: sqlite3.Connection, work_item_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM item_drafts WHERE work_item_id = ?", (work_item_id,)
+    ).fetchone()
+    return None if row is None else {**dict(row), "ops": json.loads(row["ops"])}
+
+
+def put_item(conn: sqlite3.Connection, work_item_id: str, ops: list[dict]) -> None:
+    """Replace the item's op list. `base_seq` is the item's latest event when
+    its draft was created, kept across later writes."""
+    conn.execute(
+        "INSERT INTO item_drafts (work_item_id, ops, base_seq, updated_at) VALUES "
+        "(?, ?, (SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ?), ?) "
+        "ON CONFLICT (work_item_id) DO UPDATE SET ops = excluded.ops, "
+        "updated_at = excluded.updated_at",
+        (work_item_id, json.dumps(ops), work_item_id, _now()),
+    )
+
+
+def delete_item(conn: sqlite3.Connection, work_item_id: str) -> bool:
+    return (
+        conn.execute("DELETE FROM item_drafts WHERE work_item_id = ?", (work_item_id,)).rowcount
+        == 1
     )
