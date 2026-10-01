@@ -4,7 +4,7 @@ import { ROUTES } from "./routes";
 
 export interface Crumb {
   text: string;
-  /** A page inside /ng. */
+  /** A page inside the app. */
   to?: string;
   /** A page on the shipped UI, reached by a full load. */
   href?: string;
@@ -17,7 +17,7 @@ type ItemLookup = (id: string) => Pick<CrumbItem, "repo" | "title"> & Partial<Cr
 
 const GROUP_HEAD = { templates: "Templates", settings: "Settings" } as const;
 
-/** The crumbs for a pathname under /ng. "Templates" and "Settings" have no page
+/** The crumbs for a pathname. "Templates" and "Settings" have no page
  *  of their own, so they are text. */
 export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
   const current = (text: string): Crumb => ({ text, kind: "current", title: text });

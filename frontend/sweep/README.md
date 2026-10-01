@@ -14,11 +14,11 @@ The harness is versioned here. `vite.config.ts` excludes `sweep/**` from vitest,
 
 ```bash
 cd frontend
-npx playwright test -c sweep/playwright.sweep.config.ts        # ~350 shots, 4 workers, ~6–10 min
+npx playwright test -c sweep/playwright.sweep.config.ts        # ~1,500 shots, 4 workers, ~6–10 min
 node sweep/collect.mjs                                           # → e2e-shots/sweep/manifest.json + FINDINGS.md
 ```
 
-Subsets: `SWEEP_SCREEN=board,item-changes SWEEP_WIDTHS=390,1280 SWEEP_VARIANT=long npx playwright test -c sweep/playwright.sweep.config.ts`
+Subsets: `SWEEP_SCREEN=board,item-node SWEEP_WIDTHS=390,1280 SWEEP_VARIANT=long npx playwright test -c sweep/playwright.sweep.config.ts`
 
 ## Output
 
@@ -38,19 +38,14 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 
 ### `data-allow-ellipsis` — an allowlist, not a style
 
-`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these eleven, each with its own `checks.spec.ts` case:
+`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else. It is allowed on exactly these, and the ones marked † have a `checks.spec.ts` case:
 
-1. `.doc-path` — a document's path, cut from the left (W10.D in the Documents list; since W12.2 the document pane header's path line)
-2. `.detail-meta-part` — the item header's meta line (W11 · A.1)
-3. `.board-row-title` — the board row title (W11 · B.2)
-4. `.board-row-meta` — the board row meta line (W11 · B.2)
-5. the peek header's id / meta line (W11 · I)
-6. `.app-header-crumb-current` — the item title crumb in the app header (W12.1)
-7. `.doc-modal-name` — the document pane header's title (W12.2)
-8. `.ng-crumb-repo` — the repo crumb of the /ng header, which shrinks first (UX V2 W2, brief Decided 11)
-9. `.ng-crumb-current` — the item title crumb of the /ng header, which shrinks last (UX V2 W2, brief Decided 11)
-10. `.item-one-line` — the /ng item page's question banner in a node view, the question on one line (UX V2 W5, Decisions §4)
-11. `.lib-name` — a component's name in the /ng Library list, which keeps its first 14 characters and cuts a longer id such as `never-signal-processes-you-didnt-start` (UX V2 W12, R10)
+1. `.ng-crumb-repo` † and `.ng-crumb-current` † — the header's repo and item-title crumbs, the repo shrinking first (UX V2 W2, brief Decided 11)
+2. `.item-one-line` † — the item page's question banner in a node view, the question on one line (UX V2 W5, Decisions §4)
+3. `.lib-name` † — a component's name in the Library list, which keeps its first 14 characters and cuts a longer id such as `never-signal-processes-you-didnt-start` (UX V2 W12, R10)
+4. `.rp-name-text` † and `.rp-cut` † — the Repos table's name and its steering and test cells (UX V2 W15)
+5. `.an-name` and `.an-stop-label` — Analytics' node, repo and stop labels (UX V2 W16)
+6. the review's file tree directories and file names, and the diff header's `.rv-file-path` (UX V2 W8)
 
 The element must carry its full text in `title`. Anything else that ellipsizes still fails the check; a new use needs a decision first.
 
@@ -59,7 +54,7 @@ The element must carry its full text in `title`. Anything else that ellipsizes s
 - Widths: 390, 768, 1024, 1100, 1280, 1440, 1920 (+1280×700).
 - Data: `default`, `long` (140-char titles, 32-hex ids in text, 12 repos, 40-node timelines, 600-line logs, 40-file diffs), `many` (60 rows), `empty`.
 - Shell (at 1280): sidebar open / rail, light mode, comfortable density, short viewport, group-by repo/template.
-- Screens: board, board+peek (5 states), archived, item ×14 states (default + long), 5 inspector tabs (default/long/scrolled), log maximized, 7 composers (empty + filled), intake modal, search (overlay/page/viewer), analytics, 9 settings pages (+ sub-states), login.
+- Screens: one per page and pane of the UI (`board`, `board-peek`, `item`, `item-node`, `review`, `chains`, `library`, `harnesses`, `repos`, `policy`, `intake`, the settings pages, `analytics`, `search`, `login`, …) and the phone's (`phone-*`, at 390); `cases/*.ts` is the list.
 
 ## Baseline
 
@@ -84,11 +79,11 @@ node sweep/wave.mjs all                # re-shoot, pixel-diff against the baseli
 
 When a case records `setupError`, fix the selector or fixture in `sweep/`, never `src/`. The spec never asserts; a red test means the harness threw.
 
-## UX V2 (`/ng`)
+## Waves
 
-The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the files `waves/ux2-W<n>.json` (the plain `W0`–`W13` files are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
+The UI's waves are the files `waves/ux2-W<n>.json`, so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`; the plain `W0`–`W13` files are the earlier fix programme. Until the cutover (ux2-W18) the new UI was served under a prefix and its screens' names began `ng-`, so the rule files up to `ux2-W17` and the `ux2-fix-*` ones match `^ng-` and no longer select anything: they are kept as history. `waves/ux2-W18.json` carries every one of their rules forward under the plain names.
 
-W2 screens: `ng-shell` (frame, sidebar pinned/rail/revealed), `ng-search` (the ⌘K overlay), `ng-login` (sign-in; the mock's `login` option picks the 401 or 429 answer, and the clock is fixed so the countdown reads the same), `ng-firstrun` (the board with no repo; the page clock is installed after load so the probe rows' reveal is stepped by the cell), and the flows `flow-ng-search-keyboard`, `flow-ng-sidebar-pin` (1280) and `flow-ng-sidebar-rail` (1024). Flow steps assert; a failed assertion is that step's error, which `flow-completes` reports.
+W2's flows assert: a failed assertion is that step's error, which `flow-completes` reports.
 
 ## Adding a wave's cases, flows and rules
 
@@ -97,8 +92,8 @@ A wave **adds files and edits no shared list**; `sweep.spec.ts`, `interactions.s
 - `sweep/cases/<wave>.ts` exports `cells: Case[]` (one entry per screen × variant, run by `sweep.spec.ts`), with the wave's own helpers above it.
 - `sweep/cases/<wave>.flows.ts` exports `flows: Flow[]` (run by `interactions.spec.ts`). It is a second file because cells and flows keep separate helper sets (`ng`, `ngItem`, `settle` differ in shape).
 - `sweep/waves/<wave>.json` is the wave's object (`title`, `screens`, `specs`, `rules`); the file name is its key, so `node sweep/wave.mjs <wave>` finds it.
-- `sweep/loadCases.ts` reads the directory and takes any file name: `shipped` first, then `ux2-W<n>` by number (`ux2-W2` before `ux2-W10`), then every other file by name (a fix PR adds `cases/ux2-fix-<topic>.ts`, and `.flows.ts` beside it). The first case of a screen in that order also gets the `~light` cell at 1280, so keep one screen's first case in its wave's file; a fix file sorts last and only adds variants.
-- A helper two waves share goes in `cellKit.ts` (cells) or `flowKit.ts` (flows); the pre-`/ng` screens are `cases/shipped.ts` and `shipped.flows.ts`.
+- `sweep/loadCases.ts` reads the directory and takes any file name: `ux2-W<n>` by number (`ux2-W2` before `ux2-W10`), then every other file by name (a fix PR adds `cases/ux2-fix-<topic>.ts`, and `.flows.ts` beside it). The first case of a screen in that order also gets the `~light` cell at 1280, so keep one screen's first case in its wave's file; a fix file sorts last and only adds variants.
+- A helper two waves share goes in `cellKit.ts` (cells) or `flowKit.ts` (flows).
 
 ## History and briefs
 
@@ -110,6 +105,6 @@ A wave **adds files and edits no shared list**; `sweep.spec.ts`, `interactions.s
 
 These stay flagged on purpose; do not "fix" them:
 
-- `nested-scroll` = 2 on item pages: the inspector and the right pane are two independent scrollers (the model).
-- `console` on `login/`: the 401 before sign-in, until the backend's `authenticated` field lands (Kraft-yx79s).
-- `ellipsis` on the `data-allow-ellipsis` cells listed above. Only those eleven elements may carry the attribute.
+- `nested-scroll` = 2 on the item page, the review page and the phone: a pane beside the canvas or list, each scrolling on its own (the model).
+- `console` on `login/` and `phone-login/`: the 401 before sign-in. Likewise the cells whose state is an error the page reports (`board/offline`, `new-item/error`, `search/docs-error`, `chains/review-stale`, `policy/review-stale`, `item-cap/editor-refused`, `phone-board/offline`, `phone-area/policy-stale`), excluded in `waves/ux2-W18.json`.
+- `ellipsis` on the `data-allow-ellipsis` elements listed above, and only those.

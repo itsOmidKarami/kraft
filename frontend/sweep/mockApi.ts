@@ -11,7 +11,7 @@ export interface MockOptions {
   locked?: boolean;
   /** What POST /login answers while locked: 200, a 401, or a 429 with Retry-After (default 200). */
   login?: "ok" | "wrong" | "locked";
-  /** ux2-W6: GET /work-items answers the /ng board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
+  /** ux2-W6: GET /work-items answers the board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
   ngBoard?: boolean | "empty";
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
    *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
@@ -23,13 +23,13 @@ export interface MockOptions {
   update?: "available" | "current" | "unknown";
   /** ux2-W15: the repos, policy and intake drafts, answered as W13's server does (areasMock.ts); the value seeds the cell's state. */
   areas?: AreaVariant;
-  /** ux2-W14: the /ng Harnesses page's draft (sweep/ngHarnesses.ts): `floor` clean, `problems` (a Never harness with a task, a profile missing an entry, escalation on a Never harness), `empty` (no profiles). Unset: the routes answer as before. */
+  /** ux2-W14: the Harnesses page's draft (sweep/ngHarnesses.ts): `floor` clean, `problems` (a Never harness with a task, a profile missing an entry, escalation on a Never harness), `empty` (no profiles). Unset: the routes answer as before. */
   harnesses?: HarnessesScenario;
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
-  /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
+  /** ux2-W11: the running item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library). `applied`: none, but its applied draft is in the events. */
   itemDraft?: "none" | "changes" | "problems" | "passed" | "applied";
-  /** ux2-W12: the Library's draft at /ng. `clean`: no draft. `draft`: three changes, one a new component. `blocked`: the draft with problems that name a chain, a repo and a component. */
+  /** ux2-W12: the Library's draft. `clean`: no draft. `draft`: three changes, one a new component. `blocked`: the draft with problems that name a chain, a repo and a component. */
   ngLibrary?: "clean" | "draft" | "blocked";
 }
 
@@ -256,7 +256,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
 
   const viewedMarks = new Set<string>();
   const lib = opts.ngLibrary ? libraryState(opts.ngLibrary) : null;
-  // ux2-W8: review threads per item, seeded for a needs-gate /ng item on first read.
+  // ux2-W8: review threads per item, seeded for a needs-gate item on first read.
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
   const threadsOf = (wid: string) =>
@@ -312,7 +312,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const r = ngDryRun(req.postDataJSON() ?? {});
       return json(route, r.body, r.status);
     }
-    // ux2-W6: a create from the /ng composer lands on the board's never-started row, which has a detail for the peek.
+    // ux2-W6: a create from the composer lands on the board's never-started row, which has a detail for the peek.
     if (p === "/work-items" && method === "POST" && !q.get("dry_run") && opts.ngBoard) {
       return json(route, { id: S.ngBoard.find((i) => i.bead_id === "kraft-f5d3")?.id ?? S.ngBoard[0]?.id, status: "paused" }, 201);
     }
@@ -505,7 +505,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         it.updated_at = new Date().toISOString();
       }
     }
-    // ux2-W5: cancel and complete end the item (the /ng page reads display_status); reassign and
+    // ux2-W5: cancel and complete end the item (the page reads display_status); reassign and
     // keep-waiting are B5's routes (R2), answered here only so the worker-lost fixture's card can be driven.
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/(cancel|complete)$/))) {
       const b = S.bundles[m[1]];
@@ -669,17 +669,17 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes });
     }
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
-      // For the /ng Chains editor, `default` is the real shipped file, the draft views' published side.
+      // For the Chains editor, `default` is the real shipped file, the draft views' published side.
       // The shipped Settings pages keep the scenario's chain (settings-chains/default reads this route).
-      if (m[1] === "default" && (req.headers()["referer"] ?? "").includes("/ng/")) return json(route, DRAFTS.published);
+      if (m[1] === "default") return json(route, DRAFTS.published);
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1])) ?? st.templates[0];
       if (!tpl) return json(route, { detail: "template not found" }, 404);
       // The real route returns the file's text, which is what the Chains editor shows.
       return json(route, { id: tpl.id, file: `templates/chains/${tpl.id}.yaml`, text: chainYaml(tpl.nodes), chain: { nodes: tpl.nodes }, nodes: tpl.nodes });
     }
     // The Library screen (where Settings > Steering redirects): the scenario's hooks as its tasks.
-    // The /ng editors' pickers read the real shipped library; the shipped Library page keeps the scenario's.
-    if (p === "/templates/library" && method === "GET" && (req.headers()["referer"] ?? "").includes("/ng/")) return json(route, DRAFTS.library);
+    // The editors' pickers read the real shipped library; the shipped Library page keeps the scenario's.
+    if (p === "/templates/library" && method === "GET") return json(route, DRAFTS.library);
     if (p === "/templates/library" && method === "GET") {
       const hooks = Object.entries(st.hooks);
       const components = hooks.map(([name, definition]) => ({

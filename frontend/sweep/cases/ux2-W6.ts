@@ -2,10 +2,10 @@ import type { Page } from "@playwright/test";
 import { NG_NOW } from "../ngItems";
 import { ng, settle, type Case, type Ctx } from "../cellKit";
 
-/** The /ng board (ux2-W6), served its own fixtures (`mock: { ngBoard }`), the clock fixed at NG_NOW so ages read the same every run. */
+/** The board (ux2-W6), served its own fixtures (`mock: { ngBoard }`), the clock fixed at NG_NOW so ages read the same every run. */
 async function ngBoard(c: Ctx, opts: { tail?: string; side?: "pinned" | "rail"; then?: (p: Page) => Promise<void> } = {}) {
   await c.page.clock.setFixedTime(new Date(NG_NOW));
-  await ng(c, `/ng/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
+  await ng(c, `/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
 /** The composer with its repos, chains and first dry run in. */
@@ -40,49 +40,49 @@ const checkRows = (titles: string[]) => async (p: Page) => {
 };
 
 export const cells: Case[] = [
-  // ux2-W6: the board at /ng, its own fixtures (ngBoard.ts).
-  { screen: "ng-board", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }, { short: true }], mock: { ngBoard: true }, run: (c) => ngBoard(c) },
-  ...(["long", "many"] as const).map<Case>((d) => ({ screen: "ng-board", variant: d, data: d, widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c) })),
+  // ux2-W6: the board, its own fixtures (ngBoard.ts).
+  { screen: "board", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }, { short: true }], mock: { ngBoard: true }, run: (c) => ngBoard(c) },
+  ...(["long", "many"] as const).map<Case>((d) => ({ screen: "board", variant: d, data: d, widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c) })),
   // No items, but a connected repo: the four empty groups, not first-run.
-  { screen: "ng-board", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
+  { screen: "board", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
   // The header's and filter bar's menus, opened as a person would.
   ...([["repo-menu", /all repos/], ["chain-menu", /^Chain/], ["group-menu", /^Group/], ["sort-menu", /^Sort/]] as const).map<Case>(([v, name]) => ({
-    screen: "ng-board", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
+    screen: "board", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
     run: (c) => ngBoard(c, { then: async (p) => { await p.getByRole("button", { name }).click(); await p.getByRole("menu").waitFor(); } }),
   })),
   // C: no repo connected (first-run), the first read still running, the server gone after boot.
-  { screen: "ng-board", variant: "fresh", data: "empty", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
-  { screen: "ng-board", variant: "loading", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "loading" }, run: (c) => ngBoard(c) },
-  { screen: "ng-board", variant: "offline", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "offline" }, run: (c) => ngBoard(c, { then: async (p) => { await p.getByText("OFFLINE").waitFor(); } }) },
+  { screen: "board", variant: "fresh", data: "empty", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
+  { screen: "board", variant: "loading", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "loading" }, run: (c) => ngBoard(c) },
+  { screen: "board", variant: "offline", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "offline" }, run: (c) => ngBoard(c, { then: async (p) => { await p.getByText("OFFLINE").waitFor(); } }) },
   // D: selection in every group, the bulk Cancel's inline confirm, and a partial answer.
-  { screen: "ng-board", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: checkRows(["Bump the VS Code", "Fix flaky retry", "Remove the legacy poller"]) }) },
-  { screen: "ng-board", variant: "bulk-cancel-confirm", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: async (p) => {
+  { screen: "board", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: checkRows(["Bump the VS Code", "Fix flaky retry", "Remove the legacy poller"]) }) },
+  { screen: "board", variant: "bulk-cancel-confirm", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: async (p) => {
     await checkRows(["Bump the VS Code", "Fix flaky retry"])(p);
     await p.getByRole("button", { name: "Cancel 2…" }).click();
     await p.getByRole("textbox", { name: /Reason/ }).fill("Superseded by kraft-cb61");
   } }) },
-  { screen: "ng-board", variant: "bulk-results", data: "default", widths: [1280], mock: { ngBoard: true, bulkFail: ["kraft-2c77"] }, run: (c) => ngBoard(c, { then: async (p) => {
+  { screen: "board", variant: "bulk-results", data: "default", widths: [1280], mock: { ngBoard: true, bulkFail: ["kraft-2c77"] }, run: (c) => ngBoard(c, { then: async (p) => {
     await checkRows(["Bump the VS Code", "Lint fan-out"])(p);
     await p.getByRole("button", { name: "‖ Pause 2" }).click();
     await p.getByText("1 of 2 items paused").waitFor();
   } }) },
   // E: the peek on one row of each kind, its other tabs, the overlay under 1024 and a short window.
   ...Object.entries(PEEK_ROWS).map<Case>(([v, title]) => ({
-    screen: "ng-board-peek", variant: v, data: "default", widths: [1280], ...(v === "needs-gate" ? { shells: [{ short: true }] } : {}), mock: { ngBoard: true },
+    screen: "board-peek", variant: v, data: "default", widths: [1280], ...(v === "needs-gate" ? { shells: [{ short: true }] } : {}), mock: { ngBoard: true },
     run: (c) => ngBoard(c, { then: peekRow(title) }),
   })),
   ...(["activity", "config"] as const).map<Case>((tab) => ({
-    screen: "ng-board-peek", variant: tab, data: "default", widths: [1280], mock: { ngBoard: true },
+    screen: "board-peek", variant: tab, data: "default", widths: [1280], mock: { ngBoard: true },
     run: (c) => ngBoard(c, { then: async (p) => { await peekRow(PEEK_ROWS.capped)(p); await p.getByRole("tab", { name: tab === "activity" ? "Activity" : "Config" }).click(); } }),
   })),
-  { screen: "ng-board-peek", variant: "running", data: "default", widths: [768], mock: { ngBoard: true }, run: (c) => ngBoard(c, { side: "rail", then: peekRow(PEEK_ROWS.running) }) },
+  { screen: "board-peek", variant: "running", data: "default", widths: [768], mock: { ngBoard: true }, run: (c) => ngBoard(c, { side: "rail", then: peekRow(PEEK_ROWS.running) }) },
   // F: the composer at the top of the board, as it fills, its chain menu, the attach search, the discard ask, a refused attachment.
-  { screen: "ng-new-item", variant: "composer", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerReady }) },
-  { screen: "ng-new-item", variant: "filled", data: "default", widths: [1024, 1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerFilled }) },
-  { screen: "ng-new-item", variant: "chain-menu", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: /^default/ }).click(); await p.getByRole("menu").waitFor(); } }) },
-  { screen: "ng-new-item", variant: "attach", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: "+ spec" }).click(); await p.getByRole("textbox", { name: /Search specs/ }).fill("cache"); await p.waitForTimeout(500); } }) },
-  { screen: "ng-new-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerFilled(p); await p.keyboard.press("Escape"); await p.getByText(/Discard this draft/).waitFor(); } }) },
-  { screen: "ng-new-item", variant: "error", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => {
+  { screen: "new-item", variant: "composer", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerReady }) },
+  { screen: "new-item", variant: "filled", data: "default", widths: [1024, 1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerFilled }) },
+  { screen: "new-item", variant: "chain-menu", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: /^default/ }).click(); await p.getByRole("menu").waitFor(); } }) },
+  { screen: "new-item", variant: "attach", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: "+ spec" }).click(); await p.getByRole("textbox", { name: /Search specs/ }).fill("cache"); await p.waitForTimeout(500); } }) },
+  { screen: "new-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerFilled(p); await p.keyboard.press("Escape"); await p.getByText(/Discard this draft/).waitFor(); } }) },
+  { screen: "new-item", variant: "error", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => {
     await composerFilled(p);
     await p.getByRole("button", { name: "+ plan" }).click();
     const box = p.getByRole("textbox", { name: /Search plans/ });
@@ -90,25 +90,25 @@ export const cells: Case[] = [
     await p.getByText(/attachment not found/).waitFor();
   } }) },
   // G: the draft item page, empty and titled with a spec, a node and a covered node, Config, YAML, members, the discard ask.
-  { screen: "ng-draft-item", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, false) },
-  { screen: "ng-draft-item", variant: "titled", data: "default", widths: [1024, 1280], shells: [{ short: true }], mock: { ngBoard: true }, run: (c) => ngDraft(c, true) },
+  { screen: "draft-item", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, false) },
+  { screen: "draft-item", variant: "titled", data: "default", widths: [1024, 1280], shells: [{ short: true }], mock: { ngBoard: true }, run: (c) => ngDraft(c, true) },
   ...([["node", /^verification,/], ["node-covered", /^spec,/]] as const).map<Case>(([v, name]) => ({
-    screen: "ng-draft-item", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
+    screen: "draft-item", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
     run: (c) => ngDraft(c, true, async (p) => { await p.getByRole("button", { name }).click(); }),
   })),
   ...(["Config", "YAML"] as const).map<Case>((tab) => ({
-    screen: "ng-draft-item", variant: tab.toLowerCase(), data: "default", widths: [1280], mock: { ngBoard: true },
+    screen: "draft-item", variant: tab.toLowerCase(), data: "default", widths: [1280], mock: { ngBoard: true },
     run: (c) => ngDraft(c, true, async (p) => { await p.getByRole("tab", { name: new RegExp(`^${tab}`) }).click(); await p.waitForTimeout(400); }),
   })),
-  { screen: "ng-draft-item", variant: "members", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => {
+  { screen: "draft-item", variant: "members", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => {
     await p.getByRole("button", { name: "+ members" }).click();
     await p.getByRole("button", { name: /plugins\/kraft-lite/ }).click();
   }) },
-  { screen: "ng-draft-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => { await p.keyboard.press("Escape"); await p.getByRole("alertdialog").waitFor(); }) },
+  { screen: "draft-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => { await p.keyboard.press("Escape"); await p.getByRole("alertdialog").waitFor(); }) },
   // H: the archived view, with rows, empty, and two checked.
-  { screen: "ng-archived", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived" }) },
-  { screen: "ng-archived", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c, { tail: "archived" }) },
-  { screen: "ng-archived", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived", then: checkRows(["Trim the default chain", "Drop the v0 webhook"]) }) },
-  { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
-  { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
+  { screen: "archived", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived" }) },
+  { screen: "archived", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c, { tail: "archived" }) },
+  { screen: "archived", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived", then: checkRows(["Trim the default chain", "Drop the v0 webhook"]) }) },
+  { screen: "board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
+  { screen: "board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 ];

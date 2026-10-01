@@ -10,20 +10,14 @@ vi.mock("./session", () => ({ resumeSession: vi.fn(async () => {}), startEvents:
 afterEach(() => window.history.pushState({}, "", "/"));
 
 describe("ng App", () => {
-  it("renders under the /ng basename, the board at its root", () => {
-    window.history.pushState({}, "", "/ng");
+  it("renders the board at the root", () => {
+    window.history.pushState({}, "", "/");
     render(<App />);
     expect(screen.getByRole("heading", { level: 1, name: "Board" })).toBeInTheDocument();
   });
 
-  it("renders nothing outside the basename", () => {
-    window.history.pushState({}, "", "/work-items/abc");
-    const { container } = render(<App />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
   it("shows the sign-in card on a locked boot and on a later 401, not the shell", () => {
-    window.history.pushState({}, "", "/ng");
+    window.history.pushState({}, "", "/");
     const { unmount } = render(<App initiallyLocked />);
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Sign in on the current UI/ })).toBeNull();
@@ -37,18 +31,18 @@ describe("ng App", () => {
 
   it("signs in, runs the boot probe once, then shows the shell where the person was", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/health") ? { status: "ok" } : { ok: true }), { status: 200 })));
-    window.history.pushState({}, "", "/ng/templates/harnesses");
+    window.history.pushState({}, "", "/templates/harnesses");
     render(<App initiallyLocked />);
     await userEvent.type(screen.getByLabelText(/^Password/), "pw{Enter}");
     expect(await screen.findByRole("link", { name: /Harnesses/ })).toHaveAttribute("aria-current", "page");
-    expect(window.location.pathname).toBe("/ng/templates/harnesses");
+    expect(window.location.pathname).toBe("/templates/harnesses");
     expect(session.resumeSession).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 
   it("routes /work-items/:id/review to the review page", async () => {
     vi.spyOn(api, "getWorkItem").mockResolvedValue({ id: "abc", title: "Cache embeddings", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] } } as never);
-    window.history.pushState({}, "", "/ng/work-items/abc/review");
+    window.history.pushState({}, "", "/work-items/abc/review");
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Review changes: Cache embeddings" })).toBeInTheDocument();
     vi.restoreAllMocks();

@@ -62,7 +62,7 @@ const ALLOWED = [
   "library/types", // the four sections and the ref grammar
   "shell/useDraftCounts", // the draft dots of More
   "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
-  "shell/routes", // the list of /ng pages, as data: Search's Go to rows
+  "shell/routes", // the list of pages, as data: Search's Go to rows
 ];
 
 const ng = join(dirname(fileURLToPath(import.meta.url)), "..");

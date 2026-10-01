@@ -2,7 +2,7 @@ import { hex, repo, t, type ItemBundle, type Variant } from "./fixtures";
 import { buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
 
 /**
- * The /ng board's list (ux2-W6): one row per kind of row AreaBoard.dc.html
+ * The board's list (ux2-W6): one row per kind of row AreaBoard.dc.html
  * draws, each built on ngItems.ts's chain so the peek has a full detail. Served
  * by GET /work-items only when a case asks (`MockOptions.ngBoard`), so no
  * shipped cell and no ng-item cell changes. Ages count back from NG_NOW

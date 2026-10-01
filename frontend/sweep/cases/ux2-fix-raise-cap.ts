@@ -4,7 +4,7 @@ type Limit = { path: string; key: string; value: number; maximum: number | null 
 const ATTEMPTS: Limit = { path: "verification", key: "max_attempts", value: 3, maximum: 5 };
 const TIME: Limit = { path: "", key: "time_cap_minutes", value: 480, maximum: null };
 
-/** The capped item at /ng, its stop naming `limit` (none: a cap stop that names no limit to raise), optionally the editor open. */
+/** The capped item, its stop naming `limit` (none: a cap stop that names no limit to raise), optionally the editor open. */
 async function capped(c: Ctx, limit: Limit | null, then?: (p: Ctx["page"]) => Promise<void>) {
   const stop = c.S.bundles[c.S.ng.capped].item.stop as { limit?: Limit };
   if (limit) stop.limit = limit; else delete stop.limit;
@@ -24,13 +24,13 @@ const refused = async (p: Ctx["page"]) => {
 
 export const cells: Case[] = [
   // The cap banner: with a limit to raise ("Raise cap") and without ("Open config").
-  { screen: "ng-item-cap", variant: "no-limit", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, null) },
-  { screen: "ng-item-cap", variant: "no-limit", data: "default", widths: [768], run: (c) => capped(c, null) },
-  { screen: "ng-item-cap", variant: "limit", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS) },
-  { screen: "ng-item-cap", variant: "limit-long", data: "long", widths: [1280], run: (c) => capped(c, ATTEMPTS) },
+  { screen: "item-cap", variant: "no-limit", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, null) },
+  { screen: "item-cap", variant: "no-limit", data: "default", widths: [768], run: (c) => capped(c, null) },
+  { screen: "item-cap", variant: "limit", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS) },
+  { screen: "item-cap", variant: "limit-long", data: "long", widths: [1280], run: (c) => capped(c, ATTEMPTS) },
   // The editor: a fix loop's attempts with a maximum, the work item's time cap with none, a refusal inline.
-  { screen: "ng-item-cap", variant: "editor-attempts", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS, open) },
-  { screen: "ng-item-cap", variant: "editor-attempts", data: "default", widths: [768, 1024], run: (c) => capped(c, ATTEMPTS, open) },
-  { screen: "ng-item-cap", variant: "editor-time", data: "default", widths: [1280], run: (c) => capped(c, TIME, open) },
-  { screen: "ng-item-cap", variant: "editor-refused", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS, refused) },
+  { screen: "item-cap", variant: "editor-attempts", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS, open) },
+  { screen: "item-cap", variant: "editor-attempts", data: "default", widths: [768, 1024], run: (c) => capped(c, ATTEMPTS, open) },
+  { screen: "item-cap", variant: "editor-time", data: "default", widths: [1280], run: (c) => capped(c, TIME, open) },
+  { screen: "item-cap", variant: "editor-refused", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS, refused) },
 ];

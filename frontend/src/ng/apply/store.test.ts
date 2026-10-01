@@ -122,10 +122,10 @@ describe("the restart call", () => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, e.name);
         if (e.isDirectory()) walk(p);
-        else if (/\.tsx?$/.test(e.name) && !e.name.includes(".test.") && readFileSync(p, "utf-8").includes("/apply/restart")) hits.push(p.slice(here.length));
+        else if (/\.tsx?$/.test(e.name) && !e.name.includes(".test.") && readFileSync(p, "utf-8").includes("/apply/restart")) hits.push(p.slice(here.length + 1));
       }
     };
     walk(here);
-    expect(hits).toEqual(["/ng/apply/store.ts"]);
+    expect(hits).toEqual(["ng/apply/store.ts"]);
   });
 });

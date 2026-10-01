@@ -19,8 +19,7 @@ describe("ItemHeader", () => {
   it("counts the others that need you, never this item, and hides at zero", () => {
     useStore.setState({ workItems: { w1: item({ id: "w1", display_status: "needs_you" }), a: item({ id: "a", display_status: "needs_you" }), b: item({ id: "b", display_status: "needs_you" }), c: item({ id: "c", display_status: "running" }) } });
     const { unmount } = show({ display_status: "needs_you" });
-    // The new UI's own board (the router's root, /ng in the app), not the shipped one.
-    expect(screen.getByRole("link", { name: /2 others need you/ })).toHaveAttribute("href", "/ng");
+    expect(screen.getByRole("link", { name: /2 others need you/ })).toHaveAttribute("href", "/");
     unmount();
     useStore.setState({ workItems: { w1: item({ id: "w1", display_status: "needs_you" }) } });
     show({ display_status: "needs_you" });
@@ -79,7 +78,7 @@ describe("ItemHeader", () => {
     await menu(/Cancel…/);
     expect(await screen.findByRole("dialog", { name: "Cancel this item?" })).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
-    // The review page under /ng (W8): the shell's crumbs end in it.
+    // The review page (W8): the shell's crumbs end in it.
     await menu(/Review changes/);
     expect(await screen.findByText("Review changes", { selector: '[aria-current="page"]' })).toBeInTheDocument();
   });

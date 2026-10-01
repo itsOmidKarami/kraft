@@ -53,8 +53,7 @@ export function stubFetch(answers: Record<string, [number, unknown]> = {}) {
 
 export const inShell = (ui: ReactElement, path = "/work-items/w1") =>
   render(
-    // The app's basename, so a router link reads as the browser sees it (/ng/…).
-    <MemoryRouter basename="/ng" initialEntries={[`/ng${path}`]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route element={<Shell />}>
           <Route path="*" element={ui} />

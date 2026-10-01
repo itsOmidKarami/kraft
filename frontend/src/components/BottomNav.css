@@ -1,3 +1,0 @@
-/* The tab bar's height, defined once (W3.4): every phone scroll container
-   pads its bottom by this so its last control never sits under the bar. */
-:root { --bottom-nav-h: 56px; }

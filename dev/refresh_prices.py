@@ -5,7 +5,7 @@ and antigravity).
 Not imported at runtime (`usage._prices` reads the committed JSON file, never
 the network -- see that function's docstring): this is a one-shot script a
 human runs (`just refresh-prices`) when a provider's pricing changes, the same
-"generate, paste/commit, test the committed output" shape as `dev/gen_palette.py`.
+"generate, paste/commit, test the committed output" shape as `dev/gen_theme.py`.
 """
 
 from __future__ import annotations

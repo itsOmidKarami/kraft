@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
-import { legacyPath } from "../legacyPath";
 import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 import { SIDEBAR_KEY } from "./sidebarPref";
@@ -153,13 +152,10 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("img", { name: word })).toBeInTheDocument();
   });
 
-  it("reads the footer from /health and links About and the current UI", async () => {
+  it("reads the footer from /health and links About", async () => {
     mount("/templates/chains");
     expect(await screen.findByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.getByRole("link", { name: "Current UI ↗" })).toHaveAttribute(
-      "href",
-      legacyPath({ pathname: "/ng/templates/chains", search: "" }),
-    );
+    expect(screen.queryByRole("link", { name: /Current UI/ })).toBeNull();
   });
 });
 

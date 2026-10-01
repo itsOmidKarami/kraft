@@ -22,13 +22,18 @@ export function Alias({ to }: { to: string }) {
   return <Navigate to={to + search} replace />;
 }
 
+/** The keys the shipped item page kept in its hash (`useItemUrlState`). */
+const SHIPPED_KEYS = ["node", "tab", "session", "file", "doc", "tnode", "max"];
+
 /** Where a shipped item-page hash (`#node=X&tab=changes&file=…`) lands, or
- *  null when the address has none: the Changes tab is the review page, a
- *  node is the node view, any other tab or selection is the item page. */
+ *  null when the hash is not one: the Changes tab is the review page, a node
+ *  is the node view, any other tab or selection is the item page. A hash with
+ *  none of the shipped keys (an anchor) is left alone. */
 export function shippedHash(path: string, hash: string): string | null {
   const item = /^\/work-items\/([^/]+)\/?$/.exec(path);
   if (!item || hash.length < 2) return null;
   const params = new URLSearchParams(hash.slice(1));
+  if (!SHIPPED_KEYS.some((k) => params.has(k))) return null;
   const base = `/work-items/${item[1]}`;
   if (params.get("tab") === "changes") return `${base}/review`;
   const node = params.get("node");

@@ -24,7 +24,7 @@ const GROUPS: [string, string[]][] = [
   ["Review diff", ["diff-add-theme", "diff-del-theme", "diff-add-safe", "diff-del-safe", "diff-add-plain", "diff-del-plain"]],
 ];
 
-/** /ng/_tokens, unlinked: every token and every primitive in the current look,
+/** /_tokens, unlinked: every token and every primitive in the current look,
  *  and a ThemeCard per surface at the current mode and amount. */
 export function TokenSheet() {
   const [tab, setTab] = useState("overview");

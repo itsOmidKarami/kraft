@@ -1,4 +1,4 @@
-/* The /ng frame. Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+/* The app frame. Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
 .ng-skip { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 6px 12px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 12.5px; }
 .ng-skip:focus { top: 8px; }
 .ng-shell { display: flex; min-height: 100vh; }

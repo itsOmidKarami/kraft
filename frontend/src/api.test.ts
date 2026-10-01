@@ -25,57 +25,9 @@ describe("api", () => {
     );
   });
 
-  it("createWorkItem posts JSON and returns the id", async () => {
-    const f = mockFetch(201, { id: "abc" });
-    vi.stubGlobal("fetch", f);
-    const out = await api.createWorkItem({ repo: "/r", title: "t" });
-    expect(out.id).toBe("abc");
-    expect(f).toHaveBeenCalledWith(
-      "/api/work-items",
-      expect.objectContaining({ method: "POST" }),
-    );
-    const init = f.mock.calls[0][1] as RequestInit;
-    expect(JSON.parse(init.body as string)).toEqual({ repo: "/r", title: "t" });
-    expect(init.headers).toMatchObject({ "content-type": "application/json" });
-  });
-
   it("throws with the server detail on non-2xx", async () => {
     vi.stubGlobal("fetch", mockFetch(422, { detail: "bad repo" }));
-    await expect(api.createWorkItem({ repo: "/nope", title: "t" })).rejects.toThrow(
-      "bad repo",
-    );
-  });
-
-  it("rejectGate sends the note", async () => {
-    const f = mockFetch(200, {});
-    vi.stubGlobal("fetch", f);
-    await api.rejectGate("id1", "spec_approval", "redo");
-    expect(f).toHaveBeenCalledWith(
-      "/api/work-items/id1/gates/spec_approval/reject",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ note: "redo" }),
-      }),
-    );
-  });
-
-  it("encodes custom gate names in gate action URLs", async () => {
-    const f = mockFetch(200, {});
-    vi.stubGlobal("fetch", f);
-    await api.approveGate("id1", "release/ready#1");
-    expect(f).toHaveBeenCalledWith(
-      "/api/work-items/id1/gates/release%2Fready%231/approve",
-      expect.anything(),
-    );
-  });
-
-  it("approveGate sends a chain revision's digest back, and no body otherwise", async () => {
-    const f = mockFetch(200, {});
-    vi.stubGlobal("fetch", f);
-    await api.approveGate("id1", "chain_revision_approval", "d1");
-    await api.approveGate("id1", "spec_approval");
-    expect(f.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify({ digest: "d1" }) }));
-    expect(f.mock.calls[1][1].body).toBeUndefined();
+    await expect(api.getWorkItem("nope")).rejects.toThrow("bad repo");
   });
 
   it("logUrl builds the log path", () => {
@@ -92,12 +44,6 @@ describe("api", () => {
     expect(url).toContain("kind=specs");
     expect(url).not.toContain("repo=");
     expect(url).not.toContain("source_kind=");
-  });
-
-  it("getDocument fetches by id and returns the row", async () => {
-    vi.stubGlobal("fetch", mockFetch(200, { id: "d1", content: "# hi", metadata: {} }));
-    const doc = await api.getDocument("d1");
-    expect(doc.id).toBe("d1");
   });
 
   it("search surfaces the 422 detail from a bad FTS query", async () => {

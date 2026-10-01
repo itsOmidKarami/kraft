@@ -44,7 +44,7 @@ New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraf
 **A gate stops the chain where a human decides.** Read what the agent wrote,
 then approve, or reject with a note that re-runs the node that wrote it.
 
-![A spec an agent wrote, waiting for your approval in the item's detail view](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
+![A spec an agent wrote, waiting for your approval on the item's page](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
 </td>
 <td width="35%">

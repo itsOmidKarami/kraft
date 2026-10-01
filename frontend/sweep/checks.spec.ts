@@ -84,29 +84,8 @@ test("checks/ellipsis: data-allow-ellipsis skips a deliberate cut, a plain one s
 
 /** Allowlist use (README "data-allow-ellipsis"): the item header's meta line
  *  (W11 A.1) -- a flex line whose parts each cut their own text, whole in title. */
-test("checks/ellipsis: the item header's .detail-meta-part cuts are allowed, an unmarked part still counts", async ({ page }) => {
-  const line = (attr: string) =>
-    `<div class="detail-meta" style="display:flex;width:160px;overflow:hidden;white-space:nowrap;font:12px sans-serif">` +
-    `<span class="detail-meta-part" ${attr} title="a-repository-with-an-unreasonably-long-name" style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">a-repository-with-an-unreasonably-long-name</span>` +
-    `<span class="detail-meta-part" ${attr} title="default" style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">default</span></div>`;
-  await page.setContent(line("data-allow-ellipsis"));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
-  await page.setContent(line(""));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBeGreaterThan(0);
-});
-
-/** Allowlist use: the item title crumb in the app header (W12.1), one line cut, whole in title. */
-test("checks/ellipsis: an .app-header-crumb-current cut is allowed, an unmarked crumb still counts", async ({ page }) => {
-  const crumb = (attr: string) =>
-    `<span class="app-header-crumb-current" ${attr} title="Design the caching layer for document search: embedding cache keyed by (repo, path, blob_sha)" style="display:block;width:200px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:13px sans-serif">Design the caching layer for document search: embedding cache keyed by (repo, path, blob_sha)</span>`;
-  await page.setContent(crumb("data-allow-ellipsis"));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
-  await page.setContent(crumb(""));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
-});
-
-/** Allowlist use: the /ng header's repo and item-title crumbs (UX V2 W2, Decided 11), each one line cut, whole in title. */
-test("checks/ellipsis: the /ng header's .ng-crumb-repo and .ng-crumb-current cuts are allowed, unmarked ones still count", async ({ page }) => {
+/** Allowlist use: the header's repo and item-title crumbs (UX V2 W2, Decided 11), each one line cut, whole in title. */
+test("checks/ellipsis: the header's .ng-crumb-repo and .ng-crumb-current cuts are allowed, unmarked ones still count", async ({ page }) => {
   const crumbs = (attr: string) =>
     `<ol style="display:flex;width:240px;margin:0;padding:0;list-style:none;white-space:nowrap;font:13px sans-serif">` +
     `<li class="ng-crumb-repo" ${attr} title="a-repository-with-an-unreasonably-long-name" style="flex-shrink:4;min-width:0;overflow:hidden;text-overflow:ellipsis">a-repository-with-an-unreasonably-long-name</li>` +
@@ -117,47 +96,14 @@ test("checks/ellipsis: the /ng header's .ng-crumb-repo and .ng-crumb-current cut
   expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(2);
 });
 
-/** Allowlist use: the /ng item page's one-line question banner in a node view (UX V2 W5, Decisions §4), whole in title. */
-test("checks/ellipsis: the /ng question banner's .item-one-line cut is allowed, an unmarked one still counts", async ({ page }) => {
+/** Allowlist use: the item page's one-line question banner in a node view (UX V2 W5, Decisions §4), whole in title. */
+test("checks/ellipsis: the question banner's .item-one-line cut is allowed, an unmarked one still counts", async ({ page }) => {
   const q = "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
   const line = (attr: string) =>
     `<span class="item-banner-text item-one-line" ${attr} title="${q}" style="display:block;width:240px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:13px sans-serif">${q}</span>`;
   await page.setContent(line("data-allow-ellipsis"));
   expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
   await page.setContent(line(""));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
-});
-
-/** Allowlist use: the document pane's title and path lines (W12.2), each one line cut, whole in title. */
-test("checks/ellipsis: the document pane's .doc-modal-name and .doc-path cuts are allowed, unmarked ones still count", async ({ page }) => {
-  const path = ".engineering/reviews/2026-09-13-design-the-caching-layer-for-document-search-embedding-cache.md";
-  const head = (attr: string) =>
-    `<div style="width:220px;font:12px sans-serif">` +
-    `<span class="doc-modal-name" ${attr} title="Review: Design the caching layer for document search" style="display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">Review: Design the caching layer for document search</span>` +
-    `<span class="doc-path" ${attr} title="${path}" style="display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;direction:rtl;text-align:left"><span dir="ltr">${path}</span></span></div>`;
-  await page.setContent(head("data-allow-ellipsis"));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
-  await page.setContent(head(""));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(2);
-});
-
-/** Allowlist use: the board row's title (W11 B.2), one line cut, whole in title. */
-test("checks/ellipsis: a .board-row-title cut is allowed, an unmarked title still counts", async ({ page }) => {
-  const title = (attr: string) =>
-    `<span class="board-row-title" ${attr} title="Design the caching layer for document search" style="display:block;width:140px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:14px sans-serif">Design the caching layer for document search</span>`;
-  await page.setContent(title("data-allow-ellipsis"));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
-  await page.setContent(title(""));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
-});
-
-/** Allowlist use: the board row's meta line (W11 B.2), repo · bead · template · age · reason. */
-test("checks/ellipsis: a .board-row-meta cut is allowed, an unmarked meta line still counts", async ({ page }) => {
-  const meta = (attr: string) =>
-    `<div class="board-row-meta" ${attr} title="kraft · kraft-cb59 · default · 15h ago · approve code_review" style="width:140px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:11.5px sans-serif"><span>kraft</span> · <code>kraft-cb59</code> · <span>default</span> · <span>15h ago</span> · <span>approve code_review</span></div>`;
-  await page.setContent(meta("data-allow-ellipsis"));
-  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
-  await page.setContent(meta(""));
   expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
 });
 
@@ -234,8 +180,8 @@ test("checks/input<16: 15.5px and up passes (Safari rounds to 16), under that co
   expect((await runChecks(page, true, [])).smallInputs.count).toBe(2);
 });
 
-/** Allowlist use: the /ng Library list's component name (UX V2 W12, R10): 14 characters at least, a longer id cut, whole in title. */
-test("checks/ellipsis: the /ng Library list's .lib-name cut is allowed, an unmarked name still counts", async ({ page }) => {
+/** Allowlist use: the Library list's component name (UX V2 W12, R10): 14 characters at least, a longer id cut, whole in title. */
+test("checks/ellipsis: the Library list's .lib-name cut is allowed, an unmarked name still counts", async ({ page }) => {
   const id = "never-signal-processes-you-didnt-start";
   const row = (attr: string) =>
     `<div style="display:flex;width:250px;gap:8px;font:11.5px ui-monospace,Menlo,monospace">` +

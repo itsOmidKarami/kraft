@@ -508,7 +508,8 @@ async def put_theme(body: dict, request: Request):
     neither UI wipes the keys only the other one edits; a key sent as `null`
     is removed. A body still marked `derived` is the echo of a `GET` whose V2
     values came from `palette`, and they are dropped so they keep deriving:
-    the shipped Appearance page sends back the whole object it loaded."""
+    the shipped Appearance page sent back the whole object it loaded, and a
+    tab of it left open across the upgrade still does."""
     st = request.app.state
     path = st.templates_dir / "theme.yaml"
     try:

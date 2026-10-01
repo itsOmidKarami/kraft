@@ -3,7 +3,7 @@ import { ngItem, type Flow } from "../flowKit";
 
 export const flows: Flow[] = [
   // ux2-W8 exit: a request-changes review, from the item page's diff line, sends the threads and starts the fix round on the right node; the item page shows it.
-  { name: "ng-review-request-changes", widths: [1280], keyboard: true, start: ngItem("needs-gate"), steps: [
+  { name: "review-request-changes", widths: [1280], keyboard: true, start: ngItem("needs-gate"), steps: [
     { name: "open-review", run: async (p) => {
       await p.getByRole("link", { name: "Review changes" }).focus(); await p.keyboard.press("Enter");
       await expect(p.getByRole("heading", { name: /^Review changes:/ })).toBeAttached();

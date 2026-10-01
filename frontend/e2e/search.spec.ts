@@ -1,61 +1,41 @@
 import { expect, test } from "./fixtures";
 
-// Assumes an orchestrator is already running at baseURL with KRAFT_INDEX_REPOS
-// pointed at the fixture repo seeded with .engineering/ content by e2e/serve.py.
-// See e2e/README.md.
+// Against the index e2e/serve.py seeds with two .engineering/ documents.
 
-/**
- * `page.goto` resolves on load, before React has mounted. The Ctrl-K listener
- * is attached in a layout effect, in the same commit as the header, so a
- * visible Search button means the chord is live (App.test.tsx pins that).
- * Escape handling is vitest's: App.test.tsx.
- */
-async function openWithShortcut(page: import("@playwright/test").Page) {
+async function openSearch(page: import("@playwright/test").Page) {
   await page.goto("/");
+  // The ⌘K listener is live once the sidebar's Search button is.
   await expect(page.getByRole("button", { name: "Search" })).toBeVisible();
   await page.keyboard.press("Control+k");
+  const overlay = page.getByRole("dialog", { name: "Search" });
+  await expect(overlay).toBeVisible();
+  return overlay;
 }
 
-// A result row renders its title and its snippet in sibling spans, so bare text
-// matching is ambiguous. Target the title span.
-const resultTitled = (page: import("@playwright/test").Page, title: string) =>
-  page.locator(".search-result-title", { hasText: title });
+test("Ctrl-K finds an indexed document, and a hit opens it", async ({ page }) => {
+  const overlay = await openSearch(page);
+  await overlay.getByRole("combobox", { name: "Search" }).fill("reconnect backoff");
+  const hit = overlay.getByRole("option", { name: /^WS transport design specs/ });
+  await expect(hit).toContainText("reconnect backoff schedule caps");
 
-test("Ctrl-K opens search, a hit opens the document viewer", async ({ page }) => {
-  await openWithShortcut(page);
-  const overlay = page.getByRole("dialog", { name: "Search" });
-  await expect(overlay).toBeVisible();
-
-  await overlay.getByRole("searchbox").fill("reconnect backoff");
-  await expect(resultTitled(page, "WS transport design")).toBeVisible();
-
-  await resultTitled(page, "WS transport design").click();
-  const viewer = page.getByRole("dialog", { name: "document" });
-  await expect(viewer).toBeVisible();
-  await expect(viewer.locator(".doc-modal-body")).toContainText("reconnect backoff schedule caps");
-  await expect(viewer.getByText(".engineering/specs/ws.md")).toBeVisible();
-
-  await viewer.getByRole("button", { name: /close/i }).click();
-  await expect(viewer).toBeHidden();
-  await expect(overlay).toBeVisible();
+  // A document no work item links to opens in the document dialog.
+  await hit.click();
+  const doc = page.getByRole("dialog", { name: "WS transport design" });
+  await expect(doc).toContainText(".engineering/specs/ws.md");
+  await expect(doc).toContainText("reconnect backoff schedule caps");
 });
 
-test("the advanced kind filter narrows results", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Search" }).click();
-  const overlay = page.getByRole("dialog", { name: "Search" });
+test("the kind filter narrows documents", async ({ page }) => {
+  const overlay = await openSearch(page);
+  await overlay.getByRole("combobox", { name: "Search" }).fill("board");
+  const plan = overlay.getByRole("option", { name: /^UI plan plans/ });
+  await expect(plan).toBeVisible();
 
-  await overlay.getByRole("searchbox").fill("board");
-  await expect(resultTitled(page, "UI plan")).toBeVisible();
-
-  await overlay.getByRole("button", { name: /advanced/i }).click();
-
-  // The filter's guarantee is that nothing outside the kind comes back — not
-  // that there are no results. Search defaults to hybrid, and the vector leg
-  // legitimately surfaces a semantically near spec for this query.
-  await overlay.getByLabel("kind", { exact: true }).fill("specs");
-  await expect(resultTitled(page, "UI plan")).toBeHidden();
-
-  await overlay.getByLabel("kind", { exact: true }).fill("plans");
-  await expect(resultTitled(page, "UI plan")).toBeVisible();
+  // The guarantee is that nothing outside the kind comes back, not that
+  // nothing does: hybrid search can surface a near spec for this query.
+  await overlay.getByRole("button", { name: "Filters" }).click();
+  await overlay.getByRole("textbox", { name: "Kind" }).fill("specs");
+  await expect(plan).toBeHidden();
+  await overlay.getByRole("textbox", { name: "Kind" }).fill("plans");
+  await expect(plan).toBeVisible();
 });

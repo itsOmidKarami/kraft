@@ -2,7 +2,7 @@
 
 A port of `make()` in the UX V2 prototype's `kraft-themes.js`, with the roles
 `kraft-look.js` `vars()` derives from it. Run by hand and check the output
-in, like `palettes.css`:
+in:
 
     uv run python dev/gen_theme.py
 

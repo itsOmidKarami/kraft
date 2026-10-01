@@ -402,8 +402,10 @@ def test_a_document_navigation_cannot_slip_past_the_bearer_check(client):
 
 
 def test_a_document_navigation_under_ng_gets_the_spa_shell(dist, client):
-    """UX V2 serves the new UI under /ng from the same index.html; a refresh on
-    any /ng/... URL must get the shell, uncached, like any client-side route."""
+    """The new UI was served under /ng until the cutover, and the shell
+    redirects an /ng/... bookmark to the same page without the prefix
+    (frontend/src/main.tsx). It only can if the server answers /ng/... with
+    the shell, uncached, like any client-side route."""
     r = client.get("/ng/work-items/abc", headers={"sec-fetch-dest": "document"})
     assert r.status_code == 200, r.text
     assert r.text == (dist / "index.html").read_text()

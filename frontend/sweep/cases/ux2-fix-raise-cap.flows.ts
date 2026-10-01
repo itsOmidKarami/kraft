@@ -3,7 +3,7 @@ import { ngItem, type Flow } from "../flowKit";
 
 export const flows: Flow[] = [
   // Keyboard: Raise cap opens the editor with the field focused; a value above the current one enables Save & retry; Esc closes and returns focus to the button.
-  { name: "ng-raise-cap-keyboard", widths: [1280], keyboard: true, start: async (p, S) => {
+  { name: "raise-cap-keyboard", widths: [1280], keyboard: true, start: async (p, S) => {
     (S.bundles[S.ng.capped].item.stop as { limit?: object }).limit = { path: "verification", key: "max_attempts", value: 3, maximum: 5 };
     await ngItem("capped")(p, S);
   }, steps: [

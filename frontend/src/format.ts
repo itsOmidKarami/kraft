@@ -1,32 +1,4 @@
-import type { BudgetStop, KraftEvent, LogLine, WorkerSession } from "./types";
-
-/** For a spend-cap stop Raise budget cannot lift (Kraft-9efnk.28), which cap
- *  stopped it and how to raise that one; null for the item's own cap. Wording
- *  from the docs' caps-and-budgets page, "Raising a cap". */
-export function otherCapHint(budget: BudgetStop, id: string): string | null {
-  const setPolicy = (key: string) =>
-    `a ${key} stopped it, not the item's own cap: raise it with ` +
-    `kraft item set-policy ${id} --policy ${key}=N (item-wide, up to maxima.work_item), ` +
-    "then retry -- policy.yaml only applies to items filed after it changes";
-  switch (budget.scope) {
-    case "work_item":
-      return null;
-    case "usd":
-      // Unknown spend: no higher cap passes it (Kraft-tugdf.12).
-      if (budget.unknown_launches)
-        return (
-          "a budget_usd stopped it on spend a harness never reported, which no higher cap passes: " +
-          `clear it item-wide with kraft item set-policy ${id} --policy budget_usd=none ` +
-          "(refused under a maxima.work_item.budget_usd; a cap the chain set on a node, step or task stays), " +
-          "then retry, or skip the node"
-        );
-      return setPolicy("budget_usd");
-    case "tokens":
-      return setPolicy("token_budget");
-    case "daily":
-      return "the daily cap stopped it: raise budget.daily_usd in policy.yaml, or wait for local midnight, then retry";
-  }
-}
+import type { KraftEvent, LogLine, WorkerSession } from "./types";
 
 /** A log line's one-line text. `summary` is a server-rendered stream-json
  *  line; but the server's own summariser (logs.py summary()) falls back to
@@ -151,17 +123,6 @@ export function nodeRunSpan(
   return { from, to: null };
 }
 
-/** When the item started waiting on a person: the latest `gate_requested`
- *  (for `gate`, when given) or `work_item_needs_human` event. */
-export function waitingSince(events: KraftEvent[], gate?: string | null): string | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.type === "gate_requested" && (!gate || e.payload.gate === gate)) return e.created_at;
-    if (!gate && e.type === "work_item_needs_human") return e.created_at;
-  }
-  return null;
-}
-
 /** A 32-hex id as `first8…last5` (README §5): short enough never to be
  *  ellipsized, both ends kept so two ids still tell apart. Shorter ids pass
  *  through. Render the full id in a `title` beside it. */
@@ -231,17 +192,6 @@ export function docTitle(d: {
   return `Session · ${d.hook_point ?? d.node_id ?? d.kind ?? "summary"}`;
 }
 
-/** How a session's run reads beside its hook (W13 · B.1): `turn N` for an
- *  escalation, `round N` once a fix loop is involved (a round past 0, or a fix
- *  / judge hook), `attempt N` otherwise. Null when the server sent no run info
- *  (an older server, or an artifact). */
-export function runLabel(hook: string | null | undefined, attempt?: number | null, round?: number | null): string | null {
-  if (attempt == null && round == null) return null;
-  if (hook === "escalation") return `turn ${attempt ?? 1}`;
-  if ((round ?? 0) > 0 || /fix|judge/.test(hook ?? "")) return `round ${round ?? 0}`;
-  return `attempt ${attempt ?? 1}`;
-}
-
 // ponytail: without the item's own bead id, a bead id is guessed as
 // `Capitalised-xxxx` -- tight enough for Kraft ids; pass the item for an exact match.
 const BEAD_ID = "[A-Z][A-Za-z]*-[a-z0-9]{4,6}";
@@ -283,35 +233,6 @@ export function tokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-/** A row's token kinds (Ruling 211). The cache kinds are optional: a row
- *  from before the split has them null, a fixture may leave them out. */
-type TokenKinds = {
-  tokens_in: number | null;
-  tokens_out: number | null;
-  tokens_cache_write?: number | null;
-  tokens_cache_read?: number | null;
-  split_complete?: boolean;
-};
-
-/** Every token a session or rollup spent: uncached in, cache writes, cache
- *  reads, out. The one number shown wherever tokens are, and what a
- *  token_budget counts. */
-export function tokenTotal(r: TokenKinds): number {
-  return (r.tokens_in ?? 0) + (r.tokens_cache_write ?? 0) + (r.tokens_cache_read ?? 0) + (r.tokens_out ?? 0);
-}
-
-/** `1.2k in · 3k cache write · 80k cache read · 11k out`. A session from
- *  before the split has its cache use inside `in`, and says so. */
-export function tokenSplit(r: TokenKinds): string {
-  const known = r.split_complete ?? r.tokens_cache_read != null;
-  return [
-    `${tokens(r.tokens_in ?? 0)} in${known ? "" : " (cache not split on older sessions)"}`,
-    `${tokens(r.tokens_cache_write ?? 0)} cache write`,
-    `${tokens(r.tokens_cache_read ?? 0)} cache read`,
-    `${tokens(r.tokens_out ?? 0)} out`,
-  ].join(" · ");
-}
-
 /** USD, with enough places to be useful at agent-run scale.
  *
  * `complete: false` marks a sum that is missing an agent's unreported cost —
@@ -338,34 +259,6 @@ export function usd(n: number, complete = true, estimated = false): string {
  */
 export function repoName(path: string): string {
   return path.replace(/\/+$/, "").split("/").pop() || path;
-}
-
-/** Session and work-item statuses in the words the rest of the UI uses.
- *
- * `capped_out` / `needs_human` are database values. The board says "Needs you"
- * and the detail tag says "needs you", so a row two panels down saying
- * `needs_human` reads as a different thing to the person looking at it.
- */
-const STATUS_WORDS: Record<string, string> = {
-  capped_out: "capped out",
-  needs_human: "needs you",
-  rate_limited: "rate limited",
-  config_error: "config error",
-  // A node parked on a pipeline (Kraft-ru98). Says what it is waiting on, so a
-  // healthy wait does not read as a stall.
-  waiting: "waiting on CI",
-};
-
-export function statusWord(status: string): string {
-  return STATUS_WORDS[status] ?? status;
-}
-
-/** `item.stop_reason`'s reasoning when the stop was a fix-loop judge
- *  (`kraft.executor.walk`'s `f"judge: {reasoning}"`, mirroring the existing
- *  `"executor crashed: ..."` prefix `CappedCard` already keys off of) --
- *  undefined for any other stop reason. */
-export function judgeReasoning(stopReason: string | null | undefined): string | undefined {
-  return stopReason?.startsWith("judge:") ? stopReason.slice("judge:".length).trim() : undefined;
 }
 
 /** A document's body as the viewer shows it (W8.2). The header already names

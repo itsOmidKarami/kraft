@@ -1,14 +1,13 @@
-import { useLocation } from "react-router-dom";
-import { legacyPath } from "../legacyPath";
+import { Link } from "react-router-dom";
 
-/** A page no wave has built yet: it names itself and links to its shipped page. */
-export function Placeholder({ label, note = "This page is not in the new UI yet." }: { label: string; note?: string }) {
-  const { pathname, search } = useLocation();
+/** A page with nothing to show (an unknown address, a missing item): it
+ *  names itself and links back to the board. */
+export function Placeholder({ label, note = "There is no page at this address." }: { label: string; note?: string }) {
   return (
     <div className="ng-placeholder">
       <h1>{label}</h1>
       <p>{note}</p>
-      <a href={legacyPath({ pathname: `/ng${pathname}`, search })}>Open it on the current UI ↗</a>
+      <Link to="/">Back to the board</Link>
     </div>
   );
 }

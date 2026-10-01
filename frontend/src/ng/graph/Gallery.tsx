@@ -11,7 +11,7 @@ import "./graph.css";
 
 const noop = () => {};
 
-/** /ng/_gallery, unlinked: every graph component and state, from fixtures only. */
+/** /_gallery, unlinked: every graph component and state, from fixtures only. */
 export function Gallery() {
   const [sel, setSel] = useState("review_gate");
   const [task, setTask] = useState<NodeSel>({ step: "review", task: "code_review" });

@@ -21,9 +21,9 @@ const fits = async (p: Page) => {
 
 export const flows: Flow[] = [
   // Kraft-9d8b2.17: the canvas ends at the docked pane's edge and scrolls to every lane's right end, on the floor, a harness and a profile.
-  { name: "ng-harness-lanes-fit-the-pane", widths: [1280], mock: { harnesses: "floor" }, start: ng("/ng/templates/harnesses"), steps: [
+  { name: "harness-lanes-fit-the-pane", widths: [1280], mock: { harnesses: "floor" }, start: ng("/templates/harnesses"), steps: [
     { name: "floor", run: fits },
-    { name: "harness", run: async (p) => { await p.goto("/ng/templates/harnesses?harness=claude"); await fits(p); } },
-    { name: "profile", run: async (p) => { await p.goto("/ng/templates/harnesses?profile=strong"); await fits(p); } },
+    { name: "harness", run: async (p) => { await p.goto("/templates/harnesses?harness=claude"); await fits(p); } },
+    { name: "profile", run: async (p) => { await p.goto("/templates/harnesses?profile=strong"); await fits(p); } },
   ] },
 ];

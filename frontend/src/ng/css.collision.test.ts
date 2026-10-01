@@ -4,7 +4,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// /ng is one bundle, so every folder's CSS is global (R59). A class styled at
+// The UI is one bundle, so every folder's CSS is global (R59). A class styled at
 // the head of a selector belongs to the one top-level folder that styles it;
 // ui/ and theme/ are shared: anyone may use their classes, only they style them.
 // W10 found `.rv-diff`, `.pf` and `.menu-note` styled by two folders, which moved

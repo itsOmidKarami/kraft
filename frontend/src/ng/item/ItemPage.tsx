@@ -15,7 +15,7 @@ import { Workspace } from "./Workspace";
 import { useItem, type ItemDetail } from "./useItem";
 import "./item.css";
 
-/** `/ng/work-items/:id[/nodes/:node]`: one item, its chain and the pane (W5). */
+/** `/work-items/:id[/nodes/:node]`: one item, its chain and the pane (W5). */
 export function ItemPage() {
   const { id = "" } = useParams();
   const loaded = useItem(id);

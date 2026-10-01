@@ -18,17 +18,17 @@ export function LeaveGuard() {
   const id = d?.raw.id;
   useEffect(() => {
     if (!has || !id) return;
-    const own = `/ng/work-items/${encodeURIComponent(id)}`;
+    const own = `/work-items/${encodeURIComponent(id)}`;
     const onClick = (e: MouseEvent) => {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
       const url = new URL(a.href, window.location.href);
-      if (url.origin !== window.location.origin || (url.pathname !== "/ng" && !url.pathname.startsWith("/ng/"))) return;
+      if (url.origin !== window.location.origin) return;
       if (url.pathname === own || url.pathname.startsWith(`${own}/`)) return;
       e.preventDefault();
       e.stopPropagation();
-      setTo((url.pathname.slice("/ng".length) || "/") + url.search);
+      setTo(url.pathname + url.search);
     };
     const onUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();

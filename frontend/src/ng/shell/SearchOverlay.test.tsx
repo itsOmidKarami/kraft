@@ -159,7 +159,7 @@ describe("SearchOverlay", () => {
     vi.unstubAllGlobals();
   });
 
-  it("goes to /ng pages from Go to, Archived included, without a page load", async () => {
+  it("goes to pages from Go to, Archived included, without a page load", async () => {
     mount();
     const { user } = await open();
     expect(screen.getByRole("option", { name: "Archived" })).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe("SearchOverlay", () => {
   });
 
   it("closes when a search call comes back 401 and the app shows sign-in", async () => {
-    window.history.pushState({}, "", "/ng/analytics");
+    window.history.pushState({}, "", "/analytics");
     search.mockImplementation(async () => {
       window.dispatchEvent(new CustomEvent("kraft:unauthenticated"));
       throw new Error("Unauthorized");

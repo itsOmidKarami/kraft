@@ -1,14 +1,12 @@
-import { applyTheme, savedTheme } from "./theme";
-
-// Two UIs, one build (UX V2 spec §2.2): static imports run before any code,
-// so only a dynamic import keeps one UI's CSS off the other's page.
-if (location.pathname === "/ng" || location.pathname.startsWith("/ng/")) void import("./ng/boot");
-else {
-  // The shipped UI's saved theme, before its CSS can paint (W1.3). boot.tsx
-  // applies it too, but only once the dynamic import resolves, which can be
-  // after the stylesheet lands: the page painted Nocturne dark first.
-  // theme.ts imports no CSS, so this keeps the shipped styles off /ng.
-  const saved = savedTheme();
-  if (saved) applyTheme(saved.palette, saved.mode);
-  void import("./boot");
+/** The address without the `/ng` prefix the new UI was served under until the
+ *  cutover (UX V2 spec §11.1), so a bookmark of it still opens its page; any
+ *  other address, unchanged. Query and hash are kept. */
+export function withoutNg({ pathname, search, hash }: { pathname: string; search: string; hash: string }): string | null {
+  if (pathname !== "/ng" && !pathname.startsWith("/ng/")) return null;
+  return (pathname.slice(3) || "/") + search + hash;
 }
+
+// Before the router reads the address, and without a history entry.
+const to = withoutNg(location);
+if (to) history.replaceState(history.state, "", to);
+void import("./ng/boot");

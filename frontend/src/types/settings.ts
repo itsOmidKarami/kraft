@@ -241,18 +241,19 @@ export interface Policy {
 export type PaletteId = "nocturne" | "rose" | "forest" | "amber" | "slate";
 export type ThemeMode = "light" | "dark" | "system";
 
-/** `GET/PUT /theme`. Instance-wide, like every other Settings-backed value —
- *  see the theme-palettes design doc for why this isn't per-user. */
+/** `GET/PUT /theme`. Instance-wide, like every other Settings-backed value. */
 export type BoardGroupBy = "status" | "repo" | "template";
 export type BoardOpenIn = "peek" | "full";
 
 export interface Theme {
-  palette: PaletteId;
+  /** Legacy, accepted on PUT only: GET answers without it, and startup
+   *  converts a file's palette to the three keys below (W18). */
+  palette?: PaletteId;
   mode: ThemeMode;
   density: "compact" | "comfortable";
   board: { group_by: BoardGroupBy; show_done: number; open_in: BoardOpenIn };
-  // The new UI's colour model (UX V2, under /ng). `GET` always fills the
-  // three; `derived` says they came from `palette`, not from the file.
+  // The colour model. `GET` always fills the three; `derived` says the file
+  // names no surface, so they are the default look (or an old `palette`'s).
   surface?: Surface;
   accent?: Accent;
   colour_amount?: ColourAmount;

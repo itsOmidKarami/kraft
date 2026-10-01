@@ -101,7 +101,7 @@ fixture refuses to answer a `param == "bd"` request against the fake).
     tests below the HTTP layer.
 
   Frontend setup lives in `frontend/src/testFixtures.ts`: `item()`,
-  `detailItem()`, `QUICK`, `setPhoneWidth()` — factories that take
+  `session()`, `NODES`, `setPhoneWidth()` — factories that take
   overrides, not copy-pasted object literals. Add a factory there the
   second time a setup recurs.
 

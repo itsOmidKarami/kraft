@@ -47,7 +47,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
   }
   if (phone) return <PhoneApp />;
   return (
-    <BrowserRouter basename="/ng">
+    <BrowserRouter>
       <ShippedHash />
       <Routes>
         <Route path="/_gallery" element={<Gallery />} />
@@ -71,7 +71,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           {ALIASES.map(([from, to]) => (
             <Route key={from} path={from} element={<Alias to={to} />} />
           ))}
-          <Route path="*" element={<Placeholder label="Not found" note="There is no page at this address in the new UI." />} />
+          <Route path="*" element={<Placeholder label="Not found" />} />
         </Route>
       </Routes>
       <Toaster />

@@ -37,7 +37,7 @@ export interface ChainNode {
    *  (`store.node_view`: the node's own recovery pass). */
   on_failure?: string[] | null;
   /** The node's own Lucide icon name, null when it sets none (always on a
-   *  gate). The shipped board draws none; the `/ng` editor reads it. */
+   *  gate). The chain editor reads it. */
   icon?: string | null;
 }
 
@@ -119,8 +119,7 @@ export interface WorkItemAttachment {
 /** Kraft UI v2 · B1's badge, derived server-side (`board.display_status`):
  *  exactly one of these, so a pending gate, a plain failure and a
  *  stuck-but-not-yet-escalated stop -- all `needs_human` in `status` -- read
- *  apart without re-deriving `deriveState`'s logic a second time. Additive:
- *  the shipped UI keeps its own `deriveState` and does not read this yet. */
+ *  apart with no client-side derivation. */
 export type DisplayStatus =
   | "archived"
   | "done"
@@ -342,8 +341,7 @@ export interface WorkItem {
   /** Whether an agent may review this item's `auto_escalate` gates before a
    *  human sees them (Kraft-zr3s). Set at intake; the column is on every row. */
   auto_gate?: boolean;
-  /** The board's status badge (Kraft UI v2 · B1). Additive; the shipped UI
-   *  keeps deriving its own via `deriveState` and does not read this. */
+  /** The board's status badge (Kraft UI v2 · B1). */
   display_status?: DisplayStatus;
   /** The stop `display_status` is reporting on; `null` off `needs_human`,
    *  `waiting` and `rate_limited`. Additive, unread by the shipped UI. */

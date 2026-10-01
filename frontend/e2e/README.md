@@ -1,43 +1,33 @@
 # Playwright end-to-end
 
-Eight specs, all against one running orchestrator. Playwright proves the
+Nine specs, all against one running orchestrator. Playwright proves the
 UI↔server contract and real-browser layout; component behaviour (Escape
-handling, active nav tabs, which controls a phone hides) is vitest's. Shared
-helpers — `REPO`, `REPO_NAME`, `connectRepo`, `createItem` — live in
-`fixtures.ts`.
+handling, which controls a state offers, keyboard paths) is vitest's. Shared
+helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
+`publish`, `agentRunning`, `eventCount`) live in `fixtures.ts`.
 
 | spec | what it drives |
 | --- | --- |
-| `chain.spec.ts` | create a `quick-task` item against a sample repo with a failing test, watch it reach `work_item_completed`, open the linked session summary |
-| `planning.spec.ts` | a `default`-chain item reaching `spec_approval`, "Review spec" → Documents tab, rejecting the gate (re-runs the spec node, returns to the same gate), approving into `plan_approval`, and "Review plan" |
-| `lifecycle.spec.ts` | pause / steer / resume a running agent, and a deep link answered by the SPA fallback |
-| `regression.spec.ts` | every Settings page's write path (repos, chains, policy, steering, access, notify, appearance) |
-| `search.spec.ts` | Ctrl-K → a real index hit → the document viewer; the advanced kind filter |
-| `board-responsive.spec.ts` | the peek overlays the board without moving a row |
-| `phone.visual.spec.ts` | the phone contract at 390x844: no sideways scroll, 44px touch targets, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), a **real** diff wrapping. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so this is the only place the media queries are real |
-| `attachments.visual.spec.ts` | intake from an existing spec/plan: the type-to-search picker, the `from spec+plan` badge, the "attached at intake" tag. Also writes screenshots |
+| `chain.spec.ts` | create a `quick-task` item from the board's composer, watch the header reach DONE, open the implement task's log and its session summary, find the item in the board's Done group |
+| `planning.spec.ts` | a `default` item at `spec_approval`: read the spec from the gate, reject it with a note (the spec node re-runs and the gate comes back), approve into `plan_approval`, read the plan |
+| `lifecycle.spec.ts` | pause a running agent (`KRAFT_SLOW`), resume it with a steer, see it finish; a deep link to an item loads it |
+| `regression.spec.ts` | each area's write path: connect a repo and publish, publish a chain change, a library component's and a harness's links into Chains, publish a policy cap and the intake interval, Access's port, Notifications' "Send a test", Appearance's density and open-in after a reload |
+| `search.spec.ts` | Ctrl-K finds an indexed document and opens it; the kind filter narrows documents |
+| `board-responsive.spec.ts` | the peek opens without reflowing a row: docked at 1440 and 1100, overlaid at 900 (R7) |
+| `attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results. Writes screenshots to `frontend/e2e-shots/` |
+| `phone.visual.spec.ts` | the phone at 390x844: the board, an item at a gate, its reject composer and a real diff, each with nothing scrolling sideways, every tap target at least 44px and the note at 16px (under it mobile Safari zooms on focus and never zooms back). jsdom has no viewport, so this is the only place the phone's media queries are real. Writes screenshots |
+| `addresses.spec.ts` | addresses from before the cutover still open their page: a bookmark from the new UI's old prefix, `/settings/chains`, an item's `#node=` hash |
 
-### The new UI (`e2e/v2/`)
+What the shipped UI's specs drove that has no page in this UI is not driven
+here: the item page's Timeline tab (no V2 equivalent, kickoff §4.4), and the
+`/settings/steering` address, which is an alias the router test pins
+(`src/ng/shell/aliases.test.tsx`).
 
-The same contracts through the new UI, served under `/ng` until the cutover
-(`at()` in `v2/fixtures.ts` adds the prefix). The cutover deletes the specs
-above and moves these up in their place.
-
-| spec | what it drives |
-| --- | --- |
-| `v2/chain.spec.ts` | create a `quick-task` item from the board's composer, watch the header reach DONE, open the implement task's log and its session summary, find the item in the board's Done group |
-| `v2/planning.spec.ts` | a `default` item at `spec_approval`: read the spec from the gate, reject it with a note (the spec node re-runs and the gate comes back), approve into `plan_approval`, read the plan |
-| `v2/lifecycle.spec.ts` | pause a running agent (`KRAFT_SLOW`), resume it with a steer, see it finish; a deep link to an item loads it |
-| `v2/regression.spec.ts` | each area's write path: connect a repo and publish, publish a chain change, a library component's and a harness's links into Chains, publish a policy cap and the intake interval, Access's port, Notifications' "Send a test", Appearance's density and open-in after a reload |
-| `v2/search.spec.ts` | Ctrl-K finds an indexed document and opens it; the kind filter narrows documents |
-| `v2/board-responsive.spec.ts` | the peek opens without reflowing a row: docked at 1440 and 1100, overlaid at 900 (R7) |
-| `v2/attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results |
-
-Not covered yet, each with its bead: reading an item's attached documents (Kraft-9d8b2.29), and the phone, whose
-spec is written at the cutover once the phone app is on main. The Timeline tab
-and the old Steering address have no new-UI page to drive: Timeline has no V2
-equivalent (kickoff §4.4), and `/settings/steering` is an alias tested in
-`src/ng/shell/aliases.test.tsx`.
+Three waits read the API because the page has nothing to show them by: a
+rejected gate re-runs its node in under a second and comes back looking the
+same (`eventCount`), a paused item takes a steer only once the server says
+it is steerable, and a resume in the first seconds after a pause is refused
+while the walk unwinds (the spec sends it again).
 
 `lifecycle.spec.ts` slows its agent with `KRAFT_SLOW` in the title so there is
 something to pause. One server serves every spec, so tests run one at a time
@@ -115,5 +105,5 @@ at your real `~/.kraft`.
 file to run one spec, for example `npx playwright test e2e/chain.spec.ts`.
 
 To verify: the run ends with every test passed and none failed. `chain.spec.ts`
-passing means a work item reached `work_item_completed` in the timeline and
-moved to the Done group on the Board.
+passing means a work item's header reached DONE and the item sits in the
+board's Done group.
