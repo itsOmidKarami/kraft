@@ -22,7 +22,7 @@ export const ROUTES: NgRoute[] = [
   { path: "/templates/chains", label: "Chains", icon: NAV_ICON.chains, group: "templates", built: true },
   { path: "/templates/library", label: "Library", icon: NAV_ICON.library, group: "templates", built: true },
   { path: "/templates/harnesses", label: "Harnesses", icon: NAV_ICON.harnesses, group: "templates", built: false },
-  { path: "/templates/repos", label: "Repos", icon: NAV_ICON.repos, group: "templates", built: false },
+  { path: "/templates/repos", label: "Repos", icon: NAV_ICON.repos, group: "templates", built: true },
   { path: "/settings/policy", label: "Policy", icon: NAV_ICON.policy, group: "settings", built: false },
   { path: "/settings/auto-intake", label: "Auto-intake", icon: NAV_ICON.intake, group: "settings", built: false },
   { path: "/settings/notifications", label: "Notifications", icon: NAV_ICON.notifications, group: "settings", built: true },

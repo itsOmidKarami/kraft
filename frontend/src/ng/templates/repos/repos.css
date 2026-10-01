@@ -1,0 +1,56 @@
+/* The Repos area (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+.rp-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.rp-loading { display: flex; flex-direction: column; gap: 8px; }
+.rp-skel { height: 34px; border-radius: 8px; background: var(--surface); }
+.rp-bar { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+.rp-search { flex: 1; min-width: 0; box-sizing: border-box; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: 12px; color: var(--text); }
+.rp-head, .rp-row { display: grid; grid-template-columns: minmax(0, 1.1fr) 80px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 108px); gap: 10px; align-items: center; padding: 6px 10px; }
+.rp-head { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.rp-rows { display: flex; flex-direction: column; gap: 2px; }
+.rp-row { border-radius: 8px; font-size: 12px; cursor: pointer; }
+.rp-row:hover { background: var(--surface); }
+.rp-row.is-sel { background: var(--surface-2); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.rp-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.rp-row.is-off .rp-name-text, .rp-row.is-off .rp-cell { color: var(--text-muted); }
+.rp-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rp-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.rp-mark { flex: none; font: 600 11px ui-monospace, Menlo, monospace; }
+.rp-mark.is-add { color: var(--ok); }
+.rp-mark.is-change { color: var(--warn); }
+.rp-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
+.rp-cell { min-width: 0; color: var(--text-sub); }
+.rp-cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-state { font-size: 11px; color: var(--text-muted); }
+.rp-state.is-on { color: var(--ok); }
+.rp-empty { margin: 14px 10px; font-size: 12px; color: var(--text-muted); }
+.rp-detected { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.rp-h2 { margin: 0 0 4px 10px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.rp-det { display: flex; align-items: center; gap: 12px; padding: 4px 10px; font-size: 12px; }
+.rp-det-note { flex: 1; font-size: 11px; color: var(--text-muted); }
+.rp-note { margin: 0 0 8px; font-size: 11.5px; line-height: 1.5; color: var(--bad); }
+.rp-yaml { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: var(--bg); font: 11.5px/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.rp-cfg { display: flex; flex-direction: column; gap: 2px; }
+.rp-row-cfg { display: grid; grid-template-columns: minmax(70px, 108px) minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.rp-k { padding-top: 2px; color: var(--text-muted); }
+.rp-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rp-src { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
+.rp-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; font-size: 10.5px; color: var(--text-muted); }
+.rp-chip.is-own { color: var(--text-sub); }
+.rp-chip.is-changed { border-color: var(--warn); color: var(--text); }
+.rp-reset { padding: 0; border: 0; background: transparent; font-size: 10.5px; color: var(--text-muted); text-decoration: underline; cursor: pointer; }
+.rp-reset:is(:hover, :focus-visible) { color: var(--text); }
+.rp-v .segmented { flex-wrap: wrap; max-width: 100%; }
+.rp-select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: 12px; color: var(--text); }
+
+.rp-connect { display: flex; flex-direction: column; gap: 8px; width: 320px; max-width: calc(100vw - 32px); padding: 10px; }
+.rp-connect-label { font-size: 11px; color: var(--text-muted); }
+.rp-connect-line { display: flex; gap: 6px; }
+.rp-err { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--bad); }
+.rp-probe { display: flex; flex-direction: column; gap: 2px; }
+.rp-connect-note { margin: 4px 0 0; font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+
+@media (max-width: 1023px) {
+  .rp-head, .rp-row { grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr) minmax(0, 96px); }
+  .rp-head > :nth-child(4), .rp-row > :nth-child(4) { display: none; }
+}
