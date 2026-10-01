@@ -150,7 +150,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         </Button>
       </HeaderActions>
       <LibraryList rows={rows} selected={id} onSelect={(x) => navigate(refUrl(x))} onAdd={add} />
-      <main className="lib-main" ref={frame}>
+      <div className="lib-main" ref={frame}>
         {surface === "yaml" ? (
           <div className="lib-yaml">
             <YamlView draft={draft} scope={draft.scope} published={published === null ? undefined : published === "failed" ? null : published.text} />
@@ -225,7 +225,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             problemWhere={(p) => <ProblemWhere p={p} />}
           />
         )}
-      </main>
+      </div>
     </div>
     </DraftLibrary.Provider>
   );
