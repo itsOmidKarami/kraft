@@ -22,6 +22,8 @@ from support.api import (
     _wait_for_status,
 )
 
+from kraft.adapters.agent import artifact_path
+
 _FAKE_REVIEWER = Path(__file__).resolve().parents[1] / "support" / "fake_reviewer.py"
 
 
@@ -217,6 +219,31 @@ def test_chain_review_repeated_approve_keeps_erroring(client, repo, tmp_path, mo
     second = client.post(f"/api/work-items/{wid}/gates/chain_review/approve")
     assert first.status_code == second.status_code == 422
     assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_review"
+
+
+def _spec_required(tdir):
+    default = tdir / "chains" / "default.yaml"
+    text = default.read_text().replace(
+        "artifact: spec\n", "artifact: spec\n    artifact_required: true\n", 1
+    )
+    default.write_text(text)
+
+
+@pytest.mark.api_client(edit_templates=_spec_required)
+def test_an_artifact_required_gate_refuses_approval_until_its_document_exists(client, repo):
+    wid = _post_default(client, repo)
+    _await_gate(client, wid, "spec_approval")
+    spec = Path(client.app.state.run_dirs.worktrees) / wid / artifact_path("spec", wid)
+    spec.unlink(missing_ok=True)
+
+    r = _approve_gate(client, wid, "spec_approval")
+    assert r.status_code == 422
+    assert "required document 'spec' is missing" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"
+
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("# spec\n")
+    assert _approve_gate(client, wid, "spec_approval").status_code == 200
 
 
 @pytest.mark.api_client(edit_templates=_review_then_more)

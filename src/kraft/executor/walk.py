@@ -1905,8 +1905,54 @@ async def run_once(
         # door, abandoned) gets the same "paused" verdict every caller of
         # `run_once`/`run` already knows how to handle -- there is nothing a
         # second string would let a caller do that this doesn't.
-        if gates.status_of(db, work_item_id) != "active":
+        now = db.read(
+            lambda c: c.execute(
+                "SELECT status, materialized_chain, run_chain FROM work_items WHERE id = ?",
+                (work_item_id,),
+            ).fetchone()
+        )
+        if now["status"] != "active":
             return "paused"
+        # A chain revised under this walk (an applied item draft) is the one it
+        # goes on with, at this node boundary and never inside a node: the node
+        # running keeps the steps and tasks it started with. Parsed only on a
+        # change; `row` is re-read with it, as dispatch reads the chain's
+        # policy from it. The walk's place is found by id, anchored on the node
+        # before `i` (the one just completed): `revision.revise` freezes every
+        # node at or before the one the item stands on, so that node is where
+        # it was and the next one to run follows it. A chain where it is not
+        # -- gone, or at another position, which only a writer that skips
+        # `revise` could make -- stops the item rather than run on a guessed
+        # index. The chain-revision gate never needed this: its approval
+        # starts a fresh walk, which loads the revised chain.
+        if (now["materialized_chain"], now["run_chain"]) != (
+            row["materialized_chain"],
+            row["run_chain"],
+        ):
+            row = db.read(
+                lambda c: c.execute(
+                    "SELECT * FROM work_items WHERE id = ?", (work_item_id,)
+                ).fetchone()
+            )
+            fresh = chain_of(row).chain.nodes
+            if i > 0:
+                anchor = nodes[i - 1].id
+                at = next((k for k, n in enumerate(fresh) if n.id == anchor), None)
+                if at != i - 1:
+                    where = "is gone" if at is None else f"moved from position {i - 1} to {at}"
+                    reason = (
+                        f"the chain changed under this walk and {anchor!r}, the node it last "
+                        f"completed, {where}; retry the item to walk the new chain"
+                    )
+                    await _report_if_undelivered(db, work_item_id, carried)
+                    await db.write(
+                        lambda c, node_id=anchor, why=reason: store.mark_needs_human(
+                            c, work_item_id, node_id, why, kind="config"
+                        )
+                    )
+                    return "needs_human"
+            nodes = fresh
+            continue
         node = nodes[i]
         # A gate is an ordered node of its own (`gate-is-an-ordered-node`): it
         # runs nothing, so it is recognised here rather than after an execution

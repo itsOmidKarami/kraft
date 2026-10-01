@@ -49,6 +49,19 @@
           "title": "Harness",
           "type": "string"
         },
+        "icon": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]*$",
           "title": "Id",
@@ -208,6 +221,19 @@
           "description": "A library component of the same kind to inherit from; this one's own keys win.",
           "type": "string"
         },
+        "icon": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]*$",
           "title": "Id",
@@ -335,6 +361,19 @@
             }
           ],
           "default": null
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
         },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]*$",
@@ -613,6 +652,19 @@
           "description": "A library component of the same kind to inherit from; this one's own keys win.",
           "type": "string"
         },
+        "icon": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]*$",
           "title": "Id",
@@ -696,6 +748,11 @@
           ],
           "default": null,
           "title": "Artifact"
+        },
+        "artifact_required": {
+          "default": false,
+          "title": "Artifact Required",
+          "type": "boolean"
         },
         "auto_review": {
           "anyOf": [
@@ -1149,6 +1206,19 @@
           "description": "A library component of the same kind to inherit from; this one's own keys win.",
           "type": "string"
         },
+        "icon": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]*$",
           "title": "Id",
@@ -1222,6 +1292,19 @@
         "extends": {
           "description": "A library component of the same kind to inherit from; this one's own keys win.",
           "type": "string"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Icon"
         },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]*$",

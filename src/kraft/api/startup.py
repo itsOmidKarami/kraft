@@ -269,6 +269,8 @@ async def lifespan(app: FastAPI):
     # task, both start a poller, and only the last assignment is reachable --
     # the other ticks on, uncancellable, past shutdown.
     app.state.intake_lock = asyncio.Lock()
+    # A draft publish writes its files and reloads under this (`routes.drafts`).
+    app.state.draft_publish_lock = asyncio.Lock()
     app.state.trigger_last_fired = {}
     # Always, not only for boot-time triggers: each tick reads st.policy, so a
     # trigger added by PUT /policy or `kraft admin reload` fires without a

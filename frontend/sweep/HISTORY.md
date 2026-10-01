@@ -1368,3 +1368,9 @@ Baseline on `main` `7bfd54d8`: 1324 cells, 192 flagged. Full notes: `e2e-shots/D
 ## ux2 R11 — "Try the new UI ↗" in the shipped nav (`kraft/ux2-W5-link`)
 
 Shot on the W5 PR 2 branch with this link on it, against PR 1's baseline (`main` `8e815bec`): `node sweep/wave.mjs all` **1/1 rules pass**, 0 newly flagged. 565 shipped cells with the sidebar open change by the link only (the expanded footer's last line; checked side by side on `item/gate-sidebar-open@1100~open`); no cell changed size; phone cells hide the footer, as before. No shipped CSS changed.
+## ux2-W9 — Backend: drafts and template schema (`ux2/W9`)
+
+Baseline on `main` `60fae1ef4`: 1170 cells, 179 flagged. Final on `ux2/W9` `b2cd982c7`. Full notes: `e2e-shots/DIFF-ux2-W9.md`.
+
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1170 cells, 179 flagged, 0 newly flagged, 171 changed: wall-clock text (largest 0.58%, "waiting 17d 11h" → "17d 13h") and a one-pixel scroll offset in `flow-log-maximize/03-wheel-up-pauses-follow` (4.7%). No shipped cell changed because of W9.
+- No `/ng` screens and no `waves.json` key: a backend wave. `mockApi.ts` gained a mock for every new route (drafts, item drafts, steering preview) and `used_by_paths`/`description` on the library and chain fixtures.

@@ -120,7 +120,7 @@ def test_resolved_shows_a_saved_chain_expanded_and_not_materialized(client):
     assert body["task_paths"][:2] == ["spec.main.author", "plan.main.author"]
     # Not materialized: no target, no policy, and the gates an attachment
     # would satisfy are still in the chain.
-    assert set(body) == {"id", "chain", "task_paths", "steering", "nodes"}
+    assert set(body) == {"id", "chain", "task_paths", "steering", "nodes", "documents"}
     assert {"spec_approval", "plan_approval"} <= {n["id"] for n in body["chain"]["nodes"]}
 
 
@@ -134,6 +134,36 @@ def test_resolved_names_the_attachment_kind_each_node_is_covered_by(client):
     assert covered["plan"] == covered["plan_approval"] == "plan"
     assert covered["implementation"] is None
     assert covered["final_review"] is None
+
+
+def test_resolved_lists_per_gate_the_documents_earlier_nodes_produce(client):
+    documents = client.get("/api/templates/chains/default/resolved").json()["documents"]
+    assert documents["spec_approval"] == ["spec"]
+    assert documents["plan_approval"] == ["spec", "plan"]
+    assert documents["final_review"] == [
+        "spec",
+        "plan",
+        "chain_revision",
+        "work_brief",
+        "mr_meta",
+        "review_brief",
+    ]
+
+
+def test_a_kind_two_earlier_nodes_produce_is_listed_once(client):
+    nodes = [
+        exec_node("draft", extends="spec_author"),
+        exec_node("redraft", extends="spec_author"),
+        {"id": "review", "kind": "gate"},
+    ]
+    body = client.post("/api/templates/resolve", json={"chain": {"id": "c", "nodes": nodes}})
+    assert body.json()["chains"][0]["documents"] == {"review": ["spec"]}
+
+
+def test_a_resolved_node_carries_its_icon(client):
+    node = {**exec_node("build", extends="implementer"), "icon": "hammer"}
+    body = client.post("/api/templates/resolve", json={"chain": {"id": "c", "nodes": [node]}})
+    assert body.json()["chains"][0]["nodes"][0]["icon"] == "hammer"
 
 
 def test_resolved_of_an_unknown_chain_is_404(client):

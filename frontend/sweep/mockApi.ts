@@ -226,6 +226,21 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
       return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
     }
+    /* the item chain draft (B15): its first op is passed, so apply answers 409 */
+    if ((m = p.match(/^\/work-items\/([^/]+)\/draft(\/apply)?$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json(route, { detail: "work item not found" }, 404);
+      if (method === "DELETE") return route.fulfill({ status: 204 });
+      if (m[2]) return json(route, { detail: "the item has moved past some of this draft's ops; remove them or move them after the current node", passed: [0] }, 409);
+      const ops = method === "PUT"
+        ? (req.postDataJSON()?.ops ?? []).map((op: any, i: number) => ({ ...op, passed: i === 0 }))
+        : [
+            { op: "override", path: "implement.main.implement", task_config: { model: "opus" }, passed: true },
+            { op: "skip", path: "verify.main.lint", passed: false },
+          ];
+      const cap = b.item.budget_cap ?? { spent_usd: 1.2, cap_usd: 10 };
+      return json(route, { ops, problems: [], checks: { budget: { spent_usd: cap.spent_usd, cap_usd: cap.cap_usd } }, nodes: b.item.chain_definition?.nodes ?? [], base_seq: 42, updated_at: "2026-10-01T09:12:00Z" });
+    }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
     // below stays a static 200.
@@ -298,9 +313,56 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
+    /* config drafts: one static answer per key; `stale` publishes to a 409, `yaml-error` refuses ops */
+    if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops)|\/files\/(.+))?$/))) {
+      const [, area, key, action, file] = m;
+      const name = area === "library" ? "library.yaml" : `chains/${key}.yaml`;
+      const text = file ? req.postDataJSON()?.text : area === "library" ? "tasks: {}\n" : chainYaml(st.templates[0]?.nodes ?? []);
+      const change = { path: "implement.main.implement", kind: "change", summary: "model", fields: ["model"] };
+      const result = {
+        model: { [name]: { nodes: st.templates[0]?.nodes ?? [] } },
+        resolved: null, warnings: [],
+        sources: area === "chains" ? { "implement.main.implement": {
+          model: { value: "opus", source: "chain" },
+          harness: { value: "claude", source: "library:tasks.implementer" },
+          "policy.time_cap_minutes": { value: 120, source: "library:tasks.implementer" },
+          "policy.budget_usd": { value: 2, source: "policy" },
+          effort: { value: null, source: "default" },
+        } } : {},
+        policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+        impact: area === "chains" ? { running: 2, repos: ["/Users/me/code/kraft"] } : { chains: ["default", "quick-task"], repos: ["/Users/me/code/kraft"] },
+        problems: key === "broken" ? [{ path: "implement.main.implement", field: "bogus", message: "Extra inputs are not permitted", file: name, line: 7, col: 9 }] : [],
+        changes: key === "library" ? [
+          { path: "tasks.implementer", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
+          { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
+        ] : [change],
+        ...(key === "yaml-error" ? { yaml_error: { file: name, line: 4, col: 3, message: "expected ',' or ']', but got '<stream end>'" } } : {}),
+      };
+      if (method === "DELETE") return route.fulfill({ status: 204 });
+      if (action === "publish") {
+        if (key === "stale") return json(route, { detail: `published since this draft began: ${name}`, files: { [name]: { published: text, draft: text, diff: `--- published/${name}\n+++ draft/${name}\n@@ -3 +3 @@\n-    model: sonnet\n+    model: opus\n` } } }, 409);
+        return json(route, { published: [name], result: { ...result, changes: [] } });
+      }
+      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result };
+      if (action === "ops") {
+        if (key === "yaml-error") return json(route, { detail: "fix the YAML first" }, 409);
+        const ops: { op: string }[] = req.postDataJSON()?.ops ?? [];
+        return json(route, { ...view, ops: ops.map((o) => ({ op: o.op })) });
+      }
+      return json(route, view);
+    }
+    if (p === "/drafts") return json(route, ["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" })));
     if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
+    /* the steering preview (B23): one agent task's launch context, section by section */
+    if (p === "/templates/steering/preview") return json(route, { sections: [
+      { kind: "contract", source: "kraft", text: `You are working on a Kraft work item.\nTitle: <title>\nTask: <task instruction>\nRepo: /Users/me/code/kraft\nWork item: <work item id>\nNode: ${q.get("task")?.split(".")[0] ?? "spec"}\nHook point: ${q.get("task") ?? ""}\nWorker session: <session id>\n` },
+      { kind: "document", source: "spec", text: "\n\nWrite the spec to .engineering/specs/<work item id>.md." },
+      { kind: "skill", source: "kraft:spec", text: "\n\n## Method\n\nUse the kraft:spec skill." },
+      { kind: "steering", source: "repo:never-signal-processes-you-didnt-start", text: "\n\n## Project standards\n\nNever signal a process you did not start." },
+      { kind: "steering", source: "task:project-standards", text: "\n\nKeep changes focused. Run the relevant checks before finishing.\n" },
+    ] });
     if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1]));
       if (!tpl) return json(route, { detail: `unknown chain template ${JSON.stringify(m[1])}` }, 404);
@@ -318,6 +380,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const components = hooks.map(([name, definition]) => ({
         id: `tasks.${name}`, kind: "tasks", name, definition, issues: [],
         used_by: st.templates.filter((t) => t.nodes.some((n: any) => n.tasks?.includes(name))).map((t) => t.id),
+        used_by_paths: st.templates.flatMap((t) => t.nodes.filter((n: any) => n.tasks?.includes(name)).map((n: any) => ({ chain: t.id, path: `${n.id}.main.${name}`, overrides: false }))),
       }));
       return json(route, { file: "templates/library.yaml", text: `tasks:\n${hooks.map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`).join("\n")}\n`, components });
     }

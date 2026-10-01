@@ -270,8 +270,24 @@ def test_every_door_names_the_broken_file_rather_than_the_chain_id(client, repo,
 def _unresolvable_chain(tdir):
     """Parses, so the library loads -- and does not resolve."""
     (tdir / "chains" / "broken.yaml").write_text(
-        yaml.safe_dump({"id": "broken", "nodes": [{"id": "n", "extends": "no_such_node"}]})
+        yaml.safe_dump(
+            {
+                "id": "broken",
+                "description": "never resolves",
+                "nodes": [{"id": "n", "extends": "no_such_node"}],
+            }
+        )
     )
+
+
+@pytest.mark.api_client(edit_templates=_unresolvable_chain)
+def test_the_chain_list_carries_each_description_even_one_that_does_not_resolve(client):
+    text = SCRATCH.replace("id: scratch\n", "id: scratch\ndescription: One command.\n")
+    assert client.put("/api/templates/chains/scratch", json={"text": text}).status_code == 200
+    listed = {c["id"]: c for c in client.get("/api/templates/chains").json()}
+    assert listed["scratch"]["description"] == "One command."
+    assert listed["broken"]["error"] and listed["broken"]["description"] == "never resolves"
+    assert listed["default"]["description"] is None
 
 
 @pytest.mark.api_client(edit_templates=_unresolvable_chain)

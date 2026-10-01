@@ -648,7 +648,7 @@ def test_a_sandboxed_chain_materializes_onto_member_mounts(layer):
         changes = revision.ChangeSet.model_validate(
             {"rationale": "r", "overrides": {"n": {"max_attempts": 2, "evidence": "e"}}}
         )
-        materialized = revision.revise(materialized, changes, gate="g", library=None)
+        materialized = revision.revise(materialized, changes, at="g", library=None)
         assert materialized.policy_for(materialized.chain.nodes[1]).max_attempts == 2
 
     (task,) = materialized.chain.nodes[1].tasks()

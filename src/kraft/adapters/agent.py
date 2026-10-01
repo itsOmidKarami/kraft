@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -426,6 +426,30 @@ def build_context(
     *,
     usage_source: str,
     context_channel: str,
+    steering_texts: tuple[str, ...] = (),
+    **kwargs,
+) -> str:
+    """Kraft's contract, method, intent tree and steering, folded into one
+    block of text: `context_sections` joined, so the launch and the steering
+    preview cannot disagree about what an agent reads.
+
+    A pure function of its arguments -- it takes the two resolved harness
+    *facts* (`usage_source`, `context_channel`) rather than a harness id, so a
+    test can assert on it without loading `harness.py` or launching a process,
+    and this module stays unaware of which harness produced those facts.
+    `context_channel` does not change what is built here: whether the result
+    rides in `--append-system-prompt` or is folded into the prompt itself is
+    `harness.build_argv`'s job, not this one's.
+    """
+    sections = context_sections(
+        usage_source=usage_source, steering=[("", t) for t in steering_texts], **kwargs
+    )
+    return "".join(text for _, _, text in sections)
+
+
+def context_sections(
+    *,
+    usage_source: str,
     title: str,
     task_instruction: str,
     repo_path: str,
@@ -438,85 +462,101 @@ def build_context(
     #: `inputs: [review_package]` (`AgentTask.inputs`); None for every other.
     review_package: str | None = None,
     method_text: str | None = None,
+    #: The skill `method_text` was read from: the skill section's source only.
+    skill: str | None = None,
     #: The repo's `intent_dir` (`RepoEntry.intent_dir`); None names no tree.
     intent_dir: str | None = None,
-    steering_texts: tuple[str, ...] = (),
+    #: `(source, text)` per steering profile, the repository's then the task's.
+    steering: Sequence[tuple[str, str]] = (),
     summary_name: str | None = None,  # else session_id: `escalate.thread_files`
-) -> str:
-    """Kraft's contract, method, intent tree and steering, folded into one
-    block of text.
-
-    A pure function of its arguments -- it takes the two resolved harness
-    *facts* (`usage_source`, `context_channel`) rather than a harness id, so a
-    test can assert on it without loading `harness.py` or launching a process,
-    and this module stays unaware of which harness produced those facts.
-    `context_channel` does not change what is built here: whether the result
-    rides in `--append-system-prompt` or is folded into the prompt itself is
-    `harness.build_argv`'s job, not this one's.
-    """
-    ctx = _CTX.format(
-        title=title,
-        task_instruction=task_instruction,
-        repo_path=repo_path,
-        work_item_id=work_item_id,
-        node_id=node_id,
-        hook_point=hook_point,
-        session_id=session_id,
-        summary_name=summary_name or session_id,
-    )
+) -> list[tuple[str, str, str]]:
+    """A launch's context as `(kind, source, text)` sections, in the order the
+    agent reads them; joined, they are exactly `build_context`'s text."""
+    sections = [
+        (
+            "contract",
+            "kraft",
+            _CTX.format(
+                title=title,
+                task_instruction=task_instruction,
+                repo_path=repo_path,
+                work_item_id=work_item_id,
+                node_id=node_id,
+                hook_point=hook_point,
+                session_id=session_id,
+                summary_name=summary_name or session_id,
+            ),
+        )
+    ]
     if artifact:
         title_line = _MR_META_KEYS if artifact == "mr_meta" else _TITLE_LINE.format(kind=artifact)
-        ctx += _ARTIFACT.format(
-            kind=artifact,
-            path=artifact_path(artifact, work_item_id),
-            work_item_id=work_item_id,
-            node_id=node_id,
-            hook_point=hook_point,
-            title_line=title_line,
-        ) + _artifact_notes.NOTES.get(artifact, "")
+        sections.append(
+            (
+                "document",
+                artifact,
+                _ARTIFACT.format(
+                    kind=artifact,
+                    path=artifact_path(artifact, work_item_id),
+                    work_item_id=work_item_id,
+                    node_id=node_id,
+                    hook_point=hook_point,
+                    title_line=title_line,
+                )
+                + _artifact_notes.NOTES.get(artifact, ""),
+            )
+        )
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
         # every cycle of every work item is the token cost sub-project G §4
         # already refuses for result files.
-        ctx += (
-            "\n\nThe change you are reviewing is written out at "
-            "$KRAFT_REVIEW_PACKAGE: commit list, files changed, and the diff "
-            "with ten lines of context per hunk. Read that file first. Its "
-            "context lines ARE the changed files -- do not read a changed file "
-            "separately unless a hunk you must judge is cut off mid-function. "
-            # From round 1 of a fix loop the package is narrowed to the change
-            # since the last review (Kraft-s7c04.1), and its own header says so
-            # and names the command for the rest. Without this clause the
-            # sentence above forbids the escape hatch that makes narrowing safe,
-            # and a compliant agent reviews one round's edit believing it has
-            # seen the whole change.
-            "If the package's header says its range is narrowed to the change "
-            "since an earlier round, the rest of the branch is still yours to "
-            "read with the git command that header names -- use it when you "
-            "need to judge the change as a whole.\n"
+        sections.append(
+            (
+                "review_package",
+                "kraft",
+                "\n\nThe change you are reviewing is written out at "
+                "$KRAFT_REVIEW_PACKAGE: commit list, files changed, and the diff "
+                "with ten lines of context per hunk. Read that file first. Its "
+                "context lines ARE the changed files -- do not read a changed file "
+                "separately unless a hunk you must judge is cut off mid-function. "
+                # From round 1 of a fix loop the package is narrowed to the change
+                # since the last review (Kraft-s7c04.1), and its own header says so
+                # and names the command for the rest. Without this clause the
+                # sentence above forbids the escape hatch that makes narrowing safe,
+                # and a compliant agent reviews one round's edit believing it has
+                # seen the whole change.
+                "If the package's header says its range is narrowed to the change "
+                "since an earlier round, the rest of the branch is still yours to "
+                "read with the git command that header names -- use it when you "
+                "need to judge the change as a whole.\n",
+            )
         )
     if method_text:
         # After the contract, before steering: the agent reads what it must
         # produce, then how to produce it, then the house rules that apply to
         # everything. Steering stays last so it is never buried.
-        ctx += _skill.HEADING + method_text + _skill.UNAVAILABLE
+        sections.append(("skill", skill or "", _skill.HEADING + method_text + _skill.UNAVAILABLE))
     if intent_dir:
         # After the method, before steering: a property of the repo, like
         # steering, but Kraft's own text (design §4).
-        ctx += INTENT_HEADING + _INTENT.format(dir=intent_dir.rstrip("/"))
-    if steering_texts:
-        # The context-injection boundary (00_overview.md glossary) bans
-        # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
-        # rule governs the *channel*: this is the sanctioned one — the
-        # per-invocation system prompt — carrying the steering profiles of
-        # Kraft's own library.yaml. Kraft reads nothing from inside
-        # the target repo to build this. Written here because a future
-        # reader finding a steering feature beside a rule banning steering
-        # files would otherwise assume the rule was forgotten.
-        ctx += _steering.Steering.block(steering_texts)
+        sections.append(
+            ("intent", intent_dir, INTENT_HEADING + _INTENT.format(dir=intent_dir.rstrip("/")))
+        )
+    # The context-injection boundary (00_overview.md glossary) bans
+    # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
+    # rule governs the *channel*: this is the sanctioned one — the
+    # per-invocation system prompt — carrying the steering profiles of
+    # Kraft's own library.yaml. Kraft reads nothing from inside
+    # the target repo to build this. Written here because a future
+    # reader finding a steering feature beside a rule banning steering
+    # files would otherwise assume the rule was forgotten.
+    # One section per profile, `Steering.block` split at its separators: the
+    # first carries the heading, each later one the separator before it.
+    for i, (source, text) in enumerate(steering):
+        lead = _steering.Steering.HEADING if i == 0 else _steering.Steering.SEP
+        sections.append(("steering", source, lead + text))
     if usage_source == "result_file":
-        ctx += _USAGE_REQUEST
-    return ctx
+        sections.append(("usage", "kraft", _USAGE_REQUEST))
+    return sections
 
 
 #: The most of a task's instruction that rides in the launch argv. The
@@ -727,7 +767,7 @@ async def run_agent_task(
     #: The sandbox's whole checkout (`subprocess.run_task`'s `checkout`).
     checkout=None,
     steering_texts: tuple[str, ...] = (),
-    #: PARKED: see `build_context`'s own note on this parameter.
+    #: PARKED: see `context_sections`' own note on this parameter.
     review_package: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,

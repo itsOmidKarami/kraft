@@ -252,6 +252,11 @@ e2e-ci:
 schemas:
     uv run python dev/export_config_schemas.py
 
+# Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
+# (the icon names a template's `icon:` is linted against). Run after every bump.
+icons:
+    uv run python dev/gen_icon_names.py
+
 # vscode/ checks: the committed schemas match the pydantic models, and the
 # extension typechecks and passes its unit tests.
 [doc("VS Code extension: schemas current, typecheck, unit tests")]
