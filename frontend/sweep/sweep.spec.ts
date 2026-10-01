@@ -338,6 +338,10 @@ const CASES: Case[] = [
     const wide = ["running", "failed", "needs-gate"].includes(sc);
     return { screen: "ng-item", variant: sc, data: "default", widths: wide ? [1024, 1280, 1920] : [1280], ...(wide ? { shells: [{ mode: "light" }, { short: true }] } : {}), run: (c) => ngItem(c, sc) };
   }),
+  // Under 1024 the pane overlays the canvas (R7) and the current node stays clear of it (Kraft-gvfm2).
+  { screen: "ng-item", variant: "running", data: "default", widths: [768], run: (c) => ngItem(c, "running", { side: "rail" }) },
+  { screen: "ng-item", variant: "chain-config", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "?tab=config" }) },
+  { screen: "ng-item", variant: "chain-config-capped-long", data: "long", widths: [1280], shells: [{ short: true }], run: (c) => ngItem(c, "capped", { tail: "?tab=config" }) },
   // The header's floating parts, opened the way a keyboard user would.
   { screen: "ng-item", variant: "panel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); } }) },
   { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },

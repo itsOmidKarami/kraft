@@ -89,3 +89,41 @@
 .item-card-open { margin-left: auto; }
 .item-select { margin-left: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; }
 @media (max-height: 719px) { .item-card-facts { max-height: 64px; overflow-y: auto; } }
+
+/* The chain pane (Decisions §3, §5). */
+.ip-h { margin: 16px 0 8px; font-size: 10.5px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.ip-h:first-child { margin-top: 0; }
+.ip-facts { grid-template-columns: 96px 1fr; row-gap: 8px; }
+.ip-facts dt { font-family: inherit; font-size: 12.5px; color: var(--text-muted); }
+.ip-facts dd { color: var(--text); }
+.is-mono { font-family: ui-monospace, Menlo, monospace; }
+.item-link.is-mono { font-size: 12.5px; }
+.ip-recent { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.ip-recent li { display: grid; grid-template-columns: 56px 1fr; gap: 10px; align-items: baseline; }
+.ip-recent-age { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.ip-recent-line { padding: 2px 4px; margin: -2px -4px; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); font: inherit; text-align: left; line-height: 1.45; }
+button.ip-recent-line { cursor: pointer; }
+button.ip-recent-line:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
+button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.meter { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
+.meter-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.meter-label { width: 110px; flex: none; color: var(--text-sub); }
+.meter-value { flex: 1 1 auto; font-family: ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.meter-value strong { font-weight: 500; color: var(--text); }
+.meter-edit { min-width: 24px; min-height: 24px; font-size: 12px; }
+.meter-bar-row { display: flex; align-items: center; gap: 10px; padding-left: 120px; }
+.meter-bar { position: relative; flex: 1 1 auto; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--text-sub); }
+.meter.is-warn .meter-fill { background: var(--warn); }
+.meter.is-bad .meter-fill { background: var(--bad); }
+.meter-max { flex: none; font-size: 11px; color: var(--text-muted); }
+.meter-editor { display: flex; flex-direction: column; gap: 8px; padding: 0 0 8px 120px; }
+.meter-input { width: 80px; }
+.ip-overrides { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--text-sub); }
+.ip-rest { margin-top: 16px; font-size: 12.5px; color: var(--text-sub); }
+.ip-rest summary { cursor: pointer; color: var(--text-muted); }
+.ip-rest summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ip-rest .ip-facts { margin-top: 8px; }
+.ip-repos { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.ip-foot { margin: 18px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-muted); }
+.ip-gap { margin-top: 12px; }

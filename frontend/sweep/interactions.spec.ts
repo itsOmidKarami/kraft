@@ -223,6 +223,15 @@ const FLOWS: Flow[] = [
       await expect(p.getByText("CANCELLED")).toBeVisible();
     } },
   ] },
+  // ux2-W5 E: the pane by keyboard; the collapse a person chose survives picking nodes and moving to another item.
+  { name: "ng-pane-collapse", widths: [1280], start: ngItem("running"), steps: [
+    { name: "collapse", run: async (p) => { await p.getByRole("button", { name: "Collapse pane" }).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeFocused(); }, kbd: true },
+    // A click picks without opening (Enter opens, R6).
+    { name: "pick-node-stays-collapsed", run: async (p) => { await p.getByRole("button", { name: /^implementation, node/ }).click(); await expect(p.getByRole("complementary", { name: "implementation pane, collapsed" })).toBeVisible(); } },
+    { name: "other-item-stays-collapsed", run: async (p, S) => { await p.evaluate((url) => { history.pushState({}, "", url); dispatchEvent(new PopStateEvent("popstate")); }, `/ng/work-items/${S.ng.failed}`); await expect(p.getByText("FAILED", { exact: true })).toBeVisible(); await expect(p.getByRole("button", { name: "Expand pane" })).toBeVisible(); } },
+    { name: "rail-expands", run: async (p) => { await p.getByRole("button", { name: "Expand pane" }).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("button", { name: "Collapse pane" })).toBeVisible(); }, kbd: true },
+    { name: "escape-collapses", run: async (p) => { await p.getByRole("tab", { name: "Overview" }).focus(); await p.keyboard.press("Escape"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeFocused(); }, kbd: true },
+  ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
     { name: "collapse", run: async (p) => { const b = p.getByRole("button", { name: /collapse/i }); if (await b.count()) await b.click(); } },

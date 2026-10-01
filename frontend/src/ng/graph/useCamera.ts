@@ -10,11 +10,15 @@ type Opts = {
   opening: "fit" | "current";
   /** Px on the right the docked pane takes from the view (0 when it overlays). */
   reserve?: number;
+  /** Px on the right an overlaid pane covers (under 1024, R7): only the
+   *  current-node framing keeps clear of it, so the node stays visible beside
+   *  the pane; fit and panning keep the full width (Kraft-gvfm2). */
+  cover?: number;
 };
 
 /** Pan and zoom for one canvas viewport: pinch or ⌘-scroll zooms at the cursor,
  *  scroll or a background drag pans, fit and current re-frame. */
-export function useCamera({ canvas, world, current, opening, reserve = 0 }: Opts) {
+export function useCamera({ canvas, world, current, opening, reserve = 0, cover = 0 }: Opts) {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [cam, setCam] = useState<Cam>({ tx: 0, ty: 0, s: 1 });
@@ -38,8 +42,8 @@ export function useCamera({ canvas, world, current, opening, reserve = 0 }: Opts
   const cx = current?.cx, cy = current?.cy;
   useEffect(() => {
     if (!view || mode === "free") return;
-    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, view) : fitCam(world, view, canvas));
-  }, [mode, view?.w, view?.h, world.W, world.H, cx, cy, canvas]); // eslint-disable-line react-hooks/exhaustive-deps
+    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, view, canvas));
+  }, [mode, view?.w, view?.h, world.W, world.H, cx, cy, canvas, cover]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Non-passive, on the viewport only: preventDefault stops the page zooming or scrolling.
   useEffect(() => {

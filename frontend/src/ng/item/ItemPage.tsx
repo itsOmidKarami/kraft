@@ -7,6 +7,7 @@ import { ItemHeader, useDuplicate } from "./header/ItemHeader";
 import { PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title } from "./Top";
 import { placeUrl } from "./url";
+import { Workspace } from "./Workspace";
 import { useItem, type ItemDetail } from "./useItem";
 import "./item.css";
 
@@ -55,7 +56,7 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />
       <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
-      <div className="item-canvas" />
+      <Workspace item={item} reload={reload} />
     </div>
   );
 }

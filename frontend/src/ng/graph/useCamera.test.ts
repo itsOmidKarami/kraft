@@ -78,6 +78,16 @@ describe("useCamera", () => {
     h.result.current.bind.onClickCapture(click as never);
     expect(click.stopped).toBe(true);
   });
+  it("keeps the current node clear of an overlaid pane, while fit keeps the full width (Kraft-gvfm2)", () => {
+
+    const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "current", current: { cx: 500, cy: 96 }, cover: 380 });
+    expect(h.result.current.cam).toEqual({ s: 1, tx: 330 - 500, ty: 132 - 96 });
+    act(() => h.result.current.fit());
+    const covered = h.result.current.cam;
+    const { h: plain } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "fit" });
+    expect(covered).toEqual(plain.result.current.cam);
+  });
+
   it("opens on the current node, and the reserve narrows the view", () => {
     const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "current", current: { cx: 500, cy: 96 }, reserve: 440 });
     expect(h.result.current.cam).toEqual({ s: 1, tx: 300 - 500, ty: 132 - 96 });

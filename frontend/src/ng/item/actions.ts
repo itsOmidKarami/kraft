@@ -25,6 +25,8 @@ export const act = {
   duplicate: (id: string) => post<{ id: string; duplicate_warning?: string }>(`${at(id)}/duplicate`),
   reopenMr: (id: string) => post(`${at(id)}/reopen-mr`),
   openWorktree: (id: string) => post(`${at(id)}/open-worktree`, { editor: null }),
+  /** A budget stop's way on: raise the cap and retry in one call. */
+  raiseBudget: (id: string, budgetUsd: number | null) => post(`${at(id)}/budget/raise`, { budget_usd: budgetUsd }),
   patch: (id: string, body: Record<string, unknown>) => post(at(id), body, "PATCH"),
   approve: (id: string, gate: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/approve`),
   reject: (id: string, gate: string, note: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/reject`, { note }),

@@ -36,6 +36,14 @@ describe("Inspector", () => {
     expect(screen.getByRole("tablist")).toBeInTheDocument();
   });
 
+  it("puts focus on the rail when the collapse button is pressed by keyboard (ux2-W5)", async () => {
+    const user = userEvent.setup();
+    render(<Pane />);
+    screen.getByRole("button", { name: "Collapse pane" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Expand pane" })).toHaveFocus();
+  });
+
   it("collapses on Escape and puts focus on the rail", async () => {
     const user = userEvent.setup();
     render(<Pane />);

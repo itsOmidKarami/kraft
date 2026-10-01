@@ -17,6 +17,8 @@ type Props = {
   opening?: "fit" | "current";
   /** Px the docked pane takes on the right (rule F.6). */
   reserve?: number;
+  /** Px an overlaid pane covers on the right: the current-node framing keeps clear of it (Kraft-gvfm2). */
+  cover?: number;
   onSelect?: (id: string) => void;
   onOpen?: (id: string) => void;
   onFocusNode?: (id: string) => void;
@@ -29,11 +31,12 @@ const nodeKey = (id: string) => `n:${id}`;
 const seamKey = (at: number) => `s:${at}`;
 
 /** The chain canvas: every node of a chain in one row (StageGraph.dc.html). */
-export function StageGraph({ name, nodes, selected, arcs = [], seams = [], opening = "fit", reserve = 0, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
+export function StageGraph({ name, nodes, selected, arcs = [], seams = [], opening = "fit", reserve = 0, cover = 0, onSelect, onOpen, onFocusNode, onEscape, onBackground, onSeam }: Props) {
   const lay = useMemo(() => layout(nodes), [nodes]);
   const shapes = useMemo(() => arcShapes(lay, arcs), [lay, arcs]);
-  const cur = lay.items.find((i) => i.node.state === "current");
-  const camera = useCamera({ canvas: "chain", world: lay, opening, reserve, current: cur && { cx: cur.cx, cy: L.CY } });
+  // Where the run stands: the running node, else the one it stopped on (failed) or waits at (a gate).
+  const cur = lay.items.find((i) => i.node.state === "current") ?? lay.items.find((i) => i.node.state === "failed" || i.node.state === "amber");
+  const camera = useCamera({ canvas: "chain", world: lay, opening, reserve, cover, current: cur && { cx: cur.cx, cy: L.CY } });
 
   // Keyboard stops in visual order: a seam at `at` sits before node `at`.
   const stops = useMemo(() => {

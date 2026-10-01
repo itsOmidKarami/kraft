@@ -33,7 +33,7 @@ type Props = {
 export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, tabs, tab, onTab, onCollapse, onExpand, onFocus, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
-  // Escape from inside the pane lands focus on the rail that replaces it.
+  // Escape, or the collapse button, lands focus on the rail that replaces the pane.
   useEffect(() => {
     if (!open && fromKeys.current) railBtn.current?.focus();
     fromKeys.current = false;
@@ -70,7 +70,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
             </span>
           ))}
         </nav>
-        <button type="button" className="pane-icon-btn" aria-label="Collapse pane" title="Collapse pane (Esc)" onClick={onCollapse}><PanelRightClose size={14} /></button>
+        <button type="button" className="pane-icon-btn" aria-label="Collapse pane" title="Collapse pane (Esc)" onClick={() => { fromKeys.current = true; onCollapse(); }}><PanelRightClose size={14} /></button>
       </div>
       <div className="pane-head">
         <div className="pane-title-row">
