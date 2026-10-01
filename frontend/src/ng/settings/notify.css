@@ -1,0 +1,40 @@
+/* Settings › Notifications (AreaNotifications). Colours only through theme.css tokens. */
+.nt-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
+.nt-page { max-width: 640px; box-sizing: border-box; margin: 0 auto; padding: 22px 20px 60px; display: flex; flex-direction: column; gap: 10px; }
+.nt-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.nt-title h1 { margin: 0; font-size: 16px; font-weight: 500; }
+.nt-title .lede { flex: 1; min-width: 220px; margin: 0; line-height: 1.5; }
+.nt-h2 { margin: 6px 2px 0; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.nt-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.nt-card:hover { background: var(--surface); }
+.nt-card.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.nt-card-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.nt-card-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 6px; }
+.nt-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--line); color: var(--text-sub); }
+.nt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nt-name { font-size: 13px; }
+.nt-sub { font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.nt-chips { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 3px; }
+.nt-card:not(.is-on) .nt-chip { border-style: dashed; }
+.nt-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font: 10.5px/16px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.nt-state { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.nt-status { display: flex; align-items: center; gap: 6px; font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.nt-card.is-on .nt-status { color: var(--ok); }
+.nt-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.nt-card.is-on .nt-dot { background: var(--ok); }
+.nt-extra { font-size: 10.5px; color: var(--text-muted); }
+.nt-extra.is-bad { color: var(--bad); }
+.nt-test { flex: none; }
+.nt-on { color: var(--ok); }
+.nt-off { color: var(--text-muted); }
+.nt-line { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
+.nt-line > .set-event-text { flex: 1; }
+.nt-gap { padding-top: 14px; }
+.nt-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font: 11.5px/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
+.nt-input { margin-bottom: 4px; }
+.nt-events { max-width: none; }
+
+@media (max-width: 767px) {
+  .nt-card { flex-wrap: wrap; }
+  .nt-card-main { flex-basis: 100%; }
+}

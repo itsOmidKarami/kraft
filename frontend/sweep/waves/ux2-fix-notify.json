@@ -1,0 +1,16 @@
+{
+  "title": "UX V2 fix: Settings › Notifications as AreaNotifications draws it",
+  "screens": [
+    "notifications",
+    "notifications-pane"
+  ],
+  "specs": [
+    "sweep.spec.ts"
+  ],
+  "rules": [
+    { "kind": "no-flag", "flag": "contrast", "match": "^notifications" },
+    { "kind": "no-flag", "flag": "overflow-x", "match": "^notifications" },
+    { "kind": "no-flag", "flag": "offscreen", "match": "^notifications" },
+    { "kind": "no-console", "match": "^notifications" }
+  ]
+}

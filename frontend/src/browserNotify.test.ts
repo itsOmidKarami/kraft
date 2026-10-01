@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "./types";
-import { isEnabled, maybeNotify, requestPermission, setEnabled } from "./browserNotify";
+import { enabledEvents, isEnabled, maybeNotify, requestPermission, setEnabled, setEvents } from "./browserNotify";
 
 const ev = (type: string, over: Partial<KraftEvent> = {}): KraftEvent =>
   ({ seq: 1, work_item_id: "w1", type, payload: {}, created_at: "2026-09-14T00:00:00Z", ...over }) as KraftEvent;
@@ -86,5 +86,24 @@ describe("maybeNotify", () => {
     setEnabled(true);
     maybeNotify(ev("work_item_needs_human"), "My Item");
     expect(FakeNotification.instances).toHaveLength(1);
+  });
+
+  it("alerts only for the events this browser keeps", () => {
+    setEnabled(true);
+    setEvents(["work_item_needs_human"]);
+    maybeNotify(ev("gate_requested"), "My Item");
+    expect(FakeNotification.instances).toHaveLength(0);
+    maybeNotify(ev("work_item_needs_human"), "My Item");
+    expect(FakeNotification.instances).toHaveLength(1);
+  });
+});
+
+describe("enabledEvents", () => {
+  it("is both events until set, and an unreadable value is the default", () => {
+    expect(enabledEvents()).toEqual(["gate_requested", "work_item_needs_human"]);
+    setEvents(["gate_requested"]);
+    expect(enabledEvents()).toEqual(["gate_requested"]);
+    localStorage.setItem("kraft.browserNotify.events", "{not json");
+    expect(enabledEvents()).toEqual(["gate_requested", "work_item_needs_human"]);
   });
 });

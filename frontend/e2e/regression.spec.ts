@@ -96,12 +96,17 @@ test("access: the port saves on change and survives a reload", async ({ page }) 
 
 test("notifications: send a test reports a result", async ({ page }) => {
   await page.goto("/settings/notifications");
-  const webhook = page.getByRole("region", { name: "Webhook" });
+  await page.getByRole("button", { name: "Webhook", exact: true }).click();
+  const pane = page.getByRole("complementary", { name: "Webhook pane" });
   // Nothing listens on port 9: the result is a failure with its reason.
-  await webhook.getByRole("textbox", { name: "Webhook URL" }).fill("http://127.0.0.1:9/hook");
-  await webhook.getByRole("textbox", { name: "Webhook URL" }).press("Enter");
-  await webhook.getByRole("button", { name: "Send a test" }).click();
-  await expect(webhook.getByText(/last attempt .*failed: /)).toBeVisible();
+  await pane.getByRole("textbox", { name: "Webhook URL" }).fill("http://127.0.0.1:9/hook");
+  await pane.getByRole("button", { name: "Save" }).click();
+  await expect.poll(async () => (await (await page.request.get("/api/notify")).json()).url_set).toBe(true);
+  const on = pane.getByRole("switch", { name: "Webhook notifications" });
+  if ((await on.getAttribute("aria-checked")) !== "true") await on.click();
+  await expect(on).toHaveAttribute("aria-checked", "true");
+  await pane.getByRole("button", { name: "Send a test" }).click();
+  await expect(pane.getByText(/last attempt .*failed: /)).toBeVisible();
 });
 
 test("appearance: density and open-in persist after a reload", async ({ page }) => {
