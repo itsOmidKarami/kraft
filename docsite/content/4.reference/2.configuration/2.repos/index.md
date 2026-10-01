@@ -274,6 +274,18 @@ This is not a place for target-repo files: Kraft never reads `CLAUDE.md`,
 `AGENTS.md`, or anything else from inside the repo being worked on as a
 source of process context.
 
+## Where a repo's value comes from
+
+A repo that sets no `steering:` gets the steering profiles its default chain's
+tasks select, from the library. One that sets none of `deny_tools` or `models`
+or a `policy:` key gets the instance's: `deny_tools` and `policy:` come from
+`policy.yaml`, and a repo's own list only adds to it. A repo's `policy:` may
+tighten the instance's safety layer but not relax it; a draft of `repos.yaml`
+shows that as a problem naming the repo and the field before it is published,
+the same refusal a run gives. Each field's source (`repo`, `library` or
+`default`) comes with the value in the `repos` draft's `resolved` view; see the
+[HTTP API reference](/reference/http-api).
+
 ## In this section
 
 - [Workspaces](/reference/configuration/repos/workspaces): a root repository with other repositories mounted as submodules.

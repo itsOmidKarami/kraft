@@ -420,6 +420,15 @@ def test_a_repos_draft_publishes_without_reloading_anything(client, templates_di
     assert applied == []
 
 
+def test_a_repos_draft_over_a_repos_yaml_saved_since_answers_409(client, templates_dir):
+    put_file(client, "repos", "repos.yaml", "repos: []\n# mine\n")
+    (templates_dir / "repos.yaml").write_text("repos: []\n# saved elsewhere\n")
+    r = client.post("/api/drafts/repos/repos/publish")
+    assert r.status_code == 409
+    assert "repos.yaml" in r.json()["files"]
+    assert "saved elsewhere" in (templates_dir / "repos.yaml").read_text()
+
+
 def test_a_failing_apply_hook_answers_500_keeps_the_draft_and_the_retry_succeeds(
     client, templates_dir, monkeypatch
 ):

@@ -421,6 +421,14 @@ def active_count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM work_items WHERE status = 'active'").fetchone()[0]
 
 
+def open_counts_by_repo(conn: sqlite3.Connection) -> dict[str, int]:
+    """Items not ended, per repository path: what a repo cannot be removed under."""
+    rows = conn.execute(
+        "SELECT repo, COUNT(*) FROM work_items WHERE status NOT IN (?, ?) GROUP BY repo", ENDED
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
     """Terminal. The row stays — its events and sessions are still the record of
     what happened — but it is out of the running set for good, and off the board.
