@@ -6,7 +6,7 @@ import { groupOf } from "./model";
 /** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
  *  server's `display_status` and `stop` and the raw row, one table each. */
 
-type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "fallback" | "pending_gate" | "chain_definition" | "retry_at">;
+type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "fallback" | "pending_gate" | "chain_definition" | "retry_at"> & { status?: WorkItem["status"] };
 
 const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
 
@@ -62,13 +62,14 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
   const n = nodes.find((x) => x.id === i.current_node_id) ?? nodes[nodes.length - 1];
   const kind: GlyphKind = n?.kind === "gate" ? "gate" : "exec";
-  const icon = i.display_status === "cancelled" ? "ban" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
+  const icon = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned") ? "ban" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
   const state: GlyphState = (() => {
     switch (i.display_status) {
       case "failed": return "failed";
       case "escalated": return "esc";
       case "done": return "done";
       case "cancelled": return "ghost";
+      case "archived": return i.status === "abandoned" ? "ghost" : "done";
       case "running": case "waiting": return "current";
       case "paused": return i.current_node_id ? "amber" : "todo";
       default: return groupOf(i) === "needs" ? "amber" : "current";
@@ -83,7 +84,7 @@ export type Tick = { gate: boolean; state: "done" | "current" | "hot" | "todo" |
 
 export function ticksOf(i: Row): Tick[] {
   const nodes = i.chain_definition?.nodes ?? [];
-  const ended = i.display_status === "done" || i.display_status === "cancelled";
+  const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
   const hot = groupOf(i) === "needs" || i.display_status === "escalated";
   return nodes.map((n, k) => ({

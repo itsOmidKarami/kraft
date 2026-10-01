@@ -29,7 +29,7 @@ export const ROUTES: NgRoute[] = [
   { path: "/settings/access", label: "Access", icon: NAV_ICON.access, group: "settings", built: false },
   { path: "/settings/appearance", label: "Appearance", icon: NAV_ICON.appearance, group: "settings", built: true },
   { path: "/settings/about", label: "About", icon: NAV_ICON.about, group: null, built: false },
-  { path: "/archived", label: "Archived", icon: NAV_ICON.board, group: null, built: false },
+  { path: "/archived", label: "Archived", icon: NAV_ICON.board, group: null, built: true },
 ];
 
 export const routesIn = (group: NavGroup) => ROUTES.filter((r) => r.group === group);

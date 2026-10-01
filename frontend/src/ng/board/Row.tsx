@@ -18,13 +18,15 @@ export interface RowProps {
   onOpen: (id: string) => void;
   onCheck: (id: string) => void;
   onAction: (item: WorkItem, action: RowAction) => void;
+  /** The archived view's own action and tail (H): Restore, "archived by you". */
+  own?: { label: string; run: () => void; tail: string; age: string };
 }
 
 /** One board row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks,
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
-export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction }: RowProps) {
+export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction, own }: RowProps) {
   const g = glyphOf(item);
-  const act = rowAction(item);
+  const act = own ? null : rowAction(item);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
   const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : onSelect(item.id));
@@ -48,13 +50,14 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-id">{id}</span>
           <span className="board-sep" aria-hidden>·</span>
-          <span className="board-meta-rest">{chainOf(item)} · {ago(item.updated_at, now)}</span>
+          <span className="board-meta-rest">{chainOf(item)} · {own?.age ?? ago(item.updated_at, now)}</span>
           <span className="board-sep" aria-hidden>·</span>
-          <span className={`board-meta-tail${hot ? " is-hot" : ""}`}>{reasonTail(item, now)}</span>
+          <span className={`board-meta-tail${hot ? " is-hot" : ""}`}>{own?.tail ?? reasonTail(item, now)}</span>
         </span>
       </button>
       <Ticks ticks={ticksOf(item)} />
       <span className="board-act">
+        {own && <button type="button" className="btn btn-secondary board-act-btn" disabled={offline} onClick={own.run}>{own.label}</button>}
         {act && (
           <button type="button" className={`btn ${act.kind === "gate" ? "btn-secondary" : "btn-primary"} board-act-btn`} disabled={offline} onClick={() => onAction(item, act)}>
             {act.label}

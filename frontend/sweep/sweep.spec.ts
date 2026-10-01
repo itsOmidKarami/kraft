@@ -453,6 +453,10 @@ const CASES: Case[] = [
     await p.getByRole("button", { name: /plugins\/kraft-lite/ }).click();
   }) },
   { screen: "ng-draft-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => { await p.keyboard.press("Escape"); await p.getByRole("alertdialog").waitFor(); }) },
+  // H: the archived view, with rows, empty, and two checked.
+  { screen: "ng-archived", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived" }) },
+  { screen: "ng-archived", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c, { tail: "archived" }) },
+  { screen: "ng-archived", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived", then: checkRows(["Trim the default chain", "Drop the v0 webhook"]) }) },
   { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
   { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 
