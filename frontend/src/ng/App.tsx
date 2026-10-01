@@ -8,6 +8,7 @@ import { Gallery } from "./graph/Gallery";
 import { LibraryPage } from "./library/LibraryPage";
 import { HarnessesPage } from "./harnesses/HarnessesPage";
 import { PhoneApp } from "./phone/PhoneApp";
+import { PhoneSignIn } from "./phone/signin/PhoneSignIn";
 import { usePhone } from "./phone/usePhone";
 import { ItemPage } from "./item/ItemPage";
 import { AboutPage } from "./settings/AboutPage";
@@ -40,7 +41,10 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
     window.addEventListener("kraft:unauthenticated", lock);
     return () => window.removeEventListener("kraft:unauthenticated", lock);
   }, []);
-  if (locked) return <SignIn onSignedIn={async () => { await resumeSession(); setLocked(false); }} />;
+  if (locked) {
+    const onSignedIn = async () => { await resumeSession(); setLocked(false); };
+    return phone ? <PhoneSignIn onSignedIn={onSignedIn} /> : <SignIn onSignedIn={onSignedIn} />;
+  }
   if (phone) return <PhoneApp />;
   return (
     <BrowserRouter basename="/ng">

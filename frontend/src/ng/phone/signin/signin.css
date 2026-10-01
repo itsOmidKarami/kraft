@@ -1,0 +1,8 @@
+.ph-signin { min-height: 100dvh; box-sizing: border-box; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); background: var(--bg); color: var(--text); }
+.ph-signin-card { display: flex; flex-direction: column; gap: 14px; }
+.ph-signin-brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; }
+.ph-signin-where { font: 11.5px ui-monospace, Menlo, monospace; font-weight: 400; color: var(--text-muted); overflow-wrap: anywhere; }
+.ph-signin-stay { display: flex; gap: 8px; }
+.ph-signin-opt { flex: 1; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: transparent; font-size: 14px; color: var(--text-sub); cursor: pointer; }
+.ph-signin-opt.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.ph-signin-opt:disabled { opacity: .5; cursor: default; }
