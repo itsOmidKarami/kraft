@@ -1026,6 +1026,102 @@ def _rate_limit_opencode(log_path: Path) -> RateLimitInfo | None:
     return None
 
 
+#: `seen`'s key for the model `agy`'s `init` event names; no step key
+#: (`conversation:index`) can look like it.
+_AGY_MODEL = "\x00model"
+
+
+def _stream_antigravity(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
+    """Every finished step's tokens in an `agy -p --output-format stream-json`
+    log, summed (Kraft-fjcpr).
+
+    Measured on agy 1.2.14. A `step_update` in state DONE carries that step's
+    own `usage`; the closing `result` carries the conversation's running
+    total (a resumed second turn reported 24603 input, its first 12198 plus
+    its own 12405), so it is never read: the steps already count each
+    invocation in a log once. `thinking_tokens` is a share of
+    `output_tokens` (12225 + 407 = 12632 = `total_tokens` with 322 of
+    thinking). Uncached input is `total - output - cache_read`, right whether
+    `cache_read_tokens` is a share of `input_tokens` or beside it; every run
+    measured had none. No cost: the stream carries none. The model is
+    `init.model`, present only when `--model` was passed.
+    """
+    for obj in _json_lines(lines):
+        if obj.get("event") == "init":
+            model = (obj.get("init") or {}).get("model")
+            if isinstance(model, str) and model:
+                seen[_AGY_MODEL] = Usage(model=model)
+            continue
+        step = obj.get("step_update") if obj.get("event") == "step_update" else None
+        if not isinstance(step, dict) or step.get("state") != "DONE":
+            continue
+        block = step.get("usage")
+        if not isinstance(block, dict):
+            continue
+        out, cache = _int(block.get("output_tokens")), _int(block.get("cache_read_tokens"))
+        total = _int(block.get("total_tokens")) or _int(block.get("input_tokens")) + out
+        seen[f"{step.get('conversation_id')}:{step.get('step_index')}"] = Usage(
+            tokens_in=max(total - out - cache, 0), tokens_out=out, tokens_cache_read=cache
+        )
+    steps = [u for k, u in seen.items() if k != _AGY_MODEL]
+    if not steps:
+        return None
+    model = seen.get(_AGY_MODEL)
+    return replace(_sum(steps), model=model.model if model else None)
+
+
+def _envelope_antigravity(log_path: Path) -> dict | None:
+    try:
+        u = _stream_antigravity(log_path.read_text().splitlines(), {})
+    except OSError:
+        return None
+    if u is None:
+        return None
+    return {"usage": {k: getattr(u, k) for k in KINDS}, "model": u.model}
+
+
+def _session_id_antigravity(log_path: Path) -> str | None:
+    """The `conversation_id` `agy --conversation` takes, off the `init` event."""
+    for obj in _log_objects(log_path):
+        sid = obj.get("conversation_id") if obj.get("event") == "init" else None
+        if isinstance(sid, str) and sid:
+            return sid
+    return None
+
+
+#: A limited request, as agy 1.2.14 reports one: an `AGY_ERROR: {...}` line on
+#: stderr (which the worker log holds) with a canonical status and an HTTP or
+#: gRPC code, or the closing `result`'s `error`. Wording from its changelog
+#: and binary, not a captured limit: no run here was limited.
+_AGY_LIMITED = re.compile(
+    r"RESOURCE_EXHAUSTED|\b429\b|rate.?limit|quota (?:is )?exhausted|exhausted (?:daily )?quota"
+    r"|out of credits",
+    re.IGNORECASE,
+)
+
+
+def _rate_limit_antigravity(log_path: Path) -> RateLimitInfo | None:
+    """An `AGY_ERROR` line or a failed `result` saying the launch was limited,
+    or None. No machine-readable reset time is known, so `resets_at` is None
+    and the rate-limit poller's own retry cap bounds the retries, as codex's."""
+    try:
+        lines = log_path.read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if line.startswith("AGY_ERROR:"):
+            text = line
+        else:
+            obj = next(_json_lines([line]), None)
+            result = obj.get("result") if obj and obj.get("event") == "result" else None
+            text = result.get("error") if isinstance(result, dict) else None
+        if isinstance(text, str) and _AGY_LIMITED.search(text):
+            return RateLimitInfo(
+                rate_limit_type=None, resets_at=None, resets_at_iso=None, message=text[:500]
+            )
+    return None
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -1110,6 +1206,14 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_opencode,
         rate_limit=_rate_limit_opencode,
         session_id=_session_id_opencode,
+    ),
+    "antigravity-stream-json": Reader(
+        name="antigravity-stream-json",
+        stream=_stream_antigravity,
+        envelope=_envelope_antigravity,
+        rate_limit=_rate_limit_antigravity,
+        session_id=_session_id_antigravity,
+        reports_cost=False,
     ),
 }
 
