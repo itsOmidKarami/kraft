@@ -107,7 +107,7 @@
 .is-add .rv-word-change { background: color-mix(in oklab, var(--rv-add) 22%, transparent); border-radius: 2px; }
 .is-del .rv-word-change { background: color-mix(in oklab, var(--rv-del) 22%, transparent); border-radius: 2px; }
 :is(.rv-row, .rv-half).is-picked { box-shadow: inset 3px 0 0 var(--text-sub); background: color-mix(in oklab, var(--selection) 10%, transparent); }
-.rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: Inter, system-ui, sans-serif; }
+.rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: var(--font-sans); }
 
 /* Threads and the composer (prototype 433–486). */
 .rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; color: var(--text-sub); }
@@ -129,7 +129,7 @@
 .rv-link { padding: 0; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .rv-link:is(:hover, :focus-visible) { color: var(--text); }
 .rv-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
-.rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: 13px/1.5 Inter, system-ui, sans-serif; resize: vertical; }
+.rv-textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: 13px/1.5 var(--font-sans); resize: vertical; }
 .rv-textarea.rv-mono { font: 12px/1.5 ui-monospace, Menlo, monospace; min-height: 44px; }
 .rv-chips { display: inline-flex; gap: 4px; }
 .rv-chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: 11.5px; cursor: pointer; }
@@ -137,7 +137,7 @@
 .rv-chip:is(:hover, :focus-visible) { background: var(--line); }
 .rv-preview { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .rv-suggest { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: 12px/1.6 ui-monospace, Menlo, monospace; }
-.rv-suggest-head { padding: 4px 10px; background: var(--surface-2); color: var(--text-muted); font: 11.5px Inter, system-ui, sans-serif; }
+.rv-suggest-head { padding: 4px 10px; background: var(--surface-2); color: var(--text-muted); font: 11.5px var(--font-sans); }
 .rv-suggest-line { display: flex; gap: 8px; padding: 0 10px; white-space: pre-wrap; }
 .rv-suggest-line.is-del { background: color-mix(in oklab, var(--diff-del-theme) 9%, transparent); }
 .rv-suggest-line.is-add { background: color-mix(in oklab, var(--diff-add-theme) 9%, transparent); }
