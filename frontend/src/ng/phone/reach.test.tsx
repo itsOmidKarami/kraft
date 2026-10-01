@@ -21,7 +21,7 @@ const EMPTY: Record<string, [number, unknown]> = {
   "GET /update": [200, { installed: "1.4.0", latest: "1.4.0", channel: "stable", behind: false, checked_at: null }],
   "GET /health": [200, { status: "ok", invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765 }],
 };
-const pattern = (route: string) => new RegExp(`^/ng${route.replace(/:[^/]+/g, "[^/]+")}/?$`);
+const pattern = (route: string) => new RegExp(`^${route.replace(/:[^/]+/g, "[^/]+")}/?$`);
 const tap = async (t: Tap) => {
   if ("css" in t) return void (await userEvent.click(await waitFor(() => { const el = document.querySelector<HTMLElement>(t.css); if (!el) throw new Error(`no ${t.css}`); return el; })));
   await userEvent.click(await screen.findByRole(t.role, { name: new RegExp(t.name, "i") }));
@@ -33,7 +33,7 @@ describe("every screen is reachable by tapping from the board (P.1)", () => {
   // A screen whose taps need a seeded item or row is walked by the sweep's flow-ng-phone-reach, against the full mock API.
   it.each(SCREENS.filter((s) => !s.data))("$id: $taps.length taps from the board land on $route", async (s) => {
     stubFetch(EMPTY);
-    window.history.pushState({}, "", "/ng/");
+    window.history.pushState({}, "", "/");
     render(<PhoneApp />);
     await screen.findByRole("heading", { level: 1, name: "Board" });
     for (const t of s.taps) await tap(t);
@@ -43,15 +43,15 @@ describe("every screen is reachable by tapping from the board (P.1)", () => {
 
   it.each(SCREENS.filter((s) => !s.data && s.taps.length > 0))("$id: Back goes to its parent and stays in the app", async (s) => {
     stubFetch(EMPTY);
-    window.history.pushState({}, "", "/ng/");
+    window.history.pushState({}, "", "/");
     render(<PhoneApp />);
     await screen.findByRole("heading", { level: 1, name: "Board" });
     for (const t of s.taps) await tap(t);
     await screen.findByRole("heading", { level: 1, name: s.heading });
     const back = document.querySelector<HTMLElement>(".ph-back");
     if (!back) return; // a root: the tab bar is its way out
-    const parent = parentOf(window.location.pathname.replace(/^\/ng/, "") + window.location.search);
+    const parent = parentOf(window.location.pathname + window.location.search);
     await userEvent.click(back);
-    await waitFor(() => expect(window.location.pathname).toBe(`/ng${parent === "/" ? "/" : parent}`));
+    await waitFor(() => expect(window.location.pathname).toBe(parent));
   });
 });
