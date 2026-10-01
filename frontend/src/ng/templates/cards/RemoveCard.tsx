@@ -17,12 +17,12 @@ export function RemoveCard({ anchor, label, refs, note, onRemove, onClose }: { a
         <p className="menu-title">{label}?</p>
         {refs.length > 0 && (
           <>
-            <p className="menu-note">These point at it and become problems that block publishing; Kraft won't re-target them:</p>
+            <p className="tpl-menu-note">These point at it and become problems that block publishing; Kraft won't re-target them:</p>
             <ul className="card-refs is-bad">{refs.map((r) => <li key={r.path}>{r.path}</li>)}</ul>
           </>
         )}
-        {note && <p className="menu-note">{note}</p>}
-        <p className="menu-note">⌘Z undoes it.</p>
+        {note && <p className="tpl-menu-note">{note}</p>}
+        <p className="tpl-menu-note">⌘Z undoes it.</p>
         <div className="card-acts">
           <button ref={keep} type="button" className="btn btn-secondary" onClick={onClose}>Keep</button>
           <Button variant="danger" onClick={onRemove}>{label}</Button>

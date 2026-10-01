@@ -157,7 +157,7 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
   const footer = d.kind === "chain" ? (
     asking ? (
       <>
-        <span className="rv-ask">Delete {chain}? It goes when you publish.</span>
+        <span className="tpl-rv-ask">Delete {chain}? It goes when you publish.</span>
         <span className="bp-gap" />
         <Button onClick={() => setAsking(false)}>Keep</Button>
         <Button variant="danger" onClick={async () => {

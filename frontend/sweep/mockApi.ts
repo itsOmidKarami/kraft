@@ -373,7 +373,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if ((m = p.match(/^\/drafts\/chains\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
       const [, key, action, file] = m;
       if (method === "DELETE") return route.fulfill({ status: 204 });
-      if (action === "fragment") return json(route, { path: new URL(req.url()).searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
       if (action === "publish") {
         if (key === "stale") return json(route, DRAFTS.stale409, 409);
         if (key === "broken" || key === "yaml-error") return json(route, { detail: "1 problem(s) to fix before publishing", problems: chainView(key).result.problems }, 422);
