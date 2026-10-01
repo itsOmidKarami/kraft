@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useResizable } from "../graph/useResizable";
 import { isTextField } from "../keys";
-import { HeaderTail } from "../shell/HeaderActions";
+import { AreaFrame } from "../templates/draft/AreaFrame";
+import { Kv } from "../templates/panes/controls";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
-import { counts } from "../templates/draft/view";
 import { showToast } from "../ui/Toast";
 import { AreaPane } from "./AreaPane";
 import { HarnessPane } from "./HarnessPane";
@@ -12,7 +11,6 @@ import { Lanes } from "./Lanes";
 import { List, type Pick } from "./List";
 import { ProfilePane } from "./ProfilePane";
 import { ESCALATION_PATH, type HProblem, floorLanes, harnessLanes, profileLanes, resolvedOf } from "./model";
-import { useBox } from "./useBox";
 import { usePublishedPolicy } from "./usePublishedPolicy";
 import { useProviders } from "./useProviders";
 import { useRun } from "./ops";
@@ -32,12 +30,9 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const result = view.result;
   const r = resolvedOf(result);
   const problems = result.problems as HProblem[];
-  const n = counts(result);
   const providers = useProviders();
   const published = usePublishedPolicy(view.draft);
   const [params, setParams] = useSearchParams();
-  const [frame, canvasW] = useBox();
-  const size = useResizable("harnesses", canvasW);
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState("overview");
   const { run, error: addError } = useRun(draft);
@@ -63,21 +58,18 @@ function Editor({ draft }: { draft: ConfigDraft }) {
     if (draft.error) showToast(draft.error);
   }, [draft.error]);
 
-  // ⌘Z undoes the last draft request outside a text field (brief B.5); Escape goes up one level.
-  const undo = draft.undo;
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => {
-      if (isTextField(e.target)) return;
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        undo();
-      } else if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("[role=dialog],[role=menu]") && (sel || lane)) {
-        up();
-      }
-    };
-    window.addEventListener("keydown", on);
-    return () => window.removeEventListener("keydown", on);
-  }, [undo, up, sel, lane]);
+  const area = useMemo(() => ({
+    crumb: "Harnesses",
+    files: ["harnesses.yaml", "policy.yaml"],
+    toast: "Published harnesses · new launches use it from now on",
+    affects: () => (
+      <>
+        <Kv k="new launches" v="use the published access and profiles from now on" />
+        <Kv k="running" v="sessions already launched keep the harness and model they started with" />
+        <Kv k="repos" v="a repo's own narrowing is edited in Repos and still applies" />
+      </>
+    ),
+  }), []);
 
   if (!r) return <div className="hn-note" role="alert">The harnesses draft has nothing to show{result.yaml_error ? `: ${result.yaml_error.file} line ${result.yaml_error.line}: ${result.yaml_error.message}` : "."}</div>;
 
@@ -100,7 +92,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
     if (p.profile && r.profiles[p.profile]) go({ profile: p.profile });
     else if (hit) go({ harness: hit.id });
   };
-  const common = { draft, r, providers, problems, changes, open, size, onCollapse: () => setOpen(false), onExpand: () => setOpen(true) };
+  const common = { draft, r, providers, problems, changes, open, onCollapse: () => setOpen(false), onExpand: () => setOpen(true) };
 
   const addProfile = async () => {
     let name = "profile";
@@ -111,42 +103,52 @@ function Editor({ draft }: { draft: ConfigDraft }) {
     if (ok) go({ profile: name });
   };
 
-  return (
-    <div className="hn-page" ref={frame}>
-      <h1 className="hn-sr">Harnesses</h1>
-      <HeaderTail>
-        {sel && (
-          <>
-            <span className="hn-crumb-sep" aria-hidden>›</span>
-            {sel.kind === "profile" && <><span className="hn-crumb">Profiles</span><span className="hn-crumb-sep" aria-hidden>›</span></>}
-            <span className="hn-crumb is-current">{sel.id}</span>
-          </>
-        )}
-        {view.draft ? <span className="hn-draft">DRAFT · {n.changes} {n.changes === 1 ? "CHANGE" : "CHANGES"}</span> : <span className="hn-published">published</span>}
-        {n.problems > 0 && (
-          <button type="button" className="hn-problems-badge" title="Show the problems" onClick={() => { go({}); setTab("overview"); }}>
-            {n.problems} {n.problems === 1 ? "PROBLEM" : "PROBLEMS"}
-          </button>
-        )}
-      </HeaderTail>
-      <List r={r} problems={problems} sel={sel} onPick={(p) => go(p.kind === "harness" ? { harness: p.id } : { profile: p.id })} onAdd={() => void addProfile()} />
-      {addError && <p className="hn-error hn-toast" role="alert">{adding ? "" : addError}</p>}
-      <div className="hn-stage">
-        <div className="hn-canvas" style={{ paddingRight: open ? size.width + 20 : 60 }} onClick={up}>
-          {missing ? (
-            <p className="hn-empty">No {harness ? "harness" : "profile"} called {harness ?? profile}. <button type="button" className="hn-link" onClick={() => go({})}>Back to every harness</button></p>
-          ) : (
-            <Lanes lanes={lanes} pill={pill} selected={lane} empty={empty} problems={problems} onOpen={(k) => go(h ? { harness: h.id, lane: k } : prof ? { profile: profile!, lane: k } : { harness: k })} />
-          )}
-        </div>
-        {h ? (
-          <HarnessPane {...common} h={h} lane={lane} onLane={(l) => go(l ? { harness: h.id, lane: l } : { harness: h.id })} onProfile={(name) => go({ profile: name })} />
-        ) : prof ? (
-          <ProfilePane {...common} name={profile!} lane={lane} onLane={(l) => go(l ? { profile: profile!, lane: l } : { profile: profile! })} onHarness={(id) => go({ harness: id })} onGone={(to) => go(to ? { profile: to } : {})} />
-        ) : (
-          <AreaPane draft={draft} r={r} problems={problems} published={published} tab={tab} onTab={setTab} open={open} size={size} onCollapse={() => setOpen(false)} onExpand={() => setOpen(true)} onProblem={onProblem} />
-        )}
-      </div>
-    </div>
+  const crumbs = sel && (
+    <>
+      <span className="hn-crumb-sep" aria-hidden>›</span>
+      {sel.kind === "profile" && <><span className="hn-crumb">Profiles</span><span className="hn-crumb-sep" aria-hidden>›</span></>}
+      <span className="hn-crumb is-current">{sel.id}</span>
+    </>
   );
+
+  return (
+    <AreaFrame draft={draft} area={area} pageKey="harnesses" title="Harnesses" tail={crumbs} onFix={onProblem}>
+      {({ size, review, reserve, yaml }) => (
+        <div className="hn-page">
+          <EscUp active={!review && !!(sel || lane)} onEsc={up} />
+          <List r={r} problems={problems} sel={sel} onPick={(p) => go(p.kind === "harness" ? { harness: p.id } : { profile: p.id })} onAdd={() => void addProfile()} />
+          {addError && <p className="hn-error hn-toast" role="alert">{adding ? "" : addError}</p>}
+          <div className="hn-stage">
+            <div className="hn-canvas" style={{ paddingRight: reserve(open) + 20 }} onClick={up}>
+              {missing ? (
+                <p className="hn-empty">No {harness ? "harness" : "profile"} called {harness ?? profile}. <button type="button" className="hn-link" onClick={() => go({})}>Back to every harness</button></p>
+              ) : (
+                <Lanes lanes={lanes} pill={pill} selected={lane} empty={empty} problems={problems} onOpen={(k) => go(h ? { harness: h.id, lane: k } : prof ? { profile: profile!, lane: k } : { harness: k })} />
+              )}
+            </div>
+            {!review && (h ? (
+              <HarnessPane {...common} size={size} onYaml={yaml} h={h} lane={lane} onLane={(l) => go(l ? { harness: h.id, lane: l } : { harness: h.id })} onProfile={(name) => go({ profile: name })} />
+            ) : prof ? (
+              <ProfilePane {...common} size={size} onYaml={yaml} name={profile!} lane={lane} onLane={(l) => go(l ? { profile: profile!, lane: l } : { profile: profile! })} onHarness={(id) => go({ harness: id })} onGone={(to) => go(to ? { profile: to } : {})} />
+            ) : (
+              <AreaPane draft={draft} r={r} problems={problems} published={published} tab={tab} onTab={setTab} open={open} size={size} onCollapse={() => setOpen(false)} onExpand={() => setOpen(true)} onProblem={onProblem} />
+            ))}
+          </div>
+        </div>
+      )}
+    </AreaFrame>
+  );
+}
+
+/** Escape goes up one level (lane, then selection) unless a dialog or menu is open. */
+function EscUp({ active, onEsc }: { active: boolean; onEsc: () => void }) {
+  useEffect(() => {
+    if (!active) return;
+    const on = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isTextField(e.target) && !e.defaultPrevented && !document.querySelector("[role=dialog],[role=menu]")) onEsc();
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [active, onEsc]);
+  return null;
 }

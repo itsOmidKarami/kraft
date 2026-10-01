@@ -103,11 +103,16 @@ export function harnessesServer(scenario: Scenario) {
     }])),
   });
 
+  let clean = false;
+  /** Publish: what is published becomes the draft, so the next view has no changes. */
+  const publish = () => { Object.assign(original, structuredClone(state)); clean = true; };
+
   const view = () => {
     const c = changes();
     return {
-      area: "harnesses", key: "harnesses", draft: c.length > 0 || scenario === "problems",
+      area: "harnesses", key: "harnesses", draft: c.length > 0 || (scenario === "problems" && !clean),
       files: { "harnesses.yaml": harnessesYaml(state), "policy.yaml": policyYaml(state) },
+      published: { "harnesses.yaml": harnessesYaml(original), "policy.yaml": policyYaml(original) },
       base: { "harnesses.yaml": "a".repeat(64), "policy.yaml": "b".repeat(64) }, updated_at: "2026-10-01T09:12:00Z",
       result: { model: {}, resolved: resolved(), problems: problems(), sources: {}, changes: c, impact: { tasks: 3, chains: ["default"] }, warnings: [], policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 } },
     };
@@ -122,7 +127,7 @@ export function harnessesServer(scenario: Scenario) {
       else if (o.op === "add_profile") state.profiles[o.name] = o.copy_from ? JSON.parse(JSON.stringify(state.profiles[o.copy_from])) : {};
     }
   };
-  return { view, apply, problems, count: () => Object.keys(state.profiles).length };
+  return { view, apply, publish, problems, count: () => Object.keys(state.profiles).length };
 }
 
 const harnessesYaml = (s: State) => `harnesses:\n${HARNESSES.map((h) => `  ${h.id}:\n    provider: ${h.provider}\n`).join("")}profiles:\n${Object.entries(s.profiles).map(([n, p]) => `  ${n}:\n    providers:\n${Object.entries(p).map(([pv, e]) => `      ${pv}: {model: ${e.model}${e.effort ? `, effort: ${e.effort}` : ""}}\n`).join("")}`).join("")}`;

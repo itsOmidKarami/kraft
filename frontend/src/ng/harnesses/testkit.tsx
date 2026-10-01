@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { HeaderTailHost } from "../shell/HeaderActions";
+import { HeaderActionsHost, HeaderTailHost } from "../shell/HeaderActions";
 import { vi } from "vitest";
 import type { DraftView, Problem } from "../templates/draft/types";
 import type { Access, HarnessView, ProfileView, Resolved, TaskRef } from "./model";
@@ -55,10 +55,10 @@ export const NO_ENTRY = problem({ chain: "default", path: TASKS.summary.path, pr
 export const NEVER = problem({ chain: "default", path: TASKS.implementer.path, file: "chains/default.yaml", message: `${TASKS.implementer.path}: harness 'claude' is not in its allowed_harnesses ['codex']` });
 export const ESCALATION = problem({ path: "defaults.escalation_harness", field: "escalation_harness", file: "policy.yaml", message: "escalation runs on 'claude', which is set to Never" });
 
-export function view(r: Resolved, opts: { problems?: Problem[]; changes?: { path: string; kind: "add" | "change" | "remove"; summary: string }[]; draft?: boolean } = {}): DraftView {
+export function view(r: Resolved, opts: { problems?: Problem[]; changes?: { path: string; kind: "add" | "change" | "remove"; summary: string }[]; draft?: boolean; files?: Record<string, string>; published?: Record<string, string | null> } = {}): DraftView {
   return {
     area: "harnesses", key: "harnesses", draft: opts.draft ?? (opts.changes?.length ?? 0) > 0,
-    files: { "harnesses.yaml": "harnesses: {}\n", "policy.yaml": "defaults: {}\n" }, base: {}, updated_at: null,
+    files: opts.files ?? { "harnesses.yaml": "harnesses: {}\n", "policy.yaml": "defaults: {}\n" }, base: {}, updated_at: null, ...(opts.published ? { published: opts.published } : {}),
     result: {
       model: {}, resolved: r as never, problems: opts.problems ?? [], sources: {}, changes: opts.changes ?? [], impact: {}, warnings: [],
       policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 0 },
@@ -80,7 +80,7 @@ export interface Server {
 }
 
 /** A fetch that answers the draft, the provider status and the published policy; each `ops` post is recorded. */
-export function serve(first: DraftView, opts: { published?: unknown; opsAnswer?: (ops: Record<string, unknown>[]) => Response | null } = {}): Server {
+export function serve(first: DraftView, opts: { published?: unknown; publishAnswer?: () => Response; opsAnswer?: (ops: Record<string, unknown>[]) => Response | null } = {}): Server {
   let current = first;
   const server: Server = { ops: [], calls: [], setView: (v) => void (current = v) };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -93,6 +93,7 @@ export function serve(first: DraftView, opts: { published?: unknown; opsAnswer?:
       server.ops.push(ops);
       return Promise.resolve(opts.opsAnswer?.(ops) ?? json({ ...current, ops: ops.map((o) => ({ op: o.op })) }));
     }
+    if (path === "/drafts/harnesses/harnesses/publish") return Promise.resolve(opts.publishAnswer?.() ?? json({ published: ["harnesses.yaml", "policy.yaml"], result: current.result }));
     if (path === "/harnesses") return Promise.resolve(json(STATUS));
     if (path === "/policy") return Promise.resolve(json(opts.published ?? { maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } }));
     if (path === "/drafts") return Promise.resolve(json([]));
@@ -106,12 +107,15 @@ export function renderPage(query = "") {
   resetProviders();
   const tail = document.createElement("div");
   tail.setAttribute("data-testid", "header-tail");
-  document.body.append(tail);
+  const actions = document.createElement("div");
+  document.body.append(tail, actions);
   const out = render(
     <HeaderTailHost.Provider value={tail}>
-      <MemoryRouter initialEntries={[`/templates/harnesses${query}`]}>
-        <HarnessesPage />
-      </MemoryRouter>
+      <HeaderActionsHost.Provider value={actions}>
+        <MemoryRouter initialEntries={[`/templates/harnesses${query}`]}>
+          <HarnessesPage />
+        </MemoryRouter>
+      </HeaderActionsHost.Provider>
     </HeaderTailHost.Provider>,
   );
   return { ...out, tail };

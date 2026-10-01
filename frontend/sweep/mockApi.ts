@@ -568,7 +568,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         if (m[1] === "publish") {
           const blocking = hs.problems();
           if (blocking.length) return json(route, { detail: `${blocking.length} problem(s) to fix before publishing`, problems: blocking }, 422);
-          return json(route, { published: ["harnesses.yaml", "policy.yaml"], result: { ...hs.view().result, changes: [] } });
+          hs.publish();
+          return json(route, { published: ["harnesses.yaml", "policy.yaml"], result: hs.view().result });
         }
         return json(route, hs.view());
       }

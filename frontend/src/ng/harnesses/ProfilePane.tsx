@@ -27,6 +27,7 @@ type Props = {
   onExpand: () => void;
   onLane: (l: string | null) => void;
   onHarness: (id: string) => void;
+  onYaml?: (file: string) => void;
   /** After a rename or a removal the selection moves. */
   onGone: (to: string | null) => void;
 };
@@ -112,7 +113,7 @@ export function ProfilePane(p: Props) {
       footer={footer}
     >
       <Head>Profile</Head>
-      <Note>Model and effort are per provider: click a lane. Read live at every launch.</Note>
+      <Note>Model and effort are per provider: click a lane. Read live at every launch. {p.onYaml ? <button type="button" className="hn-link" onClick={() => p.onYaml!("harnesses.yaml")}>Edit in YAML</button> : null}</Note>
       {Object.keys(profile?.providers ?? {}).length === 0 && <Note>No provider entries yet.</Note>}
       <Head>Used by · {profile?.tasks.length ?? 0}</Head>
       {(profile?.tasks ?? []).map((t) => (
