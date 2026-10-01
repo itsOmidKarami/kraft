@@ -24,7 +24,7 @@ export const ROUTES: NgRoute[] = [
   { path: "/templates/harnesses", label: "Harnesses", icon: NAV_ICON.harnesses, group: "templates", built: false },
   { path: "/templates/repos", label: "Repos", icon: NAV_ICON.repos, group: "templates", built: true },
   { path: "/settings/policy", label: "Policy", icon: NAV_ICON.policy, group: "settings", built: true },
-  { path: "/settings/auto-intake", label: "Auto-intake", icon: NAV_ICON.intake, group: "settings", built: false },
+  { path: "/settings/auto-intake", label: "Auto-intake", icon: NAV_ICON.intake, group: "settings", built: true },
   { path: "/settings/notifications", label: "Notifications", icon: NAV_ICON.notifications, group: "settings", built: true },
   { path: "/settings/access", label: "Access", icon: NAV_ICON.access, group: "settings", built: true },
   { path: "/settings/appearance", label: "Appearance", icon: NAV_ICON.appearance, group: "settings", built: true },

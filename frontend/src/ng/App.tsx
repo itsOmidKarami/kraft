@@ -20,12 +20,13 @@ import { SignIn } from "./shell/SignIn";
 import { ChainsIndex } from "./templates/ChainsIndex";
 import { ChainsPage } from "./templates/ChainsPage";
 import { ReposPage } from "./templates/ReposPage";
+import { IntakePage } from "./settings/IntakePage";
 import { PolicyPage } from "./settings/PolicyPage";
 import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/templates/repos": <ReposPage />, "/settings/policy": <PolicyPage /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/templates/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);
@@ -52,6 +53,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           <Route path="/templates/repos/:repo" element={<ReposPage />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/policy/:section" element={<PolicyPage />} />
+          <Route path="/settings/intake" element={<Navigate to="/settings/auto-intake" replace />} />
           <Route path="/templates/chains/:chain" element={<ChainsPage />} />
           <Route path="/templates/chains/:chain/nodes/:node" element={<ChainsPage />} />
           <Route path="/_tokens" element={<TokenSheet />} />
