@@ -158,6 +158,17 @@
       { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" }
     ]
   },
+  "ux2-W16": {
+    "title": "UX V2 Notifications, Access, Appearance, About, Analytics, Apply chip",
+    "screens": ["ng-appearance"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
+      { "kind": "no-console", "match": "^ng-" }
+    ]
+  },
   "ux2-W3": {
     "title": "UX V2 shared graph components: glyph, canvases, gate view, strip, pane, camera, gallery",
     "screens": ["ng-gallery"],

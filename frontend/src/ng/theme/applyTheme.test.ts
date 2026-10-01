@@ -23,7 +23,7 @@ function mockScheme(dark: boolean) {
 
 beforeEach(() => {
   localStorage.clear();
-  for (const k of ["surface", "accent", "amount", "mode", "density", "palette"]) delete html()[k];
+  for (const k of ["surface", "accent", "amount", "mode", "density", "palette", "code"]) delete html()[k];
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -57,6 +57,24 @@ describe("ng applyTheme", () => {
     expect(scheme.listeners.size).toBe(0);
     scheme.set(false);
     expect(html().mode).toBe("dark");
+  });
+
+  it("sets data-code from the scheme of the resolved mode; auto and none set none", () => {
+    const scheme = mockScheme(true);
+    const code_scheme = { light: "solarized-light", dark: "monokai" } as const;
+    applyTheme(look({ mode: "dark", code_scheme }));
+    expect(html().code).toBe("monokai");
+    applyTheme(look({ mode: "light", code_scheme }));
+    expect(html().code).toBe("solarized-light");
+    applyTheme(look({ mode: "system", code_scheme }));
+    scheme.set(false);
+    expect(html().code).toBe("solarized-light");
+    scheme.set(true);
+    expect(html().code).toBe("monokai");
+    for (const dark of ["auto", "none"] as const) {
+      applyTheme(look({ mode: "dark", code_scheme: { light: "auto", dark } }));
+      expect(html().code).toBeUndefined();
+    }
   });
 
   it("paints the default when storage throws", () => {

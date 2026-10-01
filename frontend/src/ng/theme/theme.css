@@ -68,3 +68,7 @@
 [data-accent="green"][data-mode="light"][data-amount="full"] { --accent: #006738; }
 [data-accent="amber"][data-mode="light"][data-amount="full"] { --accent: #794a00; }
 [data-accent="rose"][data-mode="light"][data-amount="full"] { --accent: #81375e; }
+[data-code="solarized-light"][data-mode="light"] { --tok-kw: #5e7000; --tok-str: #00756d; --tok-num: #bb3c00; --tok-com: #5e6b6b; --tok-name: #006cb1; }
+[data-code="solarized-dark"][data-mode="dark"] { --tok-kw: #94a924; --tok-str: #3fb1a7; --tok-num: #fe7a4b; --tok-com: #8da4ab; --tok-name: #46a6ef; }
+[data-code="monokai"][data-mode="dark"] { --tok-kw: #ff6da5; --tok-str: #e6db74; --tok-num: #b689ff; --tok-com: #a5a18d; --tok-name: #a6e22e; }
+[data-code="dracula"][data-mode="dark"] { --tok-kw: #ff79c6; --tok-str: #f1fa8c; --tok-num: #bd93f9; --tok-com: #8c9ed3; --tok-name: #50fa7b; }

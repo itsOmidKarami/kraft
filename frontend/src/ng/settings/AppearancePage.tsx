@@ -6,6 +6,7 @@ import { ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../theme/looks";
 import { HeaderActions } from "../shell/HeaderActions";
 import { ThemeCard } from "../theme/ThemeCard";
 import { Segmented } from "../ui/Segmented";
+import { AppearanceMore } from "./AppearanceMore";
 import "./settings.css";
 
 const MODES: { value: ThemeMode; label: string }[] = [
@@ -103,6 +104,7 @@ export function AppearancePage() {
             <p className="caption">{`${title(surface)} · ${accent} accent · ${mode} · ${amount}`}</p>
           </section>
         </div>
+        <AppearanceMore theme={theme} save={save} />
       </div>
     </div>
   );

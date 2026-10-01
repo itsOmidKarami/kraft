@@ -7,6 +7,8 @@ export interface Look {
   colour_amount: ColourAmount;
   mode: ThemeMode;
   density: Theme["density"];
+  /** The named code scheme per mode; `auto` and `none` paint no `--tok-*`. */
+  code_scheme?: Theme["code_scheme"];
 }
 
 /** What the page paints when nothing is cached and the server has not answered. */
@@ -33,6 +35,7 @@ export function lookOf(t: Theme): Look {
     colour_amount: t.colour_amount ?? DEFAULT_LOOK.colour_amount,
     mode: t.mode,
     density: t.density,
+    code_scheme: t.code_scheme,
   };
 }
 
@@ -53,12 +56,19 @@ export function applyTheme(look: Look): void {
   }
   stopFollowing?.();
   stopFollowing = null;
+  // The scheme belongs to the resolved mode, so it is set where the mode is.
+  const setMode = (mode: "light" | "dark") => {
+    root.mode = mode;
+    const id: string | undefined = look.code_scheme?.[mode];
+    if (id && id !== "auto" && id !== "none") root.code = id;
+    else delete root.code;
+  };
   if (look.mode !== "system") {
-    root.mode = look.mode;
+    setMode(look.mode);
     return;
   }
   const query = window.matchMedia("(prefers-color-scheme: dark)");
-  const follow = () => (root.mode = query.matches ? "dark" : "light");
+  const follow = () => setMode(query.matches ? "dark" : "light");
   follow();
   query.addEventListener("change", follow);
   stopFollowing = () => query.removeEventListener("change", follow);

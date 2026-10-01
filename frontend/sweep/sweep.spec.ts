@@ -376,6 +376,20 @@ const CASES: Case[] = [
   // An old theme.yaml with only `palette`: GET /theme derives the look (rule A.3).
   { screen: "ng-appearance", variant: "derived", data: "default", widths: [1280], run: (c) => ng(c, "/ng/settings/appearance", { palette: "forest", surface: "moss", accent: "green", colour_amount: "full", derived: true }) },
 
+  // W16 D: the sections below the colour ones, each scrolled to its heading.
+  { screen: "ng-appearance", variant: "syntax-monokai", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => {
+    await ng(c, "/ng/settings/appearance", { surface: "slate", accent: "blue", colour_amount: "subtle", code_scheme: { light: "solarized-light", dark: "monokai" } });
+    await c.page.getByRole("heading", { name: "Syntax highlighting" }).evaluate((h) => h.scrollIntoView({ block: "start" })); await settle(c.page, 300);
+  } },
+  { screen: "ng-appearance", variant: "diff-prefs", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => {
+    await ng(c, "/ng/settings/appearance", { diff: { layout: "split", colours: "safe", show_whitespace: true, word_highlight: true, wrap_lines: true, one_file_at_a_time: false } });
+    await c.page.getByRole("heading", { name: "Review diff" }).evaluate((h) => h.scrollIntoView({ block: "start" })); await settle(c.page, 300);
+  } },
+  { screen: "ng-appearance", variant: "density", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => {
+    await ng(c, "/ng/settings/appearance", { density: "comfortable" });
+    await c.page.getByRole("heading", { name: "Board" }).evaluate((h) => h.scrollIntoView({ block: "start" })); await settle(c.page, 300);
+  } },
+
   // W3: the graph components' gallery, fed by fixtures.
   { screen: "ng-gallery", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_gallery", {}) },
   { screen: "ng-gallery", variant: "mono", data: "default", widths: [1280], fullPage: true, run: (c) => ng(c, "/ng/_gallery", { colour_amount: "mono" }) },

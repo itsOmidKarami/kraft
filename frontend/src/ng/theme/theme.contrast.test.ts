@@ -50,6 +50,21 @@ const combos = SURFACES.flatMap((s) =>
   MODES.flatMap((m) => AMOUNTS.flatMap((a) => (a === "mono" ? ["none"] : ACCENTS).map((x) => [s, m, a, x]))),
 );
 
+const SCHEMES: [string, string][] = [["solarized-light", "light"], ["solarized-dark", "dark"], ["monokai", "dark"], ["dracula", "dark"]];
+
+describe("theme.css code schemes", () => {
+  it.each(SCHEMES)("%s (%s) tokens clear 4.5 on every ground", (id, m) => {
+    const t = blocks.get(`[data-code="${id}"][data-mode="${m}"]`);
+    expect(t, "scheme block").toBeDefined();
+    for (const role of ["kw", "str", "num", "com", "name"]) {
+      for (const s of SURFACES) for (const a of AMOUNTS) for (const g of ["--bg", "--surface"]) {
+        const ground = blocks.get(`[data-surface="${s}"][data-mode="${m}"][data-amount="${a}"]`)![g];
+        expect(contrast(t![`--tok-${role}`], ground), `${role} on ${s}/${a} ${g}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+});
+
 describe("theme.css", () => {
   it("has 30 neutral blocks and 36 accent blocks", () => {
     expect([...blocks.keys()].filter((k) => k.startsWith("[data-surface")).length).toBe(30);
@@ -71,5 +86,13 @@ describe("theme.css", () => {
       at(r, "--surface", 4.5);
     }
     at("--focus", "--bg", 3);
+  });
+});
+
+describe("review.css scheme hook", () => {
+  // A named scheme only reaches the diff through these (W16 D.6); the fallback keeps `auto` as it was.
+  const review = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../review/review.css"), "utf-8");
+  it.each([["kw", "info"], ["str", "ok"], ["num", "warn"], ["com", "text-muted"], ["name", "text"]])(".tok-%s reads --tok-%s fallback", (k, fb) => {
+    expect(review).toContain(`.tok-${k} { color: var(--tok-${k}, var(--${fb}));`);
   });
 });
