@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,43 @@ def _pulled(cli: str, image: str) -> None:
         _unavailable(cli, f"e2e: {cli} could not pull {image}: {pulled.stderr.strip()}")
 
 
+def _dead(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        pass
+    return False
+
+
+def _sweep_dead_runs(cli: str) -> None:
+    """Remove the relays and volume a test process left behind when it died
+    before its teardown ran (pytest-timeout's thread method ends the process
+    with `os._exit`; a kill -9 does the same): the worker container goes with
+    `--rm`, but the relays are `close_session`'s to remove (Kraft-bwaok).
+    Kraft's own `sweep` would at that home's next start, which a test's home
+    never has. Only what `launch` names, `s<pid>`, for a pid no longer
+    running and a home under pytest's temp root, so a concurrent run's live
+    session is left alone."""
+
+    def run(*argv: str) -> str:
+        return subprocess.run([cli, *argv], capture_output=True, text=True).stdout
+
+    for kind, listing, labels in (
+        ("container", ("ps", "-a", "--format", "{{.Names}}"), ".Config.Labels"),
+        ("volume", ("volume", "ls", "--format", "{{.Name}}"), ".Labels"),
+    ):
+        role = "relay" if kind == "container" else "egress-volume"
+        for name in run(*listing, "--filter", f"label=kraft.role={role}").split():
+            owner = re.fullmatch(r"kraft-(?:relay-(?:b-)?|egress-)s(\d+)", name)
+            if owner is None or not _dead(int(owner[1])):
+                continue
+            home = run(kind, "inspect", "-f", f'{{{{index {labels} "kraft.home"}}}}', name)
+            if "/pytest-of-" in home:
+                run(kind, "rm", "-f", name)
+
+
 @pytest.fixture
 def short_run(monkeypatch):
     """A run dir short enough for a unix socket path, for the probe
@@ -94,6 +132,7 @@ def probed(request, monkeypatch, short_run) -> docker.Runtime:
     relay = docker._forward._sandbox_host(os.environ).relay_image
     _pulled(cli, IMAGE)
     _pulled(cli, relay)
+    _sweep_dead_runs(cli)
     monkeypatch.setattr(docker, "_RUNTIME", docker.detect_runtime())
     if docker.socket_channel(relay) is None:
         _unavailable(cli, f"e2e: {docker.runtime().describe()} could not be probed")
