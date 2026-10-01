@@ -409,6 +409,22 @@ const CASES: Case[] = [
     },
   })),
 
+  // W16 C: Notifications. The browser's permission is stubbed: headless Chromium answers "denied" to everyone.
+  ...([
+    ["default", "default", {}],
+    ["denied", "denied", {}],
+    ["test-failed", "granted", { last_test: { at: new Date(Date.UTC(2026, 8, 13, 9, 50)).toISOString(), status: null, ms: null, error: "connection refused" } }],
+    ["not-set-up", "default", { enabled: false, url_set: false, events: [], base_url: null, last_test: null }],
+  ] as const).map<Case>(([variant, permission, notify]) => ({
+    screen: "ng-notifications", variant, data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { apply: "none" },
+    run: async (c) => {
+      await c.page.clock.setFixedTime(new Date(NG_NOW));
+      await c.page.addInitScript((p) => { (window as any).Notification = class { static permission = p; static requestPermission = async () => p; }; }, permission);
+      Object.assign(c.S.settings.notify, notify);
+      await ng(c, "/ng/settings/notifications", {});
+    },
+  })),
+
   // W16 F: Analytics under /ng, fed by the same analyticsFor() fixtures as the shipped page.
   { screen: "ng-analytics", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
   { screen: "ng-analytics", variant: "long", data: "long", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
