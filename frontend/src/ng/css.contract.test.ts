@@ -51,3 +51,13 @@ describe("data-pan", () => {
     expect(bad.map((f) => relative(src, f))).toEqual([]);
   });
 });
+
+describe("landmarks", () => {
+  // The shell's <main id="ng-main"> is the skip link's target; a page inside it that renders its own makes two.
+  // The sign-in card and the unlinked gallery sit outside the shell, so each has the page's only one.
+  it("renders <main> only in the shell, the sign-in card and the gallery", () => {
+    const own = ["shell/Shell.tsx", "shell/SignIn.tsx", "graph/Gallery.tsx"].map((f) => join(here, f));
+    const bad = sources(here).filter((f) => f.endsWith(".tsx") && !own.includes(f) && /<main[\s>]/.test(readFileSync(f, "utf-8")));
+    expect(bad.map((f) => relative(here, f))).toEqual([]);
+  });
+});
