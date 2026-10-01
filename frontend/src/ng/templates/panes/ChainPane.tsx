@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Inspector } from "../../graph/Inspector";
 import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
+import type { Scope } from "../draft/types";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { authoredAt, authoredNodes, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
 import { problemText } from "../problems";
@@ -29,9 +30,9 @@ const NOT_OVERRIDES = new Set(["id", "extends", "icon", "kind", "on_failure"]);
 
 /** The side pane for whatever is selected (Decisions §9 Side pane): crumb,
  *  icon and title, subtitle, the problem row, Overview | Config, footer. */
-export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand, onFocus, goTo, onDuplicate, onDeleted, onRenamed, onRemoved, onMarking, renameNow }: {
+export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand, onFocus, goTo, onDuplicate, onDeleted, onRenamed, onRemoved, onMarking, renameNow }: {
   draft: ConfigDraft;
-  chain: string;
+  scope: Scope;
   path: string;
   open: boolean;
   size: ReturnType<typeof useResizable>;
@@ -63,13 +64,14 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
   const [asking, setAsking] = useState(false);
   const [tab, setTab] = useState("overview");
   const r = draft.view!.result;
-  const d = describe(r, chain, path);
-  const ctx: PaneCtx = { r, chain, path, draft, goTo };
-  const own = authoredAt(r, chain, path);
+  const chain = scope.key;
+  const d = describe(r, scope, path);
+  const ctx: PaneCtx = { r, scope, path, draft, goTo };
+  const own = authoredAt(r, scope, path);
   const res = resolvedAt(r, path) ?? own;
   const probs = path ? problemsAt(r, path) : r.problems.filter((p) => !p.path);
   const loneMain = (prefix: string) => {
-    const c = normalise(resolvedAt(r, prefix) ?? authoredAt(r, chain, prefix));
+    const c = normalise(resolvedAt(r, prefix) ?? authoredAt(r, scope, prefix));
     return !!c && c.steps.length === 1 && c.steps[0].id === "main";
   };
   const crumbs = d.kind === "chain"
@@ -77,10 +79,10 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
     : [{ label: chain, onClick: () => goTo("") }, ...crumbPath(path, loneMain).map((c) => ({ label: c.label, onClick: () => goTo(c.path) }))];
   const overrides = own?.extends ? Object.keys(own).filter((k) => !NOT_OVERRIDES.has(k)).length : 0;
   const ext = typeof own?.extends === "string" ? ` · extends ${own.extends}${overrides ? ` · ${plural(overrides, "override")}` : ""}` : "";
-  const taskKind = String(valueAt(r, chain, path, "kind") ?? "");
+  const taskKind = String(valueAt(r, scope, path, "kind") ?? "");
   const sub = (() => {
     switch (d.kind) {
-      case "chain": return `chain · ${plural(authoredNodes(r, chain).length, "node")}`;
+      case "chain": return `chain · ${plural(authoredNodes(r, scope).length, "node")}`;
       case "gate": return `gate${res?.chain_finalized ? " · final review" : ""}`;
       case "node": {
         const steps = draft.resolvedNode(path)?.steps ?? [];
@@ -95,12 +97,12 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
         return `repairs, then re-measures from ${first ?? "the start"}`;
       }
       default:
-        return `${taskKind ? `${taskKind} task` : "task"}${ext}${valueAt(r, chain, path, "scope") === "each_repository" ? " · × each repository" : ""}`;
+        return `${taskKind ? `${taskKind} task` : "task"}${ext}${valueAt(r, scope, path, "scope") === "each_repository" ? " · × each repository" : ""}`;
     }
   })();
   const tabs = d.kind === "fixloop" ? undefined : d.kind === "chain" ? TABS : TABS_YAML;
   const shownTab = tabs?.some((x) => x.value === tab) ? tab : "overview";
-  const node = d.node ? (authoredNodes(r, chain).find((n) => n.id === d.node) as NodeA | undefined) : undefined;
+  const node = d.node ? (authoredNodes(r, scope).find((n) => n.id === d.node) as NodeA | undefined) : undefined;
   const icon = FIXED_ICON[d.kind] ?? (typeof res?.icon === "string" ? res.icon : undefined);
   const repos = r.impact.repos ?? [];
   const at = (el: HTMLElement) => void (anchor.current = el);
@@ -111,20 +113,20 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
   };
   // What a remove or a rename touches (Decisions §9 Rename, Remove).
   const isNodeLike = d.kind === "node" || d.kind === "gate";
-  const refs = isNodeLike ? refsTo(r, chain, path) : [];
+  const refs = isNodeLike ? refsTo(r, scope, path) : [];
   const removePath = d.kind === "esc" ? `${d.node}.escalation` : path;
   const removeLabel = { node: "Remove node", gate: "Remove gate", step: "Remove step", task: "Remove task", fixloop: "Remove fix loop", judge: "Remove judge", esc: "Remove escalation", review: "Remove reviewer", chain: "" }[d.kind];
   const parent = path.split(".").slice(0, -1).join(".");
   const siblings = (() => {
-    if (isNodeLike) return authoredNodes(r, chain).map((n) => n.id);
-    const c = normalise(resolvedAt(r, parent) ?? authoredAt(r, chain, parent));
+    if (isNodeLike) return authoredNodes(r, scope).map((n) => n.id);
+    const c = normalise(resolvedAt(r, parent) ?? authoredAt(r, scope, parent));
     if (d.kind === "step") return c?.steps.map((s) => s.id) ?? [];
-    if (d.kind === "task") return (((resolvedAt(r, parent) ?? authoredAt(r, chain, parent))?.tasks as { id: string }[] | undefined) ?? []).map((x) => x.id);
+    if (d.kind === "task") return (((resolvedAt(r, parent) ?? authoredAt(r, scope, parent))?.tasks as { id: string }[] | undefined) ?? []).map((x) => x.id);
     return [];
   })();
   const renameable = !["fixloop", "judge"].includes(d.kind);
   // Removing a task a node inherits makes this chain own that step's list (Decisions §9 Inherited items).
-  const nodeOwn = d.node ? authoredAt(r, chain, d.node) : null;
+  const nodeOwn = d.node ? authoredAt(r, scope, d.node) : null;
   const inherits = (d.kind === "task" || d.kind === "step") && !!nodeOwn?.extends && !nodeOwn.steps;
   const rename = async (id: string) => {
     const a = await draft.ops([{ op: "rename", path, id }], { quiet: true });
@@ -213,7 +215,7 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
           <Overview kind={d.kind} ctx={ctx} />
         </>
       ) : shownTab === "config" ? <Config kind={d.kind} ctx={ctx} />
-        : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} chain={chain} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
+        : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
           : <Overview kind={d.kind} ctx={ctx} />}
     </Inspector>
     {card?.t === "rename" && (

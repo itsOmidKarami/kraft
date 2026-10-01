@@ -5,7 +5,7 @@ import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
-import type { Problem, StaleBody } from "./draft/types";
+import type { Problem, Scope, StaleBody } from "./draft/types";
 import { chainFile, counts, liveChainFile } from "./draft/view";
 import { Head, Kv, Note } from "./panes/controls";
 import { problemText } from "./problems";
@@ -30,9 +30,9 @@ const serverDiff = (diff: string) =>
 /** Review & publish's pane (Decisions §9 Publish): the draft's changes and
  *  problems, the YAML diff, who it affects; Discard confirms in place;
  *  Publish waits for zero problems. A 409 shows the server's diff (R45). */
-export function ReviewPane({ draft, chain, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone }: {
+export function ReviewPane({ draft, scope, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone }: {
   draft: ConfigDraft;
-  chain: string;
+  scope: Scope;
   /** The published file's text; null for a chain never published. */
   published: string | null | undefined;
   open: boolean;
@@ -48,6 +48,7 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
   const [tab, setTab] = useState("changes");
   const [asking, setAsking] = useState(false);
   const [refused, setRefused] = useState<Problem[] | null>(null);
+  const chain = scope.key;
   const view = draft.view!;
   const r = view.result;
   const n = counts(r);

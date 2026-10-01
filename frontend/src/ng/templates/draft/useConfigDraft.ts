@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Answer } from "../../http";
 import { detailOf } from "../../http";
 import * as d from "./draftApi";
-import type { Area, DraftView, Op, OpsView, StaleBody } from "./types";
+import type { Area, DraftView, Op, OpsView, Scope, StaleBody } from "./types";
 import { normalise, type NodeA } from "./view";
 
 export const TEXT_DEBOUNCE_MS = 300;
@@ -182,10 +182,11 @@ export function useConfigDraft(area: Area, key: string) {
   }, [view]);
 
   return useMemo(() => ({
+    scope: { area, key } as Scope,
     view, status, error, pending, stale,
     clearError: () => setError(null),
     ops, field, text, flush, undo, publish, keepMine, discard, reload: load, resolvedNode,
-  }), [view, status, error, pending, stale, ops, field, text, flush, undo, publish, keepMine, discard, load, resolvedNode]);
+  }), [area, key, view, status, error, pending, stale, ops, field, text, flush, undo, publish, keepMine, discard, load, resolvedNode]);
 }
 
 export type ConfigDraft = ReturnType<typeof useConfigDraft>;

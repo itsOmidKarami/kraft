@@ -61,6 +61,7 @@ function ChainEditor({ chain, node }: { chain: string; node?: string }) {
 function Editor({ chain, node, draft }: { chain: string; node?: string; draft: ConfigDraft }) {
   const navigate = useNavigate();
   const view = draft.view!;
+  const scope = draft.scope;
   const r = view.result;
   const [frame, canvasW, areaH] = useBox();
   const size = useResizable("chains", canvasW);
@@ -233,9 +234,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     const cur = s.sel as TSel;
     if (review || surface !== "canvas") return;
     if (s.level === "chain" && cur.kind === "node") {
-      const i = authoredNodes(r, chain).findIndex((x) => x.id === cur.node);
+      const i = authoredNodes(r, scope).findIndex((x) => x.id === cur.node);
       const to = i + dir;
-      if (i >= 0 && to >= 0 && to < authoredNodes(r, chain).length) void move(cur.node, to);
+      if (i >= 0 && to >= 0 && to < authoredNodes(r, scope).length) void move(cur.node, to);
     } else if (s.level === "node" && cur.kind === "step" && s.node) {
       const steps = draft.resolvedNode(s.node)?.steps ?? [];
       const i = steps.findIndex((x) => `${s.node}.${x.id}` === pathOf(cur));
@@ -249,7 +250,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
   const sel = s.sel as TSel;
   const selPath = pathOf(sel);
-  const nodes = authoredNodes(r, chain);
+  const nodes = authoredNodes(r, scope);
   const selNode = sel.kind === "chain" ? null : nodes.find((x) => x.id === sel.node);
   const isGate = !!selNode && sel.kind === "node" && kindOf(r, selNode) === "gate";
 
@@ -299,7 +300,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (
           <ChainCanvas
-            chain={chain}
+            scope={scope}
             result={r}
             selected={sel.kind === "node" ? sel.node : undefined}
             pending={draft.pending}
@@ -327,7 +328,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
                 setStrip(a.status === 200 ? { ok: true, text: `Move ${id} here` } : { ok: false, text: `Can't move ${id}: ${detailOf(a.body)}` });
               },
               drop: (id, to) => {
-                const i = authoredNodes(r, chain).findIndex((x) => x.id === id);
+                const i = authoredNodes(r, scope).findIndex((x) => x.id === id);
                 if (i !== to) void move(id, to);
               },
               end: () => setStrip(null),
@@ -335,7 +336,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           />
         ) : (
           <NodeView
-            chain={chain}
+            scope={scope}
             node={s.node!}
             draft={draft}
             selected={sel}
@@ -371,11 +372,11 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onLeave={() => dispatch({ type: "background" })}
           />
         )}
-        {surface === "yaml" && s.level === "chain" && !review && <YamlView draft={draft} chain={chain} published={published === undefined ? undefined : published?.text ?? null} />}
+        {surface === "yaml" && s.level === "chain" && !review && <YamlView draft={draft} scope={scope} published={published === undefined ? undefined : published?.text ?? null} />}
         {review ? (
           <ReviewPane
             draft={draft}
-            chain={chain}
+            scope={scope}
             published={published === undefined ? undefined : published?.text ?? null}
             open={reviewOpen}
             size={size}
@@ -392,7 +393,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         ) : (
           <ChainPane
             draft={draft}
-            chain={chain}
+            scope={scope}
             path={selPath}
             open={s.open}
             size={size}

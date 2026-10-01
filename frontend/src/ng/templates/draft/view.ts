@@ -1,4 +1,4 @@
-import type { Authored, Change, Problem, Result } from "./types";
+import type { Authored, Change, Problem, Result, Scope } from "./types";
 
 /** What the pages read off a resolve result. Pure; nothing here edits a draft (R18). */
 
@@ -8,6 +8,7 @@ export type Container = Authored & { steps?: Step[] };
 export type NodeA = Container & { id: string; kind?: "exec" | "gate"; extends?: string };
 
 export const chainFile = (key: string) => `chains/${key}.yaml`;
+export const LIBRARY_FILE = "library.yaml";
 
 /** The chain file a draft edits: its key's, unless a chain `rename` moved the
  *  text to `chains/<new id>.yaml` (the draft keeps its old key, W9). */
@@ -17,9 +18,11 @@ export function liveChainFile(files: Record<string, unknown>, key: string): stri
   return Object.keys(files).find((f) => f !== own && f.startsWith("chains/") && files[f] !== null) ?? own;
 }
 
-/** The chain's authored mapping: the last that parsed. */
-export const authoredChain = (r: Result, key: string): Authored => r.model[liveChainFile(r.model, key)] ?? r.model[chainFile(key)] ?? {};
-export const authoredNodes = (r: Result, key: string): NodeA[] => (authoredChain(r, key).nodes as NodeA[] | undefined) ?? [];
+/** The draft's authored mapping: a chain's file, or `library.yaml`; the last that parsed. */
+export const authoredChain = (r: Result, scope: Scope): Authored =>
+  scope.area === "library" ? r.model[LIBRARY_FILE] ?? {} : r.model[liveChainFile(r.model, scope.key)] ?? r.model[chainFile(scope.key)] ?? {};
+/** A chain's node list; the library has none (its nodes are a mapping by name). */
+export const authoredNodes = (r: Result, scope: Scope): NodeA[] => (scope.area === "library" ? [] : (authoredChain(r, scope).nodes as NodeA[] | undefined) ?? []);
 
 /** `tasks:` is one step `main` (the model's own rule); every container gets `steps`. */
 export function normalise<T extends Authored>(c: T | null | undefined): (T & { steps: Step[] }) | null {
@@ -94,15 +97,24 @@ export function walk(nodes: NodeA[], path: string): Authored | null {
   return at;
 }
 
-/** The authored component at a path: what this chain itself writes there. */
-export const authoredAt = (r: Result, key: string, path: string): Authored | null => (path ? walk(authoredNodes(r, key), path) : authoredChain(r, key));
+/** A library component's path `<section>.<name>[.<step>[.<task>]]`, walked as a node tree under `name`. */
+function libraryAt(root: Authored, path: string): Authored | null {
+  const [section, name, ...rest] = path.split(".");
+  const entry = (root[section] as Record<string, Authored> | undefined)?.[name];
+  if (!entry) return null;
+  return rest.length ? walk([{ ...entry, id: name }], [name, ...rest].join(".")) : entry;
+}
+
+/** The authored component at a path: what this draft's file itself writes there. */
+export const authoredAt = (r: Result, scope: Scope, path: string): Authored | null =>
+  !path ? authoredChain(r, scope) : scope.area === "library" ? libraryAt(authoredChain(r, scope), path) : walk(authoredNodes(r, scope), path);
 /** The resolved component at a path (extends expanded), when the draft resolves. */
 export const resolvedAt = (r: Result, path: string): Authored | null => (r.resolved ? (path ? walk(r.resolved.chain.nodes as NodeA[], path) : r.resolved.chain) : null);
 
 /** A field's value at a path: the resolved one from `sources`, else what the file writes. */
-export function valueAt(r: Result, key: string, path: string, field: string): unknown {
+export function valueAt(r: Result, scope: Scope, path: string, field: string): unknown {
   const s = r.sources[path]?.[field];
   if (s) return s.value;
-  const a = resolvedAt(r, path) ?? authoredAt(r, key, path);
+  const a = resolvedAt(r, path) ?? authoredAt(r, scope, path);
   return field.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Authored)[k] : undefined), a);
 }

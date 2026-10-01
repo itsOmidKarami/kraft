@@ -12,7 +12,7 @@ type Row = { field: string; value: unknown; source: string; locked?: string };
 
 /** "on base change" restarts from this node or an earlier exec node. */
 function restartTargets(ctx: PaneCtx): string[] {
-  const nodes = authoredNodes(ctx.r, ctx.chain);
+  const nodes = authoredNodes(ctx.r, ctx.scope);
   const i = nodes.findIndex((n) => n.id === ctx.path);
   return nodes.slice(0, i + 1).filter((n) => kindOf(ctx.r, n) === "exec").map((n) => n.id);
 }
@@ -21,7 +21,7 @@ function restartTargets(ctx: PaneCtx): string[] {
  *  in the server's order that never regroups; each row its value and source
  *  chip, an override bright with a dot, ✎ to override, ↺ to reset. */
 export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
-  const { r, chain, path } = ctx;
+  const { r, scope, path } = ctx;
   if (kind === "chain") return <ChainConfig ctx={ctx} />;
   const rows: Row[] = sourceRows(r, path);
   if (!rows.length) return <Note>{r.resolved ? "Nothing to configure here." : "The resolved config shows once the draft resolves."}</Note>;
@@ -32,7 +32,7 @@ export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
     <>
       <Head>Resolved config</Head>
       <div className="cfg">{rows.map((x) => <ConfigRow key={x.field} row={x} ctx={ctx} />)}</div>
-      {kind === "task" && <Note>on failure · {authoredAt(r, chain, path)?.on_failure ? "set" : "none"} · edit it in the pane below</Note>}
+      {kind === "task" && <Note>on failure · {authoredAt(r, scope, path)?.on_failure ? "set" : "none"} · edit it in the pane below</Note>}
     </>
   );
 }
@@ -40,7 +40,7 @@ export function Config({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
 /** The chain's own caps (the prototype's "Chain-wide time caps"): `sources` has
  *  no row for the chain, so these read the file and say "policy" when unset. */
 function ChainConfig({ ctx }: { ctx: PaneCtx }) {
-  const policy = (authoredAt(ctx.r, ctx.chain, "")?.policy ?? {}) as Record<string, unknown>;
+  const policy = (authoredAt(ctx.r, ctx.scope, "")?.policy ?? {}) as Record<string, unknown>;
   const row = (f: string): Row => ({ field: `policy.${f}`, value: policy[f] ?? null, source: policy[f] === undefined ? "policy" : "chain" });
   return (
     <>

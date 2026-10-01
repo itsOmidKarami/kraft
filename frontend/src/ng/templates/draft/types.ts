@@ -2,6 +2,9 @@
 
 export type Area = "chains" | "library";
 
+/** What a config draft edits: an area and its key (a chain id, or `library`). */
+export type Scope = { area: Area; key: string };
+
 /** A chain file as its author wrote it, shorthand normalised: every container has `steps`. */
 export type Authored = Record<string, unknown>;
 

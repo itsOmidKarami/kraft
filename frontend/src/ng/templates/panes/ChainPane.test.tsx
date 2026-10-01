@@ -21,7 +21,7 @@ function mount(path: string, result: Partial<Result> = {}) {
     resolvedNode: (id: string) => resolvedNode(view.result, id),
   } as unknown as ConfigDraft;
   const goTo = vi.fn();
-  render(<ChainPane draft={draft} chain="default" path={path} open size={SIZE} onCollapse={() => {}} onExpand={() => {}} goTo={goTo} />);
+  render(<ChainPane draft={draft} scope={{ area: "chains", key: "default" }} path={path} open size={SIZE} onCollapse={() => {}} onExpand={() => {}} goTo={goTo} />);
   return { draft, goTo };
 }
 
