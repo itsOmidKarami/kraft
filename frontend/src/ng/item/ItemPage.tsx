@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { Banner, QuestionCard } from "./Banner";
-import { ItemHeader } from "./header/ItemHeader";
+import { ItemHeader, useDuplicate } from "./header/ItemHeader";
+import { PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title } from "./Top";
 import { placeUrl } from "./url";
 import { useItem, type ItemDetail } from "./useItem";
@@ -28,6 +29,11 @@ export function ItemPage() {
 function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const navigate = useNavigate();
   const { node: nodeView } = useParams();
+  const [cancelling, setCancelling] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+  const duplicate = useDuplicate(item.id, setCardError);
+  const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
   const runLog = () => {
     const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
@@ -38,13 +44,16 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
   };
   return (
     <div className="item-page">
-      <ItemHeader item={item} reload={reload} onSettings={settings} onRunLog={runLog} />
+      <ItemHeader item={item} reload={reload} onSettings={settings} onRunLog={runLog} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} />
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
         <DiffLine id={item.id} version={item.updated_at} />
       </div>
       <Banner item={item} onOpenGate={(gate) => navigate(placeUrl(item.id, { sel: { kind: "node", node: gate } }))} onRaise={settings} />
+      <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
+      {cardError && <p className="item-error" role="alert">{cardError}</p>}
+      <PausedCard item={item} reload={reload} />
       <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
       <div className="item-canvas" />
     </div>

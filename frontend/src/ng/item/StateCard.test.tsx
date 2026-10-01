@@ -1,0 +1,140 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { WorkerSession } from "../../types";
+import { PausedCard, StateCard } from "./StateCard";
+import { detail, stubFetch, type Call } from "./testkit";
+
+afterEach(() => vi.unstubAllGlobals());
+
+const stop = (kind: string, over = {}) => ({ kind, node: "merge_request", task: "merge_request.open.open_draft", attempt: 3, resume_at: null, reason: "The forge refused.", facts: {}, ...over }) as never;
+const handlers = () => ({ reload: vi.fn(), onCancel: vi.fn(), onEscalate: vi.fn(), onDuplicate: vi.fn(), onOpenNode: vi.fn() });
+const posts = (calls: Call[]) => calls.filter((c) => c.method === "POST");
+const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...render(<StateCard item={detail(over)} {...h} />) });
+
+describe("StateCard", () => {
+  it("failed: where, the reason, the facts sent, Retry from the task by its path", async () => {
+    const calls = stubFetch();
+    const { h } = show({ display_status: "failed", stop: stop("failed", { facts: { error: "403 Forbidden", tried: "3 times over 6m" } }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 2.41 } });
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card).toHaveTextContent("merge_request › open › open_draft · attempt 3");
+    expect(card).toHaveTextContent("The forge refused.");
+    expect(card).toHaveTextContent("error403 Forbidden");
+    expect(card).toHaveTextContent("spent$2.41 of $5.00");
+    await userEvent.click(within(card).getByRole("button", { name: "Retry from open_draft" }));
+    await waitFor(() => expect(h.reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request.open.open_draft" } }]);
+    await userEvent.click(within(card).getByRole("button", { name: "Escalate…" }));
+    expect(h.onEscalate).toHaveBeenCalled();
+    await userEvent.click(within(card).getByRole("button", { name: "Open merge_request →" }));
+    expect(h.onOpenNode).toHaveBeenCalledWith("merge_request");
+  });
+
+  it("waiting on the provider: Retry now, and the fallback only when policy allows it", async () => {
+    const calls = stubFetch();
+    const s = stop("rate_limit", { node: "verification", task: "verification.review.code_review", facts: { harness: "claude-code", fallback: ["codex", "gemini"], fallback_allowed: ["codex"] } });
+    show({ display_status: "waiting", stop: s, rate_limit: { count: 2, cap: 5 } });
+    const card = screen.getByRole("region", { name: "Waiting on the provider" });
+    expect(card).toHaveTextContent("2 of 5 used");
+    await userEvent.click(within(card).getByRole("button", { name: "Use codex for this attempt" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Retry now" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
+    expect(posts(calls)).toEqual([
+      { method: "POST", path: "/work-items/w1/retry", body: { path: "verification.review.code_review", task_config: { harness: "codex" } } },
+      { method: "POST", path: "/work-items/w1/retry", body: {} },
+    ]);
+  });
+
+  it("waiting on the provider with no allowed fallback has no fallback button", () => {
+    show({ display_status: "waiting", stop: stop("rate_limit", { facts: { fallback: ["codex"], fallback_allowed: [] } }) });
+    expect(screen.queryByRole("button", { name: /for this attempt/ })).toBeNull();
+  });
+
+  it("worker lost: rendered only with the B5 fields, and never for another kind (R2)", async () => {
+    const calls = stubFetch();
+    const facts = { worker: "ci-runner-3", last_seen_at: "2026-09-13T10:08:00Z", reassign_at: "2026-09-13T10:13:00Z", workers_online: ["ci-runner-1"] };
+    const { unmount } = show({ display_status: "waiting", stop: stop("worker_lost", { facts: { worker: "ci-runner-3" } }) });
+    expect(screen.queryByRole("region")).toBeNull();
+    unmount();
+    const other = show({ display_status: "waiting", stop: stop("stuck", { facts }) });
+    expect(screen.queryByRole("region")).toBeNull();
+    other.unmount();
+    show({ display_status: "waiting", stop: stop("worker_lost", { facts }) });
+    const card = screen.getByRole("region", { name: "Worker lost" });
+    await userEvent.click(within(card).getByRole("button", { name: "Reassign now" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Keep waiting" }));
+    await waitFor(() => expect(posts(calls).map((c) => c.path)).toEqual(["/work-items/w1/reassign", "/work-items/w1/keep-waiting"]));
+  });
+
+  it("conflict: the files the handler left and cleared, review and send back", async () => {
+    const { h } = show({ display_status: "needs_you", stop: stop("conflict", { facts: { unresolved: ["search/cache.py", "search/reindex.py"], resolved: ["search/config.py"] } }) });
+    const card = screen.getByRole("region", { name: "Rebase needs you" });
+    expect(card).toHaveTextContent("unresolvedsearch/cache.py · search/reindex.py");
+    expect(card).toHaveTextContent("resolvedsearch/config.py");
+    await userEvent.click(within(card).getByRole("button", { name: "Send back with guidance" }));
+    expect(h.onEscalate).toHaveBeenCalled();
+  });
+
+  it("MR closed: who closed it, Reopen, a new MR from the node that opened it, and Cancel item…", async () => {
+    const calls = stubFetch({ "GET /work-items/w1/events": [200, [
+      { seq: 1, work_item_id: "w1", type: "mr_opened", payload: { number: 142 }, node_id: "merge_request", created_at: "2026-09-13T09:00:00Z" },
+      { seq: 2, work_item_id: "w1", type: "mr_closed", payload: { ref: 142, by: "mara" }, node_id: null, created_at: "2026-09-13T09:30:00Z" },
+    ]] });
+    const { h } = show({ display_status: "needs_you", stop: stop("mr_closed", { node: "mr_checks", task: null, facts: { ref: 142, url: "u" } }) });
+    const card = screen.getByRole("region", { name: "MR !142 was closed on the forge" });
+    await within(card).findByText(/closed by mara/);
+    await userEvent.click(within(card).getByRole("button", { name: "Reopen !142" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Open a new MR" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
+    expect(posts(calls)).toEqual([
+      { method: "POST", path: "/work-items/w1/reopen-mr", body: {} },
+      { method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request" } },
+    ]);
+    await userEvent.click(within(card).getByRole("button", { name: "Cancel item…" }));
+    expect(h.onCancel).toHaveBeenCalled();
+  });
+
+  it("cancelled: the reason from the cancel event, Duplicate and Archive", async () => {
+    stubFetch({ "GET /work-items/w1/events": [200, [{ seq: 1, work_item_id: "w1", type: "work_item_cancelled", payload: { reason: "superseded", node_id: "verification" }, node_id: "verification", created_at: "t" }]] });
+    const { h } = show({ display_status: "cancelled", stop: null });
+    const card = screen.getByRole("region", { name: "Cancelled" });
+    expect(await within(card).findByText("superseded")).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole("button", { name: "Duplicate as new item" }));
+    expect(h.onDuplicate).toHaveBeenCalled();
+  });
+
+  it.each([["running", null], ["needs_you", "gate"], ["needs_you", "question"], ["needs_you", "cap"], ["done", null], ["paused", null]])("renders nothing for %s (%s)", (display_status, kind) => {
+    stubFetch();
+    const { container } = render(<StateCard item={detail({ display_status: display_status as never, stop: kind ? stop(kind) : null })} {...handlers()} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("PausedCard", () => {
+  const paused = (hook: string) => ({ id: hook, hook_point: hook, status: "paused", node_id: "verification" }) as WorkerSession;
+
+  it("resumes with the steer, or without one", async () => {
+    const calls = stubFetch();
+    const reload = vi.fn();
+    render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")] })} reload={reload} />);
+    await userEvent.type(screen.getByLabelText("Steer"), "look at reindex first");
+    await userEvent.click(screen.getByRole("button", { name: "Resume with steer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
+    expect(posts(calls).map((c) => c.body)).toEqual([{ steer: "look at reindex first" }, { steer: null }]);
+  });
+
+  it("sends the steer to one paused task when several are paused and one is picked", async () => {
+    const calls = stubFetch();
+    render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review"), paused("verification.review.automated_review")] })} reload={() => {}} />);
+    await userEvent.selectOptions(screen.getByRole("combobox"), "verification.review.automated_review");
+    await userEvent.type(screen.getByLabelText("Steer"), "only you");
+    await userEvent.click(screen.getByRole("button", { name: "Resume with steer" }));
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null, steers: { "verification.review.automated_review": "only you" } } }]));
+  });
+
+  it("is only for a paused item", () => {
+    const { container } = render(<PausedCard item={detail({ display_status: "running" })} reload={() => {}} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});

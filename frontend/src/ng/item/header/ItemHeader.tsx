@@ -18,6 +18,17 @@ import { MainButton } from "./MainButton";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
+/** Duplicate (B3): file the copy, open it, and say if it looks like a duplicate of another open item. */
+export function useDuplicate(id: string, onError: (e: string) => void) {
+  const navigate = useNavigate();
+  return async () => {
+    const r = await act.duplicate(id);
+    if (!r.ok) return onError(r.error);
+    if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
+    navigate(`/work-items/${encodeURIComponent(r.body.id)}`);
+  };
+}
+
 /** The shipped page for an /ng path (review, the board): a full load until its wave lands. */
 export const goShipped = (ngPath: string) => window.location.assign(legacyPath({ pathname: ngPath, search: "" }));
 
@@ -38,7 +49,6 @@ type Props = {
 /** The right side of the item page's header row (Decisions §1, §14): others
  *  need you, elapsed, the badge, the main button with its panel, and ⋮. */
 export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
-  const navigate = useNavigate();
   const group = useRef<HTMLDivElement>(null);
   const others = useStore((s) => Object.values(s.workItems).filter((w) => w.display_status === "needs_you" && w.id !== item.id).length);
   const hs = headerState(item);
@@ -79,12 +89,7 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
     else if (it === "cancel") setCancelling(true);
     else void run(act.archive(item.id));
   };
-  const duplicate = async () => {
-    const r = await act.duplicate(item.id);
-    if (!r.ok) return setError(r.error);
-    if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
-    navigate(`/work-items/${encodeURIComponent(r.body.id)}`);
-  };
+  const duplicate = useDuplicate(item.id, setError);
   const copy = (text: string, what: string) => navigator.clipboard?.writeText(text).then(() => showToast(`Copied ${what}`), () => {});
 
   const menu: MenuItem[] = [

@@ -83,3 +83,9 @@
 .item-card.is-bad .item-card-head svg { color: var(--bad); }
 .item-card.is-info .item-card-head svg { color: var(--info); }
 .item-quote { margin: 0; font-size: 13px; color: var(--text); }
+.item-card.is-muted { border-color: var(--border); background: var(--surface); }
+.item-card.is-muted .item-card-title { color: var(--text-sub); }
+.item-card-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+.item-card-open { margin-left: auto; }
+.item-select { margin-left: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; }
+@media (max-height: 719px) { .item-card-facts { max-height: 64px; overflow-y: auto; } }

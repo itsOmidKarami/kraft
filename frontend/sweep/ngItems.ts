@@ -214,6 +214,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       break;
     }
     case "mr-closed": {
+      ev("mr_opened", { node_id: "merge_request", number: 142, url: "https://github.com/acme/kraft-plugins/pull/142" }, 0.5);
       ev("node_started", { node_id: "mr_checks" }, 1);
       sess("mr_checks.ci.mr_checks", "waiting");
       ev("mr_closed", { ref: 142, url: "https://github.com/acme/kraft-plugins/pull/142", by: "mara" }, 2);
