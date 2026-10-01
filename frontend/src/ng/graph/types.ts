@@ -21,6 +21,8 @@ export type GraphItem = {
   paused?: boolean;
   meta?: string;
   metaTone?: "red" | "amber" | "green";
+  /** An edit to it is on its way to the server (W10 brief Decided 3). */
+  pending?: boolean;
 };
 
 const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting" };

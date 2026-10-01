@@ -105,6 +105,13 @@ async function composer(c: Ctx, st: DisplayState, open: RegExp, fill: boolean) {
     await settle(c.page);
   }
 }
+/** The /ng Chains editor on one of the mock's drafts, sidebar pinned, once the canvas has drawn. */
+async function ngChains(c: Ctx, key: string, node?: string) {
+  await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
+  await c.page.goto(`/ng/templates/chains/${key}${node ? `/nodes/${node}` : ""}`);
+  await c.page.locator(".canvas, .tpl-note").first().waitFor({ timeout: 8000 });
+  await settle(c.page, 700);
+}
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
 async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
@@ -511,6 +518,22 @@ const CASES: Case[] = [
   // The gate review overlay: the needs-gate item's document beside its changes (a draft pending, a must-fix open).
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { tail: "?doc=1", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
+  // W10: the Chains editor on the mock's real draft answers (sweep/draftViews.json).
+  { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
+  { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
+  { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.locator(".seam").nth(3).click();
+    await c.page.getByRole("menuitem", { name: /Exec node/ }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "seam-id", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.locator(".seam").nth(3).click();
+    await c.page.getByRole("menuitem", { name: /Exec node/ }).click();
+    await c.page.keyboard.type("spec");
+    await settle(c.page, 300);
+  } },
 
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },

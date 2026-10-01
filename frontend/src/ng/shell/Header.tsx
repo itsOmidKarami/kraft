@@ -21,7 +21,7 @@ export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
           const cutProps = cut ? { "data-allow-ellipsis": "", title: c.title ?? c.text } : {};
           return (
             <Fragment key={i}>
-              {!last && (c.to || c.href) ? (
+              {(!last || c.kind === "mid") && (c.to || c.href) ? (
                 <li className={cls} {...cutProps}>
                   {c.to ? <Link to={c.to}>{c.text}</Link> : <a href={c.href}>{c.text}</a>}
                 </li>

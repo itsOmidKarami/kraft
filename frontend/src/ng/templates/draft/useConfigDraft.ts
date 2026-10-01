@@ -36,11 +36,11 @@ export function useConfigDraft(area: Area, key: string) {
   }, []);
 
   /** Runs `fn` after every earlier request; a write's answer replaces the view. */
-  const enqueue = useCallback(<T,>(fn: () => Promise<Answer<T>>, write: boolean, keep = true): Promise<Answer<T>> => {
+  const enqueue = useCallback(<T,>(fn: () => Promise<Answer<T>>, write: boolean, keep = true, loud = true): Promise<Answer<T>> => {
     busy.current++;
     const run = queue.current.then(fn).then((a) => {
       if (keep && a.status >= 200 && a.status < 300 && a.body && typeof a.body === "object" && "result" in (a.body as object)) take(a.body as unknown as DraftView);
-      else if (keep && a.status >= 300 && live.current) setError(detailOf(a.body));
+      else if (keep && loud && a.status >= 300 && live.current) setError(detailOf(a.body));
       if (write) d.draftsChanged();
       return a;
     }).finally(() => { busy.current--; });
@@ -93,7 +93,8 @@ export function useConfigDraft(area: Area, key: string) {
     textTimer.current = { send, timer: setTimeout(() => { textTimer.current = null; send(); }, TEXT_DEBOUNCE_MS) };
   }, [area, key, enqueue]);
 
-  const ops = useCallback((list: Op[], opts: { preview?: boolean } = {}): Promise<Answer<OpsView>> => {
+  /** `quiet`: the caller shows a refusal itself (an id field), so it is not `error`. */
+  const ops = useCallback((list: Op[], opts: { preview?: boolean; quiet?: boolean } = {}): Promise<Answer<OpsView>> => {
     if (!opts.preview) {
       flushTyped();
       flushText();
@@ -105,7 +106,7 @@ export function useConfigDraft(area: Area, key: string) {
       } finally {
         if (!opts.preview && live.current) setPending(null);
       }
-    }, !opts.preview, !opts.preview);
+    }, !opts.preview, !opts.preview, !opts.quiet);
   }, [area, key, enqueue, flushTyped, flushText]);
 
   const field = useCallback((path: string, name: string, value: unknown, pause = false) => {

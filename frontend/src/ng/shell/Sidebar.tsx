@@ -6,6 +6,7 @@ import { useStore } from "../../store";
 import * as api from "../../api";
 import type { Health } from "../../types";
 import { NAV_ICON } from "../icons";
+import { isTextField } from "../keys";
 import { legacyPath } from "../legacyPath";
 import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
@@ -25,9 +26,6 @@ function useHealth(): Health | null {
   }, []);
   return health;
 }
-
-const isTextField = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const [mode, setMode] = useState<SidebarMode>(currentSidebar);

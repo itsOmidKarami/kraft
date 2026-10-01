@@ -2,3 +2,29 @@
 .tpl-note { padding: 28px 24px; font-size: 12.5px; color: var(--text-sub); }
 .tpl-note h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; color: var(--text); }
 .tpl-page { position: relative; height: calc(100vh - 44px); overflow: hidden; }
+.tpl-area { position: absolute; inset: 0; }
+.tpl-empty-chain { position: absolute; left: 50%; top: 54%; transform: translateX(-50%); margin: 0; font-size: 12.5px; color: var(--text-muted); pointer-events: none; }
+
+/* Header tail (brief Decided 8): the chain, its node, the draft state, the problems badge. */
+.tpl-crumb-sep { color: var(--text-muted); }
+.tpl-crumb-chain, .tpl-crumb-node { font: 12px ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.tpl-draft { flex: none; margin-left: 4px; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); }
+.tpl-published { flex: none; margin-left: 4px; font-size: 11px; color: var(--text-muted); }
+.tpl-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
+.tpl-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
+
+/* The seam menu (Decisions §9 Adding a node). */
+.seam-menu { min-width: 220px; }
+.seam-item { display: flex; align-items: center; gap: 10px; }
+.seam-item > span:last-child { display: flex; flex-direction: column; }
+.seam-item-name { color: var(--text); }
+.seam-item-sub { font-size: 11px; color: var(--text-muted); }
+.seam-diamond { width: 10px; height: 10px; margin: 0 2px; transform: rotate(45deg); border: 1.5px solid currentColor; border-radius: 2px; flex: none; }
+.seam-id { width: 300px; padding: 4px; }
+
+/* An id field and its button (Decisions §9 Invalid id). */
+.idrow { display: flex; flex-direction: column; gap: 6px; }
+.idrow-line { display: flex; gap: 6px; }
+.idrow-input { flex: 1; min-width: 0; min-height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 12px ui-monospace, Menlo, monospace; }
+.idrow-input.is-bad { border-color: var(--bad); }
+.idrow-err { margin: 0; font-size: 11.5px; color: var(--bad); }
