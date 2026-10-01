@@ -6,6 +6,7 @@ import { useStore } from "../../../store";
 import type { ChainNode, Repo, TemplateSummary, Workspace } from "../../../types";
 import { Inspector } from "../../graph/Inspector";
 import type { ChainNode as GraphNode } from "../../graph/layout";
+import { EDITOR_FIT } from "../../graph/camera";
 import { StageGraph } from "../../graph/StageGraph";
 import { useResizable, useWidth } from "../../graph/useResizable";
 import { detailOf, jsonBody, request } from "../../http";
@@ -202,6 +203,8 @@ export function DraftItemPage() {
           nodes={nodes}
           selected={sel ?? undefined}
           reserve={size.overlay ? 0 : paneOpen ? size.width : 40}
+          // Opens readable, as the Chains editor does (W10 Decided 17), not at a 30% plain fit.
+          fit={EDITOR_FIT}
           onSelect={(id) => { setSel(id); setTab((t) => (sel === id ? t : "overview")); }}
           onOpen={(id) => { setSel(id); setPaneOpen(true); }}
           onEscape={() => setSel(null)}

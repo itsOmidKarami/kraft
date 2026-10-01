@@ -24,6 +24,8 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 /** How an editor fits (the Templates prototype's `fit1`): never under `floor`,
  *  and a world wider than the view starts `left` px from the left edge. */
 export type FitRule = { floor: number; left: number };
+/** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
+export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
 
 /** The whole world in view, never above 100% or below 30%, centred; the chain
  *  sits 10px above centre, and the node canvas keeps 20px off the left edge. */

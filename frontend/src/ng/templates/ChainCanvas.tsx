@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { ChainArc, ChainNode, Seam } from "../graph/layout";
+import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result } from "./draft/types";
 import { authoredNodes, changeAt, kindOf, problemsAt, type NodeA } from "./draft/view";
@@ -24,9 +25,6 @@ type Props = {
    *  removed nodes' ghosts, and the node a change row points at. */
   review?: { published: { id: string; kind: "exec" | "gate" }[]; highlight?: string };
 };
-
-/** The editor opens readable: no smaller than 80%, a long chain starting at its left end (Templates prototype `fit1`). */
-export const EDITOR_FIT = { floor: 0.8, left: 12 } as const;
 
 /** The node an op touches, for the pending highlight (Decided 3). */
 const opNode = (o: Op) => String(o.path ?? o.node ?? o.container ?? o.id ?? "").split(".")[0];
