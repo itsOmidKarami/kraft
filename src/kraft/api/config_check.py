@@ -7,7 +7,7 @@ from __future__ import annotations
 import functools
 import re
 import tempfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -209,6 +209,27 @@ def _check_chain(path, data, ctx):
     return chain_issues(ctx.library, path, path.stem, data, ctx.instance_policy)
 
 
+def library_candidate(
+    library: TemplateLibrary | None,
+    data: dict,
+    path: Path,
+    skills_dir: Path | None = None,
+    chains: Iterable[tuple[Path, Mapping]] = (),
+) -> TemplateLibrary:
+    """`data` as `library.yaml` with the running library's chains (with none
+    running, the ones on disk), each of `chains` in place of the one of its id.
+    Raises `TemplateLibraryError`."""
+    if library is None:
+        candidate = TemplateLibrary.from_mappings(
+            data, _chains_on_disk(path.parent), library_path=path, skills_dir=skills_dir
+        )
+    else:
+        candidate = library.with_library(data, path)
+    for chain_path, body in chains:
+        candidate, _ = candidate.with_chain(chain_path, body)
+    return candidate
+
+
 def library_issues(
     library: TemplateLibrary | None,
     data: dict,
@@ -216,33 +237,38 @@ def library_issues(
     instance_policy: policy_mod.InstancePolicy | None,
     repos: list[config_mod.RepoEntry],
     skills_dir: Path | None = None,
+    chains: Iterable[tuple[Path, Mapping]] = (),
 ) -> list[TemplateIssue]:
+    """`chains`: chain files saved with the library, as `library_candidate`
+    takes them (a library draft's renames)."""
     if why := retired_message(data):
         return [TemplateIssue(path, None, why)]
+    # No running library to diff against: every chain the candidate cannot
+    # resolve is new.
+    broken_before = {i.chain for i in library.lint(instance_policy)} if library else set()
     try:
-        if library is None:
-            # No running library to diff against or take chains from: every
-            # chain the candidate cannot resolve is new, read from disk.
-            broken_before: set[str | None] = set()
-            candidate = TemplateLibrary.from_mappings(
-                data, _chains_on_disk(path.parent), library_path=path, skills_dir=skills_dir
-            )
-        else:
-            broken_before = {i.chain for i in library.lint(instance_policy)}
-            candidate = library.with_library(data, path)
+        candidate = library_candidate(library, data, path, skills_dir, chains)
     except TemplateLibraryError as exc:
         return [TemplateIssue.from_error(path, None, exc)]
     issues = [i for i in candidate.lint(instance_policy) if i.chain not in broken_before]
     issues += icon_issues(path, None, data)
-    # A repository's `steering:` names library profiles too: removing (or
-    # over-growing) one it names is refused like a chain it would break.
-    profiles = {n: p.instructions for n, p in candidate.steering.items()}
+    issues += [TemplateIssue(path, None, why) for _, why in steering_issues(candidate, repos)]
+    return issues
+
+
+def steering_issues(
+    library: TemplateLibrary, repos: list[config_mod.RepoEntry]
+) -> list[tuple[config_mod.RepoEntry, str]]:
+    """A repository's `steering:` names library profiles too: removing (or
+    over-growing) one it names is refused like a chain it would break."""
+    profiles = {n: p.instructions for n, p in library.steering.items()}
+    out = []
     for entry in repos:
         try:
             steering_mod.select(entry.steering, profiles, where=f"repos.yaml: {entry.path}")
         except steering_mod.SteeringError as exc:
-            issues.append(TemplateIssue(path, None, str(exc)))
-    return issues
+            out.append((entry, str(exc)))
+    return out
 
 
 def _chains_on_disk(root: Path) -> list[tuple[Path, dict]]:

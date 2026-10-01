@@ -77,6 +77,27 @@ def test_the_library_lists_every_component_with_the_chains_that_use_it(client, t
     assert all(c["issues"] == [] for c in components.values())
 
 
+def _with_an_override(templates_dir):
+    """A chain whose task extends `implementer` and sets its own prompt."""
+    chain = {"id": "own", "nodes": [{"id": "run", "kind": "exec", "tasks": [
+        {"id": "t", "extends": "implementer", "prompt": "Mine."}
+    ]}]}  # fmt: skip
+    (templates_dir / "chains" / "own.yaml").write_text(yaml.safe_dump(chain))
+
+
+@pytest.mark.api_client(edit_templates=_with_an_override)
+def test_used_by_paths_name_each_using_component_and_the_node_it_comes_through(client):
+    implementer = _components(client)["tasks.implementer"]
+    assert implementer["used_by_paths"] == [
+        # Reached through the library's `implementation` node, which `default` extends.
+        {"chain": "default", "path": "implementation.main.implement", "overrides": False,
+         "via": "implementation"},
+        {"chain": "own", "path": "run.main.t", "overrides": True},
+        {"chain": "quick-task", "path": "implementation.main.implement", "overrides": False},
+    ]  # fmt: skip
+    assert implementer["used_by"] == ["default", "own", "quick-task"]
+
+
 @pytest.mark.api_client(edit_templates=_with_extras)
 def test_a_component_no_chain_uses_is_listed_used_by_none(client):
     assert _components(client)["tasks.unused"]["used_by"] == []

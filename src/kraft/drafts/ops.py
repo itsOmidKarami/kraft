@@ -21,7 +21,12 @@ from yaml import YAMLError
 from kraft.drafts import authored, resolve, store
 from kraft.templates import positions
 from kraft.templates.environment import Identifier
-from kraft.templates.library import LIBRARY_FILE, Namespace
+from kraft.templates.library import (
+    LIBRARY_FILE,
+    Namespace,
+    TemplateLibrary,
+    TemplateLibraryError,
+)
 from kraft.templates.models import (
     AUTO_REVIEW_SEGMENT,
     JUDGE_SEGMENT,
@@ -96,13 +101,27 @@ def _join(*parts: str) -> str:
 
 
 class Draft:
-    """One request's working copy of a `chains` draft's files."""
+    """One request's working copy of a `chains` or `library` draft's files.
+    The file the ops address is `chain`: the library's own mapping on a
+    `library` draft, whose paths start with the section."""
 
-    def __init__(self, st, key: str, files: Mapping[str, str | None], *, exists: bool) -> None:
+    def __init__(
+        self,
+        st,
+        key: str,
+        files: Mapping[str, str | None],
+        *,
+        exists: bool,
+        area: str = "chains",
+    ) -> None:
         self.st = st
         self.files = dict(files)
-        self.name = resolve.chain_file(key, self.files)
-        self.key = self.name.removeprefix("chains/").removesuffix(".yaml")
+        self.file = authored.LIBRARY if area == "library" else authored.CHAIN
+        if self.file == authored.LIBRARY:
+            self.name, self.key = LIBRARY_FILE, key
+        else:
+            self.name = resolve.chain_file(key, self.files)
+            self.key = self.name.removeprefix("chains/").removesuffix(".yaml")
         #: Whether the key had a file or a draft before this request.
         self.exists = exists
         self.dirty: set[str] = set()
@@ -114,7 +133,10 @@ class Draft:
             self.library_raw, self.library = authored.parse(library), authored.load(library)
         except yaml.YAMLError:
             self.library_raw = self.library = {}
-        self._chain: object = authored.load(self.files.get(self.name))
+        if self.file == authored.LIBRARY:
+            self._chain: object = self.library
+        else:
+            self._chain = authored.load(self.files.get(self.name))
 
     # ── addressing ──
 
@@ -127,20 +149,31 @@ class Draft:
         return self._chain
 
     def nodes(self) -> list:
+        self.chains_only("a node")
         if not isinstance(self.chain.get("nodes"), list):
             authored.put(self.chain, "", "nodes", [])
         return self.chain["nodes"]
 
+    def chains_only(self, what: str) -> None:
+        if self.file == authored.LIBRARY:
+            raise OpError(
+                f"{what} is a chain's, not the library's; add a component with add_component"
+            )
+
+    def library_only(self, what: str) -> None:
+        if self.file != authored.LIBRARY:
+            raise OpError(f"{what} is the library draft's")
+
     def at(self, path: str) -> dict:
         """The component at `path`, owning every container it inherits on the way."""
-        found = authored.at(self.chain, path, library=self.library, write=True)
+        found = authored.at(self.chain, path, file=self.file, library=self.library, write=True)
         if found is None:
             raise OpError(f"nothing at {path!r}")
         return found
 
     def own(self, path: str, key: str) -> object:
         try:
-            return authored.own(self.chain, path, key, library=self.library)
+            return authored.own(self.chain, path, key, file=self.file, library=self.library)
         except KeyError:
             raise OpError(f"nothing at {path!r}") from None
 
@@ -154,7 +187,7 @@ class Draft:
 
     def put(self, path: str, field: str, value: object) -> None:
         self.at(path)
-        authored.put(self.chain, path, field, value, library=self.library)
+        authored.put(self.chain, path, field, value, file=self.file, library=self.library)
 
     def base_node(self, name: object) -> Mapping:
         return authored.inherited(self.library, Namespace.NODES, name)
@@ -176,16 +209,25 @@ class Draft:
         """Remove `key` at `path`: written as null when the component would
         still inherit one, deleted otherwise."""
         self.at(path).pop(key, None)
-        if (authored.at(self.expanded(), path) or {}).get(key) is not None:
+        if (self.inherited(path) or {}).get(key) is not None:
             self.put(path, key, None)
+
+    def inherited(self, path: str, chain: Mapping | None = None) -> dict | None:
+        """The component at `path` of `expanded(chain)`."""
+        return authored.at(self.expanded(chain), path, file=self.file)
 
     def expanded(self, chain: Mapping | None = None) -> dict:
         """The chain as it stands (or `chain` in its place), `extends` expanded
-        and the shorthand normalised; as written where it does not expand."""
+        and the shorthand normalised; as written where it does not expand.
+        On the library, each component expanded on its own."""
         raw = authored.parse(authored.dump(self.chain if chain is None else chain))
-        data, _ = resolve._expand(
-            getattr(self.st, "library", None), self.st.templates_dir / self.name, self.key, raw
-        )
+        if self.file == authored.LIBRARY:
+            return authored.normalise(_expand_library(raw, self.st.templates_dir / self.name))
+        library = getattr(self.st, "library", None)
+        if LIBRARY_FILE in self.files or LIBRARY_FILE in self.dirty:
+            # As written: `parse(dump(…))` puts the shorthand back.
+            library = resolve.draft_library(self.st, authored.parse(authored.dump(self.library)))
+        data, _ = resolve._expand(library, self.st.templates_dir / self.name, self.key, raw)
         return authored.normalise(dict(data))
 
     # ── writing ──
@@ -193,11 +235,14 @@ class Draft:
     def finish(self) -> dict[str, str | None]:
         """The files with every one an op touched written back by `dump`."""
         if self.name in self.dirty:
-            if isinstance(self._chain, dict):
-                self._one_shape()
-                self.files[self.name] = authored.dump(self._chain)
-            else:
+            if not isinstance(self._chain, dict):
                 self.files[self.name] = None
+            else:
+                if self.file == authored.CHAIN:
+                    self._one_shape()
+                self.files[self.name] = authored.dump(self._chain)
+        if self.file == authored.CHAIN and LIBRARY_FILE in self.dirty:
+            self.files[LIBRARY_FILE] = authored.dump(self.library)
         return self.files
 
     def _one_shape(self) -> None:
@@ -235,6 +280,39 @@ class Draft:
 
 def _dicts(value: object) -> list[dict]:
     return [x for x in value if isinstance(x, dict)] if isinstance(value, list) else []
+
+
+def _expand_library(raw: object, path) -> object:
+    """Each library component of `raw` merged onto its `extends` parents and
+    its nested components onto theirs, as a chain using it would see it."""
+    if not isinstance(raw, dict):
+        return raw
+    # Steering expands nothing; an unwritten profile must not stop the rest.
+    components = {k: v for k, v in raw.items() if k != Namespace.STEERING}
+    try:
+        library = TemplateLibrary.from_mappings(components, (), library_path=path)
+    except TemplateLibraryError:
+        return raw
+    out = dict(raw)
+    for namespace in (Namespace.NODES, Namespace.STEPS, Namespace.TASKS):
+        expanded = {}
+        for name in library.component_names(namespace):
+            # A chain of one node that uses the component, read back out.
+            use: dict = {"id": name, "extends": name}
+            if namespace is Namespace.TASKS:
+                use = {"id": "_", "tasks": [use]}
+            if namespace is not Namespace.NODES:
+                use = {"id": "_", "steps": [use]}
+            data, _ = resolve._expand(library, path, "_", {"nodes": [use]})
+            found = data["nodes"][0]
+            if namespace is not Namespace.NODES:
+                found = found["steps"][0]
+            if namespace is Namespace.TASKS:
+                found = found["tasks"][0]
+            # Expansion drops `extends`: still there, it stopped part-way.
+            expanded[name] = raw[namespace.value][name] if "extends" in found else found
+        out[namespace.value] = expanded
+    return out
 
 
 # ── order and references ──
@@ -283,6 +361,126 @@ def references(nodes: list[Mapping], id: str) -> list[dict]:
         elif _restart_from(n) == id and n.get("id") != id:
             out.append({"path": n.get("id"), "field": "on_base_changed.restart_from"})
     return out
+
+
+def _id(obj: dict) -> str:
+    id = obj.get("id")
+    return id if isinstance(id, str) else ""
+
+
+def _components(data: Mapping, file: str) -> list[tuple[dict, Namespace, str]]:
+    """Every node, step and task of an authored file (`authored.load`'s) with
+    the namespace its `extends` names and its canonical path."""
+    out: list[tuple[dict, Namespace, str]] = []
+
+    def task(t: dict, path: str) -> None:
+        out.append((t, Namespace.TASKS, path))
+        shape(t.get("on_failure"), _join(path, "on_failure"))
+
+    def step(s: dict, path: str) -> None:
+        out.append((s, Namespace.STEPS, path))
+        for t in _dicts(s.get("tasks")):
+            task(t, _join(path, _id(t)))
+        shape(s.get("on_failure"), _join(path, "on_failure"))
+
+    def shape(c: object, path: str) -> None:
+        if not isinstance(c, dict):
+            return
+        for s in _dicts(c.get("steps")):
+            step(s, _join(path, _id(s)))
+        if isinstance(c.get(JUDGE_SEGMENT), dict):
+            task(c[JUDGE_SEGMENT], _join(path, JUDGE_SEGMENT))
+
+    def node(n: dict, path: str) -> None:
+        out.append((n, Namespace.NODES, path))
+        shape(n, path)
+        for key in ("on_failure", "fix_loop"):
+            shape(n.get(key), _join(path, key))
+        if isinstance(escalation := n.get("escalation"), dict):
+            task(escalation, _join(path, "escalation", _id(escalation)))
+        if isinstance(n.get(AUTO_REVIEW_SEGMENT), dict):
+            task(n[AUTO_REVIEW_SEGMENT], _join(path, AUTO_REVIEW_SEGMENT))
+        if isinstance(base_change := n.get("on_base_changed"), dict):
+            shape(base_change.get("on_conflict"), _join(path, "on_base_changed", "on_conflict"))
+
+    if file == authored.CHAIN:
+        for n in _dicts(data.get("nodes")):
+            node(n, _id(n))
+        return out
+    for namespace, walk in (
+        (Namespace.NODES, node),
+        (Namespace.STEPS, step),
+        (Namespace.TASKS, task),
+    ):
+        entries = data.get(namespace.value)
+        for name, body in entries.items() if isinstance(entries, dict) else ():
+            if isinstance(body, dict):
+                walk(body, _join(namespace.value, str(name)))
+    return out
+
+
+def _chain_files(d: Draft) -> dict[str, dict]:
+    """Every chain file as the draft has it, authored."""
+    names = {f"chains/{p.name}" for p in (d.st.templates_dir / "chains").glob("*.yaml")}
+    names |= {n for n in d.files if n.startswith("chains/")}
+    published = resolve.published(d.st.templates_dir, names - set(d.files))
+    out = {}
+    for name in sorted(names):
+        try:
+            data = authored.load(d.files[name] if name in d.files else published[name])
+        except YAMLError:
+            continue  # not this draft's to rewrite; the chain's own problem
+        if isinstance(data, dict):
+            out[name] = data
+    return out
+
+
+def _uses(files: Mapping[str, dict], section: str, name: str) -> list[tuple[str, dict, str, str]]:
+    """Every `extends` and `steering` entry naming library component
+    `section.name`: (file, the component holding it, its path, the field)."""
+    out = []
+    for file, data in files.items():
+        kind = authored.LIBRARY if file == LIBRARY_FILE else authored.CHAIN
+        for obj, namespace, path in _components(data, kind):
+            if section == Namespace.STEERING:
+                steering = obj.get("steering")
+                if namespace is Namespace.TASKS and isinstance(steering, list) and name in steering:
+                    out.append((file, obj, path, "steering"))
+            elif namespace == section and obj.get("extends") == name:
+                out.append((file, obj, path, "extends"))
+    return out
+
+
+def _entry(d: Draft, path: str) -> tuple[dict, str] | None:
+    """On a library draft, the section holding component `path` when it is
+    one (`tasks.implementer`), and its name."""
+    section, _, name = path.partition(PATH_SEPARATOR)
+    if d.file != authored.LIBRARY or PATH_SEPARATOR in name or section not in set(Namespace):
+        return None
+    entries = d.chain.get(section)
+    if not isinstance(entries, dict) or name not in entries:
+        raise OpError(f"nothing at {path!r}")
+    return entries, name
+
+
+def _rename_component(d: Draft, path: str, id: str) -> dict:
+    """A library component, and every `extends` or `steering` naming it, in
+    the library and in each chain file, which joins the draft."""
+    entries, old = _entry(d, path)
+    section = path.partition(PATH_SEPARATOR)[0]
+    _check_id(id, entries)
+    chains = _chain_files(d)
+    uses = _uses({LIBRARY_FILE: d.chain, **chains}, section, old)
+    authored._rekey(entries, old, id, entries[old])
+    for _, obj, _, field in uses:
+        if field == "extends":
+            obj["extends"] = id
+        else:
+            obj["steering"] = [id if n == old else n for n in obj["steering"]]
+    for name in {file for file, *_ in uses} - {LIBRARY_FILE}:
+        d.files[name] = authored.dump(chains[name])
+        d.dirty.add(name)
+    return {"updated": [{"file": f, "path": p, "field": field} for f, _, p, field in uses]}
 
 
 # ── the ops ──
@@ -381,7 +579,7 @@ def remove_handler(d: Draft, path: str, kind: str) -> None:
     base_change = d.own(path, "on_base_changed")
     if isinstance(base_change, dict):
         base_change.pop(key, None)
-        inherited = (authored.at(d.expanded(), path) or {}).get("on_base_changed")
+        inherited = (d.inherited(path) or {}).get("on_base_changed")
         if isinstance(inherited, Mapping) and inherited.get(key) is not None:
             base_change[key] = None
 
@@ -412,6 +610,12 @@ def move(d: Draft, path: str, to: int, to_step: str | None = None) -> None:
 
 
 def remove(d: Draft, path: str) -> dict:
+    if (entry := _entry(d, path)) is not None:
+        # Its uses stay, dangling, as problems.
+        entries, name = entry
+        uses = _uses({LIBRARY_FILE: d.chain, **_chain_files(d)}, path.partition(".")[0], name)
+        del entries[name]
+        return {"broken": [{"file": f, "path": p, "field": field} for f, _, p, field in uses]}
     parent, _, last = path.rpartition(PATH_SEPARATOR)
     if parent.rpartition(PATH_SEPARATOR)[2] == "escalation":
         parent, last = parent.rpartition(PATH_SEPARATOR)[0], "escalation"
@@ -476,6 +680,7 @@ def change_base(d: Draft, node: str, base: str) -> dict:
 
 
 def new_chain(d: Draft, **source: str) -> None:
+    d.chains_only("new_chain")
     if set(source) - {"from"}:
         raise OpError(f"unexpected {', '.join(sorted(set(source) - {'from'}))}")
     if d.exists:
@@ -501,6 +706,7 @@ def new_chain(d: Draft, **source: str) -> None:
 
 
 def delete_chain(d: Draft) -> None:
+    d.chains_only("delete_chain")
     d.chain  # noqa: B018 -- refuses a chain that is not there
     d._chain = None
 
@@ -545,8 +751,8 @@ def set_field(d: Draft, path: str, field: str, value: object) -> None:
     d.put(path, field, value)
     # The value the component would have without the key: inherited, not set.
     without = copy.deepcopy(d.chain)
-    _unset(authored.at(without, path), field)
-    if _get(authored.at(d.expanded(without), path), field) == value:
+    _unset(authored.at(without, path, file=d.file), field)
+    if _get(d.inherited(path, without), field) == value:
         _unset(target, field)
     if field == "profile":
         target.pop("model", None)
@@ -598,7 +804,10 @@ def rename(d: Draft, path: str, id: str) -> dict:
     if id == (old if path else d.key):
         return {"updated": []}
     if not path:
+        d.chains_only("renaming the chain")
         return _rename_chain(d, id)
+    if _entry(d, path) is not None:
+        return _rename_component(d, path, id)
     if old in (JUDGE_SEGMENT, AUTO_REVIEW_SEGMENT, "escalation") or (
         parent.rpartition(PATH_SEPARATOR)[2] == "escalation"
     ):
@@ -637,7 +846,57 @@ def set_fragment(d: Draft, path: str, yaml: str) -> None:
     authored.normalise(d.chain)
 
 
-#: Every op by name. F adds its own here.
+# ── the library ──
+
+
+def add_component(d: Draft, section: str, name: str, kind: str | None = None) -> dict:
+    """A new library component, empty: a new steering profile's empty
+    `instructions` are a problem until written."""
+    d.library_only("add_component")
+    if section not in set(Namespace):
+        raise OpError(f"a library section is one of {', '.join(Namespace)}, not {section!r}")
+    if not isinstance(d.chain.get(section), dict):
+        d.put("", section, {})
+    entries = d.chain[section]
+    _check_id(name, entries)
+    if section == Namespace.NODES:
+        if kind not in (None, "exec", "gate"):
+            raise OpError(f"a node is exec or gate, not {kind!r}")
+        body: dict = {"kind": "gate"} if kind == "gate" else {"kind": "exec", "steps": []}
+    elif section == Namespace.TASKS:
+        if kind is not None and kind not in set(TaskKind):
+            raise OpError(f"no task kind {kind!r}")
+        body = {"kind": kind} if kind else {}
+    elif kind is not None:
+        raise OpError(f"a {Namespace(section).singular} has no kind")
+    else:
+        body = {"tasks": []} if section == Namespace.STEPS else {"instructions": ""}
+    entries[name] = body
+    return {"path": _join(section, name)}
+
+
+def move_to_library(d: Draft, path: str, name: str) -> dict:
+    """The exec node or task at `path` into `library.yaml` as `nodes.<name>`
+    or `tasks.<name>`, the chain keeping `{id, extends: name}`. The library
+    joins the draft."""
+    d.chains_only("move_to_library")
+    what, items = d.member(path)
+    id = path.rpartition(PATH_SEPARATOR)[2]
+    if what == "step" or (d.inherited(path) or {}).get("kind") == "gate":
+        raise OpError("only an exec node or a task moves to the library")
+    section = Namespace.NODES if what == "node" else Namespace.TASKS
+    if not isinstance(d.library.get(section.value), dict):
+        authored.put(d.library, "", section.value, {}, file=authored.LIBRARY)
+    entries = d.library[section.value]
+    _check_id(name, entries)
+    index = _index(items, id)
+    entries[name] = {k: v for k, v in items[index].items() if k != "id"}
+    items[index] = {"id": id, "extends": name}
+    d.dirty.add(LIBRARY_FILE)
+    return {"path": _join(section.value, name)}
+
+
+#: Every op by name.
 OPS: dict[str, Callable[..., dict | None]] = {
     "add_node": add_node,
     "add_step": add_step,
@@ -654,6 +913,8 @@ OPS: dict[str, Callable[..., dict | None]] = {
     "reset_field": reset_field,
     "rename": rename,
     "set_fragment": set_fragment,
+    "add_component": add_component,
+    "move_to_library": move_to_library,
 }
 
 

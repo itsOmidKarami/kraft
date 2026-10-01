@@ -177,13 +177,18 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
     name = chain_file(key, files)
     id = name.removeprefix("chains/").removesuffix(".yaml")
     path = st.templates_dir / name
-    library = getattr(st, "library", None)
     data = raw.get(name)
     try:
         before = authored.parse(published.get(old))
     except yaml.YAMLError:
         before = None
-    before, _ = _expand(library, st.templates_dir / old, key, before)
+    before, _ = _expand(getattr(st, "library", None), st.templates_dir / old, key, before)
+    # A `move_to_library` draft holds the library its chain now extends.
+    library = (
+        draft_library(st, raw.get(LIBRARY_FILE))
+        if LIBRARY_FILE in files
+        else getattr(st, "library", None)
+    )
     after, resolution = _expand(library, path, id, data)
 
     def split(file, loc):
@@ -237,14 +242,18 @@ def _impact(st, key: str) -> dict:
             (key, key, *ENDED),
         ).fetchone()[0]
     )
-    try:
-        repos = config_mod.load_repos(deps.repos_path(st))
-    except config_mod.ConfigError:
-        repos = []
     return {
         "running": running,
-        "repos": [r.path for r in repos if (r.default_chain_template or "default") == key],
+        "repos": [r.path for r in _repos(st) if (r.default_chain_template or "default") == key],
     }
+
+
+def _repos(st) -> list:
+    # A repos.yaml broken for another reason is not this draft's to report.
+    try:
+        return config_mod.load_repos(deps.repos_path(st))
+    except config_mod.ConfigError:
+        return []
 
 
 # ── sources ──
@@ -418,9 +427,10 @@ _NESTED = frozenset(
 )
 
 
-def _flat(chain: Mapping) -> dict[str, dict]:
+def _flat(chain: Mapping, *, library: bool = False) -> dict[str, dict]:
     """Every component of an expanded chain by canonical path, in chain order,
-    each with its own fields only: the prototype's `flat()`."""
+    each with its own fields only: the prototype's `flat()`. With `library`,
+    of an authored library, by `<section>.<name>` path."""
     out: dict[str, dict] = {}
 
     def join(*parts: str) -> str:
@@ -450,26 +460,41 @@ def _flat(chain: Mapping) -> dict[str, dict]:
         put(t, path)
         child(t, "on_failure", path, shape)
 
+    def step(s: Mapping, path: str) -> None:
+        put(s, path)
+        for i, t in items(s.get("tasks")):
+            task(t, named(t, path, i))
+        child(s, "on_failure", path, shape)
+
     def shape(c: Mapping, path: str) -> None:
         put(c, path)
         for i, t in items(c.get("tasks")):
             task(t, named(t, join(path, MAIN_STEP), i))
         for i, s in items(c.get("steps")):
-            step = named(s, path, i)
-            shape(s, step)
-            child(s, "on_failure", step, shape)
+            step(s, named(s, path, i))
         child(c, JUDGE_SEGMENT, path, task)
 
-    for i, node in items(chain.get("nodes")):
-        path = named(node, "", i)
-        shape(node, path)
+    def node(n: Mapping, path: str) -> None:
+        shape(n, path)
         for key in ("on_failure", "fix_loop"):
-            child(node, key, path, shape)
+            child(n, key, path, shape)
         for key in ("escalation", AUTO_REVIEW_SEGMENT):
-            child(node, key, path, task)
-        base_change = node.get("on_base_changed")
+            child(n, key, path, task)
+        base_change = n.get("on_base_changed")
         if isinstance(base_change, Mapping):
             child(base_change, "on_conflict", join(path, "on_base_changed"), shape)
+
+    if library:
+        # `<section>.<name>`, each section in the file's order.
+        walks = {"steering": put, "tasks": task, "steps": step, "nodes": node}
+        for section, entries in chain.items():
+            if section in walks and isinstance(entries, Mapping):
+                for name, body in entries.items():
+                    if isinstance(body, Mapping):
+                        walks[section](body, join(section, str(name)))
+        return out
+    for i, n in items(chain.get("nodes")):
+        node(n, named(n, "", i))
     return out
 
 
@@ -535,34 +560,126 @@ def changes(before: dict[str, dict], after: dict[str, dict]) -> list[dict]:
 # ── the library ──
 
 
+def draft_library(st, data: object) -> TemplateLibrary | None:
+    """The library a draft holding `library.yaml` resolves against, `data`
+    being that file's; None when it does not load."""
+    if not isinstance(data, dict):
+        return None
+    try:
+        return config_check.library_candidate(
+            getattr(st, "library", None),
+            data,
+            st.templates_dir / LIBRARY_FILE,
+            getattr(st, "skills_dir", None),
+        )
+    except TemplateLibraryError:
+        return None
+
+
+def _component(path: str) -> str:
+    """`nodes.verification` for `nodes.verification.review.code_review`."""
+    return PATH_SEPARATOR.join(path.split(PATH_SEPARATOR)[:2])
+
+
 def _library(st, key: str, raw: dict, files: dict, published: dict) -> dict:
-    """`library.yaml` alone (F adds the chains it pulls in, used-by paths and
-    the change list): its problems, which are the library save's own."""
+    """`library.yaml` and the chain files its renames rewrote: the library
+    save's problems, each with the chain or repo it breaks and the component
+    it comes from; the change list per component, with the chains each
+    reaches; and the chains and repos a publish reaches."""
     data = raw.get(LIBRARY_FILE)
     if not isinstance(data, dict):
         return {"problems": [_not_a_mapping(LIBRARY_FILE)]}
     path = st.templates_dir / LIBRARY_FILE
-    try:
-        repos = config_mod.load_repos(deps.repos_path(st))
-    except config_mod.ConfigError:
-        repos = []
+    running = getattr(st, "library", None)
+    skills = getattr(st, "skills_dir", None)
+    chains = [
+        (st.templates_dir / n, d)
+        for n, d in raw.items()
+        if n != LIBRARY_FILE and isinstance(d, dict)
+    ]
+    repos = _repos(st)
+    # Repos are checked below, where each problem can name its repo.
     issues = config_check.library_issues(
-        getattr(st, "library", None),
-        data,
-        path,
-        getattr(st, "instance_policy", None),
-        repos,
-        getattr(st, "skills_dir", None),
+        running, data, path, getattr(st, "instance_policy", None), [], skills, chains
     )
+    try:
+        candidate = config_check.library_candidate(running, data, path, skills, chains)
+    except TemplateLibraryError:
+        candidate = None
+    buffers = {st.templates_dir / n: t or "" for n, t in files.items()}
 
-    def split(file, loc):
-        # A component is `<section>.<name>`; a chain an edit broke is its own file's.
-        if file != LIBRARY_FILE or len(loc) < 2:
-            return None, loc
-        return PATH_SEPARATOR.join(map(str, loc[:2])), loc[2:]
+    problems = []
+    for issue in issues:
+        resolution = None
+        if candidate is not None and issue.chain in candidate.chain_ids:
+            file = candidate.chain_file(issue.chain)
+            _, resolution = _expand(candidate, file, issue.chain, candidate.chain_data(issue.chain))
 
-    buffers = {path: files.get(LIBRARY_FILE) or ""}
-    return {"problems": [p for i in issues for p in _problems(i, split, st, buffers)]}
+        def split(file, loc, resolution=resolution, issue=issue):
+            if issue.chain is not None:
+                return resolution.split(loc) if resolution is not None else (None, loc)
+            # A component of the library is `<section>.<name>`.
+            if len(loc) < 2:
+                return None, loc
+            return PATH_SEPARATOR.join(map(str, loc[:2])), loc[2:]
+
+        for p in _problems(issue, split, st, buffers):
+            component = p["path"] if issue.chain is None else None
+            source = resolution._sources.get(p["path"]) if resolution is not None else None
+            if source is not None and source.file == path:
+                component = f"{source.namespace.value}.{source.name}"
+            problems.append({**p, "chain": issue.chain, "repo": None, "component": component})
+    if candidate is not None:
+        file = deps.repos_path(st)
+        text = file.read_text() if file.is_file() else ""
+        for index, entry in enumerate(repos):
+            for _, why in config_check.steering_issues(candidate, [entry]):
+                missing = next((n for n in entry.steering if n not in candidate.steering), None)
+                line, col = positions.locate(text, ("repos", index, "steering"))
+                problems.append(
+                    {
+                        "path": "steering",
+                        "field": None,
+                        "message": why,
+                        "file": "repos.yaml",
+                        "line": line,
+                        "col": col,
+                        "chain": None,
+                        "repo": entry.path,
+                        "component": f"steering.{missing}" if missing else None,
+                    }
+                )
+
+    try:
+        before = authored.parse(published.get(LIBRARY_FILE))
+    except yaml.YAMLError:
+        before = None
+    listed = changes(
+        _flat(before, library=True) if isinstance(before, Mapping) else {},
+        _flat(data, library=True),
+    )
+    # Published or drafted: a removed component reached its chains before.
+    reaches: dict[str, set[str]] = {}
+    for library in (running, candidate):
+        for chain in library.chain_ids if library is not None else ():
+            for refs in library.references(chain).values():
+                for ref in refs:
+                    reaches.setdefault(ref, set()).add(chain)
+    for change in listed:
+        change["reaches"] = sorted(reaches.get(_component(change["path"]), ()))
+    profiles = {
+        c["path"].split(PATH_SEPARATOR)[1]
+        for c in listed
+        if c["path"].startswith(f"{Namespace.STEERING.value}{PATH_SEPARATOR}")
+    }
+    return {
+        "problems": problems,
+        "changes": listed,
+        "impact": {
+            "chains": sorted({c for change in listed for c in change["reaches"]}),
+            "repos": [r.path for r in repos if set(r.steering) & profiles],
+        },
+    }
 
 
 #: Per area of `drafts.store.AREAS`, the result's area-specific keys.

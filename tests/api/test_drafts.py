@@ -5,6 +5,7 @@ discarded for good."""
 from __future__ import annotations
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.api_client(default_setup=False)
 
@@ -191,3 +192,32 @@ def test_a_renamed_chain_keeps_its_draft_and_publishes_under_the_new_id(client, 
 def test_a_fragment_yaml_error_answers_its_line_and_column(client):
     r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": "id: spec\nkind: [\n"})
     assert (r.status_code, r.json()["line"], r.json()["col"]) == (422, 3, 1)
+
+
+def test_a_move_to_library_publishes_the_chain_and_the_library_together(client, templates_dir):
+    move = {"op": "move_to_library", "path": "spec", "name": "spec_node"}
+    r = post_ops(client, move)
+    assert sorted(r.json()["files"]) == ["chains/default.yaml", "library.yaml"]
+
+    published = client.post(f"{DEFAULT}/publish").json()["published"]
+    assert published == ["chains/default.yaml", "library.yaml"]
+    library = yaml.safe_load((templates_dir / "library.yaml").read_text())
+    assert library["nodes"]["spec_node"]["tasks"] == [{"id": "author", "extends": "spec_author"}]
+    chain = yaml.safe_load((templates_dir / "chains" / "default.yaml").read_text())
+    assert chain["nodes"][0] == {"id": "spec", "extends": "spec_node"}
+    # Reloaded: the running library has the node and the chain uses it.
+    assert client.get("/api/templates/library/nodes.spec_node").json()["used_by"] == ["default"]
+
+
+def test_a_library_rename_joins_the_chains_it_rewrites_to_the_draft(client, templates_dir):
+    library = "/api/drafts/library/library"
+    rename = {"op": "rename", "path": "tasks.implementer", "id": "builder"}
+    r = client.post(f"{library}/ops", json={"ops": [rename]})
+    assert sorted(r.json()["files"]) == ["chains/quick-task.yaml", "library.yaml"]
+    # Joined, the chain file is the draft's to write as typed.
+    text = r.json()["files"]["chains/quick-task.yaml"]
+    assert client.put(f"{library}/files/chains/quick-task.yaml", json={"text": text}).is_success
+
+    assert client.post(f"{library}/publish").status_code == 200
+    assert (templates_dir / "chains" / "quick-task.yaml").read_text() == text
+    assert "extends: builder" in text

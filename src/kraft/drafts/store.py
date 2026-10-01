@@ -32,13 +32,13 @@ class Area:
     #: The files a draft of `key` may hold.
     files: Callable[[str], tuple[str, ...]]
     #: Whether a `rename` op may move the draft's file to the one `files`
-    #: gives the new key, the old file becoming null: the only way a draft
-    #: holds a file its own key does not list.
+    #: gives the new key, the old file becoming null.
     renames: bool = False
 
 
-#: W13 adds `harnesses`, `repos`, `policy` and `intake`; F adds `library.yaml`
-#: to a chain's files and the chain files to the library's.
+#: W13 adds `harnesses`, `repos`, `policy` and `intake`. Ops join more files
+#: than `files` lists: `move_to_library` the library to a chain's draft, a
+#: library rename each chain file it rewrites to the library's.
 AREAS: dict[str, Area] = {
     "chains": Area(
         valid=_CHAIN_ID.fullmatch, files=lambda key: (f"chains/{key}.yaml",), renames=True

@@ -399,3 +399,130 @@ async def test_a_fragment_yaml_error_is_at_the_fragments_own_line(st):
         apply(st, ("set_fragment", {"path": "spec", "yaml": "id: spec\nkind: exec\ntasks: [\n"}))
     assert exc.value.extra == {"line": 4, "col": 1}
     assert str(exc.value).startswith("line 4, column 1: ")
+
+
+# ── the library ──
+
+
+def library(st, *batch):
+    """The batch applied to the published library, and the resolve result after it."""
+    published = resolve.published(st.templates_dir, ["library.yaml"])
+    draft = ops.Draft(st, "library", published, exists=True, area="library")
+    answers = ops.apply(draft, [{"op": op, **fields} for op, fields in batch])
+    files = draft.finish()
+    result = resolve.resolve(
+        st, "library", "library", files, resolve.published(st.templates_dir, sorted(files))
+    )
+    return SimpleNamespace(
+        answers=[a.get("result") for a in answers],
+        files=files,
+        model=result["model"],
+        problems=[(p["chain"], p["path"], p["component"]) for p in result["problems"]],
+    )
+
+
+def refused_library(st, *batch) -> str:
+    with pytest.raises(ops.OpError) as exc:
+        library(st, *batch)
+    return str(exc.value)
+
+
+async def test_a_library_field_op_addresses_a_component_by_its_section(st):
+    task = "nodes.verification.review.code_review"
+    r = library(
+        st,
+        ("set_field", {"path": task, "field": "prompt", "value": "Look harder."}),
+        # Equal to what `tasks.code_review` gives it: no key.
+        ("set_field", {"path": task, "field": "skill", "value": "kraft:code-review"}),
+    )
+    assert authored.at(r.model["library.yaml"], task, file=authored.LIBRARY) == {
+        "id": "code_review", "extends": "code_review", "prompt": "Look harder."
+    }  # fmt: skip
+    assert r.problems == []
+
+
+async def test_add_component_adds_an_empty_one_to_its_section(st):
+    r = library(
+        st,
+        ("add_component", {"section": "steering", "name": "terse"}),
+        ("add_component", {"section": "tasks", "name": "lint", "kind": "subprocess"}),
+    )
+    assert r.answers == [{"path": "steering.terse"}, {"path": "tasks.lint"}]
+    model = r.model["library.yaml"]
+    assert (model["steering"]["terse"], model["tasks"]["lint"]) == (
+        {"instructions": ""},
+        {"kind": "subprocess"},
+    )
+    # A profile with no instructions is a problem until they are written.
+    assert r.problems == [(None, "steering.terse", "steering.terse")]
+    why = refused_library(st, ("add_component", {"section": "tasks", "name": "implementer"}))
+    assert "already taken" in why
+
+
+async def test_renaming_a_library_task_rewrites_every_use_and_pulls_its_chains_in(st):
+    r = library(st, ("rename", {"path": "tasks.implementer", "id": "builder"}))
+    assert r.answers == [
+        {
+            "updated": [
+                {"file": "library.yaml", "path": "nodes.implementation.main.implement",
+                 "field": "extends"},
+                {"file": "chains/quick-task.yaml", "path": "implementation.main.implement",
+                 "field": "extends"},
+            ]
+        }
+    ]  # fmt: skip
+    # `default` reaches it only through the library node: its file stays out.
+    assert sorted(r.files) == ["chains/quick-task.yaml", "library.yaml"]
+    quick = r.model["chains/quick-task.yaml"]
+    assert authored.at(quick, "implementation.main.implement")["extends"] == "builder"
+    assert list(r.model["library.yaml"]["tasks"]).index("builder") == 3
+    assert r.problems == []
+
+
+async def test_renaming_a_steering_profile_rewrites_the_tasks_selecting_it(st):
+    r = library(st, ("rename", {"path": "steering.project-standards", "id": "standards"}))
+    assert r.model["library.yaml"]["tasks"]["spec_author"]["steering"] == ["standards"]
+    assert r.problems == []
+
+
+async def test_removing_a_library_component_leaves_its_uses_as_problems(st):
+    r = library(st, ("remove", {"path": "tasks.implementer"}))
+    assert [b["path"] for b in r.answers[0]["broken"]] == [
+        "nodes.implementation.main.implement",
+        "implementation.main.implement",
+    ]
+    assert "implementer" not in r.model["library.yaml"]["tasks"]
+    assert sorted(r.files) == ["library.yaml"]
+    # `default` through its library node, `quick-task` in its own file.
+    assert r.problems == [
+        ("default", "implementation", "nodes.implementation"),
+        ("quick-task", "implementation", None),
+    ]
+
+
+async def test_move_to_library_moves_a_node_and_its_chain_extends_it(st):
+    r = apply(
+        st,
+        ("move_to_library", {"path": "spec", "name": "spec_node"}),
+        # Inherited from the moved node, which only the draft's library has: no key.
+        ("set_field", {"path": "spec", "field": "kind", "value": "exec"}),
+    )
+    assert r.answers == [{"path": "nodes.spec_node"}, None]
+    assert r.nodes["spec"] == {"id": "spec", "extends": "spec_node"}
+    assert r.model is not None and r.problems == []
+    moved = authored.load(r.files["library.yaml"])["nodes"]["spec_node"]
+    assert moved == {"kind": "exec", "steps": [{"id": "main", "tasks": [
+        {"id": "author", "extends": "spec_author"}
+    ]}]}  # fmt: skip
+    assert "spec.main.author" in r.paths
+
+
+async def test_move_to_library_moves_a_task_and_refuses_a_taken_name(st):
+    r = apply(st, ("move_to_library", {"path": "draft_merge_request.open.open", "name": "opener"}))
+    assert authored.at(r.model, "draft_merge_request.open.open") == {
+        "id": "open", "extends": "opener"
+    }  # fmt: skip
+    assert authored.load(r.files["library.yaml"])["tasks"]["opener"] == {"extends": "open_draft_mr"}
+    assert r.problems == []
+    why = refused(st, ("move_to_library", {"path": "spec", "name": "verification"}))
+    assert "already taken" in why

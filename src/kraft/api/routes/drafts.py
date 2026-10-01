@@ -90,9 +90,10 @@ async def put_draft_file(area: str, key: str, file: str, body: FileText, request
     st = request.app.state
     found = _area(area, key)
     old = st.db.read(lambda c: store.get(c, area, key))
-    # A renamed draft's new file came in through the `rename` op.
-    moved = found.renames and old is not None and file in old["files"]
-    if file not in found.files(key) and not moved:
+    # A file an op joined to the draft (a rename's new file, a chain a library
+    # rename rewrote, `move_to_library`'s library) is the draft's to write too.
+    joined = old is not None and file in old["files"]
+    if file not in found.files(key) and not joined:
         raise HTTPException(422, f"{file!r} is not a file of {area} {key!r}")
     draft = {
         "files": {**(old["files"] if old else {}), file: body.text},
@@ -127,15 +128,13 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
     `?preview=1`, the result without saving."""
     st = request.app.state
     _area(area, key)
-    if area != "chains":
-        raise HTTPException(422, f"no ops on the {area} draft")
     old = st.db.read(lambda c: store.get(c, area, key))
     history = old["history"] if old else []
     current, published, result = _state(st, area, key, old, history)
     if "yaml_error" in result:
         raise HTTPException(409, "fix the YAML first")
     exists = old is not None or any(t is not None for t in published.values())
-    working = ops.Draft(st, key, current, exists=exists)
+    working = ops.Draft(st, key, current, exists=exists, area=area)
     try:
         answers = ops.apply(working, body.ops)
     except ops.OpError as exc:

@@ -371,12 +371,21 @@ class TemplateLibrary:
         expansion follows, transitively, and every steering profile a task
         selects. A chain that stops expanding part-way answers with what it
         reached; why it stopped is `lint`'s to say."""
+        return self._expansion(id).references
+
+    def usages(self, id: str) -> dict[str, list[dict[str, object]]]:
+        """Per library component chain `id` uses (as `references` names it),
+        each component of the chain that extends or selects it:
+        `{path, overrides, via?}` (`_Resolution.usages`)."""
+        return self._expansion(id).usages
+
+    def _expansion(self, id: str) -> _Resolution:
         resolution = _Resolution(self, self._chains[id].source)
         try:
             resolution.expand_chain(self._chains[id].data)
         except TemplateLibraryError:
             pass
-        return resolution.references
+        return resolution
 
     def component(self, namespace: Namespace, name: str) -> RawComponent | None:
         return self._components[namespace].get(name)
@@ -551,6 +560,16 @@ class _Resolution:
         #: (`TemplateLibrary.references`); filed under the node being expanded.
         self.references: dict[str, set[str]] = {}
         self._refs: set[str] = set()
+        #: Per library component, each chain component that extends or
+        #: selects it: its canonical `path`; `overrides`, whether it sets a key
+        #: besides `id`, `extends` and `kind`; and `via`, the library node it
+        #: sits in when the node's own expansion put it there. Kept pending
+        #: under its location until `_locate` knows the path.
+        self.usages: dict[str, list[dict[str, object]]] = {}
+        self._pending: dict[tuple[object, ...], list[dict[str, object]]] = {}
+        #: The chain node being expanded, as authored, and the library node it extends.
+        self._node_raw: object = None
+        self._via: object = None
 
     # ── expansion ──
 
@@ -578,6 +597,8 @@ class _Resolution:
         # ponytail: keyed by the node's authored id (its position without one);
         # a node whose id is only inherited is filed under `[index]`.
         self._refs = self.references.setdefault(provisional, set())
+        self._node_raw = raw
+        self._via = raw.get("extends") if isinstance(raw, Mapping) else None
         node = self._expand(raw, Namespace.NODES, provisional, loc)
         path = self._record(node, loc, prefix="", fallback=f"nodes[{index}]")
 
@@ -617,15 +638,15 @@ class _Resolution:
         }
 
     def _container(
-        self, raw: Mapping[str, object], path: str, loc: tuple[object, ...]
+        self, raw: Mapping[str, object], path: str, loc: tuple[object, ...], *, step: bool = False
     ) -> Mapping[str, object]:
         """Expand one execution shape: a `tasks` group (whose tasks already sit
-        under the `main` step they resolve to), ordered `steps`, and a fix
-        loop's dedicated judge."""
+        under the `main` step they resolve to, or under the `step` itself),
+        ordered `steps`, and a fix loop's dedicated judge."""
         container = dict(raw)
         tasks = container.get("tasks")
         if isinstance(tasks, list):
-            prefix = f"{path}{PATH_SEPARATOR}{MAIN_STEP}"
+            prefix = path if step else f"{path}{PATH_SEPARATOR}{MAIN_STEP}"
             container["tasks"] = [
                 self._task(task, prefix, (*loc, "tasks", index)) for index, task in enumerate(tasks)
             ]
@@ -647,7 +668,7 @@ class _Resolution:
     ) -> Mapping[str, object]:
         step = self._expand(raw, Namespace.STEPS, self._provisional(raw, prefix, index), loc)
         path = self._record(step, loc, prefix=prefix, fallback=f"steps[{index}]")
-        return self._with_handler(self._container(step, path, loc), path, loc)
+        return self._with_handler(self._container(step, path, loc, step=True), path, loc)
 
     def _task(
         self,
@@ -663,9 +684,10 @@ class _Resolution:
         task = self._expand(raw, Namespace.TASKS, provisional, loc)
         steering = task.get("steering")
         if isinstance(steering, list):
-            self._refs.update(
-                f"{Namespace.STEERING.value}.{n}" for n in steering if isinstance(n, str)
-            )
+            selected = [f"{Namespace.STEERING.value}.{n}" for n in steering if isinstance(n, str)]
+            self._refs.update(selected)
+            for ref in selected:
+                self._use(ref, raw, loc)
         if segment is not None:
             # A dedicated task takes its container's segment as its path
             # (`component-identifiers-are-qualified-by-node-instance`), so its
@@ -696,7 +718,33 @@ class _Resolution:
         self._locate(loc, path)
         return path
 
+    def _use(self, ref: str, raw: object, loc: tuple[object, ...]) -> None:
+        """File one usage of component `ref` by the authored `raw` at `loc`;
+        `None` for the one filed there first, which reaches `ref` through its
+        parent."""
+        if raw is None:
+            first = self._pending[loc][0]
+            self._pending[loc].append({**first, "component": ref})
+            return
+        own = set(raw) - {"id", "extends", "kind"} if isinstance(raw, Mapping) else set()
+        usage: dict[str, object] = {"component": ref, "overrides": bool(own)}
+        # The chain's own node holds nothing at `loc`: the library node put it there.
+        found = self._node_raw
+        for part in loc[2:]:
+            if isinstance(found, Mapping):
+                found = found.get(part)
+            elif isinstance(found, list) and isinstance(part, int) and part < len(found):
+                found = found[part]
+            else:
+                found = None
+        if not isinstance(found, Mapping) and isinstance(self._via, str):
+            usage["via"] = self._via
+        self._pending.setdefault(loc, []).append(usage)
+
     def _locate(self, loc: tuple[object, ...], path: str) -> None:
+        for usage in self._pending.pop(loc, ()):
+            ref = usage.pop("component")
+            self.usages.setdefault(ref, []).append({"path": path, **usage})
         source = self._inherited.pop(loc, self._chain)
         self._located[loc] = _Located(path, source)
         self._sources.setdefault(path, source)
@@ -738,6 +786,8 @@ class _Resolution:
                 loc=(*loc, "extends"),
             )
         parent = self._parent(namespace, name, where, loc)
+        # A parent's own parent is used by the same component, through it.
+        self._use(f"{namespace.value}.{name}", None if seen else raw, loc)
         # The *resolved* parent, so a kind inherited further up the chain still
         # counts as the parent's kind.
         resolved = self._merge_chain(parent.data, namespace, where, loc, seen=(*seen, name))

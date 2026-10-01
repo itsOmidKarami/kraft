@@ -1,6 +1,6 @@
 """The template library as a list of its components (Kraft-6xkkm): each one
 `library.yaml` declares, as its author wrote it, with the chains that use it
-and the lint issues that name it. What `GET /templates/library` and
+(and the path in each that does) and the lint issues that name it. What `GET /templates/library` and
 `kraft admin templates library` show; built from a loaded `TemplateLibrary`
 and its own `lint`, never a second parse."""
 
@@ -21,10 +21,13 @@ def components(library: TemplateLibrary, issues: list[TemplateIssue]) -> list[di
     """Every component, section by section in `library.yaml`'s order. `issues`
     is the library's `lint`; an issue belongs to each component it names."""
     used_by: dict[str, set[str]] = {}
+    paths: dict[str, list[dict]] = {}
     for chain in library.chain_ids:
         for refs in library.references(chain).values():
             for ref in refs:
                 used_by.setdefault(ref, set()).add(chain)
+        for ref, uses in library.usages(chain).items():
+            paths.setdefault(ref, []).extend({"chain": chain, **use} for use in uses)
 
     listed = []
     for namespace in Namespace:
@@ -49,6 +52,7 @@ def components(library: TemplateLibrary, issues: list[TemplateIssue]) -> list[di
                     "name": name,
                     "definition": definition,
                     "used_by": sorted(used_by.get(id, ())),
+                    "used_by_paths": paths.get(id, []),
                     "issues": [i for i in issues if named.search(i.message)],
                 }
             )

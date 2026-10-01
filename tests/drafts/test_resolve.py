@@ -4,6 +4,7 @@ warning."""
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -157,3 +158,66 @@ async def test_sources_name_the_layer_each_value_comes_from(st):
 async def test_policy_values_are_the_instances(st, policy, values):
     st.policy = policy
     assert scratch(st, SCRATCH)["policy_values"] == values
+
+
+# ── the library ──
+
+LIBRARY = "library.yaml"
+
+
+def library(st, *replacements):
+    published = resolve.published(st.templates_dir, [LIBRARY])
+    text = published[LIBRARY]
+    for old, new in replacements:
+        assert re.search(old, text)
+        text = re.sub(old, new, text)
+    return resolve.resolve(st, "library", "library", {LIBRARY: text}, published)
+
+
+async def test_a_library_edit_that_breaks_a_chain_names_it_its_path_and_the_component(st):
+    [p] = library(st, ("skill: kraft:code-review", "skill: kraft:no-such"))["problems"]
+    assert (p["chain"], p["repo"], p["path"], p["component"], p["file"]) == (
+        "default",
+        None,
+        "verification.review.code_review",
+        "tasks.code_review",
+        "chains/default.yaml",
+    )
+
+
+async def test_a_library_edit_that_breaks_a_repo_names_the_repo(st):
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - {path: /b}\n  - {path: /a, steering: [project-standards]}\n"
+    )
+    problems = library(st, ("  project-standards:", "  standards:"))["problems"]
+    [p] = [p for p in problems if p["repo"] is not None]
+    assert (p["repo"], p["path"], p["component"], p["file"], p["line"]) == (
+        "/a",
+        "steering",
+        "steering.project-standards",
+        "repos.yaml",
+        3,
+    )
+
+
+async def test_library_changes_carry_the_chains_each_reaches(st):
+    (st.templates_dir / "repos.yaml").write_text(
+        "repos:\n  - {path: /a, steering: [project-standards]}\n  - {path: /b}\n"
+    )
+    result = library(
+        st,
+        ("Keep changes focused.", "Stay focused."),
+        ("prompt: Implement the approved plan.", "prompt: Implement it."),
+        # The verification node's own `code_review` task, at its indent.
+        (r"( +)extends: code_review\n", r"\1extends: code_review\n\1prompt: Look harder.\n"),
+        ("  describe_mr:", "  describe:"),
+    )
+    assert [(c["path"], c["reaches"]) for c in result["changes"]] == [
+        ("steering.project-standards", ["default"]),
+        ("tasks.implementer", ["default", "quick-task"]),
+        ("tasks.describe", []),
+        ("nodes.verification.review.code_review", ["default"]),
+        # What the published library reached.
+        ("tasks.describe_mr", ["default"]),
+    ]
+    assert result["impact"] == {"chains": ["default", "quick-task"], "repos": ["/a"]}

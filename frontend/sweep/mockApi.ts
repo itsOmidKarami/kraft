@@ -315,9 +315,12 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
           effort: { value: null, source: "default" },
         } } : {},
         policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
-        impact: area === "chains" ? { running: 2, repos: ["/Users/me/code/kraft"] } : null,
+        impact: area === "chains" ? { running: 2, repos: ["/Users/me/code/kraft"] } : { chains: ["default", "quick-task"], repos: ["/Users/me/code/kraft"] },
         problems: key === "broken" ? [{ path: "implement.main.implement", field: "bogus", message: "Extra inputs are not permitted", file: name, line: 7, col: 9 }] : [],
-        changes: key === "library" ? [] : [change],
+        changes: key === "library" ? [
+          { path: "tasks.implementer", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
+          { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
+        ] : [change],
         ...(key === "yaml-error" ? { yaml_error: { file: name, line: 4, col: 3, message: "expected ',' or ']', but got '<stream end>'" } } : {}),
       };
       if (method === "DELETE") return route.fulfill({ status: 204 });
@@ -362,6 +365,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const components = hooks.map(([name, definition]) => ({
         id: `tasks.${name}`, kind: "tasks", name, definition, issues: [],
         used_by: st.templates.filter((t) => t.nodes.some((n: any) => n.tasks?.includes(name))).map((t) => t.id),
+        used_by_paths: st.templates.flatMap((t) => t.nodes.filter((n: any) => n.tasks?.includes(name)).map((n: any) => ({ chain: t.id, path: `${n.id}.main.${name}`, overrides: false }))),
       }));
       return json(route, { file: "templates/library.yaml", text: `tasks:\n${hooks.map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`).join("\n")}\n`, components });
     }
