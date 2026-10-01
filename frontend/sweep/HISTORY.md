@@ -1310,3 +1310,10 @@ Baseline on `main` `c9ba7e4c`: 1170 cells, 179 flagged. Final on the branch reba
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 1256 cells, 193 flagged, 0 newly flagged. The 86 new cells and 14 extra flags are W1–W3's, already on main.
 - 174 shipped cells changed, none in size, at most 0.49% each: elapsed-time text (cropped and checked on `el-gate-card/gate-changes-default@1280`). 996 identical.
 - **Fixtures and mocks:** items carry `display_status`, `stop`, `summary` and `budget_cap.daily`; events carry `node_id`; new mocks for every W4 endpoint. The shipped UI reads none of them.
+
+## ux2-W7 — backend for review (`ux2/W7`)
+
+Baseline: the local snapshot taken before W7. No UI change, so no wave of its own. Full notes: `e2e-shots/DIFF-ux2-W7.md` (gitignored, local).
+
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1253 cells, 192 flagged, 0 newly flagged, 0 cleared. 82 cells changed, the largest by 0.08%: wall-clock text.
+- **Mock:** `PUT`/`DELETE /work-items/:id/viewed` (kept per page load), `viewed` per file and `ignore_whitespace` on `/compare`, `GET /work-items/:id/fix-target`, and `fix_target` on the pending-gate item.
