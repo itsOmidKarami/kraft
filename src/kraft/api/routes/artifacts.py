@@ -151,6 +151,54 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
     raise HTTPException(400, f"unknown compare target {target!r}")
 
 
+def _readable_worktree(st, row):
+    worktree = st.run_dirs.worktrees / row["id"]
+    if not worktree.is_dir():
+        raise HTTPException(404, "this work item has no worktree yet")
+    try:
+        stops.refuse_live_sandboxed_session(
+            st.db, row, deps.launch(st, row["repo"]), what="the diff"
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return worktree
+
+
+def _blob_at(worktree, to_sha: str | None, path: str) -> str | None:
+    """The file's blob id at `to_sha` (None: the working tree); None if absent there."""
+    if to_sha:
+        return config_mod.git_read(worktree, "rev-parse", f"{to_sha}:{path}", expected_failure=True)
+    return config_mod.git_read(worktree, "hash-object", "--", path, expected_failure=True)
+
+
+async def _set_viewed(wid: str, request: Request, mark: bool):
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    q = request.query_params
+    path, to = q.get("file", ""), q.get("to", "latest")
+    if not path or path.startswith("/") or ".." in path.split("/"):
+        raise HTTPException(400, "`file` must be a path inside the repository")
+    worktree = _readable_worktree(st, row)
+    to_sha, _ = _resolve_target(st, row, board._pending_gate(st, wid), to)
+    blob = _blob_at(worktree, to_sha, path)
+    if mark:
+        await st.db.write(lambda c: store.mark_viewed(c, wid, path, to_sha or "worktree", blob))
+    else:
+        await st.db.write(lambda c: store.unmark_viewed(c, wid, path, blob))
+    return {"file": path, "to": to, "viewed": mark}
+
+
+@api_router.put("/work-items/{wid}/viewed")
+async def mark_viewed(wid: str, request: Request):
+    """Mark a file viewed at the compare target `to`; it holds while the file's content does."""
+    return await _set_viewed(wid, request, True)
+
+
+@api_router.delete("/work-items/{wid}/viewed")
+async def unmark_viewed(wid: str, request: Request):
+    return await _set_viewed(wid, request, False)
+
+
 @api_router.get("/work-items/{wid}/compare")
 async def compare_work_item(
     wid: str, request: Request, nodes: str | None = None, ignore_whitespace: bool = False
@@ -164,15 +212,7 @@ async def compare_work_item(
         raise HTTPException(400, "`from` cannot be the working tree")
     if not row["base_ref"]:
         raise HTTPException(409, "this work item has no base commit to compare against")
-    worktree = st.run_dirs.worktrees / wid
-    if not worktree.is_dir():
-        raise HTTPException(404, "this work item has no worktree yet")
-    try:
-        stops.refuse_live_sandboxed_session(
-            st.db, row, deps.launch(st, row["repo"]), what="the diff"
-        )
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
+    worktree = _readable_worktree(st, row)
     gate = board._pending_gate(st, wid)
     from_sha, from_base = _resolve_target(st, row, gate, frm)
     to_sha, to_base = _resolve_target(st, row, gate, to)
@@ -184,8 +224,16 @@ async def compare_work_item(
     runs = st.db.read(lambda c: store.node_run_rows(c, wid))
     head = to_sha or config_mod.git_read(worktree, "rev-parse", "HEAD")
     attribution = review.touched_by(worktree, runs, from_sha, head)
+    marks = st.db.read(
+        lambda c: store.viewed_marks(c, wid, {review.new_path(f["path"]) for f in change.files})
+    )
     files = [
-        {**f, "path": (p := review.new_path(f["path"])), "touched_by": attribution.get(p, [])}
+        {
+            **f,
+            "path": (p := review.new_path(f["path"])),
+            "touched_by": attribution.get(p, []),
+            "viewed": bool(marks.get(p)) and _blob_at(worktree, to_sha, p) in marks[p],
+        }
         for f in change.files
     ]
     groups: list[dict] = []

@@ -559,10 +559,11 @@ export function fixTargetFor(gate: string | null, node?: string) {
 
 // The shape of GET /work-items/:id/compare. One whitespace-only file rides along
 // so ignore_whitespace has something to drop, as git -w does for the real route.
-export function compareFor(id: string, variant: Variant, ignoreWhitespace = false) {
+export function compareFor(id: string, variant: Variant, ignoreWhitespace = false, viewed: ReadonlySet<string> = new Set()) {
   const d = diffFor(id, variant);
   const files = d.files.map((f, i) => ({ ...f, touched_by: i % 2 ? ["verify"] : ["implementation"] }));
   if (!ignoreWhitespace) files.push({ path: "src/reindent.py", insertions: 4, deletions: 4, touched_by: ["implementation"] });
+  for (const f of files) (f as any).viewed = viewed.has(`${id}|${f.path}`);
   return {
     from: { target: "base", sha: "a1b2c3d" }, to: { target: "latest", sha: null }, rebased: false,
     files, groups: [], diff: d.diff, untracked: d.untracked, truncated: d.truncated,

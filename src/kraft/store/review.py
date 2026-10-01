@@ -32,6 +32,7 @@ __all__ = [
     "is_draft_thread",
     "last_review",
     "next_gate_attempt",
+    "mark_viewed",
     "node_run_rows",
     "open_must_fix",
     "pending_rewind",
@@ -44,12 +45,14 @@ __all__ = [
     "publish_review",
     "record_review",
     "submit_review",
+    "unmark_viewed",
     "unrecord_review",
     "thread_row",
     "threads_for",
     "unanswered",
     "update_draft_comment",
     "update_draft_thread",
+    "viewed_marks",
 ]
 
 
@@ -374,6 +377,36 @@ def last_review(conn, wid):
         "LIMIT 1",
         (wid,),
     ).fetchone()
+
+
+def mark_viewed(conn, wid, path, to_sha, blob_id):
+    conn.execute(
+        "INSERT INTO review_viewed (work_item_id, file_path, to_sha, blob_id, viewed_at) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT (work_item_id, file_path, to_sha) "
+        "DO UPDATE SET blob_id = excluded.blob_id, viewed_at = excluded.viewed_at",
+        (wid, path, to_sha, blob_id, _now()),
+    )
+    conn.commit()
+
+
+def unmark_viewed(conn, wid, path, blob_id):
+    """Clear every mark on this blob, whichever `to` it was made against."""
+    conn.execute(
+        "DELETE FROM review_viewed WHERE work_item_id = ? AND file_path = ? AND blob_id IS ?",
+        (wid, path, blob_id),
+    )
+    conn.commit()
+
+
+def viewed_marks(conn, wid, paths):
+    """`{path: {blob_id, ...}}` for the marked paths among `paths`."""
+    marks: dict[str, set] = {}
+    for path, blob in conn.execute(
+        "SELECT file_path, blob_id FROM review_viewed WHERE work_item_id = ?", (wid,)
+    ):
+        if path in paths:
+            marks.setdefault(path, set()).add(blob)
+    return marks
 
 
 _NOTE_HEAD = (
