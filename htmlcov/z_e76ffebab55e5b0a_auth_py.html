@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_board_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-01 18:35 +0000
+            created at 2026-10-01 18:46 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -209,12 +209,14 @@
     <p class="run run2"><span class="n"><a id="t127" href="#t127">127</a></span><span class="t">        <span class="com"># (Kraft-kquf: &quot;status ok, documents 2&quot; from somebody&#x27;s e2e fixture).</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t128" href="#t128">128</a></span><span class="t">        <span class="str">&quot;run_dir&quot;</span><span class="op">:</span> <span class="nam">str</span><span class="op">(</span><span class="nam">st</span><span class="op">.</span><span class="nam">run_dirs</span><span class="op">.</span><span class="nam">base</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t129" href="#t129">129</a></span><span class="t">        <span class="str">&quot;pid&quot;</span><span class="op">:</span> <span class="nam">os</span><span class="op">.</span><span class="nam">getpid</span><span class="op">(</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t130" href="#t130">130</a></span><span class="t">        <span class="com"># public: the login screen&#x27;s &quot;stay signed in &#183; N days&quot; needs this</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t131" href="#t131">131</a></span><span class="t">        <span class="com"># before a session exists to ask `/access` for it.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t132" href="#t132">132</a></span><span class="t">        <span class="str">&quot;session_expiry_days&quot;</span><span class="op">:</span> <span class="nam">st</span><span class="op">.</span><span class="nam">access</span><span class="op">[</span><span class="str">&quot;session_expiry_days&quot;</span><span class="op">]</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t133" href="#t133">133</a></span><span class="t">        <span class="com"># public: the sidebar footer names its own build (UI v2 &#183; 01)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t134" href="#t134">134</a></span><span class="t">        <span class="str">&quot;version&quot;</span><span class="op">:</span> <span class="nam">update_mod</span><span class="op">.</span><span class="nam">installed</span><span class="op">(</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t135" href="#t135">135</a></span><span class="t">    <span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t130" href="#t130">130</a></span><span class="t">        <span class="com"># public: how long this process has been up; the About page draws it next to the pid.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t131" href="#t131">131</a></span><span class="t">        <span class="str">&quot;uptime_s&quot;</span><span class="op">:</span> <span class="nam">int</span><span class="op">(</span><span class="nam">time</span><span class="op">.</span><span class="nam">monotonic</span><span class="op">(</span><span class="op">)</span> <span class="op">-</span> <span class="nam">st</span><span class="op">.</span><span class="nam">started_at</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t132" href="#t132">132</a></span><span class="t">        <span class="com"># public: the login screen&#x27;s &quot;stay signed in &#183; N days&quot; needs this</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t133" href="#t133">133</a></span><span class="t">        <span class="com"># before a session exists to ask `/access` for it.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t134" href="#t134">134</a></span><span class="t">        <span class="str">&quot;session_expiry_days&quot;</span><span class="op">:</span> <span class="nam">st</span><span class="op">.</span><span class="nam">access</span><span class="op">[</span><span class="str">&quot;session_expiry_days&quot;</span><span class="op">]</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t135" href="#t135">135</a></span><span class="t">        <span class="com"># public: the sidebar footer names its own build (UI v2 &#183; 01)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t136" href="#t136">136</a></span><span class="t">        <span class="str">&quot;version&quot;</span><span class="op">:</span> <span class="nam">update_mod</span><span class="op">.</span><span class="nam">installed</span><span class="op">(</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t137" href="#t137">137</a></span><span class="t">    <span class="op">}</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -224,7 +226,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_board_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-01 18:35 +0000
+            created at 2026-10-01 18:46 +0000
         </p>
     </div>
 </footer>
