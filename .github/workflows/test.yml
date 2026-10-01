@@ -1,10 +1,11 @@
-# Everything runs on every pull request. The GitLab config this replaced gated
-# each job behind `changes:` rules because free-tier minutes were scarce -- see
-# its own header comment. Public repositories have unlimited Actions minutes on
-# standard runners, so the gating bought nothing and cost two hazards: a fully
-# path-gated change could produce zero jobs (which broke auto-merge, and needed
-# an unconditional job to work around), and a required check that never runs
-# blocks a pull request forever under branch protection.
+# Everything runs on every pull request, except that a docs-only one skips the
+# heavy jobs (see `changes`). The GitLab config this replaced gated each job
+# behind `changes:` rules because free-tier minutes were scarce. Public
+# repositories have unlimited Actions minutes, so the reason now is wall-clock
+# and runner queue, not cost. Gating is per job, by `if:`, never by a
+# workflow-level `paths:` filter: a filtered workflow reports no checks at all,
+# and a required check that never reports blocks a pull request forever. A job
+# skipped by its own `if:` reports "skipped", which satisfies a required check.
 name: test
 
 on:
@@ -33,6 +34,33 @@ env:
   UV_PYTHON: "3.14"
 
 jobs:
+  changes:
+    # `code` is false only for a pull request whose every changed path is
+    # prose nothing in the heavy jobs reads: root-level *.md, docsite/ (docs.yml
+    # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
+    # the test job checks). Pushes to main run everything, and so does a PR if
+    # this job fails: the heavy jobs skip only on an explicit 'false'. The unit
+    # tests that read those files still run, in `docs-tests`.
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            files=$(git diff --name-only "$BASE" HEAD)
+            if [ -z "$(printf '%s\n' "$files" | grep -vE '^([^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*\.md)$')" ]; then
+              code=false
+            fi
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -58,6 +86,8 @@ jobs:
     # the PR comment come from the newest leg only: one report, not three.
     # fail-fast off, so one version's failure doesn't hide another's.
     name: test (python ${{ matrix.python-version }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -131,6 +161,35 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  docs-tests:
+    # On a docs-only pull request, the unit tests that read a docs file stand
+    # in for the skipped matrix: a test that parses a docsite page's policy
+    # example, the README's install URL, docs/templates-v1-design.md's YAML. The
+    # grep names the same trees `changes` calls docs-only, so a new test that
+    # reads one is picked up without editing a list. Python 3.14 only, like
+    # every job but the matrix.
+    name: docs tests
+    needs: changes
+    if: needs.changes.outputs.code == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: git identity
+        run: |
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
+      - run: uv sync --frozen
+      - run: |
+          git grep -lE 'docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md' -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
+          cat "$RUNNER_TEMP/docs-tests.txt"
+          xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
+
   test-gate:
     # One check named exactly `test`, for branch protection to require. The matrix
     # above reports as `test (python 3.12)`, `test (python 3.13)`, ... so a rule
@@ -140,16 +199,25 @@ jobs:
     # `if: always()` is load-bearing. A job skipped because its `needs` failed
     # reports "skipped", and a skipped required check passes -- so without it a
     # red matrix would leave this check green. The shell test below is what
-    # turns a failed or cancelled matrix into a failed check.
+    # turns a failed or cancelled matrix into a failed check. A skipped matrix
+    # passes only when `changes` said docs-only and `docs-tests` passed.
     name: test
-    needs: test
+    needs: [changes, test, docs-tests]
     if: always()
     runs-on: ubuntu-latest
     env:
+      CODE: ${{ needs.changes.outputs.code }}
       MATRIX_RESULT: ${{ needs.test.result }}
+      DOCS_RESULT: ${{ needs.docs-tests.result }}
     steps:
       - run: |
-          if [ "$MATRIX_RESULT" != "success" ]; then
+          if [ "$CODE" = false ] && [ "$MATRIX_RESULT" = skipped ]; then
+            if [ "$DOCS_RESULT" != success ]; then
+              echo "::error::docs-only change: docs tests finished '$DOCS_RESULT', not 'success'"
+              exit 1
+            fi
+            echo "docs-only change: test matrix skipped, docs tests passed"
+          elif [ "$MATRIX_RESULT" != "success" ]; then
             echo "::error::the test matrix finished '$MATRIX_RESULT', not 'success'"
             exit 1
           fi
@@ -164,6 +232,8 @@ jobs:
     # ref-store test against a real container each. The paid
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -215,6 +285,8 @@ jobs:
 
   frontend:
     name: frontend
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,6 +304,8 @@ jobs:
 
   vscode:
     name: vscode
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -273,6 +347,8 @@ jobs:
     # frontend/package.json's exact "@playwright/test" pin must move together:
     # the image ships only the browsers its own version expects.
     name: playwright
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
