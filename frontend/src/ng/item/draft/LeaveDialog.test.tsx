@@ -11,7 +11,7 @@ const ops = [ov("merge_request", undefined, { time_cap_minutes: 9 })];
 const stay = (e: React.MouseEvent) => e.preventDefault();
 const Links = () => (
   <>
-    <a href="/ng/" onClick={stay}>Board</a>
+    <a href="/ng" onClick={stay}>Board</a>
     <a href="/ng/work-items/w1/nodes/plan" onClick={stay}>inside</a>
     <a href="/ng/work-items/w2" onClick={stay}>another item</a>
     <a href="https://example.com/x" onClick={stay}>outside</a>

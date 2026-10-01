@@ -15,6 +15,8 @@ export function DraftState() {
   const select = useSelect(d?.raw.id ?? "");
   const next = useRef(0);
   if (!d || (!d.ops.length && !d.issues.length)) return null;
+  const chip = `DRAFT · ${d.changes} ${plural(d.changes, "CHANGE", "CHANGES")}`;
+  const bad = `${d.issues.length} ${plural(d.issues.length, "PROBLEM", "PROBLEMS")}`;
   const onCanvas = new Set(d.shown.chain_definition.nodes.map((n) => n.id));
   const step = () => {
     const at = d.issues[next.current++ % d.issues.length];
@@ -24,12 +26,13 @@ export function DraftState() {
   };
   return (
     <HeaderTail>
-      <button type="button" className="idr-chip" onClick={() => d.setReviewing(true)} title="Review and apply">
-        DRAFT · {d.changes} {plural(d.changes, "CHANGE", "CHANGES")}
+      <button type="button" className="idr-chip" aria-label={chip} onClick={() => d.setReviewing(true)} title="Review and apply">
+        {chip}
       </button>
       {d.issues.length > 0 && (
-        <button type="button" className="idr-problems" onClick={step} title="Step through the problems">
-          {d.issues.length} {plural(d.issues.length, "PROBLEM", "PROBLEMS")}
+        <button type="button" className="idr-problems" aria-label={bad} onClick={step} title="Step through the problems">
+          <span className="idr-full">{bad}</span>
+          <span className="idr-short" aria-hidden>{d.issues.length} !</span>
         </button>
       )}
     </HeaderTail>
@@ -41,5 +44,10 @@ export function ReviewButton() {
   const d = useDraft();
   if (!d || !d.ops.length) return null;
   const blocked = d.issues.length > 0;
-  return <Button variant="primary" disabled={blocked} title={blocked ? "Fix the problems first" : undefined} onClick={() => d.setReviewing(true)}>Review &amp; apply</Button>;
+  return (
+    <Button variant="primary" aria-label="Review & apply" disabled={blocked} title={blocked ? "Fix the problems first" : `DRAFT · ${d.changes} ${plural(d.changes, "CHANGE", "CHANGES")}`} onClick={() => d.setReviewing(true)}>
+      <span className="idr-full">Review &amp; apply</span>
+      <span className="idr-short" aria-hidden>Review · {d.changes}</span>
+    </Button>
+  );
 }
