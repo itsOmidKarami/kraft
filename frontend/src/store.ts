@@ -101,7 +101,7 @@ export const useStore = create<State>((set, get) => ({
     const id = ev.work_item_id;
     const p = ev.payload as Record<string, any>;
     // The list's display_status and stop are the server's (B1); an event that
-    // moves the status re-reads the row so /ng's "others need you" stays true.
+    // moves the status re-reads the row so the item header's "others need you" stays true.
     if (REREAD.has(ev.type) && get().workItems[id]) queueMicrotask(() => { get().hydrateItem(id).catch(() => {}); });
     set((s) => {
       const prevEvents = s.eventsByItem[id] ?? [];

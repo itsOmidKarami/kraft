@@ -3,7 +3,7 @@
  *  throws a bare `Error(detail)` instead.
  *
  *  A 401 dispatches `kraft:unauthenticated`, as `req` does. The sign-in page
- *  is the one /ng call that does not come through here: its wrong-password
+ *  is the one call that does not come through here: its wrong-password
  *  401 is an answer, not a lost session (R44). */
 export type Answer<T = unknown> = { status: number; body: T };
 

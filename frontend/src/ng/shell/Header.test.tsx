@@ -27,7 +27,7 @@ describe("Header", () => {
     expect(within(nav).getByText("Settings")).not.toHaveAttribute("aria-current");
   });
 
-  it("links Board back to the /ng board from a work item and carries full text in titles", () => {
+  it("links Board back to the board from a work item and carries full text in titles", () => {
     const it = item({ id: "w1", repo: "/r/very-long-repository-name", title: "A very long title", bead_id: "kraft-cb59" });
     useStore.setState({ workItems: { w1: it } });
     at("/work-items/w1");

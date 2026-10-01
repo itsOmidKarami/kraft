@@ -35,7 +35,7 @@ export const useBulk = create<{ last: BulkOutcome | null; set: (o: BulkOutcome |
 }));
 
 /** A confirmed bulk Cancel, held for the window. Module state, not the
- *  board's: moving to another /ng page inside the window still sends it; a
+ *  board's: moving to another page inside the window still sends it; a
  *  full reload drops it, and nothing is sent. Returns the Undo, true when it
  *  caught the send in time. */
 export function cancelLater(ids: string[], reason: string): () => boolean {

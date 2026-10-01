@@ -39,7 +39,7 @@
 .glyph-paused { position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--text-muted); font: 700 8px/13px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
 .glyph-running { position: absolute; bottom: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 2px solid var(--bg); }
 
-/* Gallery (/ng/_gallery) */
+/* Gallery (/_gallery) */
 .gallery { max-width: 1400px; margin: 0 auto; padding: 22px 24px 60px; }
 .gallery h1 { margin: 0; font-size: 16px; font-weight: 500; }
 .gallery > section > h2 { margin: 28px 0 12px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }

@@ -48,7 +48,7 @@ export function readPlace(nodeParam: string | undefined, search: URLSearchParams
   return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined, doc: search.get("doc") || undefined };
 }
 
-/** The URL for a place, relative to the router's `/ng` basename. */
+/** The URL for a place. */
 export function placeUrl(id: string, p: Place): string {
   const q = new URLSearchParams();
   const path = selPath(p.sel);

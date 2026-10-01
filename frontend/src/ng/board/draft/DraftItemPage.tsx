@@ -38,7 +38,7 @@ function loadDraft(state: unknown, q: URLSearchParams): DraftState {
 }
 const forget = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ } };
 
-/** `/ng/work-items/new` (W6 brief G): the item page for an item that does not
+/** `/work-items/new` (W6 brief G): the item page for an item that does not
  *  exist yet. Nothing reaches the server but the dry run until Create. */
 export function DraftItemPage() {
   const location = useLocation();
@@ -116,8 +116,8 @@ export function DraftItemPage() {
   const leave = (to: string) => (dirty ? setAsk({ to }) : go(to));
   const go = (to: string) => {
     forget();
-    if (to.startsWith("/ng")) navigate(to.slice(3) || "/");
-    else if (/^https?:|^\//.test(to)) window.location.assign(to);
+    if (to.startsWith("/")) navigate(to);
+    else if (/^https?:/.test(to)) window.location.assign(to);
   };
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -136,7 +136,7 @@ export function DraftItemPage() {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (ask) return setAsk(null);
       if (sel) return setSel(null);
-      leave("/ng/");
+      leave("/");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -168,7 +168,7 @@ export function DraftItemPage() {
     <div className="draft-page" ref={page}>
       <HeaderActions>
         <span className={`draft-tag${d.title.trim() ? " is-ok" : ""}`}>{d.title.trim() ? "DRAFT · NOT CREATED" : "ADD A TITLE TO CREATE"}</span>
-        <button type="button" className="btn btn-secondary" onClick={() => leave("/ng/")}>Cancel</button>
+        <button type="button" className="btn btn-secondary" onClick={() => leave("/")}>Cancel</button>
         <CreateSplit disabled={!ok} onCreate={create} />
       </HeaderActions>
       {error && <p className="item-error" role="alert">{error}</p>}

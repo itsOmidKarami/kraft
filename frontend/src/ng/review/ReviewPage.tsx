@@ -23,7 +23,7 @@ import { useArtifact, useCompare, useThreads, useViewed } from "./useReview";
 import "../item/item.css";
 import "./review.css";
 
-/** `/ng/work-items/:id/review`: the changes of one item, its threads, and the
+/** `/work-items/:id/review`: the changes of one item, its threads, and the
  *  review that sends them (W8, spec §6.4). */
 export function ReviewPage() {
   const { id = "" } = useParams();

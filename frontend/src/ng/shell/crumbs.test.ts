@@ -18,7 +18,7 @@ describe("crumbsFor", () => {
     expect(head.href).toBeUndefined();
   });
 
-  it("makes Archived a child of the /ng Board", () => {
+  it("makes Archived a child of the Board", () => {
     const [board, archived] = crumbsFor("/archived", none);
     expect(board).toMatchObject({ text: "Board", to: "/" });
     expect(board.href).toBeUndefined();

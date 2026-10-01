@@ -111,7 +111,6 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
     <HeaderActions>
       <ReviewButton />
       {others > 0 && (
-        // The /ng board (W6 makes it the landing page; its stub renders until then).
         <Link className="item-others" to="/">
           <span className="item-dot" aria-hidden /> {others} {others === 1 ? "other needs" : "others need"} you
         </Link>

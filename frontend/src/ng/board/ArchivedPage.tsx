@@ -16,7 +16,7 @@ type Sort = "archived" | "created" | "title";
 const SORT_LABEL: Record<Sort, string> = { archived: "Recently archived", created: "Created", title: "Title" };
 const desc = (a?: string | null, b?: string | null) => ((a ?? "") < (b ?? "") ? 1 : (a ?? "") > (b ?? "") ? -1 : 0);
 
-/** `/ng/archived` (R5, GAP §2 #26): archived items with Restore, from the
+/** `/archived` (R5, GAP §2 #26): archived items with Restore, from the
  *  Done group's auto-archive line and ⌘K. A row opens the item page. */
 export function ArchivedPage() {
   const navigate = useNavigate();

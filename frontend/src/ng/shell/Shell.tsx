@@ -8,7 +8,7 @@ import { SearchOverlay } from "./SearchOverlay";
 import { Sidebar } from "./Sidebar";
 import "./shell.css";
 
-/** The frame every /ng page sits in. */
+/** The frame every page sits in. */
 export function Shell() {
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [tail, setTail] = useState<HTMLElement | null>(null);

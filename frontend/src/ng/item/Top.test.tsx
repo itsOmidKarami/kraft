@@ -56,7 +56,6 @@ describe("DiffLine", () => {
     stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }], landed: { commits: [], files: [{ path: "a.py", insertions: 10, deletions: 0 }, { path: "b.py", insertions: 3, deletions: 4 }] } }] });
     const { unmount } = render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
     expect(await screen.findByText(/2 files/)).toHaveTextContent("2 files +15 −5");
-    // The review page under /ng (W8), not the shipped Changes tab.
     expect(screen.getByRole("link", { name: "Review changes" })).toHaveAttribute("href", "/work-items/w1/review");
     unmount();
     stubFetch({ "GET /work-items/w1/diff": [200, { files: [] }] });

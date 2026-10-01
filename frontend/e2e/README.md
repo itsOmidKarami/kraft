@@ -15,7 +15,7 @@ helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
 | `search.spec.ts` | Ctrl-K finds an indexed document and opens it; the kind filter narrows documents |
 | `board-responsive.spec.ts` | the peek opens without reflowing a row: docked at 1440 and 1100, overlaid at 900 (R7) |
 | `attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results. Writes screenshots to `frontend/e2e-shots/` |
-| `addresses.spec.ts` | addresses from before the cutover still open their page: an `/ng/...` bookmark, `/settings/chains`, an item's `#node=` hash |
+| `addresses.spec.ts` | addresses from before the cutover still open their page: a bookmark from the new UI's old prefix, `/settings/chains`, an item's `#node=` hash |
 
 What the shipped UI's specs drove that has no page in this UI is not driven
 here: the item page's Timeline tab (no V2 equivalent, kickoff §4.4), and the

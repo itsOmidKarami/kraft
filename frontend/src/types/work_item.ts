@@ -37,7 +37,7 @@ export interface ChainNode {
    *  (`store.node_view`: the node's own recovery pass). */
   on_failure?: string[] | null;
   /** The node's own Lucide icon name, null when it sets none (always on a
-   *  gate). The shipped board draws none; the `/ng` editor reads it. */
+   *  gate). The chain editor reads it. */
   icon?: string | null;
 }
 

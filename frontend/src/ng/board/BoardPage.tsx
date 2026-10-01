@@ -60,7 +60,7 @@ function useNow() {
   return now;
 }
 
-/** `/ng`: the board (W6). First-run while no repo is connected, decided once
+/** `/`: the board (W6). First-run while no repo is connected, decided once
  *  on load so connecting one mid-setup does not swap the page away. */
 export function BoardPage() {
   const prefs = useBoardPrefs();

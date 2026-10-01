@@ -4,7 +4,6 @@ import { NAV_ICON } from "../icons";
 export type NavGroup = "top" | "templates" | "settings";
 
 export interface NgRoute {
-  /** Under the /ng basename. */
   path: string;
   label: string;
   icon: LucideIcon;
@@ -14,7 +13,7 @@ export interface NgRoute {
   built: boolean;
 }
 
-/** Every /ng page the shell knows, once. The sidebar, the crumbs, the Go-to
+/** Every page the shell knows, once. The sidebar, the crumbs, the Go-to
  *  list of the search overlay and the route tree are all built from it. */
 export const ROUTES: NgRoute[] = [
   { path: "/", label: "Board", icon: NAV_ICON.board, group: "top", built: true },
