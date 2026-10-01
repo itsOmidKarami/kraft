@@ -109,7 +109,7 @@ def _reload_items(st) -> list[dict]:
 
 
 def pending(st) -> dict:
-    return {"restart": _restart_items(st), "reload": _reload_items(st)}
+    return {"restart": _restart_items(st), "reload": _reload_items(st), "managed": managed()}
 
 
 def notify(app) -> dict:

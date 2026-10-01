@@ -20,6 +20,8 @@ pytestmark = pytest.mark.api_client(default_setup=False)
 def _no_env_override(monkeypatch):
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     monkeypatch.delenv("KRAFT_PORT", raising=False)
+    monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
 
 
 def pending(client) -> dict:
@@ -38,7 +40,14 @@ def put_file(templates_dir, name, text):
 
 
 def test_nothing_is_pending_on_a_fresh_server(client):
-    assert pending(client) == {"restart": [], "reload": []}
+    assert pending(client) == {"restart": [], "reload": [], "managed": False}
+
+
+@pytest.mark.parametrize("managed", [True, False])
+def test_the_answer_says_whether_a_restart_can_be_offered(client, monkeypatch, managed):
+    monkeypatch.setattr("kraft.apply.managed", lambda: managed)
+    assert pending(client)["managed"] is managed
+    assert client.post("/api/apply/reload").json()["managed"] is managed
 
 
 def test_a_saved_port_that_differs_from_the_bound_one_needs_a_restart(client, templates_dir):
@@ -89,7 +98,8 @@ def test_reload_rereads_intake_and_clears_what_it_loaded(client, templates_dir):
     assert ids(pending(client)["reload"]) == ["disk:intake.yaml"]
 
     after = client.post("/api/apply/reload")
-    assert after.status_code == 200 and after.json() == {"restart": [], "reload": []}
+    assert after.status_code == 200
+    assert after.json() == {"restart": [], "reload": [], "managed": False}
     assert client.app.state.intake["interval_s"] == 77
 
 

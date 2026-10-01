@@ -403,6 +403,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/apply" || p === "/apply/reload") return json(route, {
       restart: [{ id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" }],
       reload: [{ id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded", problem: "defaults: Input should be a valid dictionary" }],
+      managed: true,
     });
     if (p === "/apply/restart") return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) });
     if (p === "/update" || p === "/update/check") return json(route, {
