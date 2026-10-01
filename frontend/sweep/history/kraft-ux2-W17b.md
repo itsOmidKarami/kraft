@@ -65,8 +65,8 @@ A throwaway `kraft` (own `KRAFT_HOME` in the worktree's `.dev/`, port 8773, the 
 ## Differences from the mobile prototype
 
 - A cap stop with a `stop.limit` (R73) offers **Raise the <noun>…** as a link in the state card, so the action bar stays one pair (Steer · Retry); the sheet is Cancel · Save & retry. Without `stop.limit`, Steer · Retry only.
-- Notifications has no YAML of the file: it shows the effective values, and the URL as `(set, never shown)`.
-- Access reads the environment lock from health against the saved value (the API has no flag): "Set by the environment: running on …".
+- Notifications has no YAML of the file (Kraft-9d8b2.36): it shows the effective values, and the URL as `(set, never shown)`.
+- Access reads the environment lock from health against the saved value (the API has no flag, Kraft-9d8b2.37): "Set by the environment: running on …".
 - A new password signs every session out, this one too (the server revokes all), not "other sessions".
 - The Policy findings chips are the server's three severities, not four.
 - A scheduled item is always filed paused: shown as a fixed row, not a switch (the trigger code has no other state).
