@@ -240,7 +240,8 @@ export interface WorkItem {
   description?: string | null;
   repo: string;
   status: WorkItemStatus;
-  chain_template: string;
+  /** Null for an item filed with no chain: the repo's default chain runs (see ng/item/chainName). */
+  chain_template: string | null;
   chain_definition: ChainDefinition;
   current_node_id: string | null;
   bead_id: string | null;
