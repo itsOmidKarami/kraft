@@ -390,6 +390,11 @@ const CASES: Case[] = [
     await c.page.getByRole("heading", { name: "Board" }).evaluate((h) => h.scrollIntoView({ block: "start" })); await settle(c.page, 300);
   } },
 
+  // W16 F: Analytics under /ng, fed by the same analyticsFor() fixtures as the shipped page.
+  { screen: "ng-analytics", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
+  { screen: "ng-analytics", variant: "long", data: "long", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
+  { screen: "ng-analytics", variant: "empty", data: "empty", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
+
   // W3: the graph components' gallery, fed by fixtures.
   { screen: "ng-gallery", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_gallery", {}) },
   { screen: "ng-gallery", variant: "mono", data: "default", widths: [1280], fullPage: true, run: (c) => ng(c, "/ng/_gallery", { colour_amount: "mono" }) },
