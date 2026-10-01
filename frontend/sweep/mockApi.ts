@@ -396,6 +396,9 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       if (action === "ops") return json(route, { ...view, ops: (req.postDataJSON()?.ops ?? []).map((o: { op: string }) => ({ op: o.op })) });
       return json(route, view);
     }
+    /* the agent task's choices in the Chains editor (real answers, sweep/draftViews.json) */
+    if (p === "/harnesses/profiles" && method === "GET") return json(route, DRAFTS.harnesses);
+    if (p === "/harnesses/providers") return json(route, DRAFTS.providers);
     if (p === "/drafts") return json(route, ["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" })));
     if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });

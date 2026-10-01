@@ -2,18 +2,35 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
-import { useResizable, useWidth } from "../graph/useResizable";
+import { useResizable } from "../graph/useResizable";
 import { detailOf } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { ChainCanvas } from "./ChainCanvas";
+import { NodeView } from "./NodeView";
 import { ChainPane } from "./panes/ChainPane";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, counts, kindOf } from "./draft/view";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
+
+/** An element's width and height, kept current. */
+function useBox() {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [box, setBox] = useState({ w: 0, h: 600 });
+  useEffect(() => {
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight || 600 });
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, box.w, box.h] as const;
+}
 
 export const chainUrl = (chain: string) => `/templates/chains/${encodeURIComponent(chain)}`;
 export const nodeUrl = (chain: string, node: string) => `${chainUrl(chain)}/nodes/${encodeURIComponent(node)}`;
@@ -37,11 +54,12 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const navigate = useNavigate();
   const view = draft.view!;
   const r = view.result;
-  const [frame, canvasW] = useWidth();
+  const [frame, canvasW] = useBox();
   const size = useResizable("chains", canvasW);
   // The chain's own pane is the floor and open on load (Decisions §9 Chain settings).
   const [s, dispatch] = usePaneSelection(true);
   const [refused, setRefused] = useState<string | null>(null);
+
   const [nextProblem, setNextProblem] = useState(0);
   const taskPaths = r.resolved?.task_paths;
 
@@ -56,6 +74,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   useEffect(() => {
     if (draft.error) showToast(draft.error);
   }, [draft.error]);
+
 
   // ⌘Z undoes the last request, outside a text field (brief Decided 4).
   const undo = draft.undo;
@@ -154,7 +173,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           </IconButton>
         )}
       </HeaderActions>
-      <div className="tpl-area">
+      <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}`}>
         {s.level === "chain" ? (
           <ChainCanvas
             chain={chain}
@@ -171,7 +190,22 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onAdd={add}
           />
         ) : (
-          <div className="tpl-note">{s.node}</div>
+          <NodeView
+            chain={chain}
+            node={s.node!}
+            draft={draft}
+            selected={sel}
+            reserve={reserve}
+            onPick={(p) => dispatch({ type: "pick", sel: selOf(p, taskPaths) })}
+            onOpen={(p) => dispatch({ type: "expand", sel: selOf(p, taskPaths) })}
+            onEscape={onEscape}
+            onBackground={() => dispatch({ type: "background" })}
+            onBack={() => {
+              dispatch({ type: "back" });
+              navigate(chainUrl(chain));
+            }}
+            onFocusNode={(id) => focusNode(id)}
+          />
         )}
         <ChainPane
           draft={draft}

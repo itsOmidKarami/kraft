@@ -1,5 +1,6 @@
 import type { Result } from "../draft/types";
 import { authoredNodes, kindOf } from "../draft/view";
+import { isTaskPath } from "../sel";
 
 export type PaneKind = "chain" | "node" | "gate" | "step" | "task" | "fixloop" | "judge" | "esc" | "review";
 
@@ -17,7 +18,7 @@ export function describe(r: Result, key: string, path: string): { kind: PaneKind
   if (last === "judge" && segs[segs.length - 2] === "fix_loop") return { kind: "judge", node, id: "judge" };
   if (last === "auto_review") return { kind: "review", node, id: "auto_review" };
   if (segs[segs.length - 2] === "escalation") return { kind: "esc", node, id: last };
-  if (r.resolved?.task_paths.includes(path)) return { kind: "task", node, id: last };
+  if (isTaskPath(path, r.resolved?.task_paths)) return { kind: "task", node, id: last };
   return { kind: "step", node, id: last };
 }
 

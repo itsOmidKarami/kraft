@@ -531,6 +531,20 @@ const CASES: Case[] = [
     await c.page.getByRole("tab", { name: "Config" }).click();
     await settle(c.page, 300);
   } },
+  { screen: "ng-chains", variant: "node", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default", "verification") },
+  { screen: "ng-chains", variant: "node-task", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("button", { name: "code_review, agent task" }).click();
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "node-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "broken", "lint") },
+  { screen: "ng-chains", variant: "gate", data: "default", widths: [1280], run: (c) => ngChains(c, "default", "spec_approval") },
+  { screen: "ng-chains", variant: "task-menu", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("button", { name: "Add a parallel task" }).first().click();
+    await c.page.getByRole("menuitem", { name: "From the library…" }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");
