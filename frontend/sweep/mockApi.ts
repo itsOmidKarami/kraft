@@ -103,7 +103,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         it.updated_at = new Date().toISOString();
       }
     }
-    if ((m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|skip|abandon|archive|restore|escalate|open-worktree|budget\/raise|escalate\/stop|gates\/[^/]+\/(approve|reject))$/))) {
+    if ((m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|reopen-mr|skip|abandon|archive|restore|escalate|open-worktree|budget\/raise|escalate\/stop|gates\/[^/]+\/(approve|reject))$/))) {
       return json(route, { id: m[1], status: "active", node_id: "implement", loop: "verify_fix_loop", steer: null, path: "/tmp", editor: "code" });
     }
 

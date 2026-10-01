@@ -160,6 +160,11 @@ class PolicyInput(BaseModel):
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
     auto_review_attempts: PositiveInt = 1
     forge_cli_timeout_s: Annotated[StrictFloat | StrictInt, Field(gt=0)] = 120
+    #: Seconds between the MR-closed poller's ticks (`mr_poller.py`, B8): how
+    #: often it asks the forge about every item parked at an MR node. Bounded
+    #: well above a wait/cap poller's interval -- this one calls `gh`/`glab`
+    #: once per item per tick, where those read only the database.
+    forge_poll_s: Annotated[StrictInt, Field(ge=30)] = 300
     #: V1's `defaults:`/`maxima:` sections, read by the *same* loader rather
     #: than a second one. `policy.yaml` is one file, and one filename with two
     #: live loaders is how two readers of it start disagreeing (Ruling 18/37):
@@ -323,6 +328,8 @@ class Policy:
     #: and raised as a `ForgeError`. Bounds a single invocation, not a wait --
     #: that is the task's own `wait:` (`kraft.waits`).
     forge_cli_timeout_s: float = 120.0
+    #: Mirrors `PolicyInput.forge_poll_s` (B8's MR-closed poller cadence).
+    forge_poll_s: int = 300
 
     @classmethod
     def from_input(cls, parsed: PolicyInput, *, source: str | Path) -> Policy:
@@ -349,6 +356,7 @@ class Policy:
             auto_escalate_delay_s=parsed.auto_escalate_delay_s,
             auto_review_attempts=parsed.auto_review_attempts,
             forge_cli_timeout_s=float(parsed.forge_cli_timeout_s),
+            forge_poll_s=parsed.forge_poll_s,
         )
 
     def cap_for(self, key: str, override: CapOverride | dict | None = None) -> Cap:

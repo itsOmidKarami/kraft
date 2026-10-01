@@ -13,6 +13,7 @@ from kraft import (
     auto_escalate_delay,
     caps,
     executor,
+    mr_poller,
     rate_limit_retry,
     waits,
 )
@@ -256,6 +257,13 @@ async def lifespan(app: FastAPI):
     # something, and an operator who forgets to check the board is exactly
     # who auto-archive exists for (UI v2 · 03).
     app.state.archive_task = asyncio.ensure_future(archive.poller(app))
+    # Always on, like the pollers above: nothing else watches for a merge
+    # request closed on the forge outside Kraft, so an item parked at an MR
+    # node has to be re-checked by something. Its own `forge_poll_s` cadence,
+    # not the others' 10-30s: unlike them this calls `gh`/`glab` once per
+    # item per tick.
+    app.state.mr_poll_errors = {}
+    app.state.mr_poller_task = asyncio.ensure_future(mr_poller.poller(app))
     # PUT /intake swaps this task, and the swap has to await the cancellation of
     # the old one. Without the lock two overlapping saves both read the same old
     # task, both start a poller, and only the last assignment is reachable --
@@ -295,6 +303,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
         app.state.archive_task.cancel()
         await asyncio.gather(app.state.archive_task, return_exceptions=True)
+        app.state.mr_poller_task.cancel()
+        await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()

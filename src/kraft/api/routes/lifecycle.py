@@ -767,7 +767,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     matches the escalation session still live for this item) is deferred
     rather than run inline -- see the `work_item_self_retry_requested`
     branch below.
+
+    The body of this route is `_retry`, so `POST /work-items/{id}/reopen-mr`
+    (B8) can retry the same stopped node through the exact same function
+    after it reopens the merge request, instead of a second copy of this
+    logic that could drift from it.
     """
+    return await _retry(wid, body, request)
+
+
+async def _retry(wid: str, body: Retry, request: Request):
     from kraft.api.routes.gates import _decided_by  # local: it imports this module
 
     st = request.app.state
@@ -1441,6 +1450,40 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
         )
     )
     return {"ok": True}
+
+
+@api_router.post("/work-items/{wid}/reopen-mr")
+async def reopen_mr(wid: str, request: Request):
+    """B8: undo the MR-closed stop the poller wrote (`mr_poller.py`) by
+    reopening the merge request on the forge, then retrying the stopped node
+    the way `POST /retry` with no `path` does -- the same `_retry` function,
+    not a copy, so the two can never answer a retry differently.
+
+    409 unless the item is actually stopped on a closed merge request; a
+    forge failure answers 502 and leaves the item stopped, same posture as
+    `_close_cancelled_mr`'s close.
+    """
+    st = request.app.state
+    deps.forbid_self_action(st, request, wid)
+    row = deps._live_work_item_row(st, wid)
+    if row["stop_kind"] != "mr_closed":
+        raise HTTPException(409, "work item is not stopped on a closed merge request")
+    ref = board._mr_ref(st, wid)
+    if ref is None:
+        raise HTTPException(409, "work item has no merge request to reopen")
+    worktree = st.run_dirs.worktrees / wid
+    mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="closed")
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+    forge = forge_mod.resolve(backend)
+    try:
+        await forge.reopen_mr(repo=worktree, mr=mr_ref)
+    except forge_mod.ForgeError as exc:
+        raise HTTPException(502, str(exc)) from None
+    await st.db.write(
+        lambda c: events.append(c, wid, "mr_reopened", {"ref": ref["number"], "url": ref["url"]})
+    )
+    return await _retry(wid, Retry(), request)
 
 
 async def _end_work_item(request: Request, wid: str, action: str, reason: str):

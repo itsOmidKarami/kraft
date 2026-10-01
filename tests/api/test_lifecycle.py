@@ -975,3 +975,100 @@ def test_cancel_without_close_mr_behaves_as_today(client, repo, monkeypatch):
     assert r.status_code == 200, r.text
     assert "close_mr" not in r.json()
     assert fake.closed == []
+
+
+# --- E: MR closed externally (B8) --------------------------------------------
+
+
+def _set_stop_kind(wid: str, stop_kind: str) -> None:
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute("UPDATE work_items SET stop_kind = ? WHERE id = ?", (stop_kind, wid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _stopped_item_with_closed_mr(client, repo, fake, node_id: str = "merge"):
+    """A `needs_human` item on `node_id`, stopped with `stop_kind = 'mr_closed'`
+    -- what `mr_poller.tick` writes -- with its merge request already closed
+    on `fake` too, the shape `/reopen-mr` needs."""
+    from kraft import events, store
+
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    _force_node(wid, node_id, "needs_human")
+    db = client.app.state.db
+    row = client.portal.call(
+        db.read, lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    worktree = client.app.state.run_dirs.worktrees / wid
+
+    async def seed():
+        mr = await fake.open_mr(
+            repo=worktree, branch=store.branch_for(row), base="main", title="t", body="b"
+        )
+        await db.write(
+            lambda c: events.append(c, wid, "mr_opened", {"number": mr.number, "url": mr.url})
+        )
+        await fake.close_mr(repo=worktree, mr=mr)
+
+    client.portal.call(seed)
+    _set_stop_kind(wid, "mr_closed")
+    return wid
+
+
+def test_reopen_mr_on_an_mr_closed_stop_reopens_emits_and_retries(client, repo, monkeypatch):
+    fake = _fake_forge_cancel(monkeypatch)
+    wid = _stopped_item_with_closed_mr(client, repo, fake)
+
+    r = client.post(f"/api/work-items/{wid}/reopen-mr")
+
+    assert r.status_code == 200, r.text
+    assert fake.reopened == [1]
+    evs = [
+        e["payload"]
+        for e in client.get(f"/api/work-items/{wid}/events").json()
+        if e["type"] == "mr_reopened"
+    ]
+    assert evs == [{"ref": 1, "url": "http://fake.forge/1"}]
+    # The retry's own response shape (`_retry`, not a copy of it).
+    body = r.json()
+    assert body["id"] == wid
+    assert body["node_id"] == "merge"
+
+
+def test_reopen_mr_on_any_other_stop_answers_409(client, repo, monkeypatch):
+    """A merge request on file (so a 409 can only come from the `stop_kind`
+    check, not from `_mr_ref` finding none) but stopped for an unrelated
+    reason."""
+    fake = _fake_forge_cancel(monkeypatch)
+    wid = _stopped_item_with_closed_mr(client, repo, fake)
+    _set_stop_kind(wid, "failed")
+
+    assert client.post(f"/api/work-items/{wid}/reopen-mr").status_code == 409
+    assert fake.reopened == []
+
+
+def test_reopen_mr_with_a_forge_failure_answers_502_and_the_item_stays_stopped(
+    client, repo, monkeypatch
+):
+    from kraft.adapters import forge as forge_mod
+
+    fake = _fake_forge_cancel(monkeypatch)
+    wid = _stopped_item_with_closed_mr(client, repo, fake)
+
+    async def _boom(*, repo, mr):
+        raise forge_mod.ForgeError("gh: rate limited")
+
+    monkeypatch.setattr(fake, "reopen_mr", _boom)
+
+    r = client.post(f"/api/work-items/{wid}/reopen-mr")
+
+    assert r.status_code == 502, r.text
+    assert "rate limited" in r.json()["detail"]
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert detail["status"] == "needs_human"
+    assert detail["stop"]["kind"] == "mr_closed"
