@@ -15,6 +15,13 @@ import { repoName } from "../format";
 import { HealthBadge } from "./HealthBadge";
 import type { Health } from "../types";
 
+/** The page under /ng a person is on here, where the new UI has it (UX V2 R11):
+ *  a work item's own page, else the new board. */
+export const newUiPath = (pathname: string) => {
+  const item = /^\/work-items\/([^/]+)/.exec(pathname);
+  return item ? `/ng/work-items/${item[1]}` : "/ng";
+};
+
 const COLLAPSE_KEY = "kraft.sidebar_collapsed";
 const SETTINGS_OPEN_KEY = "kraft.sidebar_settings_open";
 
@@ -184,6 +191,7 @@ export function AppNav() {
           {runningCount} running · {needsYouCount} need you
         </span>
         {bindLine && <span>{bindLine}</span>}
+        <a href={newUiPath(pathname)}>Try the new UI ↗</a>
       </div>
     </aside>
   );

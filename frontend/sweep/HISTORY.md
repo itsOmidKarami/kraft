@@ -1364,3 +1364,7 @@ Baseline on `main` `7bfd54d8`: 1324 cells, 192 flagged. Full notes: `e2e-shots/D
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 1403 cells, 235 flagged (as PR 1), 0 newly flagged; shipped cells moved only by clock text (≤0.78%) and the log scroll offset of `flow-log-maximize/03@390`.
 - **Fixtures:** the mock's `/repos` (with `ngBoard`) carries a workspace rooted at kraft-plugins with two member repos.
 - **Found by the sweep and fixed:** archived rows' ticks drawn as not started.
+
+## ux2 R11 — "Try the new UI ↗" in the shipped nav (`kraft/ux2-W5-link`)
+
+Shot on the W5 PR 2 branch with this link on it, against PR 1's baseline (`main` `8e815bec`): `node sweep/wave.mjs all` **1/1 rules pass**, 0 newly flagged. 565 shipped cells with the sidebar open change by the link only (the expanded footer's last line; checked side by side on `item/gate-sidebar-open@1100~open`); no cell changed size; phone cells hide the footer, as before. No shipped CSS changed.
