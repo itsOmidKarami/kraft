@@ -1301,3 +1301,12 @@ Baseline: the ux2-W1 snapshot; rebased onto main with W3 (179 flagged before). F
 - **1114 cells identical to the baseline; 142 changed:** the new W2 cells, W3's `ng-gallery` cells, plus shipped cells moved by wall-clock text only. The largest shipped delta is 0.2% (`composer/escalate-*@390`).
 - **New screens:** `ng-search`, `ng-login`, `ng-firstrun` (steps 1-3, probing, probed, light, 1024, 1920), `ng-shell` additions. **New flows:** `flow-ng-search-keyboard`, `flow-ng-sidebar-pin`, `flow-ng-sidebar-rail`. **New rule:** `flow-completes` on `^flow-ng-`.
 - Sidebar width is read with `expect.poll`: it animates, and a read straight after a toggle saw the old width.
+
+## ux2-W4 — backend: item states (`ux2/W4`)
+
+Baseline on `main` `c9ba7e4c`: 1170 cells, 179 flagged. Final on the branch rebased onto `1492d07b`. Full notes: `e2e-shots/DIFF-ux2-W4.md` (gitignored, local).
+
+- Backend only: no `/ng` screen and no `waves.json` key.
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1256 cells, 193 flagged, 0 newly flagged. The 86 new cells and 14 extra flags are W1–W3's, already on main.
+- 174 shipped cells changed, none in size, at most 0.49% each: elapsed-time text (cropped and checked on `el-gate-card/gate-changes-default@1280`). 996 identical.
+- **Fixtures and mocks:** items carry `display_status`, `stop`, `summary` and `budget_cap.daily`; events carry `node_id`; new mocks for every W4 endpoint. The shipped UI reads none of them.
