@@ -80,6 +80,8 @@
 .tick-gate.is-done { background: var(--border); border-color: var(--border); }
 .tick-gate.is-current { background: var(--text-sub); border-color: var(--text-sub); }
 .tick-gate.is-hot { background: var(--warn); border-color: var(--warn); }
+.tick.is-run { background: color-mix(in oklab, var(--ok) 75%, transparent); }
+.tick-gate.is-run { background: color-mix(in oklab, var(--ok) 75%, transparent); border-color: transparent; }
 
 @media (max-width: 1023px) {
   .board-row { grid-template-columns: 18px 30px minmax(0, 1fr) 96px 120px; gap: 4px 10px; }
@@ -127,3 +129,37 @@
 .peek-ev-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .peek-earlier { margin: 8px 0 0; }
 .peek-error { font-size: 11.5px; }
+
+/* The composer (AreaBoard 37–62): where the new row will appear. */
+.composer { display: flex; flex-direction: column; gap: 10px; margin: 12px 8px 6px; padding: 12px 14px; border: 1.5px dashed var(--ok); border-radius: 10px; background: color-mix(in oklab, var(--ok) 4%, var(--bg)); box-shadow: 0 12px 30px color-mix(in oklab, var(--side) 50%, transparent); }
+.composer-row { display: flex; align-items: center; gap: 12px; }
+.composer-title { all: unset; flex: 1; min-width: 0; font: 500 15px/1.3 Inter, system-ui, sans-serif; color: var(--text); border-radius: 4px; }
+.composer-title::placeholder, .composer-brief::placeholder { color: var(--text-muted); }
+.composer-title:focus-visible, .composer-brief:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.composer-hint { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
+.composer-indent { padding-left: 42px; }
+.composer-brief { width: 100%; box-sizing: border-box; min-height: 38px; resize: vertical; padding: 0; border: none; background: transparent; font: 12.5px/1.55 Inter, system-ui, sans-serif; color: var(--text-sub); border-radius: 4px; }
+.composer-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.composer-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.composer-chip:is(:hover, :focus-visible), .composer-chip[aria-expanded="true"] { background: var(--surface-2); }
+.composer-chip:focus-visible, .composer-add:focus-visible, .composer-x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.composer-mono { font-family: ui-monospace, Menlo, monospace; }
+.composer-muted { color: var(--text-muted); }
+.composer-attached { cursor: default; font-size: 11.5px; max-width: min(340px, 100%); box-sizing: border-box; }
+.composer-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.composer-x { padding: 0 2px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 3px; }
+.composer-x:hover { color: var(--text); }
+.composer-add { padding: 3px 9px; border: 1.5px dashed var(--ok); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--ok); cursor: pointer; }
+.composer-add:hover { background: color-mix(in oklab, var(--ok) 14%, transparent); }
+.composer-gap { flex: 1; }
+.composer-run { font-size: 11.5px; color: var(--text-sub); }
+.composer-ticks { width: 150px; }
+.composer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 0 0 42px; border-top: 1px solid var(--line); }
+.composer-note, .composer-ask { flex: 1; font-size: 11.5px; color: var(--text-muted); }
+.composer-ask { font-size: 12px; color: var(--text-sub); }
+.composer-split { display: inline-flex; }
+.composer-create { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.composer-toggle { padding: 0 8px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.composer-attach { display: flex; flex-direction: column; gap: 2px; width: 320px; }
+.composer-attach input { margin: 2px 2px 4px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: inherit; font-size: 12px; color: var(--text); }
+.composer-attach input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

@@ -272,6 +272,26 @@ const FLOWS: Flow[] = [
     }, wait: 700 },
     { name: "ctrl-enter-opens-the-item", run: async (p) => { await p.getByRole("button", { name: /^Fix flaky retry test/ }).focus(); await p.keyboard.press("Control+Enter"); await expect(p).toHaveURL(/\/ng\/work-items\/[0-9a-f]+$/); } },
   ] },
+  // ux2-W6 F: the composer from the header button; a spec by its path; ⌘↵ sends the dry run, then the create with autostart.
+  { name: "ng-composer-create", widths: [1280], mock: { ngBoard: true }, start: ngBoard(), steps: [
+    { name: "open", run: async (p) => { await p.getByRole("button", { name: "+ New work item" }).click(); await expect(p.getByRole("textbox", { name: "Title" })).toBeFocused(); await p.getByText(/of 15 nodes run/).waitFor(); } },
+    { name: "title", run: async (p) => { await p.keyboard.type("Design the caching layer for document search"); } },
+    { name: "attach-spec", run: async (p) => {
+      await p.getByRole("button", { name: "+ spec" }).click();
+      await expect(p.getByRole("textbox", { name: /Search specs/ })).toBeFocused();
+      await p.keyboard.type("docs/specs/doc-search-cache.md"); await p.waitForTimeout(300); await p.keyboard.press("Enter");
+      await expect(p.getByText("13 of 15 nodes run · 4 gates")).toBeVisible();
+    } },
+    { name: "cmd-enter-creates-and-starts", run: async (p) => {
+      const sent = p.waitForRequest((r) => r.method() === "POST" && /\/work-items$/.test(new URL(r.url()).pathname) && !r.url().includes("dry_run"));
+      await p.getByRole("textbox", { name: "Title" }).focus();
+      await p.keyboard.press("Control+Enter");
+      const r = await sent;
+      expect(r.postDataJSON()).toMatchObject({ title: "Design the caching layer for document search", autostart: true, attachments: [{ kind: "spec", path: "docs/specs/doc-search-cache.md" }] });
+      await expect(p.getByRole("region", { name: "New work item" })).toHaveCount(0);
+      await expect(p).toHaveURL(/[?&]sel=/);
+    }, wait: 700 },
+  ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
     { name: "collapse", run: async (p) => { const b = p.getByRole("button", { name: /collapse/i }); if (await b.count()) await b.click(); } },

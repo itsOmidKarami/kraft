@@ -1,5 +1,5 @@
-import { hex, t, type ItemBundle, type Variant } from "./fixtures";
-import { buildNgItem, type NgScenario } from "./ngItems";
+import { hex, repo, t, type ItemBundle, type Variant } from "./fixtures";
+import { buildNgItem, NG_NODES, type NgScenario } from "./ngItems";
 
 /**
  * The /ng board's list (ux2-W6): one row per kind of row AreaBoard.dc.html
@@ -78,4 +78,31 @@ export function buildNgBoard(variant: Variant, bundles: Record<string, ItemBundl
   if (variant === "many")
     for (let k = 1; k < 4; k++) list.push(...build(ROWS.map((r) => ({ ...r, title: `${r.title} (${k + 1})`, bead: `${r.bead}${k}`, age: r.age + k * 7 })), "default", 1300 + k * 50, bundles));
   return { list, archived: build(ARCHIVED, variant, 1500, bundles) };
+}
+
+/** The composer's chains (ux2-W6 F), V1 as the server resolves them: spec and
+ *  its gate covered by an attached spec, plan and its gate by a plan. */
+const COVER: Record<string, string> = { spec: "spec", spec_approval: "spec", plan: "plan", plan_approval: "plan" };
+const v1 = (ids: string[]) => NG_NODES.filter((n) => ids.includes(n.id)).map((n) => ({ ...n, covered_by: COVER[n.id] ?? null }));
+export const NG_CHAINS = [
+  { id: "default", nodes: v1(NG_NODES.map((n) => n.id)), gates: 4 },
+  { id: "docs_only", nodes: v1(["spec", "spec_approval", "implementation", "work_brief", "merge_request"]), gates: 1 },
+].map((c) => ({ ...c, gates: c.nodes.filter((n) => n.kind === "gate").length }));
+export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs"].map((name, i) => ({
+  ...repo(R(name), i), enabled: true, default_chain_template: name === "kraft-docs" ? "docs_only" : "default",
+}));
+
+/** B33's dry run over NG_CHAINS: what attachments cover and what skip_nodes drop. */
+export function ngDryRun(body: { chain_template?: string; attachments?: { kind: string; path: string }[]; skip_nodes?: string[] }) {
+  const missing = (body.attachments ?? []).find((a) => a.path.includes("missing"));
+  if (missing) return { status: 422, body: { detail: `attachment not found: ${missing.path}` } };
+  const tpl = NG_CHAINS.find((c) => c.id === body.chain_template) ?? NG_CHAINS[0];
+  const kinds = new Set((body.attachments ?? []).map((a) => a.kind));
+  const skipped = tpl.nodes.flatMap((n) =>
+    n.covered_by && kinds.has(n.covered_by) ? [{ node: n.id, why: "covered_by", kind: n.covered_by }] : (body.skip_nodes ?? []).includes(n.id) ? [{ node: n.id, why: "skip" }] : []);
+  const nodes = tpl.nodes.filter((n) => !skipped.some((s) => s.node === n.id));
+  return { status: 200, body: {
+    dry_run: true, nodes, skipped, gates: nodes.filter((n) => n.kind === "gate").map((n) => n.id),
+    caps: { budget_usd: 5, budget_source: "policy", daily_usd: 50, nodes: Object.fromEntries(nodes.filter((n) => n.fix_loop).map((n) => [n.id, { attempts: 3, wall_clock_s: 1800 }])) },
+  } };
 }

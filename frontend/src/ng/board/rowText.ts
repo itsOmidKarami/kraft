@@ -77,8 +77,9 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
   return { kind, icon, state };
 }
 
-/** The tick strip: one per node, gates as diamonds (Ticks.tsx draws them). */
-export type Tick = { gate: boolean; state: "done" | "current" | "hot" | "todo" };
+/** The tick strip: one per node, gates as diamonds (Ticks.tsx draws them).
+ *  `run` is the composer's preview: a node that will run. */
+export type Tick = { gate: boolean; state: "done" | "current" | "hot" | "todo" | "run" };
 
 export function ticksOf(i: Row): Tick[] {
   const nodes = i.chain_definition?.nodes ?? [];

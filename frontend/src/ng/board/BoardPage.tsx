@@ -14,6 +14,7 @@ import { Row } from "./Row";
 import type { RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import { BulkBar } from "./BulkBar";
+import { Composer } from "./Composer";
 import { Peek, type PeekTab } from "./Peek";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
@@ -225,6 +226,7 @@ export function BoardPage() {
           onClick={(e) => { if (query.sel && !(e.target as Element).closest(".board-row, .board-group-head, button, a, input")) setQuery({ sel: "" }); }}
         >
           <div className="board-list-inner">
+            {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
             {load.state === "loading" && items.length === 0 ? <Skeleton /> : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">

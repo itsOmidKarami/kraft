@@ -127,6 +127,17 @@ async function ngBoard(c: Ctx, opts: { tail?: string; side?: "pinned" | "rail"; 
   await ng(c, `/ng/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
+/** The composer with its repos, chains and first dry run in. */
+const composerReady = async (p: Page) => { await p.getByText(/nodes run ·/).waitFor(); await p.waitForTimeout(400); };
+const composerFilled = async (p: Page) => {
+  await composerReady(p);
+  await p.getByRole("textbox", { name: "Title" }).fill("Design the caching layer for document search");
+  await p.getByRole("textbox", { name: "Brief" }).fill("Cache embeddings by content hash; invalidate on reindex.");
+  await p.getByRole("button", { name: "+ spec" }).click();
+  const box = p.getByRole("textbox", { name: /Search specs/ });
+  await box.fill("docs/specs/doc-search-cache.md"); await p.waitForTimeout(300); await box.press("Enter");
+  await p.getByText(/of 15 nodes run/).waitFor(); await p.waitForTimeout(500);
+};
 /** A board row per peek variant, by the start of its title (ngBoard.ts). */
 const PEEK_ROWS = {
   "needs-gate": "Design the caching layer", question: "Add rate limit headers", capped: "Fix flaky retry test", failed: "Retry on 429",
@@ -390,6 +401,19 @@ const CASES: Case[] = [
     run: (c) => ngBoard(c, { then: async (p) => { await peekRow(PEEK_ROWS.capped)(p); await p.getByRole("tab", { name: tab === "activity" ? "Activity" : "Config" }).click(); } }),
   })),
   { screen: "ng-board-peek", variant: "running", data: "default", widths: [768], mock: { ngBoard: true }, run: (c) => ngBoard(c, { side: "rail", then: peekRow(PEEK_ROWS.running) }) },
+  // F: the composer at the top of the board, as it fills, its chain menu, the attach search, the discard ask, a refused attachment.
+  { screen: "ng-new-item", variant: "composer", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerReady }) },
+  { screen: "ng-new-item", variant: "filled", data: "default", widths: [1024, 1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerFilled }) },
+  { screen: "ng-new-item", variant: "chain-menu", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: /^default/ }).click(); await p.getByRole("menu").waitFor(); } }) },
+  { screen: "ng-new-item", variant: "attach", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: "+ spec" }).click(); await p.getByRole("textbox", { name: /Search specs/ }).fill("cache"); await p.waitForTimeout(500); } }) },
+  { screen: "ng-new-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerFilled(p); await p.keyboard.press("Escape"); await p.getByText(/Discard this draft/).waitFor(); } }) },
+  { screen: "ng-new-item", variant: "error", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => {
+    await composerFilled(p);
+    await p.getByRole("button", { name: "+ plan" }).click();
+    const box = p.getByRole("textbox", { name: /Search plans/ });
+    await box.fill("docs/plans/missing.md"); await p.waitForTimeout(300); await box.press("Enter");
+    await p.getByText(/attachment not found/).waitFor();
+  } }) },
   { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
   { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 

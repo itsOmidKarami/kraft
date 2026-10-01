@@ -259,4 +259,15 @@ describe("BoardPage", () => {
     expect(await screen.findByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
   });
+
+  it("opens the composer from + New work item, closing the peek", async () => {
+    put(item("r1", "running"));
+    vi.spyOn(api, "getTemplates").mockResolvedValue([]);
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")] });
+    board("/?sel=r1");
+    await userEvent.click(await screen.findByRole("button", { name: "+ New work item" }));
+    expect(where()).toBe("/?new=1");
+    expect(screen.getByRole("region", { name: "New work item" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: /pane/ })).toBeNull();
+  });
 });

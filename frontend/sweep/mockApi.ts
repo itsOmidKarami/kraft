@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { NG_CHAINS, NG_REPOS, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 
 export interface MockOptions {
@@ -66,6 +67,14 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const arch = q.get("archived") === "true";
       const list = opts.ngBoard ? (opts.ngBoard === "empty" ? [] : arch ? S.ngArchived : S.ngBoard) : arch ? S.archived : S.items;
       return json(route, { items: list, cursor: 4242 });
+    }
+    if (p === "/work-items" && method === "POST" && q.get("dry_run") && opts.ngBoard) {
+      const r = ngDryRun(req.postDataJSON() ?? {});
+      return json(route, r.body, r.status);
+    }
+    // ux2-W6: a create from the /ng composer lands on the board's never-started row, which has a detail for the peek.
+    if (p === "/work-items" && method === "POST" && !q.get("dry_run") && opts.ngBoard) {
+      return json(route, { id: S.ngBoard.find((i) => i.bead_id === "kraft-f5d3")?.id ?? S.ngBoard[0]?.id, status: "paused" }, 201);
     }
     if (p === "/work-items" && method === "POST" && q.get("dry_run")) {
       const nodes = S.items[0]?.chain_definition?.nodes ?? [];
@@ -215,12 +224,12 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     /* settings */
     const st = S.settings;
     if (p === "/repos") {
-      if (method === "GET") return json(route, { repos: st.repos });
+      if (method === "GET") return json(route, { repos: opts.ngBoard && opts.ngBoard !== "empty" ? NG_REPOS : st.repos });
       if (method === "DELETE") return route.fulfill({ status: 204 });
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
-    if (p === "/templates/chains") return json(route, st.templates);
+    if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
     if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {
