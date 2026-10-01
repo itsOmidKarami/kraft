@@ -55,7 +55,7 @@ jobs:
           code=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             files=$(git diff --name-only "$BASE" HEAD)
-            if [ -z "$(printf '%s\n' "$files" | grep -vE '^([^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*)$')" ]; then
+            if [ -z "$(printf '%s\n' "$files" | grep -vE '^([^/]+\.md|docsite/.*|\.github/assets/.*|docs/[^/]*\.md)$')" ]; then
               code=false
             fi
           fi
