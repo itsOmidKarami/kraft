@@ -187,6 +187,22 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
     return wid
 
 
+async def restart(app) -> None:
+    """Replace the poller task, so a changed `st.intake` takes effect without a
+    restart: `interval_s` is read once at task start."""
+    st = app.state
+    async with st.intake_lock:
+        task = st.intake_task
+        # Clear it before the await: a second caller that gets in here while we
+        # are waiting must not find, and cancel, a task we are already retiring.
+        st.intake_task = None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if st.intake["enabled"]:
+            st.intake_task = asyncio.ensure_future(poller(app))
+
+
 async def poller(app) -> None:
     """`tick` on a fixed interval until cancelled."""
     raw = app.state.intake.get("interval_s", config_mod.INTAKE_DEFAULT["interval_s"])

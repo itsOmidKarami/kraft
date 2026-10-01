@@ -99,3 +99,23 @@ def test_a_write_that_parses_to_the_published_file_drops_the_draft(conn, clock):
     assert store.get(conn, "chains", "x") is None
     # Two texts that do not parse are not equal to each other.
     assert put(conn, {CHAIN: "nodes: [\n"}, {CHAIN: "nodes: {\n"}) is True
+
+
+@pytest.mark.parametrize(
+    ("area", "files"),
+    [
+        ("harnesses", ("harnesses.yaml", "policy.yaml")),
+        ("repos", ("repos.yaml",)),
+        ("policy", ("policy.yaml",)),
+        ("intake", ("intake.yaml", "policy.yaml")),
+    ],
+)
+def test_a_config_area_registers_its_files_under_its_own_name_as_key(area, files):
+    from kraft.drafts import areas
+
+    areas.register()
+    found = store.AREAS[area]
+    assert found.files(area) == files
+    assert found.valid(area)
+    assert not found.valid("x")
+    assert found.working is not None

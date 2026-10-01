@@ -566,16 +566,7 @@ async def put_intake(body: IntakeBody, request: Request):
     data = body.model_dump()
     config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
     st.intake = data
-    async with st.intake_lock:
-        task = st.intake_task
-        # Clear it before the await: a second saver that gets in here while we
-        # are waiting must not find, and cancel, a task we are already retiring.
-        st.intake_task = None
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        if data["enabled"]:
-            st.intake_task = asyncio.ensure_future(intake_mod.poller(app_))
+    await intake_mod.restart(app_)
     return data
 
 
