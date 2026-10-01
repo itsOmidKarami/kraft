@@ -7,13 +7,16 @@ afterEach(() => vi.unstubAllGlobals());
 const pane = (name: string) => screen.findByRole("complementary", { name: `${name} pane` });
 
 describe("harness pane", () => {
-  it("shows the file's fields read-only, whether the executable is found, and what the provider accepts", async () => {
+  it("shows the file's fields as controls, whether the executable is found, and what the provider accepts", async () => {
     serve(view(resolved()));
     renderPage("?harness=gemini");
     const p = await pane("gemini");
     expect(within(p).getByText("not on PATH")).toBeInTheDocument();
-    expect(within(p).getByText("enabled")).toBeInTheDocument();
-    expect(within(p).getByText("permission mode")).toBeInTheDocument();
+    expect(within(p).getByRole("switch", { name: "Disable gemini" })).toBeChecked();
+    expect(within(p).getByRole("textbox", { name: "executable" })).toHaveValue("");
+    expect(within(p).getByRole("textbox", { name: "default model" })).toHaveValue("");
+    expect(within(p).queryByRole("radiogroup", { name: "Default effort" })).toBeNull();
+    expect(within(p).queryByText("permission mode")).toBeNull();
     expect(within(p).getByText(/effort: none/)).toBeInTheDocument();
   });
 
@@ -21,9 +24,63 @@ describe("harness pane", () => {
     serve(view(resolved()));
     renderPage("?harness=claude");
     const p = await pane("claude");
-    expect(within(p).getByText("acceptEdits")).toBeInTheDocument();
     expect(await within(p).findByText("effort: low, medium, high, xhigh, max")).toBeInTheDocument();
     expect(await within(p).findByText("models: sonnet, opus, haiku")).toBeInTheDocument();
+    expect(within(p).getByRole("combobox", { name: "default model" })).toHaveValue("sonnet");
+    expect(within(p).getByRole("radio", { name: "not set", checked: true })).toBeInTheDocument();
+    expect(within(p).getByRole("radio", { name: "acceptEdits" })).toBeChecked();
+  });
+
+  it("each control sends one set_harness patch with its own field, and an empty one clears", async () => {
+    const server = serve(view(resolved()));
+    renderPage("?harness=claude-sandbox");
+    const p = await pane("claude-sandbox");
+    await userEvent.click(within(p).getByRole("switch", { name: "Disable claude-sandbox" }));
+    const exe = within(p).getByRole("textbox", { name: "executable" });
+    await userEvent.clear(exe);
+    await userEvent.type(exe, "/opt/claude{Enter}");
+    await userEvent.clear(exe);
+    await userEvent.type(exe, "{Enter}");
+    const model = within(p).getByRole("combobox", { name: "default model" });
+    await userEvent.type(model, "opus{Enter}");
+    await userEvent.click(within(p).getByRole("radio", { name: "max" }));
+    await userEvent.click(within(p).getByRole("radio", { name: "plan" }));
+    const id = "claude-sandbox";
+    await waitFor(() => expect(server.ops).toHaveLength(6));
+    expect(server.ops.flat()).toEqual([
+      { op: "set_harness", id, patch: { enabled: false } },
+      { op: "set_harness", id, patch: { executable: "/opt/claude" } },
+      { op: "set_harness", id, patch: { executable: null } },
+      { op: "set_harness", id, patch: { defaults: { model: "opus" } } },
+      { op: "set_harness", id, patch: { defaults: { effort: "max" } } },
+      { op: "set_harness", id, patch: { defaults: { permission_mode: "plan" } } },
+    ]);
+  });
+
+  it("clearing a default sends null, and not set is its own choice", async () => {
+    const server = serve(view(resolved()));
+    renderPage("?harness=claude");
+    const p = await pane("claude");
+    const model = within(p).getByRole("combobox", { name: "default model" });
+    await userEvent.clear(model);
+    await userEvent.type(model, "{Enter}");
+    await userEvent.click(within(p).getByRole("radiogroup", { name: "Permission mode" }).querySelector('[role="radio"]') as HTMLElement);
+    await waitFor(() => expect(server.ops).toHaveLength(2));
+    expect(server.ops.flat()).toEqual([
+      { op: "set_harness", id: "claude", patch: { defaults: { model: null } } },
+      { op: "set_harness", id: "claude", patch: { defaults: { permission_mode: null } } },
+    ]);
+  });
+
+  it("a refusal is shown in the pane, and a changed harness turns its fields amber", async () => {
+    serve(view(resolved(), { changes: [{ path: "harnesses.claude", kind: "change", summary: "enabled" }] }), {
+      opsAnswer: () => new Response(JSON.stringify({ detail: "executable is a command name or path, or null" }), { status: 422 }),
+    });
+    renderPage("?harness=claude");
+    const p = await pane("claude");
+    expect(within(p).getByRole("textbox", { name: "executable" })).toHaveClass("is-changed");
+    await userEvent.click(within(p).getByRole("switch", { name: "Disable claude" }));
+    expect(await within(p).findByRole("alert")).toHaveTextContent("executable is a command name");
   });
 
   it("the Access control sends set_access once per change with the state's own name", async () => {

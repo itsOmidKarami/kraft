@@ -34,6 +34,8 @@ interface State {
   escalation: string | null;
   profiles: Record<string, Record<string, { model: string; effort?: string }>>;
   extra: Task[];
+  /** Each harness's own fields (`set_harness`). */
+  fields: Record<string, { enabled: boolean; executable: string | null; defaults: Record<string, string> }>;
 }
 
 const initial = (scenario: Scenario): State => {
@@ -48,6 +50,7 @@ const initial = (scenario: Scenario): State => {
       deep: { claude: { model: "opus", effort: "high" }, codex: { model: "gpt-5.6-sol", effort: "high" } },
     },
     extra: [],
+    fields: Object.fromEntries(HARNESSES.map((h) => [h.id, { enabled: true, executable: h.executable ?? null, defaults: { ...h.defaults } }])),
   };
   if (scenario === "problems") {
     base.profiles.fast = { claude: { model: "haiku", effort: "low" } };
@@ -84,6 +87,7 @@ export function harnessesServer(scenario: Scenario) {
     const out: { path: string; kind: string; summary: string; fields: string[] }[] = [];
     for (const [h, a] of Object.entries(state.access)) if (a !== original.access[h]) out.push({ path: `access.${h}`, kind: "change", summary: `${original.access[h]} -> ${a}`, fields: ["allowed_harnesses"] });
     for (const [name, p] of Object.entries(state.profiles)) if (JSON.stringify(p) !== JSON.stringify(original.profiles[name])) out.push({ path: `profiles.${name}`, kind: original.profiles[name] ? "change" : "add", summary: "providers", fields: ["providers"] });
+    for (const [h, f] of Object.entries(state.fields)) if (JSON.stringify(f) !== JSON.stringify(original.fields[h])) out.push({ path: `harnesses.${h}`, kind: "change", summary: Object.keys(f).filter((k) => JSON.stringify((f as any)[k]) !== JSON.stringify((original.fields[h] as any)[k])).join(", "), fields: Object.keys(f).filter((k) => JSON.stringify((f as any)[k]) !== JSON.stringify((original.fields[h] as any)[k])).sort() });
     if (JSON.stringify(state.tools) !== JSON.stringify(original.tools)) out.push({ path: "maxima.allowed_tools", kind: "change", summary: "allowed_tools", fields: ["allowed_tools"] });
     if (JSON.stringify(state.grants) !== JSON.stringify(original.grants) || state.escalation !== original.escalation) out.push({ path: "defaults.escalation", kind: "change", summary: "escalation", fields: ["escalation_harness"] });
     return out;
@@ -91,7 +95,7 @@ export function harnessesServer(scenario: Scenario) {
 
   const resolved = () => ({
     harnesses: HARNESSES.map((h) => ({
-      id: h.id, state: state.access[h.id], executable_found: h.found, provider: h.provider, enabled: true, executable: h.executable ?? null, defaults: h.defaults,
+      id: h.id, state: state.access[h.id], executable_found: h.found, provider: h.provider, ...state.fields[h.id],
       tasks: tasksOf(h.id).map((task) => ({ ...task })),
     })),
     allowed_tools: state.tools,
@@ -124,6 +128,12 @@ export function harnessesServer(scenario: Scenario) {
       else if (o.op === "set_allowed_tools") state.tools = o.tools ?? [];
       else if (o.op === "set_escalation") { state.escalation = o.harness; state.grants = o.grants ?? []; }
       else if (o.op === "set_profile") for (const [prov, e] of Object.entries<any>(o.patch.providers ?? {})) { if (e === null) delete state.profiles[o.name][prov]; else state.profiles[o.name][prov] = e; }
+      else if (o.op === "set_harness") {
+        const f = state.fields[o.id], p = o.patch;
+        if ("enabled" in p) f.enabled = p.enabled;
+        if ("executable" in p) f.executable = p.executable;
+        for (const [k, v] of Object.entries<any>(p.defaults ?? {})) { if (v === null) delete f.defaults[k]; else f.defaults[k] = v; }
+      }
       else if (o.op === "add_profile") state.profiles[o.name] = o.copy_from ? JSON.parse(JSON.stringify(state.profiles[o.copy_from])) : {};
     }
   };

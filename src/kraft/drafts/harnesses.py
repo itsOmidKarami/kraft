@@ -34,6 +34,7 @@ NAME = "harnesses"
 FILES = ("harnesses.yaml", "policy.yaml")
 STATES = ("available", "override", "never")
 _PROFILE_KEYS = ("providers", "model", "effort", "fallback")
+_HARNESS_KEYS = ("enabled", "executable", "defaults")
 
 
 def working(st, key, files, *, exists):
@@ -278,7 +279,51 @@ def set_profile(d, name: str, patch: dict) -> None:
             raise OpError("fallback is a list of entries, or null")
 
 
+def set_harness(d, id: str, patch: dict) -> None:
+    """Edit one harness's own fields: `enabled`, `executable` (null clears it) and
+    `defaults`, which merges per option (null removes one). Which options a
+    provider accepts is checked by the resolve, like any other file edit."""
+    harness = _section(d.file("harnesses.yaml"), "harnesses").get(id)
+    if not isinstance(harness, dict):
+        known = _universe(d.read("harnesses.yaml"))
+        raise OpError(f"no harness {id!r} in harnesses.yaml; known: {known}")
+    if not isinstance(patch, dict) or not patch:
+        raise OpError("patch is a mapping of the keys to change")
+    if unknown := sorted(set(patch) - set(_HARNESS_KEYS)):
+        raise OpError(f"patch sets {unknown}; a harness has {list(_HARNESS_KEYS)}")
+    if "enabled" in patch:
+        if not isinstance(patch["enabled"], bool):
+            raise OpError("enabled is true or false")
+        harness["enabled"] = patch["enabled"]
+    if "executable" in patch:
+        value = patch["executable"]
+        if value is None:
+            harness.pop("executable", None)
+        elif isinstance(value, str) and value.strip():
+            harness["executable"] = value.strip()
+        else:
+            raise OpError("executable is a command name or path, or null")
+    if "defaults" in patch:
+        found = patch["defaults"]
+        if not isinstance(found, dict) or not all(
+            v is None or isinstance(v, str) for v in found.values()
+        ):
+            raise OpError("defaults is a mapping of option to text, null removing one")
+        defaults = harness.get("defaults")
+        defaults = dict(defaults) if isinstance(defaults, dict) else {}
+        for option, value in found.items():
+            if value is None or not value.strip():
+                defaults.pop(option, None)
+            else:
+                defaults[option] = value
+        if defaults:
+            harness["defaults"] = defaults
+        else:
+            harness.pop("defaults", None)
+
+
 OPS: dict = {
+    "set_harness": set_harness,
     "set_access": set_access,
     "set_allowed_tools": set_allowed_tools,
     "set_escalation": set_escalation,
@@ -454,7 +499,7 @@ def _escalation_problem(states: dict[str, str], harness: object) -> list[dict]:
     ]
 
 
-def _profile_changes(before: dict, after: dict) -> list[dict]:
+def _entry_changes(before: dict, after: dict, prefix: str) -> list[dict]:
     out = []
     for name in dict.fromkeys([*before, *after]):
         a, b = before.get(name), after.get(name)
@@ -465,7 +510,7 @@ def _profile_changes(before: dict, after: dict) -> list[dict]:
         fields = sorted(k for k in keys if (a or {}).get(k) != (b or {}).get(k))
         out.append(
             {
-                "path": f"profiles.{name}",
+                "path": f"{prefix}.{name}",
                 "kind": kind,
                 "summary": ", ".join(fields),
                 "fields": fields,
@@ -542,7 +587,10 @@ def resolve(st, key, raw, files, published) -> dict:
         for h in universe
         if h in changed
     ]
-    out["changes"] += _profile_changes(_section(before["harnesses.yaml"], "profiles"), profiles)
+    for section in ("harnesses", "profiles"):
+        out["changes"] += _entry_changes(
+            _section(before["harnesses.yaml"], section), _section(harnesses_yaml, section), section
+        )
     hit = [(chain, at) for chain, at, task in chosen if task.harness in changed]
     out["impact"] = {"tasks": len(hit), "chains": sorted({c for c, _ in hit})}
     return out
