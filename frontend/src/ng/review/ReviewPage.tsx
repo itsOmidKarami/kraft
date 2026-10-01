@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
@@ -7,8 +7,10 @@ import { placeUrl } from "../item/url";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
+import { DiffView, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
-import { byNodes } from "./model";
+import { byNodes, folders, unresolved } from "./model";
+import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
 import { Toolbar } from "./Toolbar";
 import { useReviewPlace } from "./url";
@@ -45,10 +47,19 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   // Under 1024 the list starts closed and opens over the diff (R7).
   const [treeOpen, setTreeOpen] = useState(!overlay);
   useEffect(() => setTreeOpen(!overlay), [overlay]);
-  const [, setCollapsed] = useState<Set<string> | "all">(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [picked, setPicked] = useState<Pick | null>(null);
+  // Where the composer is open: a pick, or a whole file (F).
+  const [, setComposer] = useState<Pick | { path: string } | null>(null);
   const viewed = useViewed(item.id, place.to, compare);
   const all = compare.state === "ready" ? compare.data.files : [];
   const files = byNodes(all, place.nodes);
+  const diffText = compare.state === "ready" ? compare.data.diff : "";
+  const patch = useMemo(() => new Map(parsePatch(diffText).map((f) => [f.path, f])), [diffText]);
+  const notShown = new Set(compare.state === "ready" && compare.data.truncated ? all.filter((f) => !patch.has(f.path)).map((f) => f.path) : []);
+  const threadList = threads.state === "ready" ? threads.data : [];
+  // With no file chosen, the tree's first: what one-file mode shows.
+  const current = place.file && files.some((f) => f.path === place.file) ? place.file : folders(files)[0]?.files[0]?.path ?? null;
   const select = (file: string) => {
     setPlace({ file });
     if (overlay) setTreeOpen(false);
@@ -65,7 +76,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         files={all}
         treeOpen={treeOpen}
         onTree={() => setTreeOpen((o) => !o)}
-        onCollapseAll={() => setCollapsed("all")}
+        onCollapseAll={() => setCollapsed(new Set(all.map((f) => f.path)))}
         onExpandAll={() => setCollapsed(new Set())}
         prefs={diff.prefs}
         setPrefs={diff.set}
@@ -76,9 +87,9 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           <FileTree
             files={files}
             untracked={compare.state === "ready" ? compare.data.untracked : []}
-            notShown={new Set()}
-            threads={threads.state === "ready" ? threads.data : []}
-            selected={place.file}
+            notShown={notShown}
+            threads={threadList}
+            selected={current}
             isViewed={viewed.isViewed}
             onSelect={select}
             onViewed={viewed.toggle}
@@ -92,7 +103,29 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               <Button onClick={() => setPlace({ from: "base", to: "latest" })}>Compare from base</Button>
             </div>
           )}
-          {compare.state === "ready" && !files.length && <p className="rv-empty">No files match this comparison.</p>}
+          {compare.state === "ready" && (
+            <DiffView
+              files={files}
+              patch={patch}
+              prefs={diff.prefs}
+              collapsed={collapsed}
+              onCollapse={(path, c) => setCollapsed((s) => {
+                const n = new Set(s);
+                if (c) n.add(path);
+                else n.delete(path);
+                return n;
+              })}
+              selected={current}
+              isViewed={viewed.isViewed}
+              onViewed={viewed.toggle}
+              threadCount={(path) => threadList.filter((t) => t.file_path === path && unresolved(t)).length}
+              picked={picked}
+              onPick={setPicked}
+              onCompose={setComposer}
+              onFileComment={(path) => setComposer({ path })}
+              truncated={compare.data.truncated ? { bytes: compare.data.diff_max_bytes, files: notShown.size } : null}
+            />
+          )}
         </section>
       </div>
     </div>

@@ -50,6 +50,7 @@
 .rv-tree-count { flex: 1 1 auto; }
 .rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; }
 .rv-tree-body { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 6px; }
+.rv-folder-row > .rv-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 11.5px; text-align: left; cursor: pointer; }
 .rv-folder-row.is-static { cursor: default; }
 .rv-folder-row:not(.is-static):is(:hover, :focus-visible) { background: var(--line); }
@@ -64,3 +65,43 @@
 .rv-file-row.is-on .rv-file-name { color: var(--text); }
 .rv-tree-threads { flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: 10.5px; text-align: center; }
 .rv-tree-foot { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--text-muted); }
+
+/* Diff (prototype 419–490). Tints follow theme.diff.colours; the marks stay,
+   so the diff reads without colour (Decisions §13). */
+.rv-files { --rv-add: var(--diff-add-theme); --rv-del: var(--diff-del-theme); display: flex; flex-direction: column; gap: 14px; min-width: 100%; width: max-content; box-sizing: border-box; padding: 14px 16px 24px; }
+.rv-files[data-colours="safe"] { --rv-add: var(--diff-add-safe); --rv-del: var(--diff-del-safe); }
+.rv-files[data-colours="plain"] { --rv-add: var(--diff-add-plain); --rv-del: var(--diff-del-plain); }
+.rv-files.is-wrap { width: auto; }
+.rv-file { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.rv-file-head { position: sticky; top: -14px; left: 0; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 6px 8px; border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; background: var(--surface); font-size: 12px; }
+.rv-fold { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
+.rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; }
+.rv-file-note { color: var(--text-muted); white-space: nowrap; }
+.rv-file-threads { padding: 1px 7px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: 11px; white-space: nowrap; }
+.rv-viewed-btn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-sub); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.rv-viewed-btn[aria-pressed="true"] { color: var(--text); }
+.rv-viewed-btn:is(:hover, :focus-visible) { background: var(--line); }
+.rv-collapsed { display: block; width: 100%; padding: 8px 12px; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; text-align: left; cursor: pointer; }
+.rv-collapsed:is(:hover, :focus-visible) { color: var(--text-sub); }
+.rv-file-msg { margin: 0; padding: 10px 12px; color: var(--text-muted); font-size: 12px; }
+.rv-lines { font: 12px/1.6 ui-monospace, Menlo, monospace; }
+.rv-lines:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.rv-hunk { padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: 11.5px; white-space: pre; }
+.rv-row { display: flex; align-items: stretch; min-width: 100%; }
+.rv-row.is-split > .rv-half { flex: 1 1 50%; min-width: 0; display: flex; }
+.rv-row.is-split > .rv-half + .rv-half { border-left: 1px solid var(--line); }
+.rv-num { flex: none; align-self: flex-start; width: 44px; padding: 0 8px 0 0; border: 0; background: transparent; color: var(--text-faint); font: inherit; text-align: right; cursor: pointer; user-select: none; }
+.rv-num:hover { color: var(--text-sub); }
+.rv-mark { flex: none; align-self: flex-start; width: 16px; color: var(--text-muted); text-align: center; user-select: none; }
+.rv-code { flex: 1 1 auto; padding-right: 16px; color: var(--text-sub); font: inherit; white-space: pre; }
+.rv-files.is-wrap .rv-code { white-space: pre-wrap; overflow-wrap: anywhere; }
+:is(.rv-row, .rv-half).is-add { background: color-mix(in oklab, var(--rv-add) 9%, transparent); }
+:is(.rv-row, .rv-half).is-add .rv-mark { color: var(--rv-add); }
+:is(.rv-row, .rv-half).is-del { background: color-mix(in oklab, var(--rv-del) 9%, transparent); }
+:is(.rv-row, .rv-half).is-del .rv-mark { color: var(--rv-del); }
+.rv-half.is-none { background: var(--surface-2); }
+.is-add .rv-word-change { background: color-mix(in oklab, var(--rv-add) 30%, transparent); border-radius: 2px; }
+.is-del .rv-word-change { background: color-mix(in oklab, var(--rv-del) 30%, transparent); border-radius: 2px; }
+:is(.rv-row, .rv-half).is-picked { box-shadow: inset 3px 0 0 var(--text-sub); background: color-mix(in oklab, var(--selection) 10%, transparent); }
+.rv-after { padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: Inter, system-ui, sans-serif; }
