@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { Theme } from "../../types";
 import { AppearancePage } from "./AppearancePage";
+import { WithHeader } from "./testkit";
 
 const BASE: Theme = {
   palette: "nocturne",
@@ -21,7 +22,7 @@ function setup(theme: Partial<Theme> = {}) {
   // As the server does: merge into the file, answer with the whole of it.
   let server = loaded;
   const put = vi.spyOn(api, "putTheme").mockImplementation(async (body) => (server = { ...server, ...body, derived: false }));
-  render(<AppearancePage />);
+  render(<WithHeader><AppearancePage /></WithHeader>);
   return put;
 }
 const pressed = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) }).getAttribute("aria-pressed");
@@ -127,5 +128,31 @@ describe("ng AppearancePage", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent("Not saved: 422: nope");
       expect(screen.getByRole("switch", { name: "Wrap long lines" })).toHaveAttribute("aria-checked", "false");
     });
+  });
+
+  it("shows theme.yaml from the page's state under the header's YAML button, kept current as it changes", async () => {
+    setup();
+    await screen.findByRole("radiogroup", { name: "Mode" });
+    fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+    expect(screen.getByLabelText("theme.yaml").textContent).toBe("mode: dark\nsurface: slate\naccent: blue\ncolour_amount: subtle\ncode_scheme:\n  light: auto\n  dark: auto\ndiff:\n  layout: unified\n  colours: theme\n  show_whitespace: true\n  word_highlight: true\n  wrap_lines: false\n  one_file_at_a_time: true\ndensity: compact\nboard:\n  open_in: peek");
+    fireEvent.click(screen.getByRole("button", { name: /^Moss/ }));
+    await waitFor(() => expect(screen.getByLabelText("theme.yaml").textContent).toContain("surface: moss"));
+  });
+
+  it("starts with the pane collapsed, and its Overview lists the values in force", async () => {
+    setup({ colour_amount: "mono" });
+    await screen.findByRole("radiogroup", { name: "Mode" });
+    expect(screen.getByRole("complementary", { name: "appearance pane, collapsed" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand appearance" }));
+    const pane = screen.getByRole("complementary", { name: "appearance pane" });
+    expect(within(pane).getByText("colour amount").nextSibling).toHaveTextContent("mono");
+    expect(within(pane).getByText("accent").nextSibling).toHaveTextContent("none");
+  });
+
+  it("writes the chosen code schemes and diff preferences into the YAML, not the defaults", async () => {
+    setup({ code_scheme: { light: "none", dark: "monokai" }, diff: { layout: "split", colours: "safe", show_whitespace: false, word_highlight: false, wrap_lines: true, one_file_at_a_time: false } });
+    await screen.findByRole("radiogroup", { name: "Mode" });
+    fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+    expect(screen.getByLabelText("theme.yaml").textContent).toContain("code_scheme:\n  light: none\n  dark: monokai\ndiff:\n  layout: split\n  colours: safe\n  show_whitespace: false\n  word_highlight: false\n  wrap_lines: true\n  one_file_at_a_time: false\n");
   });
 });
