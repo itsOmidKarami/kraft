@@ -1,0 +1,38 @@
+{
+  "title": "Phone",
+  "screens": [
+    "board",
+    "board-peek",
+    "item",
+    "phone-node",
+    "composer",
+    "new-item",
+    "settings",
+    "el-phone-list",
+    "flow-peek-open-close",
+    "flow-phone-node-page",
+    "flow-gate-reject",
+    "flow-new-item-full"
+  ],
+  "rules": [
+    {
+      "kind": "no-flag",
+      "flag": "offscreen",
+      "match": "@390"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "overflow-x",
+      "match": "@390"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "target<44",
+      "match": "@390"
+    },
+    {
+      "kind": "flow-completes",
+      "match": "^flow-(peek-open-close|phone-node-page)/.*@390"
+    }
+  ]
+}

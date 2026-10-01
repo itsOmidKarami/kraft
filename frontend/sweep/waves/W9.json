@@ -1,0 +1,23 @@
+{
+  "title": "Dead surfaces and no-op settings",
+  "screens": [
+    "menu",
+    "log-modal",
+    "board",
+    "item"
+  ],
+  "specs": [
+    "sweep.spec.ts"
+  ],
+  "rules": [
+    {
+      "kind": "differs",
+      "a": "board/group-template@1280~template",
+      "b": "board/group-template@1280"
+    },
+    {
+      "kind": "no-console",
+      "match": "^(menu|log-modal)/"
+    }
+  ]
+}

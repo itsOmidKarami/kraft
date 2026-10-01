@@ -80,15 +80,25 @@ node sweep/wave.mjs all --baseline     # full sweep, snapshot → e2e-shots/base
 node sweep/wave.mjs all                # re-shoot, pixel-diff against the baseline, rules → e2e-shots/DIFF-all.md
 ```
 
-`all` has one rule: no newly flagged cells. A cell with no flags in the baseline (`nested-scroll` aside) must not gain any. Read `DIFF-all.md` and look at the PNGs under "Regressions" and "Still flagged": a passing rule is not a passing change. `node sweep/wave.mjs <Wn>` runs one wave's screens with that rule plus the wave's own rules from `waves.json` (`no-flag` for `offscreen`, `clipped-v`, `target<44`; `no-console`; `flow-completes`; …).
+`all` has one rule: no newly flagged cells. A cell with no flags in the baseline (`nested-scroll` aside) must not gain any. Read `DIFF-all.md` and look at the PNGs under "Regressions" and "Still flagged": a passing rule is not a passing change. `node sweep/wave.mjs <Wn>` runs one wave's screens with that rule plus the wave's own rules from `waves/<wave>.json` (`no-flag` for `offscreen`, `clipped-v`, `target<44`; `no-console`; `flow-completes`; …).
 
 When a case records `setupError`, fix the selector or fixture in `sweep/`, never `src/`. The spec never asserts; a red test means the harness threw.
 
 ## UX V2 (`/ng`)
 
-The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the keys `ux2-W<n>` in `waves.json` (the plain `W0`–`W14` keys are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
+The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the files `waves/ux2-W<n>.json` (the plain `W0`–`W13` files are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
 
 W2 screens: `ng-shell` (frame, sidebar pinned/rail/revealed), `ng-search` (the ⌘K overlay), `ng-login` (sign-in; the mock's `login` option picks the 401 or 429 answer, and the clock is fixed so the countdown reads the same), `ng-firstrun` (the board with no repo; the page clock is installed after load so the probe rows' reveal is stepped by the cell), and the flows `flow-ng-search-keyboard`, `flow-ng-sidebar-pin` (1280) and `flow-ng-sidebar-rail` (1024). Flow steps assert; a failed assertion is that step's error, which `flow-completes` reports.
+
+## Adding a wave's cases, flows and rules
+
+A wave **adds files and edits no shared list**; `sweep.spec.ts`, `interactions.spec.ts` and `wave.mjs` name no wave.
+
+- `sweep/cases/<wave>.ts` exports `cells: Case[]` (one entry per screen × variant, run by `sweep.spec.ts`), with the wave's own helpers above it.
+- `sweep/cases/<wave>.flows.ts` exports `flows: Flow[]` (run by `interactions.spec.ts`). It is a second file because cells and flows keep separate helper sets (`ng`, `ngItem`, `settle` differ in shape).
+- `sweep/waves/<wave>.json` is the wave's object (`title`, `screens`, `specs`, `rules`); the file name is its key, so `node sweep/wave.mjs <wave>` finds it.
+- `sweep/loadCases.ts` reads the directory and takes any file name: `shipped` first, then `ux2-W<n>` by number (`ux2-W2` before `ux2-W10`), then every other file by name (a fix PR adds `cases/ux2-fix-<topic>.ts`, and `.flows.ts` beside it). The first case of a screen in that order also gets the `~light` cell at 1280, so keep one screen's first case in its wave's file; a fix file sorts last and only adds variants.
+- A helper two waves share goes in `cellKit.ts` (cells) or `flowKit.ts` (flows); the pre-`/ng` screens are `cases/shipped.ts` and `shipped.flows.ts`.
 
 ## History and briefs
 

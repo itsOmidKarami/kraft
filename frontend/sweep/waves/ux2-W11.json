@@ -1,0 +1,45 @@
+{
+  "title": "UX V2 item chain draft: overrides, added nodes, passed edits, Review & apply, leave dialog",
+  "screens": [
+    "ng-item-draft",
+    "ng-item",
+    "flow-ng-item-draft-add-node",
+    "flow-ng-item-draft-apply",
+    "flow-ng-item-draft-leave"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "interactions.spec.ts"
+  ],
+  "rules": [
+    {
+      "kind": "no-flag",
+      "flag": "offscreen",
+      "match": "^ng-item"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "clipped-v",
+      "match": "^ng-item"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "contrast",
+      "match": "^ng-item"
+    },
+    {
+      "kind": "no-console",
+      "match": "^ng-item"
+    },
+    {
+      "kind": "flow-completes",
+      "match": "^flow-ng-item-draft-"
+    },
+    {
+      "kind": "max-count",
+      "check": "nestedScrollers",
+      "max": 2,
+      "match": "^ng-item"
+    }
+  ]
+}

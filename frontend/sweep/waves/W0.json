@@ -1,0 +1,45 @@
+{
+  "title": "Item page layout",
+  "screens": [
+    "item",
+    "item-tasks",
+    "item-changes",
+    "item-documents",
+    "item-timeline",
+    "item-config",
+    "item-log",
+    "composer",
+    "el",
+    "flow-inspector-tabs-selection",
+    "flow-log-maximize",
+    "flow-graph-resize",
+    "flow-item-tabs-keyboard",
+    "menu",
+    "log-modal"
+  ],
+  "rules": [
+    {
+      "kind": "not-collapsed",
+      "match": "^el-(inspector|right-pane)/",
+      "min": 320
+    },
+    {
+      "kind": "no-flag",
+      "flag": "neg-duration",
+      "match": "."
+    },
+    {
+      "kind": "flow-completes",
+      "match": "^flow-(inspector-tabs-selection|log-maximize|graph-resize|item-tabs-keyboard)/"
+    },
+    {
+      "kind": "differs",
+      "a": "item/gate-comfortable@1280~comfortable",
+      "b": "item/gate-comfortable@1280"
+    },
+    {
+      "kind": "no-console",
+      "match": "^(item|el-|composer)"
+    }
+  ]
+}

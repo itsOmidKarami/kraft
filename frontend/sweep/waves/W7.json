@@ -1,0 +1,28 @@
+{
+  "title": "Settings",
+  "screens": [
+    "settings",
+    "flow-settings-save-roundtrip"
+  ],
+  "rules": [
+    {
+      "kind": "no-flag",
+      "flag": "offscreen",
+      "match": "^settings-"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "clipped-v",
+      "match": "^settings-"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "ellipsis",
+      "match": "^settings-.*@1920"
+    },
+    {
+      "kind": "flow-completes",
+      "match": "^flow-settings-save-roundtrip/"
+    }
+  ]
+}

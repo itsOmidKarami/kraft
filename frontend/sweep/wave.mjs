@@ -17,7 +17,9 @@ import { PNG } from "pngjs";
 
 const [, , waveArg = "all", ...flags] = process.argv;
 const BASELINE = flags.includes("--baseline");
-const WAVES = JSON.parse(fs.readFileSync(path.resolve("sweep/waves.json"), "utf8"));
+// One file per wave: sweep/waves/<wave>.json holds that wave's object, and the file name is its key.
+const WAVES = Object.fromEntries(fs.readdirSync(path.resolve("sweep/waves")).filter((f) => f.endsWith(".json")).sort((a, b) => a.localeCompare(b, "en", { numeric: true }))
+  .map((f) => [f.slice(0, -".json".length), JSON.parse(fs.readFileSync(path.resolve("sweep/waves", f), "utf8"))]));
 const wave = waveArg === "all" ? null : WAVES[waveArg];
 if (waveArg !== "all" && !wave) { console.error(`unknown wave ${waveArg}; known: ${Object.keys(WAVES).join(", ")}`); process.exit(2); }
 
