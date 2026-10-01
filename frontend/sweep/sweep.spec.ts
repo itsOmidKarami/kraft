@@ -338,6 +338,10 @@ const CASES: Case[] = [
     const wide = ["running", "failed", "needs-gate"].includes(sc);
     return { screen: "ng-item", variant: sc, data: "default", widths: wide ? [1024, 1280, 1920] : [1280], ...(wide ? { shells: [{ mode: "light" }, { short: true }] } : {}), run: (c) => ngItem(c, sc) };
   }),
+  // The header's floating parts, opened the way a keyboard user would.
+  { screen: "ng-item", variant: "panel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); } }) },
+  { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },
+  { screen: "ng-item", variant: "cancel-card", data: "default", widths: [1280], run: (c) => ngItem(c, "mr-closed", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); await p.getByRole("menuitem", { name: /Cancel/ }).click(); await p.getByText(/stays on the ledger/).waitFor(); } }) },
   ...NG_SCENARIOS.map<Case>((sc) => ({ screen: "ng-item", variant: `${sc}-long`, data: "long", widths: [1280], run: (c) => ngItem(c, sc) })),
 
   // Login

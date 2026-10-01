@@ -4,3 +4,42 @@
 .item-top { flex: none; min-width: 0; }
 .item-title { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
 .item-canvas { position: relative; flex: 1 1 0; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+
+/* Shared bits: facts, checks, inputs, errors, pop cards. */
+.item-muted { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+.item-error { margin: 0; font-size: 12px; color: var(--bad); }
+.item-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.item-check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-sub); }
+.item-input { box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 12.5px; resize: vertical; }
+.item-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.item-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 12.5px; }
+.item-facts > div { display: contents; }
+.item-facts dt { font: 12px ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.item-facts dd { margin: 0; color: var(--text-sub); overflow-wrap: anywhere; }
+.item-card-pop { display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); padding: 10px 8px; }
+.item-pop-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+
+/* Header row (Decisions §1): others need you, elapsed, badge, main button + ⋮. */
+.item-others { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-sub); text-decoration: none; white-space: nowrap; }
+.item-others:is(:hover, :focus-visible) { color: var(--text); text-decoration: underline; }
+.item-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.item-elapsed { display: inline-flex; align-items: center; gap: 4px; font: 12px ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
+.item-badge { padding: 2px 7px; border: 1px solid transparent; border-radius: 4px; font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
+.item-badge.is-neutral { background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--text); }
+.item-badge.is-info { border-color: var(--info); color: var(--info); }
+.item-badge.is-warn { background: color-mix(in oklab, var(--warn) 16%, transparent); color: var(--warn); }
+.item-badge.is-bad { background: color-mix(in oklab, var(--bad) 16%, transparent); color: var(--bad); }
+.item-badge.is-ok { background: color-mix(in oklab, var(--ok) 16%, transparent); color: var(--ok); }
+.item-badge.is-muted { background: var(--surface-2); color: var(--text-sub); }
+.item-main-group { display: flex; align-items: center; gap: 2px; }
+.item-main { display: flex; align-items: stretch; width: 118px; height: 28px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.item-main-action { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
+.item-main-toggle { flex: none; width: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+.item-main-action:not(:disabled):is(:hover, :focus-visible), .item-main-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); color: var(--text); }
+.item-main-action:focus-visible, .item-main-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.item-panel { box-sizing: border-box; min-width: 118px; }
+.item-panel-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.item-panel-item.is-warn:not(:disabled) { color: var(--warn); }
+.item-panel-item.is-bad:not(:disabled) { color: var(--bad); }
+.item-header-error { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

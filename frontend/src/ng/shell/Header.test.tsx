@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../../store";
 import { item } from "../../testFixtures";
 import { Header } from "./Header";
+import { usePageItem } from "./pageItem";
 
 const at = (path: string) =>
   render(
@@ -25,13 +26,24 @@ describe("Header", () => {
   });
 
   it("links Board back to the shipped board from a work item and carries full text in titles", () => {
-    const it = item({ id: "w1", repo: "/r/very-long-repository-name", title: "A very long title" });
+    const it = item({ id: "w1", repo: "/r/very-long-repository-name", title: "A very long title", bead_id: "kraft-cb59" });
     useStore.setState({ workItems: { w1: it } });
     at("/work-items/w1");
     const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(nav).getByRole("link", { name: "Board" })).toHaveAttribute("href", "/");
     expect(within(nav).getByText("very-long-repository-name")).toHaveAttribute("title", "/r/very-long-repository-name");
-    expect(within(nav).getByText("A very long title")).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByText("kraft-cb59")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("takes the item page's own item when the board list lacks it, and opens its MR in a new tab", () => {
+    usePageItem.setState({ item: { id: "w9", repo: "/r/kraft", title: "t", bead_id: "kraft-x1", mr_ref: { number: 7, url: "https://forge/7" }, display_status: "running" } });
+    at("/work-items/w9");
+    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(nav).getByText("kraft-x1")).toHaveAttribute("aria-current", "page");
+    const mr = within(nav).getByRole("link", { name: "!7 ↗" });
+    expect(mr).toHaveAttribute("target", "_blank");
+    expect(mr).toHaveAttribute("rel", "noopener noreferrer");
+    usePageItem.setState({ item: null });
   });
 
   it("has a slot for the page's actions that no crumb occupies", () => {

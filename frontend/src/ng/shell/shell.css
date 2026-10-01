@@ -16,6 +16,8 @@
 .ng-crumb-current { color: var(--text); font-weight: 500; flex-shrink: 1; }
 .ng-crumb-mid { flex-shrink: 2; }
 .ng-crumb-repo { flex-shrink: 4; }
+.ng-crumb.ng-crumb-ext { flex: none; }
+.ng-crumb + .ng-crumb-ext::before { content: "·" / ""; margin: 0 6px; }
 .ng-main { flex: 1 1 auto; min-width: 0; }
 .ng-main:focus { outline: none; }
 .ng-placeholder { max-width: 560px; padding: 28px 24px; }

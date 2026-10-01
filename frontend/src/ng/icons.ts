@@ -2,6 +2,8 @@ import { Bell, Bot, Box, ChartColumn, CircleDot, Cog, Download, FileText, GitBra
 import { createElement, type ReactElement } from "react";
 
 export { Bot, FileText, LocateFixed, Maximize2, Minus, PanelRightClose, PanelRightOpen, Plus, Scan, Siren } from "lucide-react";
+// The item page's (ux2-W5).
+export { Archive, ArchiveRestore, ChevronDown, CircleAlert, CircleCheck, CircleHelp, Clock, Copy, EllipsisVertical, Pause, Play, RotateCcw, X } from "lucide-react";
 
 /** A task's kind, as the prototype draws it. */
 export const KIND_ICON = { agent: Sparkles, builtin: Cog, subprocess: Terminal, forge: GitPullRequest } as const;
