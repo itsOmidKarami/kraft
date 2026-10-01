@@ -10,3 +10,39 @@
 .ng-placeholder { max-width: 560px; padding: 28px 24px; }
 .ng-placeholder h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; }
 .ng-placeholder p { margin: 0 0 12px; font-size: 12.5px; color: var(--text-sub); }
+
+/* Sidebar. Layout width comes from <html data-sidebar>, which boot sets before
+   its first await; with the attribute absent the 1280 query decides. The
+   custom properties carry the pinned state so the reveal and the dismissed
+   cases each need one rule. */
+:root { --ng-side-w: 40px; --ng-side-label: hidden; }
+:root[data-sidebar="pinned"] { --ng-side-w: 210px; --ng-side-label: visible; }
+@media (min-width: 1280px) { :root:not([data-sidebar]) { --ng-side-w: 210px; --ng-side-label: visible; } }
+.ng-side { position: relative; flex: none; width: var(--ng-side-w); }
+.ng-sidebar { position: absolute; inset: 0 auto 0 0; z-index: 20; box-sizing: border-box; width: var(--ng-sb-w, var(--ng-side-w)); display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: 12.5px; transition: width 120ms ease 180ms; }
+.ng-side:not([data-dismissed]) .ng-sidebar:is(:hover, :focus-within) { --ng-sb-w: 210px; --ng-sb-label: visible; transition-delay: 0s; box-shadow: 0 0 0 1px var(--line), 8px 0 18px -8px var(--line); }
+.ng-side-label { visibility: var(--ng-sb-label, var(--ng-side-label)); white-space: nowrap; transition: visibility 0s linear 180ms; }
+.ng-sidebar:is(:hover, :focus-within) .ng-side-label { transition-delay: 0s; }
+.ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px; border-bottom: 1px solid var(--line); }
+.ng-side-brand { font-weight: 600; font-size: 13px; }
+.ng-side-live { font-size: 11.5px; }
+.ng-side-live.ok, .ng-side-live-dot.ok { color: var(--ok); }
+.ng-side-live.warn, .ng-side-live-dot.warn { color: var(--warn); }
+.ng-side-live-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ng-side-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 0; display: flex; flex-direction: column; }
+.ng-side-row { display: flex; align-items: center; gap: 10px; flex: none; height: 30px; box-sizing: border-box; padding: 0 12px; margin: 0 0; border: 0; background: none; font: inherit; color: var(--text-sub); text-decoration: none; text-align: left; cursor: pointer; }
+.ng-side-row:hover { color: var(--text); background: var(--surface-2); }
+.ng-side-row.active { color: var(--text); background: var(--surface-2); }
+.ng-side-row:focus-visible, .ng-side-pin:focus-visible, .ng-side-meta:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ng-side-row svg, .ng-side-pin svg { flex: none; margin-left: 0; }
+.ng-side-kbd { margin-left: auto; }
+.ng-side-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: auto; position: relative; }
+.ng-sidebar .ng-side-row { position: relative; }
+.ng-side-group { flex: none; margin-top: 6px; padding: 8px 12px 4px; border-top: 1px solid var(--line); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.ng-side-foot { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 6px 0 8px; border-top: 1px solid var(--line); }
+.ng-side-meta { display: block; padding: 3px 12px; font-size: 11.5px; color: var(--text-muted); text-decoration: none; }
+.ng-side-meta:hover { color: var(--text); }
+.ng-side-pin { display: flex; align-items: center; height: 30px; padding: 0 12px; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.ng-side-pin:hover { color: var(--text); background: var(--surface-2); }
+.ng-side-pin[aria-pressed="true"] { color: var(--text); }
+.ng-side-pin[aria-pressed="true"] svg { fill: currentColor; }

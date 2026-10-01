@@ -102,11 +102,13 @@ async function composer(c: Ctx, st: DisplayState, open: RegExp, fill: boolean) {
   }
 }
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
-async function ng(c: Ctx, url: string, look: Record<string, unknown>) {
+async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
+  if (opts.side) await c.page.addInitScript((v) => localStorage.setItem("kraft.sidebar.v2", v), opts.side);
   await c.page.goto(url);
   await c.page.locator("main h1").first().waitFor({ timeout: 8000 });
   await settle(c.page, 600);
+  if (opts.hover) { await c.page.mouse.move(20, 300); await settle(c.page, 500); }
 }
 async function settings(c: Ctx, to: string) {
   await c.page.goto(`/settings/${to}`);
@@ -233,6 +235,11 @@ const CASES: Case[] = [
   { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
   // W2 A: an unbuilt page inside the shell.
   { screen: "ng-shell", variant: "placeholder-chains", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}) },
+  // W2 B: the sidebar. Pinned and rail by stored choice; "revealed" is the pointer over the rail.
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail" }) },
+  { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail", hover: true }) },
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },
