@@ -62,7 +62,7 @@ describe("a repo (M.2)", () => {
   it("shows every field the desktop's Config tab edits, with where each value comes from", async () => {
     open("platform");
     expect(await screen.findByRole("heading", { level: 1, name: "platform" })).toBeInTheDocument();
-    for (const f of FIELDS) expect(screen.getByRole("button", { name: new RegExp(`^${f.label.replace(/[()]/g, "\\$&")}`) })).toBeInTheDocument();
+    for (const f of FIELDS) expect(screen.getByRole("button", { name: (n) => n.startsWith(f.label) })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("60");
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("this repo");
     expect(screen.getByRole("button", { name: /^deny tools/ })).toHaveTextContent("default");
