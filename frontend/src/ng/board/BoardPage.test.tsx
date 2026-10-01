@@ -12,7 +12,11 @@ import { resetBoardPrefs } from "./prefs";
 
 const item = (id: string, display_status: DisplayStatus, over: Partial<WorkItem> = {}): WorkItem =>
   detail({ id, title: `Item ${id}`, display_status, bead_id: `kraft-${id}`, updated_at: `2026-09-13T0${id.slice(-1)}:00:00Z`, ...over });
-const put = (...list: WorkItem[]) => useStore.setState({ workItems: Object.fromEntries(list.map((i) => [i.id, i])) } as never);
+/** The store's items, and what the board's own read on mount answers. */
+const put = (...list: WorkItem[]) => {
+  useStore.setState({ workItems: Object.fromEntries(list.map((i) => [i.id, i])), connection: "open" } as never);
+  vi.spyOn(api, "listWorkItems").mockResolvedValue({ items: list, cursor: 1 });
+};
 
 const Where = () => {
   const l = useLocation();
@@ -40,6 +44,7 @@ beforeEach(() => {
   vi.spyOn(api, "getPolicy").mockResolvedValue({ archive: { after_days: 30 } } as never);
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);
   theme();
+  put();
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -156,5 +161,63 @@ describe("BoardPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
     await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
     expect(where()).toBe("/work-items/g1?sel=plan_approval");
+  });
+
+  it("opens the composer instead of first-run when asked (FirstRun's last step)", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    board("/?new=1");
+    await act(async () => {});
+    expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+  });
+
+  it("shows the skeleton while the first read runs with nothing loaded, and not once rows are there", async () => {
+    let answer: (v: { items: WorkItem[]; cursor: number }) => void = () => {};
+    vi.spyOn(api, "listWorkItems").mockReturnValue(new Promise((r) => (answer = r)));
+    board();
+    expect(await screen.findByLabelText("Loading the board")).toBeInTheDocument();
+    expect(screen.queryByText(/NEED YOU/)).toBeNull();
+    await act(async () => answer({ items: [item("n1", "needs_you")], cursor: 1 }));
+    expect(screen.queryByLabelText("Loading the board")).toBeNull();
+    expect(screen.getByText("Item n1")).toBeInTheDocument();
+  });
+
+  it("keeps the rows it has while a read runs, no skeleton over them", async () => {
+    put(item("r1", "running"));
+    vi.spyOn(api, "listWorkItems").mockReturnValue(new Promise(() => {}));
+    board();
+    expect(await screen.findByText("Item r1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading the board")).toBeNull();
+  });
+
+  it("goes offline when the read fails: the banner carries the error, rows stay, actions are off; Retry now reads again", async () => {
+    put(item("p1", "paused"));
+    const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items) — it may have stopped."));
+    board();
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server (GET /work-items) — it may have stopped. Showing what was loaded before");
+    expect(screen.getByText("OFFLINE")).toBeInTheDocument();
+    expect(screen.getByText("Item p1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ New work item" })).toBeDisabled();
+    list.mockResolvedValue({ items: [item("p1", "paused")], cursor: 1 });
+    await userEvent.click(within(banner).getByRole("button", { name: "Retry now" }));
+    expect(list).toHaveBeenCalledTimes(2);
+    await act(async () => {});
+    expect(screen.queryByText("OFFLINE")).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+  });
+
+  it("is offline while the event socket reconnects, and reads again once it is back", async () => {
+    put(item("p1", "paused"));
+    board();
+    await act(async () => {});
+    act(() => useStore.setState({ connection: "reconnecting" } as never));
+    expect(screen.getByText("OFFLINE")).toBeInTheDocument();
+    const reads = vi.mocked(api.listWorkItems).mock.calls.length;
+    act(() => useStore.setState({ connection: "open" } as never));
+    await act(async () => {});
+    expect(vi.mocked(api.listWorkItems).mock.calls.length).toBe(reads + 1);
+    expect(screen.queryByText("OFFLINE")).toBeNull();
   });
 });

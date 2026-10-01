@@ -350,6 +350,10 @@ const CASES: Case[] = [
     screen: "ng-board", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
     run: (c) => ngBoard(c, { then: async (p) => { await p.getByRole("button", { name }).click(); await p.getByRole("menu").waitFor(); } }),
   })),
+  // C: no repo connected (first-run), the first read still running, the server gone after boot.
+  { screen: "ng-board", variant: "fresh", data: "empty", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
+  { screen: "ng-board", variant: "loading", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "loading" }, run: (c) => ngBoard(c) },
+  { screen: "ng-board", variant: "offline", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "offline" }, run: (c) => ngBoard(c, { then: async (p) => { await p.getByText("OFFLINE").waitFor(); } }) },
   { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
   { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 

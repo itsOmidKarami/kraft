@@ -8,6 +8,9 @@ export interface MockOptions {
   login?: "ok" | "wrong" | "locked";
   /** ux2-W6: GET /work-items answers the /ng board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
   ngBoard?: boolean | "empty";
+  /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
+   *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
+  boardState?: "loading" | "offline";
 }
 
 /** A chain file as its author would write it: one mapping per node, nulls left out. */
@@ -25,7 +28,8 @@ const json = (route: Route, body: unknown, status = 200) =>
  */
 export async function installMocks(page: Page, S: Scenario, opts: MockOptions = {}) {
   // The live-events socket: accept and stay silent so the shell reads "live".
-  await page.routeWebSocket(/\/api\/ws\/events/, () => {});
+  await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
+  let listReads = 0;
 
   const viewedMarks = new Set<string>();
   await page.route(/\/api\//, async (route) => {
@@ -51,6 +55,11 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/budget/today") return json(route, { spent_usd: 8.3, cap_usd: 50 });
 
     /* work items */
+    if (p === "/work-items" && method === "GET" && opts.boardState && q.get("archived") !== "true") {
+      const n = ++listReads;
+      if (opts.boardState === "offline" && n > 1) return route.abort("connectionrefused");
+      if (opts.boardState === "loading") return n === 1 ? route.abort("connectionrefused") : undefined; // later reads never answer
+    }
     if (p === "/work-items" && method === "GET") {
       const arch = q.get("archived") === "true";
       const list = opts.ngBoard ? (opts.ngBoard === "empty" ? [] : arch ? S.ngArchived : S.ngBoard) : arch ? S.archived : S.items;

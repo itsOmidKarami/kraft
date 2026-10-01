@@ -101,12 +101,12 @@ describe("FirstRun", () => {
     expect(screen.queryByText(/fix attempts/)).toBeNull();
   });
 
-  it("step 3 links to the shipped board and copies the agent command", async () => {
+  it("step 3 opens the board's composer and copies the agent command", async () => {
     const user = userEvent.setup();
     mount();
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
     await user.click(screen.getByRole("button", { name: /Copy command/ }));
     expect(await screen.findByRole("button", { name: /Copied/ })).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe("kraft admin init");

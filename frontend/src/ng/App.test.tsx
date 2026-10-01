@@ -12,7 +12,7 @@ describe("ng App", () => {
   it("renders under the /ng basename, the board at its root", () => {
     window.history.pushState({}, "", "/ng");
     render(<App />);
-    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Board" })).toBeInTheDocument();
   });
 
   it("renders nothing outside the basename", () => {

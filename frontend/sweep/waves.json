@@ -202,7 +202,7 @@
       { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(board|new-item|draft-item|archived)" },
       { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-(board|new-item|draft-item|archived)" },
       { "kind": "no-flag", "flag": "contrast", "match": "^ng-(board|new-item|draft-item|archived)" },
-      { "kind": "no-console", "match": "^ng-(board|new-item|draft-item|archived)" },
+      { "kind": "no-console", "match": "^ng-(?!board/(loading|offline))(board|new-item|draft-item|archived)" },
       { "kind": "flow-completes", "match": "^flow-ng-" },
       { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-(board|new-item|draft-item|archived)" }
     ]

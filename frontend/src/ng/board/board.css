@@ -21,7 +21,7 @@
 .board-caret { font-size: 10px; color: var(--text-muted); }
 .board-tag { padding: 2px 8px; border-radius: 5px; font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; background: var(--surface-2); }
 .board-tag.is-warn { color: var(--warn); }
-.board-tag.is-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 22%, transparent); }
+.board-tag.is-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 10%, transparent); }
 
 /* Filter bar (AreaBoard 24–33). */
 .board-filters { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
@@ -51,7 +51,8 @@
 .board-row:hover { background: color-mix(in oklab, var(--surface) 55%, transparent); }
 .board-row.is-checked { background: color-mix(in oklab, var(--surface) 55%, transparent); }
 .board-row.is-sel { background: var(--surface-2); }
-.board-row.is-off { opacity: .6; }
+/* Offline: the live parts dim, the text stays readable. */
+.board-row.is-off :is(.glyph, .ticks) { opacity: .5; }
 .board-check { width: 16px; height: 16px; margin: 0; accent-color: var(--text); cursor: pointer; }
 .board-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .board-row-main { all: unset; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; border-radius: 5px; }
@@ -84,3 +85,18 @@
   .board-row { grid-template-columns: 18px 30px minmax(0, 1fr) 96px 120px; gap: 4px 10px; }
   .board-filter input { width: 170px; }
 }
+
+/* Offline (AreaBoard 20, 23) and loading (65–70). */
+.board-offline { flex: none; display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid color-mix(in oklab, var(--bad) 40%, transparent); background: color-mix(in oklab, var(--bad) 10%, var(--bg)); font-size: 12.5px; }
+.board-offline-mark { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--bad); color: var(--bg); font: 700 10px/16px Inter, system-ui, sans-serif; text-align: center; }
+.board-offline-text { flex: 1; color: var(--text); }
+.board-skeleton { padding-top: 10px; }
+.sk { display: block; height: 12px; border-radius: 4px; background: var(--surface-2); animation: sk-pulse 1.3s ease-in-out infinite; }
+.sk-head { width: 90px; height: 10px; margin: 16px 0 10px 46px; }
+.sk-row { display: grid; grid-template-columns: 18px 30px minmax(0, 1fr) 150px 132px; gap: 14px; align-items: center; padding: 8px 14px; }
+.sk-glyph { width: 30px; height: 30px; border-radius: 8px; }
+.sk-lines { display: flex; flex-direction: column; gap: 7px; }
+.sk-short { width: 34%; height: 9px; }
+.sk-ticks { height: 4px; }
+@keyframes sk-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }

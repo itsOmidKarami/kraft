@@ -21,6 +21,30 @@ const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updat
 const isTextField = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
 
+type Load = { state: "loading" | "ok" } | { state: "error"; error: string };
+
+/** The list, read again on mount (C.2): the store's own load ran at boot and
+ *  may have failed. Offline (C.3) while that read failed or the event socket
+ *  is reconnecting; it clears once the socket is open and a read succeeds. */
+function useListLoad() {
+  const [load, setLoad] = useState<Load>({ state: "loading" });
+  const connection = useStore((s) => s.connection);
+  const refresh = useCallback(() => {
+    setLoad((l) => (l.state === "error" ? l : { state: "loading" }));
+    useStore.getState().bootstrap().then(
+      () => setLoad({ state: "ok" }),
+      (e: Error) => setLoad({ state: "error", error: e.message }),
+    );
+  }, []);
+  useEffect(refresh, [refresh]);
+  const was = useRef(connection);
+  useEffect(() => {
+    if (connection === "open" && was.current === "reconnecting") refresh();
+    was.current = connection;
+  }, [connection, refresh]);
+  return { load, refresh, offline: load.state === "error" || connection === "reconnecting" };
+}
+
 /** A minute's clock for the rows' ages and "retry in". */
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -46,7 +70,7 @@ export function BoardPage() {
   const filterRef = useRef<HTMLInputElement>(null);
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
-  const offline = false;
+  const { load, refresh, offline } = useListLoad();
 
   useEffect(() => {
     api.getRepos().then((r) => setFresh(r.repos.length === 0)).catch(() => {});
@@ -106,7 +130,8 @@ export function BoardPage() {
     rows[Math.max(0, Math.min(rows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
   };
 
-  if (fresh) return <FirstRun />;
+  // FirstRun's last step opens the composer, which lives on the board.
+  if (fresh && !query.new) return <FirstRun />;
 
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
@@ -128,10 +153,20 @@ export function BoardPage() {
         />
       </HeaderTail>
       <HeaderActions>
-        {needsN > 0 && <span className="board-tag is-warn">{needsN} NEED YOU</span>}
+        {needsN > 0 && load.state !== "loading" && <span className="board-tag is-warn">{needsN} NEED YOU</span>}
+        {offline && <span className="board-tag is-bad">OFFLINE</span>}
         <button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true, sel: "" })}>+ New work item</button>
       </HeaderActions>
 
+      {offline && (
+        <div className="board-offline" role="alert">
+          <span className="board-offline-mark" aria-hidden>!</span>
+          <span className="board-offline-text">
+            Could not load the board{load.state === "error" ? `: ${load.error.replace(/\.$/, "")}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
+          </span>
+          <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
+        </div>
+      )}
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>
@@ -165,7 +200,7 @@ export function BoardPage() {
       <div className="board-body">
         <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">
-            {groups.map((g) => (
+            {load.state === "loading" && items.length === 0 ? <Skeleton /> : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">
                   <span>{g.label}</span>
@@ -205,6 +240,27 @@ export function BoardPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The board while its first list read runs (AreaBoard 65–70). */
+function Skeleton() {
+  return (
+    <div className="board-skeleton" aria-busy="true" aria-label="Loading the board">
+      {[3, 3, 2].map((rows, g) => (
+        <div key={g}>
+          <span className="sk sk-head" />
+          {Array.from({ length: rows }, (_, r) => (
+            <div key={r} className="sk-row">
+              <span />
+              <span className="sk sk-glyph" />
+              <span className="sk-lines"><span className="sk" style={{ width: `${52 + ((g + r) % 3) * 12}%` }} /><span className="sk sk-short" /></span>
+              <span className="sk sk-ticks" />
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
