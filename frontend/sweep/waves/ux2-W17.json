@@ -1,5 +1,5 @@
 {
-  "title": "UX V2 phone: the stack-navigation app under /ng (board, item, node, task, gate review, new item)",
+  "title": "UX V2 phone: the stack-navigation app under /ng (every screen)",
   "screens": [
     "ng-phone",
     "flow-ng-phone",

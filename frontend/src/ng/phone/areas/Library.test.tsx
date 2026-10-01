@@ -23,7 +23,7 @@ const PUBLISHED = {
     { id: "nodes.verification", kind: "nodes", name: "verification", used_by: [], used_by_paths: [] },
   ],
 };
-const lib = (over = {}, r = {}) => ({ "GET /drafts/library/library": [200, view("library", "library", { files: { "library.yaml": "x" }, ...over }, { model: MODEL as never, ...r })] as [number, unknown], "GET /templates/library": [200, PUBLISHED] as [number, unknown] });
+const lib = (over = {}, r = {}): Record<string, [number, unknown]> => ({ "GET /drafts/library/library": [200, view("library", "library", { files: { "library.yaml": "x" }, ...over }, { model: MODEL as never, ...r })] as [number, unknown], "GET /templates/library": [200, PUBLISHED] as [number, unknown] });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Library list (L.2)", () => {

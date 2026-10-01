@@ -109,7 +109,7 @@ export function useEditor() {
     sheet.open("edit");
   }, [sheet]);
   const submit = async (v: string) => {
-    if (!spec) return;
+    if (!spec || spec.kind === "menu") return;
     setBusy(true);
     setError(null);
     const err = await spec.set(v);

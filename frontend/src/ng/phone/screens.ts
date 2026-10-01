@@ -1,7 +1,7 @@
 /** Every screen the phone has, and the taps that reach it from the board (W17 brief P.1). Pure data, no imports: the vitest walk (`reach.test.tsx`) and the sweep's `flow-ng-phone-reach` both read it, so "reachable by tapping from the board" is a recorded fact. */
 
 /** Which seeded item a card tap opens: the harness maps each to an item of its own data. */
-export type Card = "running" | "capped" | "gate" | "plan" | "escalated";
+export type Card = "running" | "capped" | "gate" | "escalated";
 
 /** One tap: a control by role and name (a regular expression source, case-insensitive), or the first element a selector matches; `card` says which board card a selector tap means. */
 export type Tap = { role: "link" | "button" | "tab"; name: string } | { css: string; card?: Card };
@@ -33,8 +33,7 @@ export const SCREENS: PhoneScreen[] = [
   { id: "node", route: "/work-items/:id/nodes/:node", taps: [card("running"), node], data: true },
   { id: "task", route: "/work-items/:id/nodes/:node", taps: [card("running"), node, { css: ".ph-task-row" }], data: true },
   { id: "gate-node", route: "/work-items/:id/nodes/:node", taps: [card("gate"), node], data: true },
-  { id: "review-diff", route: "/work-items/:id/review", taps: [card("gate"), { role: "button", name: "^Review and decide$" }], data: true },
-  { id: "review-document", route: "/work-items/:id/review", taps: [card("plan"), { role: "button", name: "^Review and decide$" }], data: true },
+  { id: "review", route: "/work-items/:id/review", taps: [card("gate"), { role: "button", name: "^Review and decide$" }], data: true },
   { id: "new", route: "/work-items/new", taps: [{ role: "link", name: "^New work item$" }], heading: "New work item" },
   { id: "search", route: "/search", taps: [tab("Search")], heading: "Search" },
   { id: "analytics", route: "/analytics", taps: [tab("Analytics")], heading: "Analytics" },
