@@ -194,9 +194,16 @@
       "type": "string"
     },
     "palette": {
-      "default": "nocturne",
-      "title": "Palette",
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Palette"
     },
     "surface": {
       "anyOf": [

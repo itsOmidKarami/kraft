@@ -21,8 +21,10 @@ pytestmark = pytest.mark.api_client(default_setup=False)
 
 
 def test_get_theme_defaults_to_nocturne_dark(client):
+    # With no theme.yaml: nocturne's look in the new colour model, dark.
     body = client.get("/api/theme").json()
-    assert body["palette"] == "nocturne"
+    assert "palette" not in body
+    assert (body["surface"], body["accent"], body["colour_amount"]) == ("ink", "violet", "full")
     assert body["mode"] == "dark"
     assert body["density"] == "compact"
     assert body["board"] == {"group_by": "status", "show_done": 5, "open_in": "peek"}
@@ -30,7 +32,9 @@ def test_get_theme_defaults_to_nocturne_dark(client):
 
 def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
     body = {
-        "palette": "forest",
+        "surface": "moss",
+        "accent": "green",
+        "colour_amount": "subtle",
         "mode": "light",
         "density": "comfortable",
         "board": {"group_by": "repo", "show_done": 10, "open_in": "full"},
@@ -41,19 +45,21 @@ def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
 
 
 def test_put_theme_defaults_density_and_board_when_omitted(client):
-    resp = client.put("/api/theme", json={"palette": "nocturne", "mode": "dark"})
+    resp = client.put("/api/theme", json={"mode": "dark"})
     assert resp.json()["density"] == "compact"
     assert resp.json()["board"] == {"group_by": "status", "show_done": 5, "open_in": "peek"}
 
 
 def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir):
-    # An operator's theme.yaml from before this change — no density/board keys.
+    # A palette written after startup (an old tab, a hand edit) is still read
+    # until the next start converts it.
     (templates_dir / "theme.yaml").write_text("palette: rose\nmode: light\n")
     body = client.get("/api/theme").json()
     assert (
         body.items()
         >= {
-            "palette": "rose",
+            "surface": "ink",
+            "accent": "violet",
             "mode": "light",
             "density": "compact",
             "board": {"group_by": "status", "show_done": 5, "open_in": "peek"},
@@ -65,44 +71,59 @@ def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir)
     "body",
     [
         {"palette": "cerulean", "mode": "dark"},
-        {"palette": "nocturne", "mode": "twilight"},
-        {
-            "palette": "forest",
-            "mode": "dark",
-            "board": {"group_by": "priority", "show_done": 5, "open_in": "peek"},
-        },
+        {"surface": "nocturne"},
+        {"mode": "twilight"},
+        {"board": {"group_by": "priority", "show_done": 5, "open_in": "peek"}},
     ],
-    ids=["an-unknown-palette", "an-unknown-mode", "an-unknown-group-by"],
+    ids=["an-unknown-palette", "an-unknown-surface", "an-unknown-mode", "an-unknown-group-by"],
 )
-def test_put_theme_rejects_an_unknown_value(client, body):
+def test_put_theme_rejects_an_unknown_value(client, templates_dir, body):
     assert client.put("/api/theme", json=body).status_code == 422
-    assert client.get("/api/theme").json()["palette"] == "nocturne"
+    assert not (templates_dir / "theme.yaml").exists()
 
 
 def test_put_theme_merges_and_keeps_keys_the_body_leaves_out(client, templates_dir):
-    # The new UI sends one key per change; the shipped UI's palette stays.
-    client.put("/api/theme", json={"palette": "amber", "density": "comfortable"})
+    # Every control sends only its own key.
+    client.put("/api/theme", json={"mode": "light", "density": "comfortable"})
     resp = client.put("/api/theme", json={"surface": "moss"})
     assert resp.status_code == 200
     on_disk = yaml.safe_load((templates_dir / "theme.yaml").read_text())
-    assert on_disk["palette"] == "amber"
-    assert on_disk["density"] == "comfortable"
-    assert on_disk["surface"] == "moss"
+    assert (on_disk["mode"], on_disk["density"], on_disk["surface"]) == (
+        "light",
+        "comfortable",
+        "moss",
+    )
     assert resp.json()["derived"] is False
 
 
-def test_put_theme_shipped_full_object_keeps_the_v2_keys(client, templates_dir):
-    # The shipped Appearance page spreads the loaded theme and PUTs all of it.
+def test_put_theme_full_object_keeps_the_v2_keys(client, templates_dir):
+    # A shipped Appearance tab left open across the upgrade spreads the theme
+    # it loaded and PUTs all of it, with its own palette.
     client.put("/api/theme", json={"surface": "slate", "accent": "rose", "colour_amount": "full"})
     loaded = client.get("/api/theme").json()
     assert client.put("/api/theme", json={**loaded, "palette": "forest"}).status_code == 200
     body = client.get("/api/theme").json()
-    assert (body["palette"], body["surface"], body["accent"], body["colour_amount"]) == (
-        "forest",
-        "slate",
-        "rose",
+    assert (body["surface"], body["accent"], body["colour_amount"]) == ("slate", "rose", "full")
+
+
+def test_startup_converts_an_old_palette_and_keeps_the_look(tmp_path, monkeypatch, templates_dir):
+    """The cutover's theme migration runs at startup (spec §11.3): the file
+    loses `palette`, names the look it stood for, and keeps a copy."""
+    from support.api import _client
+
+    theme = templates_dir / "theme.yaml"
+    theme.write_text("palette: forest\nmode: light\n")
+    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
+        body = client.get("/api/theme").json()
+    assert (body["surface"], body["accent"], body["colour_amount"], body["mode"]) == (
+        "moss",
+        "green",
         "full",
+        "light",
     )
+    assert body["derived"] is False
+    assert "palette" not in yaml.safe_load(theme.read_text())
+    assert (templates_dir / "theme.yaml.pre-ux2").read_text() == "palette: forest\nmode: light\n"
 
 
 def test_put_theme_echo_of_a_derived_get_stays_derived(client, templates_dir):

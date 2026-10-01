@@ -38,7 +38,7 @@ export function AppearancePage() {
 
   const save = async (patch: Partial<Theme>) => {
     // A derived look is written out whole on its first change, so the other
-    // two keys stop following `palette` at the same moment (brief E.3).
+    // two keys stop following the default at the same moment (brief E.3).
     const body = theme.derived ? { surface, accent, colour_amount: amount, ...patch } : patch;
     const before = theme;
     const next = { ...theme, ...body, derived: false };
@@ -60,7 +60,7 @@ export function AppearancePage() {
       <div className="appearance">
         <h1>Appearance</h1>
         <p className="lede">The choice applies at once and is kept in theme.yaml.</p>
-        {theme.derived && <p className="note">These follow the {theme.palette} palette until you change one.</p>}
+        {theme.derived && <p className="note">These are Kraft's default colours until you change one.</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="appearance-cols">
           <div className="appearance-controls">

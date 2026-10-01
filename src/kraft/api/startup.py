@@ -99,6 +99,16 @@ async def lifespan(app: FastAPI):
     except OSError:
         # Not a refused boot: the files stay put and the next start retries.
         logger.exception("steering migration failed; templates/steering/ left in place")
+    # The UX V2 cutover: an old theme.yaml's `palette` becomes the look it
+    # stood for, once, before anything reads the theme (spec §11.3).
+    try:
+        if config_mod.migrate_theme(templates_dir / "theme.yaml"):
+            logger.info(
+                "theme.yaml: palette converted to surface, accent and colour_amount;"
+                " the old file is theme.yaml.pre-ux2"
+            )
+    except OSError:
+        logger.exception("theme migration failed; theme.yaml left as it was")
     library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
     # Now, not with the rest of app.state below: reattach's launch factory
     # reads it, for an item filed before repository steering was frozen.

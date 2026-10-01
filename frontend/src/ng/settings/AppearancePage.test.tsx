@@ -61,13 +61,13 @@ describe("ng AppearancePage", () => {
 
   it("shows derived values selected, and writes all three on the first change", async () => {
     const put = setup({ palette: "forest", surface: "moss", accent: "green", colour_amount: "full", derived: true });
-    await screen.findByText(/follow the forest palette/);
+    await screen.findByText(/Kraft's default colours until you change one/);
     expect(pressed("Moss")).toBe("true");
     expect(pressed("Green")).toBe("true");
     expect(screen.getByRole("radio", { name: "Full" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("button", { name: /^Sand/ }));
     await waitFor(() => expect(put).toHaveBeenCalledWith({ surface: "sand", accent: "green", colour_amount: "full" }));
-    expect(screen.queryByText(/follow the forest palette/)).toBeNull();
+    expect(screen.queryByText(/Kraft's default colours/)).toBeNull();
   });
 
   it("puts the page back and says so when a save fails", async () => {

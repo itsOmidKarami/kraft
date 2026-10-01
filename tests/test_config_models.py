@@ -142,10 +142,9 @@ def test_theme_with_a_surface_alone_defaults_to_no_accent_at_subtle():
 def _look(theme_file):
     from kraft import config
 
-    # What the new UI paints from: every key but `derived` and the legacy
-    # `palette` itself, which the shipped UI read and the new one does not.
+    # What the new UI paints from: every key `GET /theme` answers but `derived`.
     eff = config.Theme.load(theme_file).effective()
-    del eff["derived"], eff["palette"]
+    del eff["derived"]
     return eff
 
 

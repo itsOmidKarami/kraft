@@ -1065,7 +1065,10 @@ class DiffPrefs(_Model):
 class Theme(_Model):
     FILE = "theme.yaml"
 
-    palette: str = "nocturne"
+    # Legacy: the shipped UI's colour model. Read while present (an old tab or
+    # a hand edit can still write it) and converted at the next start by
+    # `migrate_theme`; never written back.
+    palette: str | None = None
     mode: Literal["light", "dark", "system"] = "dark"
     density: Literal["compact", "comfortable"] = "compact"
     board: BoardPrefs = BoardPrefs()
@@ -1078,8 +1081,8 @@ class Theme(_Model):
 
     @field_validator("palette")
     @classmethod
-    def _known_palette(cls, v: str) -> str:
-        if v not in PALETTE_IDS:
+    def _known_palette(cls, v: str | None) -> str | None:
+        if v is not None and v not in PALETTE_IDS:
             raise ValueError(f"unknown palette: {v!r}")
         return v
 
@@ -1096,12 +1099,13 @@ class Theme(_Model):
         write_yaml(path, self.model_dump(exclude_none=True))
 
     def effective(self) -> dict:
-        """What `GET /theme` answers: every V2 key filled, from `palette` when
-        the file names no surface (`derived: true`)."""
-        out = self.model_dump()
+        """What `GET /theme` answers: every V2 key filled, from `palette` (or
+        nocturne's look, with no file) when the file names no surface
+        (`derived: true`). `palette` itself is not in the answer."""
+        out = self.model_dump(exclude={"palette"})
         derived = self.surface is None
         if derived:
-            surface, accent = PALETTE_V2[self.palette]
+            surface, accent = PALETTE_V2[self.palette or "nocturne"]
             amount = self.colour_amount or "full"
         else:
             surface, accent, amount = self.surface, "none", self.colour_amount or "subtle"
