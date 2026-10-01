@@ -99,8 +99,12 @@ def _render_profiles(payload: dict) -> str:
     tiers = [
         {
             **p,
-            "effort": p["effort"] or "-",
-            "model": ", ".join(f"{k}={v}" for k, v in p["model"].items()),
+            "effort": p["effort"] or ("per provider" if p["providers"] else "-"),
+            "model": ", ".join(
+                f"{k}={e['model']}"
+                + (f" ({e['effort']})" if e["effort"] and not p["effort"] else "")
+                for k, e in p["providers"].items()
+            ),
             "used_by": ", ".join(p["used_by"]) or "-",
         }
         for p in payload.get("agent_profiles", [])

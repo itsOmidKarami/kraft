@@ -386,31 +386,72 @@ class FallbackEntry(BaseModel):
         return self
 
 
-class AgentProfileInput(BaseModel):
-    """One `harnesses.yaml` `profiles:` entry: a named model tier an agent task
-    selects with `profile:` (Kraft-ps1ao). `model` is keyed by *provider* id,
-    not harness id, so two harnesses on one provider share one spelling."""
+class ProviderEntryInput(BaseModel):
+    """One provider's route within a profile written with `providers:`."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    model: dict[Identifier, StrictStr] = Field(min_length=1)
+    model: StrictStr
+    effort: StrictStr | None = None
+
+
+class AgentProfileInput(BaseModel):
+    """One `harnesses.yaml` `profiles:` entry: a named model tier an agent task
+    selects with `profile:` (Kraft-ps1ao). It names each provider's route in
+    one of two shapes, never both: `providers: {id: {model, effort?}}`, or the
+    older `model: {id: model}` with one `effort` shared by every provider. Keyed
+    by *provider* id, not harness id, so two harnesses on one provider share one
+    spelling."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    providers: dict[Identifier, ProviderEntryInput] | None = Field(default=None, min_length=1)
+    model: dict[Identifier, StrictStr] | None = Field(default=None, min_length=1)
     effort: StrictStr | None = None
     #: The tier's default fallback list, for a task selecting it that sets no
     #: `fallback:` of its own (Kraft-0a3h8). An entry's profile's own list is
     #: never followed.
     fallback: list[FallbackEntry] | None = None
 
+    @model_validator(mode="after")
+    def _one_shape(self) -> AgentProfileInput:
+        if self.providers is not None and (self.model is not None or self.effort is not None):
+            raise ValueError(
+                "sets both 'providers' and 'model'/'effort'; a profile is written in one shape"
+            )
+        if self.providers is None and self.model is None:
+            raise ValueError("names no provider: set 'providers' (or the older 'model')")
+        return self
+
+
+@dataclass(frozen=True)
+class ProviderEntry:
+    """What a profile runs on one provider."""
+
+    model: str
+    effort: str | None = None
+
 
 @dataclass(frozen=True)
 class AgentProfile:
     """An agent profile: what a tier runs on, per provider. It may omit any
     provider; only a task pairing it with a harness of that provider is
-    refused (`adapters.agent.resolve_profile`)."""
+    refused (`adapters.agent.resolve_profile`). Both file shapes load into
+    `providers`; the older one copies its `effort` into every entry."""
 
     id: str
-    model: dict[str, str]
-    effort: str | None
+    providers: dict[str, ProviderEntry]
     fallback: tuple[FallbackEntry, ...] = ()
+
+    @property
+    def model(self) -> dict[str, str]:
+        return {p: e.model for p, e in self.providers.items()}
+
+    @property
+    def effort(self) -> str | None:
+        """The one effort every provider's entry shares, else None."""
+        efforts = {e.effort for e in self.providers.values()}
+        return efforts.pop() if len(efforts) == 1 else None
 
     @classmethod
     def from_input(
@@ -421,23 +462,33 @@ class AgentProfile:
                 f"profile id {id!r} must match {_IDENTIFIER.pattern} to be nameable by a "
                 f"task's 'profile:'"
             )
-        unknown = sorted(set(parsed.model) - set(harnesses))
+        if parsed.providers is not None:
+            providers = {p: ProviderEntry(e.model, e.effort) for p, e in parsed.providers.items()}
+        else:
+            providers = {
+                p: ProviderEntry(m, parsed.effort) for p, m in (parsed.model or {}).items()
+            }
+        unknown = sorted(set(providers) - set(harnesses))
         if unknown:
             raise TemplateEnvironmentError(
                 f"profiles.{id}: model names {unknown}, which is no installed provider; "
                 f"known: {sorted(harnesses)}"
             )
-        effort = parsed.effort
-        if effort is not None and not any(
-            harnesses[p].value_ok("effort", effort) for p in parsed.model
+        if parsed.providers is not None:
+            for p, entry in providers.items():
+                if entry.effort is not None and not harnesses[p].value_ok("effort", entry.effort):
+                    raise TemplateEnvironmentError(
+                        f"profiles.{id}.providers.{p}: effort {entry.effort!r} is not accepted "
+                        f"by provider {p!r}"
+                    )
+        elif parsed.effort is not None and not any(
+            harnesses[p].value_ok("effort", parsed.effort) for p in providers
         ):
             raise TemplateEnvironmentError(
-                f"profiles.{id}: effort {effort!r} is accepted by none of its providers "
-                f"{sorted(parsed.model)}"
+                f"profiles.{id}: effort {parsed.effort!r} is accepted by none of its providers "
+                f"{sorted(providers)}"
             )
-        return cls(
-            id=id, model=dict(parsed.model), effort=effort, fallback=tuple(parsed.fallback or ())
-        )
+        return cls(id=id, providers=providers, fallback=tuple(parsed.fallback or ()))
 
 
 # ── `harnesses.yaml`, the V1 file these types are read from ──────────────────
@@ -558,6 +609,39 @@ class HarnessProfileTable:
                     )
         return cls(profiles=profiles, agent_profiles=agent_profiles)
 
+    def pairing_detail(
+        self, name: str, harness: HarnessProfile, providers: Mapping[str, Harness]
+    ) -> PairingProblem | None:
+        """`pairing_problem` with what it is about: the provider and the field
+        (`model` or `effort`) that does not pair."""
+        profile = self.agent_profiles.get(name)
+        provider, at = harness.provider, f"(harness {harness.id!r})"
+        if profile is None:
+            return PairingProblem(
+                name,
+                provider,
+                None,
+                f"profile {name!r} is not defined in harnesses.yaml; "
+                f"known are {sorted(self.agent_profiles)}",
+            )
+        entry = profile.providers.get(provider)
+        if entry is None:
+            return PairingProblem(
+                name,
+                provider,
+                "model",
+                f"profile {name!r} has no model for provider {provider!r} {at}",
+            )
+        for option, value in (("model", entry.model), ("effort", entry.effort)):
+            if value is not None and not providers[provider].value_ok(option, value):
+                return PairingProblem(
+                    name,
+                    provider,
+                    option,
+                    f"profile {name!r}: provider {provider!r} takes no {option} {value!r} {at}",
+                )
+        return None
+
     def pairing_problem(
         self, name: str, harness: HarnessProfile, providers: Mapping[str, Harness]
     ) -> str | None:
@@ -565,17 +649,16 @@ class HarnessProfileTable:
         one reason text the Settings view, doctor and the launch all give
         (`adapters.agent.resolve_profile`). No model is inferred for a
         provider the profile does not name."""
-        profile = self.agent_profiles.get(name)
-        if profile is None:
-            return (
-                f"profile {name!r} is not defined in harnesses.yaml; "
-                f"known are {sorted(self.agent_profiles)}"
-            )
-        provider, at = harness.provider, f"(harness {harness.id!r})"
-        model = profile.model.get(provider)
-        if model is None:
-            return f"profile {name!r} has no model for provider {provider!r} {at}"
-        for option, value in (("model", model), ("effort", profile.effort)):
-            if value is not None and not providers[provider].value_ok(option, value):
-                return f"profile {name!r}: provider {provider!r} takes no {option} {value!r} {at}"
-        return None
+        found = self.pairing_detail(name, harness, providers)
+        return found.message if found else None
+
+
+@dataclass(frozen=True)
+class PairingProblem:
+    """Why a profile does not pair with a harness: `field` is `model` or
+    `effort`, None when the profile is not defined."""
+
+    profile: str | None
+    provider: str
+    field: str | None
+    message: str

@@ -2,7 +2,7 @@
   "$defs": {
     "AgentProfileInput": {
       "additionalProperties": false,
-      "description": "One `harnesses.yaml` `profiles:` entry: a named model tier an agent task\nselects with `profile:` (Kraft-ps1ao). `model` is keyed by *provider* id,\nnot harness id, so two harnesses on one provider share one spelling.",
+      "description": "One `harnesses.yaml` `profiles:` entry: a named model tier an agent task\nselects with `profile:` (Kraft-ps1ao). It names each provider's route in\none of two shapes, never both: `providers: {id: {model, effort?}}`, or the\nolder `model: {id: model}` with one `effort` shared by every provider. Keyed\nby *provider* id, not harness id, so two harnesses on one provider share one\nspelling.",
       "properties": {
         "effort": {
           "anyOf": [
@@ -32,19 +32,42 @@
           "title": "Fallback"
         },
         "model": {
-          "minProperties": 1,
-          "patternProperties": {
-            "^[a-z][a-z0-9_-]*$": {
-              "type": "string"
+          "anyOf": [
+            {
+              "minProperties": 1,
+              "patternProperties": {
+                "^[a-z][a-z0-9_-]*$": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
             }
-          },
-          "title": "Model",
-          "type": "object"
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "providers": {
+          "anyOf": [
+            {
+              "minProperties": 1,
+              "patternProperties": {
+                "^[a-z][a-z0-9_-]*$": {
+                  "$ref": "#/$defs/ProviderEntryInput"
+                }
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Providers"
         }
       },
-      "required": [
-        "model"
-      ],
       "title": "AgentProfileInput",
       "type": "object"
     },
@@ -144,6 +167,33 @@
         "provider"
       ],
       "title": "HarnessProfileInput",
+      "type": "object"
+    },
+    "ProviderEntryInput": {
+      "additionalProperties": false,
+      "description": "One provider's route within a profile written with `providers:`.",
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "ProviderEntryInput",
       "type": "object"
     }
   },

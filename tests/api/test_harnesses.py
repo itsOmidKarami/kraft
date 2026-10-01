@@ -128,6 +128,16 @@ def test_providers_are_each_packages_capability_surface(client):
     assert providers["invalid"] == {}
 
 
+def test_a_provider_lists_the_efforts_and_models_it_accepts_as_plain_words(client):
+    """What a profile's per-provider effort picker offers: literal values only,
+    and `[]` where the capability takes a pattern (codex's models) or any string."""
+    valid = client.get("/api/harnesses/providers").json()["valid"]
+    assert valid["claude"]["efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    assert "max" not in valid["codex"]["efforts"]
+    assert valid["codex"]["models"] == []  # a regex, not a list of words
+    assert valid["claude"]["models"] == []  # any string
+
+
 def test_a_capability_says_what_it_becomes_and_where_its_file_is(client):
     """The Harnesses page renders each capability as the flag it becomes, or
     what reads it, and says whether the definition is packaged or an override."""

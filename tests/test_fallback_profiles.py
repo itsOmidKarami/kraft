@@ -58,7 +58,9 @@ def test_a_profiles_list_is_shown_with_each_entrys_problems(tmp_path, monkeypatc
     view = harnesses_route._view(_state(live))
 
     deep = next(p for p in view["agent_profiles"] if p["id"] == "deep")
-    assert [{k: v for k, v in e.items() if k != "problems"} for e in deep["fallback"]] == [
+    assert [
+        {k: v for k, v in e.items() if not k.startswith("problem")} for e in deep["fallback"]
+    ] == [
         {"harness": "codex"},
         {"profile": "fast"},
     ]

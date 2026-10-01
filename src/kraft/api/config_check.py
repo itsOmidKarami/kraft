@@ -26,6 +26,7 @@ from kraft.templates.environment import (
     AgentProfileInput,
     HarnessProfileInput,
     HarnessProfileTable,
+    PairingProblem,
     TemplateEnvironmentError,
 )
 from kraft.templates.library import (
@@ -421,9 +422,35 @@ def selections(library: TemplateLibrary | None) -> list[tuple[str, str, AgentTas
     return out
 
 
-def launch_problems(
+@dataclass(frozen=True)
+class LaunchProblem:
+    """Why one selecting task (or one of its fallback entries) could not
+    launch. `profile`, `provider` and `field` say which pairing failed when
+    one did; they are None for a harness that is missing or a file that does
+    not load."""
+
+    chain: str
+    #: The task's path, `<path> fallback[n]` for a fallback entry.
+    task: str
+    message: str
+    profile: str | None = None
+    provider: str | None = None
+    field: str | None = None
+
+    def view(self) -> dict:
+        return {
+            "chain": self.chain,
+            "task": self.task,
+            "profile": self.profile,
+            "provider": self.provider,
+            "field": self.field,
+            "message": self.message,
+        }
+
+
+def launch_problem_details(
     selections, table: HarnessProfileTable | None, path, providers
-) -> dict[tuple[str, str], str]:
+) -> dict[tuple[str, str], LaunchProblem]:
     """Why each selecting task, keyed (chain, task path), could not launch on
     `table` (`None`: the file does not load, so none can): the launch's own
     checks, including its agent profile's pairing (Kraft-ps1ao), plus a task's
@@ -432,15 +459,24 @@ def launch_problems(
     for chain, task_path, task in selections:
         where = f"chain {chain!r} task {task_path!r}: harness {task.harness!r}"
         if table is None:
-            problems[chain, task_path] = f"{where}: {path} does not load"
+            problems[chain, task_path] = LaunchProblem(
+                chain, task_path, f"{where}: {path} does not load"
+            )
             continue
         try:
             profile = select_profile(table.profiles, task.harness, path)
         except HarnessUnavailable as exc:
-            problems[chain, task_path] = f"{where}: {exc}"
+            problems[chain, task_path] = LaunchProblem(chain, task_path, f"{where}: {exc}")
             continue
-        if why := route_problem(task, profile, table, providers):
-            problems[chain, task_path] = f"chain {chain!r} task {task_path!r}: {why}"
+        if why := route_problem_detail(task, profile, table, providers):
+            problems[chain, task_path] = LaunchProblem(
+                chain,
+                task_path,
+                f"chain {chain!r} task {task_path!r}: {why.message}",
+                why.profile,
+                why.provider,
+                why.field,
+            )
         # Each fallback entry must pair with its harness too, from the task's
         # own list or its profile's. A disabled one is not a pairing problem:
         # the launch skips it (`executor.fallback`).
@@ -449,13 +485,26 @@ def launch_problems(
             cand = fallback.apply(task, entry)
             at = f"chain {chain!r} task {task_path!r}: fallback entry {n} ({source})"
             harness = table.profiles.get(cand.harness)
+            key = f"{task_path} fallback[{n}]"
             if harness is None:
-                why = f"harness {cand.harness!r} is not in {path}"
-            else:
-                why = route_problem(cand, harness, table, providers)
-            if why:
-                problems[chain, f"{task_path} fallback[{n}]"] = f"{at}: {why}"
+                problems[chain, key] = LaunchProblem(
+                    chain, key, f"{at}: harness {cand.harness!r} is not in {path}"
+                )
+            elif why := route_problem_detail(cand, harness, table, providers):
+                problems[chain, key] = LaunchProblem(
+                    chain, key, f"{at}: {why.message}", why.profile, why.provider, why.field
+                )
     return problems
+
+
+def launch_problems(
+    selections, table: HarnessProfileTable | None, path, providers
+) -> dict[tuple[str, str], str]:
+    """`launch_problem_details`' messages, keyed the same way."""
+    return {
+        key: p.message
+        for key, p in launch_problem_details(selections, table, path, providers).items()
+    }
 
 
 def lint_report(
@@ -506,16 +555,22 @@ def lint_report(
     }
 
 
-def route_problem(task: AgentTask, harness, table: HarnessProfileTable, providers) -> str | None:
+def route_problem_detail(
+    task: AgentTask, harness, table: HarnessProfileTable, providers
+) -> PairingProblem | None:
     """Why `task`'s route (its agent profile, or its own model/effort) cannot
     run on `harness`, or None."""
     if task.profile is not None:
-        return table.pairing_problem(task.profile, harness, providers)
+        return table.pairing_detail(task.profile, harness, providers)
     for option in ("model", "effort"):
         value = getattr(task, option)
         if value is not None and not providers[harness.provider].value_ok(option, value):
-            return (
-                f"harness {harness.id!r}: provider {harness.provider!r} takes no {option} {value!r}"
+            return PairingProblem(
+                None,
+                harness.provider,
+                option,
+                f"harness {harness.id!r}: provider {harness.provider!r} takes no "
+                f"{option} {value!r}",
             )
     return None
 
