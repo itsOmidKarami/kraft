@@ -53,4 +53,18 @@ describe("ng Menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
+
+  it("draws a pick list: a text trigger named by its text, ✓ and a hint per item, read as radios, and a note", () => {
+    render(
+      <Menu label="Group by" triggerClass="board-menu-btn" trigger="Group Status" note="Needs you always comes first."
+        items={[{ label: "Status", checked: true, onSelect: () => {} }, { label: "Repo", checked: false, hint: "4", onSelect: () => {} }]} />,
+    );
+    const trigger = screen.getByRole("button", { name: "Group Status" });
+    expect(trigger).toHaveClass("board-menu-btn");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu", { name: "Group by" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Status/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: /Repo/ })).toHaveTextContent("Repo4");
+    expect(screen.getByText("Needs you always comes first.")).toBeInTheDocument();
+  });
 });

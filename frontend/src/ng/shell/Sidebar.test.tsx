@@ -16,6 +16,7 @@ const ITEM: WorkItem = {
   repo: "/repo-a",
   status: "needs_human",
   pending_gate: "human_review",
+  display_status: "needs_you",
   chain_template: "default",
   chain_definition: { template_id: "default", nodes: [] },
   current_node_id: "verify",
@@ -125,9 +126,15 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
   });
 
-  it("marks the Board when an item needs you, from deriveState", () => {
-    useStore.setState({ workItems: { [ITEM.id]: ITEM } } as never);
+  it("marks the Board when an item needs you or failed, from the server's display_status", () => {
+    const failed = { ...ITEM, id: "wi_2", display_status: "failed" as const };
+    const running = { ...ITEM, id: "wi_3", status: "active" as const, display_status: "running" as const };
+    useStore.setState({ workItems: { [ITEM.id]: ITEM, wi_2: failed, wi_3: running } } as never);
     mount();
+    expect(screen.getByRole("link", { name: "Board, 2 need you" })).toBeInTheDocument();
+    act(() => useStore.setState({ workItems: { wi_3: running, wi_4: { ...ITEM, id: "wi_4", display_status: "escalated" } } } as never));
+    expect(screen.getByRole("link", { name: "Board" })).toBeInTheDocument();
+    act(() => useStore.setState({ workItems: { [ITEM.id]: ITEM } } as never));
     expect(screen.getByRole("link", { name: "Board, 1 need you" })).toBeInTheDocument();
     act(() => useStore.setState({ workItems: {} } as never));
     expect(screen.getByRole("link", { name: "Board" })).toBeInTheDocument();

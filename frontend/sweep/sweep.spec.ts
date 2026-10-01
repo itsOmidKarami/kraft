@@ -2,7 +2,7 @@ import { test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { buildScenario, settingsFor, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
-import { installMocks } from "./mockApi";
+import { installMocks, type MockOptions } from "./mockApi";
 import { NG_NOW, NG_SCENARIOS } from "./ngItems";
 import { chromeRects, runChecks, scrollAllToBottom, type Checks } from "./checks";
 
@@ -46,6 +46,8 @@ interface Case {
   fullPage?: boolean;
   /** Also shoot `~light-firstpaint` at 1280: reload and screenshot at DOMContentLoaded, 0ms settle. */
   firstpaint?: boolean;
+  /** More of the mock's options (ux2-W6: the /ng board's fixtures and states). */
+  mock?: MockOptions;
   run: (c: Ctx) => Promise<void>;
 }
 
@@ -119,6 +121,37 @@ async function ngItem(c: Ctx, sc: string, opts: { tail?: string; side?: "pinned"
   await ng(c, `/ng/work-items/${c.S.ng[sc]}${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
+/** The /ng board (ux2-W6), served its own fixtures (`mock: { ngBoard }`), the clock fixed at NG_NOW so ages read the same every run. */
+async function ngBoard(c: Ctx, opts: { tail?: string; side?: "pinned" | "rail"; then?: (p: Page) => Promise<void> } = {}) {
+  await c.page.clock.setFixedTime(new Date(NG_NOW));
+  await ng(c, `/ng/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
+  if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
+}
+/** The composer with its repos, chains and first dry run in. */
+const composerReady = async (p: Page) => { await p.getByText(/nodes run ·/).waitFor(); await p.waitForTimeout(400); };
+const composerFilled = async (p: Page) => {
+  await composerReady(p);
+  await p.getByRole("textbox", { name: "Title" }).fill("Design the caching layer for document search");
+  await p.getByRole("textbox", { name: "Brief" }).fill("Cache embeddings by content hash; invalidate on reindex.");
+  await p.getByRole("button", { name: "+ spec" }).click();
+  const box = p.getByRole("textbox", { name: /Search specs/ });
+  await box.fill("docs/specs/doc-search-cache.md"); await p.waitForTimeout(300); await box.press("Enter");
+  await p.getByText(/of 15 nodes run/).waitFor(); await p.waitForTimeout(500);
+};
+/** A board row per peek variant, by the start of its title (ngBoard.ts). */
+const PEEK_ROWS = {
+  "needs-gate": "Design the caching layer", question: "Add rate limit headers", capped: "Fix flaky retry test", failed: "Retry on 429",
+  paused: "Trim the review prompts", running: "Bump the VS Code", "not-started": "Spike: stream logs", done: "Release notes for 0.14", cancelled: "Rename the harness profiles",
+} as const;
+/** Click a board row and wait for its peek. */
+const peekRow = (title: string) => async (p: Page) => {
+  await p.getByRole("button", { name: new RegExp(`^${title}`) }).click();
+  await p.locator(".pane .pane-tabs").waitFor();
+};
+/** Check board rows by the start of their titles. */
+const checkRows = (titles: string[]) => async (p: Page) => {
+  for (const t of titles) await p.getByRole("checkbox", { name: new RegExp(`^Select ${t}`) }).check();
+};
 /** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
   if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
@@ -332,6 +365,58 @@ const CASES: Case[] = [
     await settle(c.page, 300);
   } },
 
+  // ux2-W6: the board at /ng, its own fixtures (ngBoard.ts).
+  { screen: "ng-board", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }, { short: true }], mock: { ngBoard: true }, run: (c) => ngBoard(c) },
+  ...(["long", "many"] as const).map<Case>((d) => ({ screen: "ng-board", variant: d, data: d, widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c) })),
+  // No items, but a connected repo: the four empty groups, not first-run.
+  { screen: "ng-board", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
+  // The header's and filter bar's menus, opened as a person would.
+  ...([["repo-menu", /all repos/], ["chain-menu", /^Chain/], ["group-menu", /^Group/], ["sort-menu", /^Sort/]] as const).map<Case>(([v, name]) => ({
+    screen: "ng-board", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
+    run: (c) => ngBoard(c, { then: async (p) => { await p.getByRole("button", { name }).click(); await p.getByRole("menu").waitFor(); } }),
+  })),
+  // C: no repo connected (first-run), the first read still running, the server gone after boot.
+  { screen: "ng-board", variant: "fresh", data: "empty", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
+  { screen: "ng-board", variant: "loading", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "loading" }, run: (c) => ngBoard(c) },
+  { screen: "ng-board", variant: "offline", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "offline" }, run: (c) => ngBoard(c, { then: async (p) => { await p.getByText("OFFLINE").waitFor(); } }) },
+  // D: selection in every group, the bulk Cancel's inline confirm, and a partial answer.
+  { screen: "ng-board", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: checkRows(["Bump the VS Code", "Fix flaky retry", "Remove the legacy poller"]) }) },
+  { screen: "ng-board", variant: "bulk-cancel-confirm", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: async (p) => {
+    await checkRows(["Bump the VS Code", "Fix flaky retry"])(p);
+    await p.getByRole("button", { name: "Cancel 2…" }).click();
+    await p.getByRole("textbox", { name: /Reason/ }).fill("Superseded by kraft-cb61");
+  } }) },
+  { screen: "ng-board", variant: "bulk-results", data: "default", widths: [1280], mock: { ngBoard: true, bulkFail: ["kraft-2c77"] }, run: (c) => ngBoard(c, { then: async (p) => {
+    await checkRows(["Bump the VS Code", "Lint fan-out"])(p);
+    await p.getByRole("button", { name: "‖ Pause 2" }).click();
+    await p.getByText("1 of 2 items paused").waitFor();
+  } }) },
+  // E: the peek on one row of each kind, its other tabs, the overlay under 1024 and a short window.
+  ...Object.entries(PEEK_ROWS).map<Case>(([v, title]) => ({
+    screen: "ng-board-peek", variant: v, data: "default", widths: [1280], ...(v === "needs-gate" ? { shells: [{ short: true }] } : {}), mock: { ngBoard: true },
+    run: (c) => ngBoard(c, { then: peekRow(title) }),
+  })),
+  ...(["activity", "config"] as const).map<Case>((tab) => ({
+    screen: "ng-board-peek", variant: tab, data: "default", widths: [1280], mock: { ngBoard: true },
+    run: (c) => ngBoard(c, { then: async (p) => { await peekRow(PEEK_ROWS.capped)(p); await p.getByRole("tab", { name: tab === "activity" ? "Activity" : "Config" }).click(); } }),
+  })),
+  { screen: "ng-board-peek", variant: "running", data: "default", widths: [768], mock: { ngBoard: true }, run: (c) => ngBoard(c, { side: "rail", then: peekRow(PEEK_ROWS.running) }) },
+  // F: the composer at the top of the board, as it fills, its chain menu, the attach search, the discard ask, a refused attachment.
+  { screen: "ng-new-item", variant: "composer", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerReady }) },
+  { screen: "ng-new-item", variant: "filled", data: "default", widths: [1024, 1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: composerFilled }) },
+  { screen: "ng-new-item", variant: "chain-menu", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: /^default/ }).click(); await p.getByRole("menu").waitFor(); } }) },
+  { screen: "ng-new-item", variant: "attach", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerReady(p); await p.getByRole("button", { name: "+ spec" }).click(); await p.getByRole("textbox", { name: /Search specs/ }).fill("cache"); await p.waitForTimeout(500); } }) },
+  { screen: "ng-new-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => { await composerFilled(p); await p.keyboard.press("Escape"); await p.getByText(/Discard this draft/).waitFor(); } }) },
+  { screen: "ng-new-item", variant: "error", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?new=1", then: async (p) => {
+    await composerFilled(p);
+    await p.getByRole("button", { name: "+ plan" }).click();
+    const box = p.getByRole("textbox", { name: /Search plans/ });
+    await box.fill("docs/plans/missing.md"); await p.waitForTimeout(300); await box.press("Enter");
+    await p.getByText(/attachment not found/).waitFor();
+  } }) },
+  { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
+  { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
+
   // ux2-W5: the item page, every scenario the prototype draws (plus paused), at 1280 and with long data.
   // Three of them also at 1024 and 1920, light and 700px tall.
   ...NG_SCENARIOS.map<Case>((sc) => {
@@ -399,7 +484,7 @@ for (const cs of CASES) {
         const h = shell.short ? 700 : h0;
         await page.setViewportSize({ width: w, height: h });
         const S = buildScenario(cs.data, { mode: shell.mode, density: shell.density, group_by: shell.group_by });
-        await installMocks(page, S, { locked: cs.locked, login: cs.login });
+        await installMocks(page, S, { locked: cs.locked, login: cs.login, ...cs.mock });
         await page.addInitScript((sb) => {
           if (sb) localStorage.setItem("kraft.sidebar_collapsed", sb === "rail" ? "true" : "false");
           else localStorage.removeItem("kraft.sidebar_collapsed");

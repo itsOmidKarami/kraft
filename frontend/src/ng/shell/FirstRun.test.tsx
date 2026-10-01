@@ -1,10 +1,9 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
-import { BoardPage } from "./BoardPage";
 import { FirstRun, PROBE_STEP_MS } from "./FirstRun";
 
 const PROBE: RepoProbe = {
@@ -40,28 +39,6 @@ async function probeAndAdd(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Add repo" }));
   await user.click(await screen.findByRole("button", { name: "Continue" }));
 }
-
-describe("BoardPage", () => {
-  const board = () => render(<MemoryRouter><BoardPage label="Board" /></MemoryRouter>);
-
-  it("shows first-run only when no repo is connected", async () => {
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
-    board();
-    expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
-  });
-
-  it("keeps the stub while the repo list is unknown or non-empty", async () => {
-    vi.spyOn(api, "getRepos").mockRejectedValue(new Error("down"));
-    const { unmount } = board();
-    await act(async () => {});
-    expect(screen.getByRole("heading", { name: "Board" })).toBeInTheDocument();
-    unmount();
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/r" } as never] });
-    board();
-    await act(async () => {});
-    expect(screen.getByRole("heading", { name: "Board" })).toBeInTheDocument();
-  });
-});
 
 describe("FirstRun", () => {
   it("names the address the server is on", async () => {
@@ -124,12 +101,12 @@ describe("FirstRun", () => {
     expect(screen.queryByText(/fix attempts/)).toBeNull();
   });
 
-  it("step 3 links to the shipped board and copies the agent command", async () => {
+  it("step 3 opens the board's composer and copies the agent command", async () => {
     const user = userEvent.setup();
     mount();
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
     await user.click(screen.getByRole("button", { name: /Copy command/ }));
     expect(await screen.findByRole("button", { name: /Copied/ })).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe("kraft admin init");

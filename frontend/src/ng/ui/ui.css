@@ -43,6 +43,10 @@
 .menu-item:not(:disabled):is(:hover, :focus-visible) { background: var(--line); }
 .menu-item:disabled { color: var(--text-faint); cursor: default; }
 .menu-item-danger { color: var(--bad); }
+.menu-item:has(.menu-mark, .menu-hint) { display: flex; align-items: center; gap: 8px; }
+.menu-mark { flex: none; width: 10px; color: var(--text-sub); }
+.menu-hint { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--text-muted); }
+.menu-note { margin: 0; padding: 5px 10px 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
 
 .dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px; overflow-y: auto; background: color-mix(in oklab, var(--side) 70%, transparent); }
 .dialog { width: min(480px, 100%); padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
@@ -51,3 +55,7 @@
 
 .toasts { position: fixed; top: 16px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; }
 .toast { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12.5px; }
+.toast:has(.toast-action) { display: flex; align-items: center; gap: 14px; }
+.toast-action { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; font: inherit; font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; }
+.toast-action:is(:hover, :focus-visible) { text-decoration: underline; }
+.toast-action:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

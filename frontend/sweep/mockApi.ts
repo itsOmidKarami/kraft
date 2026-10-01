@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { NG_CHAINS, NG_REPOS, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 
 export interface MockOptions {
@@ -6,6 +7,13 @@ export interface MockOptions {
   locked?: boolean;
   /** What POST /login answers while locked: 200, a 401, or a 429 with Retry-After (default 200). */
   login?: "ok" | "wrong" | "locked";
+  /** ux2-W6: GET /work-items answers the /ng board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
+  ngBoard?: boolean | "empty";
+  /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
+   *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
+  boardState?: "loading" | "offline";
+  /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
+  bulkFail?: string[];
 }
 
 /** A chain file as its author would write it: one mapping per node, nulls left out. */
@@ -23,7 +31,8 @@ const json = (route: Route, body: unknown, status = 200) =>
  */
 export async function installMocks(page: Page, S: Scenario, opts: MockOptions = {}) {
   // The live-events socket: accept and stay silent so the shell reads "live".
-  await page.routeWebSocket(/\/api\/ws\/events/, () => {});
+  await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
+  let listReads = 0;
 
   const viewedMarks = new Set<string>();
   await page.route(/\/api\//, async (route) => {
@@ -49,9 +58,23 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/budget/today") return json(route, { spent_usd: 8.3, cap_usd: 50 });
 
     /* work items */
+    if (p === "/work-items" && method === "GET" && opts.boardState && q.get("archived") !== "true") {
+      const n = ++listReads;
+      if (opts.boardState === "offline" && n > 1) return route.abort("connectionrefused");
+      if (opts.boardState === "loading") return n === 1 ? route.abort("connectionrefused") : undefined; // later reads never answer
+    }
     if (p === "/work-items" && method === "GET") {
-      const list = q.get("archived") === "true" ? S.archived : S.items;
+      const arch = q.get("archived") === "true";
+      const list = opts.ngBoard ? (opts.ngBoard === "empty" ? [] : arch ? S.ngArchived : S.ngBoard) : arch ? S.archived : S.items;
       return json(route, { items: list, cursor: 4242 });
+    }
+    if (p === "/work-items" && method === "POST" && q.get("dry_run") && opts.ngBoard) {
+      const r = ngDryRun(req.postDataJSON() ?? {});
+      return json(route, r.body, r.status);
+    }
+    // ux2-W6: a create from the /ng composer lands on the board's never-started row, which has a detail for the peek.
+    if (p === "/work-items" && method === "POST" && !q.get("dry_run") && opts.ngBoard) {
+      return json(route, { id: S.ngBoard.find((i) => i.bead_id === "kraft-f5d3")?.id ?? S.ngBoard[0]?.id, status: "paused" }, 201);
     }
     if (p === "/work-items" && method === "POST" && q.get("dry_run")) {
       const nodes = S.items[0]?.chain_definition?.nodes ?? [];
@@ -64,6 +87,24 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       });
     }
     if (p === "/work-items" && method === "POST") return json(route, { id: S.items[0]?.id ?? "00000000000000000000000000000000" });
+    if (method === "POST" && p === "/work-items/bulk") {
+      // B9: each id through its own route's door, with that door's words (lifecycle.py).
+      const { action, ids = [], reason } = req.postDataJSON() ?? {};
+      if (action === "cancel" && !String(reason ?? "").trim()) return json(route, { detail: "reason: cancel needs a non-blank reason" }, 422);
+      const known = [...S.ngBoard, ...S.ngArchived, ...S.items, ...S.archived];
+      const fail = new Set((opts.bulkFail ?? []).map((bead) => known.find((i) => i.bead_id === bead)?.id));
+      return json(route, { results: (ids as string[]).map((id) => {
+        const i = known.find((x) => x.id === id);
+        const status = i?.status ?? "active";
+        const ended = status === "completed" || status === "abandoned";
+        const error = fail.has(id) ? `work item is paused, not running`
+          : action === "pause" && !["active", "waiting"].includes(status) ? `work item is ${status}, not running`
+          : action === "cancel" && ended ? `work item is ${status}; its chain does not run again`
+          : action === "archive" && !ended ? "only a completed or abandoned item can be archived"
+          : action === "restore" && !i?.archived_at ? "work item is not archived" : null;
+        return error ? { id, ok: false, status, error } : { id, ok: true, status: action === "pause" ? "paused" : action === "cancel" ? "abandoned" : status };
+      }) });
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)$/))) {
       const b = S.bundles[m[1]];
       if (!b) return json(route, { detail: "work item not found" }, 404);
@@ -115,10 +156,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
       return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
-    }
-    if (method === "POST" && p === "/work-items/bulk") {
-      const ids: string[] = (req.postDataJSON() ?? {}).ids ?? [];
-      return json(route, { results: ids.map((id) => ({ id, ok: true, status: "paused" })) });
     }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
@@ -187,12 +224,12 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     /* settings */
     const st = S.settings;
     if (p === "/repos") {
-      if (method === "GET") return json(route, { repos: st.repos });
+      if (method === "GET") return json(route, { repos: opts.ngBoard && opts.ngBoard !== "empty" ? NG_REPOS : st.repos });
       if (method === "DELETE") return route.fulfill({ status: 204 });
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
-    if (p === "/templates/chains") return json(route, st.templates);
+    if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
     if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {

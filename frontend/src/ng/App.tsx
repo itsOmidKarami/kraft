@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BoardPage } from "./board/BoardPage";
 import { Gallery } from "./graph/Gallery";
 import { ItemPage } from "./item/ItemPage";
 import { AppearancePage } from "./settings/AppearancePage";
 import { resumeSession } from "./session";
-import { BoardPage } from "./shell/BoardPage";
 import { Placeholder } from "./shell/Placeholder";
 import { ROUTES } from "./shell/routes";
 import { Shell } from "./shell/Shell";
@@ -13,7 +13,7 @@ import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/settings/appearance": <AppearancePage /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/settings/appearance": <AppearancePage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);
@@ -29,7 +29,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
         <Route path="/_gallery" element={<Gallery />} />
         <Route element={<Shell />}>
           {ROUTES.map((r) => (
-            <Route key={r.path} path={r.path} element={r.built ? BUILT[r.path] : r.path === "/" ? <BoardPage label={r.label} /> : <Placeholder label={r.label} />} />
+            <Route key={r.path} path={r.path} element={r.built ? BUILT[r.path] : <Placeholder label={r.label} />} />
           ))}
           <Route path="/work-items/:id" element={<ItemPage />} />
           <Route path="/work-items/:id/nodes/:node" element={<ItemPage />} />

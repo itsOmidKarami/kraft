@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Pin } from "lucide-react";
 import { Kbd } from "../ui/Kbd";
-import { useItemStates, useStore } from "../../store";
+import { useStore } from "../../store";
 import * as api from "../../api";
 import type { Health } from "../../types";
 import { NAV_ICON } from "../icons";
@@ -33,9 +33,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   // Escape in a revealed rail closes it even while the pointer is still over it.
   const [dismissed, setDismissed] = useState(false);
   const connection = useStore((s) => s.connection);
-  const items = useStore((s) => Object.values(s.workItems));
-  const stateOf = useItemStates();
-  const needsYou = items.filter((i) => stateOf(i).needsYou).length;
+  // The server's badge (R16): the board's own Needs you count, failed included.
+  const needsYou = useStore((s) => Object.values(s.workItems).filter((i) => i.display_status === "needs_you" || i.display_status === "failed").length);
   const health = useHealth();
   const location = useLocation();
   const ref = useRef<HTMLElement>(null);

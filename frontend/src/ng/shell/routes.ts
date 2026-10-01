@@ -17,7 +17,7 @@ export interface NgRoute {
 /** Every /ng page the shell knows, once. The sidebar, the crumbs, the Go-to
  *  list of the search overlay and the route tree are all built from it. */
 export const ROUTES: NgRoute[] = [
-  { path: "/", label: "Board", icon: NAV_ICON.board, group: "top", built: false },
+  { path: "/", label: "Board", icon: NAV_ICON.board, group: "top", built: true },
   { path: "/analytics", label: "Analytics", icon: NAV_ICON.analytics, group: "top", built: false },
   { path: "/templates/chains", label: "Chains", icon: NAV_ICON.chains, group: "templates", built: false },
   { path: "/templates/library", label: "Library", icon: NAV_ICON.library, group: "templates", built: false },

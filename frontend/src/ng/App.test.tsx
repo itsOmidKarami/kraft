@@ -9,10 +9,10 @@ vi.mock("./session", () => ({ resumeSession: vi.fn(async () => {}), startEvents:
 afterEach(() => window.history.pushState({}, "", "/"));
 
 describe("ng App", () => {
-  it("renders under the /ng basename, the Board stub at its root", () => {
+  it("renders under the /ng basename, the board at its root", () => {
     window.history.pushState({}, "", "/ng");
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Board" })).toBeInTheDocument();
   });
 
   it("renders nothing outside the basename", () => {

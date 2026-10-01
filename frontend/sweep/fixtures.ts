@@ -23,6 +23,7 @@ export const STATES: DisplayState[] = [
   "budget", "question", "escalating", "escalated", "done", "abandoned", "archived",
 ];
 
+import { buildNgBoard } from "./ngBoard";
 import { buildNgItem, NG_SCENARIOS } from "./ngItems";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
@@ -761,6 +762,9 @@ export interface Scenario {
   byState: Record<DisplayState, ItemBundle>;
   /** ux2-W5: the /ng item page's items, by scenario; in bundles, never in the board list. */
   ng: Record<string, string>;
+  /** ux2-W6: the /ng board's list and archived list, served only with `MockOptions.ngBoard`. */
+  ngBoard: any[];
+  ngArchived: any[];
   bundles: Record<string, ItemBundle>;
   docs: Record<string, any[]>;
   settings: ReturnType<typeof settingsFor>;
@@ -792,5 +796,7 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
     const b = buildNgItem(sc, 950 + i, variant);
     ng[sc] = b.item.id; bundles[b.item.id] = b; docs[b.item.id] = [];
   });
-  return { variant, items, archived, byState, ng, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
+  const board = buildNgBoard(variant, bundles);
+  for (const i of [...board.list, ...board.archived]) docs[i.id] = [];
+  return { variant, items, archived, byState, ng, ngBoard: board.list, ngArchived: board.archived, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }

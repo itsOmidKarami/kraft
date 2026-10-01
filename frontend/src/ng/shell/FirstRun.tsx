@@ -3,7 +3,6 @@ import { Check, Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
-import { legacyPath } from "../legacyPath";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import "./first-run.css";
@@ -189,7 +188,7 @@ export function FirstRun() {
               <h2>First work item</h2>
               <p>It is created paused, so nothing runs until you start it.</p>
               <div className="fr-actions">
-                <a className="btn btn-primary" href={legacyPath({ pathname: "/ng", search: "" })}>+ New work item ↗</a>
+                <Link className="btn btn-primary" to="/?new=1">+ New work item</Link>
               </div>
               <h3>Or drive it from an agent session</h3>
               <p><code>{ADD_REPO_COMMAND}</code> registers the MCP server and the /kraft:* skills.</p>

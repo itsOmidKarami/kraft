@@ -18,16 +18,18 @@ describe("crumbsFor", () => {
     expect(head.href).toBeUndefined();
   });
 
-  it("makes Archived a child of the shipped Board", () => {
+  it("makes Archived a child of the /ng Board", () => {
     const [board, archived] = crumbsFor("/archived", none);
-    expect(board).toMatchObject({ text: "Board", href: "/" });
+    expect(board).toMatchObject({ text: "Board", to: "/" });
+    expect(board.href).toBeUndefined();
     expect(archived).toMatchObject({ text: "Archived", kind: "current" });
   });
 
   it("shows Board › repo › bead id for a work item; the title is the page's heading, not a crumb", () => {
     const item = () => ({ repo: "/home/me/code/kraft-api", title: "Add rate limiting", bead_id: "kraft-cb59" });
     const [board, repo, cur, ...rest] = crumbsFor("/work-items/abc", item);
-    expect(board).toMatchObject({ text: "Board", href: "/" });
+    expect(board).toMatchObject({ text: "Board", to: "/" });
+    expect(board.href).toBeUndefined();
     expect(repo).toMatchObject({ text: "kraft-api", kind: "repo", title: "/home/me/code/kraft-api" });
     expect(cur).toMatchObject({ text: "kraft-cb59", kind: "current", title: "abc" });
     expect(rest).toEqual([]);
