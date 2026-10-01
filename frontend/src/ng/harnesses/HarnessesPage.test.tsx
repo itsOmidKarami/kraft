@@ -90,3 +90,14 @@ describe("HarnessesPage", () => {
     await waitFor(() => expect(screen.getByRole("complementary", { name: "codex pane" })).toBeInTheDocument());
   });
 });
+
+describe("HarnessesPage: the pane's first state", () => {
+  it("loads with the area's pane on its rail; a link to one harness opens its pane", async () => {
+    serve(view(resolved()));
+    const { unmount } = renderPage();
+    expect(await screen.findByRole("complementary", { name: "harnesses pane, collapsed" })).toBeInTheDocument();
+    unmount();
+    renderPage("?harness=claude");
+    expect(await screen.findByRole("complementary", { name: "claude pane" })).toBeInTheDocument();
+  });
+});

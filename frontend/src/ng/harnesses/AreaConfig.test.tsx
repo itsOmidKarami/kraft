@@ -1,12 +1,12 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderPage, resolved, serve, view } from "./testkit";
+import { openAreaPane, renderPage, resolved, serve, view } from "./testkit";
 
 afterEach(() => vi.unstubAllGlobals());
 
 async function openConfig() {
-  const pane = await screen.findByRole("complementary", { name: "harnesses pane" });
+  const pane = await openAreaPane();
   await userEvent.click(within(pane).getByRole("tab", { name: "Config" }));
   return pane;
 }

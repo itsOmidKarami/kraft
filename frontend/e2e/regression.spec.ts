@@ -74,6 +74,8 @@ test("policy: a cap edited and published", async ({ page }) => {
 
 test("auto-intake: the interval edited and published", async ({ page }) => {
   await page.goto("/settings/auto-intake");
+  // The pane starts on its rail.
+  await page.getByRole("button", { name: "Expand bd ready" }).click();
   const before = (await (await page.request.get("/api/intake")).json()).interval_s;
   const minutes = before === 420 ? 6 : 7;
   await editCell(page, /^check every, minutes, \d+ min\. Edit$/, String(minutes));

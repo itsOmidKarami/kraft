@@ -39,7 +39,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const running = runningOf(r);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("config");
-  const [paneOpen, setPaneOpen] = useState(true);
+  const [paneOpen, setPaneOpen] = useState(!!param);
   const [connecting, setConnecting] = useState(false);
   const connectBtn = useRef<HTMLButtonElement>(null);
   const [chains, setChains] = useState<string[]>([]);

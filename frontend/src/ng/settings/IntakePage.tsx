@@ -39,7 +39,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const r = draft.view!.result;
   const data = intakeOf(r);
   const [sel, setSel] = useState<Sel>("pickup");
-  const [paneOpen, setPaneOpen] = useState(true);
+  const [paneOpen, setPaneOpen] = useState(false);
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [repos, setRepos] = useState<{ path: string; name?: string | null }[]>([]);
   const [chains, setChains] = useState<string[]>([]);

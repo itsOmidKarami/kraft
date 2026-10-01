@@ -45,6 +45,9 @@ beforeEach(() => {
   useStore.setState({ workItems: {}, connection: "open" } as never);
 });
 
+/** The pane starts on its rail (AreaIntake paneOpen:false). */
+const expand = async (name = "bd ready") => userEvent.click(await screen.findByRole("button", { name: `Expand ${name}` }));
+
 const edit = async (name: RegExp | string, text: string) => {
   await userEvent.click(screen.getByRole("button", { name }));
   const input = screen.getByRole("textbox");
@@ -105,6 +108,7 @@ describe("Auto-intake page", () => {
   it("edits the pickup rule: the interval in minutes becomes seconds, priority P0-P4 the ceiling", async () => {
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
+    await expand();
     await edit(/^check every, minutes, 5 min/, "2");
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_intake", patch: { interval_s: 120 } }));
     await edit(/^at a time, 5/, "7");
@@ -118,6 +122,7 @@ describe("Auto-intake page", () => {
   it("refuses an interval under 30 seconds inline without sending it", async () => {
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
+    await expand();
     await edit(/^check every, minutes, 5 min/, "0.25");
     expect(await screen.findByRole("alert")).toHaveTextContent("Checks cannot come more often than every 30 seconds.");
     expect(d.postOps).not.toHaveBeenCalled();
@@ -169,7 +174,18 @@ describe("Auto-intake page", () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ changes: [{ path: "interval_s", kind: "change", summary: "300 → 120", file: "intake.yaml" }, { path: "max_concurrent", kind: "change", summary: "3 → 5", file: "policy.yaml" }] }, INTAKE, true)));
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
+    await expand();
     const chips = screen.getAllByText("changed");
     expect(chips).toHaveLength(2);
+  });
+});
+
+describe("Auto-intake page: the pane's first state", () => {
+  it("loads with the pane on its rail, and picking the rule opens it", async () => {
+    mount();
+    await screen.findByRole("region", { name: "Recent checks" });
+    expect(screen.getByRole("complementary", { name: "bd ready pane, collapsed" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { pressed: true }));
+    expect(screen.getByRole("complementary", { name: "bd ready pane" })).toBeInTheDocument();
   });
 });
