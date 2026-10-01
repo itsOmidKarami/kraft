@@ -71,8 +71,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       <NavLink
         key={r.path}
         to={r.path}
-        // A templates area has pages under its row (/templates/chains/default).
-        end={r.group !== "templates"}
+        // A templates area has pages under its row (/templates/chains/default), and so has Policy (/settings/policy/loops).
+        end={r.group !== "templates" && r.path !== "/settings/policy"}
         aria-label={label}
         className={({ isActive }) => `ng-side-row${isActive || (board && location.pathname === "/archived") ? " active" : ""}`}
       >

@@ -23,9 +23,10 @@ export function jumpTo(ta: HTMLTextAreaElement | null, scroller: HTMLElement | n
  *  changed lines marked against the published file, problems on their line
  *  and in a docked pane, a syntax error keeping the canvas on the last valid
  *  draft. No autocomplete; Tab inserts two spaces. */
-export function YamlView({ draft, scope, published }: { draft: ConfigDraft; scope: Scope; published: string | null | undefined }) {
+export function YamlView({ draft, scope, published, file: named }: { draft: ConfigDraft; scope: Scope; published: string | null | undefined; /** An area's file (repos, policy, intake); a chain or the library finds its own. */ file?: string }) {
   const view = draft.view!;
-  const file = scopeFile(view.files, scope);
+  const file = named ?? scopeFile(view.files, scope);
+  const where = named ? "page" : "canvas";
   const r = view.result;
   const stored = view.files[file] ?? "";
   const [text, setText] = useState(stored);
@@ -63,7 +64,7 @@ export function YamlView({ draft, scope, published }: { draft: ConfigDraft; scop
     edit(`${text.slice(0, a)}  ${text.slice(b)}`);
     requestAnimationFrame(() => el.setSelectionRange(a + 2, a + 2));
   };
-  const status = err ? "syntax error · the canvas keeps the last valid draft" : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "parsed · live draft";
+  const status = err ? `syntax error · the ${where} keeps the last valid draft` : probs.length || r.problems.length ? `parsed · ${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "parsed · live draft";
   const width = Math.max(40, ...lines.map((l, i) => l.length + (msgs.has(i) ? 60 : 0))) + 4;
 
   return (
@@ -72,7 +73,7 @@ export function YamlView({ draft, scope, published }: { draft: ConfigDraft; scop
         <span className="yv-file">{file}</span>
         <span className={`yv-status${err || r.problems.length ? " is-bad" : ""}`} role="status">{status}</span>
         <span className="bp-gap" />
-        <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the canvas as you type</span>
+        <span className="yv-legend"><span className="yv-plus">+</span> added <span className="yv-tilde">~</span> changed · edits apply to the {where} as you type</span>
       </div>
       {err && (
         <div className="yv-err" role="alert">

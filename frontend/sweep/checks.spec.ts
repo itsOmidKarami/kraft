@@ -161,6 +161,18 @@ test("checks/ellipsis: a .board-row-meta cut is allowed, an unmarked meta line s
   expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
 });
 
+/** Allowlist use: the Repos table's steering and tests cells and a repo's name (W15 D.1), one line cut, whole in title. */
+test("checks/ellipsis: the Repos table's .rp-cut cells and .rp-name-text cut are allowed, unmarked ones still count", async ({ page }) => {
+  const cell = (cls: string, attr: string) =>
+    `<span class="${cls}" ${attr} title="never-signal-processes-you-didnt-start" style="display:block;width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:12px sans-serif">never-signal-processes-you-didnt-start</span>`;
+  for (const cls of ["rp-cell rp-cut", "rp-name-text"]) {
+    await page.setContent(cell(cls, "data-allow-ellipsis"));
+    expect((await runChecks(page, false, [])).clippedEllipsis.count, cls).toBe(0);
+    await page.setContent(cell(cls, ""));
+    expect((await runChecks(page, false, [])).clippedEllipsis.count, cls).toBe(1);
+  }
+});
+
 /** The contrast check: muted text still has to clear 4.5:1; only text nobody
  *  has to read (disabled, placeholder, aria-hidden, faded decoration) is exempt. */
 const ground = (body: string) => `<style>body { margin: 0; background: #0f1019; font: 13px sans-serif; }</style>${body}`;

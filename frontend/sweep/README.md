@@ -92,7 +92,7 @@ W2 screens: `ng-shell` (frame, sidebar pinned/rail/revealed), `ng-search` (the �
 
 ## History and briefs
 
-- `sweep/HISTORY.md`: the receipts of W0–W14. For each wave: its rules, the cells it changed, cleared or regressed, its commits, open questions and MRs. A new wave appends here.
+- `sweep/HISTORY.md`: the receipts of W0–W14. For each wave: its rules, the cells it changed, cleared or regressed, its commits, open questions and MRs. This file is the archive up to 2026-10-01: from then on each PR writes its own receipts to `sweep/history/<branch>.md` (the branch name with `/` as `-`), a file only that PR adds, so merges never conflict on it.
 - `sweep/briefs/`: the one home for wave briefs (`W<n>_BRIEF.md`). It also holds `PUNCHLIST-v3.md`, the evidence list the waves closed, and `QUESTIONS.md`, where a wave writes a decision it cannot make. A new brief goes here in the same MR as its wave; the design handoff links here and does not copy it. Feature specs are not briefs: they follow CLAUDE.md and go to Kraft as work-item attachments. `sweep/WAVES.md` is the W0–W9 plan and the loop every wave follows.
 - `design/handoff_v4/`: the rules the code follows, with sweep frames as the reference screens.
 

@@ -1,7 +1,8 @@
 import * as api from "../api";
 import { useStore } from "../store";
 import { connectEvents } from "../ws";
-import { onApplyFrame, watchApply } from "./apply/store";
+import { watchApply } from "./apply/store";
+import { onLiveFrame } from "./live";
 import { applyTheme, lookOf } from "./theme/applyTheme";
 
 let stopEvents: (() => void) | null = null;
@@ -11,7 +12,7 @@ let stopApply: (() => void) | null = null;
 export function startEvents() {
   stopEvents?.();
   stopApply?.();
-  stopEvents = connectEvents({ onLive: onApplyFrame });
+  stopEvents = connectEvents({ onLive: onLiveFrame });
   stopApply = watchApply();
 }
 

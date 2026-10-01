@@ -120,6 +120,14 @@ async function ngLibrary(c: Ctx, ref = "") {
   if (ref) await c.page.locator(".pane").first().waitFor({ timeout: 8000 });
   await settle(c.page, 700);
 }
+/** One of the /ng settings areas (ux2-W15) on the mock's draft of it, sidebar pinned, once `ready` has drawn. */
+async function ngArea(c: Ctx, url: string, ready: string, then?: (p: Page) => Promise<void>) {
+  await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
+  await c.page.goto(url);
+  await c.page.locator(ready).first().waitFor({ timeout: 8000 });
+  await settle(c.page, 600);
+  if (then) { await then(c.page); await settle(c.page, 400); }
+}
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
 async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
@@ -350,7 +358,7 @@ const CASES: Case[] = [
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
   { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
   // W2 A: an unbuilt page inside the shell.
-  { screen: "ng-shell", variant: "placeholder", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/policy", {}) },
+  { screen: "ng-shell", variant: "placeholder", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/_nope", {}) },
   // W2 B: the sidebar. Pinned and rail by stored choice; "revealed" is the pointer over the rail.
   { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/policy", {}, { side: "pinned" }) },
   { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/policy", {}, { side: "rail" }) },
@@ -643,6 +651,31 @@ const CASES: Case[] = [
     await c.page.getByRole("tab", { name: "Config" }).click();
     await settle(c.page, 300);
   } },
+  { screen: "ng-repos", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row") },
+  { screen: "ng-repos", variant: "overview", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row", async (p) => { await p.getByRole("tab", { name: "Overview" }).click(); }) },
+  { screen: "ng-policy", variant: "limits", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/limits", ".pol-card") },
+  { screen: "ng-policy", variant: "loops", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/loops", ".pol-card") },
+  { screen: "ng-policy", variant: "housekeeping", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/housekeeping", ".pol-card") },
+  { screen: "ng-intake", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/auto-intake", ".ink-card") },
+  { screen: "ng-intake", variant: "schedule", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/auto-intake", ".ink-card", async (p) => { await p.locator(".ink-sch").first().click(); }) },
+  { screen: "ng-policy", variant: "review", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/limits", ".pol-card", async (p) => { await p.getByRole("button", { name: /tasks running maximum/ }).click(); await p.getByLabel("tasks running maximum").fill("60"); await p.keyboard.press("Enter"); await p.getByRole("button", { name: /Review/ }).click(); await p.locator(".pane").waitFor(); }) },
+  { screen: "ng-repos", variant: "config", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row", async (p) => { await p.getByRole("button", { name: /^test command, make test/ }).click(); await p.getByRole("textbox", { name: "test command" }).fill("pytest -q"); await p.keyboard.press("Enter"); await p.getByText("changed").first().waitFor(); }) },
+  { screen: "ng-repos", variant: "connect", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row", async (p) => { await p.getByRole("button", { name: /Connect repo/ }).click(); await p.getByLabel("Path to a git repository").fill("/Users/me/src/new"); await p.getByRole("button", { name: "Check" }).click(); await p.getByLabel("What was found").waitFor(); }) },
+  { screen: "ng-repos", variant: "refused", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row", async (p) => { await p.getByRole("button", { name: /^allowed tools, not set/ }).click(); await p.getByRole("textbox", { name: "allowed tools" }).fill("Bash"); await p.keyboard.press("Enter"); await p.getByText(/Refused:/).waitFor(); }) },
+  { screen: "ng-repos", variant: "problem", data: "default", widths: [1280], mock: { areas: "broken" }, run: (c) => ngArea(c, "/ng/templates/repos/docs-site", ".rp-row") },
+  { screen: "ng-repos", variant: "empty", data: "default", widths: [1280], mock: { areas: "empty" }, run: (c) => ngArea(c, "/ng/templates/repos", ".rp-bar") },
+  { screen: "ng-repos", variant: "yaml", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row", async (p) => { await p.getByRole("tab", { name: "YAML" }).click(); await p.locator(".rp-yaml").waitFor(); }) },
+  { screen: "ng-repos", variant: "review", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/templates/repos/platform", ".rp-row", async (p) => { await p.getByRole("button", { name: "Disable" }).click(); await p.getByRole("button", { name: "Review & publish" }).click(); await p.getByRole("heading", { name: /^Draft · / }).waitFor(); }) },
+  { screen: "ng-policy", variant: "menu", data: "default", widths: [1280], mock: { areas: "broken" }, run: (c) => ngArea(c, "/ng/settings/policy/housekeeping", ".pol-card", async (p) => { await p.getByRole("button", { name: /^Housekeeping/ }).click(); await p.getByRole("menu").waitFor(); }) },
+  { screen: "ng-policy", variant: "editing", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/limits", ".pol-card", async (p) => { await p.getByRole("button", { name: /^tasks running maximum/ }).click(); await p.getByLabel("tasks running maximum").fill("lots"); await p.keyboard.press("Enter"); await p.getByRole("alert").first().waitFor(); }) },
+  { screen: "ng-policy", variant: "problems", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { areas: "broken" }, run: (c) => ngArea(c, "/ng/settings/policy/limits", ".pol-card") },
+  { screen: "ng-policy", variant: "preview", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/limits", ".pol-card", async (p) => { await p.getByRole("button", { name: "Preview on a chain" }).click(); await p.getByRole("complementary", { name: "On a chain pane" }).waitFor(); await p.locator(".pol-pv").first().waitFor(); }) },
+  { screen: "ng-policy", variant: "yaml", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/policy/limits", ".pol-card", async (p) => { await p.getByRole("button", { name: "YAML", exact: true }).click(); await p.getByRole("textbox", { name: "policy.yaml, YAML" }).waitFor(); }) },
+  { screen: "ng-policy", variant: "review-stale", data: "default", widths: [1280], mock: { areas: "stale" }, run: (c) => ngArea(c, "/ng/settings/policy/housekeeping", ".pol-card", async (p) => { await p.getByRole("button", { name: /^max active items, 5/ }).click(); await p.getByLabel("max active items").fill("7"); await p.keyboard.press("Enter"); await p.getByRole("button", { name: "Review & publish" }).click(); await p.getByRole("button", { name: "Publish", exact: true }).click(); await p.getByText("Published since this draft began", { exact: true }).waitFor(); }) },
+  { screen: "ng-intake", variant: "off", data: "default", widths: [1280], mock: { areas: "off" }, run: (c) => ngArea(c, "/ng/settings/auto-intake", ".ink-card") },
+  { screen: "ng-intake", variant: "empty", data: "default", widths: [1280], mock: { areas: "empty" }, run: (c) => ngArea(c, "/ng/settings/auto-intake", ".ink-card") },
+  { screen: "ng-intake", variant: "problem", data: "default", widths: [1280], mock: { areas: "broken" }, run: (c) => ngArea(c, "/ng/settings/auto-intake", ".ink-card") },
+  { screen: "ng-intake", variant: "review", data: "default", widths: [1280], mock: { areas: "default" }, run: (c) => ngArea(c, "/ng/settings/auto-intake", ".ink-card", async (p) => { await p.getByRole("button", { name: /^check every, minutes/ }).click(); await p.getByLabel("check every, minutes").fill("2"); await p.keyboard.press("Enter"); await p.getByRole("button", { name: /Add schedule/ }).click(); await p.getByRole("button", { name: "Review & publish" }).click(); await p.getByRole("tab", { name: "YAML diff" }).click(); await p.getByText("policy.yaml", { exact: true }).first().waitFor(); }) },
   { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
   { screen: "ng-chains", variant: "move-to-library", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");

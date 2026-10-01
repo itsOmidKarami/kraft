@@ -28,7 +28,7 @@ export function useConfigDraft(area: Area, key: string) {
 
   const take = useCallback((v: DraftView) => {
     if (!live.current) return;
-    const nodes = v.result.resolved?.chain.nodes as NodeA[] | undefined;
+    const nodes = v.result.resolved?.chain?.nodes as NodeA[] | undefined;
     nodes?.forEach((n) => lastResolved.current.set(n.id, normalise(n) as NodeA));
     setView(v);
     setStatus("ready");
@@ -177,7 +177,7 @@ export function useConfigDraft(area: Area, key: string) {
 
   /** A node's steps: the resolved chain's, else the last this page rendered (Decided 2). */
   const resolvedNode = useCallback((id: string): NodeA | null => {
-    const n = (view?.result.resolved?.chain.nodes as NodeA[] | undefined)?.find((x) => x.id === id);
+    const n = (view?.result.resolved?.chain?.nodes as NodeA[] | undefined)?.find((x) => x.id === id);
     return n ? (normalise(n) as NodeA) : lastResolved.current.get(id) ?? null;
   }, [view]);
 

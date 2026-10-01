@@ -4,8 +4,14 @@ import type { DraftSummary } from "../templates/draft/types";
 
 export type AreaCount = { draft: boolean; problems: number };
 
-/** Which sidebar row each draft area belongs to (Decisions §10); W13 adds its areas here. */
-const ROW_OF: Record<string, string> = { chains: "/templates/chains", library: "/templates/library" };
+/** Which sidebar row each draft area belongs to (Decisions §10); W14 adds harnesses. */
+const ROW_OF: Record<string, string> = {
+  chains: "/templates/chains",
+  library: "/templates/library",
+  repos: "/templates/repos",
+  policy: "/settings/policy",
+  intake: "/settings/auto-intake",
+};
 
 /** Per sidebar row path, whether its area has an open draft and how many
  *  problems its drafts have. Read on mount, on window focus and after any

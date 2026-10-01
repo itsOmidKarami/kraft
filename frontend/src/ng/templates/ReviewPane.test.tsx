@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import { DEFAULT_VIEW } from "./draft/fixture.default";
 import type { Result, StaleBody } from "./draft/types";
+import * as toast from "../ui/Toast";
 import { ReviewPane } from "./ReviewPane";
 
 const SIZE = { width: 380, overlay: false, handle: undefined };
@@ -102,5 +103,63 @@ describe("Review & publish pane", () => {
     await userEvent.click(screen.getByRole("tab", { name: "YAML diff" }));
     expect(line("-   - id: old")).toHaveClass("is-del");
     expect(line("+ id: default")).toBeUndefined();
+  });
+});
+
+describe("Review & publish pane for an area (W15)", () => {
+  const AREA = { crumb: "Policy", files: ["intake.yaml", "policy.yaml"], toast: "Published policy · applies now", affects: () => <p>nothing runs</p> };
+  const files = { "intake.yaml": "enabled: true\ninterval_s: 60\n", "policy.yaml": "max_concurrent: 7\n" };
+  const published = { "intake.yaml": "enabled: true\ninterval_s: 300\n", "policy.yaml": "max_concurrent: 7\n" };
+
+  let toasted: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => void (toasted = vi.spyOn(toast, "showToast").mockImplementation(() => {})));
+
+  function mountArea(o: { result?: Partial<Result>; stale?: StaleBody | null } = {}) {
+    const draft = {
+      view: { ...DEFAULT_VIEW, area: "intake", key: "intake", draft: true, files, published, result: { ...DEFAULT_VIEW.result, changes: [], problems: [], ...o.result } },
+      stale: o.stale ?? null,
+      publish: vi.fn(() => Promise.resolve({ status: 200, body: {} })),
+      keepMine: vi.fn(() => Promise.resolve({ status: 200, body: {} })),
+      discard: vi.fn(),
+    } as unknown as ConfigDraft;
+    const cb = { onCollapse: vi.fn(), onExpand: vi.fn(), onFix: vi.fn(), onHighlight: vi.fn(), onDone: vi.fn() };
+    render(<ReviewPane draft={draft} scope={{ area: "intake", key: "intake" }} area={AREA} published={undefined} open size={SIZE} {...cb} />);
+    return { draft, ...cb };
+  }
+
+  it("lists the area's key rows, says who it affects in the area's words, and toasts the area's own line on publish", async () => {
+    const { draft, onDone } = mountArea({ result: { changes: [{ path: "interval_s", kind: "change", summary: "300 → 60", file: "intake.yaml" }] } });
+    expect(screen.getByRole("button", { name: /interval_s/ })).toHaveTextContent("300 → 60");
+    expect(screen.getByText("nothing runs")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Draft · 1 change pane" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(draft.publish).toHaveBeenCalledWith({ reload: true });
+    expect(toasted).toHaveBeenCalledWith("Published policy · applies now");
+  });
+
+  it("shows the YAML diff as one block per file that changed, from the published text the answer carries", async () => {
+    mountArea({ result: { changes: [{ path: "interval_s", kind: "change", summary: "300 → 60", file: "intake.yaml" }] } });
+    await userEvent.click(screen.getByRole("tab", { name: "YAML diff" }));
+    expect(screen.getByText("intake.yaml")).toBeInTheDocument();
+    expect(screen.queryByText("policy.yaml")).toBeNull();
+    expect(line("-interval_s: 300") ?? line("- interval_s: 300")).toBeTruthy();
+    expect(line("+ interval_s: 60")).toBeTruthy();
+  });
+
+  it("passes the whole problem to Fix → so the page can find what it is about", async () => {
+    const problem = { path: "triggers[0].repo", field: "repo", message: "not a connected repo", file: "policy.yaml", line: 1, col: 1, schedule: 0 };
+    const { onFix } = mountArea({ result: { problems: [problem] } });
+    await userEvent.click(screen.getByRole("button", { name: "Fix →" }));
+    expect(onFix).toHaveBeenCalledWith("triggers[0].repo", problem);
+  });
+
+  it("keeps the area's draft on a 409 and offers Keep my version, naming the area in the toast", async () => {
+    const stale: StaleBody = { detail: "published since this draft began: policy.yaml", files: { "policy.yaml": { published: "a\n", draft: "b\n", diff: "--- p\n+++ d\n@@ -1 +1 @@\n-a\n+b\n" } } };
+    const { draft, onDone } = mountArea({ stale });
+    expect(screen.getByRole("alert")).toHaveTextContent("Published since this draft began");
+    await userEvent.click(screen.getByRole("button", { name: "Keep my version and publish" }));
+    expect(draft.keepMine).toHaveBeenCalled();
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 });

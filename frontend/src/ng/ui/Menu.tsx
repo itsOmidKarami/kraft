@@ -13,6 +13,11 @@ export interface MenuItem {
   hint?: string;
   /** A second, quieter line under the label. */
   sub?: string;
+  /** A dot after the label: an unpublished draft (amber) or a problem (red); `dotLabel` names it for a screen reader. */
+  dot?: "draft" | "problem";
+  dotLabel?: string;
+  /** A glyph before the label. */
+  icon?: ReactNode;
 }
 
 /** A button that opens a list of actions. Focus moves into the list; ↑/↓,
@@ -69,6 +74,7 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
               }}
             >
               {it.checked !== undefined && <span className="menu-mark" aria-hidden>{it.checked ? "✓" : ""}</span>}
+              {it.icon && <span className="menu-icon" aria-hidden>{it.icon}</span>}
               {it.sub ? (
                 <span className="menu-text">
                   <span>{it.label}</span>
@@ -77,6 +83,7 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
               ) : (
                 it.label
               )}
+              {it.dot && <span className={`menu-dot is-${it.dot}`} role="img" aria-label={it.dotLabel ?? (it.dot === "draft" ? "unpublished draft" : "has a problem")} />}
               {it.hint && <span className="menu-hint">{it.hint}</span>}
             </button>
           ))}

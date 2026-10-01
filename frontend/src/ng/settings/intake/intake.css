@@ -1,0 +1,33 @@
+/* The Auto-intake page (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+.ink-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
+.ink-page { max-width: 760px; box-sizing: border-box; margin: 0 auto; padding: 20px 20px 60px; display: flex; flex-direction: column; gap: 18px; }
+.ink-card { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); text-align: left; color: var(--text); cursor: pointer; }
+.ink-card.is-on { background: var(--surface); }
+.ink-card.is-sel, .ink-sch.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); }
+.ink-status { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+.ink-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+.ink-card.is-on .ink-dot { background: var(--ok); }
+.ink-sentence { font-size: 12.5px; line-height: 1.55; color: var(--text-sub); }
+.ink-h2 { margin: 0 0 8px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.ink-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.ink-head .ink-h2 { margin: 0; }
+.ink-checks { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.ink-checks li { display: flex; gap: 12px; font-size: 12px; line-height: 1.5; color: var(--text-sub); }
+.ink-time { flex: none; width: 40px; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.ink-muted { font-size: 12px; color: var(--text-muted); }
+.ink-sched { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ink-sch { width: 100%; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; background: transparent; text-align: left; color: var(--text); cursor: pointer; }
+.ink-sch:hover { background: var(--surface); }
+.ink-sch-name { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.ink-sch-line { grid-column: 1; font-size: 11.5px; color: var(--text-muted); }
+.ink-sch-cron { grid-column: 2; grid-row: 1 / 3; align-self: center; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.ink-bad { width: 6px; height: 6px; border-radius: 50%; background: var(--bad); }
+.ink-err { margin: 2px 0 0 14px; font-size: 11px; line-height: 1.45; color: var(--bad); }
+.ink-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+.ink-row { display: grid; grid-template-columns: minmax(70px, 110px) minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ink-k { padding-top: 2px; color: var(--text-muted); }
+.ink-v { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ink-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 9px; font-size: 10.5px; color: var(--text-muted); }
+.ink-chip.is-changed { border-color: var(--warn); color: var(--warn); }
+.ink-rownote { grid-column: 2 / -1; font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+.ink-select { max-width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); font-size: 12px; color: var(--text); }

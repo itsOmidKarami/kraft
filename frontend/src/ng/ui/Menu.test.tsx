@@ -91,4 +91,25 @@ describe("ng Menu", () => {
     expect(last).toBeDisabled();
     expect(screen.getByText("Compare from")).toBeInTheDocument();
   });
+
+  it("marks an item with a draft or problem dot and a glyph, and names the dot for a screen reader", () => {
+    render(
+      <Menu
+        label="Policy section"
+        trigger="Limits ▾"
+        triggerClass="word-btn"
+        items={[
+          { label: "Limits", icon: <svg data-testid="i" />, checked: true, dot: "problem", onSelect: () => {} },
+          { label: "Loops", dot: "draft", dotLabel: "unpublished changes", checked: false, onSelect: () => {} },
+          { label: "Housekeeping", checked: false, onSelect: () => {} },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Limits ▾" }));
+    const [limits, loops, house] = screen.getAllByRole("menuitemradio");
+    expect(limits.querySelector(".menu-dot.is-problem")).toHaveAttribute("aria-label", "has a problem");
+    expect(limits.querySelector(".menu-icon [data-testid='i']")).not.toBeNull();
+    expect(loops.querySelector(".menu-dot.is-draft")).toHaveAttribute("aria-label", "unpublished changes");
+    expect(house.querySelector(".menu-dot")).toBeNull();
+  });
 });

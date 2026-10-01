@@ -164,7 +164,7 @@ describe("ng Sidebar", () => {
 });
 
 describe("ng Sidebar draft dots", () => {
-  const draft = (area: "chains" | "library", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
+  const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
 
   it("marks an area with an open draft and counts its problems, from GET /drafts", async () => {
     vi.mocked(drafts.listDrafts).mockResolvedValue({ status: 200, body: [draft("chains", "default", 0), draft("chains", "broken", 2), draft("library", "library", 0)] });
@@ -175,6 +175,16 @@ describe("ng Sidebar draft dots", () => {
     expect(chains.querySelector(".ng-side-mark.is-bad")).not.toBeNull();
     const library = within(nav()).getByRole("link", { name: "Library, unpublished draft" });
     expect(library.querySelector(".ng-side-count")).toBeNull();
+    expect(within(nav()).getByRole("link", { name: "Harnesses" }).querySelector(".ng-side-dot")).toBeNull();
+  });
+
+  it("marks the Repos, Policy and Auto-intake rows from their own draft areas, and Policy stays active on a section page", async () => {
+    vi.mocked(drafts.listDrafts).mockResolvedValue({ status: 200, body: [draft("repos", "repos", 1), draft("policy", "policy", 0), draft("intake", "intake", 0)] });
+    mount("/settings/policy/loops");
+    const policy = await within(nav()).findByRole("link", { name: "Policy, unpublished draft" });
+    expect(policy).toHaveAttribute("aria-current", "page");
+    expect(within(nav()).getByRole("link", { name: "Repos, unpublished draft, 1 problem" })).toBeInTheDocument();
+    expect(within(nav()).getByRole("link", { name: "Auto-intake, unpublished draft" })).toBeInTheDocument();
     expect(within(nav()).getByRole("link", { name: "Harnesses" }).querySelector(".ng-side-dot")).toBeNull();
   });
 

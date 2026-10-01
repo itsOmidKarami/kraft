@@ -5,7 +5,7 @@ import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
-import type { Problem, Scope, StaleBody } from "./draft/types";
+import type { Problem, Result, Scope, StaleBody } from "./draft/types";
 import { chainFile, counts, LIBRARY_FILE, scopeFile } from "./draft/view";
 import { resetLibrary, useLibrary } from "./useLibrary";
 import { Head, Kv, Note } from "./panes/controls";
@@ -28,16 +28,28 @@ function DiffLines({ lines }: { lines: { t: string; s: string }[] }) {
 const serverDiff = (diff: string) =>
   diff.split("\n").filter((l) => l && !l.startsWith("---") && !l.startsWith("+++")).map((l) => (l.startsWith("@@") ? { t: "…", s: "" } : { t: l[0] === "+" || l[0] === "-" ? l[0] : " ", s: l.slice(1) }));
 
+/** What an area that is not a chain or the library adds to the review pane (W15: repos,
+ *  policy, intake): its name, the files it spans (each file's YAML diff is a block), who it
+ *  affects, and the toast a publish shows. */
+export interface ReviewArea {
+  crumb: string;
+  files: string[];
+  toast: string;
+  affects: (r: Result) => ReactNode;
+}
+
 /** Review & publish's pane (Decisions §9 Publish): the draft's changes and
  *  problems, the YAML diff, who it affects; Discard confirms in place;
  *  Publish waits for zero problems. A 409 shows the server's diff (R45). */
-export function ReviewPane({ draft, scope, published, libraryPublished, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone, problemWhere }: {
+export function ReviewPane({ draft, scope, published, libraryPublished, area, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone, problemWhere }: {
   draft: ConfigDraft;
   scope: Scope;
   /** The published file's text; null for a chain never published. */
   published: string | null | undefined;
   /** The published `library.yaml`'s text, when a chain draft carries one (Move to library, R47): the second file's diff. */
   libraryPublished?: string | null;
+  /** An area's review (repos, policy, intake): see `ReviewArea`. */
+  area?: ReviewArea;
   open: boolean;
   size: ReturnType<typeof useResizable>;
   onCollapse: () => void;
@@ -54,7 +66,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
   const [asking, setAsking] = useState(false);
   const [refused, setRefused] = useState<Problem[] | null>(null);
   const lib = scope.area === "library";
-  const chain = scope.key;
+  const chain = area ? area.crumb : scope.key;
   const noun = lib ? "the library" : chain;
   const view = draft.view!;
   const r = view.result;
@@ -77,15 +89,15 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
   for (const c of r.changes) for (const ch of c.reaches ?? []) reach.set(ch, (reach.get(ch) ?? 0) + 1);
 
   // A rename moves the file to chains/<new id>.yaml; delete_chain makes it null.
-  const renamedTo = lib || live === chainFile(chain) ? chain : live.slice("chains/".length, -".yaml".length);
-  const deleted = view.files[live] === null;
+  const renamedTo = area || lib || live === chainFile(chain) ? chain : live.slice("chains/".length, -".yaml".length);
+  const deleted = !area && view.files[live] === null;
   const gone = deleted || renamedTo !== chain;
   const publish = async () => {
     const a = await draft.publish({ reload: !gone });
     if (a.status === 200) {
       // The published library changed (a moved component joined it): menus read it afresh.
       if (joined) resetLibrary();
-      showToast(deleted ? `Deleted ${chain}` : `Published ${lib ? "the library" : renamedTo}${joined ? " and the library" : ""} · new items use it from now on`);
+      showToast(area ? area.toast : deleted ? `Deleted ${chain}` : `Published ${lib ? "the library" : renamedTo}${joined ? " and the library" : ""} · new items use it from now on`);
       if (gone) onGone?.(deleted ? null : renamedTo);
       else onDone();
     } else if (a.status === 422) setRefused((a.body as { problems?: Problem[] }).problems ?? null);
@@ -99,7 +111,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
     }
   };
   const copy = async () => {
-    const all = Object.values(stale?.files ?? {}).map((f) => f.draft).join("\n---\n") || text;
+    const all = Object.values(stale?.files ?? {}).map((f) => f.draft).join("\n---\n") || (area ? area.files.map((f) => view.files[f] ?? "").join("\n---\n") : text);
     try {
       await navigator.clipboard.writeText(all);
       showToast("Copied the draft's YAML");
@@ -125,7 +137,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
 
   return (
     <Inspector
-      id={lib ? "library-review" : "chains-review"}
+      id={area ? `${scope.area}-review` : lib ? "library-review" : "chains-review"}
       open={open}
       size={size}
       crumbs={[{ label: lib ? "Library" : chain }]}
@@ -170,7 +182,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
           {lib && problems.some((p) => p.chain || p.repo) && <Note>A chain or repo problem is fixed in the library component it names.</Note>}
           {problems.map((p, i) => (
             <div key={i} className="tpl-rv-prob">
-              <span className="tpl-rv-path">{p.path || chain}{p.field ? ` · ${p.field}` : ""}</span>
+              <span className="tpl-rv-path">{p.path || chain}{p.field && p.field !== p.path ? ` · ${p.field}` : ""}</span>
               <span>{problemText(p)}</span>
               {problemWhere?.(p)}
               <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path, p)}>Fix →</button>
@@ -181,7 +193,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
       {tab === "changes" ? (
         <>
           <Head>Changes</Head>
-          {!r.changes.length && <Note>{published === null ? "A new chain with no nodes yet." : "No changes."}</Note>}
+          {!r.changes.length && <Note>{!area && published === null ? "A new chain with no nodes yet." : "No changes."}</Note>}
           {r.changes.map((c, i) => (
             <button key={i} type="button" className="tpl-rv-change" onClick={() => onHighlight(c.path)}>
               <span className={`tpl-rv-sign is-${c.kind}`} aria-label={c.kind}>{c.kind === "add" ? "+" : c.kind === "remove" ? "−" : "~"}</span>
@@ -203,8 +215,8 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
             </>
           )}
           <Head>Who it affects</Head>
-          <Kv k="new items" v="use this version once published" />
-          {lib ? (
+          {area ? area.affects(r) : <Kv k="new items" v="use this version once published" />}
+          {area ? null : lib ? (
             <>
               <Kv k="chains" v={r.impact.chains?.length ? r.impact.chains.map((c) => `${c}${reach.get(c) ? ` · ${plural(reach.get(c)!, "change")}` : ""}`).join(", ") : "none"} mono={!!r.impact.chains?.length} muted={!r.impact.chains?.length} />
               <Kv k="repos" v={r.impact.repos?.length ? `${r.impact.repos.join(", ")} name a changed profile` : "none name a changed profile"} mono={!!r.impact.repos?.length} muted={!r.impact.repos?.length} />
@@ -217,6 +229,17 @@ export function ReviewPane({ draft, scope, published, libraryPublished, open, si
             </>
           )}
         </>
+      ) : area ? (
+        view.published === undefined ? <Note>Loading the published files…</Note> : (
+          <>
+            {area.files.filter((f) => (view.files[f] ?? null) !== (view.published![f] ?? null)).map((f) => (
+              <div key={f}>
+                <p className="tpl-rv-file">{f}</p>
+                <DiffLines lines={folded(lineDiff((view.published![f] ?? "").split("\n"), (view.files[f] ?? "").split("\n"))).map((o) => ("s" in o ? o : { t: "…", s: "" }))} />
+              </div>
+            ))}
+          </>
+        )
       ) : published === undefined ? (
         <Note>Loading the published file…</Note>
       ) : (

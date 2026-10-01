@@ -268,5 +268,17 @@
       { "kind": "no-console", "match": "^ng-" },
       { "kind": "flow-completes", "match": "^flow-ng-(move-to-library|library-)" }
     ]
+  },
+  "ux2-W15": {
+    "title": "UX V2 Repos, Policy and Auto-intake: the three draft-model settings areas",
+    "screens": ["ng-repos", "ng-policy", "ng-intake", "ng-shell", "flow-ng-repo-connect", "flow-ng-repo-refused", "flow-ng-policy-edit-publish", "flow-ng-policy-stale", "flow-ng-intake-schedule"],
+    "specs": ["sweep.spec.ts", "interactions.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
+      { "kind": "no-console", "match": "^ng-(?!chains/review-stale|policy/review-stale)" },
+      { "kind": "flow-completes", "match": "^flow-ng-(repo|policy|intake)-" }
+    ]
   }
 }

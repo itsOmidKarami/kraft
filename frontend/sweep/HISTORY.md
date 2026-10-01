@@ -1,3 +1,4 @@
+> From 2026-10-01 each PR writes its receipts to `sweep/history/<branch>.md`; this file is the archive up to then.
 > The receipts of the UI sweep programme (W0–W14): per wave, the rules that passed or failed, the cells that changed, commits, questions and MRs. Moved from `e2e-shots/RUN-SUMMARY.md`; the text below is unedited.
 > `e2e-shots/sweep/` (the PNGs and manifests it cites) is not tracked; regenerate it with `node sweep/wave.mjs all --baseline`.
 

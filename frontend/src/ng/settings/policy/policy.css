@@ -1,0 +1,59 @@
+/* The Policy page (W15). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+.pol-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
+.pol-page { max-width: 880px; box-sizing: border-box; margin: 0 auto; padding: 16px 24px 60px; display: flex; flex-direction: column; gap: 12px; }
+.pol-section { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; margin: -2px -7px; border: 0; border-radius: 5px; background: transparent; font-size: 12.5px; color: var(--text); cursor: pointer; }
+.pol-section:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); }
+.pol-intro { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.pol-note { margin: 0; padding: 0 8px; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+.pol-note.is-bad, .pol-help.is-bad { color: var(--bad); }
+.pol-h2 { margin: 6px 8px 2px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+
+.pol-card { display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.pol-card.is-dashed { border-style: dashed; }
+.pol-card.is-bad { border-color: var(--bad); }
+.pol-body[data-flash="work_item"] .pol-card[data-scope="work_item"], .pol-body[data-flash="nodes"] .pol-card[data-scope="nodes"], .pol-body[data-flash="steps"] .pol-card[data-scope="steps"], .pol-body[data-flash="tasks"] .pol-card[data-scope="tasks"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
+.pol-card-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 6px; }
+.pol-card-ico { display: flex; color: var(--text-sub); }
+.pol-card-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.pol-card-sub { flex: 1; font-size: 11px; color: var(--text-muted); }
+.pol-card-count { font-size: 11px; color: var(--bad); }
+
+.pol-grid { padding: 0 8px; display: grid; grid-template-columns: minmax(80px, 130px) minmax(0, 1fr) minmax(0, 1fr); column-gap: 10px; align-items: center; }
+.pol-grid.has-below { grid-template-columns: minmax(80px, 130px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr); }
+.pol-grid.has-used { grid-template-columns: minmax(80px, 130px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); }
+.pol-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 30px; border-radius: 6px; font-size: 12px; }
+.pol-row.is-bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.pol-colh { padding: 0; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.pol-k { font-size: 12px; color: var(--text-sub); overflow-wrap: anywhere; }
+.pol-k.is-bad { color: var(--bad); }
+.pol-cell { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.pol-was { font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.pol-from { font-size: 10.5px; color: var(--text-muted); }
+.pol-below { display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.45; color: var(--text-muted); min-width: 0; }
+.pol-below .is-bad { color: var(--bad); }
+.pol-one { display: grid; grid-template-columns: minmax(80px, 130px) minmax(70px, 1fr) minmax(0, 2.4fr); gap: 10px; align-items: center; min-height: 30px; padding: 2px 8px; border-radius: 6px; font-size: 12px; }
+.pol-help { font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+.pol-loops { display: grid; grid-template-columns: minmax(110px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; column-gap: 10px; }
+.pol-loop { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; column-gap: 10px; align-items: center; min-height: 30px; padding: 2px 8px; font-size: 12px; }
+.pol-loop.is-default { border-bottom: 1px solid var(--line); }
+.pol-chain { margin-left: 4px; font-size: 10.5px; color: var(--text-muted); }
+.pol-link { padding: 0; border: 0; background: transparent; font-size: 11px; color: var(--text-muted); text-decoration: underline; cursor: pointer; }
+.pol-link:is(:hover, :focus-visible) { color: var(--text); }
+.pol-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pol-chip { padding: 2px 10px; border: 1px dashed var(--border); border-radius: 5px; background: transparent; font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); cursor: pointer; }
+.pol-chip.is-on { border-style: solid; background: var(--surface-2); color: var(--text); }
+.pol-chip.is-changed { border-color: var(--warn); }
+.pol-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.pol-pv { display: flex; flex-direction: column; gap: 1px; margin: 2px 0; padding: 6px; border-radius: 6px; }
+.pol-pv.is-bad { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.pol-pv-path { font: 12px ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+.pol-pv-kind { font-size: 10.5px; color: var(--text-muted); }
+.pol-pv-cap { font-size: 11px; line-height: 1.4; color: var(--text-sub); }
+.pol-pv-cap.is-bad { color: var(--bad); }
+
+@media (max-width: 1023px) {
+  .pol-grid.has-below { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr) minmax(0, 1fr); }
+  .pol-grid.has-below > :nth-child(4), .pol-grid.has-below .pol-below { display: none; }
+  .pol-one { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr); }
+  .pol-one > .pol-help { grid-column: 1 / -1; }
+}

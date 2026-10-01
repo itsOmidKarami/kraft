@@ -43,7 +43,11 @@
 .menu-item:not(:disabled):is(:hover, :focus-visible) { background: var(--line); }
 .menu-item:disabled { color: var(--text-faint); cursor: default; }
 .menu-item-danger { color: var(--bad); }
-.menu-item:has(.menu-mark, .menu-hint) { display: flex; align-items: center; gap: 8px; }
+.menu-item:has(.menu-mark, .menu-hint, .menu-icon, .menu-dot) { display: flex; align-items: center; gap: 8px; }
+.menu-icon { flex: none; display: flex; color: var(--text-sub); }
+.menu-dot { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--warn); }
+.menu-dot.is-problem { background: var(--bad); }
+.menu-dot + .menu-hint { margin-left: 8px; }
 .menu-mark { flex: none; width: 10px; color: var(--text-sub); }
 .menu-hint { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--text-muted); }
 .menu-note { margin: 0; padding: 5px 10px 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
