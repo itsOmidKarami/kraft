@@ -50,6 +50,9 @@ FLOORS = {
     "text-muted": (4.5, TEXT_ON),
     "text-faint": (3.0, TEXT_ON),
     "focus": (3.0, ("bg",)),
+    # Graph edges, dots and outlines (WCAG 1.4.11): `border` and `line` are
+    # dividers and stay quiet; `stroke` is for a line that carries state.
+    "stroke": (3.0, ("bg", "surface")),
 }
 #: Status colours are both a fill on the ground and text on a card.
 STATUS = ("ok", "warn", "bad", "info")
@@ -163,6 +166,10 @@ def neutrals(surface: str, mode: str, amount: str, log: list[str]) -> dict[str, 
         for floor, on in STATUS_FLOORS:
             t[role] = nudge(oklch(L, C, hh), [t[on]], floor, dark, f"{where} {role}", log)
             L = hex_oklab(t[role])[0]
+    floor, on = FLOORS["stroke"]
+    t["stroke"] = nudge(
+        hex_oklab(t["border"]), [t[x] for x in on], floor, dark, f"{where} stroke", log
+    )
     # Decisions §13: selection, primary buttons and focus stay neutral.
     t["selection"] = t["focus"] = t["text"]
     # Review diff colours (Appearance › Review diff): theme = the status pair,

@@ -42,6 +42,8 @@ def test_every_combination_clears_its_floors(surface, mode, amount):
         assert contrast(t[role], t["bg"]) >= 3.0, (role, "fill")
         assert contrast(t[role], t["surface"]) >= 4.5, (role, "text")
     assert contrast(t["focus"], t["bg"]) >= 3.0
+    for ground in ("bg", "surface"):
+        assert contrast(t["stroke"], t[ground]) >= 3.0, ("stroke", ground)
     for x in gen.ACCENTS:
         if amount == "mono" and x != "none":
             continue  # Mono locks the accent to none: 13 choices per surface and mode.
@@ -52,7 +54,7 @@ def test_every_combination_clears_its_floors(surface, mode, amount):
 @pytest.mark.parametrize("mode", gen.MODES)
 def test_mono_neutrals_have_no_chroma(mode):
     """At mono the five surfaces differ in lightness only."""
-    neutral = ("side", "bg", "surface", "surface-2", "line", "border")
+    neutral = ("side", "bg", "surface", "surface-2", "line", "border", "stroke")
     text = ("text", "text-sub", "text-muted", "text-faint")
     grounds = set()
     for s in gen.SURFACES:
