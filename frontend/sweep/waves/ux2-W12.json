@@ -1,0 +1,40 @@
+{
+  "title": "UX V2 Library: list, canvas, panes, steering preview, review and publish, Move to library",
+  "screens": [
+    "ng-library",
+    "ng-chains/move-to-library",
+    "flow-ng-move-to-library",
+    "flow-ng-library-blocked-publish",
+    "flow-ng-library-steering-preview",
+    "flow-ng-library-rename"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "interactions.spec.ts"
+  ],
+  "rules": [
+    {
+      "kind": "no-flag",
+      "flag": "contrast",
+      "match": "^ng-"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "offscreen",
+      "match": "^ng-"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "clipped-v",
+      "match": "^ng-"
+    },
+    {
+      "kind": "no-console",
+      "match": "^ng-"
+    },
+    {
+      "kind": "flow-completes",
+      "match": "^flow-ng-(move-to-library|library-)"
+    }
+  ]
+}

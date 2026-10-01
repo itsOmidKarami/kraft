@@ -1,0 +1,29 @@
+{
+  "title": "Board, peek, archive",
+  "screens": [
+    "board",
+    "board-peek",
+    "archived",
+    "flow-peek-open-close",
+    "flow-board-selection-archive",
+    "flow-sidebar-toggle",
+    "flow-search-keyboard",
+    "flow-new-item-full"
+  ],
+  "rules": [
+    {
+      "kind": "no-flag",
+      "flag": "offscreen",
+      "match": "^(board|board-peek|archived)/"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "ellipsis",
+      "match": "^board/long@1920"
+    },
+    {
+      "kind": "flow-completes",
+      "match": "^flow-(peek-open-close|board-selection-archive|sidebar-toggle)/"
+    }
+  ]
+}

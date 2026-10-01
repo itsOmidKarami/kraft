@@ -15,7 +15,9 @@ node sweep/wave.mjs <Wn>                      # re-shoot + pixel diff + acceptan
 git add -A && git commit -m "<Wn>: <title> — sweep ALL PASS"
 ```
 
-Stop conditions: a rule needs a design decision this file does not give → write it to `frontend/sweep/briefs/QUESTIONS.md` (wave, rule, the two options, your recommendation), skip that rule, continue. Never stop the whole run for one rule. Never weaken a rule in `sweep/waves.json` to make it pass; if a rule is genuinely wrong, say so in QUESTIONS.md.
+Stop conditions: a rule needs a design decision this file does not give → write it to `frontend/sweep/briefs/QUESTIONS.md` (wave, rule, the two options, your recommendation), skip that rule, continue. Never stop the whole run for one rule. Never weaken a rule in `sweep/waves/<wave>.json` to make it pass; if a rule is genuinely wrong, say so in QUESTIONS.md.
+
+A wave's cells, flows and rules go in `sweep/cases/<wave>.ts`, `sweep/cases/<wave>.flows.ts` and `sweep/waves/<wave>.json`; never edit the shared lists (there are none now). See the README.
 
 Harness edits (`frontend/sweep/**`) are allowed when a selector or fixture is wrong; say so in the commit. Never edit a check to hide a finding.
 
@@ -27,7 +29,7 @@ At the end append to `frontend/sweep/HISTORY.md`: per wave — rules pass/fail, 
 - `contrast`: for every visible text node, WCAG contrast of computed color vs the nearest opaque ancestor background < 4.5 (3.0 for ≥ 24px). Count + 8 examples. Cheap approximation is fine (walk up until `background-color` alpha = 1).
 - `focus-ring`: on flow steps, `document.activeElement` has no visible outline/box-shadow difference vs its blurred state. Record as flag on flow cells only.
 - fixtures.ts `settingsFor("empty")` must actually be empty.
-- sweep.spec.ts: every screen gets a `~light` shell variant at 1280 (currently three).
+- sweep.spec.ts (the loop; the cells are `sweep/cases/*.ts`): every screen gets a `~light` shell variant at 1280 (currently three).
 
 ---
 

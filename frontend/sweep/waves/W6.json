@@ -1,0 +1,31 @@
+{
+  "title": "Composers, toasts, focus, post-action",
+  "screens": [
+    "composer",
+    "toast",
+    "flow-gate-approve",
+    "flow-gate-reject",
+    "flow-pause-steer-resume",
+    "flow-escalate-thread",
+    "flow-search-keyboard",
+    "flow-new-item-full",
+    "flow-board-selection-archive",
+    "flow-sidebar-toggle",
+    "flow-item-tabs-keyboard"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "interactions.spec.ts"
+  ],
+  "rules": [
+    {
+      "kind": "flow-completes",
+      "match": "^flow-"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "focus-ring",
+      "match": "^flow-"
+    }
+  ]
+}

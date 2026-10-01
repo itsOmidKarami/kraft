@@ -1,0 +1,23 @@
+{
+  "title": "Correctness and copy",
+  "screens": [
+    "analytics",
+    "search",
+    "item",
+    "el-inspector",
+    "el-right-pane",
+    "doc-modal",
+    "login",
+    "composer"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "elements.spec.ts"
+  ],
+  "rules": [
+    {
+      "kind": "no-console",
+      "match": "^login/"
+    }
+  ]
+}
