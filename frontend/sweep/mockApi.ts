@@ -400,6 +400,14 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
       { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
     ]);
+    if (p === "/apply" || p === "/apply/reload") return json(route, {
+      restart: [{ id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" }],
+      reload: [{ id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded", problem: "defaults: Input should be a valid dictionary" }],
+    });
+    if (p === "/apply/restart") return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) });
+    if (p === "/update" || p === "/update/check") return json(route, {
+      installed: "1.4.0", latest: "v1.5.0", channel: "stable", behind: true, checked_at: new Date(Date.now() - 3_600_000).toISOString(),
+    });
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
     if (p === "/notify") return json(route, st.notify);
