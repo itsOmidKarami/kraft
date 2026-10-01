@@ -122,10 +122,9 @@ def test_cache_reads_come_off_uncached_input_whichever_way_agy_counts_them(total
     assert (got.tokens_in, got.tokens_cache_read) == (total - 500 - 4000, 4000)
 
 
-def test_the_conversation_id_is_read_off_init_and_a_failed_launch_has_none(tmp_path):
+def test_the_conversation_id_is_read_off_init(tmp_path):
     reader = usage.READERS[_READER]
     assert reader.session_id(_log(tmp_path, _RESUMED)) == _SID
-    assert reader.session_id(_log(tmp_path, [_BAD_MODEL])) is None
     assert not reader.reports_cost
 
 

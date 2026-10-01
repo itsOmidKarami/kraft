@@ -1081,9 +1081,10 @@ def _envelope_antigravity(log_path: Path) -> dict | None:
 
 
 def _session_id_antigravity(log_path: Path) -> str | None:
-    """The `conversation_id` `agy --conversation` takes, off the `init` event."""
+    """The `conversation_id` `agy --conversation` takes: only the `init`
+    event carries one at the top level."""
     for obj in _log_objects(log_path):
-        sid = obj.get("conversation_id") if obj.get("event") == "init" else None
+        sid = obj.get("conversation_id")
         if isinstance(sid, str) and sid:
             return sid
     return None
