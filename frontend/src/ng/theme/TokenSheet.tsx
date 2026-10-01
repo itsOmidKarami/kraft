@@ -10,6 +10,7 @@ import { Segmented } from "../ui/Segmented";
 import { ShortId } from "../ui/ShortId";
 import { Switch } from "../ui/Switch";
 import { Tabs } from "../ui/Tabs";
+import { HeaderActions } from "../shell/HeaderActions";
 import { showToast } from "../ui/Toast";
 import { AMOUNTS, paintedMode, SURFACES } from "./looks";
 import { ThemeCard } from "./ThemeCard";
@@ -35,6 +36,10 @@ export function TokenSheet() {
 
   return (
     <div className="tokens">
+      <HeaderActions>
+        <Button onClick={() => showToast("Toast from the header")}>Toast</Button>
+        <Button variant="primary" onClick={() => setDialog(true)}>Dialog</Button>
+      </HeaderActions>
       <h1>Tokens</h1>
       <p className="tokens-look">{`${html.surface} · ${html.accent} accent · ${paintedMode()} · ${amount}`}</p>
       {GROUPS.map(([name, keys]) => (

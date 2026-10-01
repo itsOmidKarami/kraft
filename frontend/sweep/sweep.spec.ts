@@ -240,6 +240,8 @@ const CASES: Case[] = [
   { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail" }) },
   { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail", hover: true }) },
   { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "long-crumb", data: "long", widths: [1024], run: (c) => ng(c, `/ng/work-items/${idOf(c.S, "gate")}`, {}, { side: "rail" }) },
+  { screen: "ng-shell", variant: "actions", data: "default", widths: [1280], run: (c) => ng(c, "/ng/_tokens", {}, { side: "pinned" }) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },

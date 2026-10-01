@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
+import { Header } from "./Header";
 import { HeaderActionsHost } from "./HeaderActions";
 import { Sidebar } from "./Sidebar";
 import "./shell.css";
@@ -15,9 +16,7 @@ export function Shell() {
       <div className="ng-shell">
         <Sidebar />
         <div className="ng-frame">
-          <header className="ng-header">
-            <div className="ng-header-actions" ref={setActions} />
-          </header>
+          <Header actionsRef={setActions} />
           <main id="ng-main" tabIndex={-1} className="ng-main">
             <Outlet />
           </main>
