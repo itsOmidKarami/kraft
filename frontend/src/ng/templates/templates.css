@@ -111,3 +111,16 @@
 .yv-issues-list { margin: 0; padding: 0 8px 8px; overflow-y: auto; list-style: none; }
 .yv-issue { display: block; width: 100%; padding: 3px 8px; border: 0; border-radius: 5px; background: none; text-align: left; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; overflow-wrap: anywhere; }
 .yv-issue:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+
+/* The chain switcher (Decisions §9 Header): no border at rest, a background on hover, a border while open. */
+.tpl-switch { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid transparent; border-radius: 6px; background: none; font: 12px ui-monospace, Menlo, monospace; color: var(--text); cursor: pointer; }
+.tpl-switch:is(:hover, :focus-visible) { background: var(--surface-2); }
+.tpl-switch.is-open { border-color: var(--border); background: var(--surface-2); }
+.sw { width: 300px; }
+.sw-row { display: flex; align-items: center; gap: 8px; }
+.sw-check { flex: none; width: 12px; color: var(--text); }
+.sw-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sw-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.sw-acts { display: flex; flex-direction: column; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.unsaved p { margin: 0 0 8px; font-size: 12.5px; color: var(--text-sub); line-height: 1.5; }
+.tpl-first { max-width: 420px; }

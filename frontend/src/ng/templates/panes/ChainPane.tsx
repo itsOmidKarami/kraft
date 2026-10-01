@@ -21,7 +21,7 @@ const NOT_OVERRIDES = new Set(["id", "extends", "icon", "kind", "on_failure"]);
 
 /** The side pane for whatever is selected (Decisions §9 Side pane): crumb,
  *  icon and title, subtitle, the problem row, Overview | Config, footer. */
-export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand, onFocus, goTo }: {
+export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand, onFocus, goTo, onDuplicate, onDeleted }: {
   draft: ConfigDraft;
   chain: string;
   path: string;
@@ -31,7 +31,12 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
   onExpand: () => void;
   onFocus?: () => void;
   goTo: (path: string) => void;
+  /** The chain pane's Duplicate: the switcher's id step. */
+  onDuplicate?: () => void;
+  /** After Delete chain: the deletion is a draft change, reviewed and published. */
+  onDeleted?: () => void;
 }) {
+  const [asking, setAsking] = useState(false);
   const [tab, setTab] = useState("overview");
   const r = draft.view!.result;
   const d = describe(r, chain, path);
@@ -73,7 +78,28 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
   const shownTab = tabs?.some((x) => x.value === tab) ? tab : "overview";
   const node = d.node ? (authoredNodes(r, chain).find((n) => n.id === d.node) as NodeA | undefined) : undefined;
   const icon = FIXED_ICON[d.kind] ?? (typeof res?.icon === "string" ? res.icon : undefined);
-  const footer = overrides > 0 ? <Button onClick={() => draft.ops([{ op: "reset_field", path }])}>Reset all overrides</Button> : undefined;
+  const repos = r.impact.repos ?? [];
+  const footer = d.kind === "chain" ? (
+    asking ? (
+      <>
+        <span className="rv-ask">Delete {chain}? It goes when you publish.</span>
+        <span className="bp-gap" />
+        <Button onClick={() => setAsking(false)}>Keep</Button>
+        <Button variant="danger" onClick={async () => {
+          setAsking(false);
+          const a = await draft.ops([{ op: "delete_chain" }]);
+          if (a.status === 200) onDeleted?.();
+        }}>Delete</Button>
+      </>
+    ) : (
+      <>
+        <Button onClick={onDuplicate}>Duplicate</Button>
+        <span className="bp-gap" />
+        {/* Refused while a repo defaults to it (Decisions §9 Chain settings). */}
+        <Button variant="danger" disabled={repos.length > 0} title={repos.length ? `Can't delete: ${repos.join(", ")} default to it` : undefined} onClick={() => setAsking(true)}>Delete chain</Button>
+      </>
+    )
+  ) : overrides > 0 ? <Button onClick={() => draft.ops([{ op: "reset_field", path }])}>Reset all overrides</Button> : undefined;
   return (
     <Inspector
       id="chains-pane"

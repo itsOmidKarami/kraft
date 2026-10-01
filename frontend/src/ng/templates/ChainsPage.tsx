@@ -14,10 +14,13 @@ import { NodeView } from "./NodeView";
 import { ChainPane } from "./panes/ChainPane";
 import { ReviewPane } from "./ReviewPane";
 import { YamlView } from "./YamlView";
+import { Switcher, type SwitchTo } from "./Switcher";
+import { Dialog } from "../ui/Dialog";
+import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
-import { authoredNodes, counts, kindOf } from "./draft/view";
+import { authoredNodes, chainFile, counts, kindOf } from "./draft/view";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
@@ -72,6 +75,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const [highlight, setHighlight] = useState<string | undefined>();
   const [published, setPublished] = useState<{ text: string; nodes: { id: string; kind: "exec" | "gate" }[] } | null | undefined>(undefined);
   const [nextProblem, setNextProblem] = useState(0);
+  // Leaving a chain with a draft asks first (Decisions §9 Unpublished changes, brief Decided 5).
+  const [pendingGo, setPendingGo] = useState<SwitchTo | null>(null);
+  const [dupTick, setDupTick] = useState(0);
   // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
@@ -162,6 +168,23 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     setHighlight(undefined);
   };
 
+  /** Switch to a chain, or start a new one or a copy (`new_chain` on the new key). */
+  const perform = async (to: SwitchTo) => {
+    setPendingGo(null);
+    if (to.kind === "switch") return navigate(chainUrl(to.id));
+    const a = await postOps("chains", to.id, [{ op: "new_chain", ...(to.kind === "dup" ? { from: chain } : {}) }]);
+    if (a.status !== 200) return showToast(detailOf(a.body));
+    draftsChanged();
+    showToast(to.kind === "dup" ? `Duplicated as ${to.id}` : `New chain ${to.id} · add its first node with +`);
+    navigate(chainUrl(to.id));
+  };
+  const requestGo = (to: SwitchTo) => {
+    if (to.kind === "switch" && to.id === chain) return;
+    if (view.draft) setPendingGo(to);
+    else void perform(to);
+  };
+  const neverPublished = view.base[chainFile(chain)] === null;
+
   const onEscape = () => {
     if (review) return endReview();
     if (!s.open && s.level === "node") {
@@ -196,7 +219,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     <div className="tpl-page" ref={frame}>
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
-        <span className="tpl-crumb-chain">{chain}</span>
+        <Switcher chain={chain} onGo={requestGo} startDup={dupTick} />
         {s.level === "node" && s.node && (
           <>
             <span className="tpl-crumb-sep" aria-hidden>›</span>
@@ -318,9 +341,44 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onExpand={() => dispatch({ type: "expand" })}
             onFocus={s.level === "chain" && sel.kind === "node" && !isGate ? () => focusNode(sel.node) : undefined}
             goTo={goTo}
+            onDuplicate={() => setDupTick((k) => k + 1)}
+            onDeleted={startReview}
           />
         )}
       </div>
+      {pendingGo && (
+        <Dialog
+          title="You have unpublished changes"
+          onClose={() => setPendingGo(null)}
+          footer={
+            <>
+              <Button variant="danger" onClick={async () => {
+                const a = await draft.discard();
+                if (a.status === 204 || a.status === 404) void perform(pendingGo);
+              }}>{neverPublished ? "Discard chain & continue" : "Discard & continue"}</Button>
+              <span className="bp-gap" />
+              <Button onClick={() => setPendingGo(null)}>Stay</Button>
+              {n.problems ? (
+                <Button variant="primary" onClick={() => { setPendingGo(null); startReview(); }}>Review problems</Button>
+              ) : (
+                <Button variant="primary" onClick={async () => {
+                  const a = await draft.publish();
+                  if (a.status === 200) void perform(pendingGo);
+                  else { setPendingGo(null); startReview(); }
+                }}>Publish &amp; continue</Button>
+              )}
+            </>
+          }
+        >
+          <div className="unsaved">
+            <p>
+              {chain} has {neverPublished ? "never been published" : `${n.changes} unpublished change${n.changes === 1 ? "" : "s"}`}. Publish or discard {neverPublished ? "it" : "them"} before{" "}
+              {pendingGo.kind === "switch" ? `switching to ${pendingGo.id}` : pendingGo.kind === "dup" ? `duplicating it as ${pendingGo.id}` : `creating ${pendingGo.id}`}.
+            </p>
+            {n.problems > 0 && <p>{n.problems} problem{n.problems === 1 ? "" : "s"} block publishing. Review them first, or discard.</p>}
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

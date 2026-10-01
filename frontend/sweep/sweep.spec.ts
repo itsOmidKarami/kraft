@@ -604,6 +604,19 @@ const CASES: Case[] = [
     await c.page.getByRole("tab", { name: "YAML" }).click();
     await settle(c.page, 500);
   } },
+  { screen: "ng-chains", variant: "switcher", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "Chain default, switch chain" }).click();
+    await c.page.getByRole("option").first().waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-chains", variant: "unsaved", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "Chain default, switch chain" }).click();
+    await c.page.getByRole("option").filter({ hasNotText: /^default/ }).first().click();
+    await c.page.getByRole("dialog", { name: "You have unpublished changes" }).waitFor({ timeout: 4000 });
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");
