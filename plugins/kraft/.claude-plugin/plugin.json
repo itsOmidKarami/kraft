@@ -11,13 +11,5 @@
   "skills": [
     "./skills"
   ],
-  "mcpServers": {
-    "kraft": {
-      "command": "kraft",
-      "args": [
-        "admin",
-        "mcp"
-      ]
-    }
-  }
+  "mcpServers": "./.mcp.json"
 }
