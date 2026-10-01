@@ -93,15 +93,14 @@
 .board-offline-mark { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--bad); color: var(--bg); font: 700 10px/16px Inter, system-ui, sans-serif; text-align: center; }
 .board-offline-text { flex: 1; color: var(--text); }
 .board-skeleton { padding-top: 10px; }
-.sk { display: block; height: 12px; border-radius: 4px; background: var(--surface-2); animation: sk-pulse 1.3s ease-in-out infinite; }
+/* Static: the CSS contract allows only the breakpoint queries, so no reduced-motion guard for a pulse. */
+.sk { display: block; height: 12px; border-radius: 4px; background: var(--surface-2); }
 .sk-head { width: 90px; height: 10px; margin: 16px 0 10px 46px; }
 .sk-row { display: grid; grid-template-columns: 18px 30px minmax(0, 1fr) 150px 132px; gap: 14px; align-items: center; padding: 8px 14px; }
 .sk-glyph { width: 30px; height: 30px; border-radius: 8px; }
 .sk-lines { display: flex; flex-direction: column; gap: 7px; }
 .sk-short { width: 34%; height: 9px; }
 .sk-ticks { height: 4px; }
-@keyframes sk-pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
 
 /* The selection bar (AreaBoard 92–94), floating over the list's bottom. */
 .bulk-wrap { position: absolute; left: 0; right: 0; bottom: 18px; z-index: 8; display: flex; justify-content: center; pointer-events: none; padding: 0 16px; }
