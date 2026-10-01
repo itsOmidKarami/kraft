@@ -19,7 +19,7 @@ beforeEach(() => vi.restoreAllMocks());
 describe("YAML view", () => {
   it("sends what is typed, marks lines against the published file, and follows an answer when not typing", async () => {
     const draft = fake(viewWith(TEXT));
-    const { rerender } = render(<YamlView draft={draft} chain="default" published={"id: default\nnodes:\n  - id: spec\n    kind: gate\n"} />);
+    const { rerender } = render(<YamlView draft={draft} scope={{ area: "chains", key: "default" }} published={"id: default\nnodes:\n  - id: spec\n    kind: gate\n"} />);
     expect([...document.querySelectorAll(".yv-mark")].map((m) => m.textContent)).toEqual(["", "", "", "~", ""]);
     await userEvent.type(area(), "x");
     expect(draft.text).toHaveBeenLastCalledWith(FILE, `${TEXT}x`);
@@ -27,13 +27,13 @@ describe("YAML view", () => {
     expect(area()).not.toHaveFocus();
     expect(draft.flush).toHaveBeenCalled();
     // A canvas op or an undo answers with new text: shown, since nothing is being typed.
-    rerender(<YamlView draft={fake(viewWith("id: default\nnodes: []\n"))} chain="default" published={null} />);
+    rerender(<YamlView draft={fake(viewWith("id: default\nnodes: []\n"))} scope={{ area: "chains", key: "default" }} published={null} />);
     expect(area()).toHaveValue("id: default\nnodes: []\n");
     expect([...document.querySelectorAll(".yv-mark")].map((m) => m.textContent)).toEqual(["+", "+", ""]);
   });
 
   it("marks a problem on its line, and its row puts the caret there", async () => {
-    render(<YamlView draft={fake(viewWith(TEXT, { problems: [{ path: "spec", field: "kind", message: "Value error, unknown kind", file: FILE, line: 4, col: 5 }] }))} chain="default" published={TEXT} />);
+    render(<YamlView draft={fake(viewWith(TEXT, { problems: [{ path: "spec", field: "kind", message: "Value error, unknown kind", file: FILE, line: 4, col: 5 }] }))} scope={{ area: "chains", key: "default" }} published={TEXT} />);
     expect(screen.getByText("unknown kind", { selector: ".yv-msg" })).toBeInTheDocument();
     expect(document.querySelectorAll(".yv-bgl")[3]).toHaveClass("is-bad");
     await userEvent.click(within(screen.getByRole("list")).getByRole("button", { name: /line 4 · spec · unknown kind/ }));
@@ -43,9 +43,9 @@ describe("YAML view", () => {
 
   it("on a syntax error says the canvas keeps the last valid draft, and Revert puts that text back", async () => {
     const draft = fake(viewWith(TEXT));
-    const { rerender } = render(<YamlView draft={draft} chain="default" published={TEXT} />);
+    const { rerender } = render(<YamlView draft={draft} scope={{ area: "chains", key: "default" }} published={TEXT} />);
     const broken = "id: default\nnodes: [\n";
-    rerender(<YamlView draft={Object.assign(draft, { view: viewWith(broken, { yaml_error: { file: FILE, line: 3, col: 1, message: "expected ']'" } }) })} chain="default" published={TEXT} />);
+    rerender(<YamlView draft={Object.assign(draft, { view: viewWith(broken, { yaml_error: { file: FILE, line: 3, col: 1, message: "expected ']'" } }) })} scope={{ area: "chains", key: "default" }} published={TEXT} />);
     expect(screen.getByRole("status")).toHaveTextContent("syntax error · the canvas keeps the last valid draft");
     expect(screen.getByRole("alert")).toHaveTextContent("Line 3: expected ']'");
     await userEvent.click(screen.getByRole("button", { name: "Revert to last valid draft" }));
@@ -55,7 +55,7 @@ describe("YAML view", () => {
 
   it("inserts two spaces for Tab instead of leaving the field", async () => {
     const draft = fake(viewWith("a"));
-    render(<YamlView draft={draft} chain="default" published={null} />);
+    render(<YamlView draft={draft} scope={{ area: "chains", key: "default" }} published={null} />);
     await userEvent.click(area());
     await userEvent.keyboard("{Tab}");
     expect(draft.text).toHaveBeenLastCalledWith(FILE, "a  ");
@@ -69,7 +69,7 @@ describe("a component's YAML tab", () => {
     const frag = vi.spyOn(d, "fragment").mockResolvedValue({ status: 200, body: { path: "spec", text: "id: spec\nkind: exec\n" } });
     const draft = fake(viewWith(TEXT));
     (draft.ops as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 422, body: { detail: "rename it with rename" } });
-    render(<ItemYaml draft={draft} chain="default" path="spec" />);
+    render(<ItemYaml draft={draft} scope={{ area: "chains", key: "default" }} path="spec" />);
     const ta = await screen.findByRole("textbox", { name: "spec, YAML" });
     expect(ta).toHaveValue("id: spec\nkind: exec\n");
     expect(frag).toHaveBeenCalledWith("chains", "default", "spec");

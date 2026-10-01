@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ConfigDraft } from "../draft/useConfigDraft";
-import type { Result } from "../draft/types";
+import type { Result, Scope } from "../draft/types";
 import { authoredAt, authoredNodes, kindOf, normalise, resolvedAt, valueAt, type NodeA, type Step, type Task } from "../draft/view";
 import { Head, Kv, Note, PauseText, SelectRow, type Option } from "./controls";
 import type { PaneKind } from "./describe";
@@ -8,7 +8,7 @@ import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 
 export type PaneCtx = {
   r: Result;
-  chain: string;
+  scope: Scope;
   path: string;
   draft: ConfigDraft;
   /** Select a canonical path (and open its pane). */
@@ -51,15 +51,15 @@ export function Overview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
 }
 
 function ChainOverview({ ctx }: { ctx: PaneCtx }) {
-  const { r, chain, draft } = ctx;
-  const nodes = authoredNodes(r, chain);
+  const { r, scope, draft } = ctx;
+  const nodes = authoredNodes(r, scope);
   const gates = nodes.filter((n) => kindOf(r, n) === "gate").length;
   const repos = r.impact.repos ?? [];
   const running = r.impact.running ?? 0;
   const libs = used(nodes);
   return (
     <>
-      <PauseText label="description" long rows={2} value={str(authoredAt(r, chain, "")?.description)} placeholder="What this chain is for" onText={(t) => draft.field("", "description", t, true)} onBlur={draft.flush} />
+      <PauseText label="description" long rows={2} value={str(authoredAt(r, scope, "")?.description)} placeholder="What this chain is for" onText={(t) => draft.field("", "description", t, true)} onBlur={draft.flush} />
       <Kv k="size" v={`${plural(nodes.length - gates, "exec node")} · ${plural(gates, "gate")}`} />
       <Kv k="default for" v={repos.length ? repos.join(", ") : "no repos"} mono muted={!repos.length} />
       <Kv k="running" v={`${plural(running, "item")} · keep their version`} muted={!running} />
@@ -69,20 +69,20 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
 }
 
 function GateOverview({ ctx }: { ctx: PaneCtx }) {
-  const { r, chain, path, draft } = ctx;
-  const nodes = authoredNodes(r, chain);
+  const { r, scope, path, draft } = ctx;
+  const nodes = authoredNodes(r, scope);
   const i = nodes.findIndex((n) => n.id === path);
-  const v = (f: string) => valueAt(r, chain, path, f);
+  const v = (f: string) => valueAt(r, scope, path, f);
   const artifact = str(v("artifact"));
   const required = v("artifact_required") === true;
   const docs = r.resolved?.documents[path] ?? [];
   const docOptions: Option[] = [{ value: "", label: "none" }, ...docs.map((d) => ({ value: d, label: d }))];
   if (artifact && !docs.includes(artifact)) docOptions.push({ value: artifact, label: `${artifact} (not produced)` });
   const earlier = nodes.slice(0, Math.max(0, i));
-  const rejectTo = str(authoredAt(r, chain, path)?.reject_to);
+  const rejectTo = str(authoredAt(r, scope, path)?.reject_to);
   const rejectOptions: Option[] = [{ value: "", label: "not set" }, ...earlier.map((n) => ({ value: n.id, label: kindOf(r, n) === "gate" ? `${n.id} (gate)` : n.id, disabled: kindOf(r, n) === "gate" }))];
   if (rejectTo && !earlier.some((n) => n.id === rejectTo)) rejectOptions.push({ value: rejectTo, label: `${rejectTo} (not earlier)` });
-  const reviewer = resolvedAt(r, `${path}.auto_review`) ?? authoredAt(r, chain, `${path}.auto_review`);
+  const reviewer = resolvedAt(r, `${path}.auto_review`) ?? authoredAt(r, scope, `${path}.auto_review`);
   const bad = (f: string) => r.problems.some((p) => p.path === path && p.field === f);
   return (
     <>
@@ -148,8 +148,8 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
 }
 
 function StepOverview({ ctx }: { ctx: PaneCtx }) {
-  const { r, chain, path } = ctx;
-  const step = (resolvedAt(r, path) ?? authoredAt(r, chain, path)) as Step | null;
+  const { r, scope, path } = ctx;
+  const step = (resolvedAt(r, path) ?? authoredAt(r, scope, path)) as Step | null;
   const tasks = (step?.tasks ?? []) as Task[];
   return (
     <>
@@ -164,8 +164,8 @@ function StepOverview({ ctx }: { ctx: PaneCtx }) {
 }
 
 function FixLoopOverview({ ctx }: { ctx: PaneCtx }) {
-  const { r, chain, path } = ctx;
-  const loop = (resolvedAt(r, path) ?? authoredAt(r, chain, path)) as (NodeA & { judge?: Task }) | null;
+  const { r, scope, path } = ctx;
+  const loop = (resolvedAt(r, path) ?? authoredAt(r, scope, path)) as (NodeA & { judge?: Task }) | null;
   const repair = normalise(loop)?.steps ?? [];
   return (
     <>
@@ -178,8 +178,8 @@ function FixLoopOverview({ ctx }: { ctx: PaneCtx }) {
 }
 
 function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
-  const { r, chain, path, draft } = ctx;
-  const v = (f: string) => valueAt(r, chain, path, f);
+  const { r, scope: sc, path, draft } = ctx;
+  const v = (f: string) => valueAt(r, sc, path, f);
   const opts = useHarnessOptions();
   const taskKind = str(v("kind"));
   const set = (f: string, pause = false) => (x: unknown) => draft.field(path, f, x === "" ? null : x, pause);
@@ -256,7 +256,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
           )}
         </>
       )}
-      {kind === "task" && authoredAt(r, chain, path)?.on_failure !== undefined && <Kv k="on failure" v="task handler" />}
+      {kind === "task" && authoredAt(r, sc, path)?.on_failure !== undefined && <Kv k="on failure" v="task handler" />}
     </>
   );
 }

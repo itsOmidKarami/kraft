@@ -1,17 +1,17 @@
-import type { Result } from "../draft/types";
+import type { Result, Scope } from "../draft/types";
 import { authoredNodes, kindOf } from "../draft/view";
 import { isTaskPath } from "../sel";
 
 export type PaneKind = "chain" | "node" | "gate" | "step" | "task" | "fixloop" | "judge" | "esc" | "review";
 
 /** What a canonical path names, for the pane: its kind, its node, its own id. */
-export function describe(r: Result, key: string, path: string): { kind: PaneKind; node: string; id: string } {
-  if (!path) return { kind: "chain", node: "", id: key };
+export function describe(r: Result, scope: Scope, path: string): { kind: PaneKind; node: string; id: string } {
+  if (!path) return { kind: "chain", node: "", id: scope.key };
   const segs = path.split(".");
   const [node] = segs;
   const last = segs[segs.length - 1];
   if (segs.length === 1) {
-    const n = authoredNodes(r, key).find((x) => x.id === node);
+    const n = authoredNodes(r, scope).find((x) => x.id === node);
     return { kind: n && kindOf(r, n) === "gate" ? "gate" : "node", node, id: node };
   }
   if (last === "fix_loop") return { kind: "fixloop", node, id: "fix loop" };

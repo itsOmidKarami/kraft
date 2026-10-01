@@ -22,7 +22,7 @@ function mount(o: { result?: Partial<Result>; stale?: StaleBody | null; publishe
     discard: vi.fn(() => ans("discard", 204)),
   } as unknown as ConfigDraft;
   const cb = { onCollapse: vi.fn(), onExpand: vi.fn(), onFix: vi.fn(), onHighlight: vi.fn(), onDone: vi.fn() };
-  render(<ReviewPane draft={draft} chain="default" published={o.published === undefined ? "id: default\nnodes:\n  - id: spec\n" : o.published} open size={SIZE} {...cb} />);
+  render(<ReviewPane draft={draft} scope={{ area: "chains", key: "default" }} published={o.published === undefined ? "id: default\nnodes:\n  - id: spec\n" : o.published} open size={SIZE} {...cb} />);
   return { draft, ...cb };
 }
 /** A diff line by its exact text (each ends with its newline). */

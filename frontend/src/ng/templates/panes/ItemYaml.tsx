@@ -3,6 +3,7 @@ import { Button } from "../../ui/Button";
 import { detailOf } from "../../http";
 import * as d from "../draft/draftApi";
 import { FIELD_PAUSE_MS, type ConfigDraft } from "../draft/useConfigDraft";
+import type { Scope } from "../draft/types";
 import { problemsAt } from "../draft/view";
 import { problemText } from "../problems";
 import { jumpTo } from "../YamlView";
@@ -10,7 +11,7 @@ import { jumpTo } from "../YamlView";
 /** One component's own YAML (Decisions §9 Item YAML): the server writes it
  *  (W13-A's fragment route, R46), edits send `set_fragment` on a pause; an id
  *  change or a syntax error is refused and the last valid version kept. */
-export function ItemYaml({ draft, chain, path, extendsName }: { draft: ConfigDraft; chain: string; path: string; extendsName?: string }) {
+export function ItemYaml({ draft, scope, path, extendsName }: { draft: ConfigDraft; scope: Scope; path: string; extendsName?: string }) {
   const view = draft.view!;
   const [text, setText] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<{ message: string; line?: number } | null>(null);
@@ -23,14 +24,14 @@ export function ItemYaml({ draft, chain, path, extendsName }: { draft: ConfigDra
   const stamp = `${view.updated_at}|${view.result.changes.length}|${path}`;
 
   const load = () =>
-    d.fragment("chains", chain, path).then((a) => {
+    d.fragment(scope.area, scope.key, path).then((a) => {
       if (a.status !== 200) return setFailed(true);
       setFailed(false);
       setText(a.body.text);
     });
   useEffect(() => {
     if (!dirty.current) void load();
-    // `load` reads only chain and path, both in `stamp`.
+    // `load` reads only the scope and path, both in `stamp`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stamp]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);

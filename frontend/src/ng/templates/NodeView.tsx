@@ -8,7 +8,7 @@ import type { GraphItem } from "../graph/types";
 import type { TaskKind } from "../icons";
 import { showToast } from "../ui/Toast";
 import type { ConfigDraft } from "./draft/useConfigDraft";
-import type { Op } from "./draft/types";
+import type { Op, Scope } from "./draft/types";
 import { authoredAt, authoredNodes, changeAt, kindOf, problemsAt, resolvedAt, type NodeA, type Step } from "./draft/view";
 import { ExtendMenu } from "./menus/ExtendMenu";
 import { IdCard } from "./menus/IdCard";
@@ -35,8 +35,8 @@ const TASK_KINDS = new Set(["agent", "builtin", "subprocess", "forge"]);
 
 /** The node view (Decisions §9): the strip, then the node's steps on the canvas
  *  with seams and slots; an empty node's two phrases; a gate's GateView. */
-export function NodeView({ chain, node, draft, selected, reserve, onPick, onOpen, onEscape, onBackground, onBack, onFocusNode }: {
-  chain: string;
+export function NodeView({ scope, node, draft, selected, reserve, onPick, onOpen, onEscape, onBackground, onBack, onFocusNode }: {
+  scope: Scope;
   node: string;
   draft: ConfigDraft;
   selected: TSel;
@@ -49,7 +49,7 @@ export function NodeView({ chain, node, draft, selected, reserve, onPick, onOpen
   onFocusNode: (id: string) => void;
 }) {
   const r = draft.view!.result;
-  const nodes = authoredNodes(r, chain);
+  const nodes = authoredNodes(r, scope);
   const own = nodes.find((n) => n.id === node) as NodeA | undefined;
   const [menu, setMenu] = useState<Menu | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -73,10 +73,10 @@ export function NodeView({ chain, node, draft, selected, reserve, onPick, onOpen
 
   const strip: ChainNode[] = nodes.map((n) => ({ id: n.id, kind: kindOf(r, n), icon: typeof n.icon === "string" ? n.icon : undefined, prob: problemsAt(r, n.id, true).length > 0 }));
   const top = <ChainStrip nodes={strip} viewing={node} onOpen={onFocusNode} onBack={onBack} />;
-  if (!own) return <>{top}<div className="tpl-note">There is no node called {node} in {chain}.</div></>;
+  if (!own) return <>{top}<div className="tpl-note">There is no node called {node} in {scope.key}.</div></>;
 
   if (kindOf(r, own) === "gate") {
-    const rev = resolvedAt(r, `${node}.auto_review`) ?? authoredAt(r, chain, `${node}.auto_review`);
+    const rev = resolvedAt(r, `${node}.auto_review`) ?? authoredAt(r, scope, `${node}.auto_review`);
     const g = resolvedAt(r, node) ?? own;
     const target = typeof g.reject_to === "string" ? g.reject_to : undefined;
     const revPath = `${node}.auto_review`;

@@ -2,13 +2,13 @@ import { useMemo, useRef, useState } from "react";
 import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
-import type { Op, Result } from "./draft/types";
+import type { Op, Result, Scope } from "./draft/types";
 import { authoredNodes, changeAt, kindOf, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
 import { problemWord } from "./problems";
 
 type Props = {
-  chain: string;
+  scope: Scope;
   result: Result;
   selected?: string;
   pending: Op[] | null;
@@ -42,8 +42,8 @@ function rejectTarget(r: Result, nodes: NodeA[], i: number): string | undefined 
 }
 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
-export function ChainCanvas({ chain, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip }: Props) {
-  const authored = authoredNodes(r, chain);
+export function ChainCanvas({ scope, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip }: Props) {
+  const authored = authoredNodes(r, scope);
   const busy = useMemo(() => new Set((pending ?? []).map(opNode)), [pending]);
   const nodes: ChainNode[] = authored.map((n) => {
     const kind = kindOf(r, n);
@@ -92,7 +92,7 @@ export function ChainCanvas({ chain, result: r, selected, pending, reserve, refu
   return (
     <>
       <StageGraph
-        name={chain}
+        name={scope.key}
         nodes={nodes}
         selected={review?.highlight ?? selected}
         arcs={arcs}

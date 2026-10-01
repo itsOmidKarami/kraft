@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_VIEW } from "./fixture.default";
-import type { Result } from "./types";
+import type { Result, Scope } from "./types";
 import { authoredAt, authoredNodes, changeAt, counts, kindOf, normalise, problemsAt, resolvedAt, resolvedNode, sourceRows, sourceWord, valueAt } from "./view";
 
 const R = DEFAULT_VIEW.result;
+const CHAIN: Scope = { area: "chains", key: "default" };
+const LIB: Scope = { area: "library", key: "library" };
 const withR = (extra: Partial<Result>): Result => ({ ...R, ...extra });
 
 describe("draft view", () => {
   it("reads the nodes from the authored model, kinds from the resolved chain for an extends", () => {
-    const nodes = authoredNodes(R, "default");
+    const nodes = authoredNodes(R, CHAIN);
     expect(nodes.map((n) => n.id)).toEqual(["spec", "spec_approval", "implementation", "verification", "local_review", "merge_request_feedback"]);
     const impl = nodes.find((n) => n.id === "implementation")!;
     expect(impl.kind).toBeUndefined();
@@ -66,17 +68,48 @@ describe("draft view", () => {
 describe("walk", () => {
   it("finds a component by canonical path: shorthand main steps, steps, the fix loop and its judge", () => {
     const r = DEFAULT_VIEW.result;
-    expect(authoredAt(r, "default", "spec.main.author")).toEqual({ id: "author", extends: "spec_author" });
+    expect(authoredAt(r, CHAIN, "spec.main.author")).toEqual({ id: "author", extends: "spec_author" });
     expect(resolvedAt(r, "verification.review.code_review")?.kind).toBe("agent");
     expect(resolvedAt(r, "verification.fix_loop.judge")?.id).toBe("judge");
     expect(resolvedAt(r, "verification.fix_loop.main.repair")?.profile).toBe("strong");
     expect(resolvedAt(r, "verification.nope")).toBeNull();
-    expect(authoredAt(r, "default", "")?.id).toBe("default");
+    expect(authoredAt(r, CHAIN, "")?.id).toBe("default");
   });
 
   it("reads a value from the sources, else from the model", () => {
     const r = DEFAULT_VIEW.result;
-    expect(valueAt(r, "default", "implementation.main.implement", "profile")).toBe("strong");
-    expect(valueAt({ ...r, sources: {}, resolved: null }, "default", "spec_approval", "message")).toBe("Review and approve the specification.");
+    expect(valueAt(r, CHAIN, "implementation.main.implement", "profile")).toBe("strong");
+    expect(valueAt({ ...r, sources: {}, resolved: null }, CHAIN, "spec_approval", "message")).toBe("Review and approve the specification.");
+  });
+});
+
+describe("the library scope", () => {
+  const lib = withR({
+    model: {
+      "library.yaml": {
+        tasks: { implementer: { kind: "agent", prompt: "do it" } },
+        steps: { checks: { tasks: [{ id: "lint", extends: "implementer" }] } },
+        nodes: { verification: { kind: "exec", steps: [{ id: "review", tasks: [{ id: "code_review", extends: "implementer" }] }] } },
+        steering: { standards: { instructions: "Keep it small." } },
+      },
+    },
+  });
+
+  it("reads the library file, and no chain nodes", () => {
+    expect(authoredNodes(lib, LIB)).toEqual([]);
+    expect(Object.keys(authoredAt(lib, LIB, "") ?? {})).toEqual(["tasks", "steps", "nodes", "steering"]);
+  });
+
+  it("walks section paths: a task, a step's task, a node's step and task, a steering profile", () => {
+    expect(authoredAt(lib, LIB, "tasks.implementer")).toEqual({ kind: "agent", prompt: "do it" });
+    expect(authoredAt(lib, LIB, "steps.checks.lint")).toEqual({ id: "lint", extends: "implementer" });
+    expect(authoredAt(lib, LIB, "nodes.verification.review")).toMatchObject({ id: "review" });
+    expect(authoredAt(lib, LIB, "nodes.verification.review.code_review")).toEqual({ id: "code_review", extends: "implementer" });
+    expect(authoredAt(lib, LIB, "steering.standards")).toEqual({ instructions: "Keep it small." });
+    expect(authoredAt(lib, LIB, "tasks.nope")).toBeNull();
+  });
+
+  it("reads a value from the component's own keys", () => {
+    expect(valueAt({ ...lib, resolved: null }, LIB, "tasks.implementer", "prompt")).toBe("do it");
   });
 });
