@@ -1,9 +1,11 @@
 import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../../store";
 import { item } from "../../testFixtures";
 import { Header } from "./Header";
+import { HeaderActions, HeaderTail } from "./HeaderActions";
+import { Shell } from "./Shell";
 import { usePageItem } from "./pageItem";
 
 const at = (path: string) =>
@@ -25,7 +27,7 @@ describe("Header", () => {
     expect(within(nav).getByText("Settings")).not.toHaveAttribute("aria-current");
   });
 
-  it("links Board back to the shipped board from a work item and carries full text in titles", () => {
+  it("links Board back to the /ng board from a work item and carries full text in titles", () => {
     const it = item({ id: "w1", repo: "/r/very-long-repository-name", title: "A very long title", bead_id: "kraft-cb59" });
     useStore.setState({ workItems: { w1: it } });
     at("/work-items/w1");
@@ -49,5 +51,18 @@ describe("Header", () => {
   it("has a slot for the page's actions that no crumb occupies", () => {
     at("/");
     expect(screen.getByRole("banner").querySelector(".ng-header-actions")).not.toBeNull();
+  });
+
+  it("puts a page's HeaderTail right after the crumbs, before its actions", () => {
+    const Page = () => <><HeaderTail><span>all repos</span></HeaderTail><HeaderActions><button type="button">New</button></HeaderActions></>;
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes><Route element={<Shell />}><Route path="*" element={<Page />} /></Route></Routes>
+      </MemoryRouter>,
+    );
+    const banner = screen.getByRole("banner");
+    const parts = [...banner.children].map((c) => c.className);
+    expect(parts).toEqual(["ng-crumbs-nav", "ng-header-tail", "ng-header-actions"]);
+    expect(banner.querySelector(".ng-header-tail")).toHaveTextContent("all repos");
   });
 });

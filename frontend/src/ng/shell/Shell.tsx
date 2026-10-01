@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Header } from "./Header";
-import { HeaderActionsHost } from "./HeaderActions";
+import { HeaderActionsHost, HeaderTailHost } from "./HeaderActions";
 import { SearchOverlay } from "./SearchOverlay";
 import { Sidebar } from "./Sidebar";
 import "./shell.css";
@@ -9,6 +9,7 @@ import "./shell.css";
 /** The frame every /ng page sits in. */
 export function Shell() {
   const [actions, setActions] = useState<HTMLElement | null>(null);
+  const [tail, setTail] = useState<HTMLElement | null>(null);
   const [searching, setSearching] = useState(false);
 
   // From every page, including with focus in a field.
@@ -24,19 +25,21 @@ export function Shell() {
   const closeSearch = useCallback(() => setSearching(false), []);
   return (
     <HeaderActionsHost.Provider value={actions}>
-      <a href="#ng-main" className="ng-skip" onClick={(e) => { e.preventDefault(); document.getElementById("ng-main")?.focus(); }}>
-        Skip to content
-      </a>
-      <div className="ng-shell">
-        <Sidebar onSearch={() => setSearching(true)} />
-        <div className="ng-frame">
-          <Header actionsRef={setActions} />
-          <main id="ng-main" tabIndex={-1} className="ng-main">
-            <Outlet />
-          </main>
+      <HeaderTailHost.Provider value={tail}>
+        <a href="#ng-main" className="ng-skip" onClick={(e) => { e.preventDefault(); document.getElementById("ng-main")?.focus(); }}>
+          Skip to content
+        </a>
+        <div className="ng-shell">
+          <Sidebar onSearch={() => setSearching(true)} />
+          <div className="ng-frame">
+            <Header actionsRef={setActions} tailRef={setTail} />
+            <main id="ng-main" tabIndex={-1} className="ng-main">
+              <Outlet />
+            </main>
+          </div>
         </div>
-      </div>
-      {searching && <SearchOverlay onClose={closeSearch} />}
+        {searching && <SearchOverlay onClose={closeSearch} />}
+      </HeaderTailHost.Provider>
     </HeaderActionsHost.Provider>
   );
 }

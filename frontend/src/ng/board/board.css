@@ -11,4 +11,76 @@
 .board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: 12px; color: var(--text-sub); }
 .board-more:hover { background: var(--surface-2); color: var(--text); }
 .board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.board-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* `clip`, not `hidden`: no scroll box, so the sweep's clipped-v check doesn't read it as cut-off text. */
+.board-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
+
+/* Header (AreaBoard 15–21): the repo crumb menu, the NEED YOU tag. */
+.board-crumb-sep { color: var(--text-muted); }
+.board-crumb-menu { display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px; margin: -1px 0; border: 0; border-radius: 5px; background: transparent; font: inherit; font-size: 12px; color: var(--text-sub); cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.board-crumb-menu:is(:hover, :focus-visible), .board-crumb-menu[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+.board-caret { font-size: 10px; color: var(--text-muted); }
+.board-tag { padding: 2px 8px; border-radius: 5px; font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; background: var(--surface-2); }
+.board-tag.is-warn { color: var(--warn); }
+.board-tag.is-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 22%, transparent); }
+
+/* Filter bar (AreaBoard 24–33). */
+.board-filters { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+.board-filter input { box-sizing: border-box; width: 230px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--text); }
+.board-filter input::placeholder { color: var(--text-muted); }
+.board-filter input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.board-filters-gap { flex: 1; }
+.board-menu-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.board-menu-btn.is-set { border-color: var(--text-muted); }
+.board-menu-btn:is(:hover, :focus-visible), .board-menu-btn[aria-expanded="true"] { background: var(--surface-2); }
+.board-menu-btn:focus-visible, .board-crumb-menu:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.board-menu-key { color: var(--text-muted); }
+
+/* Group heads (AreaBoard 73–76). */
+.board-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.board-note { letter-spacing: 0; text-transform: none; font-size: 11px; }
+.board-note a { color: var(--text-muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.board-note a:is(:hover, :focus-visible) { color: var(--text-sub); }
+.board-note a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.board-head-gap { flex: 1; }
+.board-select-all { padding: 2px 8px; border: 0; border-radius: 5px; background: transparent; font: inherit; font-size: 11.5px; letter-spacing: 0; text-transform: none; color: var(--text-sub); cursor: pointer; }
+.board-select-all:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+.board-select-all:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* A row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks, one action. */
+.board-row { display: grid; grid-template-columns: 18px 30px minmax(0, 1fr) 150px 132px; gap: 4px 14px; align-items: center; padding: 8px 14px; border-radius: 8px; }
+.board-row:hover { background: color-mix(in oklab, var(--surface) 55%, transparent); }
+.board-row.is-checked { background: color-mix(in oklab, var(--surface) 55%, transparent); }
+.board-row.is-sel { background: var(--surface-2); }
+.board-row.is-off { opacity: .6; }
+.board-check { width: 16px; height: 16px; margin: 0; accent-color: var(--text); cursor: pointer; }
+.board-check:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.board-row-main { all: unset; min-width: 0; display: flex; flex-direction: column; gap: 2px; cursor: pointer; border-radius: 5px; }
+.board-row-main:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.board-title { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-meta { display: flex; min-width: 0; gap: 5px; font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+/* The reason tail gives way first, then the repo; the id never does (R10). */
+.board-meta-repo { flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.board-meta-id { flex: none; } /* never shrinks: the id is whole at any width (R10) */
+.board-meta-rest { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.board-meta-tail { flex: 0 100 auto; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; color: var(--text-sub); }
+.board-meta-tail.is-hot { color: var(--warn); }
+.board-sep { flex: none; }
+.board-act { display: flex; justify-content: flex-end; }
+.board-act-btn { min-height: 24px; padding: 0 11px; font-size: 12px; white-space: nowrap; }
+.board-row-error { grid-column: 3 / -1; margin: 0; font-size: 11.5px; color: var(--bad); }
+
+/* Tick strip: a node per tick, gates as diamonds. */
+.ticks { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.tick { flex: 1; min-width: 0; height: 4px; border-radius: 2px; background: var(--line); }
+.tick.is-done { background: var(--border); }
+.tick.is-current { background: var(--text-sub); }
+.tick.is-hot { background: var(--warn); }
+.tick-gate { flex: none; width: 7px; height: 7px; margin: 0 1px; box-sizing: border-box; transform: rotate(45deg); border-radius: 2px; background: transparent; border: 1px solid var(--border); }
+.tick-gate.is-done { background: var(--border); border-color: var(--border); }
+.tick-gate.is-current { background: var(--text-sub); border-color: var(--text-sub); }
+.tick-gate.is-hot { background: var(--warn); border-color: var(--warn); }
+
+@media (max-width: 1023px) {
+  .board-row { grid-template-columns: 18px 30px minmax(0, 1fr) 96px 120px; gap: 4px 10px; }
+  .board-filter input { width: 170px; }
+}

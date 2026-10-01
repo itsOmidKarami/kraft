@@ -1,28 +1,61 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
+import { repoName } from "../../format";
 import { useStore } from "../../store";
+import type { WorkItem } from "../../types";
+import { act } from "../item/actions";
+import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { FirstRun } from "../shell/FirstRun";
-import { groupsOf } from "./model";
+import { Menu } from "../ui/Menu";
+import { chainOf, groupOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
+import { Row } from "./Row";
+import type { RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import "./board.css";
+
+const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
+const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
+
+const isTextField = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+
+/** A minute's clock for the rows' ages and "retry in". */
+function useNow() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
 
 /** `/ng`: the board (W6). First-run while no repo is connected, decided once
  *  on load so connecting one mid-setup does not swap the page away. */
 export function BoardPage() {
   const prefs = useBoardPrefs();
-  const [query] = useBoardQuery(prefs?.group_by);
+  const [query, setQuery] = useBoardQuery(prefs?.group_by);
+  const navigate = useNavigate();
+  const now = useNow();
   const [fresh, setFresh] = useState(false);
   const [allDone, setAllDone] = useState(false);
-  const items = useStore((s) => s.workItems);
+  const [archiveDays, setArchiveDays] = useState<number | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const filterRef = useRef<HTMLInputElement>(null);
+  const itemsById = useStore((s) => s.workItems);
+  const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
+  const offline = false;
 
   useEffect(() => {
     api.getRepos().then((r) => setFresh(r.repos.length === 0)).catch(() => {});
+    api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});
   }, []);
 
   const groups = useMemo(
     () =>
-      groupsOf(Object.values(items), {
+      groupsOf(items, {
         filter: { q: query.q, repo: query.repo, chain: query.chain },
         group: query.group,
         sort: query.sort,
@@ -30,28 +63,146 @@ export function BoardPage() {
       }),
     [items, query.q, query.repo, query.chain, query.group, query.sort, allDone, prefs?.show_done],
   );
+  const needsN = items.filter((i) => groupOf(i) === "needs").length;
+
+  const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
+  const select = useCallback((id: string) => (prefs?.open_in === "full" ? open(id) : setQuery({ sel: id })), [prefs?.open_in, open, setQuery]);
+  const toggle = useCallback((id: string) => setChecked((c) => {
+    const n = new Set(c);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    return n;
+  }), []);
+  const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
+    if (a.kind === "gate") return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
+    if (a.kind === "peek") return setQuery({ sel: item.id });
+    const r = await act.resume(item.id);
+    setRowErrors((e) => {
+      const { [item.id]: _, ...rest } = e;
+      return r.ok ? rest : { ...rest, [item.id]: r.error };
+    });
+  }, [open, setQuery]);
+
+  // "/" focuses the filter; Escape clears the selection once menus have had it.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "/" && !isTextField(e.target)) {
+        e.preventDefault();
+        filterRef.current?.focus();
+      } else if (e.key === "Escape" && query.sel) setQuery({ sel: "" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [query.sel, setQuery]);
+
+  // ↑/↓ move between rows, across groups.
+  const onListKey = (e: KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(".board-row-main")];
+    const at = rows.indexOf(document.activeElement as HTMLElement);
+    if (at < 0) return;
+    e.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
+  };
 
   if (fresh) return <FirstRun />;
+
+  const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
+  const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
+  const chains = [...new Set(items.map(chainOf))].sort();
+
   return (
     <div className="board-page">
       <h1 className="board-visually-hidden">Board</h1>
-      <div className="board-list" aria-label="Work items">
-        <div className="board-list-inner">
-          {groups.map((g) => (
-            <section key={g.key} className="board-group" aria-label={g.label}>
-              <h2 className="board-group-head">
-                <span>{g.label}</span>
-                <span className="board-count">{g.total}</span>
-              </h2>
-              {g.rows.length === 0 && g.empty && <p className="board-empty">{g.empty}</p>}
-              {g.rows.map((i) => (
-                <div key={i.id} className="board-row">{i.title}</div>
-              ))}
-              {g.done && g.rows.length < g.total && (
-                <button type="button" className="board-more" onClick={() => setAllDone(true)}>show all {g.total}</button>
-              )}
-            </section>
-          ))}
+      <HeaderTail>
+        <span className="board-crumb-sep" aria-hidden>›</span>
+        <Menu
+          label="Repo"
+          triggerClass="board-crumb-menu"
+          trigger={<>{query.repo ? repoName(query.repo) : "all repos"} <span aria-hidden className="board-caret">▾</span></>}
+          items={[
+            { label: "All repos", checked: !query.repo, hint: String(items.length), onSelect: () => setQuery({ repo: "" }) },
+            ...repos.map((r) => ({ label: repoName(r), checked: query.repo === r, hint: count((i) => i.repo === r), onSelect: () => setQuery({ repo: r }) })),
+          ]}
+        />
+      </HeaderTail>
+      <HeaderActions>
+        {needsN > 0 && <span className="board-tag is-warn">{needsN} NEED YOU</span>}
+        <button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true, sel: "" })}>+ New work item</button>
+      </HeaderActions>
+
+      <div className="board-filters">
+        <label className="board-filter">
+          <span className="board-visually-hidden">Filter</span>
+          <input ref={filterRef} type="search" value={query.q} placeholder="Filter by title or id" onChange={(e) => setQuery({ q: e.target.value })} />
+        </label>
+        <Menu
+          label="Chain"
+          triggerClass={`board-menu-btn${query.chain ? " is-set" : ""}`}
+          trigger={<>{query.chain ? `Chain · ${query.chain}` : "Chain"} <span aria-hidden className="board-caret">▾</span></>}
+          items={[
+            { label: "All chains", checked: !query.chain, hint: String(items.length), onSelect: () => setQuery({ chain: "" }) },
+            ...chains.map((c) => ({ label: c, checked: query.chain === c, hint: count((i) => chainOf(i) === c), onSelect: () => setQuery({ chain: c }) })),
+          ]}
+        />
+        <span className="board-filters-gap" />
+        <Menu
+          label="Group by"
+          triggerClass="board-menu-btn"
+          note="Needs you always comes first."
+          trigger={<><span className="board-menu-key">Group</span> {GROUP_LABEL[query.group]} <span aria-hidden className="board-caret">▾</span></>}
+          items={(Object.keys(GROUP_LABEL) as GroupBy[]).map((g) => ({ label: GROUP_LABEL[g], checked: query.group === g, onSelect: () => setQuery({ group: g }) }))}
+        />
+        <Menu
+          label="Sort by"
+          triggerClass="board-menu-btn"
+          trigger={<><span className="board-menu-key">Sort</span> {SORT_LABEL[query.sort]} <span aria-hidden className="board-caret">▾</span></>}
+          items={(Object.keys(SORT_LABEL) as SortBy[]).map((s) => ({ label: SORT_LABEL[s], checked: query.sort === s, onSelect: () => setQuery({ sort: s }) }))}
+        />
+      </div>
+
+      <div className="board-body">
+        <div className="board-list" onKeyDown={onListKey}>
+          <div className="board-list-inner">
+            {groups.map((g) => (
+              <section key={g.key} className="board-group" aria-label={g.label}>
+                <h2 className="board-group-head">
+                  <span>{g.label}</span>
+                  {g.key === "needs" && g.total > 0 && <span className="board-dot" aria-hidden />}
+                  <span className="board-count">{g.total}</span>
+                  {g.done && (
+                    <span className="board-note">
+                      <Link to="/archived">completed and cancelled{archiveDays != null ? ` · auto-archive after ${archiveDays} days` : ""}</Link>
+                    </span>
+                  )}
+                  <span className="board-head-gap" />
+                  {g.done && g.total > 0 && (
+                    <button type="button" className="board-select-all" onClick={() => setChecked((c) => new Set([...c, ...g.rows.map((r) => r.id)]))}>Select all</button>
+                  )}
+                </h2>
+                {g.rows.length === 0 && g.empty && <p className="board-empty">{g.empty}</p>}
+                {g.rows.map((i) => (
+                  <Row
+                    key={i.id}
+                    item={i}
+                    now={now}
+                    selected={query.sel === i.id}
+                    checked={checked.has(i.id)}
+                    offline={offline}
+                    error={rowErrors[i.id]}
+                    onSelect={select}
+                    onOpen={open}
+                    onCheck={toggle}
+                    onAction={onAction}
+                  />
+                ))}
+                {g.done && g.rows.length < g.total && (
+                  <button type="button" className="board-more" onClick={() => setAllDone(true)}>show all {g.total}</button>
+                )}
+              </section>
+            ))}
+          </div>
         </div>
       </div>
     </div>

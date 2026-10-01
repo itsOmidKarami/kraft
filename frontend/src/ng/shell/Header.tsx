@@ -37,7 +37,7 @@ export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
 }
 
 /** One row above the page: where you are, then the page's own actions. */
-export function Header({ actionsRef }: { actionsRef: (el: HTMLDivElement | null) => void }) {
+export function Header({ actionsRef, tailRef }: { actionsRef: (el: HTMLDivElement | null) => void; tailRef?: (el: HTMLDivElement | null) => void }) {
   const { pathname } = useLocation();
   const items = useStore((s) => s.workItems);
   const page = usePageItem((s) => s.item);
@@ -45,6 +45,7 @@ export function Header({ actionsRef }: { actionsRef: (el: HTMLDivElement | null)
   return (
     <header className="ng-header">
       <Crumbs crumbs={crumbs} />
+      <div className="ng-header-tail" ref={tailRef} />
       <div className="ng-header-actions" ref={actionsRef} />
     </header>
   );

@@ -5,7 +5,10 @@
 .ng-frame { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 .ng-header { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .ng-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
-.ng-crumbs-nav { flex: 1 1 0; min-width: 0; }
+.ng-crumbs-nav { flex: 0 1 auto; min-width: 0; }
+/* A page's own crumbs and state after the shell's (a chain's switcher, draft state). */
+.ng-header-tail { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.ng-header-tail:empty { display: none; }
 .ng-crumbs { display: flex; align-items: center; min-width: 0; margin: 0; padding: 0; list-style: none; white-space: nowrap; }
 .ng-crumb { color: var(--text-sub); }
 .ng-crumb-repo, .ng-crumb-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

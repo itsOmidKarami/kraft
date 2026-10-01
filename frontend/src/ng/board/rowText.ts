@@ -1,0 +1,92 @@
+import { until } from "../../format";
+import type { ChainNode, WorkItem } from "../../types";
+import type { GlyphKind, GlyphState } from "../graph/types";
+import { groupOf } from "./model";
+
+/** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
+ *  server's `display_status` and `stop` and the raw row, one table each. */
+
+type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "fallback" | "pending_gate" | "chain_definition" | "retry_at">;
+
+const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
+
+/** The reason tail after the meta: one short line per status and stop kind. */
+export function reasonTail(i: Row, now = Date.now()): string {
+  const node = nodeOf(i);
+  const tail = (() => {
+    switch (i.display_status) {
+      case "needs_you":
+        switch (i.stop?.kind) {
+          case "gate": return `approve ${i.pending_gate ?? node}`;
+          case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
+          default: return i.stop?.reason ?? `waiting for you at ${node}`;
+        }
+      case "failed": return `failed at ${node}`;
+      case "paused": return i.current_node_id ? `paused at ${node}` : "created paused";
+      case "running": return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
+      case "waiting": {
+        const at = i.stop?.resume_at ?? i.retry_at;
+        return at ? `retry ${until(at, now)}` : `waiting at ${node}`;
+      }
+      case "escalated": return "escalation running";
+      case "done": return "completed";
+      case "cancelled": return "cancelled";
+      default: return "";
+    }
+  })();
+  const to = i.fallback?.to;
+  return typeof to === "string" && to ? `${tail} · on ${to}` : tail;
+}
+
+export type RowAction =
+  | { label: string; kind: "gate"; gate: string }
+  | { label: string; kind: "peek"; tab: "overview" | "config"; budget?: boolean }
+  | { label: string; kind: "resume" };
+
+/** The one action a row offers, or none. */
+export function rowAction(i: Row): RowAction | null {
+  if (i.display_status === "failed") return { label: "Retry…", kind: "peek", tab: "overview" };
+  if (i.display_status === "paused") return i.current_node_id ? { label: "Resume", kind: "resume" } : null;
+  if (i.display_status !== "needs_you") return null;
+  switch (i.stop?.kind) {
+    case "gate": return { label: "Review to approve", kind: "gate", gate: i.pending_gate ?? nodeOf(i) };
+    case "question": return { label: "Answer", kind: "peek", tab: "overview" };
+    case "cap": return { label: "Raise cap", kind: "peek", tab: "config" };
+    case "budget": return { label: "Raise budget", kind: "peek", tab: "config", budget: true };
+    default: return { label: "Open", kind: "peek", tab: "overview" };
+  }
+}
+
+/** The row's NodeGlyph: the current node's kind and icon, its state from the status. */
+export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphState } {
+  const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
+  const n = nodes.find((x) => x.id === i.current_node_id) ?? nodes[nodes.length - 1];
+  const kind: GlyphKind = n?.kind === "gate" ? "gate" : "exec";
+  const icon = i.display_status === "cancelled" ? "ban" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
+  const state: GlyphState = (() => {
+    switch (i.display_status) {
+      case "failed": return "failed";
+      case "escalated": return "esc";
+      case "done": return "done";
+      case "cancelled": return "ghost";
+      case "running": case "waiting": return "current";
+      case "paused": return i.current_node_id ? "amber" : "todo";
+      default: return groupOf(i) === "needs" ? "amber" : "current";
+    }
+  })();
+  return { kind, icon, state };
+}
+
+/** The tick strip: one per node, gates as diamonds (Ticks.tsx draws them). */
+export type Tick = { gate: boolean; state: "done" | "current" | "hot" | "todo" };
+
+export function ticksOf(i: Row): Tick[] {
+  const nodes = i.chain_definition?.nodes ?? [];
+  const ended = i.display_status === "done" || i.display_status === "cancelled";
+  const at = nodes.findIndex((n) => n.id === i.current_node_id);
+  const hot = groupOf(i) === "needs" || i.display_status === "escalated";
+  return nodes.map((n, k) => ({
+    gate: n.kind === "gate",
+    state: ended || (at >= 0 && k < at) ? "done" : at >= 0 && k === at ? (hot ? "hot" : "current") : "todo",
+  }));
+}

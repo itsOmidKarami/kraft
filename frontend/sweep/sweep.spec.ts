@@ -341,7 +341,17 @@ const CASES: Case[] = [
   } },
 
   // ux2-W6: the board at /ng, its own fixtures (ngBoard.ts).
-  { screen: "ng-board", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c) },
+  { screen: "ng-board", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }, { short: true }], mock: { ngBoard: true }, run: (c) => ngBoard(c) },
+  ...(["long", "many"] as const).map<Case>((d) => ({ screen: "ng-board", variant: d, data: d, widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c) })),
+  // No items, but a connected repo: the four empty groups, not first-run.
+  { screen: "ng-board", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
+  // The header's and filter bar's menus, opened as a person would.
+  ...([["repo-menu", /all repos/], ["chain-menu", /^Chain/], ["group-menu", /^Group/], ["sort-menu", /^Sort/]] as const).map<Case>(([v, name]) => ({
+    screen: "ng-board", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
+    run: (c) => ngBoard(c, { then: async (p) => { await p.getByRole("button", { name }).click(); await p.getByRole("menu").waitFor(); } }),
+  })),
+  { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
+  { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 
   // ux2-W5: the item page, every scenario the prototype draws (plus paused), at 1280 and with long data.
   // Three of them also at 1024 and 1920, light and 700px tall.

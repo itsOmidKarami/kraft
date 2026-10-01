@@ -7,12 +7,18 @@ export interface MenuItem {
   onSelect: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** A pick list (the board's Chain, Group and Sort): ✓ on the current one, read as a radio. */
+  checked?: boolean;
+  /** Right-aligned and muted, e.g. a count. */
+  hint?: string;
 }
 
 /** A button that opens a list of actions. Focus moves into the list; ↑/↓,
  *  Home and End move it; Escape, or picking an item, closes the list and
- *  hands focus back to the button. */
-export function Menu({ label, trigger, items }: { label: string; trigger: ReactNode; items: MenuItem[] }) {
+ *  hands focus back to the button. With `triggerClass` the trigger is a text
+ *  button named by its own text (the list keeps `label`); `note` is a line
+ *  under the items. */
+export function Menu({ label, trigger, items, triggerClass, note }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -39,7 +45,7 @@ export function Menu({ label, trigger, items }: { label: string; trigger: ReactN
 
   return (
     <>
-      <button ref={button} type="button" className="icon-btn" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : { "aria-label": label, title: label })} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
       <Popover anchor={button} open={open} onClose={close} role="menu" label={label}>
@@ -49,7 +55,8 @@ export function Menu({ label, trigger, items }: { label: string; trigger: ReactN
               key={it.label}
               ref={(el) => void (refs.current[i] = el)}
               type="button"
-              role="menuitem"
+              role={it.checked === undefined ? "menuitem" : "menuitemradio"}
+              aria-checked={it.checked}
               tabIndex={-1}
               disabled={it.disabled}
               className={it.danger ? "menu-item menu-item-danger" : "menu-item"}
@@ -58,9 +65,12 @@ export function Menu({ label, trigger, items }: { label: string; trigger: ReactN
                 it.onSelect();
               }}
             >
+              {it.checked !== undefined && <span className="menu-mark" aria-hidden>{it.checked ? "✓" : ""}</span>}
               {it.label}
+              {it.hint && <span className="menu-hint">{it.hint}</span>}
             </button>
           ))}
+          {note && <p className="menu-note">{note}</p>}
         </div>
       </Popover>
     </>
