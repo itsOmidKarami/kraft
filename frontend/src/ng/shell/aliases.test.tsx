@@ -73,6 +73,8 @@ describe("shippedHash", () => {
     ["/work-items/abc", "#session=s1&max=1", "/work-items/abc"],
     ["/work-items/abc", "", null],
     ["/work-items/abc", "#", null],
+    ["/work-items/abc", "#summary", null],
+    ["/work-items/abc", "#section=notes", null],
     ["/work-items/abc/review", "#node=x", null],
     ["/", "#node=x", null],
   ])("%s%s → %s", (path, hash, to) => {
