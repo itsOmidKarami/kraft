@@ -384,8 +384,8 @@ const FLOWS: Flow[] = [
   // ux2-W11 C: a + seam after the current node by keyboard → a library node → its id → Create & open → it lands in the draft.
   { name: "ng-item-draft-add-node", widths: [1280], keyboard: true, mock: { itemDraft: "none" }, start: ngItem("running"), steps: [
     { name: "seam", run: async (p) => { await p.getByRole("button", { name: "Add a library node here" }).first().focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("textbox", { name: "Search library nodes" })).toBeFocused(); }, kbd: true },
-    { name: "pick", run: async (p) => { await p.keyboard.type("security"); await p.keyboard.press("Enter"); await expect(p.getByRole("textbox", { name: "Node id" })).toHaveValue("security_scan"); }, kbd: true },
-    { name: "create", run: async (p) => { await p.keyboard.press("Enter"); await expect(p.getByText("DRAFT · 1 CHANGE")).toBeVisible(); await expect(p.getByRole("complementary", { name: "security_scan pane" })).toBeVisible(); await expect(p.getByText(/Added in this item's draft/)).toBeVisible(); } },
+    { name: "pick", run: async (p) => { await p.keyboard.type("feedback"); await p.keyboard.press("Enter"); await expect(p.getByRole("textbox", { name: "Node id" })).toHaveValue("post_draft_feedback"); }, kbd: true },
+    { name: "create", run: async (p) => { await p.keyboard.press("Enter"); await expect(p.getByText("DRAFT · 1 CHANGE")).toBeVisible(); await expect(p.getByRole("complementary", { name: "post_draft_feedback pane" })).toBeVisible(); await expect(p.getByText(/Added in this item's draft/)).toBeVisible(); } },
   ] },
   // ux2-W11 D, F, G: override a later task's effort from its Config, Review & apply, Apply; the chain pane then lists it as changed for this item.
   { name: "ng-item-draft-apply", widths: [1280], mock: { itemDraft: "none" }, start: async (p, S) => { await p.clock.setFixedTime(new Date(NG_NOW)); await ng(`/ng/work-items/${S.ng.running}?sel=merge_request.open.open_draft&tab=config`)(p); }, steps: [

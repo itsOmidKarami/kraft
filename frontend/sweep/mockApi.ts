@@ -16,7 +16,7 @@ export interface MockOptions {
   boardState?: "loading" | "offline";
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
-  /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (`none` also serves two library nodes for the + seam's menu). `applied`: none, but its applied draft is in the events. */
+  /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
   itemDraft?: "none" | "changes" | "problems" | "passed" | "applied";
 }
 
@@ -509,7 +509,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         used_by: st.templates.filter((t) => t.nodes.some((n: any) => n.tasks?.includes(name))).map((t) => t.id),
         used_by_paths: st.templates.flatMap((t) => t.nodes.filter((n: any) => n.tasks?.includes(name)).map((n: any) => ({ chain: t.id, path: `${n.id}.main.${name}`, overrides: false }))),
       }));
-      if (opts.itemDraft) for (const [name, steps] of [["security_scan", [{ id: "scan", tasks: [{ id: "sast" }, { id: "dependency_audit" }] }]], ["docs_check", [{ id: "check", tasks: [{ id: "links" }] }]]] as const) components.push({ id: `nodes.${name}`, kind: "nodes", name, definition: { steps }, issues: [], used_by: [], used_by_paths: [] } as any);
       return json(route, { file: "templates/library.yaml", text: `tasks:\n${hooks.map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`).join("\n")}\n`, components });
     }
     if (p === "/registry") return json(route, { hooks: st.hooks, invalid_templates: {} });
