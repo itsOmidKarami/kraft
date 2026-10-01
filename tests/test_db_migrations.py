@@ -797,19 +797,3 @@ def test_migrate_v41_to_v42_keeps_review_gate_rows(tmp_path):
     assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     row = conn2.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()
     assert row["gate"] == "g"
-
-
-def test_migrate_v46_to_v47_adds_review_viewed(tmp_path):
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(conn, 46)
-    schema.insert_item(conn)
-    conn.commit()
-    assert "review_viewed" not in schema.tables(conn)
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    assert "review_viewed" in schema.tables(conn2)
-    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1

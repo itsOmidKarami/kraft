@@ -1,6 +1,6 @@
-"""Migrations 44 and 45, from UX V2 W4: `work_items.stop_kind` clearing on a
-move out of the stop set, and `events.node_id` backfill. A sibling of
-test_db_migrations.py."""
+"""Migrations 44 and 45, from UX V2 W4 (`work_items.stop_kind` clearing on a
+move out of the stop set, `events.node_id` backfill), and 46 from W7
+(`review_viewed`). A sibling of test_db_migrations.py."""
 
 import pytest
 from support import schema
@@ -53,3 +53,19 @@ def test_events_node_id_backfill(tmp_path):
         for r in conn.execute("SELECT type, node_id FROM events ORDER BY seq").fetchall()
     }
     assert rows == {"a": "spec", "b": "implementation", "c": None, "d": None}
+
+
+def test_migrate_v46_to_v47_adds_review_viewed(tmp_path):
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 46)
+    schema.insert_item(conn)
+    conn.commit()
+    assert "review_viewed" not in schema.tables(conn)
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert "review_viewed" in schema.tables(conn2)
+    assert conn2.execute("SELECT count(*) FROM work_items").fetchone()[0] == 1
