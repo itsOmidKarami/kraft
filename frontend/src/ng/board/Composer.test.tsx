@@ -132,7 +132,7 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ spec" }));
     fireEvent.change(screen.getByRole("textbox", { name: /Search specs/ }), { target: { value: "cache" } });
     await settle();
-    expect(search).toHaveBeenLastCalledWith({ q: "cache", repo: "/code/kraft-plugins", kind: "spec", source_kind: "artifact", limit: 5 });
+    expect(search).toHaveBeenLastCalledWith({ q: "cache", repo: "/code/kraft-plugins", kind: "specs", source_kind: "artifact", limit: 5 });
     fireEvent.click(screen.getByRole("button", { name: "docs/specs/cache.md" }));
     expect(screen.getByTitle("docs/specs/cache.md")).toHaveTextContent("spec · docs/specs/cache.md");
     fireEvent.click(screen.getByRole("button", { name: "+ plan" }));
