@@ -16,6 +16,10 @@ export interface Problem {
   line: number | null;
   col: number | null;
   fix?: string;
+  /** On the library draft: the chain or repo the problem breaks, and the library component it comes from (all `null` for one in `library.yaml` itself). */
+  chain?: string | null;
+  repo?: string | null;
+  component?: string | null;
 }
 
 export interface Change {
@@ -23,6 +27,8 @@ export interface Change {
   kind: "add" | "change" | "remove";
   summary: string;
   fields?: string[];
+  /** On the library draft: the ids of the chains that use the component. */
+  reaches?: string[];
 }
 
 export interface Source {

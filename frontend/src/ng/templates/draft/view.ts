@@ -18,6 +18,9 @@ export function liveChainFile(files: Record<string, unknown>, key: string): stri
   return Object.keys(files).find((f) => f !== own && f.startsWith("chains/") && files[f] !== null) ?? own;
 }
 
+/** The one file a draft's text edits: the library's, or the chain's (moved by a rename). */
+export const scopeFile = (files: Record<string, unknown>, scope: Scope): string => (scope.area === "library" ? LIBRARY_FILE : liveChainFile(files, scope.key));
+
 /** The draft's authored mapping: a chain's file, or `library.yaml`; the last that parsed. */
 export const authoredChain = (r: Result, scope: Scope): Authored =>
   scope.area === "library" ? r.model[LIBRARY_FILE] ?? {} : r.model[liveChainFile(r.model, scope.key)] ?? r.model[chainFile(scope.key)] ?? {};

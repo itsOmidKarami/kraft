@@ -256,5 +256,16 @@
       { "kind": "flow-completes", "match": "^flow-ng-item-draft-" },
       { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-item" }
     ]
+  },
+  "ux2-W12": {
+    "title": "UX V2 Library: list, canvas, panes, steering preview, review and publish, Move to library",
+    "screens": ["ng-library"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
+      { "kind": "no-console", "match": "^ng-" }
+    ]
   }
 }

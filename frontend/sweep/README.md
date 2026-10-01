@@ -38,7 +38,7 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 
 ### `data-allow-ellipsis` — an allowlist, not a style
 
-`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these ten, each with its own `checks.spec.ts` case:
+`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these eleven, each with its own `checks.spec.ts` case:
 
 1. `.doc-path` — a document's path, cut from the left (W10.D in the Documents list; since W12.2 the document pane header's path line)
 2. `.detail-meta-part` — the item header's meta line (W11 · A.1)
@@ -50,6 +50,7 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 8. `.ng-crumb-repo` — the repo crumb of the /ng header, which shrinks first (UX V2 W2, brief Decided 11)
 9. `.ng-crumb-current` — the item title crumb of the /ng header, which shrinks last (UX V2 W2, brief Decided 11)
 10. `.item-one-line` — the /ng item page's question banner in a node view, the question on one line (UX V2 W5, Decisions §4)
+11. `.lib-name` — a component's name in the /ng Library list, which keeps its first 14 characters and cuts a longer id such as `never-signal-processes-you-didnt-start` (UX V2 W12, R10)
 
 The element must carry its full text in `title`. Anything else that ellipsizes still fails the check; a new use needs a decision first.
 
@@ -101,4 +102,4 @@ These stay flagged on purpose; do not "fix" them:
 
 - `nested-scroll` = 2 on item pages: the inspector and the right pane are two independent scrollers (the model).
 - `console` on `login/`: the 401 before sign-in, until the backend's `authenticated` field lands (Kraft-yx79s).
-- `ellipsis` on the `data-allow-ellipsis` cells listed above. Only those ten elements may carry the attribute.
+- `ellipsis` on the `data-allow-ellipsis` cells listed above. Only those eleven elements may carry the attribute.

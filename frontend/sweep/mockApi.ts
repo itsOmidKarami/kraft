@@ -23,6 +23,8 @@ export interface MockOptions {
   bulkFail?: string[];
   /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
   itemDraft?: "none" | "changes" | "problems" | "passed" | "applied";
+  /** ux2-W12: the Library's draft at /ng. `clean`: no draft. `draft`: three changes, one a new component. `blocked`: the draft with problems that name a chain, a repo and a component. */
+  ngLibrary?: "clean" | "draft" | "blocked";
 }
 
 /** The ops each `itemDraft` state starts from (the running item stands on `verification`). */
@@ -67,6 +69,71 @@ const chainYaml = (nodes: Record<string, unknown>[]) =>
  *  with an empty exec node; `yaml-error`; and the 409 a stale publish answers. */
 const DRAFTS = JSON.parse(readFileSync(new URL("./draftViews.json", import.meta.url), "utf8"));
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+/** The Library's draft for ux2-W12, built from the real published library (draftViews.json): the model is each
+ *  component's definition as written. `add_component` and `set_field` apply; everything else is a no-op the flows don't send. */
+function libraryState(mode: "clean" | "draft" | "blocked") {
+  const model: Record<string, Record<string, any>> = {};
+  for (const c of DRAFTS.library.components) (model[c.kind] ??= {})[c.name] = clone(c.definition);
+  const changes: any[] = [];
+  const problems: any[] = [];
+  let drafted = mode !== "clean";
+  if (drafted) {
+    (model.tasks ??= {}).fixer = { kind: "agent", prompt: "Fix what the review found." };
+    changes.push(
+      { path: "tasks.implementer.prompt", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
+      { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
+      { path: "tasks.fixer", kind: "add", summary: "added", reaches: [] },
+    );
+  }
+  if (mode === "blocked")
+    problems.push(
+      { path: "implementation.main.implement", field: "profile", message: "extends tasks.implementer, whose profile 'strong' does not exist", file: "chains/default.yaml", line: 14, col: 9, chain: "default", repo: null, component: "tasks.implementer" },
+      { path: "steering", field: "steering", message: "names the profile 'project-standards', which has no instructions", file: "repos.yaml", line: 8, col: 5, chain: null, repo: "kraft", component: "steering.project-standards" },
+      { path: "tasks.fixer", field: "prompt", message: "Field required", file: "library.yaml", line: 40, col: 5, chain: null, repo: null, component: null },
+    );
+  const state = {
+    text: "# library.yaml\n",
+    view() {
+      return {
+        area: "library", key: "library", draft: drafted, files: { "library.yaml": state.text }, base: { "library.yaml": "9f2c".padEnd(64, "0") },
+        updated_at: drafted ? "2026-10-01T09:12:00Z" : null,
+        result: {
+          model: { "library.yaml": clone(model) }, resolved: null, sources: {}, warnings: [], yaml_error: undefined,
+          policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
+          impact: { chains: drafted ? ["default", "quick-task"] : [], repos: drafted ? ["/Users/me/code/kraft"] : [] },
+          problems: clone(problems), changes: clone(changes),
+        },
+      };
+    },
+    fragment: (path: string) => {
+      const [section, name] = path.split(".");
+      return Object.entries(model[section]?.[name] ?? {}).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n") + "\n";
+    },
+    /** A refusal's detail, the op's own answer, or nothing. */
+    apply(o: Record<string, unknown>): string | Record<string, unknown> | undefined {
+      if (o.op === "add_component") {
+        const { section, name, kind } = o as { section: string; name: string; kind?: string };
+        if (model[section]?.[name]) return `${name} is taken`;
+        (model[section] ??= {})[name] = section === "steering" ? { instructions: "" } : section === "steps" ? { tasks: [] } : section === "nodes" ? (kind === "gate" ? { kind: "gate" } : { kind: "exec", steps: [] }) : kind ? { kind } : {};
+        changes.push({ path: `${section}.${name}`, kind: "add", summary: "added", reaches: [] });
+        drafted = true;
+        return { path: `${section}.${name}` };
+      }
+      if (o.op === "set_field") {
+        const [section, name] = String(o.path).split(".");
+        const at = model[section]?.[name];
+        if (!at) return `nothing at ${o.path}`;
+        if (o.value === null || o.value === "") delete at[String(o.field)];
+        else at[String(o.field)] = o.value;
+        if (!changes.some((c) => c.path === `${section}.${name}`)) changes.push({ path: `${section}.${name}`, kind: "change", summary: String(o.field), fields: [o.field], reaches: [] });
+        drafted = true;
+      }
+      return undefined;
+    },
+  };
+  return state;
+}
+
 /** The `default` view under another key: `stale` is it with a publish that 409s. */
 const chainView = (key: string) => {
   // A new chain before its first node: what `new_chain` leaves (no node, nothing resolves yet).
@@ -134,6 +201,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   }
 
   const viewedMarks = new Set<string>();
+  const lib = opts.ngLibrary ? libraryState(opts.ngLibrary) : null;
   // ux2-W8: review threads per item, seeded for a needs-gate /ng item on first read.
   const threads: Record<string, any[]> = {};
   // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
@@ -456,6 +524,28 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         return json(route, { ...applyOps(view, ops), ops: ops.map((o) => ({ op: o.op })) });
       }
       return json(route, view);
+    }
+    /* ux2-W12: the Library's draft, kept for the test's life */
+    if (lib && (m = p.match(/^\/drafts\/library\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
+      const [, , action, file] = m;
+      if (method === "DELETE") return route.fulfill({ status: 204 });
+      if (action === "fragment") return json(route, { path: q.get("path"), text: lib.fragment(String(q.get("path"))) });
+      if (action === "publish") {
+        if (lib.view().result.problems.length) return json(route, { detail: `${lib.view().result.problems.length} problem(s) to fix before publishing`, problems: lib.view().result.problems }, 422);
+        return json(route, { published: ["library.yaml"], result: { ...lib.view().result, changes: [] } });
+      }
+      if (file) lib.text = req.postDataJSON()?.text ?? "";
+      if (action === "ops") {
+        const ops: Record<string, unknown>[] = req.postDataJSON()?.ops ?? [];
+        const answers = [];
+        for (const o of ops) {
+          const refused = lib.apply(o);
+          if (typeof refused === "string") return json(route, { detail: refused, op: answers.length }, 422);
+          answers.push({ op: o.op, ...(refused ? { result: refused } : {}) });
+        }
+        return json(route, { ...lib.view(), ops: answers });
+      }
+      return json(route, lib.view());
     }
     /* the library draft: one static answer */
     if ((m = p.match(/^\/drafts\/(library)\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {

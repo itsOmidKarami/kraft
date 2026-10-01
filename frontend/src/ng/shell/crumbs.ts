@@ -49,6 +49,9 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
   // A chain's page: the page itself adds `<chain> ▾ › <node>` in the header's tail (brief Decided 8).
   if (pathname.startsWith("/templates/chains/")) return [mid("Templates"), mid("Chains", { to: "/templates/chains" })];
 
+  // A library component: the page adds its name in the header's tail.
+  if (pathname.startsWith("/templates/library/")) return [mid("Templates"), mid("Library", { to: "/templates/library" })];
+
   const route = ROUTES.find((r) => r.path === pathname);
   if (route?.group === "templates" || route?.group === "settings" || pathname === "/settings/about")
     return [mid(GROUP_HEAD[pathname.startsWith("/templates") ? "templates" : "settings"]), current(route!.label)];

@@ -1,0 +1,54 @@
+/* The Library area (ux2-W12). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. Every class here is lib-*. */
+.lib-note { padding: 28px 24px; font-size: 12.5px; color: var(--text-sub); }
+.lib-note h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; color: var(--text); }
+.lib-page { position: relative; display: flex; height: calc(100vh - 44px); overflow: hidden; }
+.lib-main { position: relative; flex: 1; min-width: 0; }
+.lib-canvas { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12.5px; color: var(--text-muted); }
+.lib-yaml { position: absolute; inset: 0; z-index: 2; background: var(--bg); }
+.lib-back { display: none; position: absolute; left: 12px; top: 10px; z-index: 4; }
+
+/* Header tail: the selected component, the draft state, the problems badge. */
+.lib-sep { color: var(--text-muted); }
+.lib-ref { font: 12px ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.lib-draft { flex: none; margin-left: 4px; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); }
+.lib-published { flex: none; margin-left: 4px; font-size: 11px; color: var(--text-muted); }
+.lib-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
+.lib-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
+
+/* The list. */
+.lib-list { flex: none; width: 250px; box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+.lib-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px; }
+.lib-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); }
+.lib-search:focus-within { border-color: var(--focus); }
+.lib-q { flex: 1; min-width: 0; min-height: 26px; padding: 0; border: 0; background: transparent; font-size: 12px; color: var(--text); outline: none; }
+.lib-q::placeholder { color: var(--text-muted); }
+.lib-filter-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+.lib-head .icon-btn { position: relative; }
+.lib-filter { width: 180px; padding: 4px; }
+.lib-filter-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 5px; font-size: 12px; color: var(--text); cursor: pointer; }
+.lib-filter-row:hover { background: var(--surface-2); }
+.lib-filter-row:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
+.lib-filter-row .lib-count { margin-left: auto; }
+.lib-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
+.lib-group { margin: 10px 6px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.lib-count { font-weight: 400; color: var(--text-muted); }
+.lib-empty { margin: 10px 8px; font-size: 12px; color: var(--text-muted); }
+.lib-row { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--text-sub); cursor: pointer; }
+.lib-row:hover { background: var(--surface-2); }
+.lib-row.is-sel { background: var(--surface-2); color: var(--text); }
+.lib-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+/* An id keeps its first 14 characters (R10); a longer one cuts, with the whole name in its title. */
+.lib-name { flex: 1 1 auto; min-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px ui-monospace, Menlo, monospace; }
+.lib-used { flex: none; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.lib-mark, .lib-prob { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.lib-mark.is-add { background: var(--ok); }
+.lib-mark.is-change { background: var(--warn); }
+.lib-prob { background: var(--bad); }
+.lib-diamond { flex: none; width: 9px; height: 9px; margin: 0 2.5px; transform: rotate(45deg); border: 1.5px solid currentColor; border-radius: 2px; }
+
+@media (max-width: 767px) {
+  .lib-list { width: 100%; border-right: 0; }
+  .lib-page[data-ref] .lib-list { display: none; }
+  .lib-page:not([data-ref]) .lib-main { display: none; }
+  .lib-back { display: inline-flex; }
+}
