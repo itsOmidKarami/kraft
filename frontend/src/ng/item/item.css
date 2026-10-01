@@ -3,7 +3,8 @@
 .item-page { display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; padding: 14px 24px 16px; gap: 12px; }
 .item-top { flex: none; min-width: 0; }
 .item-title { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
-.item-canvas { position: relative; flex: 1 1 0; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.item-canvas { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 240px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.item-area { position: relative; flex: 1 1 0; min-height: 0; }
 
 /* Shared bits: facts, checks, inputs, errors, pop cards. */
 .item-muted { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
@@ -70,6 +71,7 @@
 .item-banner.is-question { max-width: 760px; }
 .item-banner-glyph { color: var(--warn); }
 .item-banner-text { flex: 1 1 auto; min-width: 0; }
+.item-banner .btn { flex: none; white-space: nowrap; }
 .item-banner code, .item-card code { font: 12.5px ui-monospace, Menlo, monospace; }
 .item-one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-card { flex: none; display: flex; flex-direction: column; gap: 10px; max-width: 760px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
@@ -128,3 +130,16 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-repos { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
 .ip-foot { margin: 18px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-muted); }
 .ip-gap { margin-top: 12px; }
+
+/* Pane lists, footers and in-pane confirms (Decisions §5, §6 Skip). */
+.ip-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ip-row { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.ip-row:is(:hover, :focus-visible) { border-color: var(--border); }
+.ip-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ip-mark { width: 12px; flex: none; color: var(--text-sub); text-align: center; }
+.ip-mark.is-live { color: var(--warn); }
+.ip-row-meta { margin-left: auto; font-size: 11.5px; color: var(--text-sub); }
+.ip-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ip-confirm { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.ip-confirm-q { margin: 0; font-size: 12.5px; color: var(--text); }
+.ip-override { margin: 0; font-size: 12.5px; color: var(--text-sub); }

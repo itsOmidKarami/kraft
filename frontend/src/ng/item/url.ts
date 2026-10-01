@@ -1,5 +1,6 @@
 import type { ChainNode } from "../../types";
 import type { Sel } from "../graph/usePaneSelection";
+import { ESCALATION } from "./nodeGraph";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
@@ -26,6 +27,8 @@ export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
   const node = nodes.find((x) => x.id === n);
   if (!node || rest.length) return null;
   if (!step) return { kind: "node", node: n };
+  // The escalation task is no step of the chain: it hangs off the node (NodeGraph's side branch).
+  if (step === ESCALATION && task === ESCALATION) return { kind: "task", node: n, step, task };
   const s = stepsOf(node).steps.find((x) => x.id === step);
   if (!s) return null;
   if (!task) return { kind: "step", node: n, step };

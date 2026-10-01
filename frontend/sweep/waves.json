@@ -183,7 +183,7 @@
   },
   "ux2-W5": {
     "title": "UX V2 item page: header, state cards, chain canvas and pane, node, task and gate panes",
-    "screens": ["ng-item", "flow-ng-cancel", "flow-ng-pane-collapse"],
+    "screens": ["ng-item", "flow-ng-cancel", "flow-ng-pane-collapse", "flow-ng-node-keyboard", "flow-ng-retry-task"],
     "specs": ["sweep.spec.ts", "interactions.spec.ts"],
     "rules": [
       { "kind": "no-flag", "flag": "offscreen", "match": "^ng-item" },

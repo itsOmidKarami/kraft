@@ -291,6 +291,14 @@ const FLOWS: Flow[] = [
       await expect(p.getByRole("region", { name: "New work item" })).toHaveCount(0);
       await expect(p).toHaveURL(/[?&]sel=/);
     }, wait: 700 },
+  // ux2-W5 G (R6): chain → node view → a task's pane → back, keyboard only.
+  { name: "ng-node-keyboard", widths: [1280], keyboard: true, start: ngItem("running"), steps: [
+    { name: "tab-into-chain", run: async (p) => { await p.locator('.graph-node[tabindex="0"]').focus(); await expect(p.getByRole("button", { name: /^verification, node, running/ })).toBeFocused(); } },
+    { name: "cmd-enter-node-view", run: async (p) => { await p.keyboard.press("ControlOrMeta+Enter"); await expect(p).toHaveURL(/\/nodes\/verification$/); await expect(p.getByRole("group", { name: "verification" })).toBeVisible(); await expect(p.locator('.graph-node[tabindex="0"]').first()).toBeFocused(); } },
+    { name: "arrows-to-a-task", run: async (p) => { await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowDown"); await expect(p.getByRole("button", { name: /^typecheck,/ })).toBeFocused(); } },
+    { name: "enter-opens-pane", run: async (p) => { await p.keyboard.press("Enter"); await expect(p).toHaveURL(/sel=verification\.checks\.typecheck/); await expect(p.getByRole("complementary", { name: "typecheck pane" })).toBeVisible(); } },
+    { name: "escape-collapses", run: async (p) => { await p.keyboard.press("Escape"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeFocused(); } },
+    { name: "escape-back-to-chain", run: async (p) => { await p.locator('.graph-node[tabindex="0"]').first().focus(); await p.keyboard.press("Escape"); await expect(p).toHaveURL(/\/work-items\/[0-9a-f]+$/); await expect(p.locator('.graph-node[tabindex="0"]').first()).toBeFocused(); } },
   ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.

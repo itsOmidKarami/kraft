@@ -427,6 +427,10 @@ const CASES: Case[] = [
   { screen: "ng-item", variant: "running", data: "default", widths: [768], run: (c) => ngItem(c, "running", { side: "rail" }) },
   { screen: "ng-item", variant: "chain-config", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "?tab=config" }) },
   { screen: "ng-item", variant: "chain-config-capped-long", data: "long", widths: [1280], shells: [{ short: true }], run: (c) => ngItem(c, "capped", { tail: "?tab=config" }) },
+  // ux2-W5 G: the node view (strip, node canvas, node pane).
+  { screen: "ng-item-node", variant: "running", data: "default", widths: [1024, 1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification" }) },
+  { screen: "ng-item-node", variant: "needs-you", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-you", { tail: "/nodes/verification" }) },
+  { screen: "ng-item-node", variant: "failed", data: "default", widths: [1280], run: (c) => ngItem(c, "failed", { tail: "/nodes/merge_request" }) },
   // The header's floating parts, opened the way a keyboard user would.
   { screen: "ng-item", variant: "panel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); } }) },
   { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },

@@ -18,6 +18,10 @@ describe("item URL", () => {
     });
   });
 
+  it("knows a node's escalation task, which no step lists", () => {
+    expect(readPlace("verification", q("sel=verification.escalation.escalation&tab=thread"), nodes).sel).toEqual({ kind: "task", node: "verification", step: "escalation", task: "escalation" });
+  });
+
   it("falls back to the floor for an unknown sel, and to the chain for an unknown node", () => {
     expect(readPlace("verification", q("sel=verification.nope"), nodes).sel).toEqual({ kind: "node", node: "verification" });
     expect(readPlace(undefined, q("sel=ghost"), nodes).sel).toEqual({ kind: "chain" });

@@ -70,6 +70,17 @@ describe("Workspace", () => {
     expect(within(pane).getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("opens the node view by Focus, pushing the URL, and the strip's ← chain comes back", async () => {
+    mount("/work-items/w1?sel=verification");
+    await userEvent.click(screen.getByRole("button", { name: /Focus/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification");
+    expect(screen.getByRole("group", { name: "verification" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "code_review, agent task, not started" }).closest("button")!);
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    await userEvent.click(screen.getByRole("button", { name: "Back to the chain" }));
+    expect(where()).toBe("/work-items/w1");
+  });
+
   it("goes back to the chain's pane from a node's crumb", async () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));

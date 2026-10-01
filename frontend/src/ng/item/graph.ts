@@ -1,10 +1,10 @@
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
+import { isEscalation } from "./nodeGraph";
 import type { ItemDetail } from "./useItem";
 
 const kindOf = (n: ApiNode) => n.kind ?? "exec";
-const isEscalation = (s: WorkerSession) => s.hook_point === "escalation" || s.hook_point.endsWith(".escalation");
 
 /** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node (R23). */
 export function rejectTarget(nodes: ApiNode[], gate: string): string | null {
