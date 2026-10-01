@@ -132,6 +132,31 @@ def test_fragment_of_an_unknown_path_is_404_and_a_missing_path_is_400(client):
     assert client.get(f"{DEFAULT}/fragment").status_code == 400
 
 
+def test_every_draft_answer_carries_the_published_text_of_its_files(client, templates_dir):
+    shipped = (templates_dir / "chains" / "default.yaml").read_text()
+    assert client.get(DEFAULT).json()["published"] == {"chains/default.yaml": shipped}
+    # A write leaves it as published, not as drafted; a file that is not there is null.
+    put(client, "default", shipped + "\n# mine\n")
+    assert client.get(DEFAULT).json()["published"] == {"chains/default.yaml": shipped}
+    assert client.post(f"{DEFAULT}/ops", json={"ops": []}).json()["published"] == {
+        "chains/default.yaml": shipped
+    }
+    assert client.get("/api/drafts/repos/repos").json()["published"] == {"repos.yaml": None}
+
+
+def test_a_repos_fragment_is_the_entrys_yaml_and_only_a_known_path_has_one(client, repo):
+    path = str(repo.resolve())
+    url = "/api/drafts/repos/repos"
+    r = client.post(f"{url}/ops", json={"ops": [{"op": "add_repo", "path": path}]})
+    assert r.status_code == 200, r.text
+    got = client.get(f"{url}/fragment", params={"path": path})
+    assert got.status_code == 200
+    assert yaml.safe_load(got.json()["text"])["path"] == path
+    assert client.get(f"{url}/fragment", params={"path": "/nowhere"}).status_code == 404
+    # No other settings area has fragments.
+    assert client.get(f"{POLICY}/fragment", params={"path": "budget"}).status_code == 404
+
+
 def test_publish_with_a_problem_answers_422_and_writes_nothing(client, templates_dir):
     put(client, "scratch", SCRATCH.replace('command: "true"}', 'command: "true", bogus: 1}'))
 
@@ -328,8 +353,13 @@ def test_each_config_area_keeps_a_draft_of_its_files(client, templates_dir, area
     )
     got = put_file(client, area, file, text).json()
     assert (got["area"], got["draft"], got["files"][file]) == (area, True, text)
-    paths = [c["path"] for c in got["result"]["changes"]]
-    assert paths[0] == file and all(p.startswith("profiles.") for p in paths[1:])
+    changes = got["result"]["changes"]
+    if area in ("policy", "intake"):
+        # One row per key, each naming its file.
+        assert changes and {c["file"] for c in changes} == {file}
+    else:
+        paths = [c["path"] for c in changes]
+        assert paths[0] == file and all(p.startswith("profiles.") for p in paths[1:])
     assert client.get(f"/api/drafts/{area}/{area}").json()["files"][file] == text
 
 
