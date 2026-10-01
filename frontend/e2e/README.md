@@ -17,6 +17,28 @@ helpers — `REPO`, `REPO_NAME`, `connectRepo`, `createItem` — live in
 | `phone.visual.spec.ts` | the phone contract at 390x844: no sideways scroll, 44px touch targets, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), a **real** diff wrapping. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so this is the only place the media queries are real |
 | `attachments.visual.spec.ts` | intake from an existing spec/plan: the type-to-search picker, the `from spec+plan` badge, the "attached at intake" tag. Also writes screenshots |
 
+### The new UI (`e2e/v2/`)
+
+The same contracts through the new UI, served under `/ng` until the cutover
+(`at()` in `v2/fixtures.ts` adds the prefix). The cutover deletes the specs
+above and moves these up in their place.
+
+| spec | what it drives |
+| --- | --- |
+| `v2/chain.spec.ts` | create a `quick-task` item from the board's composer, watch the header reach DONE, open the implement task's log and its session summary, find the item in the board's Done group |
+| `v2/planning.spec.ts` | a `default` item at `spec_approval`: read the spec from the gate, reject it with a note (the spec node re-runs and the gate comes back), approve into `plan_approval`, read the plan |
+| `v2/lifecycle.spec.ts` | pause a running agent (`KRAFT_SLOW`), resume it with a steer, see it finish; a deep link to an item loads it |
+| `v2/regression.spec.ts` | each area's write path: connect a repo and publish, publish a chain change, a library component's and a harness's links into Chains, publish a policy cap and the intake interval, Access's port, Notifications' "Send a test", Appearance's density and open-in after a reload |
+| `v2/search.spec.ts` | Ctrl-K finds an indexed document and opens it; the kind filter narrows documents |
+| `v2/board-responsive.spec.ts` | the peek opens without reflowing a row: docked at 1440 and 1100, overlaid at 900 (R7) |
+| `v2/attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results |
+
+Not covered yet, each with its bead: reading an item's attached documents (Kraft-9d8b2.29), and the phone, whose
+spec is written at the cutover once the phone app is on main. The Timeline tab
+and the old Steering address have no new-UI page to drive: Timeline has no V2
+equivalent (kickoff §4.4), and `/settings/steering` is an alias tested in
+`src/ng/shell/aliases.test.tsx`.
+
 `lifecycle.spec.ts` slows its agent with `KRAFT_SLOW` in the title so there is
 something to pause. One server serves every spec, so tests run one at a time
 (`workers: 1`, set in `playwright.config.ts`).

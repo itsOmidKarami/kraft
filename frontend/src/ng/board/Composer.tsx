@@ -209,7 +209,9 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
   useEffect(() => {
     if (!q.trim()) return setHits([]);
     const t = setTimeout(() => {
-      api.search({ q: q.trim(), repo, kind, source_kind: "artifact", limit: 5 }).then((r) => setHits(r.results), () => setHits([]));
+      // The index files documents under the plural (`specs`, `plans`), as the
+      // shipped composer's docKind did; `spec` matches nothing.
+      api.search({ q: q.trim(), repo, kind: `${kind}s`, source_kind: "artifact", limit: 5 }).then((r) => setHits(r.results), () => setHits([]));
     }, 200);
     return () => clearTimeout(t);
   }, [q, repo, kind]);
