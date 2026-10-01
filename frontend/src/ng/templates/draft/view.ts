@@ -40,7 +40,7 @@ export function normalise<T extends Authored>(c: T | null | undefined): (T & { s
 
 /** A node as the resolved chain has it (`extends` expanded), steps normalised; null when the draft doesn't resolve. */
 export function resolvedNode(r: Result, id: string): NodeA | null {
-  const n = (r.resolved?.chain.nodes as NodeA[] | undefined)?.find((x) => x.id === id);
+  const n = (r.resolved?.chain?.nodes as NodeA[] | undefined)?.find((x) => x.id === id);
   return n ? (normalise(n) as NodeA) : null;
 }
 

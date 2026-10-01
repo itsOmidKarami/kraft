@@ -227,6 +227,16 @@ const FLOWS: Flow[] = [
     { name: "restarting", run: async (p) => { await p.getByRole("button", { name: "Restart", exact: true }).click(); await expect(p.getByRole("dialog", { name: "Restarting Kraft…" })).toBeVisible(); } },
     { name: "back-and-cleared", run: async (p) => { await expect(p.getByRole("dialog")).toHaveCount(0, { timeout: 15000 }); await expect(p.getByRole("button", { name: /Restart needed/ })).toHaveCount(0); } },
   ] },
+  // ux2-W14 F: a harness set to Never while a task selects it is a problem that names the task, on the list, the lane and the header; setting it back clears it.
+  { name: "ng-harness-never-blocks-publish", widths: [1280], keyboard: true, mock: { harnesses: "floor" }, start: ng("/ng/templates/harnesses?harness=claude"), steps: [
+    { name: "no-problems", run: async (p) => { await expect(p.getByText("PROBLEM")).toHaveCount(0); } },
+    { name: "set-never", run: async (p) => { await p.getByRole("radio", { name: "Never" }).click(); await expect(p.getByText(/\d+ PROBLEMS?/)).toBeVisible(); } },
+    { name: "names-the-task", run: async (p) => {
+      await expect(p.getByRole("complementary", { name: "claude pane" })).toContainText("implementation.main.implementer: harness 'claude' is not in its allowed_harnesses");
+      await expect(p.getByLabel("claude", { exact: true }).first()).toBeVisible();
+    } },
+    { name: "set-back", run: async (p) => { await p.getByRole("radio", { name: "Available" }).click(); await expect(p.getByText(/\d+ PROBLEMS?/)).toHaveCount(0); } },
+  ] },
   // ux2-W5 B.9: Cancel… reached by keyboard only, and the request is /cancel (never the route that deletes the worktree), R17.
   { name: "ng-cancel", widths: [1280], keyboard: true, start: ngItem("running"), steps: [
     { name: "toggle-focus-opens-panel", run: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); await expect(p.getByRole("menu", { name: "Item actions" })).toBeVisible(); } },

@@ -406,6 +406,22 @@ const CASES: Case[] = [
     await c.page.getByRole("heading", { name: "Board" }).evaluate((h) => h.scrollIntoView({ block: "start" })); await settle(c.page, 300);
   } },
 
+  // W14: Templates › Harnesses. The draft's answers come from sweep/ngHarnesses.ts; the clock is already fixed.
+  ...([
+    ["floor", "floor", ""], ["harness", "floor", "?harness=claude"], ["harness-lane", "floor", "?harness=claude&lane=strong"],
+    ["profile", "floor", "?profile=strong"], ["entry", "floor", "?profile=strong&lane=claude"],
+  ] as const).map<Case>(([variant, scenario, q]) => ({
+    screen: "ng-harnesses", variant, data: "default", widths: variant === "floor" ? [1280, 1920] : [1280], shells: [{ mode: "light" }], mock: { harnesses: scenario },
+    run: (c) => ng(c, `/ng/templates/harnesses${q}`, {}),
+  })),
+  { screen: "ng-harnesses", variant: "floor-config", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { harnesses: "floor" }, run: async (c) => {
+    await ng(c, "/ng/templates/harnesses", {});
+    await c.page.getByRole("tab", { name: "Config" }).click(); await settle(c.page, 300);
+  } },
+  { screen: "ng-harnesses", variant: "problems", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { harnesses: "problems" }, run: (c) => ng(c, "/ng/templates/harnesses", {}) },
+  { screen: "ng-harnesses", variant: "problems-profile", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { harnesses: "problems" }, run: (c) => ng(c, "/ng/templates/harnesses?profile=fast", {}) },
+  { screen: "ng-harnesses", variant: "empty", data: "default", widths: [1280], mock: { harnesses: "empty" }, run: (c) => ng(c, "/ng/templates/harnesses", {}) },
+
   // W16 B: Access. Health is the running server: the page compares it with the saved bind and port.
   ...([
     ["default", "default", {}, {}, "none"],

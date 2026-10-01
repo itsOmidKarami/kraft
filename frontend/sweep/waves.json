@@ -170,6 +170,18 @@
       { "kind": "flow-completes", "match": "^flow-ng-" }
     ]
   },
+  "ux2-W14": {
+    "title": "UX V2 Harnesses: list, lanes canvas, harness, profile and entry panes, allowed tools and escalation, problems",
+    "screens": ["ng-harnesses", "flow-ng-harness-never-blocks-publish"],
+    "specs": ["sweep.spec.ts", "interactions.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-harnesses" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-harnesses" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-harnesses" },
+      { "kind": "no-console", "match": "^ng-harnesses" },
+      { "kind": "flow-completes", "match": "^flow-ng-" }
+    ]
+  },
   "ux2-W3": {
     "title": "UX V2 shared graph components: glyph, canvases, gate view, strip, pane, camera, gallery",
     "screens": ["ng-gallery"],
