@@ -9,6 +9,7 @@ import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { IconButton } from "../ui/IconButton";
 import { showToast } from "../ui/Toast";
 import { ChainCanvas } from "./ChainCanvas";
+import { BottomPane, handlerOf, type BottomTab } from "./BottomPane";
 import { NodeView } from "./NodeView";
 import { ChainPane } from "./panes/ChainPane";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
@@ -54,12 +55,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const navigate = useNavigate();
   const view = draft.view!;
   const r = view.result;
-  const [frame, canvasW] = useBox();
+  const [frame, canvasW, areaH] = useBox();
   const size = useResizable("chains", canvasW);
   // The chain's own pane is the floor and open on load (Decisions §9 Chain settings).
   const [s, dispatch] = usePaneSelection(true);
   const [refused, setRefused] = useState<string | null>(null);
-
+  const [bottomTab, setBottomTab] = useState<BottomTab>("on_failure");
+  const [bottomOpen, setBottomOpen] = useState(false);
   const [nextProblem, setNextProblem] = useState(0);
   const taskPaths = r.resolved?.task_paths;
 
@@ -75,6 +77,16 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     if (draft.error) showToast(draft.error);
   }, [draft.error]);
 
+  // The bottom pane opens collapsed on each node entry, unless the person came
+  // to open something that lives in it (Decisions §9 Bottom pane).
+  const selPathNow = pathOf(s.sel as TSel);
+  useEffect(() => {
+    const h = handlerOf(selPathNow);
+    setBottomOpen(!!h);
+    if (h) setBottomTab(h);
+    // Only on entering a node view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.node]);
 
   // ⌘Z undoes the last request, outside a text field (brief Decided 4).
   const undo = draft.undo;
@@ -173,7 +185,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
           </IconButton>
         )}
       </HeaderActions>
-      <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}`}>
+      <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (
           <ChainCanvas
             chain={chain}
@@ -205,6 +217,26 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
               navigate(chainUrl(chain));
             }}
             onFocusNode={(id) => focusNode(id)}
+          />
+        )}
+        {s.level === "node" && s.node && selNode && kindOf(r, selNode) === "exec" && (
+          <BottomPane
+            node={s.node}
+            draft={draft}
+            selPath={selPath}
+            tab={bottomTab}
+            open={bottomOpen}
+            canvasH={areaH - 64}
+            right={reserve}
+            onTab={setBottomTab}
+            onToggle={() => setBottomOpen((o) => !o)}
+            onPick={(p) => {
+              const h = handlerOf(p);
+              if (h) setBottomTab(h);
+              dispatch({ type: "pick", sel: selOf(p, taskPaths) });
+            }}
+            onOpen={(p) => dispatch({ type: "expand", sel: selOf(p, taskPaths) })}
+            onLeave={() => dispatch({ type: "background" })}
           />
         )}
         <ChainPane

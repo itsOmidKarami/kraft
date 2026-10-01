@@ -545,6 +545,21 @@ const CASES: Case[] = [
     await c.page.getByRole("menuitem", { name: "From the library…" }).waitFor({ timeout: 4000 });
     await settle(c.page, 300);
   } },
+  { screen: "ng-chains", variant: "bottom", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("tab", { name: "Fix loop" }).click();
+    await settle(c.page, 400);
+  } },
+  { screen: "ng-chains", variant: "bottom-empty", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "verification");
+    await c.page.getByRole("tab", { name: "Escalation" }).click();
+    await settle(c.page, 400);
+  } },
+  { screen: "ng-chains", variant: "bottom-handler", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default", "merge_request_feedback");
+    await c.page.getByRole("tab", { name: "On failure" }).click();
+    await settle(c.page, 400);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");

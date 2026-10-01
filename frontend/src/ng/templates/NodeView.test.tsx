@@ -142,4 +142,15 @@ describe("Chains page: the node view", () => {
     expect(uniq("agent", [])).toBe("agent");
     expect(uniq("agent", ["agent", "agent_2"])).toBe("agent_3");
   });
+
+  it("opens the bottom pane collapsed on entering a node, and open on the tab of a handler item you came to", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok({ ...DEFAULT_VIEW, draft: true, result: { ...DEFAULT_VIEW.result, problems: [{ path: "verification.fix_loop.judge", field: "prompt", message: "Field required", file: "f", line: 1, col: 1 }] } }));
+    mount("/templates/chains/default/nodes/verification");
+    await screen.findByRole("group", { name: "verification" });
+    expect(screen.getByRole("button", { name: "Expand the bottom pane" })).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(screen.getByRole("button", { name: "Back to the chain" }));
+    await userEvent.click(await screen.findByRole("button", { name: "1 PROBLEM" }));
+    expect(await screen.findByRole("button", { name: "Collapse the bottom pane" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("tab", { name: "Fix loop" })).toHaveAttribute("aria-selected", "true");
+  });
 });
