@@ -573,6 +573,14 @@ async def _escalate_stuck(
     )
 
 
+def _conflicted_paths(worktree) -> list[str] | None:
+    """The still-conflicted files in `worktree`, or None if git could not say."""
+    out = _config.git_read(
+        Path(worktree), "diff", "--name-only", "--diff-filter=U", expected_failure=True
+    )
+    return out.splitlines() if out is not None else None
+
+
 def _conflict_detail(db, work_item_id: str, node: ResolvedNode, conflicted, excs) -> str:
     """What git said about a conflict: a raised `RebaseConflict`'s message, or
     the first line of the conflicted task's own log."""
@@ -611,6 +619,7 @@ async def _resolve_conflict(
     (`resolved-conflict-restarts-from-base-change-target`), reopening the
     span's approved gates.
     """
+    before_conflicted = _conflicted_paths(worktree)
     old_base = dispatch._current_base_ref(db, work_item_id)
     try:
         new_base = await _builtins.upstream_head(
@@ -680,7 +689,17 @@ async def _resolve_conflict(
     else:
         reason = f"the conflict handler in node {node.id} could not resolve it: {detail}"
         kind = "conflict"
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=kind))
+    facts = None
+    if kind == "conflict":
+        after_conflicted = _conflicted_paths(worktree)
+        if before_conflicted is not None and after_conflicted is not None:
+            facts = {
+                "resolved": sorted(set(before_conflicted) - set(after_conflicted)),
+                "unresolved": after_conflicted,
+            }
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=kind, facts=facts)
+    )
     return "needs_human"
 
 
@@ -1648,8 +1667,12 @@ async def _door_conflict(
         if carried:
             text = carried.take()
             await db.write(lambda c: store.set_steer(c, work_item_id, text))
+        unresolved = _conflicted_paths(worktree)
+        facts = {"resolved": [], "unresolved": unresolved} if unresolved is not None else None
         await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, node.id, conflict, kind="conflict")
+            lambda c: store.mark_needs_human(
+                c, work_item_id, node.id, conflict, kind="conflict", facts=facts
+            )
         )
         return "needs_human"
     budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
