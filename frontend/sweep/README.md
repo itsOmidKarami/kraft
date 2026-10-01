@@ -69,6 +69,8 @@ cd frontend
 node sweep/wave.mjs all --baseline     # full sweep, snapshot → e2e-shots/baseline/all/
 ```
 
+`wave.mjs` fails the run (exit 1, naming the spec) when a spec exits non-zero and wrote no manifest rows, because a spec that never loaded must not read as a pass; a spec that ran and recorded `setupError`s is still data. `just test-ui` type-checks every `sweep/**/*.ts`, so a syntax error in a spec fails there too.
+
 `--baseline` shoots first when `e2e-shots/sweep/manifest.jsonl` does not exist (a fresh worktree), and otherwise snapshots the shots already there without shooting again.
 
 ## Before an MR

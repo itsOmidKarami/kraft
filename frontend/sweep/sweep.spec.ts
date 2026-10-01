@@ -25,7 +25,6 @@ const VP: Record<number, [number, number]> = {
 };
 const ALL = [390, 768, 1024, 1100, 1280, 1440, 1920];
 const KEY = [390, 1100, 1280, 1920];
-const DESK = [1100, 1280, 1920];
 // A desktop browser with a side panel open (W10.D): the peek and the item page just under 1024.
 const SIDE = [960, 1000];
 
@@ -552,8 +551,8 @@ for (const cs of CASES) {
         page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 300)}`));
 
         let setupError: string | undefined;
-        let scrolledChrome: ReturnType<typeof chromeRects> extends Promise<infer T> ? T | null : never = null;
-        let before: typeof scrolledChrome = null;
+        let scrolledChrome: Awaited<ReturnType<typeof chromeRects>> | null = null;
+        let before: Awaited<ReturnType<typeof chromeRects>> | null = null;
         try {
           await cs.run({ page, S, width, shell });
           // A returning visitor's first paint: the app has run once in this
