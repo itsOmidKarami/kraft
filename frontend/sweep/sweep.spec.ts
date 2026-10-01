@@ -390,6 +390,25 @@ const CASES: Case[] = [
     await c.page.getByRole("heading", { name: "Board" }).evaluate((h) => h.scrollIntoView({ block: "start" })); await settle(c.page, 300);
   } },
 
+  // W16 B: Access. Health is the running server: the page compares it with the saved bind and port.
+  ...([
+    ["default", "default", {}, {}, "none"],
+    ["restart-pending", "default", { port: 9100 }, {}, "restart"],
+    ["env-locked", "default", { port: 9100 }, {}, "none"],
+    ["sessions-empty", "default", {}, { sessions: [] }, "none"],
+    ["long", "long", {}, {}, "none"],
+    ["loopback", "empty", {}, {}, "none"],
+  ] as const).map<Case>(([variant, data, access, extra, apply]) => ({
+    screen: "ng-access", variant, data, widths: [1280, 1920], shells: [{ mode: "light" }], mock: { apply },
+    run: async (c) => {
+      const h = c.S.settings.health;
+      Object.assign(c.S.settings.access, access);
+      if (c.S.settings.access.bind !== "127.0.0.1") h.bind = c.S.settings.access.bind;
+      if ("sessions" in extra) c.S.settings.sessions.sessions = [...extra.sessions];
+      await ng(c, "/ng/settings/access", {});
+    },
+  })),
+
   // W16 F: Analytics under /ng, fed by the same analyticsFor() fixtures as the shipped page.
   { screen: "ng-analytics", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
   { screen: "ng-analytics", variant: "long", data: "long", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },

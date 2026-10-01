@@ -1,0 +1,260 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import * as api from "../../api";
+import { ago, until } from "../../format";
+import type { Access, AuthSession, Health } from "../../types";
+import { parseUserAgent } from "../../ua";
+import { useApply } from "../apply/store";
+import { HeaderActions } from "../shell/HeaderActions";
+import { Dialog } from "../ui/Dialog";
+import { Segmented } from "../ui/Segmented";
+import { showToast } from "../ui/Toast";
+import { Block, SetRow } from "./parts";
+import "./settings.css";
+
+const LOOPBACK = "127.0.0.1";
+const EXPIRIES = [1, 7, 30].map((d) => ({ value: String(d), label: `${d}d` }));
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The port as typed, or why it is not one (1024–65535, the range the server takes). */
+export function portProblem(text: string): string | null {
+  const t = text.trim();
+  if (!/^\d+$/.test(t)) return "digits only";
+  const n = Number(t);
+  return n < 1024 || n > 65535 ? "use 1024–65535" : null;
+}
+
+/** Settings › Access (UX V2 W16 B). Saved on change: each control sends its own
+ *  key, and the page shows what the server answered, so a refused save leaves
+ *  the control where it was. Bind and port wait for a restart; the server says
+ *  so with an `access.*` apply item. */
+export function AccessPage() {
+  const [access, setAccess] = useState<Access | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [notifyHost, setNotifyHost] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
+  const [editing, setEditing] = useState<"port" | "password" | "host" | null>(null);
+  const [draft, setDraft] = useState("");
+  const [revoking, setRevoking] = useState<AuthSession | null>(null);
+  const { restart, managed, loaded } = useApply();
+  const askRestart = useApply((s) => s.askRestart);
+  const refreshApply = useApply((s) => s.refresh);
+  const field = useRef<HTMLInputElement>(null);
+
+  const loadSessions = useCallback(() => api.getAuthSessions().then((r) => setSessions(r.sessions), () => setSessions([])), []);
+  useEffect(() => {
+    api.getAccess().then(setAccess, (e) => setErrors({ page: message(e) }));
+    api.getHealth().then(setHealth, () => {});
+    void loadSessions();
+    api.getNotify().then((n) => {
+      try {
+        setNotifyHost(n.base_url ? new URL(n.base_url).hostname : null);
+      } catch {
+        setNotifyHost(null);
+      }
+    }, () => {});
+  }, [loadSessions]);
+  useEffect(() => void (editing && field.current?.focus()), [editing]);
+
+  const err = (key: string, text: string | null) => setErrors((e) => ({ ...e, [key]: text }));
+  const put = async (key: string, body: Parameters<typeof api.putAccess>[0]): Promise<boolean> => {
+    err(key, null);
+    try {
+      setAccess(await api.putAccess(body));
+      void refreshApply();
+      if ("password" in body || "session_expiry_days" in body) void loadSessions();
+      return true;
+    } catch (e) {
+      err(key, message(e));
+      return false;
+    }
+  };
+
+  if (!access) return <div className="ng-settings">{errors.page && <p className="set-error" role="alert">{errors.page}</p>}</div>;
+
+  const lan = access.bind !== LOOPBACK;
+  const items = restart.filter((i) => i.id.startsWith("access."));
+  // The server drops its restart item when KRAFT_HOST / KRAFT_PORT wins over the file.
+  const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
+  const host = (h: string) => (h === "0.0.0.0" ? location.hostname : h);
+  const address = `${location.protocol}//${host(access.bind)}:${access.port}`;
+  const closeEdit = () => {
+    setEditing(null);
+    setDraft("");
+  };
+  const edit = (what: "port" | "password" | "host", initial = "") => {
+    setEditing(what);
+    setDraft(initial);
+    err(what, null);
+  };
+  const savePort = async () => {
+    const problem = portProblem(draft);
+    if (problem) return err("port", problem);
+    if (Number(draft) === access.port) return closeEdit();
+    if (await put("port", { port: Number(draft) })) closeEdit();
+  };
+  const savePassword = async () => {
+    if (!draft) return closeEdit();
+    if (await put("password", { password: draft })) closeEdit();
+  };
+  const addHost = async () => {
+    const h = draft.trim().replace(/,$/, "");
+    if (!h || access.allowed_hosts.includes(h)) return closeEdit();
+    if (await put("host", { allowed_hosts: [...access.allowed_hosts, h] })) closeEdit();
+  };
+  const removeHost = (h: string) => {
+    // The host this browser is on: removing it would refuse the very next request.
+    if (h === location.hostname) return err("host", "can't remove the host you're connected as");
+    void put("host", { allowed_hosts: access.allowed_hosts.filter((x) => x !== h) });
+  };
+  const undo = async () => {
+    if (!health) return;
+    await put("bind", { bind: health.bind ?? access.bind, port: health.port ?? access.port });
+  };
+  const revoke = async (s: AuthSession) => {
+    setRevoking(null);
+    try {
+      await api.revokeSession(s.id);
+      await loadSessions();
+      showToast(s.current ? "Signed out" : "Session revoked");
+    } catch (e) {
+      err("sessions", message(e));
+    }
+  };
+  const keys = (save: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || (e.key === "," && editing === "host")) {
+      e.preventDefault();
+      save();
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      closeEdit();
+    }
+  };
+
+  return (
+    <div className="ng-settings">
+      <HeaderActions><span className="saved-note">{items.length ? "restart to apply" : "saved on change"}</span></HeaderActions>
+      <div className="set-page">
+        <h1>Access</h1>
+        <p className="lede">Auth is off on localhost and on for anything else.</p>
+
+        {items.length > 0 && (
+          <div className="set-pending" role="status">
+            <div className="set-pending-text">
+              <strong>Restart to apply</strong>
+              {items.map((i) => <span key={i.id}>{i.text}</span>)}
+              <span className="set-hint">{`Kraft comes back at ${address} and this page follows. Until then it keeps running as it is.`}</span>
+              {!managed && <span className="set-hint">Started in a terminal, so Kraft cannot restart itself. Run <code>kraft admin restart</code> there.</span>}
+            </div>
+            <div className="set-pending-actions">
+              <button type="button" className="set-btn" onClick={() => void undo()}>Undo</button>
+              {managed && <button type="button" className="set-btn is-primary" onClick={() => void askRestart()}>Restart Kraft</button>}
+            </div>
+          </div>
+        )}
+
+        <Block id="set-reach" title="Reach">
+          <div className="set-modes" role="radiogroup" aria-label="Reach">
+            {[
+              { bind: LOOPBACK, title: "This machine only", note: "No password." },
+              { bind: "0.0.0.0", title: "Local network", note: "Password required. For the phone view." },
+            ].map((m) => (
+              <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode" onClick={() => void put("bind", { bind: m.bind })}>
+                <span className="set-mode-title">{m.title}</span>
+                <span className="set-mode-addr">{m.bind}:{access.port}</span>
+                <span className="set-hint">{m.note}</span>
+              </button>
+            ))}
+          </div>
+          {errors.bind && <span className="set-error" role="alert">{errors.bind}</span>}
+          {overridden("bind") && <span className="set-hint">Running on {health?.bind}: the KRAFT_HOST environment setting wins over this.</span>}
+          <span className="set-hint">Takes effect on restart. Kraft never binds publicly; use a tunnel if you need remote access.</span>
+        </Block>
+
+        <Block id="set-port" title="Port">
+          <SetRow label="port" error={errors.port} hint="Used by both binds. Takes effect on restart. 1024–65535.">
+            {editing === "port" ? (
+              <input ref={field} className="set-input" aria-label="Port" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePort())} onBlur={() => void savePort()} />
+            ) : (
+              <button type="button" className="set-value" aria-label={`Port ${access.port}, edit`} onClick={() => edit("port", String(access.port))}>{access.port}</button>
+            )}
+          </SetRow>
+          {overridden("port") && <span className="set-hint">Running on {health?.port}: the KRAFT_PORT environment setting wins over this.</span>}
+        </Block>
+
+        {lan ? (
+          <>
+            <Block id="set-hosts" title="Allowed hosts" aside="saved on change">
+              <SetRow label="hosts" error={errors.host} hint="Off loopback, a browser request is refused (403) unless its Host is on this list: the DNS-rebinding guard. On 127.0.0.1 the list is ignored.">
+                <ul className="set-chips">
+                  {access.allowed_hosts.map((h) => (
+                    <li key={h}><button type="button" className="set-chip" aria-label={`Remove ${h}`} title={h === location.hostname ? "You are connected as this host" : `Remove ${h}`} onClick={() => removeHost(h)}>{h} <span aria-hidden>×</span></button></li>
+                  ))}
+                  <li>
+                    {editing === "host" ? (
+                      <input ref={field} className="set-input" aria-label="Add a host or IP" placeholder="host or IP" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void addHost())} onBlur={() => void addHost()} />
+                    ) : (
+                      <button type="button" className="set-chip" onClick={() => edit("host")}>+ add</button>
+                    )}
+                  </li>
+                </ul>
+              </SetRow>
+              {access.allowed_hosts.length === 0 && <span className="set-hint is-warn">An empty list on a LAN bind refuses every browser.</span>}
+              {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}
+            </Block>
+
+            <Block id="set-password" title="Password" aside="writes access.yaml">
+              <SetRow label="password" error={errors.password} hint="A new password signs every session out.">
+                {editing === "password" ? (
+                  <span className="set-inline">
+                    <input ref={field} className="set-input" type="password" aria-label="New password" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePassword())} />
+                    <button type="button" className="set-btn is-primary" onClick={() => void savePassword()}>Save</button>
+                    <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+                  </span>
+                ) : (
+                  <span className="set-inline">
+                    <span>{access.password_set ? "•••••••• set" : "not set"}</span>
+                    <button type="button" className="set-btn" onClick={() => edit("password")}>{access.password_set ? "Change" : "Set a password"}</button>
+                  </span>
+                )}
+              </SetRow>
+              <SetRow label="session expiry" error={errors.expiry} hint="How long a sign-in lasts.">
+                <Segmented label="Session expiry" options={EXPIRIES} value={String(access.session_expiry_days)} onChange={(v) => void put("expiry", { session_expiry_days: Number(v) })} />
+              </SetRow>
+            </Block>
+
+            <Block id="set-sessions" title="Sessions" aside="live">
+              {errors.sessions && <span className="set-error" role="alert">{errors.sessions}</span>}
+              {sessions.length === 0 && <p className="set-hint">No sessions: auth is off.</p>}
+              <ul className="set-sessions">
+                {sessions.map((s) => (
+                  <li key={s.id} className="set-session" data-session={s.id}>
+                    <span className="set-session-who"><span>{parseUserAgent(s.label)}{s.current && <span className="set-current"> current</span>}</span><span className="set-hint">{s.ip}</span></span>
+                    <span className="set-hint">seen {ago(s.last_seen_at)}</span>
+                    <span className="set-hint">expires {until(s.expires_at)}</span>
+                    <button type="button" className="set-btn is-danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out" : "Revoke"}</button>
+                  </li>
+                ))}
+              </ul>
+            </Block>
+          </>
+        ) : (
+          <Block id="set-unused" title="Not used on 127.0.0.1">
+            {[["allowed hosts", "Only loopback names are accepted."], ["password", "Needed once Kraft is reachable from the network."], ["sessions", "None: there is nothing to sign in to."]].map(([k, v]) => (
+              <div key={k} className="set-unused"><span className="set-row-label">{k}</span><span className="set-hint">{v}</span></div>
+            ))}
+          </Block>
+        )}
+      </div>
+      {revoking && (
+        <Dialog
+          title={revoking.current ? "Sign out of this session?" : "Revoke this session?"}
+          onClose={() => setRevoking(null)}
+          footer={<><button type="button" className="set-btn" onClick={() => setRevoking(null)}>Cancel</button><button type="button" className="set-btn is-danger" onClick={() => void revoke(revoking)}>{revoking.current ? "Sign out" : "Revoke"}</button></>}
+        >
+          <p>{revoking.current ? "It signs you out here." : `${parseUserAgent(revoking.label)} has to sign in again.`}</p>
+        </Dialog>
+      )}
+    </div>
+  );
+}

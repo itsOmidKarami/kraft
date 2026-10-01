@@ -6,6 +6,7 @@ import { BoardPage } from "./board/BoardPage";
 import { DraftItemPage } from "./board/draft/DraftItemPage";
 import { Gallery } from "./graph/Gallery";
 import { ItemPage } from "./item/ItemPage";
+import { AccessPage } from "./settings/AccessPage";
 import { AppearancePage } from "./settings/AppearancePage";
 import { ReviewPage } from "./review/ReviewPage";
 import { resumeSession } from "./session";
@@ -19,7 +20,7 @@ import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/templates/chains": <ChainsIndex /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/templates/chains": <ChainsIndex /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);

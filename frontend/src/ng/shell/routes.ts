@@ -26,7 +26,7 @@ export const ROUTES: NgRoute[] = [
   { path: "/settings/policy", label: "Policy", icon: NAV_ICON.policy, group: "settings", built: false },
   { path: "/settings/auto-intake", label: "Auto-intake", icon: NAV_ICON.intake, group: "settings", built: false },
   { path: "/settings/notifications", label: "Notifications", icon: NAV_ICON.notifications, group: "settings", built: false },
-  { path: "/settings/access", label: "Access", icon: NAV_ICON.access, group: "settings", built: false },
+  { path: "/settings/access", label: "Access", icon: NAV_ICON.access, group: "settings", built: true },
   { path: "/settings/appearance", label: "Appearance", icon: NAV_ICON.appearance, group: "settings", built: true },
   { path: "/settings/about", label: "About", icon: NAV_ICON.about, group: null, built: false },
   { path: "/archived", label: "Archived", icon: NAV_ICON.board, group: null, built: true },
