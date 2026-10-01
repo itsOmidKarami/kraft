@@ -431,6 +431,13 @@ const CASES: Case[] = [
   { screen: "ng-item-node", variant: "running", data: "default", widths: [1024, 1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification" }) },
   { screen: "ng-item-node", variant: "needs-you", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-you", { tail: "/nodes/verification" }) },
   { screen: "ng-item-node", variant: "failed", data: "default", widths: [1280], run: (c) => ngItem(c, "failed", { tail: "/nodes/merge_request" }) },
+  // ux2-W5 H: the task pane's tabs, on the attempt the URL names.
+  { screen: "ng-item-task", variant: "overview", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.review.code_review" }) },
+  { screen: "ng-item-task", variant: "log", data: "default", widths: [1280], shells: [{ short: true }], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.review.code_review&tab=log" }) },
+  { screen: "ng-item-task", variant: "log-long", data: "long", widths: [1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.checks.lint&tab=log&attempt=1" }) },
+  { screen: "ng-item-task", variant: "output", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.checks.lint&tab=output" }) },
+  { screen: "ng-item-task", variant: "thread", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-you", { tail: "/nodes/verification?sel=verification.escalation.escalation" }) },
+  { screen: "ng-item-step", variant: "parallel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "/nodes/verification?sel=verification.checks" }) },
   // The header's floating parts, opened the way a keyboard user would.
   { screen: "ng-item", variant: "panel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); } }) },
   { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },

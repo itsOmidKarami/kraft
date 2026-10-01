@@ -69,3 +69,10 @@ export function footerState(item: ItemDetail, sessions: WorkerSession[]): Footer
 /** A glyph state as a word, for pane subtitles. */
 export const stateWord = (s: GlyphState | undefined) =>
   ({ done: "done", current: "running", todo: "not started", failed: "failed", amber: "waiting", plain: "stopped", esc: "escalated", ghost: "removed" } as Record<string, string>)[s ?? "todo"];
+
+/** A session's state in words: "running now", or why it waits ("needs you", "paused", "waiting"), or its end. */
+export function lookWord(look: ReturnType<typeof sessionLook>): string {
+  if (look.running) return "running now";
+  if ((look.state === "current" || look.state === "amber") && look.meta) return look.meta;
+  return stateWord(look.state);
+}

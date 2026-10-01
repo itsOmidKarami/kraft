@@ -1,15 +1,19 @@
 import type { ReactNode } from "react";
 import { elapsedBetween, shortId } from "../../../format";
-import type { KraftEvent, Policy } from "../../../types";
+import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import type { ChainNode as GraphNode } from "../../graph/layout";
 import type { Sel } from "../../graph/usePaneSelection";
 import type { TaskKind } from "../../icons";
 import { act } from "../actions";
-import { footerState, isEscalation, stateWord } from "../nodeGraph";
+import { ESCALATION, escalationsOf, footerState, isEscalation, lookWord, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
+import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
 import { NodeConfig, NodeOverview } from "./NodePane";
+import { Log } from "./Log";
 import { PathFooter } from "./PathFooter";
+import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
+import { Thread } from "./Thread";
 
 export type PaneArgs = {
   item: ItemDetail;
@@ -26,6 +30,10 @@ export type PaneArgs = {
   focus: (node: string) => void;
   editBudget: boolean;
   setEditBudget: (on: boolean) => void;
+  attempt?: number;
+  setAttempt: (attempt: number) => void;
+  docs: WorkItemDocument[];
+  onDoc: (d: WorkItemDocument) => void;
 };
 export type PaneContent = {
   crumbs: { label: string; onClick?: () => void }[];
@@ -60,6 +68,9 @@ export function paneContent(a: PaneArgs): PaneContent {
         : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} />,
     };
   const node = item.chain_definition.nodes.find((n) => n.id === sel.node)!;
+  const toNode = { label: node.id, onClick: () => a.pick({ kind: "node", node: node.id }) };
+  if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, toNode]);
+  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);
   const drawn = a.graph.find((g) => g.id === sel.node);
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
@@ -76,5 +87,95 @@ export function paneContent(a: PaneArgs): PaneContent {
       ? <NodeConfig item={item} node={node} onReset={async () => { const r = await act.patch(item.id, { node_overrides: { [node.id]: {} } }); if (r.ok) a.reload(); }} />
       : <NodeOverview item={item} node={node} onStep={(step) => a.pick({ kind: "step", node: node.id, step })} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     footer: footerOf(item, node.id, "node", footerState(item, sessions), a.reload),
+  };
+}
+
+type Crumbs = PaneContent["crumbs"];
+
+/** A step's pane (Decisions §5): its tasks, which run in parallel, and its footer. */
+function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId: string, crumbs: Crumbs): PaneContent {
+  const { item } = a;
+  const { steps, legacy } = stepsOf(node);
+  const k = steps.findIndex((st) => st.id === stepId);
+  const step = steps[k];
+  if (!step) return { crumbs, title: stepId, body: <p className="item-muted">This step is not in the item's chain.</p> };
+  const latest = step.tasks.map((p) => sessionsOf(item, p).at(-1));
+  const status = latest.every((x) => x?.status.startsWith("done")) ? "done" : latest.some((x) => x && ["running", "pending"].includes(x.status)) ? "running" : latest.some(Boolean) ? "stopped" : "not started";
+  const sessions = step.tasks.flatMap((p) => sessionsOf(item, p));
+  return {
+    crumbs,
+    icon: "layers",
+    title: stepId,
+    sub: `step ${k + 1} of ${steps.length}`,
+    tabs: OVERVIEW_CONFIG,
+    body: a.tab === "config" ? (
+      <dl className="item-facts ip-facts">
+        {step.tasks.map((p) => <div key={p}><dt>task</dt><dd className="is-mono">{p}</dd></div>)}
+      </dl>
+    ) : (
+      <>
+        <dl className="item-facts ip-facts">
+          <div><dt>tasks</dt><dd>{step.tasks.length === 1 ? "1 task" : `${step.tasks.length}, dispatched together`}</dd></div>
+          <div><dt>status</dt><dd>{status}</dd></div>
+          {node.on_failure?.length ? <div><dt>on failure</dt><dd>uses the node's</dd></div> : null}
+        </dl>
+        <h3 className="ip-h">Tasks{step.tasks.length > 1 ? " · run in parallel" : ""}</h3>
+        <ul className="ip-list">
+          {step.tasks.map((p, i) => {
+            const look = sessionLook(latest[i], a.now);
+            return (
+              <li key={p}>
+                <button type="button" className="ip-row" onClick={() => a.pick({ kind: "task", node: node.id, step: stepId, task: taskName(p) })}>
+                  <span className={`ip-mark${look.running ? " is-live" : ""}`} aria-hidden>{look.state === "done" ? "✓" : look.running ? "●" : "○"}</span>
+                  <span className="is-mono">{taskName(p)}</span>
+                  <span className="ip-row-meta">{latest[i]?.model ? "agent" : stateWord(look.state)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </>
+    ),
+    // A legacy node's steps have no path of their own: retry and skip it at node level.
+    footer: legacy ? undefined : footerOf(item, `${node.id}.${stepId}`, "step", footerState(item, sessions), a.reload),
+  };
+}
+
+const TASK_TABS = [{ value: "overview", label: "Overview" }, { value: "input", label: "Input" }, { value: "output", label: "Output" }, { value: "log", label: "Log" }, { value: "config", label: "Config" }];
+
+/** A task's pane (Decisions §5 Pane tabs): the attempt switcher over Overview,
+ *  Input, Output, Log and Config, with Thread first on the escalation task. */
+function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId: string, task: string, crumbs: Crumbs): PaneContent {
+  const { item } = a;
+  const esc = stepId === ESCALATION;
+  const path = esc ? ESCALATION : `${node.id}.${stepId}.${task}`;
+  const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
+  const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
+  const look = sessionLook(at, a.now);
+  const kind = esc || at?.model ? "agent" : undefined;
+  const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
+  const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
+  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task · ${look.running ? (look.meta ?? "running") : lookWord(look)}` };
+  if (!at) return { ...head, body: <p className="item-muted">Not started. Its tabs fill in once it runs.</p>, footer: undefined };
+  const current = item.current_node_id === node.id;
+  const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={a.setAttempt} now={a.now} />;
+  const bodies: Record<string, ReactNode> = {
+    thread: <Thread item={item} node={node.id} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
+    overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} />,
+    input: <TaskInput item={item} s={at} current={current} />,
+    output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
+    log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} />,
+    config: <TaskConfig path={path} s={at} />,
+  };
+  const live = sessions.some((s) => ["running", "pending"].includes(s.status));
+  return {
+    ...head,
+    tabs,
+    body: <>{switcher}{bodies[tab]}</>,
+    footer: esc
+      // The escalation's footer: stop it while it runs (GAP §2 #13); retry the node with a steer once it answered (#12).
+      ? <PathFooter item={item} path={node.id} what="node" state={live ? null : footerState(item, item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)))} reload={a.reload}
+          extra={live ? <button type="button" className="btn btn-secondary" onClick={async () => { const r = await act.stopEscalation(item.id); if (r.ok) a.reload(); }}>Stop escalation</button> : undefined} />
+      : footerOf(item, path, "task", footerState(item, sessions), a.reload),
   };
 }

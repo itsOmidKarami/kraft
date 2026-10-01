@@ -143,3 +143,35 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-confirm { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .ip-confirm-q { margin: 0; font-size: 12.5px; color: var(--text); }
 .ip-override { margin: 0; font-size: 12.5px; color: var(--text-sub); }
+
+/* Task pane (Decisions §5, §6): attempts, log, thread. */
+.ip-attempts { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ip-attempt-box { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
+.ip-attempt-btn { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); cursor: pointer; }
+.ip-attempt-btn:disabled { color: var(--text-faint); cursor: default; }
+.ip-attempt-btn:not(:disabled):is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
+.ip-attempt-state { color: var(--text-sub); }
+.ip-attempt-state.is-live { color: var(--warn); }
+.ip-attempt-state.is-bad { color: var(--bad); }
+.ip-log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+.ip-chips { display: inline-flex; gap: 4px; }
+.ip-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text-muted); font: 11px ui-monospace, Menlo, monospace; cursor: pointer; }
+.ip-chip[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
+.ip-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ip-follow { font-size: 12px; }
+.ip-full { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.ip-log { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 11.5px/1.6 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ip-log.is-big { max-height: 60vh; overflow: auto; }
+.ip-log:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.ip-log-t { display: inline-block; min-width: 44px; margin-right: 8px; color: var(--text-muted); }
+.ip-log-line.src-agent { color: var(--text); }
+.ip-log-full { width: min(900px, 80vw); }
+.ip-thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ip-thread-head { margin: 0; font-size: 11.5px; color: var(--text-muted); }
+.ip-turn { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+.ip-turn.is-here { border-color: color-mix(in oklab, var(--warn) 50%, transparent); }
+.ip-turn-head { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text); }
+.ip-turn-head .item-link { margin-left: auto; font-size: 11.5px; }
+.ip-turn-who { margin: 0; font-size: 11px; color: var(--warn); }
+.ip-turn-text { margin: 0; font-size: 12.5px; color: var(--text); line-height: 1.45; }
+.ip-findings { margin: 4px 0 0; padding-left: 16px; font-size: 12px; color: var(--text-sub); }

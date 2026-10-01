@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { create } from "zustand";
 import * as api from "../../api";
-import type { Policy } from "../../types";
+import type { Policy, WorkItemDocument } from "../../types";
 import { openingView } from "../graph/camera";
 import { Inspector } from "../graph/Inspector";
 import { StageGraph } from "../graph/StageGraph";
@@ -14,6 +14,7 @@ import { chainGraph } from "./graph";
 import { nodeGraph } from "./nodeGraph";
 import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
+import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import type { ItemDetail } from "./useItem";
 
@@ -39,6 +40,8 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
   const events = useEvents(item.id, item.updated_at);
+  const docs = useDocuments(item.id, item.updated_at);
+  const [, setDoc] = useState<WorkItemDocument | null>(null);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
@@ -86,8 +89,14 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
 
   const sel = place.sel;
   const pick = (to: Sel) => dispatch({ type: "pick", sel: to });
-  const tab = place.tab ?? "overview";
-  const pane = paneContent({ item, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, focus: (node) => dispatch({ type: "focus", node }), editBudget, setEditBudget });
+  const tab = place.tab ?? "";
+  const pane = paneContent({
+    item, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,
+    focus: (node) => dispatch({ type: "focus", node }),
+    attempt: place.attempt,
+    setAttempt: (attempt) => go({ ...place, attempt }),
+    onDoc: setDoc,
+  });
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
   const inside = viewing && nodeGraph(item, viewing, now);
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
@@ -138,6 +147,7 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
           title={pane.title}
           sub={pane.sub}
           tabs={pane.tabs}
+          // The pane's first tab when the URL names none (Thread, on an escalation).
           tab={pane.tabs?.some((t) => t.value === tab) ? tab : pane.tabs?.[0]?.value}
           onTab={(t) => go({ ...place, tab: t === pane.tabs?.[0]?.value ? undefined : t })}
           onCollapse={() => dispatch({ type: "collapse" })}
