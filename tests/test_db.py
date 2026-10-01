@@ -72,8 +72,8 @@ def test_migrate_is_idempotent(tmp_path):
     table_count = conn2.execute(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ).fetchone()[0]
-    assert table_count == 11  # + auth_sessions (v6), work_item_repos (v18), run_forks (v35),
-    # + node_runs, reviews, review_threads, review_comments (v39)
+    assert table_count == 12  # + auth_sessions (v6), work_item_repos (v18), run_forks (v35),
+    # + node_runs, reviews, review_threads, review_comments (v39), review_viewed (v45)
 
 
 def test_migrate_rejects_newer_db(tmp_path):
@@ -131,6 +131,7 @@ INVALID SQL STATEMENT;
             "reviews",
             "review_threads",
             "review_comments",
+            "review_viewed",
         }
         user_version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert user_version == db.SCHEMA_VERSION

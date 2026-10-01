@@ -21,12 +21,37 @@ def _last_review_sha(st, wid: str) -> str | None:
     return rev["head_sha"] if rev else None
 
 
-def _reject_default(row, gate: str | None) -> str | None:
-    if gate is None:
-        return None
+def fix_target(st, row, gate: str, node: str | None = None) -> dict:
+    """Where a rejection at `gate` restarts the chain, for the review page's sentence.
+
+    `node` is the index `executor.reject_target` picks, the function
+    `apply_rejection` runs, so the sentence and the action cannot disagree.
+    `then` is the nodes between it and the gate; `round` is the one a rejection
+    now would start, against the cap the counter snapshotted (the policy's when
+    no rejection has happened yet). Raises ValueError for a `node` not before
+    the gate, as `reject_target` does.
+    """
     nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
     idx = executor.gate_node_index(nodes, gate)
-    return nodes[executor.reject_target(nodes, idx, None)].id
+    target = executor.reject_target(nodes, idx, node)
+    key = store.reject_loop_key(gate)
+    counter = st.db.read(lambda c: store.read_counter(c, row["id"], key))
+    if counter:
+        cap = counter["cap_attempts"]
+    else:
+        cap = st.policy.cap_for(key).attempts if st.policy else None
+    return {
+        "gate": gate,
+        "node": nodes[target].id,
+        "then": [n.id for n in nodes[target + 1 : idx]],
+        "round": None
+        if cap is None
+        else {"n": (counter["count"] if counter else 0) + 1, "max": cap},
+    }
+
+
+def _reject_default(st, row, gate: str | None) -> str | None:
+    return fix_target(st, row, gate)["node"] if gate else None
 
 
 #: The event types that bound a `work_item_needs_human` stop, newest wins —
@@ -615,6 +640,58 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
     }
 
 
+@api_router.get("/work-items/{wid}/fix-target")
+async def get_fix_target(
+    wid: str, request: Request, node: str | None = None, gate: str | None = None
+):
+    """Where the work restarts if the reviewer requests changes now.
+
+    With a gate pending this is `fix_target`; with none it is what a gateless
+    `request_changes` would target (`review.changes_target`), which costs git
+    calls per thread and so is not on the polled item detail. `reason` says why.
+    """
+    from kraft import review as review_mod
+    from kraft.api.routes import gates as gate_routes
+
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    pending = _pending_gate(st, wid)
+    if gate is not None and gate != pending:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    if pending:
+        try:
+            return {**fix_target(st, row, pending, node), "reason": "requested" if node else "gate"}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    nodes = gate_routes.gate_nodes(st, row)
+    current = next((i for i, n in enumerate(nodes) if n.id == row["current_node_id"]), None)
+    if current is None:
+        raise HTTPException(409, "this work item has no current node")
+    if node:
+        idx = next((i for i, n in enumerate(nodes) if n.id == node), None)
+        if idx is None or idx > current:
+            raise HTTPException(
+                400, f"cannot request changes at {node!r}: not at or before the current node"
+            )
+        why = "requested"
+    else:
+        threads = st.db.read(lambda c: store.threads_for(c, wid))
+        runs = st.db.read(lambda c: store.node_run_rows(c, wid))
+        try:
+            idx, why = review_mod.changes_target(
+                st.run_dirs.worktrees / wid, nodes, current, threads, runs
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    return {
+        "gate": None,
+        "node": nodes[idx].id,
+        "then": [n.id for n in nodes[idx + 1 : current + 1]],
+        "round": None,
+        "reason": why,
+    }
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -695,7 +772,8 @@ async def get_work_item(wid: str, request: Request):
         # The review flow's compare picker and "runs X again" sentence (spec §2).
         "attempts": st.db.read(lambda c: store.gate_attempts(c, wid, pending)) if pending else [],
         "last_review_sha": _last_review_sha(st, wid),
-        "reject_default": _reject_default(row, pending),
+        "reject_default": _reject_default(st, row, pending),
+        "fix_target": fix_target(st, row, pending) if pending else None,
         # The document the gate is a decision about — the spec at
         # spec_approval, the plan at plan_approval. The detail screen offers
         # "Review spec" only when this is set.

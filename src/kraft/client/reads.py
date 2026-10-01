@@ -343,22 +343,27 @@ async def compare(
     from_: str = "base",
     to: str = "latest",
     nodes: str | None = None,
+    ignore_whitespace: bool = False,
 ) -> dict:
     """Any two review targets diffed: base | attempt:N | last_review | latest."""
     wid = await context.resolve_work_item(work_item_id)
     return await transport._get(
-        f"/work-items/{wid}/compare", **{"from": from_, "to": to, "nodes": nodes}
+        f"/work-items/{wid}/compare",
+        **{"from": from_, "to": to, "nodes": nodes, "ignore_whitespace": ignore_whitespace or None},
     )
 
 
-async def diff(work_item_id: str | None = None) -> dict:
+async def diff(work_item_id: str | None = None, ignore_whitespace: bool = False) -> dict:
     """What the agent changed, against the item's `base_ref`.
 
     The payload is passed through untouched — `truncated` and `untracked` are
     the two fields a renderer must not drop, and passing the dict whole is how
     that is guaranteed rather than remembered.
     """
-    return await transport._get(f"/work-items/{await context.resolve_work_item(work_item_id)}/diff")
+    wid = await context.resolve_work_item(work_item_id)
+    return await transport._get(
+        f"/work-items/{wid}/diff", ignore_whitespace=ignore_whitespace or None
+    )
 
 
 async def artifact(work_item_id: str | None = None) -> dict:

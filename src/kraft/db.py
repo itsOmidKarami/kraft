@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 46
+SCHEMA_VERSION = 47
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -206,6 +206,17 @@ CREATE TABLE auth_sessions (
   created_at   TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
   expires_at   TEXT NOT NULL
+);
+
+CREATE TABLE review_viewed (
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  file_path    TEXT NOT NULL,
+  -- the commit compared to, or 'worktree' for the working tree
+  to_sha       TEXT NOT NULL,
+  -- the file's blob at `to_sha` (NULL: deleted there), a mark holds while it matches
+  blob_id      TEXT,
+  viewed_at    TEXT NOT NULL,
+  PRIMARY KEY (work_item_id, file_path, to_sha)
 );
 
 CREATE TABLE retry_counters (
@@ -994,6 +1005,18 @@ FROM worker_sessions""",
        THEN json_extract(payload, '$.node') END
 ) WHERE node_id IS NULL""",
         "CREATE INDEX idx_events_node ON events(work_item_id, node_id, seq)",
+    ],
+    46: [
+        """CREATE TABLE review_viewed (
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  file_path    TEXT NOT NULL,
+  -- the commit compared to, or 'worktree' for the working tree
+  to_sha       TEXT NOT NULL,
+  -- the file's blob at `to_sha` (NULL: deleted there), a mark holds while it matches
+  blob_id      TEXT,
+  viewed_at    TEXT NOT NULL,
+  PRIMARY KEY (work_item_id, file_path, to_sha)
+)""",
     ],
 }
 

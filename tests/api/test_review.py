@@ -132,6 +132,24 @@ def test_item_detail_carries_attempts_and_reject_default(client, gated):
     assert body["last_review_sha"] is None
 
 
+@_REVIEW
+def test_gateless_fix_target_is_the_target_request_changes_then_returns(client, repo, monkeypatch):
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+    assert client.get(f"/api/work-items/{wid}").json()["fix_target"] is None
+    _target_thread(client, wid, "implementation")
+
+    ft = client.get(f"/api/work-items/{wid}/fix-target").json()
+    assert ft["gate"] is None and ft["round"] is None
+    assert ft["reason"] == "threads on implementation"
+    assert ft["then"] == ["work_item_summary"]
+    chosen = client.get(f"/api/work-items/{wid}/fix-target", params={"node": "work_item_summary"})
+    assert (chosen.json()["node"], chosen.json()["reason"]) == ("work_item_summary", "requested")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+    assert r.status_code == 200, r.text
+    assert r.json()["target"] == ft["node"]
+
+
 def _new_thread(client, wid, **kw):
     body = {
         "body": "use a set",

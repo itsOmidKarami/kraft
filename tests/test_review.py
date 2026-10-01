@@ -135,3 +135,24 @@ def test_a_renamed_file_survives_the_diff_filter(tmp_path):
     assert paths == {"moved.py", "other.py"}
     kept = review.filter_diff(change.diff, {"moved.py"})
     assert "moved.py" in kept and "other.py" not in kept
+
+
+def test_ignore_whitespace_drops_whitespace_only_files_from_patch_and_counts(tmp_path):
+    repo = make_repo(tmp_path)
+    c1 = _commit(repo, {"ws.txt": "a\nb\n", "mixed.txt": "a\nb\n", "same.txt": "x\n" * 20})
+    _git(repo, "mv", "same.txt", "moved.txt")
+    (repo / "ws.txt").write_text("  a\n  b\n")
+    (repo / "mixed.txt").write_text("  a\nchanged\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "edit")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    plain = review.read_change(repo, c1, head=head)
+    quiet = review.read_change(repo, c1, head=head, ignore_whitespace=True)
+
+    names = lambda ch: {review.new_path(f["path"]) for f in ch.files}  # noqa: E731
+    assert names(plain) == {"ws.txt", "mixed.txt", "moved.txt"}
+    assert names(quiet) == {"mixed.txt", "moved.txt"}
+    assert "ws.txt" not in quiet.diff and "ws.txt" in plain.diff
+    mixed = next(f for f in quiet.files if f["path"] == "mixed.txt")
+    assert (mixed["insertions"], mixed["deletions"]) == (1, 1)

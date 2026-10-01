@@ -45,7 +45,12 @@ class Change(NamedTuple):
 
 
 def read_change(
-    worktree: Path, base: str, *, head: str | None = None, context: int | None = None
+    worktree: Path,
+    base: str,
+    *,
+    head: str | None = None,
+    context: int | None = None,
+    ignore_whitespace: bool = False,
 ) -> Change | None:
     """The change in `worktree` against `base`, or None if git itself failed.
 
@@ -61,10 +66,13 @@ def read_change(
     # gitlink, runs its own filters there (Kraft-nx4id). This is the diff
     # endpoint, readable while a sandboxed worker is still writing.
     unentered = _sandbox.SUBMODULES_UNENTERED
-    diff_args = ["diff", unentered] + ([f"-U{context}"] if context is not None else []) + rev
+    # -w on both commands: git then drops a whitespace-only file from the patch and
+    # the numstat alike, so `files` and `diff` cannot disagree.
+    ws = ["-w"] if ignore_whitespace else []
+    diff_args = ["diff", unentered, *ws] + ([f"-U{context}"] if context is not None else []) + rev
     # strip=False: a diff whose last line is blank context is still that diff
     body = _config.git_read(worktree, *diff_args, strip=False)
-    numstat = _config.git_read(worktree, "diff", unentered, "--numstat", *rev)
+    numstat = _config.git_read(worktree, "diff", unentered, *ws, "--numstat", *rev)
     if body is None or numstat is None:
         return None
     untracked: list[str] = []

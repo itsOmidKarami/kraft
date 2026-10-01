@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import { artifactFor, diffFor, documentDetail, searchFor, type Scenario } from "./fixtures";
+import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
@@ -25,6 +25,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, () => {});
 
+  const viewedMarks = new Set<string>();
   await page.route(/\/api\//, async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -86,6 +87,17 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(route, diffFor(m[1], S.variant));
+    if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
+      return json(route, compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
+    }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/viewed$/)) && (method === "PUT" || method === "DELETE")) {
+      const file = q.get("file") ?? "";
+      viewedMarks[method === "PUT" ? "add" : "delete"](`${m[1]}|${file}`);
+      return json(route, { file, to: q.get("to") ?? "latest", viewed: method === "PUT" });
+    }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/fix-target$/))) {
+      return json(route, fixTargetFor(S.bundles[m[1]]?.item.pending_gate ?? null, q.get("node") ?? undefined));
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)\/artifact$/))) {
       const b = S.bundles[m[1]];
       return b ? json(route, artifactFor(b.item, S.variant)) : json(route, { detail: "no artifact" }, 404);
