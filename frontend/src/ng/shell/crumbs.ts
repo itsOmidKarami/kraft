@@ -23,6 +23,11 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
   const current = (text: string): Crumb => ({ text, kind: "current", title: text });
   const mid = (text: string, extra: Partial<Crumb> = {}): Crumb => ({ text, kind: "mid", ...extra });
 
+  // The draft item page (W6 G): Board › repo › new item; the repo returns to the board filtered to it.
+  if (pathname === "/work-items/new") {
+    const repo = item("new")?.repo;
+    return [mid("Board", { to: "/" }), ...(repo ? [mid(repoName(repo), { to: `/?repo=${encodeURIComponent(repo)}`, title: repo })] : []), current("new item")];
+  }
   // Board › repo › bead id (else the short id), then the node in a node view
   // (Decisions §1, §5, §14), or "Review changes" on the review page
   // (prototype 326). The title is the page's own h1, never a crumb.

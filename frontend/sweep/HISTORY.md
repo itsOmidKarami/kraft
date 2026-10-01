@@ -1356,3 +1356,11 @@ Baseline on `main` `7bfd54d8`: 1324 cells, 192 flagged. Full notes: `e2e-shots/D
 - **Fixtures and mocks:** the needs-gate /ng item is a re-review (two gate attempts, a last review, `fix_target`); review threads and comments with their routes, seeded on first read; item and gate review submission publishes drafts and moves the item on request_changes/approve. The shipped UI calls none of them.
 - **Found by the sweep and fixed:** line numbers, counts, tags and outcome sub-lines under 4.5:1; the hidden page heading read as clipped (now `overflow: clip`); threads and lines past the column's edge (now per-file sideways scroll, wrap under 1024); empty number buttons with no height (`min-height: 1lh`) so a click never landed; keys typed in the composer taken as diff shortcuts (Enter, `c`, `n`, `p`).
 - Real run on `just dev` (fake agents): a must-fix thread and Request changes at `spec_approval` rejected the gate, `spec` ran again, and the gate came back; no console errors.
+
+
+## ux2-W6 PR 2 — draft item page, archived view (`ux2/W6b`)
+
+- `node sweep/wave.mjs ux2-W6`: **7/7 rules pass**, 79 cells in scope; 16 new, none flagged: `ng-draft-item/{default,titled (1024, 1280, ~h700),node,node-covered,config,yaml,members,discard}`, `ng-archived/{default,empty,selected}`.
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1403 cells, 235 flagged (as PR 1), 0 newly flagged; shipped cells moved only by clock text (≤0.78%) and the log scroll offset of `flow-log-maximize/03@390`.
+- **Fixtures:** the mock's `/repos` (with `ngBoard`) carries a workspace rooted at kraft-plugins with two member repos.
+- **Found by the sweep and fixed:** archived rows' ticks drawn as not started.

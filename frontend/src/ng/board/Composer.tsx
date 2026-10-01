@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
 import { useStore } from "../../store";
@@ -28,7 +29,9 @@ const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
  *  title, a line of brief, repo, chain, an optional spec or plan, and a tick
  *  preview of what will run from the server's dry run. ⌘↵ creates and starts. */
 export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: string; onClose: () => void; onCreated: (id: string) => void }) {
+  const navigate = useNavigate();
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [roots, setRoots] = useState<Set<string>>(new Set());
   const [chains, setChains] = useState<TemplateSummary[]>([]);
   const [d, setD] = useState<Draft>({ title: "", brief: "", repo: "", chain: "", spec: "", plan: "" });
   const [ask, setAsk] = useState(false);
@@ -42,6 +45,9 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     api.getRepos().then((r) => {
       const live = r.repos.filter((x) => x.enabled !== false);
       setRepos(live);
+      // Repos that root a workspace with members: those can file a cross-repo item (on the draft page).
+      const byId = (id: string) => r.repos.find((x) => x.id === id);
+      setRoots(new Set(Object.values(r.workspaces ?? {}).filter((w) => Object.keys(w.members).length).map((w) => byId(w.root)?.path ?? "")));
       const first = live.find((x) => x.path === repoFilter) ?? live[0];
       if (first) setD((x) => (x.repo ? x : { ...x, repo: first.path, chain: first.default_chain_template }));
     }).catch(() => {});
@@ -74,6 +80,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // More options hands the draft to the draft item page (Decisions §7b): title, brief, repo, chain and attachments.
+  const more = (members: boolean) => {
+    onClose();
+    navigate("/work-items/new", { state: { draft: d, members } });
+  };
   const create = async (autostart: boolean) => {
     if (!d.title.trim() || busy || (preview && "error" in preview)) return;
     setBusy(true);
@@ -129,6 +140,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           }))}
         />
         {(["spec", "plan"] as Kind[]).map((k) => <Attach key={k} kind={k} repo={d.repo} path={d[k]} onPath={(p) => set({ [k]: p })} />)}
+        {roots.has(d.repo) && <button type="button" className="composer-add composer-cross" title="Choose members on the full page" onClick={() => more(true)}>Cross-repo <span className="composer-muted">· on the page</span></button>}
         <span className="composer-gap" />
         <span className="composer-run">{ran} of {full.length || ran} nodes run · {gates} gate{gates === 1 ? "" : "s"}</span>
         <Ticks className="composer-ticks" ticks={(full.length ? full : run?.nodes ?? []).map((n) => ({ gate: n.kind === "gate", state: off.has(n.id) ? "todo" : "run" }))} />
@@ -144,6 +156,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         ) : (
           <>
             <span className="composer-note">{error ? <span className="item-error" role="alert">{error}</span> : "Created paused. Nothing spends tokens until you start it."}</span>
+            <button type="button" className="board-select-all" title="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>
             <button type="button" className="board-select-all" onClick={leave}>Cancel</button>
             <CreateSplit disabled={!ok} onCreate={create} />
           </>
@@ -155,7 +168,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
 
 /** Create paused ▾, whose panel holds Create and start (Decisions §7b Create).
  *  The toggle opens on focus, click, Enter, Space or ↓ (rule 3). */
-function CreateSplit({ disabled, onCreate }: { disabled: boolean; onCreate: (start: boolean) => void }) {
+export function CreateSplit({ disabled, onCreate }: { disabled: boolean; onCreate: (start: boolean) => void }) {
   const group = useRef<HTMLSpanElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -188,7 +201,7 @@ function CreateSplit({ disabled, onCreate }: { disabled: boolean; onCreate: (sta
 /** A spec or plan slot: type to search the repo's documents (GET /search,
  *  the shipped composer's call), or paste a repo-relative path. A list
  *  before typing has no API source (Kraft-sob3o). */
-function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string; path: string; onPath: (p: string) => void }) {
+export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string; path: string; onPath: (p: string) => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");

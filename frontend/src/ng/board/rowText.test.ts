@@ -63,6 +63,7 @@ describe("glyphOf and ticksOf", () => {
     expect(states(row("running"))).toBe("ddct");
     expect(states(row("needs_you", { stop: stop("cap") }))).toBe("ddht");
     expect(states(row("done"))).toBe("dddd");
+    expect(states(row("archived"))).toBe("dddd");
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
   });

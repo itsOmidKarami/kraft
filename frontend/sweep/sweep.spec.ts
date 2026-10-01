@@ -137,6 +137,11 @@ const composerFilled = async (p: Page) => {
   await box.fill("docs/specs/doc-search-cache.md"); await p.waitForTimeout(300); await box.press("Enter");
   await p.getByText(/of 15 nodes run/).waitFor(); await p.waitForTimeout(500);
 };
+/** The draft item page from a typed URL (its query carries the draft), titled with a spec or empty. */
+const ngDraft = async (c: Ctx, titled: boolean, then?: (p: Page) => Promise<void>) => {
+  const q = new URLSearchParams({ repo: "/Users/dev/code/kraft-plugins", chain: "default", ...(titled ? { title: "Design the caching layer for document search", spec: "docs/specs/doc-search-cache.md" } : {}) });
+  await ngBoard(c, { tail: `work-items/new?${q}`, then: async (p) => { await p.getByText(/nodes run ·/).first().waitFor(); await p.waitForTimeout(500); if (then) await then(p); } });
+};
 /** A board row per peek variant, by the start of its title (ngBoard.ts). */
 const PEEK_ROWS = {
   "needs-gate": "Design the caching layer", question: "Add rate limit headers", capped: "Fix flaky retry test", failed: "Retry on 429",
@@ -431,6 +436,26 @@ const CASES: Case[] = [
     await box.fill("docs/plans/missing.md"); await p.waitForTimeout(300); await box.press("Enter");
     await p.getByText(/attachment not found/).waitFor();
   } }) },
+  // G: the draft item page, empty and titled with a spec, a node and a covered node, Config, YAML, members, the discard ask.
+  { screen: "ng-draft-item", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, false) },
+  { screen: "ng-draft-item", variant: "titled", data: "default", widths: [1024, 1280], shells: [{ short: true }], mock: { ngBoard: true }, run: (c) => ngDraft(c, true) },
+  ...([["node", /^verification,/], ["node-covered", /^spec,/]] as const).map<Case>(([v, name]) => ({
+    screen: "ng-draft-item", variant: v, data: "default", widths: [1280], mock: { ngBoard: true },
+    run: (c) => ngDraft(c, true, async (p) => { await p.getByRole("button", { name }).click(); }),
+  })),
+  ...(["Config", "YAML"] as const).map<Case>((tab) => ({
+    screen: "ng-draft-item", variant: tab.toLowerCase(), data: "default", widths: [1280], mock: { ngBoard: true },
+    run: (c) => ngDraft(c, true, async (p) => { await p.getByRole("tab", { name: new RegExp(`^${tab}`) }).click(); await p.waitForTimeout(400); }),
+  })),
+  { screen: "ng-draft-item", variant: "members", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => {
+    await p.getByRole("button", { name: "+ members" }).click();
+    await p.getByRole("button", { name: /plugins\/kraft-lite/ }).click();
+  }) },
+  { screen: "ng-draft-item", variant: "discard", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngDraft(c, true, async (p) => { await p.keyboard.press("Escape"); await p.getByRole("alertdialog").waitFor(); }) },
+  // H: the archived view, with rows, empty, and two checked.
+  { screen: "ng-archived", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived" }) },
+  { screen: "ng-archived", variant: "empty", data: "default", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c, { tail: "archived" }) },
+  { screen: "ng-archived", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "archived", then: checkRows(["Trim the default chain", "Drop the v0 webhook"]) }) },
   { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
   { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 

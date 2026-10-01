@@ -18,13 +18,17 @@ export interface RowProps {
   onOpen: (id: string) => void;
   onCheck: (id: string) => void;
   onAction: (item: WorkItem, action: RowAction) => void;
+  /** Beside the open peek: no tick strip, so the row's words keep their room. */
+  compact?: boolean;
+  /** The archived view's own action and tail (H): Restore, "archived by you". */
+  own?: { label: string; run: () => void; tail: string; age: string };
 }
 
 /** One board row (AreaBoard 77–86): checkbox, glyph, title and meta, ticks,
  *  one action. The title area is the row's button; the list roves ↑/↓ across them. */
-export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction }: RowProps) {
+export function Row({ item, selected, checked, offline, now, error, onSelect, onOpen, onCheck, onAction, own, compact }: RowProps) {
   const g = glyphOf(item);
-  const act = rowAction(item);
+  const act = own ? null : rowAction(item);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
   const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : onSelect(item.id));
@@ -38,7 +42,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
     }
   };
   return (
-    <div className={`board-row${selected ? " is-sel" : checked ? " is-checked" : ""}${offline ? " is-off" : ""}`} data-row={item.id}>
+    <div className={`board-row${selected ? " is-sel" : checked ? " is-checked" : ""}${offline ? " is-off" : ""}${compact ? " is-compact" : ""}`} data-row={item.id}>
       <input type="checkbox" className="board-check" checked={checked} onChange={() => onCheck(item.id)} aria-label={`Select ${item.title}`} />
       <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} sel={selected} />
       <button type="button" className="board-row-main" aria-current={selected || undefined} onClick={click} onDoubleClick={() => onOpen(item.id)} onKeyDown={key} onKeyUp={(e) => e.key === " " && e.preventDefault()}>
@@ -48,13 +52,16 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
           <span className="board-sep" aria-hidden>·</span>
           <span className="board-meta-id">{id}</span>
           <span className="board-sep" aria-hidden>·</span>
-          <span className="board-meta-rest">{chainOf(item)} · {ago(item.updated_at, now)}</span>
+          <span className="board-meta-chain">{chainOf(item)}</span>
           <span className="board-sep" aria-hidden>·</span>
-          <span className={`board-meta-tail${hot ? " is-hot" : ""}`}>{reasonTail(item, now)}</span>
+          <span className="board-meta-age">{own?.age ?? ago(item.updated_at, now)}</span>
+          <span className="board-sep" aria-hidden>·</span>
+          <span className={`board-meta-tail${hot ? " is-hot" : ""}`}>{own?.tail ?? reasonTail(item, now)}</span>
         </span>
       </button>
-      <Ticks ticks={ticksOf(item)} />
+      {!compact && <Ticks ticks={ticksOf(item)} />}
       <span className="board-act">
+        {own && <button type="button" className="btn btn-secondary board-act-btn" disabled={offline} onClick={own.run}>{own.label}</button>}
         {act && (
           <button type="button" className={`btn ${act.kind === "gate" ? "btn-secondary" : "btn-primary"} board-act-btn`} disabled={offline} onClick={() => onAction(item, act)}>
             {act.label}

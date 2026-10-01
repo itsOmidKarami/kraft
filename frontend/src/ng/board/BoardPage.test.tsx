@@ -74,6 +74,7 @@ describe("BoardPage", () => {
     const done = screen.getByRole("region", { name: "Done" });
     expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("Item n1")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Not started" })).getByText("Item p1")).toBeInTheDocument();
+    expect(document.querySelector(".board-row .ticks")).not.toBeNull();
     expect(within(done).queryByText("Item d1")).toBeNull();
     await userEvent.click(within(done).getByRole("button", { name: "show all 3" }));
     expect(within(done).getByText("Item d1")).toBeInTheDocument();
@@ -243,6 +244,8 @@ describe("BoardPage", () => {
     localStorage.removeItem("kraft.ng.pane.board");
     board("/?sel=r1");
     const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    // Beside the open peek the rows drop their tick strip first.
+    expect(document.querySelectorAll(".board-row .ticks")).toHaveLength(0);
     const handle = within(pane).getByRole("separator", { name: "Resize pane" });
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
     // jsdom has no layout, so the width sits at the 300px floor; the key is what this pins.
