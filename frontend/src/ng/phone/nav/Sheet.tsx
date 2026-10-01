@@ -17,7 +17,12 @@ export function useSheet() {
   const loc = useLocation();
   const openId = (loc.state as State)?.phSheet ?? null;
   const open = useCallback((id: string) => navigate(loc.pathname + loc.search, { state: { phSheet: id } }), [navigate, loc.pathname, loc.search]);
-  const close = useCallback(() => navigate(-1), [navigate]);
+  // A close that comes late (a confirm answered after the person already dismissed the sheet) must not pop the screen under it.
+  const live = useRef(openId);
+  live.current = openId;
+  const close = useCallback(() => {
+    if (live.current !== null) navigate(-1);
+  }, [navigate]);
   // A change that rewrites the screen's own address (a filter) runs once the sheet's entry has been popped, so it lands on the screen and not on the entry the sheet was opened over.
   const after = useRef<(() => void) | null>(null);
   useEffect(() => {

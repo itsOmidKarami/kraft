@@ -88,6 +88,27 @@ describe("Pause (C.5)", () => {
     expect(await screen.findByText("Paused at verification.")).toBeInTheDocument();
   });
 
+  it("a Cancel while the pause is still being answered does not let the answer close the screen under it (Kraft-9d8b2.54)", async () => {
+    let answer = () => {};
+    const gate = new Promise<void>((r) => (answer = r));
+    stubFetch({ "GET /work-items/w1": [200, item("running")], "GET /work-items/w1/compare": [200, { files: [] }], "GET /worker-sessions/s1/log": [200, { lines: [] }] });
+    const plain = (globalThis.fetch as unknown as (u: string, i?: RequestInit) => Promise<Response>);
+    vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => (String(u).endsWith("/pause") ? (await gate, new Response("{}", { status: 200 })) : plain(u, i))));
+    render(
+      <MemoryRouter initialEntries={["/", "/work-items/w1"]} initialIndex={1}>
+        <Routes><Route path="/work-items/:id" element={<><Item /><Where /></>} /><Route path="*" element={<Where />} /></Routes>
+        <Toaster />
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Pause" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pause now" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    answer();
+    expect(await screen.findByText("Paused at verification.")).toBeInTheDocument();
+    expect(where()).toBe("/work-items/w1");
+  });
+
   it("keeps a refusal inside the sheet and the sheet open", async () => {
     mount(item("running"), "/work-items/w1", { "POST /work-items/w1/pause": [409, { detail: "work item is already paused" }] });
     await userEvent.click(await screen.findByRole("button", { name: "Pause" }));
