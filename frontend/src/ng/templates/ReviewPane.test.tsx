@@ -76,7 +76,11 @@ describe("Review & publish pane", () => {
     Object.assign(navigator, { clipboard: { writeText } });
     const { draft, onDone } = mount({ stale: STALE });
     const box = screen.getByRole("alert");
-    expect(within(box).getByText("Published since this draft began")).toBeInTheDocument();
+    // Said once: the heading (not repeated by the server's detail), and the header no longer claims it is ready.
+    expect(within(box).getAllByText(/published since this draft began/i)).toHaveLength(1);
+    expect(screen.getByText("⚠ published since this draft began · your draft is kept")).toBeInTheDocument();
+    expect(screen.queryByText("✓ resolves · ready to publish")).toBeNull();
+    expect(within(box).getByText(/chains\/default\.yaml changed on disk/)).toBeInTheDocument();
     expect(line("-     model: sonnet")).toHaveClass("is-del");
     expect(line("+     model: opus")).toHaveClass("is-add");
     await userEvent.click(within(box).getByRole("button", { name: "Copy draft YAML" }));

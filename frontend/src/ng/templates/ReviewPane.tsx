@@ -110,7 +110,7 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
       crumbs={[{ label: chain }]}
       icon="git-compare"
       title={`Draft · ${plural(n.changes, "change")}`}
-      sub={blocked ? `✕ doesn't resolve · ${plural(n.problems, "problem")} block publishing` : "✓ resolves · ready to publish"}
+      sub={stale ? "⚠ published since this draft began · your draft is kept" : blocked ? `✕ doesn't resolve · ${plural(n.problems, "problem")} block publishing` : "✓ resolves · ready to publish"}
       tabs={TABS}
       tab={tab}
       onTab={setTab}
@@ -121,7 +121,7 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
       {stale && (
         <div className="tpl-rv-stale" role="alert">
           <p className="tpl-rv-stale-head">Published since this draft began</p>
-          <p className="tpl-rv-stale-text">{stale.detail}. Publishing now would overwrite it, so nothing was written; your draft is kept.</p>
+          <p className="tpl-rv-stale-text">{Object.keys(stale.files).join(", ")} changed on disk after this draft began. Publishing now would overwrite it, so nothing was written; your draft is kept.</p>
           {Object.entries(stale.files).map(([file, f]) => (
             <div key={file}>
               <p className="tpl-rv-file">{file}</p>
