@@ -137,6 +137,33 @@ describe("DraftItemPage", () => {
     expect(screen.getByRole("textbox", { name: "Brief" })).toHaveValue("and this");
   });
 
+  it("starts from a bead in the URL: its title prefilled, and Create names it as implemented", async () => {
+    const calls = stub();
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ title: "an older draft", repo: "/code/kraft-plugins", chain: "default" }));
+    mount(undefined, "/work-items/new?title=Fix%20the%20cache&bead=kraft-ab1");
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Fix the cache");
+    expect(screen.getByText("kraft-ab1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+    await settle();
+    expect(creates(calls).at(-1)?.body).toMatchObject({ title: "Fix the cache", implements_beads: ["kraft-ab1"] });
+  });
+
+  it("keeps a bead draft's edits across a reload, and lets the person drop the bead", async () => {
+    const calls = stub();
+    const { unmount } = mount(undefined, "/work-items/new?title=Fix&bead=kraft-ab1");
+    await settle();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Fix it properly" } });
+    unmount();
+    mount(undefined, "/work-items/new?title=Fix&bead=kraft-ab1");
+    await settle();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Fix it properly");
+    fireEvent.click(screen.getByRole("button", { name: "Do not implement kraft-ab1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+    await settle();
+    expect("implements_beads" in (creates(calls).at(-1)?.body ?? {})).toBe(false);
+  });
+
   it("shows the chain's published YAML, with the draft's own settings as rows under it", async () => {
     stub();
     mount({ draft: { title: "t", repo: "/code/kraft-plugins", chain: "default", attempts: "4" } });

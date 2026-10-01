@@ -16,7 +16,7 @@ import { useDraft } from "./draft/context";
 import { useApplied } from "./draft/useApplied";
 import { markNodes, markSteps } from "./draft/draftGraph";
 import { chainGraph } from "./graph";
-import { DocViewer } from "./DocViewer";
+import { DocViewer, docBy } from "./DocViewer";
 import { gateView } from "./gateView";
 import { nodeGraph } from "./nodeGraph";
 import { taskName } from "./paths";
@@ -52,7 +52,6 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const size = useResizable(PAGE, canvasW);
   const events = useEvents(item.id, item.updated_at);
   const docs = useDocuments(item.id, item.updated_at);
-  const [doc, setDoc] = useState<WorkItemDocument | null>(null);
   const [artifact, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
@@ -112,7 +111,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
-    onDoc: setDoc,
+    onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id }),
     onArtifact: () => setArtifact(true),
     canEdit: draft?.editable,
     applied,
@@ -188,7 +187,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
         </Inspector>
       </div>
       {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
-      {doc && <DocViewer source={{ kind: "document", id: doc.document_id, by: [doc.node_id, doc.hook_point?.split(".").at(-1), doc.attempt ? `attempt ${doc.attempt}` : ""].filter(Boolean).join(" › ") }} onClose={() => setDoc(null)} />}
+      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc)) }} onClose={() => go({ ...place, doc: undefined })} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id }} onClose={() => setArtifact(false)} />}
     </div>
   );

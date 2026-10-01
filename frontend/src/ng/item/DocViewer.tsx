@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { docBody } from "../../format";
+import type { WorkItemDocument } from "../../types";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Markdown } from "../ui/Markdown";
@@ -18,6 +19,9 @@ export const EDITORS: { id: string | null; name: string }[] = [
   { id: null, name: "Default app" },
 ];
 
+/** Where in the chain a document was written: node › task › attempt. */
+export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.split(".").at(-1), d.attempt ? `attempt ${d.attempt}` : ""].filter(Boolean).join(" › ") : "");
+
 /** A document over the page (prototype lines 278–283, GAP §2 #9): an indexed
  *  document opens in an editor and copies its path; a gate's artifact, read
  *  off the worktree with no index row or absolute path, shows only its text. */
@@ -28,7 +32,9 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
   useEffect(() => {
     const url = source.kind === "document" ? `/documents/${encodeURIComponent(source.id)}` : `/work-items/${encodeURIComponent(source.workItemId)}/artifact`;
     request<Viewed>(url).then((r) => (r.status === 200 ? setDoc(r.body) : setError(detailOf(r.body))));
-  }, [source]);
+    // The `by` line is display only: a new label must not read the document again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.kind, source.kind === "document" ? source.id : source.workItemId]);
   const open = async (editor: string | null) => {
     if (source.kind !== "document") return;
     const r = await request(`/documents/${encodeURIComponent(source.id)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });

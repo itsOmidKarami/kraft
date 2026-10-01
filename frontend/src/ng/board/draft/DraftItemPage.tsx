@@ -29,11 +29,12 @@ function loadDraft(state: unknown, q: URLSearchParams): DraftState {
   if (carried) return emptyDraft(carried);
   try {
     const saved = sessionStorage.getItem(DRAFT_KEY);
-    if (saved) return emptyDraft(JSON.parse(saved));
+    // A bead in the URL is a fresh start, unless this draft already is that bead's (a reload keeps the edits).
+    if (saved && (!q.get("bead") || JSON.parse(saved).bead === q.get("bead"))) return emptyDraft(JSON.parse(saved));
   } catch {
     // Private windows: nothing kept.
   }
-  return emptyDraft({ title: q.get("title") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "" });
+  return emptyDraft({ title: q.get("title") ?? "", repo: q.get("repo") ?? "", chain: q.get("chain") ?? "", spec: q.get("spec") ?? "", plan: q.get("plan") ?? "", bead: q.get("bead") ?? "" });
 }
 const forget = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ } };
 
@@ -173,6 +174,12 @@ export function DraftItemPage() {
       {error && <p className="item-error" role="alert">{error}</p>}
       <h1 className="board-visually-hidden">New work item</h1>
       <input className="draft-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />
+      {d.bead && (
+        <p className="draft-bead">
+          Implements <code>{d.bead}</code>
+          <button type="button" className="draft-bead-drop" aria-label={`Do not implement ${d.bead}`} onClick={() => set({ bead: "" })}>×</button>
+        </p>
+      )}
       <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
       <div className="draft-chips">
         <span>Repo</span>

@@ -18,6 +18,12 @@ describe("item URL", () => {
     });
   });
 
+  it("reads and writes the document open over the page, so a shared link lands on it", () => {
+    expect(readPlace(undefined, q("doc=d1"), nodes).doc).toBe("d1");
+    expect(readPlace(undefined, q(""), nodes).doc).toBeUndefined();
+    expect(placeUrl("w1", { sel: { kind: "chain" }, doc: "d1" })).toBe("/work-items/w1?doc=d1");
+  });
+
   it("knows a node's escalation task, which no step lists", () => {
     expect(readPlace("verification", q("sel=verification.escalation.escalation&tab=thread"), nodes).sel).toEqual({ kind: "task", node: "verification", step: "escalation", task: "escalation" });
   });
