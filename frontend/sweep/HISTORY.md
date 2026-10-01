@@ -1317,3 +1317,14 @@ Baseline: the local snapshot taken before W7. No UI change, so no wave of its ow
 
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 1253 cells, 192 flagged, 0 newly flagged, 0 cleared. 82 cells changed, the largest by 0.08%: wall-clock text.
 - **Mock:** `PUT`/`DELETE /work-items/:id/viewed` (kept per page load), `viewed` per file and `ignore_whitespace` on `/compare`, `GET /work-items/:id/fix-target`, and `fix_target` on the pending-gate item.
+
+## ux2-W5 PR 1 — item page: header, state cards, chain canvas and pane (`ux2/W5`)
+
+Baseline on `main` `8e815bec`: 1253 cells, 192 flagged. Final on the branch rebased onto `066e0d2d` (W7, backend). Full notes: `e2e-shots/DIFF-ux2-W5.md` (gitignored, local).
+
+- `node sweep/wave.mjs ux2-W5`: **7/7 rules pass**, 71 cells in scope, all new: `ng-item/<scenario>` for the prototype's 13 scenarios plus paused at 1280 and with `long` data; running, failed and needs-gate also at 1024 and 1920 and `~light`/`~h700`; `running@768` (overlay); `panel`, `kebab`, `cancel-card`, `chain-config`, `chain-config-capped-long~h700`; flows `flow-ng-cancel` and `flow-ng-pane-collapse`.
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1324 cells, 192 flagged (192 before), 0 newly flagged; no `ng-item` cell is flagged. 60 shipped cells changed, each by at most 0.08% (`composer/reject@390`): wall-clock text.
+- **New rule kind** `max-count` in `wave.mjs` (`nestedScrollers ≤ 2` on `^ng-item`).
+- **Fixtures:** `sweep/ngItems.ts`, the prototype's 15-node V1 chain in 14 scenarios, in the scenario's bundles only (the detail route answers them), never in the board list, so no shipped cell moves. The `ng-item` cases fix the page clock at `NG_NOW`.
+- **Found by the sweep and fixed:** visually-hidden `<label>`s flagged as clipped (now `aria-label`); `--text-muted` on tinted cards at 4.50:1 (now `--text-sub`); the FAILED badge at 4.34:1 in light mode (tints 9%); a gate waiting for you drawn grey (now the current, amber diamond).
+- A first official run shared the machine with another wave's sweep and saw setup timeouts and a 404; a quiet re-run of the same cells was clean.
