@@ -33,6 +33,8 @@ developers tired of babysitting a session to the end of a task.
 
 New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
 
+*Kraft* is German for force, and the root of the English word *craft*. Your agent brings the craft; Kraft is the force that carries it from spec to pull request.
+
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 <table>
