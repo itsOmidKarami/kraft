@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "../../api";
-import { ago } from "../../format";
+import { ago, elapsed } from "../../format";
 import type { Health } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { Segmented } from "../ui/Segmented";
@@ -61,12 +61,17 @@ export function AboutPage() {
   const installed = update?.installed ?? health?.version ?? "";
   const command = `kraft admin update${update && channel && channel !== update.channel ? ` --channel ${channel}` : ""}`;
   const address = health ? `${health.bind ?? ""}${health.port != null ? `:${health.port}` : ""}` : "";
+  const process = health?.pid != null ? `pid ${health.pid}${health.uptime_s != null ? ` · up ${elapsed(health.uptime_s * 1000)}` : ""}` : "";
+  const index = health?.index ? `${health.index.documents} documents · ${health.index.last_scan_at ? `scanned ${ago(health.index.last_scan_at)}` : "not scanned yet"}${health.index.errors.length ? ` · ${health.index.errors.length} scan error${health.index.errors.length === 1 ? "" : "s"}` : ""}` : "";
   const problems = health ? Object.keys(health.invalid_templates).length + health.invalid_policy.length : 0;
   const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => showToast(done), () => showToast("Could not copy"));
   const diagnostics = [
     `kraft ${installed || "unknown"}${update ? ` (${update.channel})` : ""}`,
     `health: ${health ? health.status : "unknown"}`,
     address && `address: ${address}`,
+    health?.run_dir && `run dir: ${health.run_dir}`,
+    process && `process: ${process}`,
+    index && `index: ${index}`,
     health && `invalid templates: ${Object.keys(health.invalid_templates).join(", ") || "none"}`,
     health && `invalid policy: ${health.invalid_policy.length ? health.invalid_policy.join("; ") : "none"}`,
     `update: ${verdict.text}`,
@@ -106,6 +111,9 @@ export function AboutPage() {
             <span className={health?.status === "ok" ? "set-ok" : undefined}>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}`) : "…"}</span>
           </SetRow>
           <SetRow label="address"><span>{address || "…"}</span></SetRow>
+          {health?.run_dir && <SetRow label="run directory"><span className="set-mono">{health.run_dir}</span></SetRow>}
+          {process && <SetRow label="process"><span className="set-mono">{process}</span></SetRow>}
+          {index && <SetRow label="search index"><span className={health?.index?.errors.length ? "set-warn" : undefined}>{index}</span></SetRow>}
           <div>
             <button type="button" className="set-btn" onClick={() => void copy(diagnostics, "Copied the diagnostics")}>Copy diagnostics</button>
           </div>

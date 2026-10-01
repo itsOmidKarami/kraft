@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from kraft import auth as auth_mod
@@ -51,6 +53,12 @@ def test_health_reports_port_and_version(client):
     h = client.get("/api/health").json()
     assert isinstance(h["port"], int)
     assert isinstance(h["version"], str) and h["version"]
+
+
+def test_health_reports_how_long_the_process_has_been_up(client):
+    """`uptime_s` counts from the app's start, in whole seconds, so About can say "up 3d 4h"."""
+    client.app.state.started_at = time.monotonic() - 3725
+    assert 3725 <= client.get("/api/health").json()["uptime_s"] < 3735
 
 
 @pytest.mark.api_client(host="localhost", env={"KRAFT_PORT": "18772"})

@@ -127,6 +127,8 @@ async def health(request: Request):
         # (Kraft-kquf: "status ok, documents 2" from somebody's e2e fixture).
         "run_dir": str(st.run_dirs.base),
         "pid": os.getpid(),
+        # public: how long this process has been up; the About page draws it next to the pid.
+        "uptime_s": int(time.monotonic() - st.started_at),
         # public: the login screen's "stay signed in · N days" needs this
         # before a session exists to ask `/access` for it.
         "session_expiry_days": st.access["session_expiry_days"],

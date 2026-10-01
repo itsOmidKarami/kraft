@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -211,6 +212,7 @@ async def lifespan(app: FastAPI):
     app.state.bound_port = int(os.environ.get("KRAFT_PORT") or access["port"])
     app.state.invalid_policy = invalid_policy
     app.state.reattach_summary = summary
+    app.state.started_at = time.monotonic()
 
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None
