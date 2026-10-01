@@ -38,4 +38,4 @@ export function marksBySeverity(findings: LocatedFinding[] = []): Record<Severit
   return marks;
 }
 
-export const showsFindings =(d: WorkItemDetail) => Boolean(d.pending_gate) || d.status === "paused";
+export const showsFindings = (d: WorkItemDetail) => Boolean(d.pending_gate) || d.status === "paused";
