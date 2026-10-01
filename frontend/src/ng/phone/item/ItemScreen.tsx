@@ -112,7 +112,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             <h2 className="ph-statecard-title">{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
-            {limit && <button type="button" className="ph-linkbtn" onClick={() => sheet.open("raise-cap")}>Raise the {limitWords(limit).noun}…</button>}
+            {limit && item.stop?.kind === "cap" && <button type="button" className="ph-linkbtn" onClick={() => sheet.open("raise-cap")}>Raise the {limitWords(limit).noun}…</button>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
                 {card.facts.map(([k, v]) => <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
@@ -176,6 +176,8 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
         onClose={sheet.close}
       />
     );
+  // A policy budget_usd stopped it, not the item's own cap: /budget/raise would refuse, so raise the policy like any cap.
+  if (sheet.is("raise") && stopLimitOf(item)) return <RaiseCapSheet item={item} sheet={sheet} reload={reload} />;
   if (sheet.is("raise"))
     return (
       <ChoiceSheet
@@ -229,11 +231,13 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
   if (!limit) return null;
   const words = limitWords(limit);
   const where = limit.path ? ` on ${limit.path}` : "";
+  const money = !!words.money;
+  const show = (v: number) => (money ? `$${v}` : String(v));
   const submit = async (text: string) => {
     const n = Number(text.trim());
-    if (!Number.isInteger(n) || n <= 0) return setError(`Enter a whole number of ${words.unit}.`);
-    if (n <= limit.value) return setError(`It has to be above the current ${limit.value}.`);
-    if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${limit.maximum}.`);
+    if (money ? !(Number.isFinite(n) && n > 0) : !Number.isInteger(n) || n <= 0) return setError(money ? "Enter a dollar amount." : `Enter a whole number of ${words.unit}.`);
+    if (n <= limit.value) return setError(`It has to be above the current ${show(limit.value)}.`);
+    if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${show(limit.maximum)}.`);
     setError(null);
     const patched = await act.patch(item.id, limitPatch(limit, n));
     if (!patched.ok) return setError(patched.error);
@@ -241,13 +245,13 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
     if (r.ok) sheet.close();
     else {
       reload();
-      setError(`Raised to ${n}, but the retry was refused: ${r.error}`);
+      setError(`Raised to ${show(n)}, but the retry was refused: ${r.error}`);
     }
   };
   return (
     <EditSheet
       title={`Raise the ${words.noun}`}
-      text={`Now ${limit.value} ${words.unit}${where}. ${limit.maximum != null ? `The policy maximum is ${limit.maximum}.` : "The policy sets no maximum."} Applies to this item only, then retries.`}
+      text={`Now ${money ? show(limit.value) : `${limit.value} ${words.unit}`}${where}. ${limit.maximum != null ? `The policy maximum is ${show(limit.maximum)}.` : "The policy sets no maximum."} Applies to this item only, then retries.`}
       initial={String(limit.value)}
       submitLabel="Save & retry"
       error={error}

@@ -152,11 +152,11 @@ export type StopKind =
 /** `stop` on a work item response (B.3/B.4): `null` unless `status` is
  *  `needs_human`, `waiting` or `rate_limited`. The list omits `task`,
  *  `attempt` and `facts`; only the detail endpoint sends them. */
-/** What raises the limit a `cap` stop hit (detail only; absent when no `PATCH policy` can):
- *  `path` is `""` for the item's own cap, else the fix loop's node id. */
+/** What raises the limit a `cap` or `budget` stop hit (detail only; absent when no `PATCH policy` can):
+ *  `path` is `""` for the item-wide cap, else the fix loop's node id. `budget_usd` is a policy dollar cap, not the item's own. */
 export interface StopLimit {
   path: string;
-  key: "max_attempts" | "timeout_minutes" | "time_cap_minutes" | "total_time_cap_minutes";
+  key: "max_attempts" | "timeout_minutes" | "time_cap_minutes" | "total_time_cap_minutes" | "budget_usd";
   value: number;
   maximum: number | null;
 }

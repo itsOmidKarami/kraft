@@ -175,7 +175,8 @@ export function nodeSub(n: ChainNode): { text: string; tone: "warn" | "info" | "
   }
 }
 
-const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string }> = {
+const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string; money?: true }> = {
+  budget_usd: { noun: "budget cap", unit: "dollars", money: true },
   time_cap_minutes: { noun: "running time cap", unit: "minutes of running time" },
   total_time_cap_minutes: { noun: "wall-clock cap", unit: "minutes of wall-clock time" },
   max_attempts: { noun: "attempts cap", unit: "attempts" },
@@ -183,8 +184,8 @@ const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string }> = {
 };
 export const limitWords = (l: StopLimit) => LIMIT_WORDS[l.key];
 
-/** The `stop.limit` of a cap stop, or null: without it a cap stop keeps Steer and Retry. */
-export const stopLimitOf = (item: ItemDetail): StopLimit | null => (item.stop?.kind === "cap" ? (item.stop.limit ?? null) : null);
+/** The `stop.limit` of a cap or budget stop, or null: without it a cap stop keeps Steer and Retry, and a budget stop raises the item's own cap. */
+export const stopLimitOf = (item: ItemDetail): StopLimit | null => (item.stop?.kind === "cap" || item.stop?.kind === "budget" ? (item.stop.limit ?? null) : null);
 
 /** The PATCH body that sets one limit: item-wide under `policy`, a node's under `policy.paths`. */
 export const limitPatch = (l: StopLimit, value: number) => ({ policy: l.path ? { paths: { [l.path]: { [l.key]: value } } } : { [l.key]: value } });

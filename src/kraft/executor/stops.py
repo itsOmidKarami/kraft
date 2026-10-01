@@ -155,6 +155,17 @@ def budget_reason(breach: Breach) -> str:
     )
 
 
+def budget_limit(breach) -> dict | None:
+    """The `limit` a `budget_usd` stop names (`store.mark_needs_human`): the
+    item-wide policy cap, which an item-wide override raises. Not the item's own
+    cap (`WorkItemBreach`, raised through /budget/raise), a node, step or task's
+    cap (authored in the chain), a token or daily cap, or a stop on unknown
+    spend, which no higher cap passes."""
+    if isinstance(breach, UsdBreach) and not breach.path and not breach.unknown_launches:
+        return {"path": "", "key": "budget_usd", "value": breach.cap_usd}
+    return None
+
+
 async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _policy.Budget) -> str:
     # The fallback cannot fire in practice — sums only grow between the dispatch
     # that returned BUDGET and here — but a None would crash the escalation path
@@ -184,7 +195,7 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     dump = breach.model_dump()
     await db.write(
         lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, None, dump, kind="budget"
+            c, work_item_id, node.id, reason, None, dump, kind="budget", limit=budget_limit(breach)
         )
     )
     return "needs_human"

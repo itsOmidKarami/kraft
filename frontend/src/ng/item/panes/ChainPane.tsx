@@ -8,6 +8,7 @@ import { appliedRows } from "../draft/AppliedRows";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
+import { raiseBody } from "../RaiseLimit";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -90,13 +91,20 @@ function Meter({ label, used, of, ratio, max, onEdit }: { label: string; used: s
 }
 
 /** Raise the budget: quick picks and a typed value (GAP §2 #16). A budget stop
- *  goes through /budget/raise, which also retries; otherwise PATCH budget_usd. */
+ *  on the item's own cap goes through /budget/raise, which also retries; one
+ *  on a policy cap (`stop.limit`) patches that policy and retries; otherwise
+ *  PATCH budget_usd. */
 function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: () => void; onCancel: () => void }) {
-  const cap = item.budget_cap?.cap_usd ?? 0;
+  const limit = item.stop?.kind === "budget" ? item.stop.limit : undefined;
+  const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
   const [value, setValue] = useState(String(cap || ""));
   const [error, setError] = useState<string | null>(null);
   const send = async (usdCap: number | null) => {
-    const r = item.stop?.kind === "budget" ? await act.raiseBudget(item.id, usdCap) : await act.patch(item.id, { budget_usd: usdCap });
+    let r;
+    if (limit && usdCap != null) {
+      r = await act.patch(item.id, raiseBody(limit, usdCap));
+      if (r.ok) r = await act.retry(item.id);
+    } else r = item.stop?.kind === "budget" ? await act.raiseBudget(item.id, usdCap) : await act.patch(item.id, { budget_usd: usdCap });
     if (r.ok) onDone();
     else setError(r.error);
   };
@@ -105,7 +113,7 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
       <div className="item-actions">
         <Button onClick={() => send(cap + 5)}>+$5</Button>
         <Button onClick={() => send(cap + 10)}>+$10</Button>
-        <Button onClick={() => send(null)}>No cap</Button>
+        {!limit && <Button onClick={() => send(null)}>No cap</Button>}
       </div>
       <div className="item-actions">
         <label className="item-check">$ <input aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} /></label>
