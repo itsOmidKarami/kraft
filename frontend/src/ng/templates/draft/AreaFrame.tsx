@@ -16,6 +16,8 @@ export interface FrameCtx {
   review: boolean;
   /** The width the page's body gives up to a side pane, the review pane's while reviewing. */
   reserve: (ownPaneOpen: boolean) => number;
+  /** Opens the YAML view on one of the area's files (an "Edit in YAML" link in a pane). */
+  yaml: (file: string) => void;
 }
 
 /** What the three settings areas (Repos, Policy, Auto-intake) share: the draft
@@ -85,6 +87,12 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
     setSurface("yaml");
   };
   const yamlErr = r.yaml_error;
+  const openYaml = (f: string) => {
+    draft.flush();
+    setReview(false);
+    if (area.files.includes(f)) setFile(f);
+    setSurface("yaml");
+  };
   const reserve = (own: boolean) => {
     const open = review ? reviewOpen : own;
     return size.overlay ? 0 : open ? size.width : 40;
@@ -135,7 +143,7 @@ export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, o
           </>
         ) : (
           <>
-            {children({ size, review, reserve })}
+            {children({ size, review, reserve, yaml: openYaml })}
             {review && (
               <ReviewPane
                 draft={draft}

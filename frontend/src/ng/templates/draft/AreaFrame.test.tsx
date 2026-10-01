@@ -104,6 +104,25 @@ describe("AreaFrame", () => {
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Draft · 1 change" })).toBeNull());
   });
 
+  it("lets the page open the YAML view on a given file, leaving review", async () => {
+    const draft = { view: { ...reposView({ changes: [change] }, true), files: { "intake.yaml": "a: 1\n", "policy.yaml": "b: 2\n" }, published: { "intake.yaml": "a: 1\n", "policy.yaml": "b: 1\n" } }, scope: { area: "intake", key: "intake" }, undo: vi.fn(), flush: vi.fn(), text: vi.fn(), stale: null } as unknown as ConfigDraft;
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route element={<Shell />}>
+            <Route path="/" element={<AreaFrame draft={draft} area={{ ...AREA, files: ["intake.yaml", "policy.yaml"] }} pageKey="intake" title="Auto-intake" onFix={vi.fn()}>{({ yaml }) => <button type="button" onClick={() => yaml("policy.yaml")}>Edit in YAML</button>}</AreaFrame>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Review & publish" }));
+    expect(await screen.findByRole("heading", { name: "Draft · 1 change" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(await screen.findByRole("button", { name: "Edit in YAML" }));
+    expect(await screen.findByRole("textbox", { name: "policy.yaml, YAML" })).toBeInTheDocument();
+    expect(draft.flush).toHaveBeenCalled();
+  });
+
   it("gives a two-file area a tab per file", async () => {
     const draft = { view: { ...reposView({ changes: [change] }, true), files: { "intake.yaml": "a: 1\n", "policy.yaml": "b: 2\n" }, published: { "intake.yaml": "a: 1\n", "policy.yaml": "b: 1\n" } }, scope: { area: "intake", key: "intake" }, undo: vi.fn(), flush: vi.fn(), text: vi.fn(), stale: null } as unknown as ConfigDraft;
     render(
