@@ -138,11 +138,19 @@ export function useConfigDraft(area: Area, key: string) {
       if (a.status === 409 && live.current) setStale(a.body as unknown as StaleBody);
       if (a.status === 200 && live.current) setStale(null);
       return a;
-    }, true).then(async (a) => {
+      // The review pane shows a 409's diff and a 422's problems itself: no toast.
+    }, true, true, false).then(async (a) => {
       if (a.status === 200) await load();
       return a;
     });
   }, [area, key, enqueue, flush, load]);
+
+  /** After the 409's diff: keep this draft's text over what was published since,
+   *  then publish it (R45, W13's re-base). */
+  const keepMine = useCallback(() => {
+    flush();
+    return enqueue(() => d.rebase(area, key), true).then((a): Promise<Answer<unknown>> | Answer<unknown> => (a.status === 200 ? publish() : a));
+  }, [area, key, enqueue, flush, publish]);
 
   const discard = useCallback(() => {
     flush();
@@ -173,8 +181,8 @@ export function useConfigDraft(area: Area, key: string) {
   return useMemo(() => ({
     view, status, error, pending, stale,
     clearError: () => setError(null),
-    ops, field, text, flush, undo, publish, discard, reload: load, resolvedNode,
-  }), [view, status, error, pending, stale, ops, field, text, flush, undo, publish, discard, load, resolvedNode]);
+    ops, field, text, flush, undo, publish, keepMine, discard, reload: load, resolvedNode,
+  }), [view, status, error, pending, stale, ops, field, text, flush, undo, publish, keepMine, discard, load, resolvedNode]);
 }
 
 export type ConfigDraft = ReturnType<typeof useConfigDraft>;

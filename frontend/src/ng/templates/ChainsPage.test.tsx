@@ -148,4 +148,27 @@ describe("Chains page: the chain canvas", () => {
     expect(undo).toHaveBeenCalledTimes(1);
     ta.remove();
   });
+
+  it("reviews on the chain canvas: unchanged nodes fade, changed ones say what, removed ones are ghosts where they stood", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok(view({
+      changes: [{ path: "implementation.main.implement", kind: "change", summary: "model" }, { path: "plan", kind: "remove", summary: "removed" }],
+    })));
+    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "chains/default.yaml", text: "id: default\n", chain: { nodes: [{ id: "spec", kind: "exec" }, { id: "spec_approval", kind: "gate" }, { id: "plan", kind: "exec" }, { id: "implementation" }] } });
+    mount();
+    const g = await canvas();
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    await waitFor(() => expect(within(g).getByRole("button", { name: "plan, node, removed" })).toBeInTheDocument());
+    const names = within(g).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(names.slice(0, 4)).toEqual(["spec, node", "spec_approval, gate", "plan, node, removed", "implementation, node"]);
+    expect(within(g).getByRole("button", { name: "spec, node" })).toHaveClass("is-faded");
+    const impl = within(g).getByRole("button", { name: "implementation, node" });
+    expect(impl).not.toHaveClass("is-faded");
+    expect(impl).toHaveTextContent("main.implement · model");
+    expect(within(g).queryAllByRole("button", { name: "Add a node or gate here" })).toHaveLength(0);
+    expect(screen.getByRole("complementary", { name: "Draft · 2 changes pane" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    act(() => within(g).getByRole("button", { name: "spec, node" }).focus());
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary", { name: "Draft · 2 changes pane" })).toBeNull();
+  });
 });

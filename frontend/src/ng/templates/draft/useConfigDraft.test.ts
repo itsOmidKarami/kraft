@@ -134,6 +134,7 @@ describe("useConfigDraft", () => {
     vi.spyOn(d, "publish").mockImplementation(() => answer(stale, 409) as never);
     await act(() => h.result.current.publish().then(() => {}));
     expect(h.result.current.stale).toEqual(stale);
+    expect(h.result.current.error).toBeNull();
     expect(h.result.current.view?.key).toBe("default");
   });
 

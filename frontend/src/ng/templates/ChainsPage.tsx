@@ -12,6 +12,9 @@ import { ChainCanvas } from "./ChainCanvas";
 import { BottomPane, handlerOf, type BottomTab } from "./BottomPane";
 import { NodeView } from "./NodeView";
 import { ChainPane } from "./panes/ChainPane";
+import { ReviewPane } from "./ReviewPane";
+import * as api from "../../api";
+import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import { authoredNodes, counts, kindOf } from "./draft/view";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
@@ -62,6 +65,11 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const [refused, setRefused] = useState<string | null>(null);
   const [bottomTab, setBottomTab] = useState<BottomTab>("on_failure");
   const [bottomOpen, setBottomOpen] = useState(false);
+  // Review & publish is a mode of the chain canvas (Decisions §9 Publish).
+  const [review, setReview] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(true);
+  const [highlight, setHighlight] = useState<string | undefined>();
+  const [published, setPublished] = useState<{ text: string; nodes: { id: string; kind: "exec" | "gate" }[] } | null | undefined>(undefined);
   const [nextProblem, setNextProblem] = useState(0);
   const taskPaths = r.resolved?.task_paths;
 
@@ -120,7 +128,27 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     dispatch({ type: "expand", sel });
   }, [taskPaths, s.level, dispatch, navigate, chain, focusNode]);
 
+  const startReview = () => {
+    if (s.level === "node") {
+      dispatch({ type: "back" });
+      navigate(chainUrl(chain));
+    }
+    setReview(true);
+    setReviewOpen(true);
+    setHighlight(undefined);
+    // The published file: the YAML diff's left side, and where removed nodes stood.
+    api.getTemplate(chain).then((f) => {
+      const nodes = ((f.chain.nodes as { id: string; kind?: string; extends?: string }[] | undefined) ?? []).map((n) => ({ id: n.id, kind: (n.kind === "gate" ? "gate" : "exec") as "exec" | "gate" }));
+      setPublished({ text: f.text, nodes });
+    }).catch(() => setPublished(null));
+  };
+  const endReview = () => {
+    setReview(false);
+    setHighlight(undefined);
+  };
+
   const onEscape = () => {
+    if (review) return endReview();
     if (!s.open && s.level === "node") {
       dispatch({ type: "back" });
       navigate(chainUrl(chain));
@@ -141,7 +169,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   };
 
   const n = counts(r);
-  const reserve = size.overlay ? 0 : s.open ? size.width : 40;
+  const paneOpen = review ? reviewOpen : s.open;
+  const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
   const sel = s.sel as TSel;
   const selPath = pathOf(sel);
   const nodes = authoredNodes(r, chain);
@@ -179,11 +208,12 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
       </HeaderTail>
       <HeaderActions>
-        {s.level === "chain" && (
+        {s.level === "chain" && !review && (
           <IconButton label="Chain settings" onClick={() => dispatch({ type: "expand", sel: CHAIN_SEL })}>
             <Pencil size={14} aria-hidden />
           </IconButton>
         )}
+        <Button variant="primary" aria-pressed={review} onClick={review ? endReview : startReview}>Review &amp; publish</Button>
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (
@@ -194,12 +224,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             pending={draft.pending}
             reserve={reserve}
             refused={refused}
-            onSelect={(id) => dispatch({ type: "pick", sel: selOf(id) })}
-            onOpen={(id) => dispatch({ type: "expand", sel: selOf(id) })}
-            onFocusNode={(id) => focusNode(id)}
+            onSelect={(id) => (review ? setHighlight(id) : dispatch({ type: "pick", sel: selOf(id) }))}
+            onOpen={(id) => (review ? setHighlight(id) : dispatch({ type: "expand", sel: selOf(id) }))}
+            onFocusNode={(id) => !review && focusNode(id)}
             onEscape={onEscape}
-            onBackground={() => dispatch({ type: "background" })}
+            onBackground={() => (review ? setHighlight(undefined) : dispatch({ type: "background" }))}
             onAdd={add}
+            review={review ? { published: published?.nodes ?? [], highlight } : undefined}
           />
         ) : (
           <NodeView
@@ -239,17 +270,35 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onLeave={() => dispatch({ type: "background" })}
           />
         )}
-        <ChainPane
-          draft={draft}
-          chain={chain}
-          path={selPath}
-          open={s.open}
-          size={size}
-          onCollapse={() => dispatch({ type: "collapse" })}
-          onExpand={() => dispatch({ type: "expand" })}
-          onFocus={s.level === "chain" && sel.kind === "node" && !isGate ? () => focusNode(sel.node) : undefined}
-          goTo={goTo}
-        />
+        {review ? (
+          <ReviewPane
+            draft={draft}
+            chain={chain}
+            published={published === undefined ? undefined : published?.text ?? null}
+            open={reviewOpen}
+            size={size}
+            onCollapse={() => setReviewOpen(false)}
+            onExpand={() => setReviewOpen(true)}
+            onHighlight={(p) => setHighlight(p.split(".")[0])}
+            onFix={(p) => {
+              endReview();
+              goTo(p);
+            }}
+            onDone={endReview}
+          />
+        ) : (
+          <ChainPane
+            draft={draft}
+            chain={chain}
+            path={selPath}
+            open={s.open}
+            size={size}
+            onCollapse={() => dispatch({ type: "collapse" })}
+            onExpand={() => dispatch({ type: "expand" })}
+            onFocus={s.level === "chain" && sel.kind === "node" && !isGate ? () => focusNode(sel.node) : undefined}
+            goTo={goTo}
+          />
+        )}
       </div>
     </div>
   );

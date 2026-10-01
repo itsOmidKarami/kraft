@@ -1,4 +1,4 @@
-import { Ban, Bell, Bot, Box, ChartColumn, CircleDot, Cog, Download, FileText, GitBranch, GitPullRequest, Inbox, Info, Kanban, Layers, LibraryBig, Lock, Palette, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { Ban, Bell, Bot, Box, ChartColumn, CircleDot, Cog, Download, FileText, GitBranch, GitCompare, GitPullRequest, Inbox, Info, Kanban, Layers, LibraryBig, Lock, Palette, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { createElement, type ReactElement } from "react";
 
 export { Bot, FileText, LocateFixed, Maximize2, Minus, PanelRightClose, PanelRightOpen, Plus, Scan, Siren } from "lucide-react";
@@ -16,7 +16,7 @@ export type TaskKind = keyof typeof KIND_ICON;
 // so this is the prototype's node icons; W10's picker makes its own call.
 const NODE_ICONS: Record<string, LucideIcon> = {
   // ux2-W6: a cancelled item's row glyph (AreaBoard draws `ban`).
-  ban: Ban, bot: Bot, box: Box, "circle-dot": CircleDot, cog: Cog, "file-text": FileText, "git-branch": GitBranch,
+  ban: Ban, bot: Bot, box: Box, "circle-dot": CircleDot, cog: Cog, "file-text": FileText, "git-branch": GitBranch, "git-compare": GitCompare,
   "git-pull-request": GitPullRequest, inbox: Inbox, layers: Layers, scale: Scale, "scroll-text": ScrollText,
   "refresh-cw": RefreshCw, search: Search, shield: Shield, "shield-check": ShieldCheck, siren: Siren, sparkles: Sparkles, terminal: Terminal, workflow: Workflow,
 };

@@ -20,6 +20,9 @@ type Props = {
   onEscape: () => void;
   onBackground: () => void;
   onAdd: (at: number, kind: "exec" | "gate", id: string) => Promise<boolean>;
+  /** Review & publish (Decisions §9 Publish): the published node order, for the
+   *  removed nodes' ghosts, and the node a change row points at. */
+  review?: { published: { id: string; kind: "exec" | "gate" }[]; highlight?: string };
 };
 
 /** The editor opens readable: no smaller than 80%, a long chain starting at its left end (Templates prototype `fit1`). */
@@ -36,7 +39,7 @@ function rejectTarget(r: Result, nodes: NodeA[], i: number): string | undefined 
 }
 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
-export function ChainCanvas({ chain, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd }: Props) {
+export function ChainCanvas({ chain, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review }: Props) {
   const authored = authoredNodes(r, chain);
   const busy = useMemo(() => new Set((pending ?? []).map(opNode)), [pending]);
   const nodes: ChainNode[] = authored.map((n) => {
@@ -59,9 +62,23 @@ export function ChainCanvas({ chain, result: r, selected, pending, reserve, refu
       pending: busy.has(n.id),
     };
   });
+  if (review) {
+    // Unchanged nodes fade; changed ones carry their one-line summary; removed ones are ghosts where they were.
+    nodes.forEach((n) => {
+      const own = r.changes.filter((c) => c.path === n.id || c.path.startsWith(`${n.id}.`));
+      n.faded = !n.mark;
+      n.meta = n.mark === "add" ? `new ${n.kind === "gate" ? "gate" : "exec node"}` : own.length === 1 ? `${own[0].path === n.id ? "" : `${own[0].path.slice(n.id.length + 1)} · `}${own[0].summary}` : own.length ? `${own.length} changes` : undefined;
+      n.metaTone = n.mark === "add" ? "green" : n.mark ? "amber" : undefined;
+    });
+    review.published.forEach((p, i) => {
+      if (nodes.some((n) => n.id === p.id) || !r.changes.some((c) => c.path === p.id && c.kind === "remove")) return;
+      nodes.splice(Math.min(i, nodes.length), 0, { id: p.id, kind: p.kind, state: "ghost", meta: "removed" });
+    });
+  }
   const [menu, setMenu] = useState<number | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
-  const seams: Seam[] = Array.from({ length: nodes.length + 1 }, (_, at) => ({ at, open: menu === at, always: nodes.length === 0 }));
+  // No seams while reviewing: the review is read-only (the prototype's `!s.review`).
+  const seams: Seam[] = review ? [] : Array.from({ length: nodes.length + 1 }, (_, at) => ({ at, open: menu === at, always: nodes.length === 0 }));
   const sel = authored.findIndex((n) => n.id === selected);
   const target = sel >= 0 && kindOf(r, authored[sel]) === "gate" ? rejectTarget(r, authored, sel) : undefined;
   const arcs: ChainArc[] = target && selected ? [{ kind: "reject", from: selected, to: target }] : [];
@@ -74,7 +91,7 @@ export function ChainCanvas({ chain, result: r, selected, pending, reserve, refu
       <StageGraph
         name={chain}
         nodes={nodes}
-        selected={selected}
+        selected={review?.highlight ?? selected}
         arcs={arcs}
         seams={seams}
         opening="fit"

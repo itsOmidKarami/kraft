@@ -105,7 +105,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               tabIndex={roving.tabIndex(key)}
               aria-label={accessibleName(n, n.kind === "gate" ? "gate" : "node")}
               aria-pressed={n.id === selected}
-              className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}`}
+              className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}${n.pending ? " is-pending" : ""}${n.faded ? " is-faded" : ""}`}
               style={{ left: cx - w / 2, top: L.CY - L.BOX / 2, width: w }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: cx - w / 2, x1: cx + w / 2, y0: L.CY - L.BOX / 2, y1: L.CY + L.BOX / 2 + 40 }); }}
               onClick={() => onSelect?.(n.id)}

@@ -23,6 +23,8 @@ export type GraphItem = {
   metaTone?: "red" | "amber" | "green";
   /** An edit to it is on its way to the server (W10 brief Decided 3). */
   pending?: boolean;
+  /** Unchanged while a draft is reviewed (Decisions §9 Publish). */
+  faded?: boolean;
 };
 
 const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting" };
