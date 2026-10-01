@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { BookOpen, Copy, ExternalLink, LifeBuoy } from "lucide-react";
 import * as api from "../../api";
 import { ago, elapsed } from "../../format";
 import type { Health } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
-import { Block, SetRow } from "./parts";
 import "./settings.css";
 
 export interface UpdateState {
@@ -78,50 +78,56 @@ export function AboutPage() {
     `browser: ${navigator.userAgent}`,
   ].filter(Boolean).join("\n");
 
+  const healthDot = health?.status === "ok" ? "is-ok" : "is-warn";
+  const indexDot = health?.index && health.index.last_scan_at && !health.index.errors.length ? "is-ok" : "is-warn";
+  const row = (label: string, value: ReactNode) => (<><dt>{label}</dt><dd>{value}</dd></>);
+
   return (
     <div className="ng-settings">
-      <div className="set-page">
-        <h1>About</h1>
-        <p className="lede">This build and this instance.</p>
+      <div className="set-page is-cards">
+        <div className="set-title"><h1>About</h1><p className="lede">This build and this instance.</p></div>
 
-        <Block id="set-version" title="Version">
+        <section className="set-about-version" aria-labelledby="set-version">
+          <h2 id="set-version" className="adr-sr">Version</h2>
           <div className="set-version">
             <span className="set-version-n">{installed || "…"}</span>
             {update && <span className="set-version-channel">{update.channel}</span>}
             <span className={`set-verdict is-${verdict.tone}`} role="status">{verdict.text}</span>
           </div>
           {error && <span className="set-error" role="alert">{error}</span>}
-          <span className="set-hint">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</span>
+          <p className="set-hint">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
           <div className="set-command">
             <code>{command}</code>
-            <button type="button" className="set-btn" onClick={() => void copy(command, "Copied the command")}>Copy</button>
+            <button type="button" className="set-btn is-bare" onClick={() => void copy(command, "Copied the command")}><Copy size={12} aria-hidden /> Copy</button>
           </div>
-          <div className="set-inline">
+          <div className="set-about-row">
             <a className="set-link" href={RELEASES} target="_blank" rel="noopener noreferrer">Release notes ↗</a>
+            <span className="set-about-gap" />
             <span className="set-hint">{checking ? "checking…" : update?.checked_at ? `checked ${ago(update.checked_at)}` : "not checked yet"}</span>
-            <button type="button" className="set-btn" disabled={checking} onClick={() => void load(true, channel)}>Check now</button>
+            <button type="button" className="set-textbtn" disabled={checking} onClick={() => void load(true, channel)}>Check now</button>
           </div>
-          <SetRow label="channel" hint="Which release feed Check now asks. The installed channel is the default.">
+          <div className="set-about-row" title="Which release feed Check now asks. The installed channel is the default.">
+            <span className="set-hint">Channel</span>
             <Segmented label="Channel" options={CHANNELS} value={channel ?? "stable"} onChange={(c) => { setChannel(c); void load(false, c); }} />
-          </SetRow>
-        </Block>
-
-        <Block id="set-instance" title="This instance">
-          <SetRow label="health" hint={problems ? "Open the Chains and Policy pages for the details." : undefined}>
-            <span className={health?.status === "ok" ? "set-ok" : undefined}>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}`) : "…"}</span>
-          </SetRow>
-          <SetRow label="address"><span>{address || "…"}</span></SetRow>
-          {health?.run_dir && <SetRow label="run directory"><span className="set-mono">{health.run_dir}</span></SetRow>}
-          {process && <SetRow label="process"><span className="set-mono">{process}</span></SetRow>}
-          {index && <SetRow label="search index"><span className={health?.index?.errors.length ? "set-warn" : undefined}>{index}</span></SetRow>}
-          <div>
-            <button type="button" className="set-btn" onClick={() => void copy(diagnostics, "Copied the diagnostics")}>Copy diagnostics</button>
           </div>
-        </Block>
+        </section>
 
-        <div className="set-links">
-          <a className="set-link" href={DOCS} target="_blank" rel="noopener noreferrer">Documentation ↗</a>
-          <a className="set-link" href={SUPPORT} target="_blank" rel="noopener noreferrer">Status and support ↗</a>
+        <div className="set-about-head">
+          <h2>This instance</h2>
+          <button type="button" className="set-btn" onClick={() => void copy(diagnostics, "Copied the diagnostics")}><Copy size={12} aria-hidden /> Copy diagnostics</button>
+        </div>
+        <dl className="set-about-kv">
+          {row("Health", <span className="set-dotted"><span className={`set-dot ${healthDot}`} aria-hidden /><span>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}`) : "…"}</span></span>)}
+          {problems > 0 && row("", <span className="set-hint">Open the Chains and Policy pages for the details.</span>)}
+          {row("Address", <span className="set-mono">{address || "…"}</span>)}
+          {health?.run_dir && row("Run directory", <span className="set-mono">{health.run_dir}</span>)}
+          {process && row("Process", <span className="set-mono">{process}</span>)}
+          {index && row("Search index", <span className="set-dotted"><span className={`set-dot ${indexDot}`} aria-hidden /><span className={health?.index?.errors.length ? "set-warn" : undefined}>{index}</span></span>)}
+        </dl>
+
+        <div className="set-about-links">
+          <a className="set-linkrow" href={DOCS} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden /><span>Documentation</span><ExternalLink size={14} aria-hidden /></a>
+          <a className="set-linkrow" href={SUPPORT} target="_blank" rel="noopener noreferrer"><LifeBuoy size={16} aria-hidden /><span>Status and support</span><ExternalLink size={14} aria-hidden /></a>
         </div>
         <span className="set-hint">macOS and Linux. Only the latest release gets fixes.</span>
       </div>

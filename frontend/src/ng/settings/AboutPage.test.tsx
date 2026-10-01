@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -114,12 +114,37 @@ describe("ng AboutPage", () => {
   it("leaves the three rows out for a server that does not send them, and shows a pid without an uptime", async () => {
     render(<AboutPage />);
     await screen.findByText("ok · all chains and policy valid");
-    expect(screen.queryByText("run directory")).toBeNull();
-    expect(screen.queryByText("process")).toBeNull();
-    expect(screen.queryByText("search index")).toBeNull();
+    expect(screen.queryByText("Run directory")).toBeNull();
+    expect(screen.queryByText("Process")).toBeNull();
+    expect(screen.queryByText("Search index")).toBeNull();
     document.body.innerHTML = "";
     vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, uptime_s: undefined });
     render(<AboutPage />);
     expect(await screen.findByText("pid 41822")).toBeInTheDocument();
+  });
+
+  it("draws the version as a card of its own, the instance as labelled rows and the links as a list", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 214, last_scan_at: new Date(Date.now() - 120_000).toISOString(), errors: [] } });
+    render(<AboutPage />);
+    const version = await screen.findByRole("region", { name: "Version" });
+    expect(version).toHaveClass("set-about-version");
+    expect(version.querySelector(".set-version-channel")).toHaveTextContent("stable");
+    expect(within(version).getByRole("status")).toHaveTextContent("v1.5.0 is available");
+    expect(within(version).getByText("kraft admin update")).toBeInTheDocument();
+    const rows = (await screen.findByText("Health")).closest("dl") as HTMLElement;
+    expect([...rows.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Health", "Address", "Run directory", "Process", "Search index"]);
+    expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", expect.stringContaining("github.io/kraft"));
+    expect(screen.getByRole("link", { name: "Status and support" })).toHaveClass("set-linkrow");
+  });
+
+  it("marks the search index with a warning dot until it has scanned cleanly", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 3, last_scan_at: null, errors: [] } });
+    render(<AboutPage />);
+    const dot = (await screen.findByText("3 documents · not scanned yet")).previousElementSibling;
+    expect(dot).toHaveClass("is-warn");
+    document.body.innerHTML = "";
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 3, last_scan_at: new Date().toISOString(), errors: [] } });
+    render(<AboutPage />);
+    expect((await screen.findByText("3 documents · scanned just now")).previousElementSibling).toHaveClass("is-ok");
   });
 });
