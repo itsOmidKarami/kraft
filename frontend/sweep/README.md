@@ -62,7 +62,7 @@ The element must carry its full text in `title`. Anything else that ellipsizes s
 
 ## Baseline
 
-`e2e-shots/sweep/` is not tracked (`frontend/e2e-shots/` is gitignored). It is the local baseline, and it is only as fresh as the last run. Take one on `main` after a merge, before touching UI:
+`e2e-shots/sweep/` is not tracked (`frontend/e2e-shots/` is gitignored). It is the local baseline, and it is only as fresh as the last run. Every page's `Date` is frozen at `NG_NOW` (`installMocks`), so relative durations do not move with the wall clock; a baseline taken before that freeze differs once, in clock text, so retake it. Take one on `main` after a merge, before touching UI:
 
 ```bash
 cd frontend

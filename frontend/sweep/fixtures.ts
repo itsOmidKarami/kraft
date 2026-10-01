@@ -24,7 +24,7 @@ export const STATES: DisplayState[] = [
 ];
 
 import { buildNgBoard } from "./ngBoard";
-import { buildNgItem, NG_SCENARIOS } from "./ngItems";
+import { buildNgItem, NG_NOW, NG_SCENARIOS } from "./ngItems";
 
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
@@ -40,10 +40,9 @@ export function hex(seed: number): string {
 }
 
 export const T0 = Date.parse("2026-09-13T08:00:00Z");
-const NOW = Date.now();
 export const t = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
-/** Relative to now, for "next check in 4m" style fields. */
-const fromNow = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
+/** Relative to the instant the sweep freezes the page clock at (NG_NOW), for "next check in 4m" style fields. Read at call time: ngItems and this module import each other. */
+const fromNow = (minutes: number) => new Date(Date.parse(NG_NOW) + minutes * 60_000).toISOString();
 
 /* ── repos ───────────────────────────────────────────────────────────────── */
 

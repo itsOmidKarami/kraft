@@ -1,7 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 import { NG_CHAINS, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
-import { ngThreads } from "./ngItems";
+import { NG_NOW, ngThreads } from "./ngItems";
 
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
@@ -31,6 +31,8 @@ const json = (route: Route, body: unknown, status = 200) =>
  * changes — the sweep is about how the UI looks, not what it does.
  */
 export async function installMocks(page: Page, S: Scenario, opts: MockOptions = {}) {
+  // Every sweep page is mocked here, before it navigates: fixed time keeps the app's relative durations ("17d 10h") off the wall clock. Timers still run; a case that needs another instant sets its own after.
+  await page.clock.setFixedTime(new Date(NG_NOW));
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
   let listReads = 0;
