@@ -1,4 +1,8 @@
-import { expect, REPO, test } from "./fixtures";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round: drives every operational surface of the SPA against
@@ -6,29 +10,29 @@ import { scaledTimeout } from "../e2e-timing";
 // chain.spec.ts.
 
 test("settings: connect a repo", async ({ page }) => {
-  // Earlier specs connect REPO through fixtures.connectRepo, so take it off
-  // again to drive the real Add repo flow. The server stores the resolved path,
-  // so look it up instead of sending REPO as typed.
-  const name = REPO.split("/").pop()!;
-  const { repos } = await (await page.request.get("/api/repos")).json();
-  const stored = repos.find((r: { path: string }) => r.path.endsWith(`/${name}`));
-  if (stored) {
-    const del = await page.request.delete(`/api/repos?path=${encodeURIComponent(stored.path)}`);
-    expect(del.ok()).toBe(true);
-  }
+  // A fresh repo, not REPO: earlier specs file items in REPO, and a repo with a
+  // live item can't be disconnected (409), so it can't be taken off to re-drive
+  // the Add repo flow. The server stores the resolved path, so match by suffix.
+  const dir = join(mkdtempSync(join(tmpdir(), "kraft-e2e-connect-")), "connect-me");
+  mkdirSync(dir);
+  execFileSync("git", ["init", "-q", dir]);
+  const name = "connect-me";
   await page.goto("/settings/repos");
   await page.getByRole("button", { name: /connect a repo|add repo|connect/i }).first().click();
   const dlg = page.getByRole("dialog", { name: "Add repo" });
-  await dlg.getByRole("textbox").first().fill(REPO);
+  await dlg.getByRole("textbox").first().fill(dir);
   // probe is debounced; the submit button unlocks once it lands
   await expect(dlg.getByRole("button", { name: /add|connect/i })).toBeEnabled({ timeout: scaledTimeout(15_000) });
   await dlg.getByRole("button", { name: /add|connect/i }).click();
   await expect(dlg).toBeHidden();
   // the row navigates into the detail pane, not just the list. By data-repo,
   // not text: the name also appears in the probe note and other repos' rows.
-  // A suffix match, since the server stores the resolved path.
   await page.locator(`[data-repo$="/${name}"]`).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
+  // No item uses it, so disconnecting is allowed.
+  const { repos } = await (await page.request.get("/api/repos")).json();
+  const stored = repos.find((r: { path: string }) => r.path.endsWith(`/${name}`));
+  expect((await page.request.delete(`/api/repos?path=${encodeURIComponent(stored.path)}`)).status()).toBe(204);
 });
 
 test("settings: chain templates page loads the chain file and resolves it", async ({ page }) => {

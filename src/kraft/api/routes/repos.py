@@ -13,6 +13,7 @@ from pydantic import AfterValidator, BaseModel
 
 from kraft import config as config_mod
 from kraft.api import api_router, deps
+from kraft.store import open_counts_by_repo
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +364,13 @@ async def remove_repo(request: Request, path: str):
     repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
+    # Its items' worktrees and merge steps resolve the repo from repos.yaml;
+    # removing it under them strands them (Kraft-d2ire).
+    if live := st.db.read(open_counts_by_repo).get(entry["path"]):
+        raise HTTPException(
+            409,
+            f"{entry['path']} has {live} running item(s); finish or abandon them first",
+        )
     kept = [r for r in repos if r["path"] != entry["path"]]
     # A workspace still naming it would no longer load; refused, not dropped.
     # Steering is not re-checked: a profile removed from the library must not

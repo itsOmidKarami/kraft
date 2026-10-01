@@ -1,7 +1,7 @@
 """The `repos` draft area (W13 E): `repos.yaml`.
 
-`DELETE /repos` is unchanged and still removes a repo with running items
-(Kraft-d2ire); the draft reports that as a problem instead."""
+`DELETE /repos` refuses a repo with running items with a 409; the draft
+reports the same as a problem."""
 
 from __future__ import annotations
 
