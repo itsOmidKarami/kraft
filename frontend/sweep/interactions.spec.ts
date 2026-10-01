@@ -177,7 +177,7 @@ const FLOWS: Flow[] = [
     { name: "yaml-toggle", run: async (p) => { await p.getByRole("button", { name: /yaml/i }).first().click().catch(() => {}); } },
     { name: "add-node", run: async (p) => { await p.getByRole("button", { name: /add node/i }).first().click().catch(() => {}); } },
   ] },
-  { name: "ng-search-keyboard", widths: [1280], start: ng("/ng/settings/access"), steps: [
+  { name: "ng-search-keyboard", widths: [1280], start: ng("/ng/settings/policy"), steps: [
     { name: "open", run: async (p) => { focusBefore = await activeId(p); await p.keyboard.press("Control+k"); await expect(searchBox(p)).toBeVisible(); await expect(searchBox(p)).toBeFocused(); }, kbd: true },
     { name: "type", run: async (p) => { await searchBox(p).fill("gate"); await p.waitForTimeout(700); await expect(p.getByRole("option").first()).toBeVisible(); }, kbd: true, wait: 200 },
     { name: "down-down-up", run: async (p) => {
@@ -199,14 +199,14 @@ const FLOWS: Flow[] = [
       await expect.poll(() => p.url()).not.toBe(url);
     }, kbd: true, wait: 700 },
   ] },
-  { name: "ng-sidebar-pin", widths: [1280], start: ng("/ng/settings/access"), steps: [
+  { name: "ng-sidebar-pin", widths: [1280], start: ng("/ng/settings/policy"), steps: [
     { name: "default-pinned", run: async (p) => { await sideIs(p, "pinned"); } },
     { name: "unpin-with-shortcut", run: async (p) => { await p.keyboard.press("Control+\\"); await sideIs(p, "rail"); }, kbd: true },
     { name: "reload-stays-rail", run: async (p) => { await reloadNg(p); await sideIs(p, "rail"); } },
     { name: "pin-with-shortcut", run: async (p) => { await p.keyboard.press("Control+\\"); await sideIs(p, "pinned"); }, kbd: true },
     { name: "reload-stays-pinned", run: async (p) => { await reloadNg(p); await sideIs(p, "pinned"); } },
   ] },
-  { name: "ng-sidebar-rail", widths: [1024], start: ng("/ng/settings/access"), steps: [
+  { name: "ng-sidebar-rail", widths: [1024], start: ng("/ng/settings/policy"), steps: [
     { name: "rail-by-default", run: async (p) => { await sideIs(p, "rail"); } },
     { name: "hover-reveals", run: async (p) => { await p.mouse.move(20, 300); await expect.poll(() => sideWidth(p)).toBeGreaterThan(150); } },
     { name: "leaving-collapses", run: async (p) => { await p.mouse.move(700, 450); await expect.poll(() => sideWidth(p)).toBeLessThan(100); } },
