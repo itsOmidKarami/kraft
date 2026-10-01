@@ -23,6 +23,8 @@ export const STATES: DisplayState[] = [
   "budget", "question", "escalating", "escalated", "done", "abandoned", "archived",
 ];
 
+import { buildNgItem, NG_SCENARIOS } from "./ngItems";
+
 /* ── ids & time ──────────────────────────────────────────────────────────── */
 
 /** 32-hex ids like the real ones (c7446dca30d840a8a69977c6649a7b11). */
@@ -36,9 +38,9 @@ export function hex(seed: number): string {
   return s.slice(0, 32);
 }
 
-const T0 = Date.parse("2026-09-13T08:00:00Z");
+export const T0 = Date.parse("2026-09-13T08:00:00Z");
 const NOW = Date.now();
-const t = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+export const t = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
 /** Relative to now, for "next check in 4m" style fields. */
 const fromNow = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
 
@@ -144,7 +146,7 @@ const LONG_TITLES: Record<DisplayState, string> = {
   archived: "Ship the segmented progress bar on the board row, the peek, the item hero, the stage-graph pill, search results, and the phone stage list",
 };
 
-const LONG_DESCRIPTION = `## Context
+export const LONG_DESCRIPTION = `## Context
 
 The verify node already produces a \`findings_measured\` event with every finding at every severity. The fix loop then re-runs **every** plugin on each cycle, which costs ~$0.40 and 3 minutes per cycle on \`acme-billing-platform\`.
 
@@ -172,7 +174,7 @@ export interface ItemBundle {
   logs: Record<string, any[]>;
 }
 
-function logLines(sessionId: string, n: number, long: boolean): any[] {
+export function logLines(sessionId: string, n: number, long: boolean): any[] {
   const out: any[] = [];
   const srcs = ["sys", "stdout", "agent", "tool"] as const;
   for (let i = 1; i <= n; i++) {
@@ -757,6 +759,8 @@ export interface Scenario {
   items: any[];                      // board (non-archived)
   archived: any[];
   byState: Record<DisplayState, ItemBundle>;
+  /** ux2-W5: the /ng item page's items, by scenario; in bundles, never in the board list. */
+  ng: Record<string, string>;
   bundles: Record<string, ItemBundle>;
   docs: Record<string, any[]>;
   settings: ReturnType<typeof settingsFor>;
@@ -783,5 +787,10 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
       }
     }
   }
-  return { variant, items, archived, byState, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
+  const ng: Record<string, string> = {};
+  if (variant === "default" || variant === "long") NG_SCENARIOS.forEach((sc, i) => {
+    const b = buildNgItem(sc, 950 + i, variant);
+    ng[sc] = b.item.id; bundles[b.item.id] = b; docs[b.item.id] = [];
+  });
+  return { variant, items, archived, byState, ng, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }

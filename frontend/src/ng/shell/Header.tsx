@@ -2,13 +2,20 @@ import { Fragment } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useStore } from "../../store";
 import { crumbsFor, type Crumb } from "./crumbs";
+import { usePageItem } from "./pageItem";
 
 export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="ng-crumbs-nav">
       <ol className="ng-crumbs">
         {crumbs.map((c, i) => {
-          const last = i === crumbs.length - 1;
+          if (c.kind === "ext")
+            return (
+              <li key={i} className="ng-crumb ng-crumb-ext">
+                <a href={c.href} target="_blank" rel="noopener noreferrer" title={c.title}>{c.text}</a>
+              </li>
+            );
+          const last = i === crumbs.length - 1 || crumbs[i + 1].kind === "ext";
           const cut = c.kind !== "mid";
           const cls = `ng-crumb ng-crumb-${c.kind}`;
           const cutProps = cut ? { "data-allow-ellipsis": "", title: c.title ?? c.text } : {};
@@ -33,7 +40,8 @@ export function Crumbs({ crumbs }: { crumbs: Crumb[] }) {
 export function Header({ actionsRef }: { actionsRef: (el: HTMLDivElement | null) => void }) {
   const { pathname } = useLocation();
   const items = useStore((s) => s.workItems);
-  const crumbs = crumbsFor(pathname, (id) => items[id]);
+  const page = usePageItem((s) => s.item);
+  const crumbs = crumbsFor(pathname, (id) => (page?.id === id ? page : items[id]));
   return (
     <header className="ng-header">
       <Crumbs crumbs={crumbs} />

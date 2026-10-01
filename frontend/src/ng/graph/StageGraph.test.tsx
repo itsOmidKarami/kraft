@@ -43,6 +43,14 @@ describe("StageGraph", () => {
     expect(btn(/^implement/)).toHaveFocus();
   });
 
+  it("treats the node a run stopped on, or waits at, as where it stands: Tab and the current button reach it (ux2-W5)", async () => {
+    const stopped: ChainNode[] = [{ id: "spec", kind: "exec", state: "done" }, { id: "open_mr", kind: "exec", state: "failed" }, { id: "close", kind: "exec", state: "todo" }];
+    render(<StageGraph name="c" nodes={stopped} />);
+    expect(screen.getByRole("button", { name: /current/i })).toBeInTheDocument();
+    await userEvent.setup().tab();
+    expect(btn(/^open_mr/)).toHaveFocus();
+  });
+
   it("gives the Tab stop back to a new selection", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<StageGraph name="c" nodes={nodes} selected="spec" />);

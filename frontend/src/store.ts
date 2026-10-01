@@ -101,6 +101,9 @@ export const useStore = create<State>((set, get) => ({
   applyEvent: (ev) => {
     const id = ev.work_item_id;
     const p = ev.payload as Record<string, any>;
+    // The list's display_status and stop are the server's (B1); an event that
+    // moves the status re-reads the row so /ng's "others need you" stays true.
+    if (REREAD.has(ev.type) && get().workItems[id]) queueMicrotask(() => { get().hydrateItem(id).catch(() => {}); });
     set((s) => {
       const prevEvents = s.eventsByItem[id] ?? [];
       const base: Partial<State> = {
@@ -333,6 +336,18 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 }));
+
+/** Status-moving events after which display_status and stop are re-read. */
+const REREAD = new Set([
+  "work_item_needs_human",
+  "work_item_resumed",
+  "work_item_retried",
+  "pause_requested",
+  "work_item_waiting",
+  "work_item_rate_limited",
+  "work_item_completed",
+  "work_item_cancelled",
+]);
 
 /**
  * The question inside a `work_item_needs_human` reason, or null for a stop of

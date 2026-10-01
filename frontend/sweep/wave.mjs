@@ -117,6 +117,11 @@ for (const r of wave?.rules ?? []) {
     const d = a && b2 ? diffPng(path.join(OUT, a.file), path.join(OUT, b2.file)) : { changed: false };
     rule(`${r.a} differs from ${r.b}`, !!d.changed, d.reason);
   }
+  if (r.kind === "max-count") {
+    // A check's count stays at or under `max` (ux2-W5: nestedScrollers ≤ 2, canvas + tab body).
+    const bad = cells.filter((e) => (e.checks?.[r.check]?.count ?? 0) > r.max);
+    rule(`${r.check} ≤ ${r.max} on /${r.match}/`, bad.length === 0, bad.slice(0, 8).map((e) => `${e.id} (${e.checks[r.check].count})`).join(", "));
+  }
   if (r.kind === "no-console") {
     const bad = cells.filter((e) => (e.checks?.consoleErrors ?? []).length);
     rule(`no console errors on /${r.match}/`, bad.length === 0, bad.slice(0, 5).map((e) => e.id).join(", "));

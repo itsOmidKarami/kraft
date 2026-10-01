@@ -143,6 +143,14 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         it.updated_at = new Date().toISOString();
       }
     }
+    // ux2-W5: cancel and complete end the item (the /ng page reads display_status); reassign and
+    // keep-waiting are B5's routes (R2), answered here only so the worker-lost fixture's card can be driven.
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/(cancel|complete)$/))) {
+      const b = S.bundles[m[1]];
+      if (b) Object.assign(b.item, m[2] === "cancel" ? { status: "abandoned", display_status: "cancelled", stop: null } : { status: "completed", display_status: "done", stop: null });
+      return json(route, { id: m[1], status: m[2] === "cancel" ? "abandoned" : "completed" });
+    }
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/(reassign|keep-waiting)$/))) return json(route, { id: m[1], status: "waiting" });
     if ((m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|reopen-mr|skip|abandon|archive|restore|escalate|open-worktree|budget\/raise|escalate\/stop|gates\/[^/]+\/(approve|reject))$/))) {
       return json(route, { id: m[1], status: "active", node_id: "implement", loop: "verify_fix_loop", steer: null, path: "/tmp", editor: "code" });
     }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildScenario, type DisplayState, type Scenario } from "./fixtures";
 import { installMocks } from "./mockApi";
+import { NG_NOW } from "./ngItems";
 import { focusRingMissing } from "./checks";
 
 /**
@@ -40,6 +41,8 @@ const NOTE = "Add an invalidation section for blob_sha changes mid-query.";
 
 // UX V2 /ng shell flows. Assertions throw inside a step, which the manifest records as that step's error, so flow-completes fails on them.
 const ng = (url: string) => async (p: Page) => { await p.goto(url); await p.locator("main h1").first().waitFor({ timeout: 8000 }); await settle(p, 600); };
+// ux2-W5: the /ng item page for one of ngItems.ts's scenarios, the clock fixed.
+const ngItem = (sc: string) => async (p: Page, S: Scenario) => { await p.clock.setFixedTime(new Date(NG_NOW)); await ng(`/ng/work-items/${S.ng[sc]}`)(p); };
 const sideWidth = async (p: Page) => (await p.locator(".ng-sidebar").boundingBox())!.width;
 const sideIs = async (p: Page, mode: "pinned" | "rail") => {
   expect(await p.evaluate(() => document.documentElement.dataset.sidebar)).toBe(mode);
@@ -204,6 +207,30 @@ const FLOWS: Flow[] = [
     { name: "hover-reveals", run: async (p) => { await p.mouse.move(20, 300); await expect.poll(() => sideWidth(p)).toBeGreaterThan(150); } },
     { name: "leaving-collapses", run: async (p) => { await p.mouse.move(700, 450); await expect.poll(() => sideWidth(p)).toBeLessThan(100); } },
     { name: "focus-reveals", run: async (p) => { await p.getByRole("button", { name: "Search" }).first().focus(); await expect.poll(() => sideWidth(p)).toBeGreaterThan(150); }, kbd: true },
+  ] },
+  // ux2-W5 B.9: Cancel… reached by keyboard only, and the request is /cancel (never the route that deletes the worktree), R17.
+  { name: "ng-cancel", widths: [1280], keyboard: true, start: ngItem("running"), steps: [
+    { name: "toggle-focus-opens-panel", run: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); await expect(p.getByRole("menu", { name: "Item actions" })).toBeVisible(); } },
+    { name: "arrows-to-cancel", run: async (p) => { await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await expect(p.getByRole("menuitem", { name: /Cancel/ })).toBeFocused(); } },
+    { name: "enter-opens-card", run: async (p) => { await p.keyboard.press("Enter"); await expect(p.getByRole("dialog", { name: "Cancel this item?" })).toBeVisible(); await p.getByText(/stays on the ledger/).waitFor(); } },
+    { name: "reason", run: async (p) => { await expect(p.getByLabel("Reason")).toBeFocused(); await p.keyboard.type("Superseded by kraft-cb61."); } },
+    { name: "cancel-item", run: async (p) => {
+      const sent = p.waitForRequest((r) => r.method() === "POST" && /\/work-items\/[^/]+\/(cancel|abandon)$/.test(r.url()));
+      await p.keyboard.press("Tab"); await p.keyboard.press("Enter");
+      const r = await sent;
+      expect(new URL(r.url()).pathname).toMatch(/\/cancel$/);
+      expect(r.postDataJSON()).toEqual({ reason: "Superseded by kraft-cb61.", close_mr: false });
+      await expect(p.getByText("CANCELLED", { exact: true })).toBeVisible();
+    } },
+  ] },
+  // ux2-W5 E: the pane by keyboard; the collapse a person chose survives picking nodes and moving to another item.
+  { name: "ng-pane-collapse", widths: [1280], start: ngItem("running"), steps: [
+    { name: "collapse", run: async (p) => { await p.getByRole("button", { name: "Collapse pane" }).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeFocused(); }, kbd: true },
+    // A click picks without opening (Enter opens, R6).
+    { name: "pick-node-stays-collapsed", run: async (p) => { await p.getByRole("button", { name: /^implementation, node/ }).click(); await expect(p.getByRole("complementary", { name: "implementation pane, collapsed" })).toBeVisible(); } },
+    { name: "other-item-stays-collapsed", run: async (p, S) => { await p.evaluate((url) => { history.pushState({}, "", url); dispatchEvent(new PopStateEvent("popstate")); }, `/ng/work-items/${S.ng.failed}`); await expect(p.getByText("FAILED", { exact: true })).toBeVisible(); await expect(p.getByRole("button", { name: "Expand pane" })).toBeVisible(); } },
+    { name: "rail-expands", run: async (p) => { await p.getByRole("button", { name: "Expand pane" }).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("button", { name: "Collapse pane" })).toBeVisible(); }, kbd: true },
+    { name: "escape-collapses", run: async (p) => { await p.getByRole("tab", { name: "Overview" }).focus(); await p.keyboard.press("Escape"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeFocused(); }, kbd: true },
   ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
