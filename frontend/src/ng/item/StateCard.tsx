@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
 import { ago, until, usd } from "../../format";
@@ -31,7 +32,8 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
-  const card = cardFor(item, h, events, async (p) => {
+  const navigate = useNavigate();
+  const card = cardFor(item, { ...h, onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -68,7 +70,7 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
 
 type Run = (p: Promise<{ ok: true } | { ok: false; error: string }>) => Promise<void>;
 
-function cardFor(item: ItemDetail, h: Handlers, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
@@ -140,7 +142,8 @@ function cardFor(item: ItemDetail, h: Handlers, events: KraftEvent[], run: Run):
         ...(spent ? [spent] : []),
       ],
       actions: [
-        { label: "Review the conflicts", primary: true, run: () => goShipped(`/ng/work-items/${item.id}/review`) },
+        // Decisions §14: the review page on that node.
+        { label: "Review the conflicts", primary: true, run: () => h.onReview(stop.node ?? undefined) },
         { label: "Send back with guidance", run: h.onEscalate },
       ],
     };

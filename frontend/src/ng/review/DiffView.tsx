@@ -102,6 +102,8 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const onClick = (a: Anchor) => (e: MouseEvent) => pick(a, e.shiftKey);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    // Only the line area's own keys: a thread or the composer sits inside it, and its typing is its own.
+    if (e.target !== e.currentTarget) return;
     if (e.key === "n" || e.key === "p") {
       const all = [...document.querySelectorAll<HTMLElement>(".rv-lines")];
       all[all.indexOf(e.currentTarget) + (e.key === "n" ? 1 : -1)]?.focus();

@@ -137,6 +137,16 @@ describe("DiffView", () => {
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 5, head: 6 });
   });
 
+  it("leaves keys typed into a thread or the composer alone", () => {
+    const onCompose = vi.fn();
+    render(<View onCompose={onCompose} after={(_, a) => (a.side === "new" && a.line === 5 ? <textarea aria-label="Comment" /> : null)} />);
+    const lines = screen.getByRole("group", { name: /^Lines of search/ });
+    fireEvent.keyDown(lines, { key: "ArrowDown" });
+    for (const key of ["c", "Enter", "n", "ArrowDown"]) fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key });
+    expect(onCompose).not.toHaveBeenCalled();
+    expect(row(/class EmbeddingCache/)).toHaveClass("is-picked");
+  });
+
   it("picks by mouse: a number, then Shift-click extends", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);

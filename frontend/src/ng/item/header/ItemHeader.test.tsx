@@ -78,6 +78,10 @@ describe("ItemHeader", () => {
     await waitFor(() => expect(calls).toContainEqual({ method: "POST", path: "/work-items/w1/open-worktree", body: { editor: null } }));
     await menu(/Cancel…/);
     expect(await screen.findByRole("dialog", { name: "Cancel this item?" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    // The review page under /ng (W8): the shell's crumbs end in it.
+    await menu(/Review changes/);
+    expect(await screen.findByText("Review changes", { selector: '[aria-current="page"]' })).toBeInTheDocument();
   });
 
   it("offers Duplicate on an ended item and opens the copy", async () => {
