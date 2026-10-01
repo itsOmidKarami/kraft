@@ -1,45 +1,13 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as api from "../../api";
-import { useStore } from "../../store";
-import { Shell } from "../shell/Shell";
 import * as d from "../templates/draft/draftApi";
-import type { Result } from "../templates/draft/types";
-import { libView, PUBLISHED } from "./fixture";
-import { LibraryPage } from "./LibraryPage";
+import { libView } from "./fixture";
+import { draftWith, mount, ok, setup, where } from "./testSupport";
 
-const ok = <T,>(body: T) => Promise.resolve({ status: 200, body });
-let where = "";
-function Where() {
-  where = useLocation().pathname;
-  return null;
-}
-const mount = (path = "/templates/library") =>
-  render(
-    <MemoryRouter initialEntries={[path]}>
-      <Where />
-      <Routes>
-        <Route element={<Shell />}>
-          <Route path="/templates/library" element={<LibraryPage />} />
-          <Route path="/templates/library/:ref" element={<LibraryPage />} />
-        </Route>
-      </Routes>
-    </MemoryRouter>,
-  );
-const draftWith = (extra: Partial<Result> = {}, draft = false) => vi.mocked(d.getDraft).mockImplementation(() => ok(libView(extra, draft)));
 const list = () => screen.findByRole("listbox", { name: "Library components" });
 
-beforeEach(() => {
-  vi.restoreAllMocks();
-  localStorage.clear();
-  vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);
-  vi.spyOn(d, "listDrafts").mockResolvedValue({ status: 200, body: [] });
-  vi.spyOn(d, "getDraft").mockImplementation(() => ok(libView()));
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(PUBLISHED), { status: 200 })));
-  useStore.setState({ workItems: {}, connection: "open" } as never);
-});
+beforeEach(setup);
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Library page: the list", () => {
@@ -66,7 +34,7 @@ describe("Library page: the list", () => {
     const u = userEvent.setup();
     mount();
     await u.click(within(await list()).getByRole("option", { name: /implementer/ }));
-    expect(where).toBe("/templates/library/tasks.implementer");
+    expect(where()).toBe("/templates/library/tasks.implementer");
     expect(within(await list()).getByRole("option", { name: /implementer/ })).toHaveAttribute("aria-selected", "true");
   });
 
@@ -138,7 +106,7 @@ describe("Library page: + New", () => {
     mount();
     await u.type(await open(u, "Agent task"), "fixer{Enter}");
     await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "add_component", section: "tasks", name: "fixer", kind: "agent" }], undefined));
-    expect(where).toBe("/templates/library/tasks.fixer");
+    expect(where()).toBe("/templates/library/tasks.fixer");
   });
 
   it("refuses a taken id before sending, and shows the server's refusal inline", async () => {
@@ -152,7 +120,7 @@ describe("Library page: + New", () => {
     await u.clear(field);
     await u.type(field, "other{Enter}");
     expect(await screen.findByText("name is reserved")).toBeInTheDocument();
-    expect(where).toBe("/templates/library");
+    expect(where()).toBe("/templates/library");
   });
 
   it("sends the kind of a gate and none for a step", async () => {
@@ -174,7 +142,7 @@ describe("Library page: header and YAML", () => {
     mount();
     expect(await screen.findByText("DRAFT · 1 CHANGE")).toBeInTheDocument();
     await u.click(screen.getByRole("button", { name: "1 PROBLEM" }));
-    expect(where).toBe("/templates/library/tasks.verify");
+    expect(where()).toBe("/templates/library/tasks.verify");
   });
 
   it("edits library.yaml in the YAML view, not a chain's file", async () => {

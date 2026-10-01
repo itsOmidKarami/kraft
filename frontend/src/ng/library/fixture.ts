@@ -40,9 +40,9 @@ export const libView = (extra: Partial<Result> = {}, draft = false): DraftView =
   result: { ...RESULT, ...extra },
 });
 
-const comp = (id: string, used_by: string[] = []): PublishedComponent => {
+const comp = (id: string, used_by: string[] = [], paths?: PublishedComponent["used_by_paths"]): PublishedComponent => {
   const [kind, name] = id.split(".");
-  return { id, kind: kind as PublishedComponent["kind"], name, used_by, used_by_paths: used_by.map((chain) => ({ chain, path: "x", overrides: false })) };
+  return { id, kind: kind as PublishedComponent["kind"], name, used_by, used_by_paths: paths ?? used_by.map((chain) => ({ chain, path: "x", overrides: false })) };
 };
 
 export const PUBLISHED: PublishedLibrary = {
@@ -50,7 +50,10 @@ export const PUBLISHED: PublishedLibrary = {
   text: "tasks: {}\n",
   components: [
     comp("steering.project-standards", ["default"]),
-    comp("tasks.implementer", ["default", "quick-task"]),
+    comp("tasks.implementer", ["default", "quick-task"], [
+      { chain: "default", path: "implementation.main.implement", overrides: true },
+      { chain: "quick-task", path: "build.main.go", overrides: false, via: "build" },
+    ]),
     comp("tasks.code_review", ["default"]),
     comp("tasks.verify"),
     comp("tasks.await_ci", ["default"]),

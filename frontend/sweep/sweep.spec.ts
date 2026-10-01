@@ -117,6 +117,7 @@ async function ngLibrary(c: Ctx, ref = "") {
   await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
   await c.page.goto(`/ng/templates/library${ref ? `/${ref}` : ""}`);
   await c.page.locator(".lib-row, .lib-note").first().waitFor({ timeout: 8000 });
+  if (ref) await c.page.locator(".pane").first().waitFor({ timeout: 8000 });
   await settle(c.page, 700);
 }
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
@@ -609,6 +610,12 @@ const CASES: Case[] = [
   // W10: the Chains editor on the mock's real draft answers (sweep/draftViews.json).
   { screen: "ng-library", variant: "list", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c) },
   { screen: "ng-library", variant: "list-blocked", data: "default", widths: [1280], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c) },
+  { screen: "ng-library", variant: "task", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c, "tasks.implementer") },
+  { screen: "ng-library", variant: "task-config", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c, "tasks.implementer");
+    await c.page.getByRole("tab", { name: "Config" }).click();
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
   { screen: "ng-chains", variant: "pane-gate", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
     await ngChains(c, "default");

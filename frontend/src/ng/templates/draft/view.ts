@@ -114,10 +114,26 @@ export const authoredAt = (r: Result, scope: Scope, path: string): Authored | nu
 /** The resolved component at a path (extends expanded), when the draft resolves. */
 export const resolvedAt = (r: Result, path: string): Authored | null => (r.resolved ? (path ? walk(r.resolved.chain.nodes as NodeA[], path) : r.resolved.chain) : null);
 
+const dig = (a: Authored | null | undefined, field: string) => field.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Authored)[k] : undefined), a);
+
+/** A library component's value: what it writes, else what the component it `extends` writes, up its bases.
+ *  The library has no `sources` (a bead asks for them); a task extends a task, a node a node. */
+function libraryValue(r: Result, scope: Scope, path: string, field: string): unknown {
+  const root = authoredChain(r, scope) as Record<string, Record<string, Authored> | undefined>;
+  let at = authoredAt(r, scope, path);
+  const section = path.startsWith("nodes.") && path.split(".").length === 2 ? "nodes" : "tasks";
+  for (let i = 0; i < 8 && at; i++) {
+    const v = dig(at, field);
+    if (v !== undefined) return v;
+    at = typeof at.extends === "string" ? root[section]?.[at.extends] ?? null : null;
+  }
+  return undefined;
+}
+
 /** A field's value at a path: the resolved one from `sources`, else what the file writes. */
 export function valueAt(r: Result, scope: Scope, path: string, field: string): unknown {
   const s = r.sources[path]?.[field];
   if (s) return s.value;
-  const a = resolvedAt(r, path) ?? authoredAt(r, scope, path);
-  return field.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Authored)[k] : undefined), a);
+  if (scope.area === "library") return libraryValue(r, scope, path, field);
+  return dig(resolvedAt(r, path) ?? authoredAt(r, scope, path), field);
 }

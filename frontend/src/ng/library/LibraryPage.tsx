@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useResizable, useWidth } from "../graph/useResizable";
 import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
@@ -9,9 +10,10 @@ import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDr
 import { counts } from "../templates/draft/view";
 import { YamlView } from "../templates/YamlView";
 import { LibraryList } from "./LibraryList";
+import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
 import { listRows } from "./rows";
-import { parseRef, refUrl, SECTION_LABEL, type PublishedLibrary, type Section } from "./types";
+import { parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
 
 /** The published library, for its used-by figures and its text (the YAML view's left side). */
@@ -38,6 +40,11 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [published] = usePublished();
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const [nextProblem, setNextProblem] = useState(0);
+  // The part of the component picked (a step or task inside a node); the component's root until one is.
+  const [sub, setSub] = useState<string | null>(null);
+  const [paneOpen, setPaneOpen] = useState(true);
+  const [frame, mainW] = useWidth();
+  const size = useResizable("library", mainW);
   const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null), [r, published]);
   const sel = parseRef(refId);
   const id = sel ? `${sel.section}.${sel.name}` : undefined;
@@ -48,6 +55,11 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   useEffect(() => {
     if (draft.error) showToast(draft.error);
   }, [draft.error]);
+  // A new component starts at its root, pane open.
+  useEffect(() => {
+    setSub(null);
+    setPaneOpen(true);
+  }, [id]);
 
   // ⌘Z undoes the last request, outside a text field.
   const undo = draft.undo;
@@ -106,7 +118,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         </Button>
       </HeaderActions>
       <LibraryList rows={rows} selected={id} onSelect={(x) => navigate(refUrl(x))} onAdd={add} />
-      <main className="lib-main">
+      <main className="lib-main" ref={frame}>
         {surface === "yaml" ? (
           <div className="lib-yaml">
             <YamlView draft={draft} scope={draft.scope} published={published === null ? undefined : published === "failed" ? null : published.text} />
@@ -114,8 +126,21 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         ) : (
           <div className="lib-canvas">
             <Button className="lib-back" onClick={() => navigate("/templates/library")}>← Library</Button>
-            {!refId ? <p>Pick a component.</p> : !sel || (rows.length > 0 && !row) ? <p>There is no component called {refId}.</p> : row ? <p><span className="lib-ref">{row.name}</span> · {SECTION_LABEL[row.section].toLowerCase()}</p> : null}
+            {!refId ? <p>Pick a component.</p> : !sel || (rows.length > 0 && !row) ? <p>There is no component called {refId}.</p> : null}
           </div>
+        )}
+        {surface === "canvas" && row && (
+          <LibraryPane
+            draft={draft}
+            path={sub ?? row.id}
+            uses={published === null || published === "failed" ? null : published.components.find((c) => c.id === row.id)?.used_by_paths ?? null}
+            open={paneOpen}
+            size={size}
+            goTo={(p) => { setSub(p === row.id ? null : p); setPaneOpen(true); }}
+            onLibrary={() => navigate("/templates/library")}
+            onCollapse={() => setPaneOpen(false)}
+            onExpand={() => setPaneOpen(true)}
+          />
         )}
       </main>
     </div>

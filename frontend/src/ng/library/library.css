@@ -52,3 +52,10 @@
   .lib-page:not([data-ref]) .lib-main { display: none; }
   .lib-back { display: inline-flex; }
 }
+
+/* The component pane's Used by block. */
+.lib-use { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 4px 0; font-size: 12px; }
+.lib-use-chain { font: 12px ui-monospace, Menlo, monospace; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.lib-use-chain:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.lib-use-path { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
+.lib-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; font-size: 10.5px; color: var(--text-sub); }
