@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { Button } from "../ui/Button";
@@ -6,7 +6,7 @@ import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Problem, Scope, StaleBody } from "./draft/types";
-import { chainFile, counts, liveChainFile } from "./draft/view";
+import { chainFile, counts, scopeFile } from "./draft/view";
 import { Head, Kv, Note } from "./panes/controls";
 import { problemText } from "./problems";
 import "./panes/panes.css";
@@ -30,7 +30,7 @@ const serverDiff = (diff: string) =>
 /** Review & publish's pane (Decisions §9 Publish): the draft's changes and
  *  problems, the YAML diff, who it affects; Discard confirms in place;
  *  Publish waits for zero problems. A 409 shows the server's diff (R45). */
-export function ReviewPane({ draft, scope, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone }: {
+export function ReviewPane({ draft, scope, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone, problemWhere }: {
   draft: ConfigDraft;
   scope: Scope;
   /** The published file's text; null for a chain never published. */
@@ -39,33 +39,40 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
   size: ReturnType<typeof useResizable>;
   onCollapse: () => void;
   onExpand: () => void;
-  onFix: (path: string) => void;
+  onFix: (path: string, problem: Problem) => void;
   onHighlight: (path: string) => void;
   onDone: () => void;
   /** After a publish that moved the chain's file (a rename) or deleted it: where to go. */
   onGone?: (to: string | null) => void;
+  /** Where a problem breaks, after its sentence: the Library names the chain, repo and component (Decisions §10). */
+  problemWhere?: (p: Problem) => ReactNode;
 }) {
   const [tab, setTab] = useState("changes");
   const [asking, setAsking] = useState(false);
   const [refused, setRefused] = useState<Problem[] | null>(null);
+  const lib = scope.area === "library";
   const chain = scope.key;
+  const noun = lib ? "the library" : chain;
   const view = draft.view!;
   const r = view.result;
   const n = counts(r);
   const blocked = n.problems > 0;
   const stale: StaleBody | null = draft.stale;
-  const live = liveChainFile(view.files, chain);
+  const live = scopeFile(view.files, scope);
   const text = view.files[live] ?? "";
   const problems = refused?.length ? refused : r.problems;
+  // How many of the changes reach each chain, as the server counts them.
+  const reach = new Map<string, number>();
+  for (const c of r.changes) for (const ch of c.reaches ?? []) reach.set(ch, (reach.get(ch) ?? 0) + 1);
 
   // A rename moves the file to chains/<new id>.yaml; delete_chain makes it null.
-  const renamedTo = live === chainFile(chain) ? chain : live.slice("chains/".length, -".yaml".length);
+  const renamedTo = lib || live === chainFile(chain) ? chain : live.slice("chains/".length, -".yaml".length);
   const deleted = view.files[live] === null;
   const gone = deleted || renamedTo !== chain;
   const publish = async () => {
     const a = await draft.publish({ reload: !gone });
     if (a.status === 200) {
-      showToast(deleted ? `Deleted ${chain}` : `Published ${renamedTo} · new items use it from now on`);
+      showToast(deleted ? `Deleted ${chain}` : `Published ${lib ? "the library" : renamedTo} · new items use it from now on`);
       if (gone) onGone?.(deleted ? null : renamedTo);
       else onDone();
     } else if (a.status === 422) setRefused((a.body as { problems?: Problem[] }).problems ?? null);
@@ -105,13 +112,13 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
 
   return (
     <Inspector
-      id="chains-review"
+      id={lib ? "library-review" : "chains-review"}
       open={open}
       size={size}
-      crumbs={[{ label: chain }]}
+      crumbs={[{ label: lib ? "Library" : chain }]}
       icon="git-compare"
       title={`Draft · ${plural(n.changes, "change")}`}
-      sub={stale ? "⚠ published since this draft began · your draft is kept" : blocked ? `✕ doesn't resolve · ${plural(n.problems, "problem")} block publishing` : "✓ resolves · ready to publish"}
+      sub={stale ? "⚠ published since this draft began · your draft is kept" : blocked ? `✕ ${lib ? "breaks something" : "doesn't resolve"} · ${plural(n.problems, "problem")} block publishing` : lib ? "✓ checked against every chain and repo · ready to publish" : "✓ resolves · ready to publish"}
       tabs={TABS}
       tab={tab}
       onTab={setTab}
@@ -135,7 +142,7 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
             <Button variant="primary" disabled={blocked} onClick={async () => {
               const a = await draft.keepMine();
               if (a.status === 200) {
-                showToast(`Published ${chain} over the newer version`);
+                showToast(`Published ${noun} over the newer version`);
                 onDone();
               }
             }}>Keep my version and publish</Button>
@@ -147,11 +154,13 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
         <>
           <Head>Problems</Head>
           {r.yaml_error && <div className="tpl-rv-prob"><span className="tpl-rv-path">{r.yaml_error.file}, line {r.yaml_error.line}</span><span>{r.yaml_error.message}</span></div>}
+          {lib && problems.some((p) => p.chain || p.repo) && <Note>A chain or repo problem is fixed in the library component it names.</Note>}
           {problems.map((p, i) => (
             <div key={i} className="tpl-rv-prob">
               <span className="tpl-rv-path">{p.path || chain}{p.field ? ` · ${p.field}` : ""}</span>
               <span>{problemText(p)}</span>
-              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path)}>Fix →</button>
+              {problemWhere?.(p)}
+              <button type="button" className="tpl-rv-fix" onClick={() => onFix(p.path, p)}>Fix →</button>
             </div>
           ))}
         </>
@@ -164,13 +173,23 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
             <button key={i} type="button" className="tpl-rv-change" onClick={() => onHighlight(c.path)}>
               <span className={`tpl-rv-sign is-${c.kind}`} aria-label={c.kind}>{c.kind === "add" ? "+" : c.kind === "remove" ? "−" : "~"}</span>
               <span className="tpl-rv-path">{c.path}</span>
-              <span className="tpl-rv-sum">{c.summary}</span>
+              <span className="tpl-rv-sum">{c.summary}{c.reaches?.length ? ` · reaches ${plural(c.reaches.length, "chain")}` : ""}</span>
             </button>
           ))}
           <Head>Who it affects</Head>
           <Kv k="new items" v="use this version once published" />
-          <Kv k="running" v={`${plural(r.impact.running ?? 0, "item")} keep the version they started on`} />
-          <Kv k="repos" v={r.impact.repos?.length ? `${r.impact.repos.join(", ")} default to it` : "none default to it"} mono={!!r.impact.repos?.length} />
+          {lib ? (
+            <>
+              <Kv k="chains" v={r.impact.chains?.length ? r.impact.chains.map((c) => `${c}${reach.get(c) ? ` · ${plural(reach.get(c)!, "change")}` : ""}`).join(", ") : "none"} mono={!!r.impact.chains?.length} muted={!r.impact.chains?.length} />
+              <Kv k="repos" v={r.impact.repos?.length ? `${r.impact.repos.join(", ")} name a changed profile` : "none name a changed profile"} mono={!!r.impact.repos?.length} muted={!r.impact.repos?.length} />
+              <Kv k="running" v="items keep the version they started on" />
+            </>
+          ) : (
+            <>
+              <Kv k="running" v={`${plural(r.impact.running ?? 0, "item")} keep the version they started on`} />
+              <Kv k="repos" v={r.impact.repos?.length ? `${r.impact.repos.join(", ")} default to it` : "none default to it"} mono={!!r.impact.repos?.length} />
+            </>
+          )}
         </>
       ) : published === undefined ? (
         <Note>Loading the published file…</Note>

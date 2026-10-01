@@ -9,12 +9,14 @@ import { showToast } from "../ui/Toast";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
 import { counts } from "../templates/draft/view";
 import { useBox } from "../templates/ChainsPage";
+import { ReviewPane } from "../templates/ReviewPane";
 import { DraftLibrary } from "../templates/useLibrary";
 import { YamlView } from "../templates/YamlView";
 import { LibraryCanvas } from "./LibraryCanvas";
 import { LibraryList } from "./LibraryList";
 import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
+import { ProblemWhere } from "./ProblemWhere";
 import { listRows } from "./rows";
 import { parseRef, refUrl, type PublishedLibrary, type Section } from "./types";
 import "./library.css";
@@ -40,7 +42,10 @@ export function LibraryPage() {
 function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraft }) {
   const navigate = useNavigate();
   const r = draft.view!.result;
-  const [published] = usePublished();
+  const [published, reloadPublished] = usePublished();
+  // Review & publish takes the pane's place (Decisions §10 Publish); the canvas stays.
+  const [review, setReview] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(true);
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const [nextProblem, setNextProblem] = useState(0);
   // The part of the component picked (a step or task inside a node), or null for the component itself, and
@@ -80,7 +85,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
     setPaneOpen(false);
     setCollapsed(true);
   };
-  const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
+  const reserve = size.overlay ? 0 : (review ? reviewOpen : paneOpen) ? size.width : 40;
   // A component the published library does not list (one just added) has no uses yet.
   const uses = published === null || published === "failed" ? null : published.components.find((c) => c.id === id)?.used_by_paths ?? [];
   // What the menus offer: the draft's own components, so one just added or renamed is there before it is published.
@@ -139,6 +144,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
         )}
       </HeaderTail>
       <HeaderActions>
+        {surface === "canvas" && <Button variant="primary" aria-pressed={review} onClick={() => { setReview((v) => !v); setReviewOpen(true); }}>Review &amp; publish</Button>}
         <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
           {surface === "yaml" ? "⇄ Canvas" : "YAML"}
         </Button>
@@ -150,7 +156,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
             <YamlView draft={draft} scope={draft.scope} published={published === null ? undefined : published === "failed" ? null : published.text} />
           </div>
         ) : (
-          <div className="lib-canvas">
+          <div className="lib-canvas" style={{ right: reserve }}>
             <Button className="lib-back" onClick={() => navigate("/templates/library")}>← Library</Button>
             {!refId ? <p>Pick a component.</p> : !sel || (rows.length > 0 && !row) ? <p>There is no component called {refId}.</p> : null}
           </div>
@@ -172,7 +178,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               onGoTo={(x) => navigate(refUrl(x))}
             />
             {uses && <p className="lib-used-line">{uses.length ? `used by ${[...new Set(uses.map((u) => u.chain))].join(", ")}` : "not used by any chain"}</p>}
-            <LibraryPane
+            {review ? null : <LibraryPane
               draft={draft}
               path={sub ?? row.id}
               uses={uses}
@@ -182,8 +188,28 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               onLibrary={() => navigate("/templates/library")}
               onCollapse={collapse}
               onExpand={() => expand()}
-            />
+            />}
           </>
+        )}
+        {surface === "canvas" && review && (
+          <ReviewPane
+            draft={draft}
+            scope={draft.scope}
+            published={published === null ? undefined : published === "failed" ? null : published.text}
+            open={reviewOpen}
+            size={size}
+            onCollapse={() => setReviewOpen(false)}
+            onExpand={() => setReviewOpen(true)}
+            onHighlight={(path) => { const c = path.split(".").slice(0, 2).join("."); setReview(false); if (rows.some((x) => x.id === c)) navigate(refUrl(c)); }}
+            onFix={(path, p) => {
+              // A problem is fixed in the library component it names, else the one its own path names.
+              const target = componentOf(p) ?? path.split(".").slice(0, 2).join(".");
+              setReview(false);
+              if (rows.some((x) => x.id === target)) navigate(refUrl(target));
+            }}
+            onDone={() => { setReview(false); void reloadPublished(); }}
+            problemWhere={(p) => <ProblemWhere p={p} />}
+          />
         )}
       </main>
     </div>

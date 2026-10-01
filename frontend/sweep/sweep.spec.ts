@@ -626,6 +626,18 @@ const CASES: Case[] = [
     await c.page.locator(".lib-section-row").nth(4).click();
     await settle(c.page, 300);
   } },
+  { screen: "ng-library", variant: "review", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: async (c) => {
+    await ngLibrary(c);
+    await c.page.getByRole("button", { name: /Review & publish/ }).click();
+    await c.page.getByRole("heading", { name: /Draft ·/ }).waitFor({ timeout: 8000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-library", variant: "review-clean", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c);
+    await c.page.getByRole("button", { name: /Review & publish/ }).click();
+    await c.page.getByRole("heading", { name: /Draft ·/ }).waitFor({ timeout: 8000 });
+    await settle(c.page, 300);
+  } },
   { screen: "ng-library", variant: "task-config", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
     await ngLibrary(c, "tasks.implementer");
     await c.page.getByRole("tab", { name: "Config" }).click();
