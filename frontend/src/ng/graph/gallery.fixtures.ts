@@ -1,3 +1,4 @@
+import type { ChainArc, ChainNode, Seam } from "./layout";
 import type { GlyphKind, GlyphState, GraphItem } from "./types";
 import type { GlyphSize } from "./NodeGlyph";
 
@@ -21,4 +22,38 @@ export const BADGES: { caption: string; kind?: GlyphKind; item: Omit<GraphItem, 
   { caption: "unknown icon", item: { icon: "no-such-icon", taskKind: "subprocess" } },
   { caption: "slot", kind: "slot", item: {} },
   { caption: "gate + attempt", kind: "gate", item: { state: "current", attempt: 2 } },
+];
+
+/** A 15-node chain mid-run: the fix loop on verification, a rebase arc, open seams after the current node. */
+export const CHAIN_15: ChainNode[] = [
+  { id: "intake", kind: "exec", icon: "inbox", state: "done", meta: "2m" },
+  { id: "spec", kind: "exec", icon: "sparkles", state: "done", meta: "6m" },
+  { id: "approve_spec", kind: "gate", state: "done", meta: "you" },
+  { id: "plan", kind: "exec", icon: "file-text", state: "done", meta: "4m" },
+  { id: "approve_plan", kind: "gate", state: "done", meta: "auto" },
+  { id: "implement", kind: "exec", icon: "layers", state: "done", meta: "38m", attempt: 2 },
+  { id: "verification", kind: "exec", icon: "shield-check", state: "current", sub: "2/3 · 10:42", attempt: 2, running: true },
+  { id: "code_review", kind: "exec", icon: "bot", state: "todo" },
+  { id: "review_gate", kind: "gate", state: "todo" },
+  { id: "docs", kind: "exec", icon: "scroll-text", state: "todo" },
+  { id: "security_scan", kind: "exec", icon: "shield", state: "todo" },
+  { id: "merge_request", kind: "exec", icon: "git-pull-request", state: "todo" },
+  { id: "mr_checks", kind: "exec", icon: "workflow", state: "todo" },
+  { id: "merge_gate", kind: "gate", state: "todo" },
+  { id: "close", kind: "exec", icon: "circle-dot", state: "todo" },
+];
+export const CHAIN_15_ARCS: ChainArc[] = [
+  { kind: "loop", node: "verification", tone: "active", label: "fix · round 2" },
+  { kind: "rebase", from: "merge_gate", to: "verification" },
+  { kind: "reject", from: "review_gate", to: "implement" },
+];
+export const CHAIN_15_SEAMS: Seam[] = [{ at: 8, open: true }, { at: 10, always: true }];
+
+/** A short chain that stopped: a capped node with an escalation, and a failed one. */
+export const CHAIN_STOPPED: ChainNode[] = [
+  { id: "intake", kind: "exec", icon: "inbox", state: "done", meta: "1m" },
+  { id: "implement", kind: "exec", icon: "layers", state: "current", capped: true, attempt: 3, attemptStopped: true, meta: "capped", metaTone: "red", esc: true },
+  { id: "verification", kind: "exec", icon: "shield-check", state: "failed", prob: true, meta: "failed", metaTone: "red" },
+  { id: "merge", kind: "gate", state: "todo" },
+  { id: "removed_step", kind: "exec", icon: "box", state: "ghost" },
 ];

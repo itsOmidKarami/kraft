@@ -51,3 +51,49 @@
 .zoom-btn { display: flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); cursor: pointer; }
 .zoom-btn:is(:hover, :focus-visible), .zoom-btn[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
 .zoom-pct { min-width: 38px; padding: 0 6px; font: 11px ui-monospace, Menlo, monospace; }
+
+/* Canvases (StageGraph, NodeGraph): docked into a positioned parent. */
+.canvas { position: absolute; inset: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; cursor: grab; touch-action: none; user-select: none; }
+.canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.canvas-svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.canvas-zoom { position: absolute; bottom: 12px; z-index: 4; }
+.edge { stroke: var(--border); stroke-width: 2; fill: none; }
+.edge.is-todo { stroke: var(--line); stroke-dasharray: 4 4; }
+.dot { fill: var(--border); }
+.dot.is-todo { fill: var(--line); }
+.arc path { stroke-width: 1.5; fill: none; }
+.arc path.is-dashed { stroke-dasharray: 4 3; }
+.arc.tone-idle path { stroke: var(--border); }
+.arc.tone-active path { stroke: var(--warn); }
+.arc.tone-red path, .arc.tone-reject path { stroke: var(--bad); }
+.arc-label { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; background: var(--bg); font-size: 10.5px; white-space: nowrap; color: var(--text-sub); pointer-events: none; }
+.arc-label.tone-active { color: var(--warn); }
+.arc-label.tone-red, .arc-label.tone-reject { color: var(--bad); }
+.arc-label.tone-reject { font-family: ui-monospace, Menlo, monospace; }
+.mark-start { position: absolute; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--border); color: var(--text-sub); display: flex; align-items: center; justify-content: center; font-size: 8px; background: var(--bg); }
+.mark-end { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); }
+
+/* A node or task: glyph, label, meta. Words sit on --bg so the dotted grid never lowers their contrast. */
+.graph-node { position: absolute; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.graph-node:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.graph-node:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
+.graph-label { padding: 0 3px; border-radius: 3px; background: var(--bg); text-align: center; line-height: 1.3; font: 400 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.graph-node.is-bold .graph-label { font-weight: 600; color: var(--text); }
+.graph-node.is-todo .graph-label { color: var(--text-muted); }
+.graph-node.is-ghost .graph-label { color: var(--text-muted); text-decoration: line-through; }
+.graph-node.is-ghost .glyph { opacity: .55; }
+.graph-node.is-add .graph-label { color: var(--ok); }
+.graph-node.is-bad .graph-label { color: var(--bad); }
+.graph-meta, .graph-sub { margin-top: -4px; padding: 0 3px; border-radius: 3px; background: var(--bg); font-size: 10.5px; white-space: nowrap; color: var(--text-muted); }
+.graph-meta.tone-red { color: var(--bad); }
+.graph-meta.tone-amber { color: var(--warn); }
+.graph-meta.tone-green { color: var(--ok); }
+.graph-sub { display: flex; align-items: center; gap: 5px; color: var(--text-sub); }
+.graph-sub-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--warn); }
+.graph-sub-dot.tone-muted { background: var(--text-muted); }
+
+/* Seams: the dashed green insert points, shown on hover and on focus as well (R6). */
+.seam { position: absolute; z-index: 2; width: 20px; height: 20px; box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; border: 1.5px dashed var(--ok); background: var(--bg); color: var(--ok); font: 600 13px/17px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.seam:is(:hover, :focus-visible), .seam.is-open, .seam.is-always { opacity: 1; }
+.seam:hover, .seam.is-open { background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
+.gallery-frame { position: relative; height: 320px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

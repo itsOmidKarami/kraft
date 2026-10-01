@@ -1,5 +1,7 @@
-import { BADGES, EXEC_STATES, GATE_STATES, SIZES } from "./gallery.fixtures";
+import { useState } from "react";
+import { BADGES, CHAIN_15, CHAIN_15_ARCS, CHAIN_15_SEAMS, CHAIN_STOPPED, EXEC_STATES, GATE_STATES, SIZES } from "./gallery.fixtures";
 import { NodeGlyph } from "./NodeGlyph";
+import { StageGraph } from "./StageGraph";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
 
@@ -7,6 +9,7 @@ const noop = () => {};
 
 /** /ng/_gallery, unlinked: every graph component and state, from fixtures only. */
 export function Gallery() {
+  const [sel, setSel] = useState("review_gate");
   return (
     <main className="gallery">
       <h1>Graph components</h1>
@@ -26,6 +29,15 @@ export function Gallery() {
           {BADGES.map((b) => (
             <div key={b.caption} className="gallery-cell"><NodeGlyph size="lg" kind={b.kind} {...b.item} /><span>{b.caption}</span></div>
           ))}
+        </div>
+      </section>
+      <section aria-labelledby="g-chain">
+        <h2 id="g-chain">StageGraph</h2>
+        <div className="gallery-frame">
+          <StageGraph name="default" nodes={CHAIN_15} selected={sel} onSelect={setSel} onOpen={setSel} arcs={sel === "review_gate" ? CHAIN_15_ARCS : CHAIN_15_ARCS.filter((a) => a.kind !== "reject")} seams={CHAIN_15_SEAMS} />
+        </div>
+        <div className="gallery-frame">
+          <StageGraph name="stopped" nodes={CHAIN_STOPPED} opening="current" />
         </div>
       </section>
       <section aria-labelledby="g-zoom">
