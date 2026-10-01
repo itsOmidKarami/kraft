@@ -98,6 +98,28 @@ def test_compare_base_to_latest_matches_the_whole_change(client, gated):
 
 
 @_REVIEW
+def test_compare_ignore_whitespace_agrees_across_files_counts_and_diff(client, gated):
+    wt = _worktree(client, gated)
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=wt, capture_output=True, text=True, check=True
+    ).stdout.split()
+    tracked = next(p for p in tracked if not p.startswith("."))
+    text = (wt / tracked).read_text()
+    (wt / tracked).write_text("    " + text.replace("\n", "\n    "))
+    url = f"/api/work-items/{gated}/compare"
+    params = {"from": "attempt:1", "to": "latest"}
+    plain = client.get(url, params=params).json()
+    quiet = client.get(url, params={**params, "ignore_whitespace": 1}).json()
+    assert plain["ignore_whitespace"] is False and quiet["ignore_whitespace"] is True
+    # the fake fix already edited the file for real; the indent on top shows only without -w
+    count = lambda body: sum(  # noqa: E731
+        f["insertions"] + f["deletions"] for f in body["files"] if f["path"] == tracked
+    )
+    assert count(quiet) < count(plain)
+    assert quiet["diff"].count("\n+") < plain["diff"].count("\n+")
+
+
+@_REVIEW
 def test_compare_rejects_bad_targets(client, gated):
     for params, code in [
         ({"from": "latest", "to": "base"}, 400),

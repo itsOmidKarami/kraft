@@ -49,7 +49,7 @@ def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
 
 
 @api_router.get("/work-items/{wid}/diff")
-async def get_work_item_diff(wid: str, request: Request):
+async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool = False):
     """The changes an agent made, for a reviewer with no filesystem access.
 
     Two ranges, kept apart (Kraft-nceo). `landed` is `base_ref..HEAD` -- what
@@ -73,6 +73,7 @@ async def get_work_item_diff(wid: str, request: Request):
             "diff": "",
             "untracked": [],
             "truncated": False,
+            "ignore_whitespace": ignore_whitespace,
             "landed": {"commits": [], "files": [], "diff": "", "truncated": False},
             "diff_max_bytes": DIFF_MAX_BYTES,
             "worktree_path": str(st.run_dirs.worktrees / wid),
@@ -89,8 +90,8 @@ async def get_work_item_diff(wid: str, request: Request):
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    change = review.read_change(worktree, "HEAD")
-    landed = review.read_change(worktree, base, head="HEAD")
+    change = review.read_change(worktree, "HEAD", ignore_whitespace=ignore_whitespace)
+    landed = review.read_change(worktree, base, head="HEAD", ignore_whitespace=ignore_whitespace)
     if change is None or landed is None:
         # None means git itself failed (and git_read has already logged the
         # command and stderr). Returning an empty diff here would be
@@ -111,6 +112,7 @@ async def get_work_item_diff(wid: str, request: Request):
         "diff": diff,
         "untracked": change.untracked,
         "truncated": truncated,
+        "ignore_whitespace": ignore_whitespace,
         "landed": {
             "commits": landed.commits,
             "files": landed.files,
@@ -150,7 +152,9 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
 
 
 @api_router.get("/work-items/{wid}/compare")
-async def compare_work_item(wid: str, request: Request, nodes: str | None = None):
+async def compare_work_item(
+    wid: str, request: Request, nodes: str | None = None, ignore_whitespace: bool = False
+):
     """Any two review targets of the pending gate, diffed (spec §2)."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
@@ -172,7 +176,9 @@ async def compare_work_item(wid: str, request: Request, nodes: str | None = None
     gate = board._pending_gate(st, wid)
     from_sha, from_base = _resolve_target(st, row, gate, frm)
     to_sha, to_base = _resolve_target(st, row, gate, to)
-    change = review.read_change(worktree, from_sha, head=to_sha)
+    change = review.read_change(
+        worktree, from_sha, head=to_sha, ignore_whitespace=ignore_whitespace
+    )
     if change is None:
         raise HTTPException(500, "git could not diff these two targets")
     runs = st.db.read(lambda c: store.node_run_rows(c, wid))
@@ -203,6 +209,7 @@ async def compare_work_item(wid: str, request: Request, nodes: str | None = None
         "diff": diff,
         "untracked": change.untracked,
         "truncated": truncated,
+        "ignore_whitespace": ignore_whitespace,
         "diff_max_bytes": DIFF_MAX_BYTES,
     }
 

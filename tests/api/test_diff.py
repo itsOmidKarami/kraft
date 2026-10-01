@@ -317,3 +317,27 @@ def test_diff_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
     else:
         assert r.status_code == 200, r.text
         assert "calc.py" in r.json()["files"][0]["path"]
+
+
+def test_diff_ignore_whitespace_drops_whitespace_only_files(client, seeded_item, worktree):
+    _write(worktree / "ws.txt", "a\nb\n")
+    _write(worktree / "doc.md", "a\nb\n")
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-m", "land"], cwd=worktree, check=True)
+    _write(worktree / "ws.txt", "  a\n  b\n")
+    _write(worktree / "doc.md", "  a\n  b\n")
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-m", "indent"], cwd=worktree, check=True)
+    _write(worktree / "calc.py", "x\n")
+    _write(worktree / "ws.txt", "    a\n    b\n")
+
+    url = f"/api/work-items/{seeded_item}/diff"
+    plain = client.get(url).json()
+    quiet = client.get(url, params={"ignore_whitespace": "true"}).json()
+
+    assert plain["ignore_whitespace"] is False and quiet["ignore_whitespace"] is True
+    assert "ws.txt" in {f["path"] for f in plain["files"]}
+    assert "ws.txt" not in {f["path"] for f in quiet["files"]}
+    assert "ws.txt" not in quiet["diff"]
+    assert "doc.md" in {f["path"] for f in plain["landed"]["files"]}
+    assert "doc.md" in {f["path"] for f in quiet["landed"]["files"]}  # added, not whitespace-only

@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import { artifactFor, diffFor, documentDetail, searchFor, type Scenario } from "./fixtures";
+import { artifactFor, compareFor, diffFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
@@ -86,6 +86,9 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(route, diffFor(m[1], S.variant));
+    if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
+      return json(route, compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? "")));
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)\/artifact$/))) {
       const b = S.bundles[m[1]];
       return b ? json(route, artifactFor(b.item, S.variant)) : json(route, { detail: "no artifact" }, 404);
