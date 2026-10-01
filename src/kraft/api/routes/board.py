@@ -698,9 +698,7 @@ def budget_cap(st, row) -> dict:
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, source = store.effective_work_item_cap(row, budget)
     since = store.local_midnight_utc()
-    spent_usd, daily_spent_usd = st.db.read(
-        lambda c: store.budget_spend(c, row["id"], since=since)
-    )
+    spent_usd, daily_spent_usd = st.db.read(lambda c: store.budget_spend(c, row["id"], since=since))
     return {
         "cap_usd": cap_usd,
         "source": source,
