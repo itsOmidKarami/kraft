@@ -3,6 +3,8 @@ import { repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
+import type { Applied } from "../draft/applied";
+import { appliedRows } from "../draft/AppliedRows";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 
@@ -100,12 +102,13 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
  *  Only what the API reports is drawn (Kraft-x8qzu: no running-time, wall-clock
  *  or token caps; Kraft-o114l: auto gate is read-only; Kraft-k3vq1: the budget
  *  override has no reset). */
-export function ChainConfig({ item, policy, reload, editBudget, onEditBudget }: { item: ItemDetail; policy: Policy | null; reload: () => void; editBudget: boolean; onEditBudget: (on: boolean) => void }) {
+export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, applied }: { item: ItemDetail; policy: Policy | null; reload: () => void; editBudget: boolean; onEditBudget: (on: boolean) => void; applied?: Record<string, Applied> }) {
   const [error, setError] = useState<string | null>(null);
   const cap = item.budget_cap;
   const daily = cap?.daily;
   const used = item.usage?.total;
   const overrides = Object.entries(item.node_overrides ?? {});
+  const draftRows = appliedRows(applied);
   const agent = (item as { agent_overrides?: Record<string, unknown> | null }).agent_overrides;
   const reset = async (body: Record<string, unknown>) => {
     setError(null);
@@ -135,7 +138,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget }: 
       </dl>
 
       <h3 className="ip-h">Changed for this item</h3>
-      {cap?.source !== "item" && !overrides.length && !(agent && Object.keys(agent).length) ? (
+      {cap?.source !== "item" && !overrides.length && !draftRows.length && !(agent && Object.keys(agent).length) ? (
         <p className="item-muted">Nothing changed. This item runs the chain and policy as frozen.</p>
       ) : (
         <ul className="ip-overrides">
@@ -146,6 +149,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget }: 
           {overrides.map(([node, o]) => (
             <li key={node}><span className="is-mono">{node}</span> {Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")} <button type="button" className="item-link" onClick={() => reset({ node_overrides: { [node]: {} } })}>reset</button></li>
           ))}
+          {draftRows.map((r) => <li key={r.path}><span className="is-mono">{r.path}</span> {r.text} <span className="item-muted">applied by the draft</span></li>)}
         </ul>
       )}
       {error && <p className="item-error" role="alert">{error}</p>}
