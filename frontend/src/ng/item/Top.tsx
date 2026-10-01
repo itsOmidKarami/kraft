@@ -1,10 +1,10 @@
+import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState } from "react";
 import * as api from "../../api";
 import { plainMarkdown } from "../../format";
 import type { DiffFile } from "../../types";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { goShipped } from "./header/ItemHeader";
 
 /** The title, edited in place (Decisions §2): Enter saves, Esc restores. */
 export function Title({ id, title, onSaved }: { id: string; title: string; onSaved: () => void }) {
@@ -124,7 +124,7 @@ export function DiffLine({ id, version }: { id: string; version: string }) {
     <p className="item-diffline">
       {files.length} {files.length === 1 ? "file" : "files"} <span className="item-add">+{add}</span> <span className="item-del">−{del}</span>
       <span aria-hidden> · </span>
-      <button type="button" className="item-link is-strong" onClick={() => goShipped(`/ng/work-items/${id}/review`)}>Review changes</button>
+      <Link className="item-link is-strong" to={`/work-items/${encodeURIComponent(id)}/review`}>Review changes</Link>
     </p>
   );
 }

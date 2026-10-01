@@ -24,11 +24,12 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
   const mid = (text: string, extra: Partial<Crumb> = {}): Crumb => ({ text, kind: "mid", ...extra });
 
   // Board › repo › bead id (else the short id), then the node in a node view
-  // (Decisions §1, §5, §14). The title is the page's own h1, never a crumb.
-  const wi = /^\/work-items\/([^/]+)(?:\/nodes\/([^/]+))?/.exec(pathname);
+  // (Decisions §1, §5, §14), or "Review changes" on the review page
+  // (prototype 326). The title is the page's own h1, never a crumb.
+  const wi = /^\/work-items\/([^/]+)(?:\/nodes\/([^/]+)|\/(review))?/.exec(pathname);
   if (wi) {
     const id = decodeURIComponent(wi[1]);
-    const node = wi[2] && decodeURIComponent(wi[2]);
+    const node = wi[2] ? decodeURIComponent(wi[2]) : wi[3] && "Review changes";
     const it = item(id);
     const name = it?.bead_id || shortId(id);
     const out: Crumb[] = [mid("Board", { to: "/" })];

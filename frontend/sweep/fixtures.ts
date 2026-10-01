@@ -559,7 +559,7 @@ ${variant === "long" ? "+    # " + "a very long line that never wraps because it
 export function fixTargetFor(gate: string | null, node?: string) {
   const chain = ["implementation", "verify", "review"];
   const at = node ? chain.indexOf(node) : 0;
-  return { gate, node: chain[Math.max(at, 0)], then: chain.slice(Math.max(at, 0) + 1), round: gate ? { n: 1, max: 3 } : null, reason: node ? "requested" : "gate" };
+  return { gate, node: chain[Math.max(at, 0)], then: chain.slice(Math.max(at, 0) + 1), round: gate ? { n: 1, max: 3 } : null, reason: node ? "requested" : gate ? "gate" : "current node" };
 }
 
 // The shape of GET /work-items/:id/compare. One whitespace-only file rides along

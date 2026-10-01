@@ -51,12 +51,8 @@ describe("ng Shell", () => {
     },
   );
 
-  it("renders an item path and an unknown path as placeholders without throwing", () => {
-    window.history.pushState({}, "", "/ng/work-items/abc/review?x=1");
-    const { unmount } = render(<App />);
-    expect(screen.getByRole("heading", { name: "Work item" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open it on the current UI ↗" })).toHaveAttribute("href", "/work-items/abc?x=1#tab=changes");
-    unmount();
+  // The review route was a placeholder until W8 built it (App.test.tsx covers it now).
+  it("renders an unknown path as the not-found placeholder without throwing", () => {
     window.history.pushState({}, "", "/ng/nope/at/all");
     render(<App />);
     expect(screen.getByRole("heading", { name: "Not found" })).toBeInTheDocument();

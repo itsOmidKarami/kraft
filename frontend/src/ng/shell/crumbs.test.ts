@@ -41,7 +41,10 @@ describe("crumbsFor", () => {
     expect(texts(`/work-items/${id}`)).toEqual(["Board", "f3e4f5f5…e0f79"]);
   });
 
-  it("in a node view, links the item back to its chain and ends in the node", () => {
+  it("in a node view and on the review page, links the item back to its chain and ends in the node or Review changes", () => {
+    const [, , onItem, review] = crumbsFor("/work-items/abc/review", () => ({ repo: "/r/x", title: "t", bead_id: "kraft-cb59" }));
+    expect(onItem).toMatchObject({ text: "kraft-cb59", kind: "mid", to: "/work-items/abc" });
+    expect(review).toMatchObject({ text: "Review changes", kind: "current" });
     const [, , itemCrumb, node] = crumbsFor("/work-items/abc/nodes/verification", () => ({ repo: "/r/x", title: "t", bead_id: "kraft-cb59" }));
     expect(itemCrumb).toMatchObject({ text: "kraft-cb59", kind: "mid", to: "/work-items/abc" });
     expect(node).toMatchObject({ text: "verification", kind: "current" });

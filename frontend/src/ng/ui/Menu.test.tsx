@@ -67,4 +67,28 @@ describe("ng Menu", () => {
     expect(screen.getByRole("menuitemradio", { name: /Repo/ })).toHaveTextContent("Repo4");
     expect(screen.getByText("Needs you always comes first.")).toBeInTheDocument();
   });
+
+  it("draws a one-of list (W8): radios with the chosen one ticked, a sub-line, a heading", () => {
+    render(
+      <Menu
+        label="Compare from"
+        trigger="Compare from base ▾"
+        triggerClass="word-btn"
+        heading="Compare from"
+        items={[
+          { label: "base", sub: "the item's starting point", checked: true, onSelect: () => {} },
+          { label: "your last review", sub: "No review submitted yet", checked: false, disabled: true, onSelect: () => {} },
+        ]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Compare from base ▾" });
+    expect(trigger).toHaveClass("word-btn");
+    fireEvent.click(trigger);
+    const [base, last] = screen.getAllByRole("menuitemradio");
+    expect(base).toHaveAttribute("aria-checked", "true");
+    expect(base).toHaveTextContent("the item's starting point");
+    expect(last).toHaveAttribute("aria-checked", "false");
+    expect(last).toBeDisabled();
+    expect(screen.getByText("Compare from")).toBeInTheDocument();
+  });
 });

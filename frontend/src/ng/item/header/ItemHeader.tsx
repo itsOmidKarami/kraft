@@ -50,6 +50,7 @@ type Props = {
  *  need you, elapsed, the badge, the main button with its panel, and ⋮. */
 export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
   const group = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
   const others = useStore((s) => Object.values(s.workItems).filter((w) => w.display_status === "needs_you" && w.id !== item.id).length);
   const hs = headerState(item);
   const [pausing, setPausing] = useState(false);
@@ -93,7 +94,7 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   const copy = (text: string, what: string) => navigator.clipboard?.writeText(text).then(() => showToast(`Copied ${what}`), () => {});
 
   const menu: MenuItem[] = [
-    { label: "Review changes", onSelect: () => goShipped(`/ng/work-items/${item.id}/review`) },
+    { label: "Review changes", onSelect: () => navigate(`/work-items/${encodeURIComponent(item.id)}/review`) },
     { label: "Item settings", onSelect: onSettings },
     { label: "Open worktree in editor", onSelect: () => void run(act.openWorktree(item.id)) },
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },

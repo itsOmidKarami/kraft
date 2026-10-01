@@ -1,5 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkerSession } from "../../types";
 import { PausedCard, StateCard } from "./StateCard";
@@ -10,7 +12,14 @@ afterEach(() => vi.unstubAllGlobals());
 const stop = (kind: string, over = {}) => ({ kind, node: "merge_request", task: "merge_request.open.open_draft", attempt: 3, resume_at: null, reason: "The forge refused.", facts: {}, ...over }) as never;
 const handlers = () => ({ reload: vi.fn(), onCancel: vi.fn(), onEscalate: vi.fn(), onDuplicate: vi.fn(), onOpenNode: vi.fn() });
 const posts = (calls: Call[]) => calls.filter((c) => c.method === "POST");
-const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...render(<StateCard item={detail(over)} {...h} />) });
+let where = "";
+const Where = () => {
+  const l = useLocation();
+  where = l.pathname + l.search;
+  return null;
+};
+const routed = (ui: ReactElement) => render(<MemoryRouter initialEntries={["/work-items/w1"]}>{ui}<Where /></MemoryRouter>);
+const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...routed(<StateCard item={detail(over)} {...h} />) });
 
 describe("StateCard", () => {
   it("failed: where, the reason, the facts sent, Retry from the task by its path", async () => {
@@ -73,6 +82,9 @@ describe("StateCard", () => {
     expect(card).toHaveTextContent("resolvedsearch/config.py");
     await userEvent.click(within(card).getByRole("button", { name: "Send back with guidance" }));
     expect(h.onEscalate).toHaveBeenCalled();
+    // Decisions §14: the review page on that node (W8).
+    await userEvent.click(within(card).getByRole("button", { name: "Review the conflicts" }));
+    expect(where).toBe("/work-items/w1/review?nodes=merge_request");
   });
 
   it("MR closed: who closed it, Reopen, a new MR from the node that opened it, and Cancel item…", async () => {
@@ -105,7 +117,7 @@ describe("StateCard", () => {
 
   it.each([["running", null], ["needs_you", "gate"], ["needs_you", "question"], ["needs_you", "cap"], ["done", null], ["paused", null]])("renders nothing for %s (%s)", (display_status, kind) => {
     stubFetch();
-    const { container } = render(<StateCard item={detail({ display_status: display_status as never, stop: kind ? stop(kind) : null })} {...handlers()} />);
+    const { container } = routed(<StateCard item={detail({ display_status: display_status as never, stop: kind ? stop(kind) : null })} {...handlers()} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

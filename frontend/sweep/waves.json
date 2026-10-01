@@ -206,5 +206,18 @@
       { "kind": "flow-completes", "match": "^flow-ng-" },
       { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-(board|board-peek|new-item|draft-item|archived)/" }
     ]
+  },
+  "ux2-W8": {
+    "title": "UX V2 review page and gate review",
+    "screens": ["ng-review", "ng-gate-review", "flow-ng-review-request-changes"],
+    "specs": ["sweep.spec.ts", "interactions.spec.ts"],
+    "rules": [
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(gate-)?review" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-(gate-)?review" },
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-(gate-)?review" },
+      { "kind": "no-console", "match": "^ng-(gate-)?review" },
+      { "kind": "flow-completes", "match": "^flow-ng-review" },
+      { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-(gate-)?review" }
+    ]
   }
 }

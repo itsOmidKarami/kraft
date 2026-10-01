@@ -1,6 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 import { NG_CHAINS, NG_REPOS, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
+import { ngThreads } from "./ngItems";
 
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
@@ -35,6 +36,22 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   let listReads = 0;
 
   const viewedMarks = new Set<string>();
+  // ux2-W8: review threads per item, seeded for a needs-gate /ng item on first read.
+  const threads: Record<string, any[]> = {};
+  // W5b's gate-pane thread (the bundle's) comes first, in the full thread shape, then W8's review set.
+  const threadsOf = (wid: string) =>
+    (threads[wid] ??= [
+      ...(S.bundles[wid]?.threads ?? []).map((t: any) => ({ anchor_sha: "9c8d7e6", resolved_at: null, draft: false, ...t, comments: t.comments.map((c: any) => ({ thread_id: t.id, review_id: "r1", attempt: null, suggestion: null, claim: null, draft: false, ...c })) })),
+      ...(S.bundles[wid]?.item.pending_gate === "final_review" && Object.values(S.ng).includes(wid)
+        ? ngThreads(wid, compareFor(wid, S.variant).files.map((f: { path: string }) => f.path).sort(treeOrder))
+        : []),
+    ]);
+  // The review tree's order: by folder, the top level last, so the seeded threads land on the file shown first.
+  const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "\uffff");
+  const treeOrder = (a: string, b: string) => dirOf(a).localeCompare(dirOf(b)) || a.localeCompare(b);
+  const findThread = (tid: string) => Object.values(threads).flat().find((t) => t.id === tid);
+  const findComment = (cid: string) => Object.values(threads).flat().flatMap((t) => t.comments).find((c) => c.id === cid);
+  let seq = 0;
   await page.route(/\/api\//, async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -128,7 +145,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(route, diffFor(m[1], S.variant));
-    if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/)) && method === "GET") return json(route, S.bundles[m[1]]?.threads ?? []);
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
       return json(route, compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
     }
@@ -136,6 +152,58 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const file = q.get("file") ?? "";
       viewedMarks[method === "PUT" ? "add" : "delete"](`${m[1]}|${file}`);
       return json(route, { file, to: q.get("to") ?? "latest", viewed: method === "PUT" });
+    }
+    /* ux2-W8: review threads and comments, kept for the test's life */
+    if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/))) {
+      const list = threadsOf(m[1]);
+      if (method === "GET") return json(route, list);
+      const b = req.postDataJSON() ?? {};
+      const id = `th-new${seq++}`;
+      const t = { id, work_item_id: m[1], gate: S.bundles[m[1]]?.item.pending_gate ?? null, node_id: b.node_id ?? null, file_path: b.file_path ?? null, side: b.side ?? null, start_line: b.start_line ?? null, end_line: b.end_line ?? null, anchor_sha: b.anchor_sha ?? "9c8d7e6", label: b.label ?? null, state: "open", resolved_at: null, created_at: "2026-09-13T10:09:00.000Z", draft: true,
+        comments: [{ id: `c-new${seq++}`, thread_id: id, review_id: null, author: "you", attempt: null, body: b.body, suggestion: b.suggestion ?? null, claim: null, created_at: "2026-09-13T10:09:00.000Z", draft: true }] };
+      list.push(t);
+      return json(route, t, 201);
+    }
+    if ((m = p.match(/^\/threads\/([^/]+)(?:\/(comments|resolve|reopen))?$/))) {
+      const t = findThread(m[1]);
+      if (!t) return json(route, { detail: `unknown thread ${m[1]}` }, 404);
+      const b = method === "GET" ? {} : req.postDataJSON() ?? {};
+      if (m[2] === "comments") {
+        const c = { id: `c-new${seq++}`, thread_id: t.id, review_id: null, author: "you", attempt: null, body: b.body, suggestion: b.suggestion ?? null, claim: null, created_at: "2026-09-13T10:09:00.000Z", draft: true };
+        t.comments.push(c);
+        return json(route, c, 201);
+      }
+      if (m[2]) return json(route, Object.assign(t, { state: m[2] === "resolve" ? "resolved" : "open" }));
+      if (method === "DELETE") { threads[t.work_item_id] = threads[t.work_item_id].filter((x) => x !== t); return route.fulfill({ status: 204 }); }
+      Object.assign(t.comments[0], { body: b.body ?? t.comments[0].body, suggestion: "suggestion" in b ? b.suggestion : t.comments[0].suggestion });
+      if ("label" in b) t.label = b.label;
+      return json(route, t);
+    }
+    // A submitted review publishes the drafts; request_changes and approve move the item as the gate call would.
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)(?:\/gates\/([^/]+))?\/review$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json(route, { detail: "work item not found" }, 404);
+      const it = b.item;
+      const { outcome } = req.postDataJSON() ?? {};
+      if (m[2] && it.pending_gate !== m[2]) return json(route, { detail: `gate '${m[2]}' is not pending` }, 409);
+      const list = threadsOf(m[1]);
+      if (outcome === "approve" && list.some((t) => t.label === "must_fix" && t.state !== "resolved"))
+        return json(route, { detail: `must-fix review threads are not resolved: ${list.filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id).join(", ")}` }, 409);
+      for (const t of list) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id: "r2" }); }
+      const gate = m[2] ?? null;
+      if (outcome === "comment") return json(route, { review_id: "r2", outcome, gate, reply_agent: !!gate });
+      const target = outcome === "approve" ? null : it.fix_target?.node ?? fixTargetFor(null).node;
+      Object.assign(it, { status: "active", display_status: "running", stop: null, pending_gate: null, gate_artifact: null, fix_target: null, attempts: [] });
+      if (target) it.current_node_id = target;
+      if (gate) return json(route, { id: it.id, status: "active" });
+      return json(route, { review_id: "r2", outcome, gate: null, target, target_reason: "current node", action: "rerun" });
+    }
+    if ((m = p.match(/^\/comments\/([^/]+)$/))) {
+      const c = findComment(m[1]);
+      if (!c) return json(route, { detail: `unknown comment ${m[1]}` }, 404);
+      const t = findThread(c.thread_id);
+      if (method === "DELETE") { t.comments = t.comments.filter((x: any) => x !== c); return route.fulfill({ status: 204 }); }
+      return json(route, Object.assign(c, { body: req.postDataJSON()?.body ?? c.body }));
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/fix-target$/))) {
       return json(route, fixTargetFor(S.bundles[m[1]]?.item.pending_gate ?? null, q.get("node") ?? undefined));

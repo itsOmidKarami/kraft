@@ -1,0 +1,90 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as api from "../../api";
+import type { CompareFile, ReviewThread } from "../../types";
+import * as http from "../http";
+import { GateReview } from "./GateReview";
+import { DEFAULT_PREFS } from "./prefs";
+import { ReviewPage } from "./ReviewPage";
+
+const DOC = { work_item_id: "w1", path: ".engineering/reviews/kraft-cb59.md", title: "Review brief", content: "## Summary\n\nAdds an `EmbeddingCache`.", truncated: false, artifact_max_bytes: 524288 };
+const FILES: CompareFile[] = [{ path: "search/cache.py", insertions: 9, deletions: 1, touched_by: ["implementation"], viewed: true }];
+const must = { id: "t1", label: "must_fix", state: "open", draft: false, file_path: "search/cache.py", comments: [] } as unknown as ReviewThread;
+
+afterEach(() => vi.restoreAllMocks());
+
+const overlay = (o: { threads?: ReviewThread[]; doc?: object } = {}) => {
+  vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: o.doc ?? DOC });
+  const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
+  render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
+  return p;
+};
+
+describe("GateReview", () => {
+  it("shows the gate's document beside the changes, viewed marks read-only", async () => {
+    overlay();
+    expect(await screen.findByText("Review brief")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByText("WAITING FOR YOU")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Viewed / })).toBeNull();
+  });
+
+  it("approves through the review route, or with the digest for a chain revision", async () => {
+    const p = overlay();
+    await screen.findByText("Review brief");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    expect(p.approve).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("sends a chain revision's digest to the gate's approve", async () => {
+    const p = overlay({ doc: { ...DOC, digest: "d1" } });
+    await screen.findByText("Review brief");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    const [path, init] = vi.mocked(http.request).mock.calls.at(-1)!;
+    expect([path, JSON.parse(init!.body as string)]).toEqual(["/work-items/w1/gates/final_review/approve", { digest: "d1" }]);
+    expect(p.approve).not.toHaveBeenCalled();
+    expect(p.onClose).toHaveBeenCalled();
+  });
+
+  it("keeps Approve off with an open must-fix; Request changes, a file and × go where they say", async () => {
+    const p = overlay({ threads: [must] });
+    await screen.findByText("Review brief");
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    expect(p.onRequestChanges).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "cache.py" }));
+    expect(p.onReviewChanges).toHaveBeenLastCalledWith("search/cache.py");
+    fireEvent.click(screen.getByRole("button", { name: "Review Changes" }));
+    expect(p.onReviewChanges).toHaveBeenLastCalledWith();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(p.onClose).toHaveBeenCalled();
+  });
+});
+
+describe("the overlay on the review page", () => {
+  const ITEM = { id: "w1", title: "t", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] }, attempts: [], pending_gate: "final_review", gate_artifact: "x.md", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" };
+  const open = async (search: string, o: object = {}) => {
+    vi.spyOn(api, "getWorkItem").mockResolvedValue({ ...ITEM, ...o } as never);
+    vi.spyOn(api, "getTheme").mockResolvedValue({ diff: DEFAULT_PREFS } as never);
+    vi.spyOn(http, "request").mockImplementation(async (p) => (String(p).includes("/artifact") ? { status: 200, body: DOC } : String(p).includes("/compare") ? { status: 200, body: { files: [], diff: "", untracked: [], to: { target: "latest", sha: null }, truncated: false } } : { status: 200, body: [] }));
+    const view = render(<MemoryRouter initialEntries={[`/work-items/w1/review${search}`]}><Routes><Route path="/work-items/:id/review" element={<ReviewPage />} /></Routes></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Review changes: t" });
+    return view;
+  };
+
+  it("opens only with doc=1, a pending gate and a document", async () => {
+    const a = await open("?doc=1");
+    expect(screen.getByRole("dialog", { name: "Gate review: final_review" })).toBeInTheDocument();
+    a.unmount();
+    const b = await open("");
+    expect(screen.queryByRole("dialog", { name: /Gate review/ })).toBeNull();
+    b.unmount();
+    const c = await open("?doc=1", { gate_artifact: null });
+    expect(screen.queryByRole("dialog", { name: /Gate review/ })).toBeNull();
+    c.unmount();
+    await open("?doc=1&gate=local_review");
+    expect(screen.queryByRole("dialog", { name: /Gate review/ })).toBeNull();
+  });
+});

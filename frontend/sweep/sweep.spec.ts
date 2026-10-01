@@ -152,6 +152,24 @@ const peekRow = (title: string) => async (p: Page) => {
 const checkRows = (titles: string[]) => async (p: Page) => {
   for (const t of titles) await p.getByRole("checkbox", { name: new RegExp(`^Select ${t}`) }).check();
 };
+/** The /ng review page on the needs-gate item. `settings`: Diff settings rows to click first (saved to the mock's theme). */
+async function ngReview(c: Ctx, opts: { sc?: string; tail?: string; side?: "pinned" | "rail"; settings?: string[]; then?: (p: Page) => Promise<void> } = {}) {
+  await ngItem(c, opts.sc ?? "needs-gate", { tail: `/review${opts.tail ?? ""}`, side: opts.side });
+  const p = c.page;
+  if (opts.settings?.length) {
+    await p.getByRole("button", { name: "Diff settings" }).click();
+    for (const name of opts.settings) await p.getByRole("menuitemradio", { name }).or(p.getByRole("menuitemcheckbox", { name })).click();
+    await p.keyboard.press("Escape");
+    await settle(p, 300);
+  }
+  if (opts.then) { await opts.then(p); await settle(p, 400); }
+}
+/** Pick new line 5 of the review's file by its number, open the composer with Enter, type. */
+async function ngComment(p: Page, text: string) {
+  await p.getByRole("button", { name: "Pick new line 5", exact: true }).first().click();
+  await p.getByRole("group", { name: /^Lines of / }).first().press("Enter");
+  await p.getByRole("textbox", { name: "Comment" }).fill(text);
+}
 /** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
   if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
@@ -450,6 +468,25 @@ const CASES: Case[] = [
   { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },
   { screen: "ng-item", variant: "cancel-card", data: "default", widths: [1280], run: (c) => ngItem(c, "mr-closed", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); await p.getByRole("menuitem", { name: /Cancel/ }).click(); await p.getByText(/stays on the ledger/).waitFor(); } }) },
   ...NG_SCENARIOS.map<Case>((sc) => ({ screen: "ng-item", variant: `${sc}-long`, data: "long", widths: [1280], run: (c) => ngItem(c, sc) })),
+
+  // ux2-W8: the review page and the gate review overlay.
+  { screen: "ng-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }, { short: true }], run: (c) => ngReview(c) },
+  { screen: "ng-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { side: "rail" }) },
+  { screen: "ng-review", variant: "tree-open", data: "default", widths: [768], run: (c) => ngReview(c, { side: "rail", then: async (p) => { await p.getByRole("button", { name: "Expand file list" }).click(); } }) },
+  { screen: "ng-review", variant: "menu-from", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: /^Compare from/ }).click(); } }) },
+  { screen: "ng-review", variant: "menu-nodes", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: /^Nodes:/ }).click(); } }) },
+  { screen: "ng-review", variant: "menu-settings", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: "Diff settings" }).click(); } }) },
+  { screen: "ng-review", variant: "split", data: "default", widths: [1280, 1920], run: (c) => ngReview(c, { settings: ["Side-by-side"] }) },
+  { screen: "ng-review", variant: "all-files", data: "default", widths: [1280], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
+  { screen: "ng-review", variant: "threads", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
+  { screen: "ng-review", variant: "composer", data: "default", widths: [1280], run: (c) => ngReview(c, { then: (p) => ngComment(p, "Name the fallback here, so the next reader does not have to find `default=0`.") }) },
+  { screen: "ng-review", variant: "suggest", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await ngComment(p, "Say what it returns:"); await p.getByRole("button", { name: "± Suggest change" }).click(); } }) },
+  { screen: "ng-review", variant: "finish", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: "Request changes" }).click(); } }) },
+  { screen: "ng-review", variant: "finish-gateless", data: "default", widths: [1280], run: (c) => ngReview(c, { sc: "running", then: async (p) => { await p.getByRole("button", { name: "Finish review" }).click(); await p.getByText("Why this node").waitFor(); } }) },
+  { screen: "ng-review", variant: "long", data: "long", widths: [1280, 1920], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
+  // The gate review overlay: the needs-gate item's document beside its changes (a draft pending, a must-fix open).
+  { screen: "ng-gate-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { tail: "?doc=1", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
+  { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
 
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },

@@ -47,6 +47,11 @@
 .menu-mark { flex: none; width: 10px; color: var(--text-sub); }
 .menu-hint { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--text-muted); }
 .menu-note { margin: 0; padding: 5px 10px 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted); }
+.menu-item:has(.menu-sub) { align-items: flex-start; }
+.menu-text { display: flex; flex-direction: column; gap: 1px; }
+.menu-sub { font-size: 11.5px; color: var(--text-muted); }
+.menu-item:disabled .menu-sub { color: var(--text-faint); }
+.menu-heading { padding: 6px 10px 4px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
 
 .dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px; overflow-y: auto; background: color-mix(in oklab, var(--side) 70%, transparent); }
 .dialog { width: min(480px, 100%); padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }

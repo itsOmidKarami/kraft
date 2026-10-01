@@ -190,6 +190,11 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
       ev("node_started", { node_id: "final_review" }, 1);
       ev("gate_requested", { node_id: "final_review", gate: "final_review" }, 0.2);
       item.status = "needs_human"; item.display_status = "needs_you"; item.pending_gate = "final_review";
+      // A re-review (ux2-W8): two attempts at the gate, and a review submitted on the first.
+      item.attempts = [{ n: 1, sha: "4d1e2f3", base_sha: "1a2b3c4", at: t(3) }, { n: 2, sha: "9c8d7e6", base_sha: "1a2b3c4", at: t(1.1) }];
+      item.last_review_sha = "4d1e2f3";
+      item.head_sha = "9c8d7e6";
+      item.fix_target = { gate: "final_review", node: "implementation", then: ["verification", "work_brief", "local_review", "merge_request", "mr_checks", "summary"], round: { n: 2, max: 3 } };
       item.gate_artifact = ".engineering/reviews/kraft-cb59-review.md";
       item.mr_ref = { number: 142, url: "https://github.com/acme/kraft-plugins/pull/142" };
       item.stop = stop("gate", null);
@@ -242,4 +247,27 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   item.usage = { total: { ...total, cost_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
   const threads = sc === "needs-gate" ? [{ id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: "search/cache.py", side: "new", start_line: 40, end_line: 44, label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: "cache has no size bound", created_at: t(90) }] }] : [];
   return { item, sessions, events, logs, threads };
+}
+
+/** ux2-W8: the review threads a needs-gate item starts with, on the first two
+ *  files of its comparison (`compareFor`), at lines its diff has: a must-fix
+ *  still open, a question an agent answered and claimed, a resolved nit, and
+ *  a draft of yours with a suggested change. */
+export function ngThreads(wid: string, files: string[]): any[] {
+  const [a, b = a] = files;
+  let n = 0;
+  const c = (author: string, body: string, o: Record<string, unknown> = {}) => ({ id: `c${wid.slice(0, 6)}${n++}`, review_id: author === "you" && o.draft ? null : "r1", author, attempt: null, body, suggestion: null, claim: null, created_at: "2026-09-13T09:40:00.000Z", draft: false, ...o });
+  const t = (id: string, file_path: string, side: string, start: number, end: number, label: string | null, state: string, comments: any[], draft = false) => {
+    for (const x of comments) x.thread_id = id;
+    return { id, work_item_id: wid, gate: "final_review", node_id: "implementation", file_path, side, start_line: start, end_line: end, anchor_sha: "9c8d7e6", label, state, resolved_at: state === "resolved" ? "2026-09-13T09:55:00.000Z" : null, created_at: "2026-09-13T09:40:00.000Z", comments, draft };
+  };
+  return [
+    t("th-must", a, "new", 4, 4, "must_fix", "open", [c("you", "`commits` can be empty: `max()` of an empty generator raises. The `default=0` covers it, but say so in the docstring.")]),
+    t("th-q", a, "new", 7, 8, "question", "claimed", [
+      c("you", "Why take the max of both signals instead of trusting the commit subjects?"),
+      c("implementation", "Reports lag the commits by one cycle, so the max is the safe reading; `test_progress` covers both orders.", { attempt: 2, claim: "answered" }),
+    ]),
+    t("th-nit", b, "old", 2, 2, "nit", "resolved", [c("you", "`Optional` is unused after this change.")]),
+    t("th-draft", a, "new", 5, 5, null, "open", [c("you", "Tighten the docstring:", { draft: true, suggestion: { start_line: 5, end_line: 5, replacement: '    """The highest task any report or commit subject names."""' } })], true),
+  ];
 }

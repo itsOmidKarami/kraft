@@ -1345,3 +1345,14 @@ Baseline: PR 1's (`main` `8e815bec`, 1253 cells, 192 flagged), so PR 1's 71 cell
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 1359 cells, 192 flagged (192 before), 0 newly flagged. 236 changed cells: the 106 new ones and shipped cells by wall-clock text only (largest 0.76%, `el-gate-card/gate-*-default@1100`); no cell changed size. The AppNav "Try the new UI" link (R11) is its own PR (`kraft/ux2-W5-link`).
 - **Allowlist entry 10:** the node view's one-line question banner (`.item-one-line`, Decisions §4) carries `data-allow-ellipsis` with the whole question in `title`; `checks.spec.ts` pins it both ways.
 - Mocks: `GET /work-items/{id}/threads` (one open thread on the needs-gate fixture).
+
+## ux2-W8 — review page and gate review (`ux2/W8`)
+
+Baseline on `main` `7bfd54d8`: 1324 cells, 192 flagged. Full notes: `e2e-shots/DIFF-ux2-W8.md` (gitignored, local).
+
+- `node sweep/wave.mjs ux2-W8`: **7/7 rules pass**, 41 cells in scope, all new: `ng-review/default` at 768, 1024, 1280, 1920 (`~light`, `~h700`); `tree-open@768`; `menu-from`, `menu-nodes`, `menu-settings`; `split`, `all-files`, `long` (1280, 1920); `threads` (+light), `composer`, `suggest`; `finish` (1280, 1920, light), `finish-gateless`; `ng-gate-review/default` at 768–1920 and light; flow `flow-ng-review-request-changes`.
+- `node sweep/wave.mjs all` (after rebasing onto #351/#353): **1/1 rules pass**, 1463 cells, 235 flagged, 0 newly flagged; 27 flows, 238 flow rows (the flows file did not parse on main: W6's `ng-composer-create` lacked its closing `] },`, fixed here). 156 shipped cells changed: wall-clock text (≤1.1%), plus the log-maximize wheel step (scroll position in a streaming log).
+- **Rebase:** one `/threads` mock serves W5b's gate-pane thread and W8's review set (W5b's static route had hidden W8's).
+- **Fixtures and mocks:** the needs-gate /ng item is a re-review (two gate attempts, a last review, `fix_target`); review threads and comments with their routes, seeded on first read; item and gate review submission publishes drafts and moves the item on request_changes/approve. The shipped UI calls none of them.
+- **Found by the sweep and fixed:** line numbers, counts, tags and outcome sub-lines under 4.5:1; the hidden page heading read as clipped (now `overflow: clip`); threads and lines past the column's edge (now per-file sideways scroll, wrap under 1024); empty number buttons with no height (`min-height: 1lh`) so a click never landed; keys typed in the composer taken as diff shortcuts (Enter, `c`, `n`, `p`).
+- Real run on `just dev` (fake agents): a must-fix thread and Request changes at `spec_approval` rejected the gate, `spec` ran again, and the gate came back; no console errors.

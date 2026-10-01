@@ -1,5 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../../types";
 import { detail, stubFetch, V1 } from "../testkit";
@@ -9,6 +11,15 @@ afterEach(() => vi.unstubAllGlobals());
 const gate = V1[1];
 const pending = detail({ current_node_id: "plan_approval", pending_gate: "plan_approval", gate_artifact: ".engineering/plans/p.md", display_status: "needs_you" });
 const approved = (by: string): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate: "plan_approval", by }, node_id: "plan_approval", created_at: "t" });
+
+let where = "";
+const Where = () => {
+  const l = useLocation();
+  where = l.pathname + l.search;
+  return null;
+};
+// The footer navigates (W8's review page), so it renders inside a router.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter initialEntries={["/work-items/w1"]}>{ui}<Where /></MemoryRouter>);
 
 describe("GateFooter", () => {
   it("approves the gate", async () => {
@@ -37,6 +48,16 @@ describe("GateFooter", () => {
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={onRead} />);
     await userEvent.click(screen.getByRole("button", { name: /Read p\.md/ }));
     expect(onRead).toHaveBeenCalled();
+  });
+
+  it("reviews changes on the review page: the gate's document first while it is pending (W8)", async () => {
+    const { unmount } = render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(where).toBe("/work-items/w1/review?gate=plan_approval&doc=1");
+    unmount();
+    render(<GateFooter item={detail({ gate_artifact: null })} gate={gate} reload={() => {}} onRead={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(where).toBe("/work-items/w1/review?gate=plan_approval");
   });
 });
 

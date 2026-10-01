@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { ChainNode, KraftEvent } from "../../../types";
 import { FileText } from "../../icons";
 import { Button } from "../../ui/Button";
 import { request } from "../../http";
 import { act } from "../actions";
 import { rejectTarget } from "../graph";
-import { goShipped } from "../header/ItemHeader";
 import { totals, useDiffFiles } from "../Top";
 import type { ItemDetail } from "../useItem";
 
@@ -58,6 +58,7 @@ export function GateBody({ item, gate, events }: { item: ItemDetail; gate: Chain
 
 /** The decision card in the gate's footer (Decisions §5: a gate can be approved from the chain). */
 export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; gate: ChainNode; reload: () => void; onRead: () => void }) {
+  const navigate = useNavigate();
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -87,7 +88,8 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
   return (
     <div className="ip-footer">
       {item.gate_artifact && <Button onClick={onRead}><FileText size={12} aria-hidden /> Read {item.gate_artifact.split("/").pop()}</Button>}
-      <Button onClick={() => goShipped(`/ng/work-items/${item.id}/review`)}>Review changes</Button>
+      {/* The review page (W8): the gate review overlay first when the gate has a document (it opens only at the pending gate). */}
+      <Button onClick={() => navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(gate.id)}${item.gate_artifact ? "&doc=1" : ""}`)}>Review changes</Button>
       <Button variant="primary" disabled={busy} onClick={() => run(act.approve(item.id, gate.id))}>Approve</Button>
       <Button disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
       {error && <span className="item-error" role="alert">{error}</span>}
