@@ -40,10 +40,19 @@ function shoot() {
   const env = { ...process.env };
   if (screens) env.SWEEP_SCREEN = screens.map((s) => s.replace(/\*$/, "")).join(",");
   const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
+  const MANIFEST = path.join(OUT, "manifest.jsonl");
+  const rows = () => (fs.existsSync(MANIFEST) ? fs.readFileSync(MANIFEST, "utf8").split("\n").filter(Boolean).length : 0);
+  const dead = [];
   for (const spec of specs) {
+    const before = rows();
     try { execSync(`npx playwright test -c sweep/playwright.sweep.config.ts sweep/${spec}`, { stdio: "inherit", env }); }
-    catch { /* the specs never assert; a non-zero exit is a harness crash and is visible in the list reporter */ }
+    catch {
+      // The specs never assert, so a spec that ran and recorded setupErrors exits non-zero and is still data.
+      // One that wrote no row at all never ran (it did not parse, or crashed on load): a skip must not read as a pass.
+      if (rows() === before) dead.push(spec);
+    }
   }
+  if (dead.length) { console.error(`sweep spec(s) exited non-zero and wrote no manifest rows: ${dead.join(", ")} -- see the playwright output above`); process.exit(1); }
 }
 
 if (BASELINE) {

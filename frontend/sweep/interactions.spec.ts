@@ -58,7 +58,7 @@ const searchBox = (p: Page) => p.getByRole("combobox", { name: "Search" });
 
 const FLOWS: Flow[] = [
   { name: "peek-open-close", widths: [1280, 390], start: board, steps: [
-    { name: "click-row", run: async (p, S) => { const row = p.locator('[data-testid="board-card"]').first(); if (p.viewportSize()!.width < 768) { const b = (await row.boundingBox())!; await p.mouse.move(b.x + 40, b.y + 20); await p.mouse.down(); await p.waitForTimeout(650); await p.mouse.up(); } else await row.click(); } },
+    { name: "click-row", run: async (p) => { const row = p.locator('[data-testid="board-card"]').first(); if (p.viewportSize()!.width < 768) { const b = (await row.boundingBox())!; await p.mouse.move(b.x + 40, b.y + 20); await p.mouse.down(); await p.waitForTimeout(650); await p.mouse.up(); } else await row.click(); } },
     { name: "peek-scroll-bottom", run: async (p) => { await p.getByLabel("peek").evaluate((el) => { el.scrollTop = el.scrollHeight; }); } },
     { name: "esc-closes", run: key("Escape") },
     { name: "second-row", run: async (p) => { await p.locator('[data-testid="board-card"]').nth(1).click(); } },
