@@ -1401,3 +1401,14 @@ On top of #363. Baseline retaken on `main` `8120f6262` after #364 froze the page
 - **Mock:** fragments dumped from the view's model, change_base's preview, and the real shipped library for `/ng` referers (the shipped Library page keeps the scenario's).
 - **Beads:** Kraft-x2q3y (step-label ellipsis, W3), Kraft-xjv0h (danger hover contrast, W1); Kraft-osck9 fixed here.
 - **Process:** a first baseline was killed by another session's `pkill -f "wave.mjs all --baseline"` and its results were discarded; the whole run was redone from the baseline step.
+
+## ux2-W11 — Item chain draft (`ux2/W11`)
+
+Baseline shot on `ux2/W11` with the item-draft mock switched off, `SWEEP_PORT=4391` for the baseline and every run (the controller allowed a 439x port while 4317 was held): 1520 cells, 238 flagged. W5's `/ng` item cells are therefore identical to `main`'s. Full notes: `e2e-shots/DIFF-ux2-W11.md`.
+
+- `node sweep/wave.mjs ux2-W11`: **7/7 rules pass** (no contrast, offscreen, clipped-v or console flag on `^ng-item`; the three flows complete; nestedScrollers ≤ 2).
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 0 newly flagged, 1550 cells. 30 are new (`ng-item-draft/*`, 3 flows); no existing cell changed beyond 1–2 pixels of noise on 13 shipped cells and `flow-pause-steer-resume/04-submit` (0.17%, clock text). No `ng-*` cell moved.
+- **New screen:** `ng-item-draft` (changes, problems, passed, apply, apply-blocked, seam-menu, config-edit, applied, leave); flows `flow-ng-item-draft-add-node`, `-apply`, `-leave`. **New key:** `ux2-W11`.
+- **Mock:** W9's item-draft mock answered a non-empty draft for every item, which would have drawn a draft on every `ng-item` cell. It is now stateful and **opt-in** (`MockOptions.itemDraft`: `none`, `changes`, `problems`, `passed`, `applied`); unset, an item has no draft. It reimplements the server's `passed` rule and answers PUT, DELETE and apply (200, 409, 422, 404), and serves two library nodes while a case sets it.
+- **Found by the sweep and fixed:** at 1024 the header's tail overlapped the Review button (chip, badge and the item's own actions are 100px too wide), so under 1280 the chip gives way to the count on the button and the badge shortens; the leave guard missed the Board crumb (`href="/ng"`, no slash); the draft's problem text on its tinted block was 4.36:1 and the hints 3.04:1, now `--text` and `--text-muted`.
+- **Exit test on a real server** (throwaway `KRAFT_HOME` outside `/tmp`, port 8798, fake agent): see the PR body.
