@@ -1,6 +1,6 @@
 {
   "title": "UX V2 fix: an item whose worktree is gone (Kraft-9d8b2.7)",
-  "screens": ["ng-item/kebab-no-worktree"],
+  "screens": ["ng-item"],
   "specs": ["sweep.spec.ts"],
   "rules": [
     { "kind": "no-flag", "flag": "contrast", "match": "^ng-item/kebab-no-worktree" },

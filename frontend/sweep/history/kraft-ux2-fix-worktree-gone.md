@@ -1,11 +1,9 @@
 # ux2-fix-worktree-gone · an item whose worktree is gone (Kraft-9d8b2.7)
 
-Branch `kraft/ux2-fix-worktree-gone`, on `8280bc3b3`. **Sweep port: 4394.**
+Branch `kraft/ux2-fix-worktree-gone`, on `f07344fd6` (the sweep split, #383). **Sweep port: 4394.**
 
-Baseline: `node sweep/wave.mjs ux2-W5 --baseline` on this worktree before the cell and the mock flag existed.
+The cell is `cases/ux2-fix-worktree-gone.ts`, its rules `waves/ux2-fix-worktree-gone.json`.
 
-## `node sweep/wave.mjs ux2-W5`
+## `node sweep/wave.mjs ux2-fix-worktree-gone`
 
-7/7 rules pass · 1 changed · 0 cleared · 0 regressions. The one change is the new cell `ng-item/kebab-no-worktree@1280`: the item menu open on a running item whose detail says `worktree_exists: false`, "Open worktree in editor" greyed with "worktree removed · Retry recreates it" under it.
-
-The cell sits in `sweep/sweep.spec.ts` beside `ng-item/kebab`: `sweep/cases/` and `sweep/waves/` are not on main yet (the sweep split), so no per-PR case or rules file.
+5/5 rules pass · 0 regressions. The wave's screen is `ng-item`, so it re-shoots the 100 existing `ng-item` cells with no baseline for this branch: "100 changed" means unbaselined, not changed. The new cell is `ng-item/kebab-no-worktree@1280`: the item menu open on a running item whose detail says `worktree_exists: false`, "Open worktree in editor" greyed with "worktree removed · Retry recreates it" under it. Its four rules (contrast, offscreen, clipped-v, no console errors) pass.
