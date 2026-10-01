@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 import { Board } from "./board/Board";
 import { Analytics } from "./analytics/Analytics";
 import { Item } from "./item/Item";
+import { More } from "./more/More";
 import { Search } from "./search/Search";
 import { GateReviewRoute } from "./review/GateReview";
 import { NewItem } from "./new/NewItem";
@@ -36,7 +37,7 @@ export function PhoneApp() {
           <Route path="/" element={<Board />} />
           <Route path="/search" element={<Search />} />
           <Route path="/analytics" element={<Analytics />} />
-          <Route path="/more" element={<Soon title="More" />} />
+          <Route path="/more" element={<More />} />
           <Route path="/work-items/new" element={<NewItem />} />
           <Route path="/work-items/:id" element={<Item />} />
           <Route path="/work-items/:id/nodes/:node" element={<NodeRoute />} />

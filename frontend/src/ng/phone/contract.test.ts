@@ -41,7 +41,10 @@ const ALLOWED = [
   "templates/draft/useConfigDraft",
   "templates/draft/draftApi",
   "templates/draft/types",
-  "apply/store",
+  "templates/draft/view", // counts(), the pure helpers
+  "templates/problems", // problemText
+  "shell/useDraftCounts", // the draft dots of More
+  "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
   "shell/routes", // the list of /ng pages, as data: Search's Go to rows
 ];
 
@@ -51,7 +54,7 @@ const src = join(ng, "..");
 
 const sources = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) && !e.name.includes(".test.") ? [join(dir, e.name)] : [],
+    e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) && !e.name.includes(".test.") && !e.name.startsWith("testkit") ? [join(dir, e.name)] : [],
   );
 
 /** Every relative import of a file that leaves `ng/phone` for another part of `ng/`, or reaches `deriveState`. */
@@ -88,8 +91,9 @@ describe("ng/phone imports", () => {
 });
 
 describe("the apply restart call", () => {
-  it("has no call site in ng/phone yet (K adds the one, behind a confirm)", () => {
-    const hits = sources(join(ng, "phone")).filter((f) => readFileSync(f, "utf-8").includes("apply/restart"));
-    expect(hits.map((f) => relative(ng, f))).toEqual([]);
+  it("is made from one place in ng/phone, More, behind its own confirm", () => {
+    const hits = sources(join(ng, "phone")).filter((f) => /runRestart\(/.test(readFileSync(f, "utf-8")));
+    expect(hits.map((f) => relative(ng, f))).toEqual([join("phone", "more", "More.tsx")]);
+    expect(sources(join(ng, "phone")).filter((f) => readFileSync(f, "utf-8").includes("/apply/restart"))).toEqual([]);
   });
 });
