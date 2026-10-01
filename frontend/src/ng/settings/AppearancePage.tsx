@@ -3,6 +3,7 @@ import * as api from "../../api";
 import type { Accent, ColourAmount, Surface, Theme, ThemeMode } from "../../types";
 import { applyTheme, lookOf } from "../theme/applyTheme";
 import { ACCENTS, AMOUNTS, resolveMode, SURFACES, title } from "../theme/looks";
+import { HeaderActions } from "../shell/HeaderActions";
 import { ThemeCard } from "../theme/ThemeCard";
 import { Segmented } from "../ui/Segmented";
 import "./settings.css";
@@ -27,7 +28,7 @@ export function AppearancePage() {
     if (theme) applyTheme(lookOf(theme));
   }, [theme]);
 
-  if (!theme) return <main className="ng-settings">{error && <p role="alert">{error}</p>}</main>;
+  if (!theme) return <div className="ng-settings">{error && <p role="alert">{error}</p>}</div>;
 
   const surface = theme.surface ?? "graphite";
   const amount = theme.colour_amount ?? "subtle";
@@ -53,11 +54,8 @@ export function AppearancePage() {
   const setAmount = (v: ColourAmount) => save(v === "mono" ? { colour_amount: v, accent: "none" } : { colour_amount: v });
 
   return (
-    <main className="ng-settings">
-      <header className="ng-settings-head">
-        <span className="crumbs">Settings › Appearance</span>
-        <span className="saved-note">saved on change</span>
-      </header>
+    <div className="ng-settings">
+      <HeaderActions><span className="saved-note">saved on change</span></HeaderActions>
       <div className="appearance">
         <h1>Appearance</h1>
         <p className="lede">The choice applies at once and is kept in theme.yaml.</p>
@@ -106,6 +104,6 @@ export function AppearancePage() {
           </section>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

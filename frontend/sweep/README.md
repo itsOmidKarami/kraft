@@ -38,7 +38,7 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 
 ### `data-allow-ellipsis` — an allowlist, not a style
 
-`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these seven, each with its own `checks.spec.ts` case:
+`clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these nine, each with its own `checks.spec.ts` case:
 
 1. `.doc-path` — a document's path, cut from the left (W10.D in the Documents list; since W12.2 the document pane header's path line)
 2. `.detail-meta-part` — the item header's meta line (W11 · A.1)
@@ -47,6 +47,8 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 5. the peek header's id / meta line (W11 · I)
 6. `.app-header-crumb-current` — the item title crumb in the app header (W12.1)
 7. `.doc-modal-name` — the document pane header's title (W12.2)
+8. `.ng-crumb-repo` — the repo crumb of the /ng header, which shrinks first (UX V2 W2, brief Decided 11)
+9. `.ng-crumb-current` — the item title crumb of the /ng header, which shrinks last (UX V2 W2, brief Decided 11)
 
 The element must carry its full text in `title`. Anything else that ellipsizes still fails the check; a new use needs a decision first.
 
@@ -82,6 +84,8 @@ When a case records `setupError`, fix the selector or fixture in `sweep/`, never
 
 The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the keys `ux2-W<n>` in `waves.json` (the plain `W0`–`W14` keys are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
 
+W2 screens: `ng-shell` (frame, sidebar pinned/rail/revealed), `ng-search` (the ⌘K overlay), `ng-login` (sign-in; the mock's `login` option picks the 401 or 429 answer, and the clock is fixed so the countdown reads the same), `ng-firstrun` (the board with no repo; the page clock is installed after load so the probe rows' reveal is stepped by the cell), and the flows `flow-ng-search-keyboard`, `flow-ng-sidebar-pin` (1280) and `flow-ng-sidebar-rail` (1024). Flow steps assert; a failed assertion is that step's error, which `flow-completes` reports.
+
 ## History and briefs
 
 - `sweep/HISTORY.md`: the receipts of W0–W14. For each wave: its rules, the cells it changed, cleared or regressed, its commits, open questions and MRs. A new wave appends here.
@@ -94,4 +98,4 @@ These stay flagged on purpose; do not "fix" them:
 
 - `nested-scroll` = 2 on item pages: the inspector and the right pane are two independent scrollers (the model).
 - `console` on `login/`: the 401 before sign-in, until the backend's `authenticated` field lands (Kraft-yx79s).
-- `ellipsis` on the `data-allow-ellipsis` cells listed above. Only those seven elements may carry the attribute.
+- `ellipsis` on the `data-allow-ellipsis` cells listed above. Only those nine elements may carry the attribute.

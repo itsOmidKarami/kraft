@@ -4,6 +4,8 @@ import { artifactFor, diffFor, documentDetail, searchFor, type Scenario } from "
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
   locked?: boolean;
+  /** What POST /login answers while locked: 200, a 401, or a 429 with Retry-After (default 200). */
+  login?: "ok" | "wrong" | "locked";
 }
 
 /** A chain file as its author would write it: one mapping per node, nulls left out. */
@@ -32,7 +34,11 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
 
     if (p === "/health") return json(route, S.settings.health);
     if (opts.locked) {
-      if (p === "/login" && method === "POST") return json(route, { ok: true });
+      if (p === "/login" && method === "POST") {
+        if (opts.login === "wrong") return json(route, { detail: "Wrong password." }, 401);
+        if (opts.login === "locked") return route.fulfill({ status: 429, contentType: "application/json", headers: { "Retry-After": "125" }, body: JSON.stringify({ detail: "Too many failed logins. Try again later." }) });
+        return json(route, { ok: true });
+      }
       return json(route, { detail: "unauthenticated" }, 401);
     }
 

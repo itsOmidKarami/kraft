@@ -1291,3 +1291,13 @@ Baseline on `main` `b08f1287` (built into its own dist, `SWEEP_DIST`): 1192 cell
 - **New screen:** `ng-gallery` (`/ng/_gallery`, fixtures only): default at 1280 and 1920 in both modes, mono and full at 1280, overlay at 768, keyboard at 1280. **New key:** `ux2-W3`.
 - **Harness (R41):** `checks.ts`'s offscreen check exempts what a `data-pan` canvas clips while the canvas itself is in view, as it does for a sideways scroll strip; two `checks.spec.ts` cases, and `ng/css.contract.test.ts` keeps `data-pan` inside `src/ng/graph/`.
 - **Process:** never build into `frontend/dist` while a sweep from the same worktree is serving it. The first baseline here was shot while measuring builds into that dist and was thrown away; every later shot used `SWEEP_DIST`.
+
+## ux2-W2 — the shell (`ux2/W2`)
+
+Baseline: the ux2-W1 snapshot; rebased onto main with W3 (179 flagged before). Full notes: `e2e-shots/DIFF-ux2-W2.md` (gitignored, local).
+
+- `node sweep/wave.mjs ux2-W2`: **6/6 rules pass**, 61 cells in scope. The console rule skips `ng-login/` and `ng-search/docs-error`, whose cells provoke a 401 and a 500 on purpose (the browser logs those itself; the shipped `login/` cells are exempt the same way).
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1256 cells, 193 flagged (179 before), 0 newly flagged. The 14 new flagged cells are all `ng-`: 8 `ng-login` (the deliberate 401), `ng-search/docs-error` (the deliberate 500), 4 `ng-search/results` (a long result title ellipsised by design), and `ng-shell/board-stub@390` (the shipped board's own chips, as `stub@390` since W0).
+- **1114 cells identical to the baseline; 142 changed:** the new W2 cells, W3's `ng-gallery` cells, plus shipped cells moved by wall-clock text only. The largest shipped delta is 0.2% (`composer/escalate-*@390`).
+- **New screens:** `ng-search`, `ng-login`, `ng-firstrun` (steps 1-3, probing, probed, light, 1024, 1920), `ng-shell` additions. **New flows:** `flow-ng-search-keyboard`, `flow-ng-sidebar-pin`, `flow-ng-sidebar-rail`. **New rule:** `flow-completes` on `^flow-ng-`.
+- Sidebar width is read with `expect.poll`: it animates, and a read straight after a toggle saw the old width.

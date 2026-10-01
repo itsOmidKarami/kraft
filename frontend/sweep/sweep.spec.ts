@@ -1,7 +1,7 @@
 import { test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { buildScenario, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
+import { buildScenario, settingsFor, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
 import { installMocks } from "./mockApi";
 import { chromeRects, runChecks, scrollAllToBottom, type Checks } from "./checks";
 
@@ -40,6 +40,8 @@ interface Case {
   widths: number[];
   shells?: Shell[];
   locked?: boolean;
+  /** With `locked`: what the mock's POST /login answers. */
+  login?: "ok" | "wrong" | "locked";
   fullPage?: boolean;
   /** Also shoot `~light-firstpaint` at 1280: reload and screenshot at DOMContentLoaded, 0ms settle. */
   firstpaint?: boolean;
@@ -102,11 +104,50 @@ async function composer(c: Ctx, st: DisplayState, open: RegExp, fill: boolean) {
   }
 }
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
-async function ng(c: Ctx, url: string, look: Record<string, unknown>) {
+async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
+  if (opts.side) await c.page.addInitScript((v) => localStorage.setItem("kraft.sidebar.v2", v), opts.side);
   await c.page.goto(url);
   await c.page.locator("main h1").first().waitFor({ timeout: 8000 });
   await settle(c.page, 600);
+  if (opts.hover) { await c.page.mouse.move(20, 300); await settle(c.page, 500); }
+}
+/** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
+async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
+  if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
+  if (opts.docsError) await c.page.route("**/api/search*", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"index unavailable"}' }));
+  await ng(c, "/ng/templates/chains", {}, { side: "pinned" });
+  await c.page.keyboard.press("Control+k");
+  const box = c.page.getByRole("combobox", { name: /search/i });
+  await box.waitFor({ timeout: 4000 });
+  if (q) { await box.fill(q); await c.page.waitForTimeout(700); }
+  await settle(c.page, 400);
+}
+/** The /ng sign-in card; `submit` types a password and presses Enter, against the mock's 401 or 429. The clock's fixed so the countdown reads the same every run. */
+async function ngLogin(c: Ctx, opts: { fill?: boolean; submit?: boolean } = {}) {
+  await c.page.clock.setFixedTime(new Date("2026-01-01T00:00:00Z"));
+  await ng(c, "/ng", {});
+  if (opts.fill || opts.submit) await c.page.getByLabel(/^Password/).fill("hunter2");
+  if (opts.submit) { await c.page.keyboard.press("Enter"); await c.page.locator('[role="alert"], [role="timer"]').first().waitFor({ timeout: 4000 }); }
+  await settle(c.page, 400);
+}
+/** The /ng board with no repo connected. A fresh install has the default chain, which the "empty" data lacks, so it's put back. The page clock is installed after load, so the probe rows' reveal steps are ours to advance. */
+async function ngFirstRun(c: Ctx, stage: "step1" | "probing" | "probed" | "step2" | "step3") {
+  c.S.settings.templates = settingsFor("default", {}).templates;
+  await ng(c, "/ng", {}, { side: "pinned" });
+  await c.page.getByRole("heading", { name: "Nothing on the board yet" }).waitFor({ timeout: 4000 });
+  if (stage === "step1") return;
+  await c.page.clock.install();
+  await c.page.getByLabel(/Path to a local git checkout/).fill("/Users/dev/code/acme");
+  await c.page.getByRole("button", { name: "+ Add repo" }).click();
+  await c.page.getByRole("list", { name: "Probe results" }).waitFor({ timeout: 4000 });
+  if (stage === "probing") { await c.page.clock.runFor(500); return settle(c.page, 200); }
+  await c.page.clock.runFor(2000);
+  if (stage === "probed") return settle(c.page, 200);
+  await c.page.getByRole("button", { name: "Add repo", exact: true }).click();
+  await c.page.getByRole("button", { name: "Continue" }).click();
+  if (stage === "step3") await c.page.getByRole("button", { name: "Continue" }).click();
+  await settle(c.page, 400);
 }
 async function settings(c: Ctx, to: string) {
   await c.page.goto(`/settings/${to}`);
@@ -230,8 +271,33 @@ const CASES: Case[] = [
   { screen: "settings-index", variant: "default", data: "default", widths: [390, 1280], run: async (c) => { await c.page.goto("/settings"); await settle(c.page, 600); } },
 
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
-  { screen: "ng-shell", variant: "stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
+  { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
+  // W2 A: an unbuilt page inside the shell.
+  { screen: "ng-shell", variant: "placeholder-chains", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}) },
+  // W2 B: the sidebar. Pinned and rail by stored choice; "revealed" is the pointer over the rail.
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail" }) },
+  { screen: "ng-shell", variant: "revealed", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "rail", hover: true }) },
+  { screen: "ng-shell", variant: "pinned", data: "default", widths: [1024], run: (c) => ng(c, "/ng/templates/chains", {}, { side: "pinned" }) },
+  { screen: "ng-shell", variant: "long-crumb", data: "long", widths: [1024], run: (c) => ng(c, `/ng/work-items/${idOf(c.S, "gate")}`, {}, { side: "rail" }) },
+  { screen: "ng-shell", variant: "actions", data: "default", widths: [1280], run: (c) => ng(c, "/ng/_tokens", {}, { side: "pinned" }) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
+  { screen: "ng-search", variant: "empty", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngSearch(c, "") },
+  { screen: "ng-search", variant: "results", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngSearch(c, "gate") },
+  { screen: "ng-search", variant: "results", data: "default", widths: [1024, 1920], run: (c) => ngSearch(c, "gate") },
+  { screen: "ng-search", variant: "no-match", data: "empty", widths: [1280], run: (c) => ngSearch(c, "zzzqx", { noBeads: true }) },
+  { screen: "ng-search", variant: "docs-error", data: "default", widths: [1280], run: (c) => ngSearch(c, "gate", { docsError: true }) },
+  { screen: "ng-login", variant: "idle", data: "default", widths: [1280], locked: true, shells: [{ mode: "light" }], run: (c) => ngLogin(c) },
+  { screen: "ng-login", variant: "idle", data: "default", widths: [1024, 1920], locked: true, run: (c) => ngLogin(c) },
+  { screen: "ng-login", variant: "filled", data: "default", widths: [1280], locked: true, run: (c) => ngLogin(c, { fill: true }) },
+  { screen: "ng-login", variant: "error", data: "default", widths: [1280], locked: true, login: "wrong", run: (c) => ngLogin(c, { submit: true }) },
+  { screen: "ng-login", variant: "locked", data: "default", widths: [1280], locked: true, login: "locked", shells: [{ mode: "light" }], run: (c) => ngLogin(c, { submit: true }) },
+  { screen: "ng-firstrun", variant: "step1", data: "empty", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngFirstRun(c, "step1") },
+  { screen: "ng-firstrun", variant: "step1", data: "empty", widths: [1024, 1920], run: (c) => ngFirstRun(c, "step1") },
+  { screen: "ng-firstrun", variant: "probing", data: "empty", widths: [1280], run: (c) => ngFirstRun(c, "probing") },
+  { screen: "ng-firstrun", variant: "probed", data: "empty", widths: [1280], run: (c) => ngFirstRun(c, "probed") },
+  { screen: "ng-firstrun", variant: "step2", data: "empty", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngFirstRun(c, "step2") },
+  { screen: "ng-firstrun", variant: "step3", data: "empty", widths: [1280], run: (c) => ngFirstRun(c, "step3") },
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },
   { screen: "ng-tokens", variant: "graphite-violet-full", data: "default", widths: [1920], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { accent: "violet", colour_amount: "full" }) },
@@ -310,14 +376,14 @@ for (const cs of CASES) {
         const h = shell.short ? 700 : h0;
         await page.setViewportSize({ width: w, height: h });
         const S = buildScenario(cs.data, { mode: shell.mode, density: shell.density, group_by: shell.group_by });
-        await installMocks(page, S, { locked: cs.locked });
+        await installMocks(page, S, { locked: cs.locked, login: cs.login });
         await page.addInitScript((sb) => {
           if (sb) localStorage.setItem("kraft.sidebar_collapsed", sb === "rail" ? "true" : "false");
           else localStorage.removeItem("kraft.sidebar_collapsed");
         }, shell.sidebar ?? "");
         // A locked page cannot read /api/theme, so the mode shell reaches it the
         // only way a real one does: the theme this browser saved last session.
-        if (cs.locked && shell.mode) await page.addInitScript((mode) => localStorage.setItem("kraft.theme", JSON.stringify({ palette: "nocturne", mode })), shell.mode);
+        if (cs.locked && shell.mode) await page.addInitScript((mode) => { localStorage.setItem("kraft.theme", JSON.stringify({ palette: "nocturne", mode })); localStorage.setItem("kraft.theme.v2", JSON.stringify({ surface: "graphite", mode })); }, shell.mode);
         const consoleErrors: string[] = [];
         page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 300)); });
         page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 300)}`));

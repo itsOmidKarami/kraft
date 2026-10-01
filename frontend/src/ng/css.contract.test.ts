@@ -26,6 +26,14 @@ describe("ng CSS", () => {
     }
     expect(bad).toEqual([]);
   });
+
+  it("shrinks the repo crumb before the work item title", () => {
+    const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
+    const shrink = (sel: string) => Number(new RegExp(`${sel}\\s*{[^}]*flex-shrink:\\s*(\\d+)`).exec(css)?.[1]);
+    expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-current"));
+    expect(shrink("\\.ng-crumb-mid")).toBeGreaterThan(shrink("\\.ng-crumb-current"));
+    expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-mid"));
+  });
 });
 
 const sources = (dir: string): string[] =>

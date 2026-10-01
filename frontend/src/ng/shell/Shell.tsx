@@ -1,0 +1,42 @@
+import { useCallback, useEffect, useState } from "react";
+import { Outlet } from "react-router-dom";
+import { Header } from "./Header";
+import { HeaderActionsHost } from "./HeaderActions";
+import { SearchOverlay } from "./SearchOverlay";
+import { Sidebar } from "./Sidebar";
+import "./shell.css";
+
+/** The frame every /ng page sits in. */
+export function Shell() {
+  const [actions, setActions] = useState<HTMLElement | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // From every page, including with focus in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+      e.preventDefault();
+      setSearching(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const closeSearch = useCallback(() => setSearching(false), []);
+  return (
+    <HeaderActionsHost.Provider value={actions}>
+      <a href="#ng-main" className="ng-skip" onClick={(e) => { e.preventDefault(); document.getElementById("ng-main")?.focus(); }}>
+        Skip to content
+      </a>
+      <div className="ng-shell">
+        <Sidebar onSearch={() => setSearching(true)} />
+        <div className="ng-frame">
+          <Header actionsRef={setActions} />
+          <main id="ng-main" tabIndex={-1} className="ng-main">
+            <Outlet />
+          </main>
+        </div>
+      </div>
+      {searching && <SearchOverlay onClose={closeSearch} />}
+    </HeaderActionsHost.Provider>
+  );
+}
