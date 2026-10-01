@@ -1,4 +1,24 @@
-import { Cog, GitPullRequest, Sparkles, Terminal } from "lucide-react";
+import { Bot, Box, CircleDot, Cog, FileText, GitBranch, GitPullRequest, Inbox, Layers, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { createElement, type ReactElement } from "react";
+
+export { Bot, FileText, LocateFixed, Maximize2, Minus, PanelRightClose, PanelRightOpen, Plus, Scan, Siren } from "lucide-react";
 
 /** A task's kind, as the prototype draws it. */
 export const KIND_ICON = { agent: Sparkles, builtin: Cog, subprocess: Terminal, forge: GitPullRequest } as const;
+export type TaskKind = keyof typeof KIND_ICON;
+
+// ponytail: a static map, not lucide-react/dynamic: dynamic put ~1,860 files and
+// ~7.5 MB into the wheel's dist (W3 brief A.6). No shipped chain sets `icon:` yet,
+// so this is the prototype's node icons; W10's picker makes its own call.
+const NODE_ICONS: Record<string, LucideIcon> = {
+  bot: Bot, box: Box, "circle-dot": CircleDot, cog: Cog, "file-text": FileText, "git-branch": GitBranch,
+  "git-pull-request": GitPullRequest, inbox: Inbox, layers: Layers, scale: Scale, "scroll-text": ScrollText,
+  search: Search, shield: Shield, "shield-check": ShieldCheck, siren: Siren, sparkles: Sparkles, terminal: Terminal, workflow: Workflow,
+};
+
+/** A node's or task's own icon (R32): a name we don't know draws the kind's icon,
+ *  and an exec node with neither draws a box. */
+export function NodeIcon({ name, kind, size }: { name?: string; kind?: TaskKind; size?: number }): ReactElement {
+  const icon = (name && NODE_ICONS[name]) || (kind ? KIND_ICON[kind] : Box);
+  return createElement(icon, { size, "aria-hidden": true });
+}

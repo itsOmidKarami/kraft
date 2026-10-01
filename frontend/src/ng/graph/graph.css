@@ -1,0 +1,47 @@
+/* Shared graph components. Colours only through theme.css tokens; geometry is
+   inline, from the pure layout functions (W3 brief rules 1-4). */
+
+/* NodeGlyph (NodeGlyph.dc.html) */
+.glyph { position: relative; display: flex; align-items: center; justify-content: center; flex: none; }
+.glyph-box { position: relative; box-sizing: border-box; display: flex; align-items: center; justify-content: center; flex: none; transition: border-color .12s, box-shadow .12s; border: 1px solid var(--border); background: var(--bg); color: var(--text-sub); }
+.glyph-exec .glyph-box, .glyph-slot .glyph-box { width: 100%; height: 100%; }
+.glyph-box.is-done { color: var(--text-muted); }
+.glyph-box.is-current { border: 1.5px solid var(--text-sub); background: var(--surface-2); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-sub) 12%, transparent); }
+.glyph-box.is-todo { border: 1px dashed var(--border); color: var(--text-faint); }
+.glyph-box.is-failed { border-color: var(--bad); color: var(--bad); }
+.glyph-box.is-esc { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); color: var(--warn); }
+.glyph-box.is-ghost { border: 1px dashed var(--border); color: var(--text-faint); }
+.glyph-box.is-amber { border: 1.5px solid var(--warn); color: var(--warn); }
+.glyph-box.mark-add { border: 1.5px dashed var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--bg)); color: var(--ok); }
+.glyph-box.mark-add.is-prob { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--bg)); color: var(--bad); }
+.glyph-box.mark-change { border: 1.5px solid var(--warn); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent); }
+.glyph-slot .glyph-box { border: 1.5px dashed var(--ok); color: var(--ok); }
+.glyph-box.is-prob { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
+.glyph-box.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
+.glyph-box.is-capped { border-color: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+.glyph-box.is-skipped { opacity: .45; border-style: dashed; }
+/* Gates: the rotated square. */
+.glyph-gate .glyph-box { transform: rotate(45deg); border: 1.5px solid var(--text-muted); background: var(--surface-2); }
+.glyph-gate .glyph-box.is-done { border-color: var(--border); background: var(--border); }
+.glyph-gate .glyph-box.is-current { border-color: var(--warn); box-shadow: none; }
+.glyph-gate .glyph-box.is-todo { border: 1.5px dashed var(--border); background: var(--bg); }
+.glyph-gate .glyph-box.is-ghost { border: 1.5px dashed var(--border); }
+.glyph-gate .glyph-box.mark-add { border: 1.5px dashed var(--ok); }
+.glyph-gate .glyph-box.is-sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--selection); }
+.glyph-light { aspect-ratio: 1; border-radius: 50%; background: var(--ok); }
+.is-current > .glyph-light { background: var(--warn); }
+/* Badges */
+.glyph-prob { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--bad); color: var(--bg); font: 700 10px/16px system-ui, sans-serif; text-align: center; }
+.glyph-att { position: absolute; top: -8px; padding: 0 5px; height: 16px; box-sizing: border-box; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font: 600 9.5px/14px ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
+.glyph-att.is-stopped { border-color: var(--bad); color: var(--bad); }
+.glyph-corner { position: absolute; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; }
+.glyph-esc { border: 1px solid var(--warn); color: var(--warn); }
+.glyph-paused { position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--text-muted); font: 700 8px/13px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
+.glyph-running { position: absolute; bottom: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 2px solid var(--bg); }
+
+/* Gallery (/ng/_gallery) */
+.gallery { max-width: 1400px; margin: 0 auto; padding: 22px 24px 60px; }
+.gallery h1 { margin: 0; font-size: 16px; font-weight: 500; }
+.gallery h2 { margin: 28px 0 12px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.gallery-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px 22px; margin-bottom: 18px; }
+.gallery-cell { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 56px; font-size: 11px; color: var(--text-muted); }

@@ -241,6 +241,9 @@ const CASES: Case[] = [
   // An old theme.yaml with only `palette`: GET /theme derives the look (rule A.3).
   { screen: "ng-appearance", variant: "derived", data: "default", widths: [1280], run: (c) => ng(c, "/ng/settings/appearance", { palette: "forest", surface: "moss", accent: "green", colour_amount: "full", derived: true }) },
 
+  // W3: the graph components' gallery, fed by fixtures.
+  { screen: "ng-gallery", variant: "default", data: "default", widths: [1280], fullPage: true, run: (c) => ng(c, "/ng/_gallery", {}) },
+
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },
   { screen: "login", variant: "filled", data: "default", widths: [390, 1280], locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 600); await c.page.locator('input[type="password"]').fill("hunter2").catch(() => {}); await settle(c.page); } },

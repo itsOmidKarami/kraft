@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { Gallery } from "./graph/Gallery";
 import { legacyPath } from "./legacyPath";
 import { AppearancePage } from "./settings/AppearancePage";
 import { TokenSheet } from "./theme/TokenSheet";
@@ -30,6 +31,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
     <BrowserRouter basename="/ng">
       <Routes>
         <Route path="/settings/appearance" element={<AppearancePage />} />
+        <Route path="/_gallery" element={<Gallery />} />
         <Route path="/_tokens" element={<TokenSheet />} />
         <Route path="*" element={<Stub />} />
       </Routes>
