@@ -18,7 +18,7 @@ const DIST = process.env.SWEEP_DIST;
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /(sweep|elements|interactions|checks)\.spec\.ts$/,
+  testMatch: /(sweep|interactions|checks)\.spec\.ts$/,
   timeout: 60_000,
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,

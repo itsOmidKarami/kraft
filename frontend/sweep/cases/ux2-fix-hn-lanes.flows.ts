@@ -6,7 +6,7 @@ const fits = async (p: Page) => {
   await p.locator(".hn-lane").first().waitFor();
   await p.evaluate(() => { const c = document.querySelector(".hn-canvas") as HTMLElement; c.scrollLeft = c.scrollWidth; });
   const m = await p.evaluate(() => {
-    const pane = [...document.querySelectorAll("aside")].find((a) => !a.classList.contains("sidebar"))!.getBoundingClientRect();
+    const pane = [...document.querySelectorAll("aside")].find((a) => !a.classList.contains("ng-sidebar"))!.getBoundingClientRect();
     const canvas = (document.querySelector(".hn-canvas") as HTMLElement).getBoundingClientRect();
     const lanes = [...document.querySelectorAll(".hn-lane")].map((l) => {
       const r = l.getBoundingClientRect();

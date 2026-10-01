@@ -40,7 +40,9 @@ export const idOf = (S: Scenario, st: DisplayState) => S.byState[st].item.id;
 export async function ngChains(c: Ctx, key: string, node?: string) {
   await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
   await c.page.goto(`/templates/chains/${key}${node ? `/nodes/${node}` : ""}`);
-  await c.page.locator(".canvas, .tpl-note").first().waitFor({ timeout: 8000 });
+  // A node view draws no canvas: wait for its pane's heading instead.
+  if (node) await c.page.getByRole("heading", { level: 2, name: node, exact: true }).waitFor({ timeout: 8000 });
+  else await c.page.locator(".canvas, .tpl-note").first().waitFor({ timeout: 8000 });
   await settle(c.page, 700);
 }
 /** A page under a given look: the mock's theme is what GET /theme answers. */
