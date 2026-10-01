@@ -110,6 +110,17 @@ async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { si
   await settle(c.page, 600);
   if (opts.hover) { await c.page.mouse.move(20, 300); await settle(c.page, 500); }
 }
+/** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
+async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
+  if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
+  if (opts.docsError) await c.page.route("**/api/search*", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"index unavailable"}' }));
+  await ng(c, "/ng/templates/chains", {}, { side: "pinned" });
+  await c.page.keyboard.press("Control+k");
+  const box = c.page.getByRole("combobox", { name: /search/i });
+  await box.waitFor({ timeout: 4000 });
+  if (q) { await box.fill(q); await c.page.waitForTimeout(700); }
+  await settle(c.page, 400);
+}
 async function settings(c: Ctx, to: string) {
   await c.page.goto(`/settings/${to}`);
   await c.page.locator("main").waitFor();
@@ -243,6 +254,11 @@ const CASES: Case[] = [
   { screen: "ng-shell", variant: "long-crumb", data: "long", widths: [1024], run: (c) => ng(c, `/ng/work-items/${idOf(c.S, "gate")}`, {}, { side: "rail" }) },
   { screen: "ng-shell", variant: "actions", data: "default", widths: [1280], run: (c) => ng(c, "/ng/_tokens", {}, { side: "pinned" }) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
+  { screen: "ng-search", variant: "empty", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngSearch(c, "") },
+  { screen: "ng-search", variant: "results", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngSearch(c, "gate") },
+  { screen: "ng-search", variant: "results", data: "default", widths: [1024, 1920], run: (c) => ngSearch(c, "gate") },
+  { screen: "ng-search", variant: "no-match", data: "empty", widths: [1280], run: (c) => ngSearch(c, "zzzqx", { noBeads: true }) },
+  { screen: "ng-search", variant: "docs-error", data: "default", widths: [1280], run: (c) => ngSearch(c, "gate", { docsError: true }) },
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },
   { screen: "ng-tokens", variant: "graphite-violet-full", data: "default", widths: [1920], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { accent: "violet", colour_amount: "full" }) },
