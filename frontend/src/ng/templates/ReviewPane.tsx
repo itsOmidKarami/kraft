@@ -197,7 +197,7 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
           {r.changes.map((c, i) => (
             <button key={i} type="button" className="tpl-rv-change" onClick={() => onHighlight(c.path)}>
               <span className={`tpl-rv-sign is-${c.kind}`} aria-label={c.kind}>{c.kind === "add" ? "+" : c.kind === "remove" ? "−" : "~"}</span>
-              <span className="tpl-rv-path">{c.path}</span>
+              <span className="tpl-rv-path">{c.path || "chain"}</span>
               <span className="tpl-rv-sum">{c.summary}{c.reaches?.length ? ` · reaches ${plural(c.reaches.length, "chain")}` : ""}</span>
             </button>
           ))}

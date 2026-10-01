@@ -228,9 +228,23 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         "resolved": resolved,
         "problems": problems,
         "sources": sources,
-        "changes": changes(_flat(before), _flat(after)),
+        "changes": [*_chain_changes(before, after), *changes(_flat(before), _flat(after))],
         "impact": impact,
     }
+
+
+def _chain_changes(before: Mapping, after: Mapping) -> list[dict]:
+    """One row, at the chain's own path (`""`), for the chain-level keys that
+    differ (`description`, `policy`): `_flat` walks only the nodes. Unset and
+    empty read the same, so a new chain's blank description is no change."""
+    fields = [
+        k
+        for k in dict.fromkeys([*before, *after])
+        if k not in ("id", "nodes") and (before.get(k) or None) != (after.get(k) or None)
+    ]
+    if not fields:
+        return []
+    return [{"path": "", "kind": "change", "summary": ", ".join(fields), "fields": fields}]
 
 
 def _impact(st, key: str) -> dict:

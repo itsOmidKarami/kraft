@@ -46,6 +46,12 @@ describe("Review & publish pane", () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 
+  it("lists an edit to the chain itself, whose path is empty, as the chain", () => {
+    mount({ result: { changes: [{ path: "", kind: "change" as const, summary: "description" }] } });
+    expect(screen.getByRole("heading", { name: "Draft · 1 change" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /chain\s*description/ })).toBeInTheDocument();
+  });
+
   it("blocks publishing while there are problems or a YAML error, and Fix → goes to the path", async () => {
     const { onFix } = mount({ result: { problems: [{ path: "lint", field: null, message: "Value error, 'steps' must not be empty", file: "f", line: 3, col: 5 }] } });
     expect(screen.getByText("✕ doesn't resolve · 1 problem block publishing")).toBeInTheDocument();

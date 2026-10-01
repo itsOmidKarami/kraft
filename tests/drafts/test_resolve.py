@@ -49,6 +49,16 @@ async def test_every_schema_error_is_a_problem_with_its_path_and_line(st):
     ]
 
 
+async def test_a_chain_level_edit_is_a_change_and_a_new_chains_blank_description_is_not(st):
+    edited = SCRATCH.replace("id: scratch\n", "id: scratch\ndescription: Runs the thing.\n")
+    assert scratch(st, edited, published=SCRATCH)["changes"] == [
+        {"path": "", "kind": "change", "summary": "description", "fields": ["description"]}
+    ]
+    assert scratch(st, SCRATCH, published=SCRATCH)["changes"] == []
+    blank = SCRATCH.replace("id: scratch\n", 'id: scratch\ndescription: ""\n')
+    assert scratch(st, blank, published=SCRATCH)["changes"] == []
+
+
 async def test_a_yaml_error_keeps_the_newest_model_that_parses(st):
     good = SCRATCH.replace("id: run", "id: kept")
     history = [{"files": {CHAIN: good}}, {"files": {CHAIN: "nodes: [\n"}}]
