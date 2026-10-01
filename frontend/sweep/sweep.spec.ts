@@ -230,7 +230,9 @@ const CASES: Case[] = [
   { screen: "settings-index", variant: "default", data: "default", widths: [390, 1280], run: async (c) => { await c.page.goto("/settings"); await settle(c.page, 600); } },
 
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
-  { screen: "ng-shell", variant: "stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
+  { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
+  // W2 A: an unbuilt page inside the shell.
+  { screen: "ng-shell", variant: "placeholder-chains", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/templates/chains", {}) },
   // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },

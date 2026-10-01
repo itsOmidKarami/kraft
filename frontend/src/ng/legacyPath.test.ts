@@ -20,6 +20,7 @@ describe("legacyPath", () => {
     ["/ng/templates/harnesses", "/settings/harnesses"],
     ["/ng/templates/repos", "/settings/repos"],
     ["/ng/settings/notifications", "/settings/notify"],
+    ["/ng/settings/auto-intake", "/settings/intake"],
     ["/ng/settings/about", "/settings"],
     ["/ng/settings/policy", "/settings/policy"],
   ])("%s → %s", (from, to) => expect(at(from)).toBe(to));

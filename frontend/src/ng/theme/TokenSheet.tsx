@@ -34,7 +34,7 @@ export function TokenSheet() {
   const amount = (html.amount ?? "subtle") as (typeof AMOUNTS)[number]["value"];
 
   return (
-    <main className="tokens">
+    <div className="tokens">
       <h1>Tokens</h1>
       <p className="tokens-look">{`${html.surface} · ${html.accent} accent · ${paintedMode()} · ${amount}`}</p>
       {GROUPS.map(([name, keys]) => (
@@ -144,6 +144,6 @@ export function TokenSheet() {
           <Field label="Reason"><input /></Field>
         </Dialog>
       )}
-    </main>
+    </div>
   );
 }

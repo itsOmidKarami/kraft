@@ -1,0 +1,12 @@
+/* The /ng frame. Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279. */
+.ng-skip { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 6px 12px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 12.5px; }
+.ng-skip:focus { top: 8px; }
+.ng-shell { display: flex; min-height: 100vh; }
+.ng-frame { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.ng-header { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ng-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.ng-main { flex: 1 1 auto; min-width: 0; }
+.ng-main:focus { outline: none; }
+.ng-placeholder { max-width: 560px; padding: 28px 24px; }
+.ng-placeholder h1 { margin: 0 0 6px; font-size: 16px; font-weight: 500; }
+.ng-placeholder p { margin: 0 0 12px; font-size: 12.5px; color: var(--text-sub); }

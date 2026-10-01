@@ -10,6 +10,6 @@ export function legacyPath({ pathname, search }: { pathname: string; search: str
     if (c === "nodes" && d) hash = `#node=${d}`;
     else if (c === "review") hash = "#tab=changes";
   } else if (a === "templates" && b) path = `/settings/${b}`;
-  else if (a === "settings" && b) path = b === "about" ? "/settings" : `/settings/${b === "notifications" ? "notify" : b}`;
+  else if (a === "settings" && b) path = b === "about" ? "/settings" : `/settings/${{ notifications: "notify", "auto-intake": "intake" }[b] ?? b}`;
   return path + search + hash;
 }

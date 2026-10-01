@@ -1,4 +1,4 @@
-import { Bot, Box, CircleDot, Cog, FileText, GitBranch, GitPullRequest, Inbox, Layers, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { Bell, Bot, Box, ChartColumn, CircleDot, Cog, Download, FileText, GitBranch, GitPullRequest, Inbox, Info, Kanban, Layers, LibraryBig, Lock, Palette, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { createElement, type ReactElement } from "react";
 
 export { Bot, FileText, LocateFixed, Maximize2, Minus, PanelRightClose, PanelRightOpen, Plus, Scan, Siren } from "lucide-react";
@@ -22,3 +22,20 @@ export function NodeIcon({ name, kind, size }: { name?: string; kind?: TaskKind;
   const icon = (name && NODE_ICONS[name]) || (kind ? KIND_ICON[kind] : Box);
   return createElement(icon, { size, "aria-hidden": true });
 }
+
+/** The sidebar's icons (Decisions §10). */
+export const NAV_ICON = {
+  search: Search,
+  board: Kanban,
+  analytics: ChartColumn,
+  chains: Workflow,
+  library: LibraryBig,
+  harnesses: Bot,
+  repos: GitBranch,
+  policy: SlidersHorizontal,
+  intake: Download,
+  notifications: Bell,
+  access: Lock,
+  appearance: Palette,
+  about: Info,
+} as const;

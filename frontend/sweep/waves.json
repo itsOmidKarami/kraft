@@ -168,5 +168,16 @@
       { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
       { "kind": "no-console", "match": "^ng-" }
     ]
+  },
+  "ux2-W2": {
+    "title": "UX V2 shell: sidebar rail, crumb header, search overlay, sign-in, first-run",
+    "screens": ["ng-shell", "ng-search", "ng-login", "ng-firstrun"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "no-console", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-" }
+    ]
   }
 }

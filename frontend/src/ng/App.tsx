@@ -1,22 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Gallery } from "./graph/Gallery";
 import { legacyPath } from "./legacyPath";
 import { AppearancePage } from "./settings/AppearancePage";
+import { Placeholder } from "./shell/Placeholder";
+import { ROUTES } from "./shell/routes";
+import { Shell } from "./shell/Shell";
 import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 const currentUi = () => legacyPath(window.location);
 
-function Stub() {
-  return (
-    <main style={{ padding: "16px 24px" }}>
-      <h1>Kraft next</h1>
-      <p>This is the UX V2 build, in progress.</p>
-      <a href={currentUi()}>Current UI ↗</a>
-    </main>
-  );
-}
+/** The routes whose page exists; every other row of ROUTES renders a placeholder. */
+const BUILT: Record<string, ReactElement> = { "/settings/appearance": <AppearancePage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);
@@ -25,15 +21,20 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
     window.addEventListener("kraft:unauthenticated", lock);
     return () => window.removeEventListener("kraft:unauthenticated", lock);
   }, []);
-  // W2 replaces this with the Sign-in screen.
+  // W2 E replaces this with the Sign-in screen.
   if (locked) return <main><a href={currentUi()}>Sign in on the current UI</a></main>;
   return (
     <BrowserRouter basename="/ng">
       <Routes>
-        <Route path="/settings/appearance" element={<AppearancePage />} />
         <Route path="/_gallery" element={<Gallery />} />
-        <Route path="/_tokens" element={<TokenSheet />} />
-        <Route path="*" element={<Stub />} />
+        <Route element={<Shell />}>
+          {ROUTES.map((r) => (
+            <Route key={r.path} path={r.path} element={r.built ? BUILT[r.path] : <Placeholder label={r.label} />} />
+          ))}
+          <Route path="/work-items/*" element={<Placeholder label="Work item" />} />
+          <Route path="/_tokens" element={<TokenSheet />} />
+          <Route path="*" element={<Placeholder label="Not found" note="There is no page at this address in the new UI." />} />
+        </Route>
       </Routes>
       <Toaster />
     </BrowserRouter>
