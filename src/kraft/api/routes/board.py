@@ -299,7 +299,15 @@ async def list_work_items(request: Request):
             "progress": _board_progress(st, r),
             "fallback": _ran_on_fallback(latest, r["id"]),
             "display_status": display_status(
-                r, r["stop_kind"], _list_escalated(r["id"]), pending.get(r["id"])
+                r,
+                _stop_kind(
+                    r["stop_kind"],
+                    r["status"],
+                    pending.get(r["id"]),
+                    _boundary_payload(boundary_by_item.get(r["id"])),
+                ),
+                _list_escalated(r["id"]),
+                pending.get(r["id"]),
             ),
             "stop": _list_stop(r, pending.get(r["id"]), boundary_by_item.get(r["id"])),
             "step": _step_of(r, chains[r["id"]], task_by_item.get(r["id"]), with_task=True),
@@ -314,6 +322,14 @@ async def list_work_items(request: Request):
     return {"items": items, "cursor": cursor}
 
 
+def _boundary_payload(boundary) -> dict | None:
+    """The `work_item_needs_human` payload of a list row's latest stop-boundary
+    event, or None when that event is not a stop."""
+    if boundary is not None and boundary["type"] == "work_item_needs_human":
+        return json.loads(boundary["payload"])
+    return None
+
+
 def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
     """`stop` on the list (B.4): like the detail's, minus `facts`, `task` and
     `attempt` -- the board reads no sessions per row, and `boundary` is this
@@ -322,11 +338,10 @@ def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
     status = row["status"]
     if status not in ("needs_human", "waiting", "rate_limited"):
         return None
-    reason = None
-    if boundary is not None and boundary["type"] == "work_item_needs_human":
-        reason = json.loads(boundary["payload"])["reason"]
+    payload = _boundary_payload(boundary)
+    reason = payload["reason"] if payload else None
     return {
-        "kind": _stop_kind(row["stop_kind"], status, pending_gate),
+        "kind": _stop_kind(row["stop_kind"], status, pending_gate, payload),
         "node": row["current_node_id"],
         "resume_at": row["retry_at"],
         "reason": reason,
@@ -589,16 +604,41 @@ def _rate_limit_retries(st, row) -> dict | None:
     return {"count": counter["count"] if counter else 0, "cap": cap}
 
 
-def _stop_kind(stop_kind: str | None, status: str, pending_gate: str | None) -> str:
+def _legacy_needs_human_kind(payload: dict | None) -> str:
+    """The kind of a `needs_human` row from before migration 45, which has no
+    `stop_kind`: what its `work_item_needs_human` event still says (the
+    `needs_context:` reason, a `budget` or `capped` figure), else `failed`: a
+    stop nobody can name is one a person has to look at, and `failed` is the
+    kind that offers Retry."""
+    payload = payload or {}
+    if payload.get("kind"):
+        return payload["kind"]
+    if str(payload.get("reason") or "").startswith("needs_context:"):
+        return "question"
+    if "budget" in payload:
+        return "budget"
+    if "capped" in payload:
+        return "cap"
+    return "failed"
+
+
+def _stop_kind(
+    stop_kind: str | None, status: str, pending_gate: str | None, payload: dict | None = None
+) -> str:
     """`stop.kind` (B.3): the stored `stop_kind`, unless a gate is pending
     (`gate` -- a gate stop writes no `stop_kind`, it is `gate_requested`), or
-    the row predates migration 45 and carries none, in which case the status
-    itself says whether it was a wait or a rate limit."""
+    the row predates migration 45 and carries none. Then the status says
+    whether it was a wait or a rate limit, and a `needs_human` row is read off
+    its stop event (`payload`): never called a rate limit."""
     if pending_gate:
         return "gate"
     if stop_kind is not None:
         return stop_kind
-    return "wait" if status == "waiting" else "rate_limit"
+    if status == "waiting":
+        return "wait"
+    if status == "needs_human":
+        return _legacy_needs_human_kind(payload)
+    return "rate_limit"
 
 
 def _stop_task_and_attempt(sessions, node_id: str | None) -> tuple[str | None, int | None]:
@@ -688,7 +728,7 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
         return None
     node = row["current_node_id"]
     task, attempt = _stop_task_and_attempt(sessions, node)
-    kind = _stop_kind(row["stop_kind"], status, pending_gate)
+    kind = _stop_kind(row["stop_kind"], status, pending_gate, stop_payload)
     facts = dict(stop_payload.get("facts") or {}) if stop_payload else {}
     if kind == "rate_limit":
         facts.update(_rate_limit_facts(st, row, task))
@@ -880,7 +920,12 @@ async def get_work_item(wid: str, request: Request):
         # The board's status badge (Kraft UI v2 · B1), and the stop it names
         # when there is one -- {kind, node, task, attempt, resume_at, reason,
         # facts} -- `None` off `needs_human`/`waiting`/`rate_limited`.
-        "display_status": display_status(row, row["stop_kind"], escalated, pending),
+        "display_status": display_status(
+            row,
+            _stop_kind(row["stop_kind"], row["status"], pending, stop_payload),
+            escalated,
+            pending,
+        ),
         "stop": _stop(st, row, sessions, pending, stop_payload),
         # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
         # the frozen chain's total, how many were gates, and the current

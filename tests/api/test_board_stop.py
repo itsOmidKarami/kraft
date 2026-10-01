@@ -374,6 +374,49 @@ def test_stop_kind_falls_back_on_a_pre_migration_row(client, repo, status, node,
     assert row["stop"]["kind"] == expected
 
 
+@pytest.mark.parametrize(
+    ("reason", "extra", "kind", "display"),
+    [
+        ("task failed in node implementation: implement [agent]", {}, "failed", "failed"),
+        ("needs_context: which schema?", {}, "question", "needs_you"),
+        (
+            "verify.fix_loop exhausted after 3 fix cycle(s)",
+            {"capped": {"cycles": 3, "attempts": 3}},
+            "cap",
+            "needs_you",
+        ),
+        (
+            "budget cap reached",
+            {"budget": {"scope": "usd", "spent_usd": 5.0, "cap_usd": 5.0}},
+            "budget",
+            "needs_you",
+        ),
+    ],
+)
+def test_a_needs_human_row_with_no_stop_kind_is_read_off_its_stop_event(
+    client, repo, reason, extra, kind, display
+):
+    """A `needs_human` row stopped on 1.4.0 has no `stop_kind` (and its event no
+    `kind`). It is never called a rate limit: the kind comes off the event, and
+    `display_status` follows it, so a failed task reads `failed` on the list and
+    the detail (Kraft-9d8b2.49)."""
+    wid = _paused_item(client, repo)
+    _run(lambda c: store.load_chain(c, wid, "implement"))
+    _run(lambda c: store.mark_needs_human(c, wid, "implement", reason, kind="failed", **extra))
+    _run(lambda c: c.execute("UPDATE work_items SET stop_kind = NULL WHERE id = ?", (wid,)))
+    _run(
+        lambda c: c.execute(
+            "UPDATE events SET payload = json_remove(payload, '$.kind') "
+            "WHERE type = 'work_item_needs_human'"
+        )
+    )
+
+    detail = client.get(f"/api/work-items/{wid}").json()
+    row = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    assert (detail["stop"]["kind"], row["stop"]["kind"]) == (kind, kind)
+    assert (detail["display_status"], row["display_status"]) == (display, display)
+
+
 def _capped_item(client, repo, maxima: dict, limit: dict | None) -> dict:
     from support.harness import v1_resolved
 
