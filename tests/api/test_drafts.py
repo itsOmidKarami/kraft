@@ -381,6 +381,17 @@ def applied(client, monkeypatch):
     return calls
 
 
+def test_a_policy_maximum_under_a_shipped_chains_value_answers_422_naming_the_chain(
+    client, templates_dir
+):
+    shipped = (templates_dir / "policy.yaml").read_text()
+    put_file(client, "policy", "policy.yaml", shipped + "\nmaxima:\n  max_attempts: 1\n")
+    r = client.post(f"{POLICY}/publish")
+    assert r.status_code == 422
+    assert {"default", "quick-task"} & {p["chain"] for p in r.json()["problems"] if "chain" in p}
+    assert (templates_dir / "policy.yaml").read_text() == shipped
+
+
 def test_publishing_a_policy_draft_reloads_the_policy(client, templates_dir, applied):
     put_file(client, "policy", "policy.yaml", policy_text(templates_dir))
     assert client.post(f"{POLICY}/publish").status_code == 200

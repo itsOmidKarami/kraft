@@ -321,6 +321,16 @@ def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):
     assert client.get("/api/policy").json()["default"]["attempts"] == 3
 
 
+def test_get_policy_answers_the_loaded_concurrency_and_the_active_count(client, templates_dir):
+    body = client.get("/api/policy").json()
+    assert (body["max_concurrent"], body["active_count"]) == (3, 0)
+
+    # A hand edit not yet reloaded does not change what the slots count against.
+    path = templates_dir / "policy.yaml"
+    path.write_text(path.read_text() + "\nmax_concurrent: 7\n")
+    assert client.get("/api/policy").json()["max_concurrent"] == 3
+
+
 _POLICY = {"loops": {}, "default": {"attempts": 3, "wall_clock_s": 3600}}
 
 

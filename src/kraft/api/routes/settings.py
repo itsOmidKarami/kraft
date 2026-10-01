@@ -433,6 +433,8 @@ class PolicyBody(BaseModel):
     findings: dict | None = None
     budget: dict | None = None
     max_concurrent: int = Field(default=3, ge=1)
+    #: Read-only, answered by `GET /policy`; a page that sends its GET body back is not refused.
+    active_count: int | None = Field(default=None, exclude=True)
     rate_limit_retries: int | None = None
     triggers: list[dict] | None = None
     archive: dict | None = None
@@ -445,7 +447,10 @@ class PolicyBody(BaseModel):
 async def get_policy(request: Request):
     st = request.app.state
     data = config_mod.read_yaml(st.templates_dir / "policy.yaml", {"loops": {}, "default": {}})
-    data.setdefault("max_concurrent", st.policy.max_concurrent if st.policy else 3)
+    # The loaded value, not the file's: it is the one the slots are counted against.
+    loaded = st.policy.max_concurrent if st.policy else data.get("max_concurrent", 3)
+    data["max_concurrent"] = loaded
+    data["active_count"] = st.db.read(store.active_count)
     return data
 
 
