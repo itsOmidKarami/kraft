@@ -10,10 +10,11 @@ name: test
 
 on:
   pull_request:
-    # `labeled`/`unlabeled` matter: release-impact reads the labels off the
-    # event payload, so without them, adding the label a failing check asked
-    # for would not re-run that check.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # Not `labeled`/`unlabeled`: a label change would start a second run on the
+    # same head sha, and concurrency would cancel the first, leaving a CANCELLED
+    # check run for every required name that blocks the merge. The label check
+    # is its own workflow, pr-labels.yml.
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
 
@@ -200,11 +201,12 @@ jobs:
     # `needs` failed reports "skipped", and a skipped required check passes --
     # so a bare `needs` would leave this check green on a red matrix. Unlike
     # `always()`, `!cancelled()` is false once the whole run is cancelled, which
-    # concurrency does to the first run when a `labeled` event follows `opened`
-    # on the same head sha. That run's gate is then skipped instead of failed,
-    # so it stops leaving a red `test` beside the later run's green one (which
-    # blocked auto-merge). Cost: a run cancelled by hand also leaves a skipped
-    # gate, not a red one. The shell test below turns a failed matrix into a
+    # concurrency does to the first run when a push follows another on the same
+    # pull request. That run's gate is then skipped instead of failed. Cancelled
+    # runs sit on an older head sha, so they no longer count against the merge;
+    # what once made a duplicate run on the *same* sha (a `labeled` event after
+    # `opened`) is gone with the `labeled` trigger. Cost: a run cancelled by
+    # hand also leaves a skipped gate, not a red one. The shell test below turns a failed matrix into a
     # failed check. A skipped matrix passes only when `changes` said docs-only
     # and `docs-tests` passed.
     name: test
@@ -431,30 +433,3 @@ jobs:
         run: |
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/pr-body.md"
           uv run --python 3.12 --no-project python dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
-
-  release-impact:
-    # Every pull request declares what it ships. The version comes from the git
-    # tag, so there is no bump commit left to forget -- which means the only
-    # place anyone can be asked is here, while the author still knows what the
-    # change is worth. `release::none` is a first-class answer and the expected
-    # one for docs, comments, CI config and test-only changes.
-    #
-    # Skipped for forks on purpose. Only people with write access can label a
-    # pull request, so requiring a label from an outside contributor is a red X
-    # they have no way to clear. For a fork, the maintainer labels before
-    # merging; an unlabelled merge stops the next release until it is labelled.
-    name: release impact declared
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - env:
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: |
-          python3 dev/next_tag.py "" "$LABELS" > /dev/null || {
-            echo "This PR needs exactly one of: release::major, release::minor, release::patch, release::none"
-            exit 1
-          }
-          echo "declared: $LABELS"

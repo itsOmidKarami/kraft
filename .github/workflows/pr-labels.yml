@@ -1,0 +1,51 @@
+# The release-label check, apart from test.yml so that a label change never
+# starts (or cancels) the heavy run. In test.yml, `labeled` after `opened`
+# started a second run on the same head sha; concurrency cancelled the first,
+# and a run cancelled while its jobs were still queued leaves a CANCELLED check
+# run for every required name, which blocks the merge with everything green.
+#
+# No `concurrency:` here, on purpose: the job takes seconds, and cancelling one
+# of two runs on the same sha is the exact thing that leaves a CANCELLED
+# `release impact declared` behind. The labels are read live, not off the event
+# payload, so whichever run finishes last has seen the newest labels.
+name: pr-labels
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  release-impact:
+    # Every pull request declares what it ships. The version comes from the git
+    # tag, so there is no bump commit left to forget -- which means the only
+    # place anyone can be asked is here, while the author still knows what the
+    # change is worth. `release::none` is a first-class answer and the expected
+    # one for docs, comments, CI config and test-only changes.
+    #
+    # Skipped for forks on purpose. Only people with write access can label a
+    # pull request, so requiring a label from an outside contributor is a red X
+    # they have no way to clear. For a fork, the maintainer labels before
+    # merging; an unlabelled merge stops the next release until it is labelled.
+    #
+    # The job name is a required check context; renaming it needs a ruleset edit.
+    name: release impact declared
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          LABELS=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels -q '[.labels[].name] | join(",")')
+          python3 dev/next_tag.py "" "$LABELS" > /dev/null || {
+            echo "This PR needs exactly one of: release::major, release::minor, release::patch, release::none"
+            exit 1
+          }
+          echo "declared: $LABELS"
