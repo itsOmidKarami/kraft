@@ -354,7 +354,9 @@ async def _stop_for_config_error(
     causes = [c for t in failed if (c := _task_cause(db, work_item_id, node, t))]
     detail = "; ".join(causes) if causes else "see the session log"
     reason = f"could not start {named} in node {node.id}: {detail}"
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="config")
+    )
     return "needs_human"
 
 
@@ -366,7 +368,9 @@ async def _stop_for_wait_timeout(
     named = ", ".join(t.path for t in timed_out)
     causes = [c for t in timed_out if (c := _task_cause(db, work_item_id, node, t, WAIT_TIMED_OUT))]
     reason = f"{named} timed out waiting" + (f": {'; '.join(causes)}" if causes else "")
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    # `cap`: a stop for a person naming the wait, never a failure -- NEEDS YOU,
+    # not FAILED (`board.display_status`).
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="cap"))
     return "needs_human"
 
 
@@ -409,7 +413,11 @@ async def _sentinel_stop(
             f"a repair in node {node.id} finished with concerns, so the node "
             f"was not measured again: {doubts}"
         )
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        # `stuck`, not `failed`: nothing failed, the repair doubts itself and a
+        # person decides (`context.py`'s "a person decides").
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="stuck")
+        )
         return "needs_human"
     return None
 
@@ -432,6 +440,8 @@ class _Stuck:
     goes straight to a human under its own cause."""
 
     reason: str
+    #: `store.StopKind` for the `needs_human` this becomes (Kraft UI v2 · B1).
+    kind: store.StopKind
     capped: dict | None = None
     bundle: dict | None = None
     #: `stops.suggestion`: what the node's last session said to do next.
@@ -460,6 +470,7 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
             node.id,
             reason,
             stuck.capped,
+            kind=stuck.kind,
             bundle=stuck.bundle,
             stuck=True,
             suggested=stuck.suggested,
@@ -546,7 +557,9 @@ async def _escalate_stuck(
             _subprocess.read_question(Path(session["result_path"])) if session else None
         ) or "(no question given)"
         reason = f"needs_context: {question}"
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="question")
+        )
         return "needs_human"
     cause = _task_cause(db, work_item_id, node, task, status)
     return await _stop_stuck(
@@ -558,6 +571,14 @@ async def _escalate_stuck(
         + (f": {cause}" if cause else "")
         + ")",
     )
+
+
+def _conflicted_paths(worktree) -> list[str] | None:
+    """The still-conflicted files in `worktree`, or None if git could not say."""
+    out = _config.git_read(
+        Path(worktree), "diff", "--name-only", "--diff-filter=U", expected_failure=True
+    )
+    return out.splitlines() if out is not None else None
 
 
 def _conflict_detail(db, work_item_id: str, node: ResolvedNode, conflicted, excs) -> str:
@@ -598,6 +619,7 @@ async def _resolve_conflict(
     (`resolved-conflict-restarts-from-base-change-target`), reopening the
     span's approved gates.
     """
+    before_conflicted = _conflicted_paths(worktree)
     old_base = dispatch._current_base_ref(db, work_item_id)
     try:
         new_base = await _builtins.upstream_head(
@@ -606,7 +628,9 @@ async def _resolve_conflict(
     except _builtins.BaseBranchMissing as exc:
         # No base to resolve onto: a person has to say where this item goes.
         reason = f"the conflict in node {node.id} cannot be resolved: {exc}"
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="config")
+        )
         return "needs_human"
     note = prompts.rebase_resolve_note(
         worktree,
@@ -656,13 +680,26 @@ async def _resolve_conflict(
             f"the conflict handler in node {node.id} finished without rebasing onto "
             f"{new_base or 'the upstream tip'}: {detail}"
         )
+        kind = "conflict"
     elif (question := dispatch.needs_context_question(db, work_item_id, node, round)) is not None:
         # The handler judged that what landed upstream changes what this item
         # is for, and asked: the question is the stop.
         reason = f"needs_context: {question}"
+        kind = "question"
     else:
         reason = f"the conflict handler in node {node.id} could not resolve it: {detail}"
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        kind = "conflict"
+    facts = None
+    if kind == "conflict":
+        after_conflicted = _conflicted_paths(worktree)
+        if before_conflicted is not None and after_conflicted is not None:
+            facts = {
+                "resolved": sorted(set(before_conflicted) - set(after_conflicted)),
+                "unresolved": after_conflicted,
+            }
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind=kind, facts=facts)
+    )
     return "needs_human"
 
 
@@ -915,7 +952,9 @@ async def _walk_node_once(
                 if question is not None:
                     reason = f"needs_context: {question}"
                     await db.write(
-                        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason)
+                        lambda c: store.mark_needs_human(
+                            c, work_item_id, node.id, reason, kind="question"
+                        )
                     )
                     return "needs_human"
                 # Kraft-5m7t: a `retry --steer` against this node only
@@ -932,7 +971,7 @@ async def _walk_node_once(
                     reason += f" ({', '.join(repr(e) for e in excs)})"
                 if repaired:
                     reason += " (after on_failure)"
-                return _Stuck(reason)
+                return _Stuck(reason, kind="failed")
         await node_runs.completed(db, Path(worktree) if worktree else None, work_item_id, node.id)
         return "ok"
 
@@ -1215,7 +1254,9 @@ async def _walk_node_once(
         if question is not None:
             reason = f"needs_context: {question}"
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
+                lambda c, reason=reason: store.mark_needs_human(
+                    c, work_item_id, node.id, reason, kind="question"
+                )
             )
             return "needs_human"
 
@@ -1247,7 +1288,9 @@ async def _walk_node_once(
                 "change them. Reinstall and restart, or skip the node."
             )
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
+                lambda c, reason=reason: store.mark_needs_human(
+                    c, work_item_id, node.id, reason, kind="infra"
+                )
             )
             return "needs_human"
 
@@ -1308,7 +1351,7 @@ async def _walk_node_once(
                 )
             )
             if verdict == "stop_needs_human":
-                return _Stuck(f"judge: {reasoning}")
+                return _Stuck(f"judge: {reasoning}", kind="stuck")
             # "as if there were no eligible findings" (spec) -- a task that
             # failed outright (blind or not: a red pipeline reports findings
             # *and* fails) would still be in the loop once its eligible
@@ -1342,7 +1385,9 @@ async def _walk_node_once(
                     c, work_item_id, node.id, measured
                 )
             )
-            return _Stuck(reason, capped={"cycles": count - 1, "attempts": cap.attempts})
+            return _Stuck(
+                reason, kind="cap", capped={"cycles": count - 1, "attempts": cap.attempts}
+            )
 
         if prints and fix_ran:
             # Whole-set equality catches "nothing at all changed". Kraft-0i6z4:
@@ -1375,7 +1420,9 @@ async def _walk_node_once(
                 # Deliberately NOT mark_sessions_capped_out: these sessions did
                 # not cap out, and only a real cap breach may claim they did.
                 return _Stuck(
-                    reason, bundle=await _diagnosis_bundle(db, work_item_id, node, worktree, launch)
+                    reason,
+                    kind="stuck",
+                    bundle=await _diagnosis_bundle(db, work_item_id, node, worktree, launch),
                 )
 
         payload = {
@@ -1467,7 +1514,9 @@ async def _walk_node_once(
                 f"{_in_process_causes(db, work_item_id, node, fix_failed)}"
             )
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
+                lambda c, reason=reason: store.mark_needs_human(
+                    c, work_item_id, node.id, reason, kind="failed"
+                )
             )
             return "needs_human"
         round = count
@@ -1542,7 +1591,9 @@ async def _restart_for_base_change(
     if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
         reason = f"{key} exhausted after {count - 1} restart(s) from {restart_from!r}"
         capped = {"cycles": count - 1, "attempts": cap.attempts}
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, capped))
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, capped, kind="cap")
+        )
         return None
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
@@ -1551,7 +1602,11 @@ async def _restart_for_base_change(
             if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, gate.id):
                 await db.write(
                     lambda c, g=gate.id: events.append(
-                        c, work_item_id, "gate_reopened", {"gate": g, "reason": "conflict_resolved"}
+                        c,
+                        work_item_id,
+                        "gate_reopened",
+                        {"gate": g, "reason": "conflict_resolved"},
+                        node_id=g,
                     )
                 )
     for n in span:
@@ -1616,7 +1671,13 @@ async def _door_conflict(
         if carried:
             text = carried.take()
             await db.write(lambda c: store.set_steer(c, work_item_id, text))
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, conflict))
+        unresolved = _conflicted_paths(worktree)
+        facts = {"resolved": [], "unresolved": unresolved} if unresolved is not None else None
+        await db.write(
+            lambda c: store.mark_needs_human(
+                c, work_item_id, node.id, conflict, kind="conflict", facts=facts
+            )
+        )
         return "needs_human"
     budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
     result = await _resolve_conflict(
@@ -1803,12 +1864,21 @@ async def run_once(
     except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index].id
         reason = str(exc)
+        kind = "config" if isinstance(exc, _config.ConfigError) else "infra"
         await node_runs.entered(db, run_dirs.worktrees / work_item_id, work_item_id, failing_node)
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason))
+        await db.write(
+            lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason, kind=kind)
+        )
         return "needs_human"
     if report is not None:
         await db.write(
-            lambda c: events.append(c, work_item_id, "worktree_prepared", {"report": report})
+            lambda c: events.append(
+                c,
+                work_item_id,
+                "worktree_prepared",
+                {"report": report},
+                node_id=nodes[start_index].id,
+            )
         )
 
     i = start_index

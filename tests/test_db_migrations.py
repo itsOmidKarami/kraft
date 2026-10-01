@@ -202,6 +202,25 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
         # Harmless when `sandbox` was already dropped (version < 43).
         replace = (*replace, ("sandbox        TEXT,", "sandbox        TEXT"))
+    if version < 45:
+        drop_lines = (
+            *drop_lines,
+            "stop_kind        TEXT,",
+            "-- the reason a `needs_human`/`waiting`/`rate_limited` row is stopped",
+            "-- (`store.StopKind`, Kraft UI v2",
+            "-- column existed. `work_items_stop_kind_clear` clears it",
+            "-- row leaves that set, so it can never point at a stop that is over.",
+        )
+    if version < 46:
+        drop_lines = (
+            *drop_lines,
+            "events.node_id (Kraft UI v2",
+            "-- the node this event is about, or NULL for an item-level event",
+            "-- (`events.append`, Kraft UI v2",
+            "-- `node_id`/`node` key, or passed explicitly by an emitter that knows its",
+            "-- node but does not name it in the payload.",
+            "CREATE INDEX idx_events_node",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -444,8 +463,13 @@ def test_a_fresh_schema_and_a_fully_migrated_one_agree(tmp_path):
         return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
 
     assert shape(old) == shape(fresh)
-    # What makes a run fork immutable (`db._RUN_FORK_TRIGGERS`) is not a column.
-    assert triggers(old) == triggers(fresh) == {"run_forks_immutable", "run_forks_undeletable"}
+    # What makes a run fork immutable (`db._RUN_FORK_TRIGGERS`) and what clears
+    # `stop_kind` are not columns.
+    assert (
+        triggers(old)
+        == triggers(fresh)
+        == {"run_forks_immutable", "run_forks_undeletable", "work_items_stop_kind_clear"}
+    )
 
 
 ADDED_COLUMNS = [
@@ -488,6 +512,8 @@ ADDED_COLUMNS = [
     (42, "worker_sessions", ("sandbox",), None),
     # NULL: no `network` policy, so an adopted session has no channel to re-open
     (43, "worker_sessions", ("egress",), None),
+    # NULL: a row stopped before stop kinds existed has no recorded reason
+    (44, "work_items", ("stop_kind",), None),
 ]
 
 

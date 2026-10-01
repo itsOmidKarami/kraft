@@ -161,6 +161,7 @@ async def review(
                 work_item_id,
                 "gate_auto_review_skipped",
                 {"gate": gate, "reason": "unreviewable"},
+                node_id=node.id,
             )
         )
         return "undecided", (f"gate {gate!r} declares no agent task to review it; a person decides")
@@ -174,6 +175,7 @@ async def review(
                 work_item_id,
                 "gate_auto_review_skipped",
                 {"gate": gate, "reason": "profile_fallback"},
+                node_id=node.id,
             )
         )
         return "undecided", refusal
@@ -195,7 +197,11 @@ async def review(
 
     await db.write(
         lambda c: events.append(
-            c, work_item_id, "gate_auto_review_started", {"gate": gate, "session_id": session_id}
+            c,
+            work_item_id,
+            "gate_auto_review_started",
+            {"gate": gate, "session_id": session_id},
+            node_id=node.id,
         )
     )
 

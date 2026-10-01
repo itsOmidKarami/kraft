@@ -232,7 +232,9 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         # logged a second time, no error, no hint that approving was never
         # going to work. The node that produced the bad artifact needs to be
         # redone, not re-approved, so this is a clear stop, not a silent one.
-        await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
+        await st.db.write(
+            lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason, kind="config")
+        )
         raise HTTPException(
             422, f"{reason} -- gate {gate!r} cannot be approved; run `kraft item retry` instead"
         )

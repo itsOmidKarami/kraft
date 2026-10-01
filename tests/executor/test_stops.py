@@ -42,6 +42,7 @@ async def test_an_exit_that_neither_hands_off_nor_stops_leaves_the_item_stopped(
         pass
 
     assert claimed.status() == "needs_human"
+    assert claimed.row()["stop_kind"] == "infra"
 
 
 async def test_a_raising_exit_stops_the_item_and_still_raises(claimed):
@@ -77,7 +78,9 @@ async def test_an_item_the_body_already_stopped_is_not_stopped_twice(claimed):
     exactly one event rather than gaining a second, contradictory one."""
     async with _bracket(claimed):
         await claimed.database.write(
-            lambda c: store.mark_needs_human(c, claimed.id, "implementation", "the real reason")
+            lambda c: store.mark_needs_human(
+                c, claimed.id, "implementation", "the real reason", kind="failed"
+            )
         )
 
     assert claimed.status() == "needs_human"

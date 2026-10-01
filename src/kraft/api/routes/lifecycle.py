@@ -7,11 +7,11 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import psutil
 from fastapi import HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
 from kraft import escalate, events, executor, node_runs, store
@@ -84,6 +84,14 @@ class EndWorkItem(BaseModel):
 class CompleteWorkItem(EndWorkItem):
     #: Close the item's beads as a walked completion would. Off by default.
     close_beads: bool = False
+
+
+class CancelWorkItem(EndWorkItem):
+    #: Close the item's open merge request on the forge once cancel has ended
+    #: it (B4). Off by default -- cancel never touches the forge on its own.
+    #: `/complete` does not take this: a completed item's MR is the one the
+    #: walk's own `merge` node already landed or left open on purpose.
+    close_mr: bool = False
 
 
 class Escalate(BaseModel):
@@ -354,6 +362,56 @@ async def restore_work_item(wid: str, request: Request):
         raise HTTPException(409, "work item is not archived")
     await st.db.write(lambda c: store.restore_work_item(c, wid))
     return {"id": wid, "status": row["status"]}
+
+
+class Bulk(BaseModel):
+    action: Literal["pause", "cancel", "archive", "restore"]
+    ids: Annotated[list[str], Field(min_length=1, max_length=200)]
+    #: Required when `action` is `cancel` (`EndWorkItem.reason`'s own rule);
+    #: unused by the other three.
+    reason: str | None = None
+
+
+@api_router.post("/work-items/bulk")
+async def bulk_work_items(body: Bulk, request: Request):
+    """B9: the single-item route each action already has, called once per id,
+    in `ids` order, each in its own write -- a `/retry`-style all-or-nothing
+    claim would need a new one of those per action, and nothing here asks for
+    one. An id's `HTTPException` becomes a result rather than aborting the
+    rest, same posture as a CI matrix: one leg's failure does not cancel its
+    siblings. `cancel`'s reason is checked once, up front, so a request that
+    cannot possibly succeed touches nothing (`EndWorkItem.reason` would
+    otherwise answer the same 422 for the first id and silently skip it for
+    the rest)."""
+    if body.action == "cancel" and not (body.reason or "").strip():
+        raise HTTPException(422, "reason: cancel needs a non-blank reason")
+    results = [await _bulk_one(request, wid, body.action, body.reason) for wid in body.ids]
+    return {"results": results}
+
+
+async def _bulk_one(request: Request, wid: str, action: str, reason: str | None) -> dict:
+    st = request.app.state
+    try:
+        if action == "pause":
+            await pause_work_item(wid, request)
+        elif action == "cancel":
+            await cancel_work_item(wid, CancelWorkItem(reason=reason or ""), request)
+        elif action == "archive":
+            await archive_work_item(wid, request)
+        else:
+            await restore_work_item(wid, request)
+    except HTTPException as exc:
+        error = "not found" if exc.status_code == 404 else str(exc.detail)
+        row = st.db.read(
+            lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+        )
+        return {"id": wid, "ok": False, "error": error} | (
+            {"status": row["status"]} if row is not None else {}
+        )
+    row = st.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    return {"id": wid, "ok": True, "status": row["status"] if row is not None else None}
 
 
 @api_router.post("/work-items/{wid}/pause")
@@ -662,7 +720,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             # must not leave it stranded there with no walk behind it.
             reason = str(exc)
             await st.db.write(
-                lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
+                lambda c: store.mark_needs_human(
+                    c, wid, row["current_node_id"], reason, kind="infra"
+                )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
@@ -678,6 +738,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                     wid,
                     "worktree_rebase_verified",
                     {"reported_head": new_base, "worktree_head": worktree_head},
+                    node_id=row["current_node_id"],
                 )
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
@@ -757,7 +818,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     matches the escalation session still live for this item) is deferred
     rather than run inline -- see the `work_item_self_retry_requested`
     branch below.
+
+    The body of this route is `_retry`, so `POST /work-items/{id}/reopen-mr`
+    (B8) can retry the same stopped node through the exact same function
+    after it reopens the merge request, instead of a second copy of this
+    logic that could drift from it.
     """
+    return await _retry(wid, body, request)
+
+
+async def _retry(wid: str, body: Retry, request: Request):
     from kraft.api.routes.gates import _decided_by  # local: it imports this module
 
     st = request.app.state
@@ -967,7 +1037,9 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             reason = str(exc)
-            await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+            await st.db.write(
+                lambda c: store.mark_needs_human(c, wid, node_id, reason, kind="infra")
+            )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
         # See the matching comment in `resume_work_item` (Kraft-jypzx): an
@@ -981,10 +1053,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                     wid,
                     "worktree_rebase_verified",
                     {"reported_head": new_base, "worktree_head": worktree_head},
+                    node_id=node_id,
                 )
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
+        # Computed ahead of `spawn`, which only schedules the walk task: a
+        # session for it may or may not exist by the time this request
+        # returns, so reading the count after would be a race either way --
+        # read it now, while it is still a clean prediction.
+        attempt = _retry_attempt(st.db, wid, node, target)
         try:
             deps.spawn(
                 request.app,
@@ -1020,7 +1098,33 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             "path": target.path if target is not None else None,
             "loop": key,
             "steer": steer,
+            "attempt": attempt,
         }
+
+
+def _retry_attempt(db, wid: str, node, target: ChainPath | None) -> int:
+    """B2: the attempt number the task this retry launches will run as.
+
+    A `path` naming a task retries just that one; a `path` naming a step
+    retries every task in it; no `path` (and a `restart`, which also hands in
+    `target=None`) retries the whole node, so every one of its own tasks is a
+    candidate -- the highest next-attempt among them is the one that will
+    actually be reported once a session exists (`walk` dispatches the first
+    one that is not already `done`, and `next_attempt` is monotonic in
+    whichever that turns out to be). The dedicated escalation task is never a
+    candidate: its sessions are never written under its own path (they use
+    the literal hook_point `"escalation"`), so counting it would only ever
+    read a stale, always-empty 1.
+    """
+    if target is not None and target.task is not None:
+        paths = [target.task.path]
+    elif target is not None and target.step is not None:
+        paths = [t.path for t in target.step.tasks]
+    else:
+        paths = [t.path for t in node.tasks() if t is not node.escalation]
+    if not paths:
+        return 1
+    return max(db.read(lambda c, p=p: store.next_attempt(c, wid, node.id, p)) for p in paths)
 
 
 def _retry_target(chain, row, body: Retry) -> ChainPath | None:
@@ -1385,11 +1489,94 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
 
 
 @api_router.post("/work-items/{wid}/cancel")
-async def cancel_work_item(wid: str, body: EndWorkItem, request: Request):
+async def cancel_work_item(wid: str, body: CancelWorkItem, request: Request):
     """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
-    archiving reclaims it later, the same as for any ended item."""
-    await _end_work_item(request, wid, "cancel", body.reason)
-    return deps._work_item_row(request.app.state, wid)
+    archiving reclaims it later, the same as for any ended item.
+
+    `body.close_mr` (B4) closes the item's open merge request once the cancel
+    itself has landed -- a forge failure never undoes it, it only shows up in
+    the response's `close_mr`.
+    """
+    row = await _end_work_item(request, wid, "cancel", body.reason)
+    result = dict(deps._work_item_row(request.app.state, wid))
+    if body.close_mr:
+        result["close_mr"] = await _close_cancelled_mr(request.app.state, wid, row)
+    return result
+
+
+async def _close_cancelled_mr(st, wid: str, row) -> dict:
+    """B4: close the just-cancelled item's open merge request. `{ok: True}`
+    on success; `{ok: False, error}` for no open MR or a forge failure --
+    cancel itself already stands by the time this runs, so neither undoes it.
+    """
+    ref = board._mr_ref(st, wid)
+    if ref is None:
+        return {"ok": False, "error": "no open merge request"}
+    try:
+        state = await board._mr_state(st, row)
+    except forge_mod.ForgeError as exc:
+        return {"ok": False, "error": str(exc)}
+    if state != "open":
+        return {"ok": False, "error": "no open merge request"}
+    worktree = st.run_dirs.worktrees / wid
+    mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="open")
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+    forge = forge_mod.resolve(backend)
+    try:
+        await forge.close_mr(repo=worktree, mr=mr_ref)
+    except forge_mod.ForgeError as exc:
+        return {"ok": False, "error": str(exc)}
+    await st.db.write(
+        lambda c: events.append(
+            c,
+            wid,
+            "mr_closed",
+            {"ref": ref["number"], "url": ref["url"], "by": "cancel"},
+            node_id=row["current_node_id"],
+        )
+    )
+    return {"ok": True}
+
+
+@api_router.post("/work-items/{wid}/reopen-mr")
+async def reopen_mr(wid: str, request: Request):
+    """B8: undo the MR-closed stop the poller wrote (`mr_poller.py`) by
+    reopening the merge request on the forge, then retrying the stopped node
+    the way `POST /retry` with no `path` does -- the same `_retry` function,
+    not a copy, so the two can never answer a retry differently.
+
+    409 unless the item is actually stopped on a closed merge request; a
+    forge failure answers 502 and leaves the item stopped, same posture as
+    `_close_cancelled_mr`'s close.
+    """
+    st = request.app.state
+    deps.forbid_self_action(st, request, wid)
+    row = deps._live_work_item_row(st, wid)
+    if row["stop_kind"] != "mr_closed":
+        raise HTTPException(409, "work item is not stopped on a closed merge request")
+    ref = board._mr_ref(st, wid)
+    if ref is None:
+        raise HTTPException(409, "work item has no merge request to reopen")
+    worktree = st.run_dirs.worktrees / wid
+    mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="closed")
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+    forge = forge_mod.resolve(backend)
+    try:
+        await forge.reopen_mr(repo=worktree, mr=mr_ref)
+    except forge_mod.ForgeError as exc:
+        raise HTTPException(502, str(exc)) from None
+    await st.db.write(
+        lambda c: events.append(
+            c,
+            wid,
+            "mr_reopened",
+            {"ref": ref["number"], "url": ref["url"]},
+            node_id=row["current_node_id"],
+        )
+    )
+    return await _retry(wid, Retry(), request)
 
 
 async def _end_work_item(request: Request, wid: str, action: str, reason: str):
@@ -1549,7 +1736,9 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     # never looked at the pipeline this repair created.
     def _record(c):
         store.set_ci_pipeline_ref(c, wid, "")
-        events.append(c, wid, "mr_labels_set", {"labels": list(labels)})
+        events.append(
+            c, wid, "mr_labels_set", {"labels": list(labels)}, node_id=row["current_node_id"]
+        )
 
     await st.db.write(_record)
     return {"work_item_id": wid, "labels": list(labels)}

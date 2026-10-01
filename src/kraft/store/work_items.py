@@ -3,10 +3,33 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from typing import Literal
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import ENDED, write_status
+
+#: Why a `needs_human`/`waiting`/`rate_limited` row is stopped (Kraft UI v2 ·
+#: B1). The first ten are `needs_human` kinds, written by `mark_needs_human`.
+#: `wait` and `rate_limit` are written only by `mark_waiting` and
+#: `mark_rate_limited`, in the same `UPDATE` that sets the status. `gate` is
+#: never written here -- a gate stop is `gate_requested`, not
+#: `work_item_needs_human`, and `board.display_status` reports `gate` for it
+#: without reading this column. B5 adds `worker_lost` itself.
+StopKind = Literal[
+    "gate",
+    "question",
+    "cap",
+    "budget",
+    "failed",
+    "conflict",
+    "mr_closed",
+    "config",
+    "infra",
+    "stuck",
+    "wait",
+    "rate_limit",
+]
 
 #: How much of the title goes into the branch name. A Kraft title is a
 #: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
@@ -158,14 +181,22 @@ def mark_needs_human(
     budget: dict | None = None,
     bundle: dict | None = None,
     *,
+    kind: StopKind,
     stuck: bool = False,
     suggested: dict | None = None,
+    facts: dict | None = None,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
 
+    `kind` is required -- a missing kind at a call site is a bug the stop
+    kinds work (Kraft UI v2 · B1) means to catch as a `TypeError`, not show up
+    later as a wrong badge. It is written to `stop_kind` in the same `UPDATE`
+    that moves the row to `needs_human`, and to the event payload as `kind`.
+
     `stuck` marks a stop in the stuck set (`walk._Stuck`, Ruling 176): the only
     stops automatic escalation answers. Written only by `walk._stop_stuck`;
-    `executor.gates.stuck_stop` is its reader.
+    `executor.gates.stuck_stop` is its reader. `stuck` and `kind` are
+    independent: `stuck` is the auto-escalation marker, `kind` is why.
 
     The UI shows capped-out as a glyph *plus* the words "capped n/n", and the
     board never fetches sessions per row — so the numbers have to ride the
@@ -183,15 +214,19 @@ def mark_needs_human(
     `suggested` is the next action the chain or a repair concluded
     (`{action, reason}`, Kraft-s7c04.27): recorded as `suggested_action`, so
     the stop offers it as one command instead of only prose in the reason.
+
+    `facts` carries kind-specific detail the detail view renders (conflict's
+    resolved/unresolved files, a closed MR's ref and url) -- written to the
+    payload as `facts` only when given.
     """
     if not write_status(
         conn,
-        "UPDATE work_items SET status = 'needs_human', retry_at = NULL, updated_at = ? "
-        "WHERE id = ?",
-        (_now(), work_item_id),
+        "UPDATE work_items SET status = 'needs_human', stop_kind = ?, retry_at = NULL, "
+        "updated_at = ? WHERE id = ?",
+        (kind, _now(), work_item_id),
     ):
         return
-    payload = {"node_id": node_id, "reason": reason}
+    payload = {"node_id": node_id, "reason": reason, "kind": kind}
     # The reason names the hook that failed, never why -- that is in the failed
     # session's log. Naming the session here is what lets the timeline offer
     # "view log" on the one event a human actually lands on, instead of asking
@@ -221,6 +256,8 @@ def mark_needs_human(
         payload["stuck"] = True
     if suggested is not None:
         payload["suggested_action"] = suggested
+    if facts is not None:
+        payload["facts"] = facts
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 
@@ -231,7 +268,8 @@ def mark_rate_limited(
     once `retry_at` passes, with nobody paged (unlike `mark_needs_human`)."""
     if not write_status(
         conn,
-        "UPDATE work_items SET status = 'rate_limited', retry_at = ?, updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'rate_limited', stop_kind = 'rate_limit', retry_at = ?, "
+        "updated_at = ? WHERE id = ?",
         (retry_at, _now(), work_item_id),
     ):
         return
@@ -251,7 +289,8 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
     """
     if not write_status(
         conn,
-        "UPDATE work_items SET status = 'waiting', retry_at = ?, updated_at = ? WHERE id = ?",
+        "UPDATE work_items SET status = 'waiting', stop_kind = 'wait', retry_at = ?, "
+        "updated_at = ? WHERE id = ?",
         (retry_at, _now(), work_item_id),
     ):
         return

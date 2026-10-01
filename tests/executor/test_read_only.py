@@ -98,6 +98,7 @@ async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it
     assert launched == ["build.check.review"]
     assert _git(it.repo, "show", "--name-only", "--format=", "HEAD") == "calc.py"
     assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "failed"
     assert _reason(it) == "build.check is read_only, but it changed the worktree: calc.py"
     [event] = it.events("read_only_violated")
     assert event["payload"] == {"node_id": "build", "scope": "build.check", "files": ["calc.py"]}

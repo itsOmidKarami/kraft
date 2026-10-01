@@ -233,8 +233,14 @@ def set_thread_state(conn, tid, state: str) -> None:
         "UPDATE review_threads SET state = ?, resolved_at = ? WHERE id = ?",
         (state, _now() if state == "resolved" else None, tid),
     )
-    wid = thread_row(conn, tid)["work_item_id"]
-    events.append(conn, wid, "thread_updated", {"thread_id": tid, "state": state})
+    t = thread_row(conn, tid)
+    events.append(
+        conn,
+        t["work_item_id"],
+        "thread_updated",
+        {"thread_id": tid, "state": state},
+        node_id=t["node_id"],
+    )
 
 
 def agent_reply(conn, tid, *, author, body, claim, attempt) -> str:
@@ -251,7 +257,11 @@ def agent_reply(conn, tid, *, author, body, claim, attempt) -> str:
         # An agent claim never reopens a `claimed` or `resolved` thread: report
         # the state the thread is actually in instead.
         events.append(
-            conn, t["work_item_id"], "thread_updated", {"thread_id": tid, "state": t["state"]}
+            conn,
+            t["work_item_id"],
+            "thread_updated",
+            {"thread_id": tid, "state": t["state"]},
+            node_id=t["node_id"],
         )
     return cid
 
@@ -332,6 +342,7 @@ def publish_review(conn, rid: str) -> None:
         r["work_item_id"],
         "review_submitted",
         {"review_id": rid, "gate": r["gate"], "outcome": r["outcome"]},
+        node_id=r["gate"],
     )
 
 
@@ -395,7 +406,11 @@ def render_threads(threads: list[dict]) -> str:
 
 def request_rewind(conn, wid, *, review_id, target, note) -> None:
     events.append(
-        conn, wid, "rewind_requested", {"review_id": review_id, "target": target, "note": note}
+        conn,
+        wid,
+        "rewind_requested",
+        {"review_id": review_id, "target": target, "note": note},
+        node_id=target,
     )
 
 

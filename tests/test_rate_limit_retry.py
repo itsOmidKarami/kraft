@@ -121,10 +121,13 @@ async def test_tick_falls_back_to_needs_human_once_the_cap_breaches(
     got = await rate_limit_retry.tick(app)
     assert got == []
     row = app.state.db.read(
-        lambda c: c.execute("SELECT status, retry_at FROM work_items WHERE id='w1'").fetchone()
+        lambda c: c.execute(
+            "SELECT status, retry_at, stop_kind FROM work_items WHERE id='w1'"
+        ).fetchone()
     )
     assert row["status"] == "needs_human"
     assert row["retry_at"] is None
+    assert row["stop_kind"] == "cap"
     assert app.state.tasks == {}  # nothing was relaunched
 
 

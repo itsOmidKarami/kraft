@@ -418,7 +418,9 @@ async def test_an_old_layout_member_stops_an_escalations_self_retry_before_the_r
     )
     _old_layout(root, run_dirs.worktrees / it.id, "libs/a")
     await it.database.write(
-        lambda c: store.mark_needs_human(c, it.id, "implementation", "stuck", stuck=True)
+        lambda c: store.mark_needs_human(
+            c, it.id, "implementation", "stuck", stuck=True, kind="stuck"
+        )
     )
     cursor = it.events()[-1]["seq"]
     request = {"node_id": "implementation", "key": None, "gate_key": None, "steer": None}

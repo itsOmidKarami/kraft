@@ -81,7 +81,9 @@ async def _item(database, run_dirs, defaults=None, item_policy=None, nodes=_NODE
         )
     )
     await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
-    await database.write(lambda c: store.mark_needs_human(c, "w1", "implementation", "stuck"))
+    await database.write(
+        lambda c: store.mark_needs_human(c, "w1", "implementation", "stuck", kind="stuck")
+    )
 
 
 async def _ran(database, run_dirs, sid, hook_point):

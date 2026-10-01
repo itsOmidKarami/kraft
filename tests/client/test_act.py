@@ -208,7 +208,7 @@ def test_escalate_on_a_needs_human_item_schedules_a_turn(wired, tmp_path):
         await api.app.state.db.write(lambda c: store.enter_node(c, wid, "implementation"))
         await api.app.state.db.write(
             lambda c: store.mark_needs_human(
-                c, wid, "implementation", "task failed in node implementation"
+                c, wid, "implementation", "task failed in node implementation", kind="failed"
             )
         )
         return await client.escalate("please look at this", work_item_id=wid)

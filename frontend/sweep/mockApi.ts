@@ -44,10 +44,23 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
 
     let m: RegExpMatchArray | null;
 
+    /* budget */
+    if (p === "/budget/today") return json(route, { spent_usd: 8.3, cap_usd: 50 });
+
     /* work items */
     if (p === "/work-items" && method === "GET") {
       const list = q.get("archived") === "true" ? S.archived : S.items;
       return json(route, { items: list, cursor: 4242 });
+    }
+    if (p === "/work-items" && method === "POST" && q.get("dry_run")) {
+      const nodes = S.items[0]?.chain_definition?.nodes ?? [];
+      return json(route, {
+        dry_run: true,
+        nodes,
+        skipped: [],
+        gates: nodes.filter((n: any) => n.gate_after === n.id).map((n: any) => n.id),
+        caps: { budget_usd: 5, budget_source: "policy", daily_usd: 50, nodes: {} },
+      });
     }
     if (p === "/work-items" && method === "POST") return json(route, { id: S.items[0]?.id ?? "00000000000000000000000000000000" });
     if ((m = p.match(/^\/work-items\/([^/]+)$/))) {
@@ -58,8 +71,16 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/events$/))) {
       const b = S.bundles[m[1]];
+      const all = b?.events ?? [];
+      const limit = q.get("limit") ? Number(q.get("limit")) : undefined;
+      const before = q.get("before_seq") ? Number(q.get("before_seq")) : undefined;
+      if (before !== undefined) {
+        const page = all.filter((e) => e.seq < before);
+        return json(route, page.slice(-(limit ?? 100)));
+      }
       const after = Number(q.get("after_seq") ?? 0);
-      return json(route, (b?.events ?? []).filter((e) => e.seq > after));
+      const page = all.filter((e) => e.seq > after);
+      return json(route, limit !== undefined ? page.slice(0, limit) : page);
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
@@ -68,6 +89,24 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if ((m = p.match(/^\/work-items\/([^/]+)\/artifact$/))) {
       const b = S.bundles[m[1]];
       return b ? json(route, artifactFor(b.item, S.variant)) : json(route, { detail: "no artifact" }, 404);
+    }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/cancel-preview$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json(route, { detail: "work item not found" }, 404);
+      const it = b.item;
+      return json(route, {
+        running: it.current_node_id ? { node: it.current_node_id, task: it.current_node_id, attempt: 1 } : null,
+        kept: { branch: `kraft/${it.id}`, worktree: `/tmp/kraft/worktrees/${it.id}`, findings: (it.deferred_findings ?? []).length, threads: 0 },
+        mr: it.mr_ref ? { ref: it.mr_ref.number, url: it.mr_ref.url, state: "open" } : null,
+        spend: { spent_usd: it.budget_cap?.spent_usd ?? 0, cap_usd: it.budget_cap?.cap_usd ?? null },
+      });
+    }
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
+      return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
+    }
+    if (method === "POST" && p === "/work-items/bulk") {
+      const ids: string[] = (req.postDataJSON() ?? {}).ids ?? [];
+      return json(route, { results: ids.map((id) => ({ id, ok: true, status: "paused" })) });
     }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
@@ -92,7 +131,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         it.updated_at = new Date().toISOString();
       }
     }
-    if ((m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|skip|abandon|archive|restore|escalate|open-worktree|budget\/raise|escalate\/stop|gates\/[^/]+\/(approve|reject))$/))) {
+    if ((m = p.match(/^\/work-items\/([^/]+)\/(pause|resume|retry|reopen-mr|skip|abandon|archive|restore|escalate|open-worktree|budget\/raise|escalate\/stop|gates\/[^/]+\/(approve|reject))$/))) {
       return json(route, { id: m[1], status: "active", node_id: "implement", loop: "verify_fix_loop", steer: null, path: "/tmp", editor: "code" });
     }
 

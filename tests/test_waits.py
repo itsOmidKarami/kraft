@@ -199,6 +199,8 @@ async def test_wait_timeout_stops_for_human_and_is_not_a_code_failure(walk, item
 
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert "timed out" in reason and "ci.main.ci" in reason
+    # R28: a stop for a person naming the wait, never a failure -- NEEDS YOU.
+    assert it.row()["stop_kind"] == "cap"
     assert not it.events("fix_cycle_started")
     assert [(s["hook_point"], s["status"]) for s in it.sessions()] == [
         ("ci.main.ci", "capped_out")

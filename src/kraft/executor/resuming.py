@@ -65,6 +65,12 @@ async def reconcile_current_node(
     # Which session, and how it ended, rides on the card -- appended, so the
     # prefix `analytics._DEFECT_SIGNATURES` matches on is unchanged.
     seen = {r["hook_point"]: r["status"] for r in final}
+    not_advancing = [
+        seen.get(t.path)
+        for step in node.steps
+        for t in step.tasks
+        if seen.get(t.path) not in _ADVANCING
+    ]
     detail = ", ".join(
         f"{t.task.id}: {seen.get(t.path, 'no session')}"
         for step in node.steps
@@ -74,7 +80,14 @@ async def reconcile_current_node(
     reason = "resume: current-node session did not resolve cleanly" + (
         f" ({detail})" if detail else ""
     )
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+    # question only when every session that didn't advance asked one; a mix
+    # of a question and a plain failure is still a failure (Kraft UI v2 · B1).
+    kind = (
+        "question"
+        if not_advancing and all(s == "needs_context" for s in not_advancing)
+        else "failed"
+    )
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind=kind))
     return "needs_human"
 
 

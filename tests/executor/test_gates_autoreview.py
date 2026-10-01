@@ -37,6 +37,8 @@ from kraft.executor.context import LaunchContext
 from kraft.templates import revision
 from kraft.templates.library import TemplateLibrary
 
+from .test_gates import _requested, _resolved, _review, _reviewed
+
 GATE = "revision_approval"
 
 LIBRARY = TemplateLibrary.from_mappings(
@@ -360,3 +362,23 @@ async def test_a_published_must_fix_thread_downgrades_an_approve_to_undecided(
     assert it.events("chain_revised") == []
     [skipped] = it.events("gate_auto_review_skipped")
     assert skipped["payload"]["reason"] == "undecided"
+
+
+async def test_review_gates_stops_config_when_on_approve_refuses(item_on, monkeypatch):
+    """`review_gates`' approve branch, when `on_approve` itself reports the
+    approval could not apply (`approved is None`) -- the gate route's own
+    refusal path (`kraft.api.routes.gates.apply_approval`), reached here
+    through the escalation/auto-review door instead of a person's click."""
+    it = await item_on(_reviewed(), auto_gate=True)
+    monkeypatch.setattr(
+        gates_module.gate_review, "review", lambda *a, **kw: _resolved(("approve", None))
+    )
+
+    async def _on_approve(row, gate, **_kw):
+        return None, "the artifact changed since the review ran"
+
+    await _requested(it)
+    result = await _review(it, on_approve=_on_approve)
+
+    assert result == "needs_human"
+    assert (it.status(), it.row()["stop_kind"]) == ("needs_human", "config")

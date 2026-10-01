@@ -263,7 +263,9 @@ async def _guarded_resume_adopted_escalation(
         )
         reason = f"resume_after_escalation crashed: {exc!r}"
         try:
-            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+            await db.write(
+                lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="infra")
+            )
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after resume crash", work_item_id)
 
@@ -424,7 +426,7 @@ async def _stop_at_cap(db, row, pid: int, hit) -> None:
             caps.REACHED,
             hit.payload(node_id=row["node_id"], task=row["hook_point"], session_id=session_id),
         )
-        store.mark_needs_human(c, row["work_item_id"], row["node_id"], hit.reason)
+        store.mark_needs_human(c, row["work_item_id"], row["node_id"], hit.reason, kind="cap")
 
     await db.write(_capped)
 
@@ -473,7 +475,9 @@ async def _guarded_adopt(
         logger.exception("adopted session %s crashed", session_id)
         reason = f"reattach crashed: {exc!r}"
         try:
-            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+            await db.write(
+                lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="infra")
+            )
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after adopt crash", work_item_id)
     finally:
@@ -672,6 +676,7 @@ async def reattach(
                     r["work_item_id"],
                     r["node_id"],
                     "reattach: session pending, spawn unconfirmed",
+                    kind="infra",
                 )
             )
             summary.unknown.append(sid)
@@ -737,6 +742,7 @@ async def reattach(
                     r["work_item_id"],
                     r["node_id"],
                     f"reattach: running session, PID identity unconfirmed, no result ({reason})",
+                    kind="infra",
                 )
             )
             summary.unknown.append(sid)

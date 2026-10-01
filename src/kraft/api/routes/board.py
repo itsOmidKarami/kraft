@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from kraft import config as config_mod
 from kraft import events, executor, store
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
+from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 
 
@@ -44,13 +45,75 @@ _STOP_BOUNDARY = (
 )
 
 
+def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
+    """The `work_item_needs_human` payload of the stop the item is *currently*
+    sitting on (or None if anything in `_STOP_BOUNDARY` superseded it), and
+    whether an `escalation_message` landed after that boundary event -- the
+    same episode `deriveState` bounds client-side (an escalation from an
+    earlier, already-superseded stop must not read as live). One event scan
+    for both, so `display_status` costs the detail route nothing beyond what
+    `_current_stop` already read."""
+    evs = st.db.read(lambda c: events.read_after(c, 0, wid))
+    boundary = None
+    for e in reversed(evs):
+        if e["type"] in _STOP_BOUNDARY:
+            boundary = e
+            break
+    stop = (
+        boundary["payload"]
+        if boundary is not None and boundary["type"] == "work_item_needs_human"
+        else None
+    )
+    escalated = boundary is not None and any(
+        e["type"] == "escalation_message" and e["seq"] > boundary["seq"] for e in evs
+    )
+    return stop, escalated
+
+
 def _current_stop(st, wid: str) -> dict | None:
     """The `work_item_needs_human` payload of the stop the item is *currently*
     sitting on, or None if anything in `_STOP_BOUNDARY` superseded it."""
-    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
-        if e["type"] in _STOP_BOUNDARY:
-            return e["payload"] if e["type"] == "work_item_needs_human" else None
-    return None
+    return _stop_episode(st, wid)[0]
+
+
+def display_status(row, stop_kind: str | None, escalated: bool, pending_gate: str | None) -> str:
+    """The design vocabulary's status badge (Kraft Design Decisions §1, §14):
+    exactly one of `archived`, `done`, `cancelled`, `paused`, `running`,
+    `waiting`, `needs_you`, `escalated`, `failed`. The stored `status` column
+    (`kraft.store.work_items`) is unchanged by this -- `display_status` is a
+    read-side view over it, `stop_kind`, whether an escalation is live, and
+    whether a gate is pending.
+
+    `infra` shows as `failed`, not `needs_you`: a daemon restart
+    that lost a session, a git refresh that failed, or a forge that 403'd
+    three times in a row (Decisions §14's own example) are all stops where no
+    handler applies and no timer will change that -- auto-escalation did not
+    or cannot run for them (Item States requirement 1). A `stuck` stop still
+    counts as `needs_you` until its escalation turn actually starts, at which
+    point `escalated` takes over.
+    """
+    if row["archived_at"] is not None:
+        return "archived"
+    status = row["status"]
+    if status == "completed":
+        return "done"
+    if status == "abandoned":
+        return "cancelled"
+    if status == "paused":
+        return "paused"
+    if status == "active":
+        return "running"
+    if status in ("waiting", "rate_limited"):
+        return "waiting"
+    if status == "needs_human":
+        if pending_gate:
+            return "needs_you"
+        if escalated:
+            return "escalated"
+        if stop_kind in ("failed", "config", "infra"):
+            return "failed"
+        return "needs_you"
+    return "running"
 
 
 def _stop_reason(st, wid: str) -> str | None:
@@ -77,6 +140,19 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
     scanned out of the *preceding* node's hook bindings, and a V1 gate declares
     it itself (`gate-owns-gate-behaviour`)."""
     return executor.gate_artifact(st.run_dirs, row, gate)
+
+
+@api_router.get("/budget/today")
+async def budget_today(request: Request):
+    """The instance's spend since local midnight against `policy.budget.daily_usd`
+    (B10) -- the same window and cap the daily budget stop already uses
+    (`intake.py`, `executor/stops.py`), surfaced for a UI with no single work
+    item in view."""
+    st = request.app.state
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    since = store.local_midnight_utc()
+    _item, spent_usd = st.db.read(lambda c: store.budget_spend(c, "", since=since))
+    return {"spent_usd": spent_usd, "cap_usd": budget.daily_usd}
 
 
 @api_router.get("/work-items")
@@ -113,9 +189,23 @@ async def list_work_items(request: Request):
             "  WHERE type IN ('launch_fallback', 'worker_session_started')"
             "  GROUP BY work_item_id, type)"
         ).fetchall()
-        return rows, cursor, gates, launches
+        # The latest `_STOP_BOUNDARY` event per item, and the latest
+        # `escalation_message` per item -- `display_status`/`stop` (B.4) need
+        # both, and the list reads no sessions per row, so this is the one
+        # grouped query that stands in for `_stop_episode`'s per-item scan.
+        boundaries = c.execute(
+            "SELECT work_item_id, type, payload, seq FROM events WHERE seq IN ("
+            f"  SELECT MAX(seq) FROM events WHERE type IN ({','.join('?' * len(_STOP_BOUNDARY))})"
+            "  GROUP BY work_item_id)",
+            _STOP_BOUNDARY,
+        ).fetchall()
+        escalations = c.execute(
+            "SELECT work_item_id, MAX(seq) AS seq FROM events "
+            "WHERE type = 'escalation_message' GROUP BY work_item_id"
+        ).fetchall()
+        return rows, cursor, gates, launches, boundaries, escalations
 
-    rows, cursor, gate_rows, launch_rows = st.db.read(_read)
+    rows, cursor, gate_rows, launch_rows, boundary_rows, escalation_rows = st.db.read(_read)
     latest: dict[tuple[str, str], dict] = {
         (e["work_item_id"], e["type"]): json.loads(e["payload"]) for e in launch_rows
     }
@@ -124,6 +214,13 @@ async def list_work_items(request: Request):
         for g in gate_rows
         if g["type"] == "gate_requested"
     }
+    boundary_by_item = {b["work_item_id"]: b for b in boundary_rows}
+    escalation_seq_by_item = {e["work_item_id"]: e["seq"] for e in escalation_rows}
+
+    def _list_escalated(wid: str) -> bool:
+        boundary = boundary_by_item.get(wid)
+        return boundary is not None and escalation_seq_by_item.get(wid, -1) > boundary["seq"]
+
     items = [
         {
             "id": r["id"],
@@ -147,10 +244,33 @@ async def list_work_items(request: Request):
             "archived_by": r["archived_by"],
             "progress": _board_progress(st, r),
             "fallback": _ran_on_fallback(latest, r["id"]),
+            "display_status": display_status(
+                r, r["stop_kind"], _list_escalated(r["id"]), pending.get(r["id"])
+            ),
+            "stop": _list_stop(r, pending.get(r["id"]), boundary_by_item.get(r["id"])),
         }
         for r in rows
     ]
     return {"items": items, "cursor": cursor}
+
+
+def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
+    """`stop` on the list (B.4): like the detail's, minus `facts`, `task` and
+    `attempt` -- the board reads no sessions per row, and `boundary` is this
+    item's latest `_STOP_BOUNDARY` row from the one grouped query `_read`
+    already ran, not a per-item scan."""
+    status = row["status"]
+    if status not in ("needs_human", "waiting", "rate_limited"):
+        return None
+    reason = None
+    if boundary is not None and boundary["type"] == "work_item_needs_human":
+        reason = json.loads(boundary["payload"])["reason"]
+    return {
+        "kind": _stop_kind(row["stop_kind"], status, pending_gate),
+        "node": row["current_node_id"],
+        "resume_at": row["retry_at"],
+        "reason": reason,
+    }
 
 
 def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
@@ -298,6 +418,73 @@ def _mr_ref(st, wid: str) -> dict | None:
     return None
 
 
+async def _mr_state(st, row) -> str | None:
+    """The item's merge request's live state, for the cancel preview and the
+    close-on-cancel check: the recorded ref is only `{number, url}`, so this is
+    one `find_mr` call. None when the forge no longer knows it. Raises
+    `ForgeError`; the preview catches it, the close reports it."""
+    worktree = st.run_dirs.worktrees / row["id"]
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+    found = await forge_mod.resolve(backend).find_mr(repo=worktree, branch=store.branch_for(row))
+    return found.state if found else None
+
+
+def _running_session(st, wid: str) -> dict | None:
+    """The session a cancel would stop (D.2's `running`): the same row
+    `store.running_sessions_for_node` finds, read for the fields the preview
+    shows rather than the ones a signal needs."""
+    s = st.db.read(
+        lambda c: c.execute(
+            "SELECT s.node_id, s.hook_point, s.attempt FROM worker_sessions s "
+            "JOIN work_items w ON w.id = s.work_item_id "
+            "WHERE s.work_item_id = ? AND s.status IN ('running', 'pending') "
+            "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') "
+            "ORDER BY s.created_at DESC LIMIT 1",
+            (wid,),
+        ).fetchone()
+    )
+    return {"node": s["node_id"], "task": s["hook_point"], "attempt": s["attempt"]} if s else None
+
+
+def _open_thread_count(st, wid: str) -> int:
+    threads = st.db.read(lambda c: store.threads_for(c, wid))
+    return sum(1 for t in threads if t["state"] != "resolved")
+
+
+@api_router.get("/work-items/{wid}/cancel-preview")
+async def cancel_preview(wid: str, request: Request):
+    """What `/cancel` would do (B4): read-only, so the UI can show it before
+    the person commits. Refuses the same way `/cancel` itself does, once the
+    item has already ended (`_live_work_item_row`)."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    cap_usd, _source = store.effective_work_item_cap(row, budget)
+    spent_usd, _daily = st.db.read(lambda c: store.budget_spend(c, wid))
+    ref = _mr_ref(st, wid)
+    mr = None
+    if ref is not None:
+        try:
+            state = await _mr_state(st, row)
+        except forge_mod.ForgeError:
+            # Read-only: a forge that cannot answer leaves the state unknown
+            # rather than failing the preview of a cancel that needs no forge.
+            state = None
+        mr = {"ref": ref["number"], "url": ref["url"], "state": state}
+    return {
+        "running": _running_session(st, wid),
+        "kept": {
+            "branch": store.branch_for(row),
+            "worktree": str(st.run_dirs.worktrees / wid),
+            "findings": len(_deferred_findings(st, wid)),
+            "threads": _open_thread_count(st, wid),
+        },
+        "mr": mr,
+        "spend": {"spent_usd": spent_usd, "cap_usd": cap_usd},
+    }
+
+
 def _needs_context_question(st, wid: str) -> str | None:
     """The agent's question, straight from the `needs_context: <question>`
     reason `_needs_context_stop` already trusts — not a scan of
@@ -328,6 +515,106 @@ def _rate_limit_retries(st, row) -> dict | None:
     return {"count": counter["count"] if counter else 0, "cap": cap}
 
 
+def _stop_kind(stop_kind: str | None, status: str, pending_gate: str | None) -> str:
+    """`stop.kind` (B.3): the stored `stop_kind`, unless a gate is pending
+    (`gate` -- a gate stop writes no `stop_kind`, it is `gate_requested`), or
+    the row predates migration 45 and carries none, in which case the status
+    itself says whether it was a wait or a rate limit."""
+    if pending_gate:
+        return "gate"
+    if stop_kind is not None:
+        return stop_kind
+    return "wait" if status == "waiting" else "rate_limit"
+
+
+def _stop_task_and_attempt(sessions, node_id: str | None) -> tuple[str | None, int | None]:
+    """The `hook_point`/`attempt` of `node_id`'s latest session that is not an
+    escalation turn -- `sessions` ordered oldest first, as `get_work_item`
+    already loads them, so the latest match scanning backward is the one."""
+    for s in reversed(sessions):
+        if s["node_id"] == node_id and s["hook_point"] != "escalation":
+            return s["hook_point"], s["attempt"]
+    return None, None
+
+
+def _summary(st, wid: str, row, chain: dict, sessions) -> dict:
+    """`summary` on the detail response (H.4): a run's progress at a glance --
+    nodes done out of the frozen chain's total, how many of those were gates,
+    and the current node's step (1-based) out of its steps when it declares
+    more than one.
+    """
+    nodes = chain.get("nodes") or []
+    completed = _completed_nodes(st, wid)
+    gates_passed = sum(1 for n in nodes if n["id"] in completed and n.get("gate_after") is not None)
+    step = None
+    node = next((n for n in nodes if n["id"] == row["current_node_id"]), None)
+    steps = node.get("steps") if node else None
+    if steps and len(steps) > 1:
+        task, _attempt = _stop_task_and_attempt(sessions, row["current_node_id"])
+        index = next((i for i, group in enumerate(steps) if task in group), None)
+        if index is not None:
+            step = {"index": index + 1, "count": len(steps)}
+    return {
+        "nodes_done": len(completed),
+        "nodes_total": len(nodes),
+        "gates_passed": gates_passed,
+        "step": step,
+    }
+
+
+def _rate_limit_facts(st, row, task_path: str | None) -> dict:
+    """B6: a rate-limited stop's `retries`, plus -- when the stopped task's
+    frozen chain names a `fallback:` -- that list and the subset its resolved
+    policy still allows. Reuses `MaterializedChain.policy_for`, the same
+    resolution `TemplateLibrary.lint`'s `fallback-never-escapes-allowed-
+    harnesses` check already trusts, rather than re-deriving it."""
+    facts: dict = {"retries": _rate_limit_retries(st, row)}
+    if task_path is None:
+        return facts
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        return facts
+    task = next(
+        (t for node in chain.chain.nodes for t in node.tasks() if t.path == task_path), None
+    )
+    from kraft.templates.models import AgentTask  # deferred: pulls in policy/harness schema
+
+    if not isinstance(getattr(task, "task", None), AgentTask):
+        return facts
+    fallback = [e.harness for e in task.task.fallback or () if e.harness]
+    if not fallback:
+        return facts
+    allowed = chain.policy_for(task).allowed_harnesses
+    facts["fallback"] = fallback
+    facts["fallback_allowed"] = (
+        fallback if allowed is None else [h for h in fallback if h in allowed]
+    )
+    return facts
+
+
+def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None) -> dict | None:
+    """`stop` on the detail response (B.3): `None` unless the item is
+    currently `needs_human`, `waiting` or `rate_limited`."""
+    status = row["status"]
+    if status not in ("needs_human", "waiting", "rate_limited"):
+        return None
+    node = row["current_node_id"]
+    task, attempt = _stop_task_and_attempt(sessions, node)
+    kind = _stop_kind(row["stop_kind"], status, pending_gate)
+    facts = dict(stop_payload.get("facts") or {}) if stop_payload else {}
+    if kind == "rate_limit":
+        facts.update(_rate_limit_facts(st, row, task))
+    return {
+        "kind": kind,
+        "node": node,
+        "task": task,
+        "attempt": attempt,
+        "resume_at": row["retry_at"],
+        "reason": stop_payload["reason"] if stop_payload else None,
+        "facts": facts,
+    }
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -340,13 +627,15 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
+    stop_payload, escalated = _stop_episode(st, wid)
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
     # merely not crashing. `steerable` below reads the frozen snapshot directly.
     chain = store.chain_view(row)
     node_overrides = store.node_overrides_of(row)
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)
-    spent_usd, _daily = st.db.read(lambda c: store.budget_spend(c, wid))
+    since = store.local_midnight_utc()
+    spent_usd, daily_spent_usd = st.db.read(lambda c: store.budget_spend(c, wid, since=since))
     progress = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid)
     return {
         **{k: row[k] for k in row.keys()},
@@ -370,7 +659,12 @@ async def get_work_item(wid: str, request: Request):
         # where it comes from -- and reusing the name would make every GET
         # response's truthy `budget` object read as "the item is stopped for
         # budget" even when it is running fine under its cap.
-        "budget_cap": {"cap_usd": cap_usd, "source": cap_source, "spent_usd": spent_usd},
+        "budget_cap": {
+            "cap_usd": cap_usd,
+            "source": cap_source,
+            "spent_usd": spent_usd,
+            "daily": {"spent_usd": daily_spent_usd, "cap_usd": budget.daily_usd},
+        },
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
@@ -408,11 +702,20 @@ async def get_work_item(wid: str, request: Request):
         "gate_artifact": _gate_artifact(st, row, pending),
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
-        "stop_reason": _stop_reason(st, wid),
+        "stop_reason": stop_payload["reason"] if stop_payload else None,
         # What the chain or a repair concluded a person should do about that
         # stop -- `{action: skip|retry|abandon, reason}` -- or None
         # (Kraft-s7c04.27). Each action is one existing verb.
-        "suggested_action": (_current_stop(st, wid) or {}).get("suggested_action"),
+        "suggested_action": (stop_payload or {}).get("suggested_action"),
+        # The board's status badge (Kraft UI v2 · B1), and the stop it names
+        # when there is one -- {kind, node, task, attempt, resume_at, reason,
+        # facts} -- `None` off `needs_human`/`waiting`/`rate_limited`.
+        "display_status": display_status(row, row["stop_kind"], escalated, pending),
+        "stop": _stop(st, row, sessions, pending, stop_payload),
+        # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
+        # the frozen chain's total, how many were gates, and the current
+        # node's step when it declares more than one.
+        "summary": _summary(st, wid, row, chain, sessions),
         "deferred_findings": _deferred_findings(st, wid),
         "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),
@@ -429,11 +732,29 @@ async def get_work_item(wid: str, request: Request):
     }
 
 
+#: The window `before_seq` alone returns, with no `limit` given (rule H.3).
+_DEFAULT_PAGE = 100
+
+
 @api_router.get("/work-items/{wid}/events")
-async def get_events(wid: str, request: Request, after_seq: int = 0):
+async def get_events(
+    wid: str,
+    request: Request,
+    after_seq: int | None = None,
+    before_seq: int | None = None,
+    limit: int | None = None,
+):
     st = request.app.state
     deps._work_item_row(st, wid)
-    return st.db.read(lambda c: events.read_after(c, after_seq, wid))
+    if after_seq is not None and before_seq is not None:
+        raise HTTPException(422, "after_seq and before_seq cannot both be given")
+    if limit is not None and not 1 <= limit <= 500:
+        raise HTTPException(422, "limit must be between 1 and 500")
+    if before_seq is not None:
+        return st.db.read(
+            lambda c: events.read_before(c, before_seq, wid, limit=limit or _DEFAULT_PAGE)
+        )
+    return st.db.read(lambda c: events.read_after(c, after_seq or 0, wid, limit=limit))
 
 
 @api_router.get("/work-items/{wid}/documents")

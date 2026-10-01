@@ -226,6 +226,7 @@ def test_a_non_conflict_rebase_failure_goes_to_a_human_even_when_armed(
         if e["type"] == "work_item_needs_human"
     ]
     assert stops[-1]["payload"]["reason"] == "rebase conflict: could not apply"
+    assert stops[-1]["payload"]["kind"] == "infra"
     assert calls == []
 
 

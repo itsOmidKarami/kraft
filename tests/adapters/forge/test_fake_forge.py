@@ -63,6 +63,29 @@ async def test_fake_forge_find_mr_tracks_its_own_opened_and_merged_lists():
     assert (await f.find_mr(repo="/r", branch="kraft/w1")).state == "merged"
 
 
+async def test_fake_forge_close_mr_flips_the_ref_state():
+    f = forge.FakeForge()
+    mr = await _opened(f)
+
+    await f.close_mr(repo="/r", mr=mr)
+
+    found = await f.find_mr(repo="/r", branch="kraft/abc")
+    assert found.state == "closed"
+    assert f.closed == [mr.number]
+
+
+async def test_fake_forge_reopen_mr_flips_a_closed_ref_back_open():
+    f = forge.FakeForge()
+    mr = await _opened(f)
+    await f.close_mr(repo="/r", mr=mr)
+
+    await f.reopen_mr(repo="/r", mr=mr)
+
+    found = await f.find_mr(repo="/r", branch="kraft/abc")
+    assert found.state == "open"
+    assert f.reopened == [mr.number]
+
+
 async def test_fake_forge_records_labels_and_retries():
     f = forge.FakeForge()
     mr = await _opened(f)

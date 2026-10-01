@@ -90,6 +90,10 @@ async def test_a_repair_that_never_ran_spends_no_attempt_and_names_its_own_cause
     assert _counter(it) is None, "the attempt the repair never made was spent"
     assert [e["payload"]["outcome"] for e in it.events("fix_cycle_refunded")] == [outcome]
     assert not any("stuck" in r or "exhausted" in r for r in _reasons(it))
+    # Looked up rather than a fifth parameter: the ids are pinned in docs/intent.
+    kind = {"infra_stop": "infra", "config_error": "config"}.get(outcome)
+    if kind is not None:
+        assert it.row()["stop_kind"] == kind
 
 
 async def test_a_failed_sync_step_stops_naming_it_without_spending_an_attempt(item_on, script):
@@ -106,6 +110,7 @@ async def test_a_failed_sync_step_stops_naming_it_without_spending_an_attempt(it
     assert await _walk_node(it) == "needs_human"
     assert _counter(it) is None
     assert _reasons(it) == ["fix attempt 1 in node build could not finish: sync [forge] failed"]
+    assert it.row()["stop_kind"] == "failed"
 
 
 async def test_a_repair_that_ran_and_failed_is_a_spent_attempt(item_on, script):

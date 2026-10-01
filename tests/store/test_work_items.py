@@ -90,15 +90,43 @@ def test_branch_for(conn, branch, expected):
 
 async def test_mark_needs_human_and_completed(database):
     await mk_item(database, "wh")
-    await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "boom"))
-    assert _row(database, "wh")["status"] == "needs_human"
+    await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "boom", kind="failed"))
+    row = _row(database, "wh")
+    assert row["status"] == "needs_human"
+    assert row["stop_kind"] == "failed"
     ev = database.read(lambda c: events.read_after(c, 0))[-1]
     assert ev["type"] == "work_item_needs_human"
-    assert ev["payload"] == {"node_id": "verify", "reason": "boom"}
+    assert ev["payload"] == {"node_id": "verify", "reason": "boom", "kind": "failed"}
 
     await mk_item(database, "wc")
     await database.write(lambda c: store.mark_completed(c, "wc"))
     assert _row(database, "wc")["status"] == "completed"
+
+
+async def test_mark_needs_human_writes_facts_only_when_given(database):
+    await mk_item(database, "wh")
+    await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "boom", kind="failed"))
+    no_facts = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]["payload"]
+    assert "facts" not in no_facts
+
+    await database.write(
+        lambda c: store.mark_needs_human(
+            c, "wh", "verify", "conflict", kind="conflict", facts={"unresolved": ["a.py"]}
+        )
+    )
+    with_facts = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]["payload"]
+    assert with_facts["facts"] == {"unresolved": ["a.py"]}
+
+
+def test_mark_needs_human_kind_has_no_default():
+    """A missed call site must be a `TypeError`, not a silently wrong badge
+    (Kraft UI v2 · B1) -- so `kind` can never quietly default to something."""
+    import inspect
+
+    assert (
+        inspect.signature(store.mark_needs_human).parameters["kind"].default
+        is inspect.Parameter.empty
+    )
 
 
 async def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(database):
@@ -125,14 +153,18 @@ async def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(datab
         await session(sid)
         await database.write(lambda c, sid=sid, status=status: store.session_exited(c, sid, status))
     await database.write(
-        lambda c: store.mark_needs_human(c, "wh", "verify", "needs_context: which db?")
+        lambda c: store.mark_needs_human(
+            c, "wh", "verify", "needs_context: which db?", kind="question"
+        )
     )
     asked = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]["payload"]
 
     # A later session that explains nothing (a budget-refused launch) —
     # the button goes away rather than pointing back at "asked".
     await session("refused", "on.implementation.start")
-    await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "over budget"))
+    await database.write(
+        lambda c: store.mark_needs_human(c, "wh", "verify", "over budget", kind="budget")
+    )
     broke = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]["payload"]
 
     assert asked["session_id"] == "asked", "the stop names an older, unrelated failure"
@@ -206,20 +238,33 @@ def test_branch_name_slugs_the_title_and_stays_a_legal_ref(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("mark", "status", "event", "node"),
+    ("mark", "status", "stop_kind", "event", "node"),
     [
-        (store.mark_rate_limited, "rate_limited", "work_item_rate_limited", "implementation"),
-        (store.mark_waiting, "waiting", "work_item_waiting", "mr_checks"),
+        (
+            store.mark_rate_limited,
+            "rate_limited",
+            "rate_limit",
+            "work_item_rate_limited",
+            "implementation",
+        ),
+        (store.mark_waiting, "waiting", "wait", "work_item_waiting", "mr_checks"),
     ],
     ids=["rate_limited", "waiting"],
 )
-async def test_a_timed_stop_sets_the_status_retry_at_and_event(database, mark, status, event, node):
+async def test_a_timed_stop_sets_the_status_retry_at_and_event(
+    database, mark, status, stop_kind, event, node
+):
     """`mark_waiting` mirrors `mark_rate_limited`: the poller reads status +
-    retry_at, and the event is what the timeline shows a human."""
+    retry_at, and the event is what the timeline shows a human. Each writes its
+    own `stop_kind` in the same `UPDATE` (Kraft UI v2 · B1)."""
     await mk_item(database)
     await database.write(lambda c: mark(c, "w1", node, "2099-01-01T00:00:00+00:00"))
-    row = _row(database, columns="status, retry_at")
-    assert (row["status"], row["retry_at"]) == (status, "2099-01-01T00:00:00+00:00")
+    row = _row(database, columns="status, retry_at, stop_kind")
+    assert (row["status"], row["retry_at"], row["stop_kind"]) == (
+        status,
+        "2099-01-01T00:00:00+00:00",
+        stop_kind,
+    )
     ev = database.read(lambda c: events.read_after(c, 0))[-1]
     assert ev["type"] == event
     assert ev["payload"] == {"node_id": node, "retry_at": "2099-01-01T00:00:00+00:00"}
@@ -230,7 +275,9 @@ async def test_mark_needs_human_clears_retry_at(database):
     await database.write(
         lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
     )
-    await database.write(lambda c: store.mark_needs_human(c, "w1", "implementation", "boom"))
+    await database.write(
+        lambda c: store.mark_needs_human(c, "w1", "implementation", "boom", kind="failed")
+    )
     row = _row(database, columns="status, retry_at")
     assert row["status"] == "needs_human"
     assert row["retry_at"] is None

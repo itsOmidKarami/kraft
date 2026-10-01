@@ -170,6 +170,7 @@ async def test_restarts_are_bounded_by_the_nodes_own_counter(item_on, script):
     assert len(it.events("base_change_restart")) == 1
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason == "rebase.on_base_changed exhausted after 1 restart(s) from 'verify'"
+    assert it.row()["stop_kind"] == "cap"
 
 
 async def test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure(item_on, script):
@@ -181,6 +182,7 @@ async def test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure(ite
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason.startswith("task failed in node rebase: sync [forge]")
     assert not it.events("node_recovery_started")
+    assert it.row()["stop_kind"] == "failed"
 
 
 def _with_handler():
@@ -250,21 +252,39 @@ async def test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase(ite
 
 
 @pytest.mark.parametrize(
-    ("ending", "reason"),
+    ("ending", "reason", "kind", "facts"),
     [
-        ("done", "the conflict handler in node rebase finished without rebasing onto"),
-        ("failed", "the conflict handler in node rebase could not resolve it: "),
-        ("needs_context", "needs_context: "),
+        (
+            "done",
+            "the conflict handler in node rebase finished without rebasing onto",
+            "conflict",
+            {"resolved": ["file_a.txt"], "unresolved": ["file_b.txt"]},
+        ),
+        (
+            "failed",
+            "the conflict handler in node rebase could not resolve it: ",
+            "conflict",
+            {"resolved": ["file_a.txt"], "unresolved": ["file_b.txt"]},
+        ),
+        ("needs_context", "needs_context: ", "question", None),
     ],
     ids=["did-not-rebase", "failed", "asked"],
 )
 async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
-    item_on, script, ending, reason
+    item_on, script, ending, reason, kind, facts
 ):
     """A handler reporting success is believed only once the worktree sits on
     the upstream tip; one that failed stops naming the conflict, and one that
-    asked stops with its question."""
+    asked stops with its question.
+
+    B7: a real conflict in two files, where the handler clears one of them
+    (`git add`) before answering -- the stop's `facts` tell the file it
+    resolved from the one still conflicted. The `question` branch gets no
+    `facts` (B7's rule): it is not naming conflicted files, it is asking."""
     it = await item_on(_chain(**_with_handler()))
+    await _prepared(it)
+    _unmerge(it.worktree, "file_a.txt", "ours a", "theirs a")
+    _unmerge(it.worktree, "file_b.txt", "ours b", "theirs b")
     script.plan = {"sync": ["conflict"], "resolve": [ending]}
     landed = []
 
@@ -273,13 +293,40 @@ async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
             landed.append(await _upstream_moves(it))
 
     async def record(_row):
+        _git(it.worktree, "add", "file_a.txt")
         await it.session("s-resolve", "rebase.on_base_changed.on_conflict.main.resolve", ending)
 
     script.effects = {"check": land_upstream, "resolve": record}
 
     assert await _walk(it) == "needs_human"
-    assert it.events("work_item_needs_human")[-1]["payload"]["reason"].startswith(reason)
+    payload = it.events("work_item_needs_human")[-1]["payload"]
+    assert payload["reason"].startswith(reason)
     assert not it.events("base_change_restart")
+    assert it.row()["stop_kind"] == kind
+    if facts is None:
+        assert "facts" not in payload
+    else:
+        assert payload["facts"] == facts
+
+
+def _unmerge(repo, path, ours, theirs):
+    """Stage `path` as a real git conflict (unmerged stages 2/3), the way an
+    aborted merge or rebase leaves it -- no actual merge needed."""
+    (repo / path).write_text(ours)
+
+    def _blob(content):
+        return subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=repo,
+            input=content,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    index_info = f"100644 {_blob(ours)} 2\t{path}\n100644 {_blob(theirs)} 3\t{path}\n"
+    subprocess.run(
+        ["git", "update-index", "--index-info"], cwd=repo, input=index_info, text=True, check=True
+    )
 
 
 async def test_a_conflict_with_its_base_branch_gone_is_a_stop_naming_it(
@@ -301,6 +348,7 @@ async def test_a_conflict_with_its_base_branch_gone_is_a_stop_naming_it(
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert "cannot be resolved" in reason and "base branch" in reason
     assert not it.events("node_recovery_started"), "no handler ran against a missing base"
+    assert it.row()["stop_kind"] == "config"
 
 
 async def test_a_conflict_handler_is_judged_against_the_items_base_branch(
@@ -399,13 +447,25 @@ async def test_a_conflict_at_the_door_goes_to_the_nodes_handler(item_on, script,
 async def test_a_conflict_at_the_door_with_no_handler_stops_for_a_human(item_on, script):
     """`rebase-conflict-requires-explicit-handler`, at the door: nothing runs,
     the stop names the conflict, and the steer the resume carried waits on the
-    row for the next attempt."""
+    row for the next attempt.
+
+    B7: no handler clears anything, so a real two-file conflict names both
+    files `unresolved` and none `resolved`."""
     it = await item_on(_gated(), "rebase")
+    await _prepared(it)
+    _unmerge(it.worktree, "file_a.txt", "ours a", "theirs a")
+    _unmerge(it.worktree, "file_b.txt", "ours b", "theirs b")
+    # An ordinary, unstaged edit alongside the conflict: `--diff-filter=U` is
+    # what keeps it out of `facts` (plain `git diff` would list it too).
+    (it.worktree / "calc.py").write_text("# an unrelated unstaged edit\n")
 
     assert await _enter_with_conflict(it, "resume", steer="mind the auth") == "needs_human"
     assert script.calls == []
-    assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == "rebase failed for x"
+    payload = it.events("work_item_needs_human")[-1]["payload"]
+    assert payload["reason"] == "rebase failed for x"
     assert it.row()["pending_steer_context"] == "mind the auth"
+    assert it.row()["stop_kind"] == "conflict"
+    assert payload["facts"] == {"resolved": [], "unresolved": ["file_a.txt", "file_b.txt"]}
 
 
 async def _prepared(it):

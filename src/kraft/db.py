@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 46
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -113,6 +113,11 @@ CREATE TABLE work_items (
   -- (`RunFork.materialized_chain`, copied here so every reader of the row
   -- gets it). NULL until the first retry: the intake snapshot is the run.
   run_chain        TEXT,
+  -- the reason a `needs_human`/`waiting`/`rate_limited` row is stopped
+  -- (`store.StopKind`, Kraft UI v2 · B1). NULL for a row stopped before this
+  -- column existed. `work_items_stop_kind_clear` clears it the moment the
+  -- row leaves that set, so it can never point at a stop that is over.
+  stop_kind        TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -122,11 +127,17 @@ CREATE TABLE events (
   work_item_id TEXT NOT NULL REFERENCES work_items(id),
   type         TEXT NOT NULL,
   payload      TEXT NOT NULL,
+  -- the node this event is about, or NULL for an item-level event
+  -- (`events.append`, Kraft UI v2 · B13). Defaulted from the payload's own
+  -- `node_id`/`node` key, or passed explicitly by an emitter that knows its
+  -- node but does not name it in the payload.
+  node_id      TEXT, -- events.node_id (Kraft UI v2 · B13)
   created_at   TEXT NOT NULL
 );
 
 CREATE INDEX idx_events_work_item ON events(work_item_id, seq);
 CREATE INDEX idx_events_type ON events(type);
+CREATE INDEX idx_events_node ON events(work_item_id, node_id, seq);
 
 CREATE TABLE worker_sessions (
   id             TEXT PRIMARY KEY,
@@ -320,6 +331,17 @@ _RUN_FORK_TRIGGERS = [
     "CREATE TRIGGER run_forks_undeletable BEFORE DELETE ON run_forks "
     "BEGIN SELECT RAISE(ABORT, 'a run fork is immutable'); END",
 ]
+
+#: `stop_kind` is only meaningful while a row is stopped -- this clears it the
+#: instant the row's status leaves the stop set, so a resumed/cancelled/done
+#: item can never be read as still pointing at its last stop's kind. Shared
+#: between the fresh-install path and migration 44, which both need the exact
+#: same trigger body.
+_WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER = (
+    "CREATE TRIGGER work_items_stop_kind_clear AFTER UPDATE OF status ON work_items "
+    "WHEN NEW.status NOT IN ('needs_human', 'waiting', 'rate_limited') "
+    "BEGIN UPDATE work_items SET stop_kind = NULL WHERE id = NEW.id; END"
+)
 
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
@@ -952,6 +974,27 @@ FROM worker_sessions""",
     ],
     42: ["ALTER TABLE worker_sessions ADD COLUMN sandbox TEXT"],
     43: ["ALTER TABLE worker_sessions ADD COLUMN egress TEXT"],
+    # Stop kinds (Kraft UI v2 · B1): NULL for every existing row, since none of
+    # them recorded why they stopped.
+    44: [
+        "ALTER TABLE work_items ADD COLUMN stop_kind TEXT",
+        _WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER,
+    ],
+    # Events carry their node (Kraft UI v2 · B13): backfilled from whichever of
+    # the payload's `node_id`/`node` keys is a string -- `json_type(...) =
+    # 'text'` guards against a `node` key some emitter used for something that
+    # is not a node id (a dict, say), which `json_extract` would otherwise
+    # hand back as serialized JSON text indistinguishable from a real id.
+    45: [
+        "ALTER TABLE events ADD COLUMN node_id TEXT",
+        """UPDATE events SET node_id = COALESCE(
+  CASE WHEN json_type(payload, '$.node_id') = 'text'
+       THEN json_extract(payload, '$.node_id') END,
+  CASE WHEN json_type(payload, '$.node') = 'text'
+       THEN json_extract(payload, '$.node') END
+) WHERE node_id IS NULL""",
+        "CREATE INDEX idx_events_node ON events(work_item_id, node_id, seq)",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
@@ -1014,6 +1057,7 @@ def migrate(conn: sqlite3.Connection) -> None:
                 conn.execute(stmt)
         for stmt in _RUN_FORK_TRIGGERS:
             conn.execute(stmt)
+        conn.execute(_WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     except BaseException:

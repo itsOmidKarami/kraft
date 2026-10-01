@@ -98,7 +98,11 @@ def fork_run(
             if _approved(conn, work_item_id, node.id):
                 reopened.append(node.id)
                 events.append(
-                    conn, work_item_id, "gate_reopened", {"gate": node.id, "reason": "retry"}
+                    conn,
+                    work_item_id,
+                    "gate_reopened",
+                    {"gate": node.id, "reason": "retry"},
+                    node_id=node.id,
                 )
     events.append(
         conn,

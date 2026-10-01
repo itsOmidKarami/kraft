@@ -127,6 +127,7 @@ async def test_each_levels_cap_stops_its_own_scope_and_names_it(item_on, fast, l
 
     assert time.monotonic() - started < 10, "the task ran out its own sleep"
     assert _reason(it) == f"{_SCOPE[level]} hit its {WHAT[field]} of 1 minutes"
+    assert it.row()["stop_kind"] == "cap"
     (session,) = it.sessions()
     assert session["status"] == "capped_out"
     (reached,) = it.events(caps.REACHED)
@@ -364,6 +365,7 @@ async def test_a_parked_item_past_its_total_cap_is_stopped_for_a_human(item_on, 
 
     assert stopped == [it.id]
     assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "cap"
     assert _reason(it) == "the work item hit its total time cap of 1 minutes"
 
 
@@ -381,6 +383,7 @@ async def test_a_gate_past_its_timeout_stops_naming_the_gate_and_stays_answerabl
     assert await caps.tick(it.database, now=(T0 + timedelta(minutes=3)).isoformat()) == []
 
     assert _reason(it) == "gate `review` waited past its timeout of 1 minutes"
+    assert it.row()["stop_kind"] == "cap"
     assert gates.pending_gate(it.database, it.id) == "review"
     assert "stuck" not in it.events("work_item_needs_human")[-1]["payload"]
     assert [e["type"] for e in it.events() if e["type"] == caps.REACHED] == [caps.REACHED]

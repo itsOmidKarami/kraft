@@ -163,7 +163,7 @@ Related: \`.engineering/specs/2026-09-12-reuse-what-we-measured.md\`, session \`
 
 /* ── builders ────────────────────────────────────────────────────────────── */
 
-type Ev = { seq: number; work_item_id: string; type: string; payload: Record<string, unknown>; created_at: string };
+type Ev = { seq: number; work_item_id: string; type: string; payload: Record<string, unknown>; node_id?: string | null; created_at: string };
 
 export interface ItemBundle {
   item: any;
@@ -215,7 +215,11 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
   let m = 0;
   const ev = (type: string, payload: Record<string, unknown> = {}, dm = 1) => {
     m += dm;
-    events.push({ seq: ++seq, work_item_id: id, type, payload, created_at: t(m) });
+    // Mirrors the server's own default (`events.append`, Kraft UI v2 · B13):
+    // whichever of the payload's `node_id`/`node` keys is a string.
+    const fromPayload = payload.node_id ?? payload.node;
+    const node_id = typeof fromPayload === "string" ? fromPayload : null;
+    events.push({ seq: ++seq, work_item_id: id, type, payload, node_id, created_at: t(m) });
   };
   const sess = (node: string, status: string, over: Record<string, unknown> = {}, hook = HOOK[node] ?? "on.task") => {
     const sid = hex(seed * 100 + sessions.length + 1);
@@ -288,7 +292,12 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     steerable: true,
     node_overrides: long ? { review: { auto_escalate: false } } : {},
     node_overrides_count: long ? 1 : 0,
-    budget_cap: { cap_usd: long ? 25 : 5, source: long ? "item" : "policy", spent_usd: 2.41 },
+    budget_cap: {
+      cap_usd: long ? 25 : 5,
+      source: long ? "item" : "policy",
+      spent_usd: 2.41,
+      daily: { spent_usd: 8.3, cap_usd: 50 },
+    },
     root_merge_policy: "bump",
     worktree_path: `/Users/dev/.kraft/worktrees/${id.slice(0, 12)}`,
     head_sha: hex(seed + 77).slice(0, 40),
@@ -298,6 +307,17 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     ] : [],
     attachments: long ? [{ kind: "spec", path: ".engineering/specs/2026-09-12-reuse-what-we-measured.md" }] : [],
     mr_ref: null, progress: null, rate_limit: null,
+    // Kraft UI v2 · B1, hand-derived per case below (`board.display_status`'s
+    // rules): data only, the shipped UI still derives its own via
+    // `deriveState` and never reads these.
+    display_status: "running", stop: null,
+    // Kraft UI v2 · B13: data only, unread by the shipped UI.
+    summary: {
+      nodes_done: Math.max(cur, 0),
+      nodes_total: nodes.length,
+      gates_passed: nodes.slice(0, Math.max(cur, 0)).filter((n) => n.gate_after === n.id).length,
+      step: null,
+    },
   };
 
   const startCurrent = (status: string) => {
@@ -307,6 +327,19 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     if (status !== "pending") ev("worker_session_started", { session_id: s.id, node_id: currentNode }, 0.2);
     return s;
   };
+  /** `stop` (B.3): the detail shape, hand-built to match whichever
+   *  `work_item_needs_human`/`work_item_waiting`/`work_item_rate_limited`
+   *  event the case below already emits. */
+  const mkStop = (kind: string, extra: Record<string, unknown> = {}) => ({
+    kind,
+    node: currentNode,
+    task: currentNode ? (HOOK[currentNode] ?? null) : null,
+    attempt: 1,
+    resume_at: null,
+    reason: null,
+    facts: {},
+    ...extra,
+  });
   const progress = (c: number, total: number) => ({
     current: c, total, title: long ? LONG_TITLES.running.slice(0, 90) : "Thread findings into the prompt",
     tasks: Array.from({ length: total }, (_, i) => ({ n: i + 1, title: long ? `Task ${i + 1}: ${LONG_TITLES.gate.slice(0, 60)}` : `Task ${i + 1}`, state: i + 1 < c ? "done" : i + 1 === c ? "current" : "pending" })),
@@ -327,6 +360,8 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       ev("work_item_rate_limited", { node_id: currentNode, retry_at: fromNow(4) }, 3);
       item.status = "rate_limited"; item.retry_at = fromNow(4); item.rate_limit = { count: 2, cap: 5 };
       item.progress = progress(2, 6);
+      item.display_status = "waiting";
+      item.stop = mkStop("rate_limit", { resume_at: item.retry_at, facts: { retries: item.rate_limit } });
       break;
     }
     case "waiting": {
@@ -334,16 +369,20 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       ev("work_item_waiting", { node_id: currentNode, retry_at: fromNow(9) }, 1);
       item.status = "waiting"; item.retry_at = fromNow(9);
       item.mr_ref = { number: 1842, url: "https://gitlab.example.com/acme/kraft/-/merge_requests/1842" };
+      item.display_status = "waiting";
+      item.stop = mkStop("wait", { resume_at: item.retry_at });
       break;
     }
     case "not_started": {
       item.status = "paused"; item.current_node_id = null;
+      item.display_status = "paused"; item.stop = null;
       break;
     }
     case "paused": {
       startCurrent("paused");
       ev("work_item_paused", { node_id: currentNode }, 4);
       item.status = "paused"; item.pending_steer_context = long ? "Look at the CI-only environment first: the failure never reproduces locally." : null;
+      item.display_status = "paused"; item.stop = null;
       break;
     }
     case "gate": case "escalating": case "escalated": {
@@ -352,6 +391,12 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       const artifact = `.engineering/reviews/2026-09-13-${long ? "design-the-caching-layer-for-document-search-embedding-cache-keyed-by-repo-path-blob-sha" : "caching-layer"}.md`;
       ev("gate_requested", { node_id: currentNode, gate: "code_review", artifact }, 0.2);
       item.status = "needs_human"; item.pending_gate = "code_review"; item.gate_artifact = artifact;
+      // A pending gate always wins the badge (B.1 rule 5), even in the
+      // "escalating"/"escalated" fixtures below: those are an auto-review
+      // agent working the gate itself, a different thing from a stuck item's
+      // escalation thread, and the gate stays pending through both.
+      item.display_status = "needs_you";
+      item.stop = mkStop("gate");
       item.deferred_findings = [
         { severity: "minor", message: "Docstring missing on `combine()`", file: "kraft/progress.py", line: 41, source_plugin: "ruff" },
         { severity: "minor", message: "Consider `functools.cache` here", file: "kraft/index/embed.py", line: 12, source_plugin: "reviewer" },
@@ -398,13 +443,22 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       }
       ev("work_item_needs_human", { node_id: currentNode, reason: "verify_fix_loop hit its cap", capped: { cycles: 3, attempts: 3 } }, 1);
       item.status = "needs_human"; item.stop_reason = "verify_fix_loop hit its cap";
+      item.display_status = "needs_you";
+      item.stop = mkStop("cap", { reason: item.stop_reason });
       break;
     }
     case "budget": {
       startCurrent("failed");
       ev("work_item_needs_human", { node_id: currentNode, reason: "spend cap reached", budget: { scope: "work_item", spent_usd: 5.12, cap_usd: 5 } }, 2);
       item.status = "needs_human"; item.stop_reason = "spend cap reached";
-      item.budget_cap = { cap_usd: 5, source: "policy", spent_usd: 5.12 };
+      item.budget_cap = {
+        cap_usd: 5,
+        source: "policy",
+        spent_usd: 5.12,
+        daily: { spent_usd: 31.4, cap_usd: 50 },
+      };
+      item.display_status = "needs_you";
+      item.stop = mkStop("budget", { reason: item.stop_reason });
       break;
     }
     case "question": {
@@ -414,6 +468,8 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
         : "Should the JSON keys be renamed too, or only the user-facing strings?";
       ev("work_item_needs_human", { node_id: currentNode, reason: "agent needs context", question: q }, 2);
       item.status = "needs_human"; item.needs_context_question = q; item.stop_reason = "agent needs context";
+      item.display_status = "needs_you";
+      item.stop = mkStop("question", { reason: item.stop_reason });
       break;
     }
     case "done": case "archived": {
@@ -421,12 +477,14 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       item.status = "completed";
       item.mr_ref = { number: 1837, url: "https://gitlab.example.com/acme/kraft/-/merge_requests/1837" };
       if (state === "archived") { item.archived_at = t(m + 60); item.archived_by = seed % 2 ? "you" : "auto"; }
+      item.display_status = state === "archived" ? "archived" : "done";
       break;
     }
     case "abandoned": {
       startCurrent("failed");
       ev("work_item_abandoned", { node_id: currentNode }, 2);
       item.status = "abandoned";
+      item.display_status = "cancelled";
       break;
     }
   }

@@ -83,3 +83,4 @@ async def test_an_infra_stop_suggests_a_retry(item_on, script, database):
     assert await stops.stop_for_infra(database, it.id, SimpleNamespace(id="build")) == "needs_human"
     [stop] = it.events("work_item_needs_human")
     assert stop["payload"]["suggested_action"] == stops.RETRY_LATER
+    assert it.row()["stop_kind"] == "infra"

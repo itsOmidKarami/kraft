@@ -52,6 +52,11 @@ rate_limit_retries: 5
 # task's own total_time_cap_minutes). Raise it on a slow forge. Read at startup.
 forge_cli_timeout_s: 120
 
+# How often the MR-closed poller asks the forge about every item parked at a
+# merge-request node, in seconds (minimum 30). Raise it on a rate-limited
+# forge or a large board; this always runs, so there is no "off".
+# forge_poll_s: 300
+
 # Completed and abandoned items older than this many days move to the
 # archive. Delete the key to keep them on the board. The board's Done header
 # says "after 30 days" whatever this is set to.

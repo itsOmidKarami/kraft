@@ -79,6 +79,8 @@ _BASE = "default: { attempts: 1, wall_clock_s: 1 }\n"
         pytest.param(_BASE + "auto_escalate_delay_s: -1\n", id="auto-escalate-delay-negative"),
         pytest.param(_BASE + "auto_escalate_delay_s: soon\n", id="auto-escalate-delay-not-int"),
         pytest.param(_BASE + "forge_cli_timeout_s: 0\n", id="forge-cli-timeout-zero"),
+        pytest.param(_BASE + "forge_poll_s: 29\n", id="forge-poll-below-30"),
+        pytest.param(_BASE + "forge_poll_s: soon\n", id="forge-poll-not-int"),
     ],
 )
 def test_load_policy_rejects_malformed(tmp_path, doc):
@@ -314,6 +316,8 @@ def test_cron_due_matches_star_and_lists():
             "forge_cli_timeout_s: 30\n", "forge_cli_timeout_s", 30.0, id="forge-cli-timeout"
         ),
         pytest.param("", "forge_cli_timeout_s", 120.0, id="forge-cli-timeout-default"),
+        pytest.param("forge_poll_s: 60\n", "forge_poll_s", 60, id="forge-poll"),
+        pytest.param("", "forge_poll_s", 300, id="forge-poll-default"),
         pytest.param("", "triggers", [], id="triggers-default"),
     ],
 )

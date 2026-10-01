@@ -156,6 +156,8 @@ class Forge(Protocol):
         self, *, repo: Path, branch: str, head_sha: str, pipeline_id: str = ""
     ) -> CIStatus: ...
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None: ...
+    async def close_mr(self, *, repo: Path, mr: MRRef) -> None: ...
+    async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None: ...
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
@@ -276,6 +278,13 @@ class FakeForge:
     _queued_head: dict[int, str | None] = field(default_factory=dict)
     #: The head each merge request merged at, by number.
     _merged_head: dict[int, str | None] = field(default_factory=dict)
+    #: Numbers `close_mr` has closed (B4). `find_mr` reports these as
+    #: `closed` unless they also merged -- a merge is forever, a close is
+    #: reversible by `reopen_mr`.
+    closed: list[int] = field(default_factory=list)
+    #: Numbers `reopen_mr` has put back, in call order -- a test's receipt
+    #: that the call landed, the same role `retried`/`merged` play.
+    reopened: list[int] = field(default_factory=list)
 
     @staticmethod
     def _next(script: list):
@@ -409,6 +418,15 @@ class FakeForge:
             self.merged.append(number)
             self._merged_head[number] = _head(repo)
 
+    async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
+        if mr.number not in self.closed:
+            self.closed.append(mr.number)
+
+    async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None:
+        self.reopened.append(mr.number)
+        if mr.number in self.closed:
+            self.closed.remove(mr.number)
+
     def _matches(self, number: int, repo: Path) -> bool:
         """A number opened before `_opened_repo` existed (an older test's
         opened={...} literal) matches any repo -- back-compatible, not
@@ -428,10 +446,16 @@ class FakeForge:
                 del self._landing[number]
                 self._merged_head[number] = self._queued_head.pop(number)
                 self.merged.append(number)
+        if number in self.merged:
+            state = "merged"
+        elif number in self.closed:
+            state = "closed"
+        else:
+            state = "open"
         return MRRef(
             number=number,
             url=f"http://fake.forge/{number}",
-            state="merged" if number in self.merged else "open",
+            state=state,
             merge_queued=number in self._landing,
             merged_sha=self._merged_head.get(number) or "",
         )

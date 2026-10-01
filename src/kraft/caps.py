@@ -599,7 +599,7 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
     if seen["status"] == "needs_human" and now["pending_gate"] != seen["pending_gate"]:
         return False
     events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
-    store.mark_needs_human(conn, seen["id"], seen["current_node_id"], hit.reason)
+    store.mark_needs_human(conn, seen["id"], seen["current_node_id"], hit.reason, kind="cap")
     return True
 
 

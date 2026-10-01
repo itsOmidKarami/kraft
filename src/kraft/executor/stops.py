@@ -92,7 +92,9 @@ async def claimed_or_stopped(
             )
             if row is not None and row["status"] == "active":
                 stop = reason + cause
-                await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, stop))
+                await db.write(
+                    lambda c: store.mark_needs_human(c, work_item_id, node_id, stop, kind="infra")
+                )
 
 
 def budget_breach(
@@ -180,7 +182,11 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     )
     reason = budget_reason(breach)
     dump = breach.model_dump()
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, None, dump))
+    await db.write(
+        lambda c: store.mark_needs_human(
+            c, work_item_id, node.id, reason, None, dump, kind="budget"
+        )
+    )
     return "needs_human"
 
 
@@ -269,7 +275,9 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
         "CI infrastructure failed and retrying it did not recover",
     )
     await db.write(
-        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, suggested=RETRY_LATER)
+        lambda c: store.mark_needs_human(
+            c, work_item_id, node.id, reason, suggested=RETRY_LATER, kind="infra"
+        )
     )
     return "needs_human"
 
@@ -280,7 +288,7 @@ async def stop_for_time_cap(db, work_item_id: str, node: ResolvedNode) -> str:
     cap of N minutes". Not a failure: no recovery, no fix attempt, and not in
     the stuck set, so no escalation turn answers it."""
     reason = db.read(lambda c: _caps.reason_of(c, work_item_id))
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, kind="cap"))
     return "needs_human"
 
 

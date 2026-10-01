@@ -71,6 +71,18 @@ export interface BudgetCap {
   cap_usd: number | null;
   source: "item" | "policy";
   spent_usd: number;
+  /** The instance's spend since local midnight against `policy.budget.daily_usd`
+   *  (B10, `GET /budget/today`'s own shape) -- optional/unused by the shipped
+   *  UI, which has no daily total anywhere yet. */
+  daily?: { spent_usd: number; cap_usd: number | null };
+}
+
+/** `GET /budget/today` (B10): the instance's spend since local midnight
+ *  against `policy.budget.daily_usd`, with no single work item in view.
+ *  Optional/unused by the shipped UI. */
+export interface BudgetToday {
+  spent_usd: number;
+  cap_usd: number | null;
 }
 
 export interface ChainDefinition {
@@ -99,6 +111,97 @@ export interface WorkItemAttachment {
   kind: "spec" | "plan";
   /** Repo-relative path, normalized by the server. */
   path: string;
+}
+
+/** Kraft UI v2 · B1's badge, derived server-side (`board.display_status`):
+ *  exactly one of these, so a pending gate, a plain failure and a
+ *  stuck-but-not-yet-escalated stop -- all `needs_human` in `status` -- read
+ *  apart without re-deriving `deriveState`'s logic a second time. Additive:
+ *  the shipped UI keeps its own `deriveState` and does not read this yet. */
+export type DisplayStatus =
+  | "archived"
+  | "done"
+  | "cancelled"
+  | "paused"
+  | "running"
+  | "waiting"
+  | "needs_you"
+  | "escalated"
+  | "failed";
+
+/** `work_items.stop_kind` (Kraft UI v2 · B1), plus `gate` (a pending gate,
+ *  never written to the column itself) and `worker_lost` (added by B5,
+ *  elsewhere). */
+export type StopKind =
+  | "gate"
+  | "question"
+  | "cap"
+  | "budget"
+  | "failed"
+  | "conflict"
+  | "mr_closed"
+  | "config"
+  | "infra"
+  | "stuck"
+  | "wait"
+  | "rate_limit"
+  | "worker_lost";
+
+/** `stop` on a work item response (B.3/B.4): `null` unless `status` is
+ *  `needs_human`, `waiting` or `rate_limited`. The list omits `task`,
+ *  `attempt` and `facts`; only the detail endpoint sends them. */
+export interface WorkItemStop {
+  kind: StopKind;
+  node: string | null;
+  task?: string | null;
+  attempt?: number | null;
+  resume_at: string | null;
+  reason: string | null;
+  facts?: Record<string, unknown>;
+}
+
+/** `GET /work-items/{id}/cancel-preview` (B4): what `POST .../cancel` would
+ *  do, read-only. Additive: not read by the shipped UI yet. */
+export interface CancelPreview {
+  running: { node: string | null; task: string | null; attempt: number | null } | null;
+  kept: { branch: string; worktree: string; findings: number; threads: number };
+  mr: { ref: number; url: string; state: "open" | "merged" | "closed" } | null;
+  spend: { spent_usd: number; cap_usd: number | null };
+}
+
+/** `POST /work-items/{id}/duplicate` (B3): a fresh, paused item from this
+ *  one's own title, description, repo, chain template, workspace selection
+ *  and attachments. Additive: not read by the shipped UI yet. */
+export interface DuplicateResponse {
+  id: string;
+  status: "paused";
+  duplicate_warning?: string;
+}
+
+/** One id's outcome in a `POST /work-items/bulk` (B9) batch, in request order. */
+export interface BulkResult {
+  id: string;
+  ok: boolean;
+  status?: WorkItemStatus;
+  error?: string;
+}
+
+/** `POST /work-items?dry_run=1` (B33): what create would do, without doing
+ *  it. Additive: not read by the shipped UI yet. */
+export interface CreateDryRun {
+  dry_run: true;
+  nodes: ChainNode[];
+  skipped: (
+    | { node: string; why: "covered_by"; kind: string }
+    | { node: string; why: "skip" }
+  )[];
+  gates: string[];
+  caps: {
+    budget_usd: number | null;
+    budget_source: "item" | "policy";
+    daily_usd: number | null;
+    nodes: Record<string, { attempts: number; wall_clock_s: number }>;
+  };
 }
 
 /** The breach a spend-cap stop recorded (`kraft.caps.Breach`), tagged on
@@ -213,6 +316,25 @@ export interface WorkItem {
   /** Whether an agent may review this item's `auto_escalate` gates before a
    *  human sees them (Kraft-zr3s). Set at intake; the column is on every row. */
   auto_gate?: boolean;
+  /** The board's status badge (Kraft UI v2 · B1). Additive; the shipped UI
+   *  keeps deriving its own via `deriveState` and does not read this. */
+  display_status?: DisplayStatus;
+  /** The stop `display_status` is reporting on; `null` off `needs_human`,
+   *  `waiting` and `rate_limited`. Additive, unread by the shipped UI. */
+  stop?: WorkItemStop | null;
+  /** A run's progress at a glance (Kraft UI v2 · B13). Only on the detail
+   *  endpoint. Additive, unread by the shipped UI. */
+  summary?: WorkItemSummary;
+}
+
+/** `GET /work-items/{id}`'s `summary` (B13): nodes done out of the frozen
+ *  chain's total, how many of those were gates, and the current node's step
+ *  (1-based) out of its steps when it declares more than one. */
+export interface WorkItemSummary {
+  nodes_done: number;
+  nodes_total: number;
+  gates_passed: number;
+  step: { index: number; count: number } | null;
 }
 
 export interface Finding {
@@ -287,6 +409,10 @@ export interface KraftEvent {
   work_item_id: string;
   type: string;
   payload: Record<string, unknown>;
+  /** The node this event is about, or `null` for an item-level event (Kraft
+   *  UI v2 · B13). Defaulted server-side from the payload's own `node_id`/
+   *  `node` key, or set explicitly by an emitter that knows its node. */
+  node_id?: string | null;
   created_at: string;
 }
 

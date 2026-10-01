@@ -66,7 +66,9 @@ def turns(monkeypatch, database, run_dirs):
             )
         )
         await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
-        await database.write(lambda c: store.mark_needs_human(c, "w1", "implementation", "x"))
+        await database.write(
+            lambda c: store.mark_needs_human(c, "w1", "implementation", "x", kind="failed")
+        )
         (run_dirs.worktrees / "w1" / ".engineering" / "sessions").mkdir(parents=True)
         scripts.extend(steps)
         for i, _ in enumerate(steps):

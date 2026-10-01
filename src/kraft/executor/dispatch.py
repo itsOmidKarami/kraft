@@ -876,6 +876,7 @@ async def _dispatch_task(
                     work_item_row["id"],
                     "scope_budget_reached",
                     {**breach.model_dump(), "task": task.path},
+                    node_id=node.id,
                 )
             )
         return True
@@ -1214,6 +1215,7 @@ async def _launch_agent(
                 work_item_row["id"],
                 "agent_session_resumed",
                 {"task": task.path, "session_id": resumed[0]},
+                node_id=node.id,
             )
         )
     # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):

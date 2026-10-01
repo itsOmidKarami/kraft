@@ -124,6 +124,20 @@ async def test_reconcile_still_needs_human_when_latest_attempt_failed(
 
     assert await _resume(database, run_dirs, it) == "needs_human"
     assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "failed"
+
+
+async def test_reconcile_needs_human_with_a_question_when_the_latest_attempt_asked(
+    item_on, database, run_dirs, tmp_path
+):
+    """The `question` branch of `resuming.reconcile_current_node`'s stop: every
+    session that did not advance asked a question, so the kind is `question`,
+    not the generic `failed`."""
+    it = await item_on(_quick_task(tmp_path), "implementation", worktree=True)
+    await it.session("s-impl", "implementation.main.implement", "needs_context")
+
+    assert await _resume(database, run_dirs, it) == "needs_human"
+    assert it.row()["stop_kind"] == "question"
 
 
 async def test_resume_threads_local_files_from_the_launch_context(

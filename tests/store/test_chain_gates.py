@@ -148,7 +148,7 @@ def _node_skipped(database):
 
 async def test_skip_node_marks_active_and_appends_event(database):
     await mk_item(database)
-    await database.write(lambda c: store.mark_needs_human(c, "w1", "verify", "boom"))
+    await database.write(lambda c: store.mark_needs_human(c, "w1", "verify", "boom", kind="failed"))
     await database.write(lambda c: store.skip_node(c, "w1", "verify", None, "flaky, known issue"))
     assert tuple(_item(database, "status, retry_at")) == ("active", None)
     assert _node_skipped(database) == [

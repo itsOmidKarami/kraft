@@ -152,6 +152,7 @@ async def test_a_pending_session_becomes_unknown_and_needs_human(
     assert (adopted, summary.unknown) == ({}, ["s1"])
     assert "w1" not in summary.resumed_work_items
     assert item.status() == "needs_human"
+    assert item.row()["stop_kind"] == "infra"
     assert item.events("session_unknown")
 
 
@@ -166,6 +167,7 @@ async def test_unconfirmed_identity_records_which_check_failed(item, database, r
 
     assert summary.unknown == ["s1"]
     assert item.status() == "needs_human"
+    assert item.row()["stop_kind"] == "infra"
     (unknown,) = item.events("session_unknown")
     assert "not alive" in unknown["payload"]["reason"]
     assert "not alive" in item.events("work_item_needs_human")[-1]["payload"]["reason"]
@@ -424,6 +426,7 @@ async def test_a_crashed_adopt_marks_the_work_item_needs_human(
 
     assert summary.adopted == ["s1"]
     assert item.status() == "needs_human"
+    assert item.row()["stop_kind"] == "infra"
     reason = item.events("work_item_needs_human")[0]["payload"]["reason"]
     assert "reattach crashed" in reason and "boom" in reason
 
@@ -551,7 +554,7 @@ async def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn
     monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)
     monkeypatch.setattr("kraft.builtins.refresh_worktree_base", fake_refresh)
     await database.write(
-        lambda c: store.mark_needs_human(c, "w1", "implementation", "budget exhausted")
+        lambda c: store.mark_needs_human(c, "w1", "implementation", "over budget", kind="budget")
     )
     await item.session("esc1", "escalation")
     await database.write(

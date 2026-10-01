@@ -343,6 +343,7 @@ async def test_a_scope_budget_stop_names_its_scope(item_on):
 
     (stopped,) = it.events("work_item_needs_human")
     assert "10 tokens spent in `build.run`" in stopped["payload"]["reason"]
+    assert it.row()["stop_kind"] == "budget"
 
 
 async def test_an_escalation_turns_spend_counts_toward_its_nodes_budget(item_on):

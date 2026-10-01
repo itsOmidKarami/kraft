@@ -257,7 +257,9 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     monkeypatch.setattr(sys.modules["kraft.executor.retry"], "retry", walk)
     target = WorkItemTarget.for_repository("target", base_branch="release")
     it = await item_on(_ONE_NODE, "n", target=target)
-    await it.database.write(lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True))
+    await it.database.write(
+        lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True, kind="stuck")
+    )
     cursor = it.events()[-1]["seq"]
     request = {"node_id": "n", "key": None, "gate_key": None, "steer": None}
     await it.database.write(
@@ -267,6 +269,39 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     await gates.resume_after_escalation(it.database, run_dirs, work_item_id=it.id, cursor=cursor)
 
     assert bases == ["release"]
+
+
+async def test_an_escalations_self_retry_that_cannot_rebase_stops_infra(
+    item_on, run_dirs, repo, monkeypatch
+):
+    """The self-retry's own `RuntimeError` catch (`executor.gates.resume_after_escalation`,
+    distinct from `api.routes.lifecycle`'s `/resume`/`/retry` doors): a git
+    failure here is outside the code too, so it is `infra`, not the generic
+    `failed`."""
+    from kraft import events, store
+    from kraft.executor import gates
+
+    async def refresh(*_args, **_kwargs):
+        raise RuntimeError("could not fetch origin")
+
+    monkeypatch.setattr(kraft_builtins, "refresh_worktree_base", refresh)
+    it = await item_on(_ONE_NODE, "n")
+    await it.database.write(
+        lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True, kind="stuck")
+    )
+    cursor = it.events()[-1]["seq"]
+    request = {"node_id": "n", "key": None, "gate_key": None, "steer": None}
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", request)
+    )
+
+    result = await gates.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
+    )
+
+    assert result == "needs_human"
+    assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "infra"
 
 
 async def test_the_merge_request_lists_the_commits_it_adds_to_its_base(

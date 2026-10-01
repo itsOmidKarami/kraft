@@ -743,12 +743,13 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
     assert started["current_node_id"] == "spec"
 
 
-def _append(wid: str, type: str, payload: dict) -> None:
+def _append(wid: str, type: str, payload: dict) -> int:
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
     conn.row_factory = sqlite3.Row
     try:
-        events.append(conn, wid, type, payload)
+        seq = events.append(conn, wid, type, payload)
         conn.commit()
+        return seq
     finally:
         conn.close()
 

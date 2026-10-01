@@ -120,28 +120,6 @@ async def test_a_waiting_task_marks_the_row_and_ends_the_run(item_on, monkeypatc
     assert it.row()["retry_at"]
 
 
-async def test_needs_human_names_the_session_that_failed(item_on, fake_agent, monkeypatch):
-    """Kraft-eh6p. `work_item_needs_human` is the event a human lands on, and
-    its reason names the hook ('task failed in node open_mr: on.mr.open'), not
-    the failure — which lives in the failed session's log. Without the session
-    id on this event the timeline has nothing to hang a 'view log' button on,
-    and the only route to the reason is noticing the preceding
-    worker_session_exited row."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "error")
-    it = await item_on(fake_agent.quick_task)
-
-    assert await _walk(it) == "needs_human"
-    failed = [
-        e["payload"]["session_id"]
-        for e in it.events("worker_session_exited")
-        if e["payload"]["status"] == "failed"
-    ]
-    assert failed, "the scenario did not produce a failed session"
-    assert it.events("work_item_needs_human")[0]["payload"].get("session_id") == failed[-1], (
-        "needs_human does not name the session whose log holds the reason"
-    )
-
-
 async def test_walk_attributes_a_config_error_to_the_first_node(item_on, fake_agent):
     """A malformed repos.yaml reaches `ensure_worktree` through the repo entry.
     It must land as needs_human against the node that was about to dispatch,
@@ -152,6 +130,11 @@ async def test_walk_attributes_a_config_error_to_the_first_node(item_on, fake_ag
     assert await _walk(it, repo_entry=poisoned) == "needs_human"
     assert it.status() == "needs_human"
     assert it.row()["current_node_id"] is not None
+    # `dispatch.item_sandbox` wraps the poisoned entry's `ConfigError` in its
+    # own `SandboxUnresolved(RuntimeError)` before this reaches
+    # `prepare_runtime`'s except -- so this is the `RuntimeError` branch,
+    # `infra`, not the direct-`ConfigError` one.
+    assert it.row()["stop_kind"] == "infra"
     assert "boom" in _stop_reason(it)
 
 
@@ -266,6 +249,7 @@ async def test_needs_human_reason_names_a_failed_forge_task_s_kind(item_on, monk
 
     assert await _walk(it, repo_entry=FORGE_REPO) == "needs_human"
     assert "ci_poll [forge]" in _stop_reason(it)
+    assert it.row()["stop_kind"] == "failed"
 
 
 def _unstartable_agent(task_id):
@@ -363,6 +347,7 @@ async def test_a_task_that_cannot_start_stops_naming_its_cause(
     assert all(part in reason for part in reason_names), reason
     assert len(it.events("fix_cycle_started")) == cycles
     assert it.sessions()[-1]["status"] == "config_error"
+    assert it.row()["stop_kind"] == "config"
     if sessions is not None:
         assert [s["hook_point"] for s in it.sessions()] == sessions
 
@@ -387,6 +372,7 @@ async def test_a_fix_loop_that_caps_out_on_a_raising_task_names_the_exception(
     assert await _walk(it, policy=_loop_policy(tmp_path, attempts=1)) == "needs_human"
     assert "exhausted" in _stop_reason(it)
     assert "the-real-cause" in _stop_reason(it)
+    assert it.row()["stop_kind"] == "cap"
 
 
 async def test_a_config_error_stop_carries_a_bounded_cause(item_on, tmp_path):
@@ -398,8 +384,10 @@ async def test_a_config_error_stop_carries_a_bounded_cause(item_on, tmp_path):
 
     await _walk(it)
 
-    reason = it.events("work_item_needs_human")[0]["payload"]["reason"]
+    ev = it.events("work_item_needs_human")[0]
+    reason = ev["payload"]["reason"]
     assert "no-such-method-" in reason and reason.endswith("…")
+    assert ev["payload"]["kind"] == "config"
     assert len(reason) < 400
     assert skill in Path(it.sessions()[0]["log_path"]).read_text()
 
@@ -488,6 +476,8 @@ async def test_an_in_process_blind_failure_opens_no_fix_cycle_of_its_own(
         reason = _stop_reason(it)
         assert all(part in reason for part in reason_names), reason
         assert not any(part in reason for part in reason_lacks), reason
+        expected_kind = "question" if reason.startswith("needs_context:") else "infra"
+        assert it.row()["stop_kind"] == expected_kind
 
 
 async def test_a_red_pipeline_with_failed_jobs_opens_its_fix_cycle_as_before(

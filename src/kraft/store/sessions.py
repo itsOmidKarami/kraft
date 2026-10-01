@@ -130,6 +130,19 @@ def create_session(
     return id, log_path, result_path
 
 
+def next_attempt(conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_point: str) -> int:
+    """The attempt number a session dispatched right now for this exact (work
+    item, node, hook point) would get -- the same `COUNT(*) + 1` `create_session`
+    computes in its own `INSERT`, read ahead of time so a response (B2's retry
+    `attempt`) can name it before the session exists."""
+    (count,) = conn.execute(
+        "SELECT COUNT(*) FROM worker_sessions WHERE work_item_id = ? "
+        "AND node_id = ? AND hook_point = ?",
+        (work_item_id, node_id, hook_point),
+    ).fetchone()
+    return count + 1
+
+
 def latest_escalation_thread(conn: sqlite3.Connection, work_item_id: str) -> int:
     """The highest `thread` number among `work_item_id`'s escalation
     sessions, or 0 if it has never been escalated -- `escalate.dispatch`'s
