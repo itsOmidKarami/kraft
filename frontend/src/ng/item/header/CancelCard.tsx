@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { useFocusSoon } from "../useFocusSoon";
 import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
@@ -16,7 +16,6 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
   const [closeMr, setCloseMr] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const reasonId = useId();
   const reasonRef = useFocusSoon<HTMLTextAreaElement>();
 
   useEffect(() => {
@@ -60,8 +59,7 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
             <input type="checkbox" checked={closeMr} onChange={(e) => setCloseMr(e.target.checked)} /> Also close !{preview.mr.ref} on the forge
           </label>
         )}
-        <label className="item-visually-hidden" htmlFor={reasonId}>Reason</label>
-        <textarea id={reasonId} ref={reasonRef} className="item-input" rows={2} placeholder="Reason (required, goes in the run log)" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <textarea aria-label="Reason" ref={reasonRef} className="item-input" rows={2} placeholder="Reason (required, goes in the run log)" value={reason} onChange={(e) => setReason(e.target.value)} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
           <Button variant="danger" disabled={busy || !reason.trim()} onClick={submit}>Cancel item</Button>

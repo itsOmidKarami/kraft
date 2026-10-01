@@ -220,7 +220,7 @@ const FLOWS: Flow[] = [
       const r = await sent;
       expect(new URL(r.url()).pathname).toMatch(/\/cancel$/);
       expect(r.postDataJSON()).toEqual({ reason: "Superseded by kraft-cb61.", close_mr: false });
-      await expect(p.getByText("CANCELLED")).toBeVisible();
+      await expect(p.getByText("CANCELLED", { exact: true })).toBeVisible();
     } },
   ] },
   // ux2-W5 E: the pane by keyboard; the collapse a person chose survives picking nodes and moving to another item.

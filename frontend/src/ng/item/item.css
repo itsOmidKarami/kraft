@@ -28,9 +28,9 @@
 .item-badge { padding: 2px 7px; border: 1px solid transparent; border-radius: 4px; font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
 .item-badge.is-neutral { background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--text); }
 .item-badge.is-info { border-color: var(--info); color: var(--info); }
-.item-badge.is-warn { background: color-mix(in oklab, var(--warn) 16%, transparent); color: var(--warn); }
-.item-badge.is-bad { background: color-mix(in oklab, var(--bad) 16%, transparent); color: var(--bad); }
-.item-badge.is-ok { background: color-mix(in oklab, var(--ok) 16%, transparent); color: var(--ok); }
+.item-badge.is-warn { background: color-mix(in oklab, var(--warn) 9%, transparent); color: var(--warn); }
+.item-badge.is-bad { background: color-mix(in oklab, var(--bad) 9%, transparent); color: var(--bad); }
+.item-badge.is-ok { background: color-mix(in oklab, var(--ok) 9%, transparent); color: var(--ok); }
 .item-badge.is-muted { background: var(--surface-2); color: var(--text-sub); }
 .item-main-group { display: flex; align-items: center; gap: 2px; }
 .item-main { display: flex; align-items: stretch; width: 118px; height: 28px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
@@ -78,13 +78,14 @@
 .item-card.is-info { border-color: color-mix(in oklab, var(--info) 55%, transparent); }
 .item-card-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 400; }
 .item-card-title { font-weight: 600; color: var(--text); }
-.item-card-where { color: var(--text-muted); font-size: 12.5px; }
+.item-card-where { color: var(--text-sub); font-size: 12.5px; }
 .item-card.is-warn .item-card-head svg { color: var(--warn); }
 .item-card.is-bad .item-card-head svg { color: var(--bad); }
 .item-card.is-info .item-card-head svg { color: var(--info); }
 .item-quote { margin: 0; font-size: 13px; color: var(--text); }
 .item-card.is-muted { border-color: var(--border); background: var(--surface); }
 .item-card.is-muted .item-card-title { color: var(--text-sub); }
+.item-card .item-facts dt { color: var(--text-sub); }
 .item-card-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
 .item-card-open { margin-left: auto; }
 .item-select { margin-left: 6px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; }

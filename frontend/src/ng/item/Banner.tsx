@@ -59,8 +59,7 @@ export function QuestionCard({ item, compact, reload, onOpenThread }: { item: It
         <span className="item-card-where">asked by {item.stop.task ? taskName(item.stop.task) : "the agent"}{where && ` · on ${where}`}</span>
       </h2>
       <blockquote className="item-quote">“{q}”</blockquote>
-      <label className="item-visually-hidden" htmlFor="item-answer">Your answer</label>
-      <textarea id="item-answer" className="item-input" rows={2} placeholder="Or write an answer…" value={answer} onChange={(e) => setAnswer(e.target.value)} />
+      <textarea aria-label="Your answer" className="item-input" rows={2} placeholder="Or write an answer…" value={answer} onChange={(e) => setAnswer(e.target.value)} />
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
         <Button variant="primary" disabled={busy || !answer.trim()} onClick={async () => {
