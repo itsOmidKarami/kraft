@@ -128,6 +128,16 @@ def test_providers_are_each_packages_capability_surface(client):
     assert providers["invalid"] == {}
 
 
+def test_a_provider_lists_the_efforts_and_models_it_accepts_as_plain_words(client):
+    """What a profile's per-provider effort picker offers: literal values only,
+    and `[]` where the capability takes a pattern (codex's models) or any string."""
+    valid = client.get("/api/harnesses/providers").json()["valid"]
+    assert valid["claude"]["efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    assert "max" not in valid["codex"]["efforts"]
+    assert valid["codex"]["models"] == []  # a regex, not a list of words
+    assert valid["claude"]["models"] == []  # any string
+
+
 def test_a_capability_says_what_it_becomes_and_where_its_file_is(client):
     """The Harnesses page renders each capability as the flag it becomes, or
     what reads it, and says whether the definition is packaged or an override."""
@@ -173,7 +183,7 @@ def test_a_profile_may_take_the_name_of_a_harnesses_route(client, pid):
 
 @pytest.mark.parametrize(
     "method, path",
-    [("get", "/api/harnesses"), ("get", "/api/harnesses/claude"), ("put", "/api/harnesses/claude")],
+    [("get", "/api/harnesses/claude"), ("put", "/api/harnesses/claude")],
 )
 def test_the_flat_profile_paths_are_gone(client, method, path):
     kwargs = {"json": {"provider": "codex"}} if method == "put" else {}
@@ -313,3 +323,16 @@ def test_disabling_a_fallback_harness_is_not_a_pairing_problem(client):
         "/api/harnesses/profiles/codex", json={"provider": "fake", "enabled": False}
     )
     assert response.status_code == 200, response.text
+
+
+def test_harness_status_lists_every_provider_with_whether_its_executable_is_found(
+    client, monkeypatch
+):
+    monkeypatch.setattr(
+        "kraft.api.routes.harnesses.shutil.which", lambda exe: "/bin/x" if exe == "codex" else None
+    )
+    rows = {h["id"]: h for h in client.get("/api/harnesses").json()}
+    assert {"claude", "codex", "amp"} <= set(rows)
+    assert (rows["codex"]["executable_found"], rows["amp"]["executable_found"]) == (True, False)
+    assert rows["codex"]["efforts"] == ["minimal", "low", "medium", "high", "xhigh"]
+    assert "version" not in rows["codex"]

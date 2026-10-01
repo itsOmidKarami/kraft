@@ -179,6 +179,15 @@ def _write_cache(release: Release, now: float, channel: str) -> None:
         pass
 
 
+def last_checked(channel: str = "stable") -> float | None:
+    """When a check on `channel` last succeeded, however long ago; None if never."""
+    try:
+        blob = json.loads(_cache_path().read_text())
+        return float(blob["checked_at"]) if blob.get("channel", "stable") == channel else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
     """The newest installable release in `channel`, or `None` if that cannot be established."""
     now = time.time()

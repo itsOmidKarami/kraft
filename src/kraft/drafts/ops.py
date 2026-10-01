@@ -918,16 +918,16 @@ OPS: dict[str, Callable[..., dict | None]] = {
 }
 
 
-def apply(d: Draft, ops: list) -> list[dict]:
-    """Run `ops` on `d` in order; each one's own answer. Raises `OpError`
-    with `.index` set to the op that failed."""
+def apply(d: Draft, ops: list, table: Mapping[str, Callable] = OPS) -> list[dict]:
+    """Run `ops` on `d` in order, each looked up in `table`; each one's own
+    answer. Raises `OpError` with `.index` set to the op that failed."""
     out = []
     for index, op in enumerate(ops):
         try:
-            if not isinstance(op, dict) or op.get("op") not in OPS:
+            if not isinstance(op, dict) or op.get("op") not in table:
                 name = op.get("op") if isinstance(op, dict) else op
                 raise OpError(f"no op {name!r}")
-            fn = OPS[op["op"]]
+            fn = table[op["op"]]
             fields = {k: v for k, v in op.items() if k != "op"}
             try:
                 inspect.signature(fn).bind(d, **fields)

@@ -1040,7 +1040,7 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reload_p = subs.add_parser(
         "reload",
         parents=[common],
-        help="reread the template library and policy.yaml from disk, no restart",
+        help="reread the template library, policy.yaml and intake.yaml from disk, no restart",
     )
     reload_p.set_defaults(func=_cmd_reload)
 

@@ -10,6 +10,9 @@ cannot accept a profile a launch would refuse."""
 
 from __future__ import annotations
 
+import re
+import shutil
+
 import yaml
 from fastapi import HTTPException, Request
 
@@ -55,26 +58,41 @@ def _agent_profiles_view(table, library, selections, path, providers) -> list[di
     pairing of it would not launch. Read-only: edited in the file."""
     tasks = library.component_names(Namespace.TASKS) if library is not None else ()
     used_by = {name: _task_profile(library, name) for name in tasks}
-    problems = config_check.launch_problems(selections, table, path, providers)
+    problems = config_check.launch_problem_details(selections, table, path, providers)
+
+    def of(p, key_for):
+        return [
+            problems[c, key_for(tp)]
+            for c, tp, t in selections
+            if t.profile == p.id and (c, key_for(tp)) in problems
+        ]
+
     return [
         {
             "id": p.id,
             "effort": p.effort,
             "model": p.model,
+            "providers": {
+                n: {"model": e.model, "effort": e.effort} for n, e in p.providers.items()
+            },
             "used_by": [f"tasks.{t}" for t, pid in used_by.items() if pid == p.id],
             "chains": sorted({c for c, _, t in selections if t.profile == p.id}),
-            "problems": [
-                problems[c, tp]
-                for c, tp, t in selections
-                if t.profile == p.id and (c, tp) in problems
-            ],
+            "problems": [found.message for found in of(p, lambda tp: tp)],
+            "problem_details": [found.view() for found in of(p, lambda tp: tp)],
             # Its default fallback list, each entry with the pairing problems
             # of the tasks that take it (Kraft-0a3h8).
             "fallback": [
                 {
                     **entry.model_dump(exclude_none=True),
                     "problems": [
-                        problems[c, f"{tp} fallback[{n}]"]
+                        problems[c, f"{tp} fallback[{n}]"].message
+                        for c, tp, t in selections
+                        if t.profile == p.id
+                        and t.fallback is None
+                        and (c, f"{tp} fallback[{n}]") in problems
+                    ],
+                    "problem_details": [
+                        problems[c, f"{tp} fallback[{n}]"].view()
                         for c, tp, t in selections
                         if t.profile == p.id
                         and t.fallback is None
@@ -129,8 +147,18 @@ async def list_harnesses(request: Request):
     return _view(request.app.state)
 
 
+def _literals(h: harness_mod.Harness, capability: str) -> list[str]:
+    """The values `capability` is limited to, when every one is a plain word
+    (an effort level, a model id); `[]` when it takes any string or a pattern."""
+    cap = h.capabilities.get(capability)
+    values = list(cap.values) if cap else []
+    return values if all(re.fullmatch(r"[\w.:-]+", v) for v in values) else []
+
+
 def _provider_view(h: harness_mod.Harness) -> dict:
     return {
+        "efforts": _literals(h, "effort"),
+        "models": _literals(h, "model"),
         "id": h.id,
         "kind": h.kind,
         "command": list(h.command),
@@ -151,6 +179,26 @@ def _provider_view(h: harness_mod.Harness) -> dict:
             for name, c in h.capabilities.items()
         },
     }
+
+
+@api_router.get("/harnesses")
+async def harness_status():
+    """One entry per provider, in the table's order, with whether its CLI is on
+    the daemon's PATH. A worker's PATH is an allowlist, so a worker that cannot
+    find the CLI is a launch problem and not this flag. No `version`: the probe's
+    output is not cached anywhere this route can read (Kraft-ewd5x)."""
+    return [
+        {
+            "id": h.id,
+            "label": h.id,
+            "executable": h.command[0],
+            "executable_found": shutil.which(h.command[0]) is not None,
+            "efforts": _literals(h, "effort"),
+            "models": _literals(h, "model"),
+            "capabilities": _provider_view(h)["capabilities"],
+        }
+        for h in harness_mod.load(None).valid.values()
+    ]
 
 
 # Profiles and providers each have their own prefix (the Ruling 204 shape), so

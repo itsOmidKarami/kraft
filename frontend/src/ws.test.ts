@@ -43,6 +43,20 @@ describe("connectEvents", () => {
     expect(useStore.getState().lastSeq).toBe(9);
   });
 
+  it("ignores a live frame: store, last seq and resume cursor are unchanged", () => {
+    connectEvents();
+    const before = useStore.getState();
+    FakeWS.instances[0].onmessage!({
+      data: JSON.stringify({ frame: "live", type: "intake_checked", payload: {}, created_at: "t" }),
+    });
+    const after = useStore.getState();
+    expect(after.lastSeq).toBe(3);
+    expect(after.eventsByItem).toBe(before.eventsByItem);
+    FakeWS.instances[0].onclose!();
+    vi.advanceTimersByTime(1000);
+    expect(FakeWS.instances[1].url).toContain("after_seq=3");
+  });
+
   it("reconnects after close using the updated lastSeq and escalating backoff", () => {
     connectEvents();
     useStore.setState({ lastSeq: 20 } as never);

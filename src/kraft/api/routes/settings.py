@@ -5,9 +5,10 @@ import re
 from pathlib import Path
 
 import yaml
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from kraft import apply as apply_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
 from kraft import harness as harness_mod
@@ -410,8 +411,7 @@ async def reload_templates_endpoint(request: Request):
     chain past a `maxima:` ceiling is a lint issue; a policy that does not
     validate is refused and the running one kept (Kraft-m86uq)."""
     st = request.app.state
-    refused_policy = deps.reload_policy(st)
-    deps._reload_templates(st)
+    refused_policy = await apply_mod.reload(request.app)
     ids = st.library.chain_ids if st.library is not None else ()
     valid = sorted(id for id in ids if id not in st.invalid_chains)
     return {
@@ -433,6 +433,8 @@ class PolicyBody(BaseModel):
     findings: dict | None = None
     budget: dict | None = None
     max_concurrent: int = Field(default=3, ge=1)
+    #: Read-only, answered by `GET /policy`; a page that sends its GET body back is not refused.
+    active_count: int | None = Field(default=None, exclude=True)
     rate_limit_retries: int | None = None
     triggers: list[dict] | None = None
     archive: dict | None = None
@@ -445,7 +447,10 @@ class PolicyBody(BaseModel):
 async def get_policy(request: Request):
     st = request.app.state
     data = config_mod.read_yaml(st.templates_dir / "policy.yaml", {"loops": {}, "default": {}})
-    data.setdefault("max_concurrent", st.policy.max_concurrent if st.policy else 3)
+    # The loaded value, not the file's: it is the one the slots are counted against.
+    loaded = st.policy.max_concurrent if st.policy else data.get("max_concurrent", 3)
+    data["max_concurrent"] = loaded
+    data["active_count"] = st.db.read(store.active_count)
     return data
 
 
@@ -556,6 +561,12 @@ async def get_intake(request: Request):
     return data
 
 
+@api_router.get("/intake/checks")
+async def get_intake_checks(request: Request, limit: int = Query(20, ge=1, le=100)):
+    """What each recent poll found, started and left alone, newest first."""
+    return request.app.state.db.read(lambda c: store.intake_checks(c, limit))
+
+
 @api_router.put("/intake")
 async def put_intake(body: IntakeBody, request: Request):
     """Applies without a restart: the poller task is replaced, not just the
@@ -566,16 +577,9 @@ async def put_intake(body: IntakeBody, request: Request):
     data = body.model_dump()
     config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
     st.intake = data
-    async with st.intake_lock:
-        task = st.intake_task
-        # Clear it before the await: a second saver that gets in here while we
-        # are waiting must not find, and cancel, a task we are already retiring.
-        st.intake_task = None
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        if data["enabled"]:
-            st.intake_task = asyncio.ensure_future(intake_mod.poller(app_))
+    apply_mod.record(st, "intake.yaml")
+    await intake_mod.restart(app_)
+    apply_mod.notify(app_)
     return data
 
 
@@ -618,6 +622,7 @@ async def put_access(body: AccessBody, request: Request):
         raise HTTPException(422, why)
     config_mod.Access.model_validate(access).save(st.templates_dir / "access.yaml")
     st.access = access
+    apply_mod.notify(request.app)
     # Only once the new hash is durable: revoking first and then failing to write
     # would sign everyone out while leaving the *old* password live.
     if body.password:

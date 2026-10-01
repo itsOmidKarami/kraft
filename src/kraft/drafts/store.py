@@ -35,11 +35,20 @@ class Area:
     #: Whether a `rename` op may move the draft's file to the one `files`
     #: gives the new key, the old file becoming null.
     renames: bool = False
+    #: An area that is not `chains` or `library` brings its own ops: `working`
+    #: builds one request's working copy (`kraft.drafts.config.ConfigDraft`)
+    #: and `ops` is its op table. `None` means the chain ops of `kraft.drafts.ops`.
+    working: Callable | None = None
+    ops: dict[str, Callable] | None = None
+    #: `async (app, written)` run after a publish wrote its files and before the
+    #: draft is dropped; `written` is the draft's files. `None` reloads the
+    #: template library.
+    after_publish: Callable | None = None
 
 
-#: W13 adds `harnesses`, `repos`, `policy` and `intake`. Ops join more files
-#: than `files` lists: `move_to_library` the library to a chain's draft, a
-#: library rename each chain file it rewrites to the library's.
+#: `kraft.drafts.areas` adds `harnesses`, `repos`, `policy` and `intake`. Ops
+#: join more files than `files` lists: `move_to_library` the library to a
+#: chain's draft, a library rename each chain file it rewrites to the library's.
 AREAS: dict[str, Area] = {
     "chains": Area(
         valid=_CHAIN_ID.fullmatch, files=lambda key: (f"chains/{key}.yaml",), renames=True

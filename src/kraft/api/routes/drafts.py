@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
+from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import store as items
 from kraft.api import api_router, deps
@@ -24,6 +25,9 @@ from kraft.templates.library import LIBRARY_FILE
 
 
 def _area(area: str, key: str) -> store.Area:
+    from kraft.drafts import areas  # here, not at import: `resolve` imports this package
+
+    areas.register()
     found = store.AREAS.get(area)
     if found is None:
         raise HTTPException(404, f"no draft area {area!r}")
@@ -78,10 +82,11 @@ async def list_config_drafts(request: Request):
 async def get_config_draft(area: str, key: str, request: Request):
     """The draft, or the published files and their result when there is none."""
     st = request.app.state
-    _area(area, key)
+    found = _area(area, key)
     draft = st.db.read(lambda c: store.get(c, area, key))
     files, published, result = _state(st, area, key, draft, draft["history"] if draft else [])
-    if not files:
+    # A config file that is not there yet is still a page to open: ops create it.
+    if not files and found.working is None:
         raise HTTPException(404, f"no {area} {key!r}")
     return _view(st, area, key, files, published, result)
 
@@ -134,16 +139,19 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
     is written back whole (`authored.dump`), comments dropped. With
     `?preview=1`, the result without saving."""
     st = request.app.state
-    _area(area, key)
+    found = _area(area, key)
     old = st.db.read(lambda c: store.get(c, area, key))
     history = old["history"] if old else []
     current, published, result = _state(st, area, key, old, history)
     if "yaml_error" in result:
         raise HTTPException(409, "fix the YAML first")
     exists = old is not None or any(t is not None for t in published.values())
-    working = ops.Draft(st, key, current, exists=exists, area=area)
+    if found.working is None:
+        working, table = ops.Draft(st, key, current, exists=exists, area=area), ops.OPS
+    else:
+        working, table = found.working(st, key, current, exists=exists), found.ops
     try:
-        answers = ops.apply(working, body.ops)
+        answers = ops.apply(working, body.ops, table)
     except ops.OpError as exc:
         return JSONResponse(
             status_code=422, content={"detail": str(exc), "op": exc.index, **exc.extra}
@@ -202,7 +210,9 @@ def _stale(st, draft: dict) -> JSONResponse | None:
             ),
         }
         for f, base in draft["base"].items()
-        if store.digest(published[f]) != base
+        # A file already holding the draft's text has nothing to overwrite: a
+        # publish whose apply hook failed, tried again.
+        if store.digest(published[f]) != base and published[f] != draft["files"].get(f)
     }
     if not changed:
         return None
@@ -220,7 +230,7 @@ async def publish_draft(area: str, key: str, request: Request):
     """Write the draft over the published files and reload, only if none of
     them changed since it joined the draft and the draft has no problem."""
     st = request.app.state
-    _area(area, key)
+    found = _area(area, key)
     draft = st.db.read(lambda c: store.get(c, area, key))
     if draft is None:
         raise HTTPException(404, f"no draft of {area} {key!r}")
@@ -249,8 +259,15 @@ async def publish_draft(area: str, key: str, request: Request):
                 path.unlink(missing_ok=True)
             else:
                 config_mod.write_text(path, text)
-        deps._reload_templates(st)
+        try:
+            if found.after_publish is None:
+                deps._reload_templates(st)
+            else:
+                await found.after_publish(request.app, draft["files"])
+        except Exception as exc:  # noqa: BLE001 -- the files are written: say so, keep the draft
+            raise HTTPException(500, f"published, but applying it failed: {exc}") from exc
         await st.db.write(lambda c: store.delete(c, area, key))
+    apply_mod.notify(request.app)
     _, _, result = _state(st, area, key, None, [])
     return {"published": sorted(draft["files"]), "result": result}
 

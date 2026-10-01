@@ -20,6 +20,7 @@ from support.launches import agent_launches
 from kraft import doctor
 from kraft import harness as _harness
 from kraft.adapters import agent
+from kraft.adapters.profiles import resolve_profile
 from kraft.api.routes import harnesses as harnesses_route
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
@@ -110,7 +111,7 @@ def test_an_absent_profiles_section_is_an_empty_table():
     [
         ({"model": {"nonesuch": "x"}}, "nonesuch"),
         ({"model": {}}, "profiles.p: model"),
-        ({"effort": "high"}, "profiles.p: model"),
+        ({"effort": "high"}, "profiles.p: .*names no provider"),
         ({"model": {"claude": 5}}, "profiles.p: model.claude"),
         ({"model": {"claude": "opus"}, "prompt": "be clever"}, "profiles.p: prompt"),
         ({"model": {"codex": "gpt-5.6-sol"}, "effort": "max"}, "effort 'max'"),
@@ -200,6 +201,100 @@ def test_a_retry_override_of_the_model_displaces_the_profile():
     assert (again.profile, again.model) == ("fast", None)
 
 
+# ── the per-provider shape (Kraft W13 C) ──
+
+PER_PROVIDER = {
+    "p": {
+        "providers": {
+            "claude": {"model": "opus", "effort": "max"},
+            "codex": {"model": "gpt-5.6-sol", "effort": "high"},
+        }
+    }
+}
+
+
+def test_the_older_shape_copies_its_shared_effort_into_every_provider():
+    table = _table({"p": {"effort": "high", "model": {"claude": "opus", "codex": "gpt-5.6-sol"}}})
+    entries = table.agent_profiles["p"].providers
+    assert {k: (e.model, e.effort) for k, e in entries.items()} == {
+        "claude": ("opus", "high"),
+        "codex": ("gpt-5.6-sol", "high"),
+    }
+
+
+def test_the_per_provider_shape_keeps_each_providers_own_model_and_effort():
+    profile = _table(PER_PROVIDER).agent_profiles["p"]
+    assert {k: (e.model, e.effort) for k, e in profile.providers.items()} == {
+        "claude": ("opus", "max"),
+        "codex": ("gpt-5.6-sol", "high"),
+    }
+    assert profile.effort is None  # the providers disagree
+    assert profile.model == {"claude": "opus", "codex": "gpt-5.6-sol"}
+
+
+def test_a_launch_resolves_the_effort_of_the_providers_own_entry():
+    table = _table(PER_PROVIDER)
+    providers = _harness.load(None).valid
+    for harness, want in (("claude", ("opus", "max")), ("codex", ("gpt-5.6-sol", "high"))):
+        assert resolve_profile("p", table.profiles[harness], table, providers) == want
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        (
+            {"providers": {"claude": {"model": "opus"}}, "model": {"claude": "opus"}},
+            "profiles.p: .*both",
+        ),
+        (
+            {"providers": {"claude": {"model": "opus"}}, "effort": "high"},
+            "profiles.p: .*both",
+        ),
+        (
+            {
+                "providers": {
+                    "claude": {"model": "opus", "effort": "max"},
+                    "codex": {"model": "m", "effort": "max"},
+                }
+            },
+            r"profiles\.p\.providers\.codex: effort 'max'",
+        ),
+        ({"providers": {"nonesuch": {"model": "x"}}}, "nonesuch"),
+    ],
+    ids=["model-too", "effort-too", "effort-names-its-provider", "unknown-provider"],
+)
+def test_a_bad_per_provider_profile_is_refused_at_load(body, why):
+    with pytest.raises(TemplateEnvironmentError, match=why):
+        _table({"p": body})
+
+
+def test_an_effort_one_provider_takes_and_another_refuses_names_that_provider_only():
+    """`max` is claude's, not codex's: with the shared effort it loads and only
+    a codex pairing fails; the problem names codex, not claude."""
+    table = _table({"p": {"effort": "max", "model": {"claude": "opus", "codex": "gpt-5.6-sol"}}})
+    providers = _harness.load(None).valid
+    assert table.pairing_detail("p", table.profiles["claude"], providers) is None
+    found = table.pairing_detail("p", table.profiles["codex"], providers)
+    assert (found.profile, found.provider, found.field) == ("p", "codex", "effort")
+    assert "takes no effort 'max'" in found.message
+
+
+def test_a_mixed_profile_is_checked_against_each_providers_own_effort():
+    """The pairing is not skipped because the providers' efforts differ: with a
+    provider table that has since stopped taking codex's `high`, codex fails
+    and claude, on `max`, still pairs."""
+
+    class Refuses:
+        def value_ok(self, option, value):
+            return not (option == "effort" and value == "high")
+
+    table = _table(PER_PROVIDER)
+    providers = {"claude": _harness.load(None).valid["claude"], "codex": Refuses()}
+    assert table.pairing_detail("p", table.profiles["claude"], providers) is None
+    found = table.pairing_detail("p", table.profiles["codex"], providers)
+    assert (found.provider, found.field) == ("codex", "effort")
+
+
 # ── pairing: checked where a task meets its harness ──
 
 
@@ -223,13 +318,60 @@ def test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem(tmp_path, monk
         "id": "fast",
         "effort": "low",
         "model": {"claude": "haiku"},
+        "providers": {"claude": {"model": "haiku", "effort": "low"}},
         "used_by": ["tasks.claude_fast"],
         "chains": ["c"],
         "problems": [],
+        "problem_details": [],
         "fallback": [],
     }
     assert listed["deep"]["used_by"] == ["tasks.codex_deep"]
     assert listed["deep"]["problems"] == []
+
+
+def test_the_view_shows_each_providers_route_and_names_the_provider_that_fails(
+    tmp_path, monkeypatch
+):
+    """Per-provider efforts: `effort` is null where the providers differ, and
+    codex's `max` is a problem on codex alone."""
+    profiles = {
+        "mixed": {
+            "providers": {
+                "claude": {"model": "opus", "effort": "max"},
+                "codex": {"model": "gpt-5.6-sol", "effort": "high"},
+            }
+        },
+    }
+    tasks = {
+        "claude_mixed": {"kind": "agent", "harness": "claude", "prompt": "p", "profile": "mixed"}
+    }
+    live = _live(tmp_path, monkeypatch, tasks, profiles=profiles)
+    mixed = {p["id"]: p for p in _view(live)["agent_profiles"]}["mixed"]
+    assert mixed["effort"] is None
+    assert mixed["providers"] == {
+        "claude": {"model": "opus", "effort": "max"},
+        "codex": {"model": "gpt-5.6-sol", "effort": "high"},
+    }
+    assert mixed["problems"] == []
+
+    # Move the claude task's profile onto a codex-only `max`: the loader refuses
+    # that profile outright, so the failing pairing is the model, on one provider.
+    profiles["mixed"]["providers"]["codex"] = {"model": "opus", "effort": "high"}
+    both = {**tasks, "codex_mixed": {**tasks["claude_mixed"], "harness": "codex"}}
+    live = _live(tmp_path / "again", monkeypatch, both, profiles=profiles)
+    mixed = {p["id"]: p for p in _view(live)["agent_profiles"]}["mixed"]
+    assert [(d["provider"], d["field"]) for d in mixed["problem_details"]] == [("codex", "model")]
+    assert len(mixed["problems"]) == 1 and "provider 'codex'" in mixed["problems"][0]
+
+
+def test_the_view_and_doctor_report_the_same_pairing_problems(tmp_path, monkeypatch):
+    profiles = {"wrong": {"providers": {"codex": {"model": "opus", "effort": "high"}}}}
+    tasks = {"x": {"kind": "agent", "harness": "codex", "prompt": "p", "profile": "wrong"}}
+    live = _live(tmp_path, monkeypatch, tasks, profiles=profiles)
+    shown = {p["id"]: p for p in _view(live)["agent_profiles"]}["wrong"]["problems"]
+    failed = [r for r in doctor._agent_checks() if not r["ok"] and r["name"] == "profile: wrong"]
+    assert len(shown) == 1 and len(failed) == 1
+    assert shown[0] in failed[0]["detail"]
 
 
 def test_a_task_overriding_its_parents_profile_does_not_use_it(tmp_path, monkeypatch):

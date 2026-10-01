@@ -90,7 +90,7 @@ kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
 kraft admin update [--restart] [-y] [--channel stable|rc|beta|alpha]  # install the newest release; --restart also restarts
 kraft admin reindex [--repo PATH]
-kraft admin reload                           # reread the template library and policy.yaml from disk, no restart
+kraft admin reload                           # reread the template library, policy.yaml and intake.yaml from disk, no restart
 kraft admin templates lint                   # check every chain in the library; exit 1 on any error
 kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
 kraft admin templates library [ID]           # the library's components

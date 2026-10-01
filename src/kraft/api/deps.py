@@ -278,6 +278,9 @@ def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) ->
 
 
 def _reload_templates(st) -> None:
+    from kraft import apply
+
+    apply.record_library(st)
     st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
     lint_loaded(st)
 
@@ -301,10 +304,14 @@ def reload_policy(st) -> str | None:
     """Reread `policy.yaml` into the running server (Kraft-m86uq). A file that
     does not validate is refused and the running policy kept; the reason is
     returned, not raised."""
+    from kraft import apply
+
+    digest = apply._digest(st.templates_dir / "policy.yaml")
     try:
         apply_policy(st, *read_policy(st.templates_dir))
     except PolicyError as exc:
         return str(exc)
+    apply.set_loaded(st, "policy.yaml", digest)
     return None
 
 

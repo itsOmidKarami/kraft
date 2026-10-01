@@ -33,6 +33,7 @@ def test_the_table_names_a_chain_that_selects_a_profile_on_its_own_task():
         "provider": "codex",
         "enabled": True,
         "used_by": [],
+        "problems": [],
         "chains": ["mine"],
     }
     out = templates._render_profiles({"profiles": [profile], "error": None})
@@ -49,6 +50,37 @@ def test_the_agent_profiles_follow_with_their_model_per_provider(app, capsys, mo
     assert set(rows) == {"deep", "strong", "fast"}
     assert rows["fast"][1:] == ["low", "claude=haiku,", "fake=haiku", "-"]
     assert "tasks.implementer," in rows["strong"]
+
+
+def test_a_profile_whose_providers_differ_shows_each_providers_effort():
+    from kraft.cli.templates import _render_profiles
+
+    tier = {
+        "id": "mixed",
+        "effort": None,
+        "providers": {
+            "claude": {"model": "opus", "effort": "max"},
+            "codex": {"model": "gpt-5.6-sol", "effort": "high"},
+        },
+        "used_by": [],
+        "problems": [],
+    }
+    shared = {
+        **tier,
+        "id": "same",
+        "effort": "high",
+        "providers": {"claude": {"model": "opus", "effort": "high"}},
+    }
+    rows = {
+        line.split()[0]: line
+        for line in _render_profiles(
+            {"profiles": [], "error": None, "file": "h.yaml", "agent_profiles": [tier, shared]}
+        ).splitlines()
+        if line.split() and line.split()[0] in {"mixed", "same"}
+    }
+    assert "per provider" in rows["mixed"]
+    assert "claude=opus (max)" in rows["mixed"] and "codex=gpt-5.6-sol (high)" in rows["mixed"]
+    assert "claude=opus" in rows["same"] and "(high)" not in rows["same"]
 
 
 def test_one_profile_prints_its_settings_and_users(app, capsys):

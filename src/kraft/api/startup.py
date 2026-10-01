@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from kraft import apply as apply_mod
 from kraft import (
     archive,
     auto_escalate_delay,
@@ -188,6 +189,9 @@ async def lifespan(app: FastAPI):
     app.state.policy = policy_obj
     app.state.instance_policy = instance_policy
     deps.lint_loaded(app.state)
+    app.state.loaded_hashes = {}
+    app.state.apply_signature = ()
+    apply_mod.record(app.state)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
     app.state.access = access
@@ -276,6 +280,7 @@ async def lifespan(app: FastAPI):
     # trigger added by PUT /policy or `kraft admin reload` fires without a
     # restart (Kraft-ygnw6). A tick with no triggers files nothing.
     app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
+    app.state.apply_task = asyncio.ensure_future(apply_mod.watcher(app))
     try:
         yield
     finally:
@@ -307,6 +312,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(app.state.archive_task, return_exceptions=True)
         app.state.mr_poller_task.cancel()
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
+        app.state.apply_task.cancel()
+        await asyncio.gather(app.state.apply_task, return_exceptions=True)
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()

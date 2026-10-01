@@ -48,30 +48,47 @@ def _daily_breached(db, budget: policy_mod.Budget) -> bool:
 
 
 async def tick(app) -> list[str]:
-    """One poll. Returns the work item ids started, which is usually none."""
+    """One poll. Returns the work item ids started, which is usually none, and
+    records the poll (what was ready, started and passed over, and why) as an
+    `intake_checks` row, broadcast live when it is not empty."""
+    st = app.state
+    if not st.intake.get("enabled"):
+        return []
+    check = await _poll(app)
+    row = await st.db.write(lambda c: store.record_intake_check(c, **check))
+    if check["ready"] or check["started"] or check["skipped"]:
+        bc = getattr(st, "broadcaster", None)
+        if bc is not None:
+            bc.publish("intake_checked", check)
+    return row["started"]
+
+
+def _invalid() -> dict:
+    return {"ready": 0, "started": [], "skipped": [{"bead": None, "reason": "invalid_config"}]}
+
+
+async def _poll(app) -> dict:
     from kraft.api import deps
 
     st = app.state
     cfg = st.intake
-    if not cfg.get("enabled"):
-        return []
     if st.invalid_policy:
-        return []
+        return _invalid()
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
-    if _daily_breached(st.db, budget):
-        logger.info("auto-intake: daily budget reached, starting nothing")
-        return []
     # Every active item counts, not only auto-started ones: a person working on
     # three things must not find the poller adding a fourth.
     slots = int(st.policy.max_concurrent if st.policy else 1) - st.db.read(store.active_count)
-    if slots <= 0:
-        return []
+    if _daily_breached(st.db, budget):
+        logger.info("auto-intake: daily budget reached, starting nothing")
+        blocked = "daily_budget"
+    else:
+        blocked = "max_concurrent" if slots <= 0 else None
 
     try:
         repos = config_mod.load_repos(deps.repos_path(st))
     except config_mod.ConfigError as exc:
         logger.warning("auto-intake: repo config invalid, skipping this tick: %s", exc)
-        return []
+        return _invalid()
     wanted = set(cfg.get("repos") or [])
     repos = [r for r in repos if r.enabled and (not wanted or r.path in wanted)]
     # `repos.yaml` paths are stored as written, so a `~` or a trailing slash in
@@ -81,30 +98,38 @@ async def tick(app) -> list[str]:
 
     known = _known_beads(st.db)
     ceiling = int(cfg.get("priority_ceiling", 2))
+    ready = 0
     started: list[str] = []
+    skipped: list[dict] = []
     for repo in repos:
-        if slots <= 0:
-            break
         for row in await beads.ready(cwd=repo.path):
-            if slots <= 0:
-                break
-            if row["id"] in known or not isinstance(row.get("priority"), int):
+            if not isinstance(row.get("priority"), int):
                 continue
+            ready += 1
+            if row["id"] in known:
+                reason = "already_item"
             # An epic is a container for work, not work: auto-starting one files a
             # chain against a title that describes a quarter.
-            if row.get("issue_type") == "epic":
-                continue
+            elif row.get("issue_type") == "epic":
+                reason = "epic"
             # P0 is the *highest* priority, so "P2 and below" is `>= ceiling`.
             # The highest-priority work is what a human should be looking at;
             # unattended pickup is for the backlog.
-            if row["priority"] < ceiling:
-                continue
-            wid = await _start(app, repo, row)
-            if wid is not None:
-                started.append(wid)
-                known.add(row["id"])
-                slots -= 1
-    return started
+            elif row["priority"] < ceiling:
+                reason = "above_priority_ceiling"
+            elif blocked or slots <= 0:
+                reason = blocked or "max_concurrent"
+            else:
+                wid = await _start(app, repo, row)
+                if wid is None:
+                    reason = "invalid_config"
+                else:
+                    started.append(wid)
+                    known.add(row["id"])
+                    slots -= 1
+                    continue
+            skipped.append({"bead": row["id"], "reason": reason})
+    return {"ready": ready, "started": started, "skipped": skipped}
 
 
 async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
@@ -185,6 +210,22 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
         # on, never crash the tick.
         logger.warning("auto-intake: %s already has a live walk, not double-starting", wid)
     return wid
+
+
+async def restart(app) -> None:
+    """Replace the poller task, so a changed `st.intake` takes effect without a
+    restart: `interval_s` is read once at task start."""
+    st = app.state
+    async with st.intake_lock:
+        task = st.intake_task
+        # Clear it before the await: a second caller that gets in here while we
+        # are waiting must not find, and cancel, a task we are already retiring.
+        st.intake_task = None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if st.intake["enabled"]:
+            st.intake_task = asyncio.ensure_future(poller(app))
 
 
 async def poller(app) -> None:

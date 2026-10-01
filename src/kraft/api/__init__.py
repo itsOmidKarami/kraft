@@ -39,6 +39,7 @@ app.middleware("http")(perimeter._perimeter)
 
 # Each of these decorates `api_router` (imported above) with its own routes.
 from kraft.api.routes import (  # noqa: E402,F401
+    admin,
     artifacts,
     auth,
     board,

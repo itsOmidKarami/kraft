@@ -313,6 +313,10 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
+    if (p === "/harnesses") return json(route, [
+      { id: "claude", label: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: [], capabilities: {} },
+      { id: "codex", label: "codex", executable: "codex", executable_found: false, efforts: [], models: [], capabilities: {} },
+    ]);
     /* config drafts: one static answer per key; `stale` publishes to a 409, `yaml-error` refuses ops */
     if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
       const [, area, key, action, file] = m;
@@ -392,6 +396,19 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/theme") return json(route, method === "PUT" ? Object.assign(st.theme, req.postDataJSON(), { derived: false }) : st.theme);
     if (p === "/steering") return json(route, st.steering);
     if ((m = p.match(/^\/steering\/([^/]+)$/))) return method === "DELETE" ? json(route, { deleted: m[1] }) : json(route, st.steeringBody(decodeURIComponent(m[1])));
+    if (p === "/intake/checks") return json(route, [
+      { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
+      { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
+    ]);
+    if (p === "/apply" || p === "/apply/reload") return json(route, {
+      restart: [{ id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" }],
+      reload: [{ id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded", problem: "defaults: Input should be a valid dictionary" }],
+      managed: true,
+    });
+    if (p === "/apply/restart") return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) });
+    if (p === "/update" || p === "/update/check") return json(route, {
+      installed: "1.4.0", latest: "v1.5.0", channel: "stable", behind: true, checked_at: new Date(Date.now() - 3_600_000).toISOString(),
+    });
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
     if (p === "/notify") return json(route, st.notify);

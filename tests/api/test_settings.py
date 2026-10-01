@@ -3,10 +3,15 @@
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from pathlib import Path
+
 import pytest
 import yaml
 
-from kraft import config
+from kraft import config, store
+from kraft.paths import RunDirs
 
 #: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
 pytestmark = pytest.mark.api_client(default_setup=False)
@@ -225,6 +230,23 @@ def test_get_intake_returns_the_defaults_when_no_file_was_written(client):
     assert body["interval_s"] == config.INTAKE_DEFAULT["interval_s"]
 
 
+def test_intake_checks_are_newest_first_and_limited(client):
+    conn = sqlite3.connect(RunDirs(Path(os.environ["KRAFT_RUN_DIR"])).db)
+    for n in range(3):
+        store.record_intake_check(
+            conn, ready=n, started=[f"w{n}"], skipped=[{"bead_id": "B", "reason": "epic"}]
+        )
+    conn.commit()
+    conn.close()
+    rows = client.get("/api/intake/checks").json()
+    assert [r["ready"] for r in rows] == [2, 1, 0]
+    assert set(rows[0]) == {"id", "at", "ready", "started", "skipped"}
+    assert rows[0]["started"] == ["w2"]
+    assert [r["ready"] for r in client.get("/api/intake/checks?limit=2").json()] == [2, 1]
+    assert client.get("/api/intake/checks?limit=101").status_code == 422
+    assert client.get("/api/intake/checks?limit=0").status_code == 422
+
+
 def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir):
     """The poller task is replaced, not just the dict it reads: `interval_s` is
     read once at task start, so a live poller would keep the old interval."""
@@ -319,6 +341,16 @@ def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):
     bad = {"loops": {}, "default": {"attempts": 0, "wall_clock_s": 1}}
     assert client.put("/api/policy", json=bad).status_code == 422
     assert client.get("/api/policy").json()["default"]["attempts"] == 3
+
+
+def test_get_policy_answers_the_loaded_concurrency_and_the_active_count(client, templates_dir):
+    body = client.get("/api/policy").json()
+    assert (body["max_concurrent"], body["active_count"]) == (3, 0)
+
+    # A hand edit not yet reloaded does not change what the slots count against.
+    path = templates_dir / "policy.yaml"
+    path.write_text(path.read_text() + "\nmax_concurrent: 7\n")
+    assert client.get("/api/policy").json()["max_concurrent"] == 3
 
 
 _POLICY = {"loops": {}, "default": {"attempts": 3, "wall_clock_s": 3600}}

@@ -59,8 +59,8 @@ def resolve_profile(
     `ProfileUnavailable` in `pairing_problem`'s words."""
     if why := table.pairing_problem(name, harness, providers):
         raise ProfileUnavailable(why)
-    profile = table.agent_profiles[name]
-    return profile.model[harness.provider], profile.effort
+    entry = table.agent_profiles[name].providers[harness.provider]
+    return entry.model, entry.effort
 
 
 def select_profile(profiles: dict[str, HarnessProfile], pid: str, path: Path) -> HarnessProfile:

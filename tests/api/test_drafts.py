@@ -166,12 +166,25 @@ def test_discard_is_final(client):
 @pytest.mark.parametrize(
     ("method", "url", "status"),
     [
-        ("get", "/api/drafts/harnesses/x", 404),
+        ("get", "/api/drafts/nope/x", 404),
+        ("get", "/api/drafts/harnesses/x", 400),
+        ("get", "/api/drafts/intake/policy", 400),
+        ("put", "/api/drafts/policy/policy/files/repos.yaml", 422),
+        ("put", "/api/drafts/repos/repos/files/policy.yaml", 422),
         ("get", "/api/drafts/chains/Bad..id", 400),
         ("put", "/api/drafts/chains/default/files/library.yaml", 422),
         ("put", "/api/drafts/library/library/files/chains/default.yaml", 422),
     ],
-    ids=["unknown-area", "bad-chain-id", "chain-outside-file", "library-outside-file"],
+    ids=[
+        "unknown-area",
+        "harnesses-key",
+        "intake-key",
+        "policy-area-other-file",
+        "repos-area-other-file",
+        "bad-chain-id",
+        "chain-outside-file",
+        "library-outside-file",
+    ],
 )
 def test_a_request_outside_an_area_is_refused(client, method, url, status):
     body = {"json": {"text": "x: 1\n"}} if method == "put" else {}
@@ -276,3 +289,189 @@ def test_a_library_rename_joins_the_chains_it_rewrites_to_the_draft(client, temp
     assert client.post(f"{library}/publish").status_code == 200
     assert (templates_dir / "chains" / "quick-task.yaml").read_text() == text
     assert "extends: builder" in text
+
+
+# ── the config-file areas (W13 B) ──
+
+POLICY = "/api/drafts/policy/policy"
+
+
+def put_file(client, area, file, text):
+    return client.put(f"/api/drafts/{area}/{area}/files/{file}", json={"text": text})
+
+
+def policy_text(templates_dir, old="rate_limit_retries: 5", new="rate_limit_retries: 6"):
+    text = (templates_dir / "policy.yaml").read_text()
+    assert old in text
+    return text.replace(old, new)
+
+
+@pytest.mark.parametrize(
+    ("area", "file"),
+    [
+        ("harnesses", "harnesses.yaml"),
+        ("harnesses", "policy.yaml"),
+        ("repos", "repos.yaml"),
+        ("policy", "policy.yaml"),
+        ("intake", "intake.yaml"),
+        ("intake", "policy.yaml"),
+    ],
+)
+def test_each_config_area_keeps_a_draft_of_its_files(client, templates_dir, area, file):
+    text = (
+        "enabled: true\ninterval_s: 60\npriority_ceiling: 2\n"
+        if file == "intake.yaml"
+        # The harnesses area reads the file for its profiles; keep them.
+        else (templates_dir / file).read_text().replace("effort: low", "effort: medium")
+        if area == "harnesses" and file == "harnesses.yaml"
+        else "x: 1\n"
+    )
+    got = put_file(client, area, file, text).json()
+    assert (got["area"], got["draft"], got["files"][file]) == (area, True, text)
+    paths = [c["path"] for c in got["result"]["changes"]]
+    assert paths[0] == file and all(p.startswith("profiles.") for p in paths[1:])
+    assert client.get(f"/api/drafts/{area}/{area}").json()["files"][file] == text
+
+
+def test_a_config_area_opens_before_its_file_exists(client):
+    got = client.get("/api/drafts/repos/repos")
+    assert got.status_code == 200
+    assert (got.json()["draft"], got.json()["files"]) == (False, {})
+
+
+def test_a_config_draft_shows_the_problems_the_put_route_would_refuse(client, templates_dir):
+    shipped = (templates_dir / "policy.yaml").read_text()
+    bad = put_file(client, "policy", "policy.yaml", shipped + "\nmax_concurrent: nope\n")
+    problems = bad.json()["result"]["problems"]
+    assert problems and problems[0]["file"] == "policy.yaml"
+    r = client.post(f"{POLICY}/publish")
+    assert (r.status_code, r.json()["problems"]) == (422, problems)
+    assert (templates_dir / "policy.yaml").read_text() == shipped
+
+
+def test_a_harnesses_draft_shows_a_problem_the_file_already_had(client, templates_dir):
+    """`PUT /harnesses` only refuses what an edit newly breaks; a draft shows
+    everything, so a profile that is already unusable blocks the publish."""
+    path = templates_dir / "harnesses.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["profiles"]["broken"] = {"model": {"nosuch": "x"}}
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    got = put_file(client, "harnesses", "harnesses.yaml", path.read_text() + "\n# touched\n")
+    assert [p["file"] for p in got.json()["result"]["problems"]] == ["harnesses.yaml"]
+
+
+@pytest.fixture
+def applied(client, monkeypatch):
+    """What each area's publish applied: `reload_policy` and the intake restart."""
+    from kraft import intake as intake_mod
+    from kraft.api import deps
+
+    calls = []
+    real = deps.reload_policy
+
+    def reload_policy(st):
+        calls.append("policy")
+        return real(st)
+
+    async def restart(app):
+        calls.append("intake")
+
+    monkeypatch.setattr(deps, "reload_policy", reload_policy)
+    monkeypatch.setattr(intake_mod, "restart", restart)
+    return calls
+
+
+def test_a_policy_maximum_under_a_shipped_chains_value_answers_422_naming_the_chain(
+    client, templates_dir
+):
+    shipped = (templates_dir / "policy.yaml").read_text()
+    put_file(client, "policy", "policy.yaml", shipped + "\nmaxima:\n  max_attempts: 1\n")
+    r = client.post(f"{POLICY}/publish")
+    assert r.status_code == 422
+    assert {"default", "quick-task"} & {p["chain"] for p in r.json()["problems"] if "chain" in p}
+    assert (templates_dir / "policy.yaml").read_text() == shipped
+
+
+def test_publishing_a_policy_draft_reloads_the_policy(client, templates_dir, applied):
+    put_file(client, "policy", "policy.yaml", policy_text(templates_dir))
+    assert client.post(f"{POLICY}/publish").status_code == 200
+    assert applied == ["policy"]
+    assert "rate_limit_retries: 6" in (templates_dir / "policy.yaml").read_text()
+    assert client.app.state.policy.rate_limit_retries == 6
+
+
+def test_publishing_an_intake_draft_restarts_the_poller(client, templates_dir, applied):
+    text = "enabled: true\ninterval_s: 90\npriority_ceiling: 2\n"
+    put_file(client, "intake", "intake.yaml", text)
+    assert client.post("/api/drafts/intake/intake/publish").status_code == 200
+    assert applied == ["intake"]
+    assert (templates_dir / "intake.yaml").read_text() == text
+    assert client.app.state.intake["interval_s"] == 90
+
+
+def test_a_harnesses_draft_reloads_the_policy_only_when_it_wrote_policy_yaml(
+    client, templates_dir, applied
+):
+    path = templates_dir / "harnesses.yaml"
+    edited = path.read_text().replace("effort: low", "effort: medium")
+    assert edited != path.read_text()
+    put_file(client, "harnesses", "harnesses.yaml", edited)
+    assert client.post("/api/drafts/harnesses/harnesses/publish").status_code == 200
+    assert applied == []
+
+    put_file(client, "harnesses", "policy.yaml", policy_text(templates_dir))
+    assert client.post("/api/drafts/harnesses/harnesses/publish").status_code == 200
+    assert applied == ["policy"]
+
+
+def test_a_repos_draft_publishes_without_reloading_anything(client, templates_dir, applied):
+    put_file(client, "repos", "repos.yaml", "repos: []\n")
+    assert client.post("/api/drafts/repos/repos/publish").status_code == 200
+    assert (templates_dir / "repos.yaml").read_text() == "repos: []\n"
+    assert applied == []
+
+
+def test_a_repos_draft_over_a_repos_yaml_saved_since_answers_409(client, templates_dir):
+    put_file(client, "repos", "repos.yaml", "repos: []\n# mine\n")
+    (templates_dir / "repos.yaml").write_text("repos: []\n# saved elsewhere\n")
+    r = client.post("/api/drafts/repos/repos/publish")
+    assert r.status_code == 409
+    assert "repos.yaml" in r.json()["files"]
+    assert "saved elsewhere" in (templates_dir / "repos.yaml").read_text()
+
+
+def test_a_failing_apply_hook_answers_500_keeps_the_draft_and_the_retry_succeeds(
+    client, templates_dir, monkeypatch
+):
+    from kraft.api import deps
+
+    monkeypatch.setattr(deps, "reload_policy", lambda st: "refused")
+    put_file(client, "policy", "policy.yaml", policy_text(templates_dir))
+    r = client.post(f"{POLICY}/publish")
+    assert r.status_code == 500
+    assert "refused" in r.json()["detail"]
+    assert "rate_limit_retries: 6" in (templates_dir / "policy.yaml").read_text()
+    assert client.get(POLICY).json()["draft"] is True
+
+    monkeypatch.undo()
+    assert client.post(f"{POLICY}/publish").status_code == 200
+    assert client.get(POLICY).json()["draft"] is False
+
+
+def test_two_drafts_over_policy_yaml_the_second_publish_answers_409_and_writes_nothing(
+    client, templates_dir
+):
+    put_file(client, "policy", "policy.yaml", policy_text(templates_dir))
+    put_file(
+        client, "harnesses", "policy.yaml", policy_text(templates_dir, new="rate_limit_retries: 7")
+    )
+    assert client.post(f"{POLICY}/publish").status_code == 200
+
+    r = client.post("/api/drafts/harnesses/harnesses/publish")
+    assert r.status_code == 409
+    assert "rate_limit_retries: 7" in r.json()["files"]["policy.yaml"]["diff"]
+    assert "rate_limit_retries: 6" in (templates_dir / "policy.yaml").read_text()
+    # The way out: keep mine.
+    assert client.post("/api/drafts/harnesses/harnesses/rebase").status_code == 200
+    assert client.post("/api/drafts/harnesses/harnesses/publish").status_code == 200
+    assert "rate_limit_retries: 7" in (templates_dir / "policy.yaml").read_text()

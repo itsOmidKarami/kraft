@@ -21,6 +21,8 @@ export function connectEvents(): () => void {
     };
     socket.onmessage = (e) => {
       const ev = JSON.parse(e.data);
+      // A live frame (`/ws/events?live=1` only) is not an event row: no seq to resume from.
+      if (ev.frame === "live") return;
       useStore.getState().applyEvent(ev);
       maybeNotify(ev, useStore.getState().workItems[ev.work_item_id]?.title ?? "Kraft");
     };
