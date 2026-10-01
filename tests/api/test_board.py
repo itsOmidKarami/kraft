@@ -160,7 +160,7 @@ def _seed_repo(client, wid, **kwargs):
         conn.close()
 
 
-def _seed_session(client, wid, *, session_id, hook_point):
+def _seed_session(client, wid, *, session_id, hook_point, node_id="verify"):
     """Write a `worker_sessions` row directly — same reasoning as `_seed_repo`:
     a judge session normally comes from `dispatch.launch_hook`, which a
     detail-payload test needs no more than it needs `ensure_worktree`."""
@@ -171,7 +171,7 @@ def _seed_session(client, wid, *, session_id, hook_point):
             conn,
             id=session_id,
             work_item_id=wid,
-            node_id="verify",
+            node_id=node_id,
             hook_point=hook_point,
             log_path=f"/tmp/{session_id}.log",
             result_path=f"/tmp/{session_id}.json",

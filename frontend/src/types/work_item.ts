@@ -307,7 +307,7 @@ export interface WorkItem {
    *  the steer box rather than offer one. Only on the detail endpoint. */
   steerable?: boolean;
   /** The root repo's merge request, once `open_mr` has run; null before then.
-   *  Only on the detail endpoint. */
+   *  On the detail and the list. */
   mr_ref?: { number: number; url: string } | null;
   /** Only on the detail endpoint; see `TaskProgress`. */
   progress?: TaskProgress | null;
@@ -338,6 +338,10 @@ export interface WorkItem {
   /** A run's progress at a glance (Kraft UI v2 · B13). Only on the detail
    *  endpoint. Additive, unread by the shipped UI. */
   summary?: WorkItemSummary;
+  /** The current node's step out of its steps, with the step's id and the
+   *  latest task's (absent when the task's path has no step or task segment), when the node declares more than one step and a session
+   *  has run. List only; `summary.step` is the detail's. */
+  step?: { index: number; count: number; name?: string; task?: string } | null;
 }
 
 /** `GET /work-items/{id}`'s `summary` (B13): nodes done out of the frozen

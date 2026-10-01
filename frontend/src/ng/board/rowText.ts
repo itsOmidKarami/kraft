@@ -6,7 +6,7 @@ import { groupOf } from "./model";
 /** What a board row says and offers (W6 brief B.4, B.5, B.7), from the
  *  server's `display_status` and `stop` and the raw row, one table each. */
 
-type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "fallback" | "pending_gate" | "chain_definition" | "retry_at"> & { status?: WorkItem["status"] };
+type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progress" | "step" | "mr_ref" | "fallback" | "pending_gate" | "chain_definition" | "retry_at"> & { status?: WorkItem["status"] };
 
 const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
 
@@ -23,13 +23,15 @@ export function reasonTail(i: Row, now = Date.now()): string {
         }
       case "failed": return `failed at ${node}`;
       case "paused": return i.current_node_id ? `paused at ${node}` : "created paused";
-      case "running": return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
+      case "running":
+        if (i.step) return i.step.name && i.step.task ? `${i.step.index} of ${i.step.count} · ${i.step.name} › ${i.step.task}` : `${node} · step ${i.step.index} of ${i.step.count}`;
+        return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
       case "waiting": {
         const at = i.stop?.resume_at ?? i.retry_at;
         return at ? `retry ${until(at, now)}` : `waiting at ${node}`;
       }
       case "escalated": return "escalation running";
-      case "done": return "completed";
+      case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
       case "cancelled": return "cancelled";
       default: return "";
     }

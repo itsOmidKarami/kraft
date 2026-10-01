@@ -228,9 +228,33 @@ async def list_work_items(request: Request):
             "SELECT work_item_id, MAX(seq) AS seq FROM events "
             "WHERE type = 'escalation_message' GROUP BY work_item_id"
         ).fetchall()
-        return rows, cursor, gates, launches, boundaries, escalations
+        # `mr_ref` and the step's task: the same grouped-query trade as the
+        # rest, so the list stays one pass instead of `_mr_ref`'s per-item scan.
+        mr_events = c.execute(
+            "SELECT work_item_id, payload FROM events WHERE seq IN ("
+            "  SELECT MAX(seq) FROM events WHERE type = 'mr_opened' GROUP BY work_item_id)"
+        ).fetchall()
+        roots = c.execute(
+            "SELECT work_item_id, mr_ref FROM work_item_repos WHERE role = 'root'"
+        ).fetchall()
+        tasks = c.execute(
+            "SELECT s.work_item_id, s.hook_point FROM worker_sessions s"
+            " JOIN work_items w ON w.id = s.work_item_id AND w.current_node_id = s.node_id"
+            " WHERE s.hook_point != 'escalation' ORDER BY s.created_at"
+        ).fetchall()
+        return rows, cursor, gates, launches, boundaries, escalations, mr_events, roots, tasks
 
-    rows, cursor, gate_rows, launch_rows, boundary_rows, escalation_rows = st.db.read(_read)
+    (
+        rows,
+        cursor,
+        gate_rows,
+        launch_rows,
+        boundary_rows,
+        escalation_rows,
+        mr_event_rows,
+        root_rows,
+        task_rows,
+    ) = st.db.read(_read)
     latest: dict[tuple[str, str], dict] = {
         (e["work_item_id"], e["type"]): json.loads(e["payload"]) for e in launch_rows
     }
@@ -241,11 +265,15 @@ async def list_work_items(request: Request):
     }
     boundary_by_item = {b["work_item_id"]: b for b in boundary_rows}
     escalation_seq_by_item = {e["work_item_id"]: e["seq"] for e in escalation_rows}
+    mr_event_by_item = {e["work_item_id"]: json.loads(e["payload"]) for e in mr_event_rows}
+    root_mr_by_item = {r["work_item_id"]: r["mr_ref"] for r in root_rows}
+    task_by_item = {t["work_item_id"]: t["hook_point"] for t in task_rows}  # latest wins
 
     def _list_escalated(wid: str) -> bool:
         boundary = boundary_by_item.get(wid)
         return boundary is not None and escalation_seq_by_item.get(wid, -1) > boundary["seq"]
 
+    chains = {r["id"]: store.chain_view(r) for r in rows}
     items = [
         {
             "id": r["id"],
@@ -257,7 +285,7 @@ async def list_work_items(request: Request):
             # `store.chain_view`, not the raw column: a V1 row's
             # `chain_definition` is `"{}"`, and the board draws its stage bar
             # and names the current node from `chain_definition.nodes`.
-            "chain_definition": store.chain_view(r),
+            "chain_definition": chains[r["id"]],
             "current_node_id": r["current_node_id"],
             "bead_id": r["bead_id"],
             "created_at": r["created_at"],
@@ -273,6 +301,12 @@ async def list_work_items(request: Request):
                 r, r["stop_kind"], _list_escalated(r["id"]), pending.get(r["id"])
             ),
             "stop": _list_stop(r, pending.get(r["id"]), boundary_by_item.get(r["id"])),
+            "step": _step_of(r, chains[r["id"]], task_by_item.get(r["id"]), with_task=True),
+            "mr_ref": _pick_mr_ref(
+                r["id"] in root_mr_by_item,
+                root_mr_by_item.get(r["id"]),
+                mr_event_by_item.get(r["id"]),
+            ),
         }
         for r in rows
     ]
@@ -435,12 +469,26 @@ def _mr_ref(st, wid: str) -> dict | None:
     Its root's own row records the root's merge request (Kraft-mjsf), and
     that is the item's; a root with none has no one merge request to link.
     """
-    if rows := st.db.read(lambda c: store.repos_for(c, wid)):
-        return next((r["mr_ref"] for r in rows if r["role"] == "root"), None)
-    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
-        if e["type"] == "mr_opened":
-            return {"number": e["payload"]["number"], "url": e["payload"]["url"]}
-    return None
+    repo_rows = st.db.read(lambda c: store.repos_for(c, wid))
+    root = next((r["mr_ref"] for r in repo_rows if r["role"] == "root"), None)
+    last = next(
+        (
+            e["payload"]
+            for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid)))
+            if e["type"] == "mr_opened"
+        ),
+        None,
+    )
+    return _pick_mr_ref(bool(repo_rows), root, last)
+
+
+def _pick_mr_ref(multi_repo: bool, root_ref, last_event: dict | None) -> dict | None:
+    """`_mr_ref`'s rule on data already read: a multi-repo item's root row is
+    its merge request (a JSON string on the list's raw rows, a dict from
+    `repos_for`); otherwise the latest `mr_opened` payload."""
+    if multi_repo:
+        return json.loads(root_ref) if isinstance(root_ref, str) else root_ref
+    return {"number": last_event["number"], "url": last_event["url"]} if last_event else None
 
 
 async def _mr_state(st, row) -> str | None:
@@ -562,6 +610,26 @@ def _stop_task_and_attempt(sessions, node_id: str | None) -> tuple[str | None, i
     return None, None
 
 
+def _step_of(row, chain: dict, task: str | None, *, with_task: bool = False) -> dict | None:
+    """The current node's step (1-based) out of its steps, when it declares
+    more than one and `task` (a `node.step.task` path) is in one of them;
+    `with_task` adds the step's id and the task's, which the list row draws
+    as `step › task` (the detail's `summary.step` does not)."""
+    node = next((n for n in chain.get("nodes") or [] if n["id"] == row["current_node_id"]), None)
+    steps = node.get("steps") if node else None
+    if not steps or len(steps) < 2:
+        return None
+    index = next((i for i, group in enumerate(steps) if task in group), None)
+    if index is None:
+        return None
+    step = {"index": index + 1, "count": len(steps)}
+    if not with_task:
+        return step
+    parts = task.split(".", 2)
+    # A path with no step or task segment (a hand-written chain) names neither.
+    return {**step, "name": parts[1], "task": parts[2]} if len(parts) == 3 else step
+
+
 def _summary(st, wid: str, row, chain: dict, sessions) -> dict:
     """`summary` on the detail response (H.4): a run's progress at a glance --
     nodes done out of the frozen chain's total, how many of those were gates,
@@ -571,14 +639,8 @@ def _summary(st, wid: str, row, chain: dict, sessions) -> dict:
     nodes = chain.get("nodes") or []
     completed = _completed_nodes(st, wid)
     gates_passed = sum(1 for n in nodes if n["id"] in completed and n.get("gate_after") is not None)
-    step = None
-    node = next((n for n in nodes if n["id"] == row["current_node_id"]), None)
-    steps = node.get("steps") if node else None
-    if steps and len(steps) > 1:
-        task, _attempt = _stop_task_and_attempt(sessions, row["current_node_id"])
-        index = next((i for i, group in enumerate(steps) if task in group), None)
-        if index is not None:
-            step = {"index": index + 1, "count": len(steps)}
+    task, _attempt = _stop_task_and_attempt(sessions, row["current_node_id"])
+    step = _step_of(row, chain, task)
     return {
         "nodes_done": len(completed),
         "nodes_total": len(nodes),
