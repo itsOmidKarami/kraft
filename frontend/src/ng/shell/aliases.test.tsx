@@ -38,27 +38,27 @@ const SHIPPED: [from: string, lands: string][] = [
 describe("shipped addresses", () => {
   it.each(SHIPPED)("%s lands on %s, never on Not found", async (from, lands) => {
     vi.spyOn(api, "getWorkItem").mockResolvedValue({ id: "abc", title: "Cache embeddings", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] } } as never);
-    window.history.pushState({}, "", `/ng${from}`);
+    window.history.pushState({}, "", from);
     render(<App />);
-    await waitFor(() => expect(window.location.pathname.replace(/\/$/, "")).toBe(`/ng${lands}`.replace(/\/$/, "")));
+    await waitFor(() => expect(window.location.pathname.replace(/\/$/, "")).toBe(lands.replace(/\/$/, "")));
     expect(screen.queryByRole("heading", { name: "Not found" })).toBeNull();
   });
 
   it("keeps the query string and adds no history entry", async () => {
-    window.history.pushState({}, "", "/ng/settings/chains?chain=default");
+    window.history.pushState({}, "", "/settings/chains?chain=default");
     const depth = window.history.length;
     render(<App />);
-    await waitFor(() => expect(window.location.pathname).toBe("/ng/templates/chains"));
+    await waitFor(() => expect(window.location.pathname).toBe("/templates/chains"));
     expect(window.location.search).toBe("?chain=default");
     expect(window.history.length).toBe(depth);
   });
 
   it("turns a shipped item hash into the page it pointed at", async () => {
     vi.spyOn(api, "getWorkItem").mockResolvedValue({ id: "abc", title: "Cache embeddings", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] } } as never);
-    window.history.pushState({}, "", "/ng/work-items/abc#node=verify&tab=tasks");
+    window.history.pushState({}, "", "/work-items/abc#node=verify&tab=tasks");
     const depth = window.history.length;
     render(<App />);
-    await waitFor(() => expect(window.location.pathname).toBe("/ng/work-items/abc/nodes/verify"));
+    await waitFor(() => expect(window.location.pathname).toBe("/work-items/abc/nodes/verify"));
     expect(window.location.hash).toBe("");
     expect(window.history.length).toBe(depth);
   });

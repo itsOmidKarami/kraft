@@ -47,7 +47,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
   }
   if (phone) return <PhoneApp />;
   return (
-    <BrowserRouter basename="/ng">
+    <BrowserRouter>
       <ShippedHash />
       <Routes>
         <Route path="/_gallery" element={<Gallery />} />
