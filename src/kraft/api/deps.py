@@ -222,6 +222,15 @@ def _work_item_row(st, wid):
     return row
 
 
+def worktree_missing(row) -> HTTPException:
+    """The 404 for an item whose worktree directory is not on disk. An item
+    that never ran (no `current_node_id`) has not made one yet; one that did
+    lost it -- reclaimed, or deleted by hand -- and "yet" would mislead."""
+    if row["current_node_id"] is None:
+        return HTTPException(404, "this work item has not started, so it has no worktree yet")
+    return HTTPException(404, "this work item's worktree was removed from disk")
+
+
 def _live_work_item_row(st, wid):
     """`_work_item_row` for a door onto the item's chain: an ended item
     answers 409 naming its status, because nothing runs its chain again

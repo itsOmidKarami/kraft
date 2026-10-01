@@ -80,7 +80,7 @@ async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool
         }
     worktree = st.run_dirs.worktrees / wid
     if not worktree.is_dir():
-        raise HTTPException(404, "this work item has no worktree yet")
+        raise deps.worktree_missing(row)
 
     try:
         # No host git in a sandboxed worktree while its worker can still
@@ -154,7 +154,7 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
 def _readable_worktree(st, row):
     worktree = st.run_dirs.worktrees / row["id"]
     if not worktree.is_dir():
-        raise HTTPException(404, "this work item has no worktree yet")
+        raise deps.worktree_missing(row)
     try:
         stops.refuse_live_sandboxed_session(
             st.db, row, deps.launch(st, row["repo"]), what="the diff"
