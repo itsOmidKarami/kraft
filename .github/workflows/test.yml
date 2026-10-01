@@ -196,14 +196,20 @@ jobs:
     # naming each leg has to be edited whenever the supported range changes; a
     # rule naming this job never does.
     #
-    # `if: always()` is load-bearing. A job skipped because its `needs` failed
-    # reports "skipped", and a skipped required check passes -- so without it a
-    # red matrix would leave this check green. The shell test below is what
-    # turns a failed or cancelled matrix into a failed check. A skipped matrix
-    # passes only when `changes` said docs-only and `docs-tests` passed.
+    # `if: ${{ !cancelled() }}` is load-bearing. A job skipped because its
+    # `needs` failed reports "skipped", and a skipped required check passes --
+    # so a bare `needs` would leave this check green on a red matrix. Unlike
+    # `always()`, `!cancelled()` is false once the whole run is cancelled, which
+    # concurrency does to the first run when a `labeled` event follows `opened`
+    # on the same head sha. That run's gate is then skipped instead of failed,
+    # so it stops leaving a red `test` beside the later run's green one (which
+    # blocked auto-merge). Cost: a run cancelled by hand also leaves a skipped
+    # gate, not a red one. The shell test below turns a failed matrix into a
+    # failed check. A skipped matrix passes only when `changes` said docs-only
+    # and `docs-tests` passed.
     name: test
     needs: [changes, test, docs-tests]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.changes.outputs.code }}
