@@ -36,11 +36,11 @@ function Frame() {
   );
 }
 
-/** The phone app (W17): its own router on the /ng basename, its own toaster. It
+/** The phone app (W17): its own router, its own toaster. It
  *  shares the desktop's URLs, so a place survives a resize (A.1). */
 export function PhoneApp() {
   return (
-    <BrowserRouter basename="/ng">
+    <BrowserRouter>
       <ShippedHash />
       <Routes>
         <Route element={<Frame />}>
