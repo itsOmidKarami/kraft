@@ -1,7 +1,7 @@
 import { hex, logLines, LONG_DESCRIPTION, t, type ItemBundle, type Variant } from "./fixtures";
 
 /**
- * Items for the /ng item page (ux2-W5): the prototype's 15-node V1 chain in
+ * Items for the item page (ux2-W5): the prototype's 15-node V1 chain in
  * every scenario `Kraft Prototype V2.dc.html` draws, plus paused. They live in
  * the scenario's bundles only (the detail route answers them), never in the
  * board list, so no shipped cell changes. Times are T0-based; the ng-item

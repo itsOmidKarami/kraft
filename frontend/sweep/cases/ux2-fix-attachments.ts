@@ -8,7 +8,7 @@ const doc = (kind: string, n: number) => ({
 
 export const cells: Case[] = [
   // Kraft-9d8b2.29: a spec and a plan attached at intake read in the chain pane's Overview, each opening its document.
-  { screen: "ng-item", variant: "attached", data: "default", widths: [1280], run: async (c) => {
+  { screen: "item", variant: "attached", data: "default", widths: [1280], run: async (c) => {
     const id = c.S.ng.running;
     const it = c.S.bundles[id].item;
     const before = c.S.docs[id];

@@ -6,10 +6,10 @@ import type { Flow } from "./flowKit";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "cases");
 const wave = (f: string) => f.replace(/(\.flows)?\.ts$/, "");
-const rank = (w: string) => (w === "shipped" ? 0 : /^ux2-W\d/.test(w) ? 1 : 2);
+const rank = (w: string) => (/^ux2-W\d/.test(w) ? 0 : 1);
 
 /**
- * Every sweep/cases/*.ts (cells) or *.flows.ts (flows), whatever the name: `shipped` first, then the waves
+ * Every sweep/cases/*.ts (cells) or *.flows.ts (flows), whatever the name: the waves
  * by number (ux2-W2 before ux2-W10), then any other file (a fix's ux2-fix-<topic>.ts) by name. A screen's
  * first case in this order also gets the ~light cell at 1280, so a fix adding to a wave's screen must not
  * add a first case: it sorts after the waves, so it never does.

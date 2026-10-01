@@ -41,7 +41,7 @@ const inScope = (e) => !screens || screens.some((s) => s.endsWith("*") ? e.scree
 function shoot() {
   const env = { ...process.env };
   if (screens) env.SWEEP_SCREEN = screens.map((s) => s.replace(/\*$/, "")).join(",");
-  const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
+  const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "interactions.spec.ts"];
   const MANIFEST = path.join(OUT, "manifest.jsonl");
   const rows = () => (fs.existsSync(MANIFEST) ? fs.readFileSync(MANIFEST, "utf8").split("\n").filter(Boolean).length : 0);
   const dead = [];

@@ -29,21 +29,21 @@ export interface Case {
   noLight?: true;
   /** Also shoot `~light-firstpaint` at 1280: reload and screenshot at DOMContentLoaded, 0ms settle. */
   firstpaint?: boolean;
-  /** More of the mock's options (ux2-W6: the /ng board's fixtures and states). */
+  /** More of the mock's options (ux2-W6: the board's fixtures and states). */
   mock?: MockOptions;
   run: (c: Ctx) => Promise<void>;
 }
 
 export const settle = (page: Page, ms = 400) => page.waitForTimeout(ms);
 export const idOf = (S: Scenario, st: DisplayState) => S.byState[st].item.id;
-/** The /ng Chains editor on one of the mock's drafts, sidebar pinned, once the canvas has drawn. */
+/** The Chains editor on one of the mock's drafts, sidebar pinned, once the canvas has drawn. */
 export async function ngChains(c: Ctx, key: string, node?: string) {
   await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
-  await c.page.goto(`/ng/templates/chains/${key}${node ? `/nodes/${node}` : ""}`);
+  await c.page.goto(`/templates/chains/${key}${node ? `/nodes/${node}` : ""}`);
   await c.page.locator(".canvas, .tpl-note").first().waitFor({ timeout: 8000 });
   await settle(c.page, 700);
 }
-/** A /ng page under a given look: the mock's theme is what GET /theme answers. */
+/** A page under a given look: the mock's theme is what GET /theme answers. */
 export async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
   if (opts.side) await c.page.addInitScript((v) => localStorage.setItem("kraft.sidebar.v2", v), opts.side);
@@ -52,9 +52,9 @@ export async function ng(c: Ctx, url: string, look: Record<string, unknown>, opt
   await settle(c.page, 600);
   if (opts.hover) { await c.page.mouse.move(20, 300); await settle(c.page, 500); }
 }
-/** The /ng item page (ux2-W5) for one of ngItems.ts's scenarios, the clock fixed at NG_NOW so elapsed reads the same every run. */
+/** The item page (ux2-W5) for one of ngItems.ts's scenarios, the clock fixed at NG_NOW so elapsed reads the same every run. */
 export async function ngItem(c: Ctx, sc: string, opts: { tail?: string; side?: "pinned" | "rail"; then?: (p: Page) => Promise<void> } = {}) {
   await c.page.clock.setFixedTime(new Date(NG_NOW));
-  await ng(c, `/ng/work-items/${c.S.ng[sc]}${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
+  await ng(c, `/work-items/${c.S.ng[sc]}${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }

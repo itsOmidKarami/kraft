@@ -1,4 +1,4 @@
-/** The /ng Harnesses page's server (ux2-W14): the `harnesses` draft's answers, shaped like
+/** The Harnesses page's server (ux2-W14): the `harnesses` draft's answers, shaped like
  *  `src/kraft/drafts/harnesses.py`'s resolve, with the few ops the flows send applied to a
  *  small in-memory state so problems appear and clear as the real draft's do. */
 
