@@ -201,6 +201,14 @@ parametrizing a pinned test means repointing it in the same change. Run
   environment. A test must pass on the floor, so it never relies on a newer
   stdlib API or on 3.14's lazy annotations.
 - Only one heavy local test run at a time on a shared machine.
+- A test that runs past its timeout (120s, `pyproject.toml`) ends its whole
+  process: pytest-timeout's `thread` method dumps every stack, then exits.
+  Under xdist that reads `[gwN] node down: Not properly terminated` and
+  `worker 'gwN' crashed while running '<test>'`; `<test>` is the one that
+  hung, and the `Timeout` stack dump above says where. Its teardown never
+  runs, so what it started outside the process stays. The sandbox e2e
+  fixture (`tests/worker/test_egress_docker.py`) removes the relays, volume
+  and worker a killed run left at the next run.
 
 ## Enforced mechanically
 
