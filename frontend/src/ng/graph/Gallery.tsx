@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { BADGES, CHAIN_15, CHAIN_15_ARCS, CHAIN_15_SEAMS, CHAIN_STOPPED, EXEC_STATES, GATE_STATES, SIZES } from "./gallery.fixtures";
+import { BADGES, NODE_EDIT, NODE_VERIFY, NODE_VERIFY_SIDE, CHAIN_15, CHAIN_15_ARCS, CHAIN_15_SEAMS, CHAIN_STOPPED, EXEC_STATES, GATE_STATES, SIZES } from "./gallery.fixtures";
 import { NodeGlyph } from "./NodeGlyph";
+import { NodeGraph, type NodeSel } from "./NodeGraph";
 import { StageGraph } from "./StageGraph";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
@@ -10,6 +11,7 @@ const noop = () => {};
 /** /ng/_gallery, unlinked: every graph component and state, from fixtures only. */
 export function Gallery() {
   const [sel, setSel] = useState("review_gate");
+  const [task, setTask] = useState<NodeSel>({ step: "review", task: "code_review" });
   return (
     <main className="gallery">
       <h1>Graph components</h1>
@@ -38,6 +40,15 @@ export function Gallery() {
         </div>
         <div className="gallery-frame">
           <StageGraph name="stopped" nodes={CHAIN_STOPPED} opening="current" />
+        </div>
+      </section>
+      <section aria-labelledby="g-node">
+        <h2 id="g-node">NodeGraph</h2>
+        <div className="gallery-frame is-tall">
+          <NodeGraph name="verification" steps={NODE_VERIFY} selected={task} onSelect={setTask} onOpen={setTask} side={NODE_VERIFY_SIDE} loop={{ tone: "active", label: "fix loop · attempt 2 of 3" }} onFailure="retry_flaky, then re-measure" />
+        </div>
+        <div className="gallery-frame">
+          <NodeGraph name="security_scan" steps={NODE_EDIT} seamAfter />
         </div>
       </section>
       <section aria-labelledby="g-zoom">

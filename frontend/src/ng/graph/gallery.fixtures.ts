@@ -1,3 +1,4 @@
+import type { NodeStep } from "./nodeLayout";
 import type { ChainArc, ChainNode, Seam } from "./layout";
 import type { GlyphKind, GlyphState, GraphItem } from "./types";
 import type { GlyphSize } from "./NodeGlyph";
@@ -56,4 +57,25 @@ export const CHAIN_STOPPED: ChainNode[] = [
   { id: "verification", kind: "exec", icon: "shield-check", state: "failed", prob: true, meta: "failed", metaTone: "red" },
   { id: "merge", kind: "gate", state: "todo" },
   { id: "removed_step", kind: "exec", icon: "box", state: "ghost" },
+];
+
+/** verification, mid-run: a 3-task parallel step, the fix loop, an escalation branch. */
+export const NODE_VERIFY: NodeStep[] = [
+  { id: "checks", tasks: [
+    { id: "lint", taskKind: "subprocess", state: "done", meta: "11s" },
+    { id: "typecheck", taskKind: "subprocess", state: "done", meta: "19s" },
+    { id: "unit_tests", taskKind: "builtin", state: "done", meta: "1m 04s", attempt: 2 },
+  ] },
+  { id: "review", tasks: [{ id: "code_review", taskKind: "agent", icon: "bot", state: "current", meta: "running · 41s", running: true }] },
+  { id: "report", tasks: [{ id: "summarise", taskKind: "agent", state: "todo" }] },
+];
+export const NODE_VERIFY_SIDE = { id: "escalate", icon: "siren", meta: "thread · 2 turns" };
+
+/** A node being edited: a change, an empty step's slot, seams. */
+export const NODE_EDIT: NodeStep[] = [
+  { id: "scan", mark: "change", seamBefore: true, seamBelow: true, tasks: [
+    { id: "semgrep", taskKind: "subprocess", mark: "change" },
+    { id: "secrets", taskKind: "subprocess", mark: "add" },
+  ] },
+  { id: "step_2", mark: "add", tasks: [], slot: {} },
 ];

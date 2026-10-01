@@ -97,3 +97,28 @@
 .seam:is(:hover, :focus-visible), .seam.is-open, .seam.is-always { opacity: 1; }
 .seam:hover, .seam.is-open { background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
 .gallery-frame { position: relative; height: 320px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+
+/* NodeGraph */
+.step-frame { position: absolute; box-sizing: border-box; border-radius: 12px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 25%, transparent); cursor: pointer; transition: border-color .12s, background .12s; }
+.step-frame:hover { border-color: var(--border); }
+.step-frame.is-sel { border-color: var(--text-muted); background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
+.step-frame.mark-add { border: 1px dashed var(--ok); }
+.step-frame.mark-change { border-color: var(--warn); }
+.step-frame.is-prob { border-color: var(--bad); }
+.step-label { position: absolute; z-index: 1; box-sizing: border-box; margin: 0; padding: 2px 4px; border: 0; border-radius: 5px; background: var(--bg); text-align: center; font: 400 11px ui-monospace, Menlo, monospace; color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.step-label:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+.step-label.is-sel { font-weight: 600; color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
+.step-label.mark-add { color: var(--ok); }
+.step-label.mark-change { color: var(--warn); }
+.step-prob { color: var(--bad); }
+.graph-node.is-task { gap: 5px; }
+.graph-node.is-task .graph-label { font-size: 11px; overflow-wrap: anywhere; }
+.graph-node.is-task .graph-meta { margin-top: -2px; }
+.graph-node.is-warn .graph-label, .graph-node.is-side .graph-label { color: var(--warn); }
+.graph-node.is-slot .graph-label { color: var(--ok); }
+.edge.is-side { stroke: var(--warn); stroke-dasharray: 4 4; }
+.mark-start.is-node { width: 18px; height: 18px; font-size: 7px; }
+.seam.is-node { opacity: .6; }
+.seam.is-node:is(:hover, :focus-visible) { opacity: 1; }
+.node-footer { position: absolute; padding: 0 4px; background: var(--bg); font-size: 11px; white-space: nowrap; color: var(--text-muted); }
+.gallery-frame.is-tall { height: 460px; }
