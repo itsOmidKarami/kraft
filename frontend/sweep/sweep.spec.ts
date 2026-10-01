@@ -119,6 +119,7 @@ async function ngLibrary(c: Ctx, ref = "") {
   await c.page.locator(".lib-row, .lib-note").first().waitFor({ timeout: 8000 });
   if (ref) await c.page.locator(".pane").first().waitFor({ timeout: 8000 });
   await settle(c.page, 700);
+}
 /** One of the /ng settings areas (ux2-W15) on the mock's draft of it, sidebar pinned, once `ready` has drawn. */
 async function ngArea(c: Ctx, url: string, ready: string, then?: (p: Page) => Promise<void>) {
   await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
