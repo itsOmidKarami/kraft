@@ -395,6 +395,17 @@ const CASES: Case[] = [
   { screen: "ng-analytics", variant: "long", data: "long", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
   { screen: "ng-analytics", variant: "empty", data: "empty", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
 
+  // W16 A: the apply chip, its popover open, on a page of its own.
+  ...([["reload", "Changed on disk, 1"], ["restart", "Restart needed, 1"], ["problem", "Reload found a problem, 1"], ["unmanaged", "Restart needed, 1"]] as const).map<Case>(([v, name]) => ({
+    screen: "ng-apply", variant: v, data: "default", widths: [1280], shells: v === "restart" ? [{ mode: "light" }] : undefined, mock: { apply: v },
+    run: async (c) => { await ng(c, "/ng/settings/appearance", {}); await c.page.getByRole("button", { name }).click(); await c.page.getByRole("dialog", { name: "Waiting to apply" }).waitFor(); await settle(c.page, 300); },
+  })),
+  { screen: "ng-apply", variant: "confirm", data: "default", widths: [1280], mock: { apply: "restart" }, run: async (c) => {
+    await ng(c, "/ng/settings/appearance", {});
+    await c.page.getByRole("button", { name: "Restart needed, 1" }).click(); await c.page.getByRole("button", { name: "Restart Kraft" }).click();
+    await c.page.getByRole("dialog", { name: "Restart Kraft?" }).waitFor(); await settle(c.page, 300);
+  } },
+
   // W3: the graph components' gallery, fed by fixtures.
   { screen: "ng-gallery", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_gallery", {}) },
   { screen: "ng-gallery", variant: "mono", data: "default", widths: [1280], fullPage: true, run: (c) => ng(c, "/ng/_gallery", { colour_amount: "mono" }) },

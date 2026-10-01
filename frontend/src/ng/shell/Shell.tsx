@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
+import { ApplyDialogs } from "../apply/ApplyChip";
 import { Header } from "./Header";
 import { HeaderActionsHost, HeaderTailHost } from "./HeaderActions";
 import { SearchOverlay } from "./SearchOverlay";
@@ -39,6 +40,7 @@ export function Shell() {
           </div>
         </div>
         {searching && <SearchOverlay onClose={closeSearch} />}
+        <ApplyDialogs />
       </HeaderTailHost.Provider>
     </HeaderActionsHost.Provider>
   );

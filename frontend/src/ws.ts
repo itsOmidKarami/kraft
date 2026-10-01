@@ -3,7 +3,9 @@ import { useStore } from "./store";
 
 const BACKOFF = [1000, 2000, 5000, 10000];
 
-export function connectEvents(): () => void {
+/** With `onLive`, the socket also asks for live frames (`?live=1`) and hands each
+ *  to it: messages that are not event rows, so nothing else sees them. */
+export function connectEvents(opts: { onLive?: (frame: { type: string; payload: unknown }) => void } = {}): () => void {
   let attempt = 0;
   let stopped = false;
   let socket: WebSocket | null = null;
@@ -13,7 +15,7 @@ export function connectEvents(): () => void {
     if (stopped) return;
     const seq = useStore.getState().lastSeq;
     socket = new WebSocket(
-      `${location.origin.replace(/^http/, "ws")}/api/ws/events?after_seq=${seq}`,
+      `${location.origin.replace(/^http/, "ws")}/api/ws/events?after_seq=${seq}${opts.onLive ? "&live=1" : ""}`,
     );
     socket.onopen = () => {
       attempt = 0;
@@ -22,7 +24,7 @@ export function connectEvents(): () => void {
     socket.onmessage = (e) => {
       const ev = JSON.parse(e.data);
       // A live frame (`/ws/events?live=1` only) is not an event row: no seq to resume from.
-      if (ev.frame === "live") return;
+      if (ev.frame === "live") return opts.onLive?.(ev);
       useStore.getState().applyEvent(ev);
       maybeNotify(ev, useStore.getState().workItems[ev.work_item_id]?.title ?? "Kraft");
     };

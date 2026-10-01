@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useStore } from "../../store";
+import { ApplyChip } from "../apply/ApplyChip";
 import { crumbsFor, type Crumb } from "./crumbs";
 import { usePageItem } from "./pageItem";
 
@@ -47,6 +48,7 @@ export function Header({ actionsRef, tailRef }: { actionsRef: (el: HTMLDivElemen
       <Crumbs crumbs={crumbs} />
       <div className="ng-header-tail" ref={tailRef} />
       <div className="ng-header-actions" ref={actionsRef} />
+      <ApplyChip />
     </header>
   );
 }

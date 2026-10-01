@@ -57,6 +57,17 @@ describe("connectEvents", () => {
     expect(FakeWS.instances[1].url).toContain("after_seq=3");
   });
 
+  it("asks for live frames, and hands them over, only when given onLive", () => {
+    const seen: unknown[] = [];
+    connectEvents();
+    expect(FakeWS.instances[0].url).not.toContain("live=1");
+    connectEvents({ onLive: (f) => seen.push(f) });
+    expect(FakeWS.instances[1].url).toContain("live=1");
+    FakeWS.instances[1].onmessage!({ data: JSON.stringify({ frame: "live", type: "apply_changed", payload: {}, created_at: "t" }) });
+    expect(seen).toHaveLength(1);
+    expect(useStore.getState().lastSeq).toBe(3);
+  });
+
   it("reconnects after close using the updated lastSeq and escalating backoff", () => {
     connectEvents();
     useStore.setState({ lastSeq: 20 } as never);
