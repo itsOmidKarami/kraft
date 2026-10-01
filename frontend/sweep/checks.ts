@@ -46,6 +46,9 @@ export async function runChecks(page: Page, phone: boolean, consoleErrors: strin
     // own right edge that still cross the viewport's.
     const scrollable = (el: Element, r: DOMRect) => {
       for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        // A graph canvas (data-pan) clips, but drag, scroll and fit reach what it
+        // cuts off, as a scroll strip does: exempt while the canvas itself is in view.
+        if (a.hasAttribute("data-pan")) { const ar = a.getBoundingClientRect(); return ar.left >= -1 && ar.right <= vw + 1; }
         const ox = getComputedStyle(a).overflowX;
         if (ox === "visible") continue;
         if (ox !== "auto" && ox !== "scroll") return false;

@@ -79,3 +79,11 @@ export const NODE_EDIT: NodeStep[] = [
   ] },
   { id: "step_2", mark: "add", tasks: [], slot: {} },
 ];
+
+/** Placeholder pane bodies per selection kind: the real ones are the pages' (W5 on). */
+export const PANE_FACTS: Record<"chain" | "node" | "step" | "task", { sub: string; rows: [string, string][] }> = {
+  chain: { sub: "15 nodes · running · verification", rows: [["Status", "running"], ["Progress", "6 of 15 nodes"], ["Current", "verification"], ["Spend", "$3.12 of $25"]] },
+  node: { sub: "exec node", rows: [["Status", "see the canvas"], ["Steps", "3"], ["Fix loop", "attempt 2 of 3"], ["Running time", "10:42 of 8h"]] },
+  step: { sub: "step · 3 parallel tasks", rows: [["Tasks", "lint, typecheck, unit_tests"], ["Status", "done"]] },
+  task: { sub: "task", rows: [["Kind", "agent"], ["Model", "default"], ["Duration", "41s"]] },
+};

@@ -71,7 +71,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
   const { cam } = camera;
 
   return (
-    <div role="group" aria-label={name} className="canvas" {...camera.bind} onClick={onClick} onKeyDown={onKeyDown}>
+    <div role="group" aria-label={name} className="canvas" data-pan {...camera.bind} onClick={onClick} onKeyDown={onKeyDown}>
       <div className="canvas-world" style={{ width: lay.W, height: lay.H, transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
         <svg className="canvas-svg" width={lay.W} height={lay.H} aria-hidden="true">
           {lay.edges.map((e, i) => <path key={`e${i}`} d={e.d} className={e.todo ? "edge is-todo" : "edge"} />)}

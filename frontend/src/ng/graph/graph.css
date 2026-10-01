@@ -42,7 +42,7 @@
 /* Gallery (/ng/_gallery) */
 .gallery { max-width: 1400px; margin: 0 auto; padding: 22px 24px 60px; }
 .gallery h1 { margin: 0; font-size: 16px; font-weight: 500; }
-.gallery h2 { margin: 28px 0 12px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.gallery > section > h2 { margin: 28px 0 12px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .gallery-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px 22px; margin-bottom: 18px; }
 .gallery-cell { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 56px; font-size: 11px; color: var(--text-muted); }
 
@@ -166,3 +166,45 @@
 .gateview-note { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: 11px; line-height: 1.55; color: var(--text-muted); text-wrap: pretty; }
 .gallery-frame.is-stack { display: flex; flex-direction: column; }
 .gallery-area { position: relative; flex: 1; min-height: 0; }
+
+/* Inspector: docked over the canvas, square-edged, one border, one soft shadow (Decisions §9 Panes). */
+.pane, .pane-rail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; box-sizing: border-box; border-left: 1px solid var(--border); background: var(--surface); box-shadow: -12px 0 28px color-mix(in srgb, var(--bg) 60%, transparent); }
+.pane { display: flex; flex-direction: column; }
+.pane.is-overlay { box-shadow: -16px 0 36px color-mix(in srgb, var(--bg) 80%, transparent); }
+.pane-handle { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; z-index: 3; cursor: col-resize; touch-action: none; }
+.pane-handle:is(:hover, :focus-visible) { background: linear-gradient(90deg, transparent 3px, var(--text-muted) 3px, var(--text-muted) 5px, transparent 5px); }
+.pane-crumb { flex: none; display: flex; align-items: center; gap: 7px; padding: 10px 10px 8px 14px; font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.pane-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
+.crumb { display: inline-flex; align-items: center; gap: 3px; }
+.crumb-link { margin: -1px -2px; padding: 1px 4px; border: 0; border-radius: 4px; background: transparent; font: inherit; color: var(--text-sub); white-space: nowrap; cursor: pointer; }
+.crumb-link:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+.crumb-static { padding: 1px 2px; white-space: nowrap; }
+.crumb-sep { color: var(--text-muted); }
+.pane-icon-btn, .rail-btn { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); cursor: pointer; }
+.pane-icon-btn:is(:hover, :focus-visible), .rail-btn:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+.pane-head { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 0 14px 12px; border-bottom: 1px solid var(--line); }
+.pane-title-row { display: flex; align-items: center; gap: 8px; }
+.pane-glyph { width: 26px; height: 28px; display: flex; align-items: center; justify-content: center; flex: none; color: var(--text-sub); }
+.pane-diamond { width: 11px; height: 11px; transform: rotate(45deg); border-radius: 3px; border: 1.5px solid var(--text-sub); }
+.pane-title { flex: 1; min-width: 0; margin: 0; font: 500 16px ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+.pane-focus { display: flex; align-items: center; gap: 5px; flex: none; height: 26px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent; font-size: 11.5px; color: var(--text-sub); white-space: nowrap; cursor: pointer; }
+.pane-focus:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
+.pane-sub { margin: 0; font-size: 11.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+.pane-prob { flex: none; display: flex; gap: 9px; padding: 9px 14px; background: color-mix(in srgb, var(--bad) 14%, var(--surface)); border-bottom: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); font-size: 12px; line-height: 1.5; }
+.pane-prob > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.pane-prob-mark { flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; background: var(--bad); color: var(--bg); font: 700 10px/16px system-ui, sans-serif; text-align: center; }
+.pane-prob-msg { color: var(--text); }
+.pane-prob-fix { font-size: 11.5px; color: var(--text-sub); }
+.pane-tabs { flex: none; padding: 0 14px; }
+.pane-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; font-size: 12.5px; color: var(--text-sub); }
+.pane-footer { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.pane-rail { width: 40px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0; }
+.rail-name { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--text-sub); cursor: pointer; }
+.rail-name:is(:hover, :focus-visible) { background: var(--surface-2); }
+.rail-icon { position: relative; display: flex; }
+.rail-prob { position: absolute; top: -4px; right: -5px; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); }
+.rail-title { writing-mode: vertical-rl; max-height: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); }
+.pane-facts { display: grid; gap: 8px; margin: 0; }
+.pane-facts div { display: flex; justify-content: space-between; gap: 12px; }
+.pane-facts dt { color: var(--text-muted); }
+.pane-facts dd { margin: 0; color: var(--text); }

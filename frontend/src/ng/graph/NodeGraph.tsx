@@ -109,7 +109,7 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
   };
 
   return (
-    <div role="group" aria-label={name} className="canvas" {...camera.bind} onClick={onClick} onKeyDown={onKeyDown}>
+    <div role="group" aria-label={name} className="canvas" data-pan {...camera.bind} onClick={onClick} onKeyDown={onKeyDown}>
       <div className="canvas-world" style={{ width: lay.W, height: lay.H, transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
         {steps.map((st, k) => {
           const f = lay.cols[k].frame;

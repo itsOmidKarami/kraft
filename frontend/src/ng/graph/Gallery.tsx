@@ -5,6 +5,7 @@ import { GateView } from "./GateView";
 import { NodeGlyph } from "./NodeGlyph";
 import { NodeGraph, type NodeSel } from "./NodeGraph";
 import { StageGraph } from "./StageGraph";
+import { Workbench } from "./Workbench";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
 
@@ -71,6 +72,12 @@ export function Gallery() {
         <div className="gallery-frame">
           <GateView gate={{ id: "approve_plan", state: "plain" }} onAdd={noop} />
         </div>
+      </section>
+      <section aria-labelledby="g-pane">
+        <h2 id="g-pane">Inspector</h2>
+        <Workbench page="gallery" />
+        <Workbench page="gallery-rail" open={false} />
+        <Workbench page="gallery-wide" width={520} />
       </section>
       <section aria-labelledby="g-zoom">
         <h2 id="g-zoom">ZoomControls</h2>
