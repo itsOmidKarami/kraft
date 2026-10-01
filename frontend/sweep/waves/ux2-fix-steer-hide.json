@@ -1,0 +1,11 @@
+{
+  "title": "UX V2 fix: the paused card hides the steer when the item is not steerable (Kraft-9d8b2.28)",
+  "screens": ["ng-item"],
+  "specs": ["sweep.spec.ts"],
+  "rules": [
+    { "kind": "no-flag", "flag": "contrast", "match": "^ng-item/paused-not-steerable" },
+    { "kind": "no-flag", "flag": "offscreen", "match": "^ng-item/paused-not-steerable" },
+    { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-item/paused-not-steerable" },
+    { "kind": "no-console", "match": "^ng-item/paused-not-steerable" }
+  ]
+}

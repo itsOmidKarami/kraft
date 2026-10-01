@@ -136,6 +136,18 @@ describe("PausedCard", () => {
     expect(posts(calls).map((c) => c.body)).toEqual([{ steer: "look at reindex first" }, { steer: null }]);
   });
 
+  it("offers plain Resume only when the item is not steerable, since the server refuses a steer then", async () => {
+    const calls = stubFetch();
+    const reload = vi.fn();
+    render(<PausedCard item={detail({ display_status: "paused", steerable: false, worker_sessions: [paused("verification.review.code_review"), paused("verification.review.automated_review")] })} reload={reload} />);
+    expect(screen.queryByLabelText("Steer")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume with steer" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(posts(calls).map((c) => c.body)).toEqual([{ steer: null }]);
+  });
+
   it("sends the steer to one paused task when several are paused and one is picked", async () => {
     const calls = stubFetch();
     render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review"), paused("verification.review.automated_review")] })} reload={() => {}} />);
