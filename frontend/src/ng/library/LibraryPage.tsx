@@ -182,10 +182,24 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               draft={draft}
               path={sub ?? row.id}
               uses={uses}
+              names={rows.filter((x) => x.section === row.section).map((x) => x.name)}
               open={paneOpen}
               size={size}
               goTo={(p) => expand(p)}
               onLibrary={() => navigate("/templates/library")}
+              onRenamed={(to) => {
+                // A component's rename moves the URL; a part of one moves the selection.
+                if (to.split(".").length <= 2) navigate(refUrl(to), { replace: true });
+                else setSub(to);
+              }}
+              onRemoved={(removed) => {
+                if (removed.split(".").length > 2) return setSub(null);
+                // The next row of the list takes the selection, else the previous, else the empty list.
+                const i = rows.findIndex((x) => x.id === removed);
+                const next = rows[i + 1] ?? rows[i - 1];
+                navigate(next ? refUrl(next.id) : "/templates/library", { replace: true });
+              }}
+              onDuplicated={(to) => navigate(refUrl(to))}
               onCollapse={collapse}
               onExpand={() => expand()}
             />}
