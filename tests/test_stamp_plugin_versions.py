@@ -1,7 +1,7 @@
-"""Writing the release version into both plugin manifests.
+"""Writing the release version into every plugin manifest.
 
-Both plugins are meant to move together: one release, one version, in both
-files. Getting it wrong publishes a marketplace whose versions describe
+Every manifest is meant to move together: one release, one version, in every
+file. Getting it wrong publishes a marketplace whose versions describe
 nothing.
 """
 
@@ -69,6 +69,16 @@ def test_the_real_manifests_are_the_default_targets():
     assert any("plugins/kraft-lite/" in n for n in names)
     for path in stamp_mod.MANIFESTS:
         assert path.is_file(), f"{path} does not exist"
+
+
+def test_every_shipped_plugin_manifest_is_stamped_and_they_agree():
+    """A manifest added for another agent (`.cursor-plugin/`, ...) but left off
+    MANIFESTS keeps the version it was committed with forever, and that agent's
+    plugin list shows a release that never shipped."""
+    shipped = set(stamp_mod._ROOT.glob("plugins/*/.*-plugin/plugin.json"))
+    assert shipped <= set(stamp_mod.MANIFESTS), shipped - set(stamp_mod.MANIFESTS)
+    versions = {p: json.loads(p.read_text())["version"] for p in stamp_mod.MANIFESTS}
+    assert len(set(versions.values())) == 1, versions
 
 
 def test_the_vscode_extension_is_stamped_and_keeps_its_own_shape(tmp_path):

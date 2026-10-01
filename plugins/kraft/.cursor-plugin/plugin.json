@@ -1,15 +1,11 @@
 {
-  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "kraft",
   "version": "1.4.0",
   "description": "Drive Kraft from an agent session: file work, read the board, act on gates, recover stopped work.",
   "license": "Apache-2.0",
   "author": {
-    "name": "Omid Karami",
-    "url": "https://github.com/itsOmidKarami"
+    "name": "Omid Karami"
   },
-  "skills": [
-    "./skills"
-  ],
-  "mcpServers": "./.mcp.json"
+  "skills": "./skills",
+  "mcpServers": ".mcp.json"
 }

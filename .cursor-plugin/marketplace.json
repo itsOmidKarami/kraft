@@ -1,0 +1,21 @@
+{
+  "name": "kraft",
+  "owner": {
+    "name": "Omid Karami"
+  },
+  "metadata": {
+    "description": "Kraft, a local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours; and Kraft Lite, its chains without the orchestrator."
+  },
+  "plugins": [
+    {
+      "name": "kraft",
+      "source": "plugins/kraft",
+      "description": "Drive Kraft from an agent session: file work, read the board, act on gates, recover stopped work."
+    },
+    {
+      "name": "kraft-lite",
+      "source": "plugins/kraft-lite",
+      "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator."
+    }
+  ]
+}
