@@ -64,7 +64,7 @@
 .set-drow.is-del { background: color-mix(in oklab, var(--set-del) 14%, transparent); box-shadow: inset 2px 0 0 var(--set-del); }
 .set-diff-preview[data-colours="plain"] :is(.set-drow.is-add, .set-drow.is-del) { background: transparent; }
 .set-diff-preview[data-wrap="true"] .set-drow { white-space: pre-wrap; }
-.set-mark { color: var(--text-muted); }
+.set-mark { color: var(--text-sub); }
 .set-word { padding: 0; background: color-mix(in oklab, var(--set-add) 28%, transparent); color: inherit; }
 .set-drow.is-del .set-word { background: color-mix(in oklab, var(--set-del) 28%, transparent); }
 .set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
@@ -107,7 +107,7 @@
 .set-session { display: grid; grid-template-columns: minmax(0, 1fr) 90px 100px auto; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .set-session-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .set-current { margin-left: 4px; font-size: 10.5px; color: var(--ok); }
-.set-unused { display: grid; grid-template-columns: minmax(80px, 130px) minmax(0, 1fr); gap: 10px; padding: 4px 8px; font-size: 12px; opacity: .8; }
+.set-unused { display: grid; grid-template-columns: minmax(80px, 130px) minmax(0, 1fr); gap: 10px; padding: 4px 8px; font-size: 12px; }
 
 @media (max-width: 767px) {
   .set-modes { grid-template-columns: minmax(0, 1fr); }

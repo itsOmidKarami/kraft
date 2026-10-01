@@ -1412,3 +1412,14 @@ Baseline shot on `ux2/W11` with the item-draft mock switched off, `SWEEP_PORT=43
 - **Mock:** W9's item-draft mock answered a non-empty draft for every item, which would have drawn a draft on every `ng-item` cell. It is now stateful and **opt-in** (`MockOptions.itemDraft`: `none`, `changes`, `problems`, `passed`, `applied`); unset, an item has no draft. It reimplements the server's `passed` rule and answers PUT, DELETE and apply (200, 409, 422, 404), and serves two library nodes while a case sets it.
 - **Found by the sweep and fixed:** at 1024 the header's tail overlapped the Review button (chip, badge and the item's own actions are 100px too wide), so under 1280 the chip gives way to the count on the button and the badge shortens; the leave guard missed the Board crumb (`href="/ng"`, no slash); the draft's problem text on its tinted block was 4.36:1 and the hints 3.04:1, now `--text` and `--text-muted`.
 - **Exit test on a real server** (throwaway `KRAFT_HOME` outside `/tmp`, port 8798, fake agent): see the PR body.
+
+## ux2-W16 — Notifications, Access, Appearance, About, Analytics, Apply chip (`ux2/W16`)
+
+Baseline on `main` `06c08afd1`, shot from a clean worktree: 1520 cells. Official runs on SWEEP_PORT=4392 (4317 was held by another session's run). Full notes: `e2e-shots/DIFF-ux2-W16.md`.
+
+- `node sweep/wave.mjs ux2-W16`: **6/6 rules pass** (no contrast, offscreen, clipped-v or console flag on `^ng-`; `flow-ng-apply-restart` completes; no newly flagged cells).
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1609 cells, 0 newly flagged. 113 changed: 89 new W16 cells, 23 `ng-shell` and shell-flow cells (their placeholder page is now `/ng/settings/policy`, since Access is built), `ng-appearance` default/mono/blue-full 0.06% (the new section's heading at the bottom edge), and `flow-pause-steer-resume/04` 0.17% (clock text). No shipped cell changed beyond clock text.
+- **Caught by the first shot:** contrast on `.set-hint` at reduced opacity, the apply chip's tinted background and the diff preview marks; fixed in CSS, re-shot.
+- **New screens:** `ng-access`, `ng-notifications`, `ng-about`, `ng-analytics`, `ng-apply` (+ new `ng-appearance` variants); flow `flow-ng-apply-restart`. **New key:** `ux2-W16`.
+- **Mock:** `MockOptions.apply` (`/apply` answers nothing pending unless a cell asks) and `.update`; after POST /apply/restart `/health` fails three times, as a server coming back does.
+- **Process:** `ws.ts` gained an opt-in `onLive`; the shipped call site is unchanged.

@@ -1,8 +1,11 @@
 /* The apply chip and its restart dialogs (W16 A). Colours only from W1 tokens. */
-.apply-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--warn); border-radius: 6px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: var(--warn); font: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer; }
-.apply-chip.is-bad { border-color: var(--bad); background: color-mix(in oklab, var(--bad) 12%, transparent); color: var(--bad); }
+.apply-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--warn); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer; }
+.apply-chip > svg { color: var(--warn); }
+.apply-chip.is-bad { border-color: var(--bad); }
+.apply-chip.is-bad > svg { color: var(--bad); }
+.apply-chip:hover { background: var(--surface-2); }
 .apply-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.apply-chip-count { padding: 0 5px; border-radius: 8px; background: color-mix(in oklab, currentColor 22%, transparent); font: 600 9.5px/15px ui-monospace, Menlo, monospace; }
+.apply-chip-count { padding: 0 5px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 600 9.5px/15px ui-monospace, Menlo, monospace; }
 .apply-pop { width: 340px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; font-size: 12px; color: var(--text); }
 .apply-block { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 10px; }
 .apply-block + .apply-block { border-top: 1px solid var(--line); }
