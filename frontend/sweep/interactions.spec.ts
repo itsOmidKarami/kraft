@@ -312,6 +312,7 @@ const FLOWS: Flow[] = [
       await p.getByRole("group", { name: "Retry merge_request.open.open_draft" }).getByRole("button", { name: "Retry" }).click();
       expect((await sent).postDataJSON()).toEqual({ path: "merge_request.open.open_draft" });
     } },
+  ] },
   // ux2-W8 exit: a request-changes review, from the item page's diff line, sends the threads and starts the fix round on the right node; the item page shows it.
   { name: "ng-review-request-changes", widths: [1280], keyboard: true, start: ngItem("needs-gate"), steps: [
     { name: "open-review", run: async (p) => {
