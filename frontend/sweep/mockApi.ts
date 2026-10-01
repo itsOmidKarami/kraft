@@ -123,6 +123,32 @@ function libraryState(mode: "clean" | "draft" | "blocked") {
         drafted = true;
         return { path: `${section}.${name}` };
       }
+      if (o.op === "rename") {
+        const [section, name] = String(o.path).split(".");
+        const to = String(o.id);
+        if (model[section]?.[to]) return `${to} is taken`;
+        const own = model[section]?.[name];
+        if (!own) return `nothing at ${o.path}`;
+        model[section][to] = own;
+        delete model[section][name];
+        // Library-internal references follow; the chains that use it are rewritten in the same draft.
+        const refs: { file: string; path: string; field: string }[] = [];
+        for (const sec of Object.values(model)) for (const [k, c] of Object.entries(sec)) if (c?.extends === name) { c.extends = to; refs.push({ file: "library.yaml", path: k, field: "extends" }); }
+        const published = DRAFTS.library.components.find((c: any) => c.id === o.path);
+        for (const u of published?.used_by_paths ?? []) refs.push({ file: `chains/${u.chain}.yaml`, path: u.path, field: "extends" });
+        changes.push({ path: `${section}.${name}`, kind: "remove", summary: "renamed", reaches: published?.used_by ?? [] }, { path: `${section}.${to}`, kind: "add", summary: `renamed from ${name}`, reaches: published?.used_by ?? [] });
+        drafted = true;
+        return { updated: refs };
+      }
+      if (o.op === "remove") {
+        const [section, name] = String(o.path).split(".");
+        if (!model[section]?.[name]) return `nothing at ${o.path}`;
+        delete model[section][name];
+        const published = DRAFTS.library.components.find((c: any) => c.id === o.path);
+        changes.push({ path: String(o.path), kind: "remove", summary: "removed", reaches: published?.used_by ?? [] });
+        drafted = true;
+        return { broken: (published?.used_by_paths ?? []).map((u: any) => ({ file: `chains/${u.chain}.yaml`, path: u.path, field: "extends" })) };
+      }
       if (o.op === "set_field") {
         const [section, name] = String(o.path).split(".");
         const at = model[section]?.[name];
@@ -177,6 +203,21 @@ function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknow
         view.result.sources = {};
       }
     }
+  }
+  for (const o of ops) {
+    if (o.op !== "move_to_library") continue;
+    // R47: the node or task becomes a component of library.yaml and the chain keeps `{ id, extends }`; the library joins the draft.
+    const [id, step, task] = String(o.path).split(".");
+    const node = nodes.find((n) => n.id === id) as Record<string, any>;
+    const container = task ? node.steps.find((x: any) => x.id === step).tasks : nodes;
+    const at = container.findIndex((x: any) => x.id === (task ?? id));
+    const { id: _id, ...body } = container[at];
+    container[at] = { id: task ?? id, extends: o.name };
+    const section = task ? "tasks" : "nodes";
+    view.files["library.yaml"] = `${section}:\n  ${o.name}: ${JSON.stringify(body)}\n`;
+    view.base["library.yaml"] = "9f2c".padEnd(64, "0");
+    view.result.model["library.yaml"] = { [section]: { [String(o.name)]: body } };
+    view.result.changes.push({ path: String(o.path), kind: "change", summary: `extends ${o.name}`, fields: ["extends"] });
   }
   view.draft = true;
   return view;

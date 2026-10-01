@@ -644,6 +644,13 @@ const CASES: Case[] = [
     await settle(c.page, 300);
   } },
   { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
+  { screen: "ng-chains", variant: "move-to-library", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec, node" }).click();
+    await c.page.getByRole("button", { name: "Move to library…" }).click();
+    await c.page.getByRole("dialog", { name: "Move to library" }).waitFor({ timeout: 8000 });
+    await settle(c.page, 400);
+  } },
   { screen: "ng-chains", variant: "pane-gate", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
     await ngChains(c, "default");
     await c.page.getByRole("button", { name: "spec_approval, gate" }).click();

@@ -10,7 +10,7 @@ import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDr
 import { counts } from "../templates/draft/view";
 import { useBox } from "../templates/ChainsPage";
 import { ReviewPane } from "../templates/ReviewPane";
-import { DraftLibrary } from "../templates/useLibrary";
+import { DraftLibrary, resetLibrary } from "../templates/useLibrary";
 import { YamlView } from "../templates/YamlView";
 import { LibraryCanvas } from "./LibraryCanvas";
 import { LibraryList } from "./LibraryList";
@@ -221,7 +221,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               setReview(false);
               if (rows.some((x) => x.id === target)) navigate(refUrl(target));
             }}
-            onDone={() => { setReview(false); void reloadPublished(); }}
+            onDone={() => { setReview(false); resetLibrary(); void reloadPublished(); }}
             problemWhere={(p) => <ProblemWhere p={p} />}
           />
         )}

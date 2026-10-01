@@ -4,7 +4,7 @@ import { idError } from "../ids";
 
 /** One row: an id field and its button (Decisions §9 Adding a node, Invalid
  *  id). The reason shows only when the id is refused, here or by the server. */
-export function IdRow({ label, taken, placeholder, initial = "", go, refused, onGo }: {
+export function IdRow({ label, taken, placeholder, initial = "", go, refused, onGo, onChange }: {
   label: string;
   taken: string[];
   placeholder?: string;
@@ -13,6 +13,8 @@ export function IdRow({ label, taken, placeholder, initial = "", go, refused, on
   /** The server's refusal of the last try. */
   refused?: string | null;
   onGo: (id: string) => void;
+  /** Each edit of the text, for a card whose note follows it. */
+  onChange?: (text: string) => void;
 }) {
   const [text, setText] = useState(initial);
   const [sent, setSent] = useState<string | null>(null);
@@ -43,7 +45,10 @@ export function IdRow({ label, taken, placeholder, initial = "", go, refused, on
           value={text}
           placeholder={placeholder}
           spellCheck={false}
-          onChange={(e) => setText(e.target.value.trim())}
+          onChange={(e) => {
+            setText(e.target.value.trim());
+            onChange?.(e.target.value.trim());
+          }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
         />
         <Button variant="primary" disabled={!can} onClick={submit}>{go}</Button>

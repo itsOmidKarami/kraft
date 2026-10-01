@@ -17,6 +17,8 @@ import { refsTo } from "../cards/refs";
 import { ExtendMenu } from "../menus/ExtendMenu";
 import { IconPicker } from "../IconPicker";
 import { showToast } from "../../ui/Toast";
+import { MoveToLibraryCard } from "../../library/MoveToLibraryCard";
+import { movable } from "../../library/moveToLibrary";
 import { detailOf } from "../../http";
 import "./panes.css";
 
@@ -53,7 +55,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   /** The page asks for the rename card (a click on the selected node's name). */
   renameNow?: { el: HTMLElement; tick: number } | null;
 }) {
-  const [card, setCard] = useState<{ t: "rename" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
+  const [card, setCard] = useState<{ t: "move" } | { t: "rename" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -156,6 +158,8 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     if (a.status === 200) showToast(`Base is now ${base}`);
   };
 
+  // R47: an exec node or a task that extends nothing can become a library component.
+  const moveWhat = movable(path, own, d.kind);
   const footer = d.kind === "chain" ? (
     asking ? (
       <>
@@ -180,6 +184,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     <>
       {d.kind === "node" && typeof own?.extends === "string" && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "extend" }); }}>Change base…</Button>}
       {overrides > 0 && <Button onClick={() => draft.ops([{ op: "reset_field", path }])}>Reset all overrides</Button>}
+      {moveWhat && <Button onClick={(e) => { at(e.currentTarget); setCard({ t: "move" }); }}>Move to library…</Button>}
       <span className="bp-gap" />
       {removeLabel && <Button variant="danger" onClick={(e) => { at(e.currentTarget); setCard({ t: "remove" }); onMarking?.(refs.map((x) => x.node)); }}>{removeLabel}</Button>}
     </>
@@ -218,6 +223,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
           : <Overview kind={d.kind} ctx={ctx} />}
     </Inspector>
+    {card?.t === "move" && moveWhat && own && <MoveToLibraryCard anchor={anchor} draft={draft} path={path} id={d.id} own={own} what={moveWhat} onMoved={() => {}} onClose={closeCard} />}
     {card?.t === "rename" && (
       <RenameCard anchor={anchor} what={d.kind === "chain" ? "chain" : d.kind === "gate" ? "gate" : d.kind === "node" ? "node" : d.kind === "step" ? "step" : "task"} id={d.kind === "chain" ? chain : d.id} taken={siblings} refs={refs} refused={refused} chain={d.kind === "chain"} onGo={(id) => void rename(id)} onClose={closeCard} />
     )}

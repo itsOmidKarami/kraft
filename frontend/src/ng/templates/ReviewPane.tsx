@@ -6,7 +6,8 @@ import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Problem, Scope, StaleBody } from "./draft/types";
-import { chainFile, counts, scopeFile } from "./draft/view";
+import { chainFile, counts, LIBRARY_FILE, scopeFile } from "./draft/view";
+import { resetLibrary, useLibrary } from "./useLibrary";
 import { Head, Kv, Note } from "./panes/controls";
 import { problemText } from "./problems";
 import "./panes/panes.css";
@@ -30,11 +31,13 @@ const serverDiff = (diff: string) =>
 /** Review & publish's pane (Decisions §9 Publish): the draft's changes and
  *  problems, the YAML diff, who it affects; Discard confirms in place;
  *  Publish waits for zero problems. A 409 shows the server's diff (R45). */
-export function ReviewPane({ draft, scope, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone, problemWhere }: {
+export function ReviewPane({ draft, scope, published, libraryPublished, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone, problemWhere }: {
   draft: ConfigDraft;
   scope: Scope;
   /** The published file's text; null for a chain never published. */
   published: string | null | undefined;
+  /** The published `library.yaml`'s text, when a chain draft carries one (Move to library, R47): the second file's diff. */
+  libraryPublished?: string | null;
   open: boolean;
   size: ReturnType<typeof useResizable>;
   onCollapse: () => void;
@@ -60,6 +63,14 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
   const stale: StaleBody | null = draft.stale;
   const live = scopeFile(view.files, scope);
   const text = view.files[live] ?? "";
+  // A chain draft that moved a component into the library carries `library.yaml` too, and a publish writes both.
+  const libText = !lib ? view.files[LIBRARY_FILE] : undefined;
+  const joined = typeof libText === "string";
+  const libraryList = useLibrary();
+  const libModel = (view.result.model[LIBRARY_FILE] ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const addedToLibrary = joined && typeof libraryList !== "string"
+    ? ["nodes", "steps", "tasks", "steering"].flatMap((s) => Object.keys(libModel[s] ?? {}).map((n) => `${s}.${n}`)).filter((id) => !libraryList.some((c) => c.id === id))
+    : [];
   const problems = refused?.length ? refused : r.problems;
   // How many of the changes reach each chain, as the server counts them.
   const reach = new Map<string, number>();
@@ -72,7 +83,9 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
   const publish = async () => {
     const a = await draft.publish({ reload: !gone });
     if (a.status === 200) {
-      showToast(deleted ? `Deleted ${chain}` : `Published ${lib ? "the library" : renamedTo} · new items use it from now on`);
+      // The published library changed (a moved component joined it): menus read it afresh.
+      if (joined) resetLibrary();
+      showToast(deleted ? `Deleted ${chain}` : `Published ${lib ? "the library" : renamedTo}${joined ? " and the library" : ""} · new items use it from now on`);
       if (gone) onGone?.(deleted ? null : renamedTo);
       else onDone();
     } else if (a.status === 422) setRefused((a.body as { problems?: Problem[] }).problems ?? null);
@@ -118,7 +131,7 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
       crumbs={[{ label: lib ? "Library" : chain }]}
       icon="git-compare"
       title={`Draft · ${plural(n.changes, "change")}`}
-      sub={stale ? "⚠ published since this draft began · your draft is kept" : blocked ? `✕ ${lib ? "breaks something" : "doesn't resolve"} · ${plural(n.problems, "problem")} block publishing` : lib ? "✓ checked against every chain and repo · ready to publish" : "✓ resolves · ready to publish"}
+      sub={stale ? "⚠ published since this draft began · your draft is kept" : blocked ? `✕ ${lib ? "breaks something" : "doesn't resolve"} · ${plural(n.problems, "problem")} block publishing` : lib ? "✓ checked against every chain and repo · ready to publish" : `✓ resolves · ready to publish${joined ? " · writes library.yaml too" : ""}`}
       tabs={TABS}
       tab={tab}
       onTab={setTab}
@@ -176,6 +189,19 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
               <span className="tpl-rv-sum">{c.summary}{c.reaches?.length ? ` · reaches ${plural(c.reaches.length, "chain")}` : ""}</span>
             </button>
           ))}
+          {joined && (
+            <>
+              <Head>library.yaml</Head>
+              {addedToLibrary.map((id) => (
+                <div key={id} className="tpl-rv-change">
+                  <span className="tpl-rv-sign is-add" aria-label="add">+</span>
+                  <span className="tpl-rv-path">{id}</span>
+                  <span className="tpl-rv-sum">added to the library</span>
+                </div>
+              ))}
+              {!addedToLibrary.length && <Note>The library file changed.</Note>}
+            </>
+          )}
           <Head>Who it affects</Head>
           <Kv k="new items" v="use this version once published" />
           {lib ? (
@@ -194,7 +220,16 @@ export function ReviewPane({ draft, scope, published, open, size, onCollapse, on
       ) : published === undefined ? (
         <Note>Loading the published file…</Note>
       ) : (
-        <DiffLines lines={folded(lineDiff(published === null ? [] : published.split("\n"), text.split("\n"))).map((o) => ("s" in o ? o : { t: "…", s: "" }))} />
+        <>
+          {joined && <p className="tpl-rv-file">{live}</p>}
+          <DiffLines lines={folded(lineDiff(published === null ? [] : published.split("\n"), text.split("\n"))).map((o) => ("s" in o ? o : { t: "…", s: "" }))} />
+          {joined && (
+            <>
+              <p className="tpl-rv-file">{LIBRARY_FILE}</p>
+              {libraryPublished === undefined ? <Note>Loading the published library…</Note> : <DiffLines lines={folded(lineDiff(libraryPublished === null ? [] : libraryPublished.split("\n"), libText.split("\n"))).map((o) => ("s" in o ? o : { t: "…", s: "" }))} />}
+            </>
+          )}
+        </>
       )}
     </Inspector>
   );
