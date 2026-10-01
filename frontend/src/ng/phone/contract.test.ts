@@ -35,6 +35,7 @@ const ALLOWED = [
   "review/url",
   "review/finish",
   "review/patch",
+  "review/FinishReview", // useSubmit only: the one review submit the desktop sends
   "review/model",
   "templates/draft/useConfigDraft",
   "templates/draft/draftApi",

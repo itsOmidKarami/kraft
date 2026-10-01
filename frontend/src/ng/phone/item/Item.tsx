@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useEvents } from "../../item/useEvents";
 import { useItem } from "../../item/useItem";
 import { ScreenHeader } from "../nav/ScreenHeader";
+import { Doc } from "../doc/Doc";
 import { Composer, isComposeKind } from "./Composer";
 import { ItemScreen } from "./ItemScreen";
 
@@ -18,6 +19,7 @@ export function Item() {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+  if (params.get("doc")) return <Doc id={params.get("doc")!} />;
   if (loaded.state === "loading")
     return (
       <>

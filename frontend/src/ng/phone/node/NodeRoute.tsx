@@ -4,6 +4,7 @@ import { useDocuments } from "../../item/useDocuments";
 import { useEvents } from "../../item/useEvents";
 import { useItem } from "../../item/useItem";
 import { placeUrl, readPlace, type Place } from "../../item/url";
+import { Doc } from "../doc/Doc";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { NodeScreen } from "./NodeScreen";
 import { TaskScreen } from "./TaskScreen";
@@ -26,6 +27,7 @@ export function NodeRoute() {
   const place = readPlace(nodeParam, params, nodes);
   // A node change inside the screen is not history; entering the screen was.
   const setPlace = useCallback((patch: Partial<Place>) => navigate(placeUrl(id, { ...place, ...patch }), { replace: true }), [navigate, id, place]);
+  if (params.get("doc")) return <Doc id={params.get("doc")!} />;
   if (loaded.state === "loading")
     return (
       <>

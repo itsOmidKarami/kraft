@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { Board } from "./board/Board";
 import { Item } from "./item/Item";
+import { GateReviewRoute } from "./review/GateReview";
 import { NodeRoute } from "./node/NodeRoute";
 import { Soon } from "./nav/Soon";
 import { TabBar } from "./nav/TabBar";
@@ -34,7 +35,7 @@ export function PhoneApp() {
           <Route path="/work-items/new" element={<Soon title="New work item" />} />
           <Route path="/work-items/:id" element={<Item />} />
           <Route path="/work-items/:id/nodes/:node" element={<NodeRoute />} />
-          <Route path="/work-items/:id/review" element={<Soon title="Review" />} />
+          <Route path="/work-items/:id/review" element={<GateReviewRoute />} />
           <Route path="/templates/*" element={<Soon title="Templates" />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/*" element={<Soon title="Settings" />} />
