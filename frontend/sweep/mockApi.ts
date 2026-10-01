@@ -247,7 +247,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     const b = S.bundles[S.ng.running];
     b?.events.push({ seq: Math.max(0, ...b.events.map((e: any) => e.seq)) + 1, work_item_id: S.ng.running, type: "chain_revised", payload: { gate: null, changes: ITEM_DRAFT_SEEDS.changes.slice(0, 2), diff: [], source: "draft" }, node_id: null, created_at: NG_NOW });
   }
-  const areas = opts.areas ? makeAreas(opts.areas) : null;
+  // Always answering: a shell cell may open Policy (a built page), and the shipped UI never asks for /drafts/(repos|policy|intake).
+  const areas = makeAreas(opts.areas ?? "default");
 
   const viewedMarks = new Set<string>();
   const lib = opts.ngLibrary ? libraryState(opts.ngLibrary) : null;
@@ -554,7 +555,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       { id: "codex", label: "codex", executable: "codex", executable_found: false, efforts: [], models: [], capabilities: {} },
     ]);
     /* ux2-W15: the settings areas' drafts */
-    if (areas && (m = p.match(/^\/drafts\/(repos|policy|intake)\/\1(?:\/(undo|publish|ops|rebase|fragment|preview)|\/files\/(.+))?$/))) {
+    if ((m = p.match(/^\/drafts\/(repos|policy|intake)\/\1(?:\/(undo|publish|ops|rebase|fragment|preview)|\/files\/(.+))?$/))) {
       const [status, body] = areas.handle(m[1], m[2], m[3], method, req.postDataJSON() ?? {}, q) ?? [404, { detail: "no" }];
       return status === 204 ? route.fulfill({ status: 204 }) : json(route, body, status);
     }
@@ -626,7 +627,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     /* the agent task's choices in the Chains editor (real answers, sweep/draftViews.json) */
     if (p === "/harnesses/profiles" && method === "GET") return json(route, DRAFTS.harnesses);
     if (p === "/harnesses/providers") return json(route, DRAFTS.providers);
-    if (p === "/drafts") return json(route, [...(areas?.list() ?? []), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
+    if (p === "/drafts") return json(route, [...areas.list(), ...["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" }))]);
     if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
@@ -666,12 +667,12 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
     if (p === "/registry") return json(route, { hooks: st.hooks, invalid_templates: {} });
     if ((m = p.match(/^\/registry\/([^/]+)\/runs$/))) return json(route, { runs: Object.values(S.bundles).slice(0, 8).map((b, i) => ({ work_item_id: b.item.id, node_id: b.item.current_node_id ?? "verify", round: i % 3, status: ["done", "failed", "done", "capped_out"][i % 4], wall_ms: 120_000 + i * 40_000, created_at: b.item.updated_at })) });
-    if (p === "/policy") return json(route, areas ? { ...st.policy, max_concurrent: 5, active_count: areas.activeCount() } : st.policy);
+    if (p === "/policy") return json(route, opts.areas ? { ...st.policy, max_concurrent: 5, active_count: areas.activeCount() } : st.policy);
     // PUT merges over the file, as the real route does since B30.
     if (p === "/theme") return json(route, method === "PUT" ? Object.assign(st.theme, req.postDataJSON(), { derived: false }) : st.theme);
     if (p === "/steering") return json(route, st.steering);
     if ((m = p.match(/^\/steering\/([^/]+)$/))) return method === "DELETE" ? json(route, { deleted: m[1] }) : json(route, st.steeringBody(decodeURIComponent(m[1])));
-    if (p === "/intake/checks" && areas) return json(route, areas.checks());
+    if (p === "/intake/checks" && opts.areas) return json(route, areas.checks());
     if (p === "/intake/checks") return json(route, [
       { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
       { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },

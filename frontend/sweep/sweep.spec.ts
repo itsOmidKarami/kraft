@@ -357,7 +357,7 @@ const CASES: Case[] = [
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
   { screen: "ng-shell", variant: "board-stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
   // W2 A: an unbuilt page inside the shell.
-  { screen: "ng-shell", variant: "placeholder", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/policy", {}) },
+  { screen: "ng-shell", variant: "placeholder", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/_nope", {}) },
   // W2 B: the sidebar. Pinned and rail by stored choice; "revealed" is the pointer over the rail.
   { screen: "ng-shell", variant: "pinned", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/policy", {}, { side: "pinned" }) },
   { screen: "ng-shell", variant: "rail", data: "default", widths: [1024], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/policy", {}, { side: "rail" }) },

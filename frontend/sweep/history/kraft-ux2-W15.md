@@ -34,7 +34,7 @@ A throwaway `kraft` (own `KRAFT_HOME` inside the worktree's `.dev/`, port 8771, 
 
 ## Differences from the prototypes
 
-Policy cells take a value that creates a problem into the draft and show it in red, as the prototype does (Repos alone refuses inline). Three finding severities (the loader accepts no `info`). "Set below policy" and Preview on a chain are the server's (#365). No "next check" countdown or empty-poll lines (the API has neither). Recent checks refetch every 30 s and on focus. Repos' YAML tab is the entry's read-only fragment. YAML opens as the shared full-height editor (button reads "⇄ Page"), not the prototype's side pane.
+Policy cells take a value that creates a problem into the draft and show it in red, as the prototype does (Repos alone refuses inline). Three finding severities (the loader accepts no `info`). "Set below policy" and Preview on a chain are the server's (#365). No "next check" countdown or empty-poll lines (the API has neither). Recent checks take each live `intake_checked` frame from the shared socket (`ng/live.ts`) and refetch every 30 s and on focus as the fallback. Repos' YAML tab is the entry's read-only fragment. YAML opens as the shared full-height editor (button reads "⇄ Page"), not the prototype's side pane.
 
 ## Shared files touched, additively
 
@@ -42,4 +42,4 @@ Policy cells take a value that creates a problem into the draft and show it in r
 
 ## Beads (under Kraft-9d8b2)
 
-Kraft-xkmkq (shipped Policy offers `info`), Kraft-7jeur (next-check time), Kraft-ijjmu (empty polls), Kraft-tgiao (server-side probing `add_repo`), Kraft-9d8b2.14 (take `intake_checked` from the shared ws `onLive` once #369 lands).
+Kraft-xkmkq (shipped Policy offers `info`), Kraft-7jeur (next-check time), Kraft-ijjmu (empty polls), Kraft-tgiao (server-side probing `add_repo`), Kraft-9d8b2.14 (the live frame, closed here).
