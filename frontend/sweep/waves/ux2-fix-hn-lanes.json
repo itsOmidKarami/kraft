@@ -1,0 +1,16 @@
+{
+  "title": "UX V2 fix: the Harnesses lanes reserve the docked pane's width",
+  "screens": [
+    "ng-harnesses-scrolled",
+    "flow-ng-harness-lanes-fit-the-pane"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "interactions.spec.ts"
+  ],
+  "rules": [
+    { "kind": "no-flag", "flag": "contrast", "match": "^ng-harnesses-scrolled/" },
+    { "kind": "no-console", "match": "^ng-harnesses-scrolled/" },
+    { "kind": "flow-completes", "match": "^flow-ng-harness-lanes-" }
+  ]
+}

@@ -90,6 +90,14 @@ describe("the canvas", () => {
     expect(await screen.findByText("No task selects this harness.")).toBeInTheDocument();
   });
 
+  it("the canvas ends where the docked pane begins, so no lane runs under it", async () => {
+    serve(view(resolved()));
+    renderPage("");
+    const canvas = await screen.findByText(/every harness/).then((e) => e.closest(".hn-canvas") as HTMLElement);
+    expect(parseFloat(canvas.style.right)).toBeGreaterThan(0);
+    expect(canvas.style.paddingRight).toBe("");
+  });
+
   it("lanes are 520px wide", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "harnesses.css"), "utf-8");
     expect(css).toMatch(/\.hn-lane \{[^}]*width: 520px/);

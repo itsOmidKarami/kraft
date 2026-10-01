@@ -119,7 +119,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
           <List r={r} problems={problems} sel={sel} onPick={(p) => go(p.kind === "harness" ? { harness: p.id } : { profile: p.id })} onAdd={() => void addProfile()} />
           {addError && <p className="hn-error hn-toast" role="alert">{adding ? "" : addError}</p>}
           <div className="hn-stage">
-            <div className="hn-canvas" style={{ paddingRight: reserve(open) + 20 }} onClick={up}>
+            <div className="hn-canvas" style={{ right: reserve(open) }} onClick={up}>
               {missing ? (
                 <p className="hn-empty">No {harness ? "harness" : "profile"} called {harness ?? profile}. <button type="button" className="hn-link" onClick={() => go({})}>Back to every harness</button></p>
               ) : (
