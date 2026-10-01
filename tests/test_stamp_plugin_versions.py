@@ -71,6 +71,16 @@ def test_the_real_manifests_are_the_default_targets():
         assert path.is_file(), f"{path} does not exist"
 
 
+def test_every_shipped_plugin_manifest_is_stamped_and_they_agree():
+    """A manifest added for another agent (`.cursor-plugin/`, ...) but left off
+    MANIFESTS keeps the version it was committed with forever, and that agent's
+    plugin list shows a release that never shipped."""
+    shipped = set(stamp_mod._ROOT.glob("plugins/*/.*-plugin/plugin.json"))
+    assert shipped <= set(stamp_mod.MANIFESTS), shipped - set(stamp_mod.MANIFESTS)
+    versions = {p: json.loads(p.read_text())["version"] for p in stamp_mod.MANIFESTS}
+    assert len(set(versions.values())) == 1, versions
+
+
 def test_the_vscode_extension_is_stamped_and_keeps_its_own_shape(tmp_path):
     """package.json is the extension's manifest: only `version` may change, and
     the key order (which `vsce` and reviewers read top-down) must survive."""

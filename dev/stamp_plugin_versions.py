@@ -20,6 +20,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 MANIFESTS = (
     _ROOT / "plugins" / "kraft" / ".claude-plugin" / "plugin.json",
     _ROOT / "plugins" / "kraft-lite" / ".claude-plugin" / "plugin.json",
+    _ROOT / "plugins" / "kraft" / ".cursor-plugin" / "plugin.json",
+    _ROOT / "plugins" / "kraft-lite" / ".cursor-plugin" / "plugin.json",
     # The VS Code extension ships in the same release at the same version.
     _ROOT / "vscode" / "package.json",
 )
