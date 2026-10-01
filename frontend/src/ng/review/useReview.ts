@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
-import type { Compare, CompareTarget, ReviewThread } from "../../types";
+import type { Compare, CompareTarget, ReviewThread, WorkItem, WorkItemArtifact } from "../../types";
 import { detailOf, request } from "../http";
 import { COALESCE_MS } from "../item/useItem";
 
@@ -69,4 +69,20 @@ export function useViewed(id: string, to: CompareTarget, compare: Fetched<Compar
     setError(detailOf(body));
   };
   return { isViewed, toggle, error };
+}
+
+/** The pending gate's document (GET /artifact), read while there is one: the
+ *  gate review shows it, and a chain revision's `digest` rides on Approve. */
+export function useArtifact(item: Pick<WorkItem, "id" | "pending_gate" | "gate_artifact" | "updated_at">) {
+  const [got, setGot] = useState<Fetched<WorkItemArtifact> | null>(null);
+  const wanted = !!(item.pending_gate && item.gate_artifact);
+  useEffect(() => {
+    if (!wanted) return setGot(null);
+    let live = true;
+    request<WorkItemArtifact>(`/work-items/${encodeURIComponent(item.id)}/artifact`).then(({ status, body }) => {
+      if (live) setGot(status === 200 ? { state: "ready", data: body } : { state: "error", status, error: detailOf(body) });
+    });
+    return () => void (live = false);
+  }, [item.id, wanted, item.pending_gate, item.updated_at]);
+  return got;
 }

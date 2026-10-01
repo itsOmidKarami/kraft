@@ -12,13 +12,15 @@ type Item = Pick<WorkItem, "id" | "pending_gate" | "display_status" | "fix_targe
 const ACTION = { retried: "retried", rerun: "running again", queued: "queued" } as const;
 
 /** Sends a review and moves on (G.5, G.6): a refusal comes back as the server's words. */
-export function useSubmit(item: Item, gate: string | null, threads: ReviewThread[], reload: () => void) {
+/** `digest`: the chain revision's, as GET /artifact returned it; an approval at
+ *  a chain-revision gate carries it (Kraft-ec66w, #355). */
+export function useSubmit(item: Item, gate: string | null, threads: ReviewThread[], reload: () => void, digest?: string | null) {
   const navigate = useNavigate();
   return async (outcome: ReviewOutcome, summary: string): Promise<string | null> => {
     const atGate = !!gate && item.pending_gate === gate;
     const path = atGate ? `/work-items/${encodeURIComponent(item.id)}/gates/${encodeURIComponent(gate!)}/review` : `/work-items/${encodeURIComponent(item.id)}/review`;
     const n = drafts(threads).length;
-    const { status, body } = await request(path, jsonBody("POST", { outcome, ...(summary.trim() && { summary: summary.trim() }) }));
+    const { status, body } = await request(path, jsonBody("POST", { outcome, ...(summary.trim() && { summary: summary.trim() }), ...(outcome === "approve" && digest && { digest }) }));
     if (status < 200 || status >= 300) return detailOf(body);
     const threadsSent = `${n} ${n === 1 ? "thread" : "threads"}`;
     if (outcome === "comment") {

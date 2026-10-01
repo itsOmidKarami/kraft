@@ -14,10 +14,9 @@ const must = { id: "t1", label: "must_fix", state: "open", draft: false, file_pa
 
 afterEach(() => vi.restoreAllMocks());
 
-const overlay = (o: { threads?: ReviewThread[]; doc?: object } = {}) => {
-  vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: o.doc ?? DOC });
+const overlay = (o: { threads?: ReviewThread[] } = {}) => {
   const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
-  render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
+  render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: DOC }} files={FILES} threads={o.threads ?? []} isViewed={() => true} {...p} />);
   return p;
 };
 
@@ -30,22 +29,10 @@ describe("GateReview", () => {
     expect(screen.queryByRole("button", { name: /^Viewed / })).toBeNull();
   });
 
-  it("approves through the review route, or with the digest for a chain revision", async () => {
+  it("approves through the page's review submit", async () => {
     const p = overlay();
-    await screen.findByText("Review brief");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
     expect(p.approve).toHaveBeenCalled();
-    vi.restoreAllMocks();
-  });
-
-  it("sends a chain revision's digest to the gate's approve", async () => {
-    const p = overlay({ doc: { ...DOC, digest: "d1" } });
-    await screen.findByText("Review brief");
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
-    const [path, init] = vi.mocked(http.request).mock.calls.at(-1)!;
-    expect([path, JSON.parse(init!.body as string)]).toEqual(["/work-items/w1/gates/final_review/approve", { digest: "d1" }]);
-    expect(p.approve).not.toHaveBeenCalled();
-    expect(p.onClose).toHaveBeenCalled();
   });
 
   it("keeps Approve off with an open must-fix; Request changes, a file and × go where they say", async () => {
@@ -65,10 +52,10 @@ describe("GateReview", () => {
 
 describe("the overlay on the review page", () => {
   const ITEM = { id: "w1", title: "t", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] }, attempts: [], pending_gate: "final_review", gate_artifact: "x.md", created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" };
-  const open = async (search: string, o: object = {}) => {
+  const open = async (search: string, o: object = {}, doc: object = DOC) => {
     vi.spyOn(api, "getWorkItem").mockResolvedValue({ ...ITEM, ...o } as never);
     vi.spyOn(api, "getTheme").mockResolvedValue({ diff: DEFAULT_PREFS } as never);
-    vi.spyOn(http, "request").mockImplementation(async (p) => (String(p).includes("/artifact") ? { status: 200, body: DOC } : String(p).includes("/compare") ? { status: 200, body: { files: [], diff: "", untracked: [], to: { target: "latest", sha: null }, truncated: false } } : { status: 200, body: [] }));
+    vi.spyOn(http, "request").mockImplementation(async (p) => (String(p).includes("/artifact") ? { status: 200, body: doc } : String(p).includes("/compare") ? { status: 200, body: { files: [], diff: "", untracked: [], to: { target: "latest", sha: null }, truncated: false } } : { status: 200, body: [] }));
     const view = render(<MemoryRouter initialEntries={[`/work-items/w1/review${search}`]}><Routes><Route path="/work-items/:id/review" element={<ReviewPage />} /></Routes></MemoryRouter>);
     await screen.findByRole("heading", { name: "Review changes: t" });
     return view;
@@ -86,5 +73,13 @@ describe("the overlay on the review page", () => {
     c.unmount();
     await open("?doc=1&gate=local_review");
     expect(screen.queryByRole("dialog", { name: /Gate review/ })).toBeNull();
+  });
+
+  it("sends a chain revision's digest with Approve, through the review route (#355)", async () => {
+    await open("?doc=1", {}, { ...DOC, digest: "d1" });
+    await screen.findByText("Review brief");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
+    const [path, init] = vi.mocked(http.request).mock.calls.at(-1)!;
+    expect([path, JSON.parse(init!.body as string)]).toEqual(["/work-items/w1/gates/final_review/review", { outcome: "approve", digest: "d1" }]);
   });
 });

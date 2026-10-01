@@ -56,8 +56,8 @@ const Where = () => {
 };
 const routed = (ui: ReactNode) => render(<MemoryRouter initialEntries={["/work-items/w1/review"]}><Routes><Route path="*" element={<>{ui}<Where /></>} /></Routes></MemoryRouter>);
 
-function Finish({ it = item(), gate = "final_review" as string | null, threads = [th()], reload = () => {}, initial }: { it?: WorkItem; gate?: string | null; threads?: ReviewThread[]; reload?: () => void; initial?: "request_changes" }) {
-  const submit = useSubmit(it, gate, threads, reload);
+function Finish({ it = item(), gate = "final_review" as string | null, threads = [th()], reload = () => {}, initial, digest }: { it?: WorkItem; gate?: string | null; threads?: ReviewThread[]; reload?: () => void; initial?: "request_changes"; digest?: string }) {
+  const submit = useSubmit(it, gate, threads, reload, digest);
   return <FinishDialog item={it} gate={gate} threads={threads} initial={initial} submit={submit} onClose={() => {}} />;
 }
 const body = () => JSON.parse(vi.mocked(http.request).mock.calls.at(-1)![1]!.body as string);
@@ -105,6 +105,18 @@ describe("FinishDialog", () => {
     expect(screen.getByRole("button", { name: "Submit review" })).toBeDisabled();
     fireEvent.click(screen.getByRole("radio", { name: /Approve/ }));
     expect(screen.getByRole("button", { name: "Submit review" })).toBeEnabled();
+  });
+
+  it("carries a chain revision's digest on Approve only", async () => {
+    vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
+    const { unmount } = routed(<Finish threads={[]} digest="d1" />);
+    fireEvent.click(screen.getByRole("radio", { name: /Approve/ }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
+    expect(body()).toEqual({ outcome: "approve", digest: "d1" });
+    unmount();
+    routed(<Finish digest="d1" />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
+    expect(body()).toEqual({ outcome: "request_changes" });
   });
 
   it("counts your draft replies as things to send", () => {
