@@ -20,6 +20,11 @@ describe("draftBody", () => {
     });
   });
 
+  it("names the bead the item implements only when there is one", () => {
+    expect(draftBody(emptyDraft({ ...base, bead: " kraft-ab1 " }), NODES, null, false).implements_beads).toEqual(["kraft-ab1"]);
+    expect("implements_beads" in draftBody(emptyDraft(base), NODES, null, false)).toBe(false);
+  });
+
   it("sends attachments, skips, a set budget (not a blank one), agent review off, and autostart", () => {
     const b = draftBody(emptyDraft({ ...base, spec: "docs/spec.md", plan: " ", skip: ["mr_checks"], budget: "$7.50", autoGate: false }), NODES, null, true);
     expect(b).toMatchObject({ attachments: [{ kind: "spec", path: "docs/spec.md" }], skip_nodes: ["mr_checks"], budget_usd: 7.5, auto_gate: false, autostart: true });

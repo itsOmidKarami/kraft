@@ -8,7 +8,6 @@ import type { Bead, SearchResult, WorkItem } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
 import { Kbd } from "../ui/Kbd";
 import { Tabs } from "../ui/Tabs";
-import { openShipped } from "./nav";
 import { ROUTES } from "./routes";
 import "./search.css";
 
@@ -46,9 +45,9 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
   open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
 });
 
-/** The ⌘K palette. Items and Go to rows stay inside /ng; documents and beads
- *  open on the shipped UI until the pages they belong to are built. */
-export function SearchOverlay({ onClose }: { onClose: () => void }) {
+/** The ⌘K palette. A document of a work item opens on that item's page (`?doc=`),
+ *  one with no item in `onDocument`'s dialog, and a bead starts a draft item that implements it. */
+export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; onDocument: (id: string) => void }) {
   const navigate = useNavigate();
   const ref = useModal<HTMLDivElement>(onClose);
   const uid = useId();
@@ -101,15 +100,15 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
       ...needsYou.map((i) => itemRow(i, "needs", navigate)),
       ...items.map((i) => itemRow(i, "items", navigate)),
       ...docs.results.map((r): Row => {
-        const wid = r.links[0]?.work_item_id;
+        const wid = r.links.find((l) => l.work_item_id)?.work_item_id;
         return {
           id: `docs:${r.id}`,
           section: "docs",
           label: docTitle({ ...r, ...r.links[0], content: r.snippet.replace(/[[\]]/g, "") }),
           sub: `${r.kind ?? r.source_kind} · ${repoName(r.repo)}`,
           snippet: r.snippet,
-          note: "opens the document on the current UI",
-          open: () => openShipped(wid ? `/work-items/${wid}` : "/search"),
+          note: wid ? "opens the document on its work item" : "opens the document",
+          open: () => (wid ? navigate(`/work-items/${encodeURIComponent(wid)}?doc=${encodeURIComponent(r.id)}`) : onDocument(r.id)),
         };
       }),
       ...beads.list
@@ -119,8 +118,8 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
           section: "beads",
           label: b.title,
           sub: [b.id, b.status].filter(Boolean).join(" · "),
-          note: "starts a work item for this bead on the current UI",
-          open: () => openShipped(`/?q=${encodeURIComponent(b.id)}`),
+          note: "drafts a work item that implements this bead",
+          open: () => navigate(`/work-items/new?${new URLSearchParams({ title: b.title, bead: b.id })}`),
         })),
       ...[...ROUTES, NEW_ITEM].filter((r) => !query || has(r.label, query)).map((r): Row => ({
         id: `goto:${r.path}`,
@@ -131,7 +130,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
       })),
     ];
     return out;
-  }, [workItems, docs.results, beads.list, query, navigate]);
+  }, [workItems, docs.results, beads.list, query, navigate, onDocument]);
 
   const count = (s: Row["section"][]) => rows.filter((r) => s.includes(r.section)).length;
   const shown = rows.filter((r) => ({ all: true, items: r.section === "needs" || r.section === "items", docs: r.section === "docs", beads: r.section === "beads" })[tab] ?? false);

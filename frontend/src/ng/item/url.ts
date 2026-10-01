@@ -4,13 +4,15 @@ import { ESCALATION } from "./nodeGraph";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
- *  attempt (spec §6.2). The URL carries all four, so Back and shared links land
+ *  attempt (spec §6.2), and the document open over it. The URL carries all of them, so Back and shared links land
  *  on them. */
 export interface Place {
   node?: string;
   sel: Sel;
   tab?: string;
   attempt?: number;
+  /** The document id open over the page (`?doc=`), so ⌘K and a pasted link land on it. */
+  doc?: string;
 }
 
 /** A selection's canonical path: `node`, `node.step` or `node.step.task`. */
@@ -43,7 +45,7 @@ export function readPlace(nodeParam: string | undefined, search: URLSearchParams
   const raw = search.get("sel");
   const sel = (raw && pathSel(raw, nodes)) || floor;
   const attempt = Number(search.get("attempt"));
-  return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined };
+  return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined, doc: search.get("doc") || undefined };
 }
 
 /** The URL for a place, relative to the router's `/ng` basename. */
@@ -53,6 +55,7 @@ export function placeUrl(id: string, p: Place): string {
   if (path && path !== p.node) q.set("sel", path);
   if (p.tab) q.set("tab", p.tab);
   if (p.attempt) q.set("attempt", String(p.attempt));
+  if (p.doc) q.set("doc", p.doc);
   const qs = q.toString();
   return `/work-items/${encodeURIComponent(id)}${p.node ? `/nodes/${encodeURIComponent(p.node)}` : ""}${qs ? `?${qs}` : ""}`;
 }

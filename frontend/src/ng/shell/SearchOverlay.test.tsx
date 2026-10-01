@@ -7,11 +7,8 @@ import { App } from "../App";
 import { useStore } from "../../store";
 import { item } from "../../testFixtures";
 import type { SearchResult } from "../../types";
-import * as nav from "./nav";
 import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
-
-vi.mock("./nav", () => ({ openShipped: vi.fn() }));
 
 const Where = () => {
   const l = useLocation();
@@ -39,7 +36,6 @@ const DOC_FREE: SearchResult = { ...DOC, id: "d2", title: "Free spec", links: []
 let search: ReturnType<typeof vi.spyOn>;
 let beads: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  vi.mocked(nav.openShipped).mockClear();
   useStore.setState({ workItems: { wi_gate: GATED, wi_plain: PLAIN }, connection: "open" } as never);
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", bind: "x", port: 1, version: "1" } as never);
   search = vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [DOC, DOC_FREE] });
@@ -127,16 +123,40 @@ describe("SearchOverlay", () => {
     };
     await go("Gated work");
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
-    expect(nav.openShipped).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    for (const [name, to] of [["Caching spec", "/work-items/wi_gate"], ["Free spec", "/search"], ["New bead", "/?q=kraft-new"]] as const) {
-      await user.keyboard("{Meta>}k{/Meta}");
-      await user.type(await screen.findByRole("combobox"), "work");
-      await screen.findByText("Caching spec");
-      await go(name);
-      expect(nav.openShipped).toHaveBeenLastCalledWith(to);
-    }
+    await user.keyboard("{Meta>}k{/Meta}");
+    await user.type(await screen.findByRole("combobox"), "work");
+    await screen.findByText("Caching spec");
+    await go("Caching spec");
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
+    expect(screen.getByTestId("search")).toHaveTextContent("?doc=d1");
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    await user.type(await screen.findByRole("combobox"), "work");
+    await screen.findByText("Caching spec");
+    await go("New bead");
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/new");
+    expect(screen.getByTestId("search")).toHaveTextContent("?title=New+bead&bead=kraft-new");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows a document with no work item in a dialog; Escape closes it and focus goes back to where ⌘K was opened", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/documents/d2") ? { id: "d2", title: "Free spec", path: "/r/alpha/spec.md", content: "# Free spec\n\nThe **cache** has no bound." } : {}), { status: 200 })));
+    mount();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("page field");
+    await user.click(field);
+    await user.keyboard("{Meta>}k{/Meta}");
+    await user.type(await screen.findByRole("combobox"), "free");
+    await user.click(await screen.findByRole("option", { name: /Free spec/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Free spec" });
+    expect(await within(dialog).findByText("cache")).toBeInTheDocument();
+    expect(screen.getByTestId("where")).toHaveTextContent("/analytics");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(field).toHaveFocus();
+    vi.unstubAllGlobals();
   });
 
   it("goes to /ng pages from Go to, Archived included, without a page load", async () => {
@@ -150,7 +170,6 @@ describe("SearchOverlay", () => {
     await user.click(await screen.findByRole("option", { name: "New work item" }));
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
     expect(screen.getByTestId("search")).toHaveTextContent("?new=1");
-    expect(nav.openShipped).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -162,7 +181,6 @@ describe("SearchOverlay", () => {
     await user.type(input, "zzzz");
     await screen.findByText(/No matches/);
     await user.keyboard("{Enter}");
-    expect(nav.openShipped).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
