@@ -18,8 +18,11 @@ export function IdRow({ label, taken, placeholder, initial = "", go, refused, on
   const [sent, setSent] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    input.current?.focus();
-    input.current?.select();
+    // After the popover is placed (focusSoon), then the text selected.
+    requestAnimationFrame(() => {
+      input.current?.focus();
+      input.current?.select();
+    });
   }, []);
   const err = idError(text, taken) ?? (refused && sent === text ? refused : null);
   const can = !!text && !err;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { KIND_ICON, type TaskKind } from "../../icons";
 import { Popover } from "../../ui/Popover";
 import { useLibrary } from "../useLibrary";
+import { focusSoon } from "./focus";
 import { PickList } from "./PickList";
 
 export type TaskChoice = { kind: TaskKind } | { extends: string };
@@ -13,7 +14,7 @@ export function TaskMenu({ anchor, title, agentOnly, onPick, onClose }: { anchor
   const [lib, setLib] = useState(false);
   const library = useLibrary();
   const first = useRef<HTMLButtonElement>(null);
-  useEffect(() => { if (!lib) first.current?.focus(); }, [lib]);
+  useEffect(() => { if (!lib) focusSoon(first.current); }, [lib]);
   const tasks = typeof library === "string" ? [] : library.filter((c) => c.kind === "tasks" && (!agentOnly || c.definition.kind === "agent"));
   const kinds = agentOnly ? (["agent"] as TaskKind[]) : KINDS;
   return (

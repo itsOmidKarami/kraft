@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { focusSoon } from "./focus";
 
 export type Pick = { key: string; label: string; sub?: string; icon?: ReactNode };
 
@@ -8,7 +9,7 @@ export function PickList({ items, placeholder, empty, onPick, autoFocus = true }
   const [q, setQ] = useState("");
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const search = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (autoFocus) search.current?.focus(); }, [autoFocus]);
+  useEffect(() => { if (autoFocus) focusSoon(search.current); }, [autoFocus]);
   const shown = items.filter((i) => !q || `${i.label} ${i.sub ?? ""}`.toLowerCase().includes(q.toLowerCase()));
   const move = (e: KeyboardEvent, from: number) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;

@@ -82,12 +82,12 @@ describe("Chains page: the chain canvas", () => {
     act(() => seams[2].focus());
     await userEvent.keyboard("{Enter}");
     const exec = await screen.findByRole("menuitem", { name: /Exec node/ });
-    expect(exec).toHaveFocus();
+    await waitFor(() => expect(exec).toHaveFocus());
     await userEvent.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: /Gate/ })).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     const id = await screen.findByRole("textbox", { name: "Gate id" });
-    expect(id).toHaveFocus();
+    await waitFor(() => expect(id).toHaveFocus());
     await userEvent.keyboard("security_approval{Enter}");
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(post.mock.calls[0][2]).toEqual([{ op: "add_node", at: 2, id: "security_approval", kind: "gate" }]);
@@ -100,6 +100,7 @@ describe("Chains page: the chain canvas", () => {
     const g = await canvas();
     await userEvent.click(within(g).getAllByRole("button", { name: "Add a node or gate here" })[0]);
     await userEvent.click(await screen.findByRole("menuitem", { name: /Exec node/ }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Node id" })).toHaveFocus());
     await userEvent.keyboard("spec");
     expect(screen.getByRole("alert")).toHaveTextContent("spec is taken.");
     expect(screen.getByRole("button", { name: "Create & open →" })).toBeDisabled();

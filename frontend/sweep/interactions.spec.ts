@@ -55,6 +55,8 @@ const reloadNg = async (p: Page) => { await p.reload(); await p.locator("main h1
 let focusBefore = "";
 const activeId = (p: Page) => p.evaluate(() => { const a = document.activeElement as HTMLElement; return a ? `${a.tagName}#${a.id}.${a.className}` : ""; });
 const searchBox = (p: Page) => p.getByRole("combobox", { name: "Search" });
+// W10: the Chains editor on the mock's real draft answers.
+const chains = (key: string) => async (p: Page) => { await p.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned")); await p.goto(`/ng/templates/chains/${key}`); await p.locator(".canvas").first().waitFor({ timeout: 8000 }); await settle(p, 700); };
 
 const FLOWS: Flow[] = [
   { name: "peek-open-close", widths: [1280, 390], start: board, steps: [
@@ -349,6 +351,22 @@ const FLOWS: Flow[] = [
       await expect.poll(() => new URL(p.url()).search).toBe("?sel=implementation");
       await expect(p.getByText("RUNNING", { exact: true })).toBeVisible();
     }, wait: 700 },
+  ] },
+  // W10 B, D: a seam by keyboard → Exec node → its id → Create & open → the new node's empty view.
+  { name: "ng-chain-add-node", widths: [1280], start: chains("default"), steps: [
+    { name: "seam-menu", run: async (p) => { await p.locator(".seam").nth(2).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("menuitem", { name: /Exec node/ })).toBeFocused(); }, kbd: true },
+    { name: "exec-node", run: async (p) => { await p.keyboard.press("Enter"); await expect(p.getByRole("textbox", { name: "Node id" })).toBeFocused(); }, kbd: true },
+    { name: "taken-id", run: async (p) => { await p.keyboard.type("spec"); await expect(p.getByRole("alert")).toHaveText("spec is taken."); await expect(p.getByRole("button", { name: "Create & open →" })).toBeDisabled(); }, kbd: true },
+    { name: "create", run: async (p) => { for (let i = 0; i < 4; i++) await p.keyboard.press("Backspace"); await p.keyboard.type("lint"); await p.keyboard.press("Enter"); await expect.poll(() => new URL(p.url()).pathname).toBe("/ng/templates/chains/default/nodes/lint"); }, kbd: true, wait: 600 },
+    { name: "empty-node", run: async (p) => { await expect(p.getByText(/This node is empty/)).toBeVisible(); await expect(p.getByRole("button", { name: "add your first step" })).toBeVisible(); } },
+  ] },
+  // W10 F: Review & publish, then a stale draft's 409 with the server's diff.
+  { name: "ng-chain-publish", widths: [1280], start: chains("default"), steps: [
+    { name: "review", run: async (p) => { await p.getByRole("button", { name: "Review & publish" }).click(); await expect(p.getByRole("heading", { name: /^Draft · \d+ changes?$/ })).toBeVisible(); } },
+    { name: "yaml-diff", run: async (p) => { await p.getByRole("tab", { name: "YAML diff" }).click(); await expect(p.locator(".rv-line.is-add").first()).toBeVisible(); } },
+    { name: "publish", run: async (p) => { await p.getByRole("button", { name: "Publish", exact: true }).click(); await expect(p.locator(".toast", { hasText: "Published default" })).toBeVisible(); }, wait: 300 },
+    { name: "stale-chain", run: async (p) => { await chains("stale")(p); await p.getByRole("button", { name: "Review & publish" }).click(); } },
+    { name: "stale-publish", run: async (p) => { await p.getByRole("button", { name: "Publish", exact: true }).click(); await expect(p.getByText("Published since this draft began", { exact: true })).toBeVisible(); await expect(p.getByRole("button", { name: "Keep my version and publish" })).toBeVisible(); } },
   ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.

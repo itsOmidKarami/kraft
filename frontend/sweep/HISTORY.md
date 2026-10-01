@@ -1381,3 +1381,12 @@ Baseline on `main` `06da92d39`, shot from a clean worktree: 1479 cells, 235 flag
 
 - `node sweep/wave.mjs all`: **1/1 rules pass**, 0 newly flagged, 41 changed on the first shot (313 on the re-shot after the rebase, a slower machine; every shot is clock text and sub-pixel offsets, none newly flagged). Shooting `main` against its own baseline changes 79 cells, 40 of these 41 among them (wall-clock text, caret and scroll offsets); the one other, `el-gate-card/rate_limited-tasks-long@1280`, differs in a 244x13 px line of text. The branch changes no `/ng` or shipped screen source (`ws.ts` only ignores a new frame).
 - No `/ng` screens and no `waves.json` key: a backend wave. `mockApi.ts` gained a mock for every new route: `/harnesses`, the `/drafts/{area}/{key}` routes for the config areas, `/intake/checks`, `/apply`, `/apply/reload`, `/apply/restart`, `/update`, `/update/check`.
+## ux2-W10 — Chains editor, PR 1: canvas, panes, publish (`ux2/W10`)
+
+Baseline on `ux2/W10`'s fork from W9 (`b4297ef53`): 1253 cells, 192 flagged. Final on `ux2/W10` (sections A–G). Full notes: `e2e-shots/DIFF-ux2-W10.md`.
+
+- `node sweep/wave.mjs ux2-W10`: **6/6 rules pass** (no contrast, offscreen, clipped-v or console flag on `^ng-`, review-stale's own 409 excepted; both chain flows complete; no newly flagged cells).
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1294 cells, 195 flagged, 0 newly flagged. 68 shipped cells changed by 0–0.25%: wall-clock text. A first run caught the mock serving the real chain file to the shipped Settings page (up to 4%); fixed and re-run.
+- **New screen:** `ng-chains` (29 cells on real W9 answers in `sweep/draftViews.json`); flows `flow-ng-chain-add-node`, `flow-ng-chain-publish`. **New key:** `ux2-W10`. `ng-shell`'s cells moved to `/ng/settings/access`; `placeholder-chains` became `placeholder`.
+- **Mock:** the chains branch of the draft mock serves real answers (default with a change, an added gate and a removed one; broken; yaml-error; the stale 409), applies the ops the flows send, and answers `rebase`, `fragment`, `/harnesses/profiles`, `/harnesses/providers`.
+- **Process:** the port is contended (Kraft-kfw1e); every sweep here ran in a loop that waits for the port and retries on "already used".

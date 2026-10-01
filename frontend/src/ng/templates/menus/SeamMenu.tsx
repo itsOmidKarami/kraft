@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Box } from "lucide-react";
 import { Popover } from "../../ui/Popover";
+import { focusSoon } from "./focus";
 import { IdRow } from "./IdRow";
 
 /** The two-step menu behind a seam on the chain canvas (Decisions §9 Adding a
@@ -14,7 +15,7 @@ export function SeamMenu({ anchor, taken, refused, onCreate, onClose }: {
 }) {
   const [kind, setKind] = useState<"exec" | "gate" | null>(null);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
-  useEffect(() => { if (!kind) items.current[0]?.focus(); }, [kind]);
+  useEffect(() => { if (!kind) focusSoon(items.current[0]); }, [kind]);
   const onKey = (e: KeyboardEvent) => {
     const at = items.current.findIndex((b) => b === document.activeElement);
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;

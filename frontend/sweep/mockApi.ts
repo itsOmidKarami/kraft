@@ -417,9 +417,9 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes });
     }
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
-      // The default scenario's `default` chain is the real shipped file, the draft views' published side.
-      // No shipped cell reads it: the shipped Chains editor is shot on the `long` scenario.
-      if (S.variant === "default" && m[1] === "default") return json(route, DRAFTS.published);
+      // For the /ng Chains editor, `default` is the real shipped file, the draft views' published side.
+      // The shipped Settings pages keep the scenario's chain (settings-chains/default reads this route).
+      if (m[1] === "default" && (req.headers()["referer"] ?? "").includes("/ng/")) return json(route, DRAFTS.published);
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1])) ?? st.templates[0];
       if (!tpl) return json(route, { detail: "template not found" }, 404);
       // The real route returns the file's text, which is what the Chains editor shows.

@@ -138,8 +138,9 @@ export function useConfigDraft(area: Area, key: string) {
       if (a.status === 409 && live.current) setStale(a.body as unknown as StaleBody);
       if (a.status === 200 && live.current) setStale(null);
       return a;
+      // Its answer is `{published, result}`, not a draft view: the reload below takes over.
       // The review pane shows a 409's diff and a 422's problems itself: no toast.
-    }, true, true, false).then(async (a) => {
+    }, true, false, false).then(async (a) => {
       if (a.status === 200) await load();
       return a;
     });

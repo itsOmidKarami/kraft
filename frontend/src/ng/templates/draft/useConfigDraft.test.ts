@@ -121,6 +121,16 @@ describe("useConfigDraft", () => {
     expect(ops.mock.calls[0][2]).toEqual([{ op: "set_field", path: "spec.main.author", field: "prompt", value: "Wr" }]);
   });
 
+  it("reloads the draft after a publish instead of taking its answer as the view", async () => {
+    const h = await mount();
+    vi.spyOn(d, "publish").mockImplementation(() => answer({ published: ["chains/default.yaml"], result: VIEW.result }) as never);
+    // The reload hangs, so the view in between is what the page renders.
+    vi.mocked(d.getDraft).mockImplementation(() => new Promise(() => {}));
+    act(() => void h.result.current.publish());
+    await waitFor(() => expect(d.getDraft).toHaveBeenCalledTimes(2));
+    expect(h.result.current.view?.files).toEqual(VIEW.files);
+  });
+
   it("says Nothing to undo on the server's 409", async () => {
     const h = await mount();
     vi.spyOn(d, "undo").mockImplementation(() => answer({ detail: "nothing to undo" }, 409) as never);

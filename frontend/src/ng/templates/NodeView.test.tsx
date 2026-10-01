@@ -70,10 +70,12 @@ describe("Chains page: the node view", () => {
     expect(post.mock.calls[0][2]).toEqual([{ op: "add_step", container: "lint", at: 0, id: "step_1" }]);
     const name = await screen.findByRole("textbox", { name: "Name the first step" });
     expect(name).toHaveValue("step_1");
+    await waitFor(() => expect(name).toHaveFocus());
     await userEvent.clear(name);
     await userEvent.type(name, "checks{Enter}");
     await waitFor(() => expect(post.mock.calls[1][2]).toEqual([{ op: "rename", path: "lint.step_1", id: "checks" }]));
-    expect(await screen.findByRole("menuitem", { name: "From the library…" })).toHaveFocus();
+    const lib = await screen.findByRole("menuitem", { name: "From the library…" });
+    await waitFor(() => expect(lib).toHaveFocus());
   });
 
   it("adds a blank agent task into a new step in one request, then opens it with the prompt focused", async () => {

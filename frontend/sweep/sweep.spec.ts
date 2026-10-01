@@ -575,7 +575,7 @@ const CASES: Case[] = [
     await ngChains(c, "stale");
     await c.page.getByRole("button", { name: "Review & publish" }).click();
     await c.page.getByRole("button", { name: "Publish", exact: true }).click();
-    await c.page.getByText("Published since this draft began").waitFor({ timeout: 4000 });
+    await c.page.getByText("Published since this draft began", { exact: true }).waitFor({ timeout: 4000 });
     await settle(c.page, 300);
   } },
   { screen: "ng-chains", variant: "review-problems", data: "default", widths: [1280], run: async (c) => {
