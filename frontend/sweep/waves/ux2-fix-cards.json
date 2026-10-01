@@ -1,17 +1,34 @@
 {
-  "title": "UX V2 fix: Access as AreaAccess draws it, each section a card",
+  "title": "UX V2 fix: Access and About draw their sections as the designs' cards",
   "screens": [
     "access",
     "access-yaml",
-    "access-cards"
+    "access-cards",
+    "about",
+    "about-instance"
   ],
   "specs": [
     "sweep.spec.ts"
   ],
   "rules": [
-    { "kind": "no-flag", "flag": "contrast", "match": "^access" },
-    { "kind": "no-flag", "flag": "overflow-x", "match": "^access" },
-    { "kind": "no-flag", "flag": "offscreen", "match": "^access" },
-    { "kind": "no-console", "match": "^access" }
+    {
+      "kind": "no-flag",
+      "flag": "contrast",
+      "match": "^(access|about)"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "overflow-x",
+      "match": "^(access|about)"
+    },
+    {
+      "kind": "no-flag",
+      "flag": "offscreen",
+      "match": "^(access|about)"
+    },
+    {
+      "kind": "no-console",
+      "match": "^(access|about)"
+    }
   ]
 }
