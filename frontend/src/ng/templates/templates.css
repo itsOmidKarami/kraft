@@ -146,6 +146,7 @@
 .ip-cell.is-on { border-color: var(--text); color: var(--text); }
 
 /* The settings areas' shared frame (W15): the YAML view's file tabs. */
+.adr-sr { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 .adr-yaml { position: absolute; inset: 0; }
 .adr-yaml.has-files { top: 34px; }
 .adr-files { position: absolute; left: 0; right: 0; top: 0; z-index: 9; height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--bg); }

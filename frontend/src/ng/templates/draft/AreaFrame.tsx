@@ -22,11 +22,13 @@ export interface FrameCtx {
  *  state and problems badge in the header's tail, YAML and Review & publish as
  *  its actions, ⌘Z, the area's file(s) in the shared YamlView and the shared
  *  review pane. The page draws its body, and its own pane, from `children`. */
-export function AreaFrame({ draft, area, pageKey, tail, actions, onFix, onHighlight, children }: {
+export function AreaFrame({ draft, area, pageKey, title, tail, actions, onFix, onHighlight, children }: {
   draft: ConfigDraft;
   area: ReviewArea;
   /** The key the pane width is remembered under (`useResizable`). */
   pageKey: string;
+  /** The page's heading, read by a screen reader only: the crumbs are the visible one. */
+  title: string;
   /** Before the draft state in the header's tail (Policy's section menu). */
   tail?: ReactNode;
   /** Header buttons before YAML. */
@@ -96,6 +98,7 @@ export function AreaFrame({ draft, area, pageKey, tail, actions, onFix, onHighli
 
   return (
     <div className="tpl-page" ref={frame}>
+      <h1 className="adr-sr">{title}</h1>
       <HeaderTail>
         {tail}
         {view.draft

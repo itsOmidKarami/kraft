@@ -92,6 +92,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
       draft={draft}
       area={area}
       pageKey="repos"
+      title="Repos"
       onFix={onFix}
       onHighlight={(path) => { const x = repos.find((y) => y.path === path); if (x) select(x); }}
     >

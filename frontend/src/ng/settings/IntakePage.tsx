@@ -92,7 +92,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   };
 
   return (
-    <AreaFrame draft={draft} area={area} pageKey="intake" onFix={onFix}>
+    <AreaFrame draft={draft} area={area} pageKey="intake" title="Auto-intake" onFix={onFix}>
       {({ size, review, reserve }) => (
         <>
           <div className="ink-body" style={{ right: reserve(paneOpen) }}>

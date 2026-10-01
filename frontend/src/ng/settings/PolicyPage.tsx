@@ -105,6 +105,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
       draft={draft}
       area={area}
       pageKey="policy"
+      title="Policy"
       tail={menu}
       actions={section === "limits" && p && "below" in (Object.values(p.limits.caps)[0] ? Object.values(Object.values(p.limits.caps)[0])[0] : {}) ? <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}>Preview on a chain</Button> : undefined}
       onFix={onFix}

@@ -30,7 +30,7 @@ function mount(over: Partial<Result> = {}, draftFlag = false) {
     <MemoryRouter>
       <Routes>
         <Route element={<Shell />}>
-          <Route path="/" element={<AreaFrame draft={draft} area={AREA} pageKey="repos" onFix={onFix}>{() => <p>the page</p>}</AreaFrame>} />
+          <Route path="/" element={<AreaFrame draft={draft} area={AREA} pageKey="repos" title="Repos" onFix={onFix}>{() => <p>the page</p>}</AreaFrame>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -49,6 +49,11 @@ beforeEach(() => {
 const change = { path: "/src/platform", kind: "change" as const, summary: "x" };
 
 describe("AreaFrame", () => {
+  it("has one heading for a screen reader, the page's name", async () => {
+    mount();
+    expect(await screen.findByRole("heading", { level: 1, name: "Repos" })).toHaveClass("adr-sr");
+  });
+
   it("says published, or DRAFT · N CHANGES, and counts problems as a badge that steps through them", async () => {
     const { onFix } = mount();
     expect(await screen.findByText("published")).toBeInTheDocument();
@@ -105,7 +110,7 @@ describe("AreaFrame", () => {
       <MemoryRouter>
         <Routes>
           <Route element={<Shell />}>
-            <Route path="/" element={<AreaFrame draft={draft} area={{ ...AREA, files: ["intake.yaml", "policy.yaml"] }} pageKey="intake" onFix={vi.fn()}>{() => <p>page</p>}</AreaFrame>} />
+            <Route path="/" element={<AreaFrame draft={draft} area={{ ...AREA, files: ["intake.yaml", "policy.yaml"] }} pageKey="intake" title="Auto-intake" onFix={vi.fn()}>{() => <p>page</p>}</AreaFrame>} />
           </Route>
         </Routes>
       </MemoryRouter>,
