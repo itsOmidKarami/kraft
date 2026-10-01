@@ -94,6 +94,10 @@ class Hit:
             return f"gate `{self.scope}` waited past its timeout of {self.minutes} minutes"
         return f"{where} hit its {_WHAT[self.field]} of {self.minutes} minutes"
 
+    @property
+    def limit(self) -> dict | None:
+        return item_limit(self.scope, self.field, self.minutes)
+
     def payload(self, **extra) -> dict:
         return {
             "scope": self.scope,
@@ -102,6 +106,28 @@ class Hit:
             "reason": self.reason,
             **extra,
         }
+
+
+def item_limit(scope: str, field: str, minutes: int) -> dict | None:
+    """The `limit` a cap stop names (`store.mark_needs_human`): only the work
+    item's own cap, which an item-wide override raises. A node, step or task's
+    is authored in the chain or defaulted by level, and an item override only
+    tightens at a path."""
+    return (
+        {"path": "", "key": field, "value": minutes} if not scope and field in CAP_FIELDS else None
+    )
+
+
+def reached_limit(conn, work_item_id: str) -> dict | None:
+    """The `limit` of the newest `time_cap_reached`, for the stop it caused."""
+    row = conn.execute(
+        "SELECT payload FROM events WHERE work_item_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
+        (work_item_id, REACHED),
+    ).fetchone()
+    if row is None:
+        return None
+    p = json.loads(row["payload"])
+    return item_limit(p["scope"], p["field"], p["minutes"])
 
 
 def monotonic() -> float:
@@ -599,7 +625,9 @@ def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
     if seen["status"] == "needs_human" and now["pending_gate"] != seen["pending_gate"]:
         return False
     events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
-    store.mark_needs_human(conn, seen["id"], seen["current_node_id"], hit.reason, kind="cap")
+    store.mark_needs_human(
+        conn, seen["id"], seen["current_node_id"], hit.reason, kind="cap", limit=hit.limit
+    )
     return True
 
 

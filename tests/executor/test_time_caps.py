@@ -192,6 +192,7 @@ async def test_a_cap_stop_spends_no_attempt_and_is_not_escalated(item_on, monkey
     assert not it.events("fix_cycle_started") and not it.events("stuck_escalation_started")
     assert [s["hook_point"] for s in it.sessions()] == ["build.run.impl", "build.run.impl"]
     assert "stuck" not in it.events("work_item_needs_human")[-1]["payload"]
+    assert "limit" not in it.events("work_item_needs_human")[-1]["payload"]
     dispatched = []
 
     async def fake_dispatch(*a, **kw):
@@ -344,6 +345,22 @@ async def test_only_a_persons_retry_starts_the_clocks_afresh(item_on, escalated,
     assert _launch(it).remaining_s == left * 60
 
 
+@pytest.mark.parametrize("field", FIELDS)
+@pytest.mark.parametrize("level", list(_SCOPE))
+async def test_only_the_work_items_own_cap_names_a_limit_an_item_override_raises(
+    item_on, fast, level, field
+):
+    """`stop.limit`: an item-wide override raises the work item's cap. A node,
+    step or task's is authored or defaulted, and an item override only
+    tightens at a path, so no limit is named there. (The chain's own cap
+    reaches the work item's clock but is not an item override either: the
+    parametrisation's `chain` row is the work item's scope, `""`.)"""
+    it = await _level(item_on, level, field)
+    assert await _walk(it) == "needs_human"
+    limit = it.events("work_item_needs_human")[-1]["payload"].get("limit")
+    assert limit == ({"path": "", "key": field, "value": 1} if level in ("item", "chain") else None)
+
+
 # ── parked: a total cap and a gate's own timeout ─────────────────────────────
 
 
@@ -367,6 +384,11 @@ async def test_a_parked_item_past_its_total_cap_is_stopped_for_a_human(item_on, 
     assert it.status() == "needs_human"
     assert it.row()["stop_kind"] == "cap"
     assert _reason(it) == "the work item hit its total time cap of 1 minutes"
+    assert it.events("work_item_needs_human")[-1]["payload"]["limit"] == {
+        "path": "",
+        "key": "total_time_cap_minutes",
+        "value": 1,
+    }
 
 
 async def test_a_gate_past_its_timeout_stops_naming_the_gate_and_stays_answerable(item_on):

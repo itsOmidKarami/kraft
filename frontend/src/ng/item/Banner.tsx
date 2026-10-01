@@ -3,11 +3,13 @@ import { CircleHelp } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
+import { RaiseLimit } from "./RaiseLimit";
 import type { ItemDetail } from "./useItem";
 
 /** The reason banner (Decisions §4): only when the item needs you at a gate
  *  or a cap; the action is the filled button. */
-export function Banner({ item, onOpenGate, onRaise }: { item: ItemDetail; onOpenGate: (gate: string) => void; onRaise: () => void }) {
+export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail; onOpenGate: (gate: string) => void; onRaise: () => void; reload: () => void }) {
+  const [raising, setRaising] = useState(false);
   const stop = item.stop;
   if (item.display_status !== "needs_you" || !stop) return null;
   if (stop.kind === "gate") {
@@ -28,7 +30,11 @@ export function Banner({ item, onOpenGate, onRaise }: { item: ItemDetail; onOpen
           {(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached")).replace(/\.$/, "")}
           {stop.node && <> at <code>{stop.node}</code></>}.
         </span>
-        <Button variant="primary" onClick={onRaise}>Raise cap</Button>
+        {/* A cap that names its limit opens that limit's editor; any other stop opens the Config it can only point at. */}
+        {stop.kind === "cap" && stop.limit
+          ? <Button variant="primary" onClick={() => setRaising(true)}>Raise cap</Button>
+          : <Button variant="primary" onClick={onRaise}>{stop.kind === "cap" ? "Open config" : "Raise cap"}</Button>}
+        {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}
       </div>
     );
   return null;

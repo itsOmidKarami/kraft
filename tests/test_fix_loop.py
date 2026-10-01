@@ -1,11 +1,14 @@
+import json
 import shlex
 import sys
 from pathlib import Path
 
+import pytest
 from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
 from kraft import events, executor, policy, store
+from kraft.executor import walk
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE = f"{sys.executable} {_FAKE_AGENT}"
@@ -103,6 +106,45 @@ async def test_fix_loop_cap_breach(tmp_path, monkeypatch, database, run_dirs, re
     assert any(r["status"] == "capped_out" for r in caps)
     row = database.read(lambda c: store.read_counter(c, wid, "verify.fix_loop"))
     assert row["count"] == 2  # attempts + 1, the breaching bump
+    # `stop.limit`: the node's own `max_attempts`, which a `PATCH policy` raises.
+    (stop,) = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "work_item_needs_human"
+    ]
+    assert stop["limit"] == {"path": "verify", "key": "max_attempts", "value": 1}
+
+
+async def test_fix_loop_wall_clock_breach_names_timeout_minutes_as_the_limit(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
+    """The loop's clock ran out with attempts to spare: `stop.limit` is the
+    node's `timeout_minutes`, not its `max_attempts`."""
+    from datetime import UTC, datetime, timedelta
+
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    # An hour past the counter's own start, whatever the real run took.
+    monkeypatch.setattr(walk, "_now", lambda: (datetime.now(UTC) + timedelta(hours=1)).isoformat())
+    tracker = isolated_bd(tmp_path)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=5, wall_clock_s=60)
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="out of time",
+        repo=str(repo),
+        chain=_fixloop_template(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    result = await executor.run(
+        database, run_dirs, work_item_id=wid, bd_cwd=str(tracker), policy=pol
+    )
+    assert result == "needs_human"
+    (stop,) = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "work_item_needs_human"
+    ]
+    assert stop["limit"] == {"path": "verify", "key": "timeout_minutes", "value": 1}
 
 
 async def test_fix_loop_per_item_attempts_override_breaches_before_policy_cap(
@@ -145,6 +187,14 @@ async def test_fix_loop_per_item_attempts_override_breaches_before_policy_cap(
         if e["type"] == "work_item_needs_human"
     )
     assert reason == "verify.fix_loop exhausted after 1 fix cycle(s)"
+    # The `node_overrides` door set that cap and wins over a policy override, so
+    # raising the policy would change nothing: no limit is named.
+    stop = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "work_item_needs_human"
+    ]
+    assert "limit" not in stop[0]
 
 
 async def test_resume_mid_fix_loop_reenters_and_continues_budget(
@@ -423,3 +473,23 @@ def test_ci_fix_loop_reads_the_repair_s_re_measure_not_the_stale_pre_repair_find
     messages = [f["message"] for f in after["payload"]["findings"]]
     assert any("expected 3, got 5" in m for m in messages), messages
     assert not any("expected 3, got 4" in m for m in messages), messages
+
+
+@pytest.mark.parametrize(
+    ("ran_out", "door", "expected"),
+    [
+        (True, {}, {"path": "verify", "key": "max_attempts", "value": 3}),
+        (False, {}, {"path": "verify", "key": "timeout_minutes", "value": 30}),
+        (True, {"attempts": 1}, None),
+        (False, {"wall_clock_s": 60}, None),
+        # The other bound's door does not hide this one.
+        (False, {"attempts": 1}, {"path": "verify", "key": "timeout_minutes", "value": 30}),
+    ],
+)
+def test_a_fix_loop_stop_names_the_bound_that_ran_out_unless_node_overrides_set_it(
+    ran_out, door, expected
+):
+    row = {"node_overrides": json.dumps({"verify": door})}
+    cap = policy.Cap(attempts=3, wall_clock_s=1800)
+
+    assert walk._fix_loop_limit(row, "verify", cap, attempts_ran_out=ran_out) == expected

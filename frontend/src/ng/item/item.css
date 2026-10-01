@@ -192,3 +192,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .dv-close { margin-left: auto; }
 /* The document viewer's dialog: two classes, so it outranks ui's `.dialog` width (R59: item styles its own class). */
 .dv-dialog.dialog { box-sizing: border-box; width: min(760px, 100%); }
+
+/* The cap stop's limit editor (RaiseLimit). */
+.rl-dialog.dialog { box-sizing: border-box; width: min(420px, 100%); }
+.rl-form { display: flex; flex-direction: column; gap: 12px; }

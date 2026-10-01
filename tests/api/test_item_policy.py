@@ -211,3 +211,40 @@ def test_the_server_runs_the_time_cap_poller(client):
     wait scheduler."""
     assert client.app.state.caps_task is not None
     assert not client.app.state.caps_task.done()
+
+
+@pytest.mark.parametrize(
+    ("policy", "status", "field"),
+    [
+        # What a cap stop's `stop.limit` tells the UI to send, on a stopped item.
+        ({"paths": {"verification": {"max_attempts": 5}}}, 200, None),
+        ({"paths": {"verification": {"timeout_minutes": 120}}}, 200, None),
+        ({"time_cap_minutes": 90}, 200, None),
+        ({"total_time_cap_minutes": 240}, 200, None),
+        # Past the administrator maximum, the refusal names the field.
+        (
+            {"paths": {"verification": {"max_attempts": 6}}},
+            422,
+            "policy.paths.verification.max_attempts",
+        ),
+        (
+            {"paths": {"verification": {"timeout_minutes": 121}}},
+            422,
+            "policy.paths.verification.timeout_minutes",
+        ),
+    ],
+)
+def test_the_patch_a_cap_stops_limit_names_raises_a_stopped_item_within_the_maximum(
+    bounded, repo, policy, status, field
+):
+    wid = _file(bounded, repo).json()["id"]
+    _set_status(bounded, wid, "needs_human")
+
+    got = bounded.patch(f"/api/work-items/{wid}", json={"policy": policy})
+
+    assert got.status_code == status, got.text
+    if field is None:
+        assert _stored(bounded, wid) == policy
+    else:
+        assert field in got.json()["detail"]
+        assert _stored(bounded, wid) is None

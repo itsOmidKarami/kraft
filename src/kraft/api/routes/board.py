@@ -10,6 +10,7 @@ from kraft import policy as policy_mod
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
+from kraft.cap_levels import CAP_FIELDS
 
 
 def _pending_gate(st, wid: str) -> str | None:
@@ -691,6 +692,7 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
     facts = dict(stop_payload.get("facts") or {}) if stop_payload else {}
     if kind == "rate_limit":
         facts.update(_rate_limit_facts(st, row, task))
+    limit = _stop_limit(row, stop_payload)
     return {
         "kind": kind,
         "node": node,
@@ -699,7 +701,26 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
         "resume_at": row["retry_at"],
         "reason": stop_payload["reason"] if stop_payload else None,
         "facts": facts,
+        **({"limit": limit} if limit else {}),
     }
+
+
+def _stop_limit(row, stop_payload: dict | None) -> dict | None:
+    """`stop.limit` on a cap stop: the item-policy field that raises the limit
+    that stopped it, `{path, key, value, maximum}`. `maximum` is the
+    administrator ceiling now (None where there is none), read off the item's
+    frozen policy; the rest was written when the item stopped."""
+    limit = stop_payload.get("limit") if stop_payload else None
+    chain = store.materialized_chain_of(row) if limit else None
+    if limit is None or chain is None:
+        return None
+    maxima = chain.policy.maxima
+    if limit["key"] in CAP_FIELDS:
+        bound = maxima.nearest("work_item", limit["key"])
+        maximum = bound[1] if bound else None
+    else:
+        maximum = getattr(maxima, limit["key"])
+    return {**limit, "maximum": maximum}
 
 
 @api_router.get("/work-items/{wid}/fix-target")

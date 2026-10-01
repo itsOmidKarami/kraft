@@ -61,7 +61,7 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
         <DiffLine id={item.id} version={item.updated_at} />
       </div>
-      <Banner item={item} onOpenGate={(gate) => navigate(placeUrl(item.id, { sel: { kind: "node", node: gate } }))} onRaise={settings} />
+      <Banner item={item} onOpenGate={(gate) => navigate(placeUrl(item.id, { sel: { kind: "node", node: gate } }))} onRaise={settings} reload={reload} />
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />

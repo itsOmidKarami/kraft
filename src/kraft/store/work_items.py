@@ -185,6 +185,7 @@ def mark_needs_human(
     stuck: bool = False,
     suggested: dict | None = None,
     facts: dict | None = None,
+    limit: dict | None = None,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
 
@@ -218,6 +219,10 @@ def mark_needs_human(
     `facts` carries kind-specific detail the detail view renders (conflict's
     resolved/unresolved files, a closed MR's ref and url) -- written to the
     payload as `facts` only when given.
+
+    `limit` (a cap stop) names the one item-policy field that raises what
+    stopped it: `{path, key, value}`, `path` being `""` item-wide or a node id.
+    Given only where a `PATCH policy` can raise it; the detail adds `maximum`.
     """
     if not write_status(
         conn,
@@ -258,6 +263,8 @@ def mark_needs_human(
         payload["suggested_action"] = suggested
     if facts is not None:
         payload["facts"] = facts
+    if limit is not None:
+        payload["limit"] = limit
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 
