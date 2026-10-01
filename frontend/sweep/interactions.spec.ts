@@ -291,6 +291,7 @@ const FLOWS: Flow[] = [
       await expect(p.getByRole("region", { name: "New work item" })).toHaveCount(0);
       await expect(p).toHaveURL(/[?&]sel=/);
     }, wait: 700 },
+  ] },
   // ux2-W5 G (R6): chain → node view → a task's pane → back, keyboard only.
   { name: "ng-node-keyboard", widths: [1280], keyboard: true, start: ngItem("running"), steps: [
     { name: "tab-into-chain", run: async (p) => { await p.locator('.graph-node[tabindex="0"]').focus(); await expect(p.getByRole("button", { name: /^verification, node, running/ })).toBeFocused(); } },

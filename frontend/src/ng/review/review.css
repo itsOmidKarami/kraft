@@ -194,3 +194,5 @@
   .rv-code { white-space: pre-wrap; overflow-wrap: anywhere; }
   .rv-after { padding-left: 12px; }
 }
+/* A coloured token on a changed-word tint leans toward the text colour, so it stays readable (4.5:1). */
+.rv-word-change:is(.tok-kw, .tok-str, .tok-num) { color: color-mix(in oklab, currentColor 65%, var(--text)); }
