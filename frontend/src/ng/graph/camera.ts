@@ -37,3 +37,12 @@ const LIVE = new Set(["running", "waiting", "needs_you", "escalated", "paused", 
 /** Decisions §7 "Opening view": an item with a node in progress opens on it at
  *  100%; one not started or finished opens fitted (R37). */
 export const openingView = (status: string, hasCurrent: boolean): "current" | "fit" => (hasCurrent && LIVE.has(status) ? "current" : "fit");
+
+/** The least pan that brings a world box into view with `margin` px to spare
+ *  (a node focused by keyboard must be visible). Unchanged when it already is. */
+export function revealCam(cam: Cam, box: { x0: number; x1: number; y0: number; y1: number }, view: Size, margin = 24): Cam {
+  const fit = (lo: number, hi: number, size: number) => (lo < margin ? margin - lo : hi > size - margin ? size - margin - hi : 0);
+  const dx = fit(cam.tx + box.x0 * cam.s, cam.tx + box.x1 * cam.s, view.w);
+  const dy = fit(cam.ty + box.y0 * cam.s, cam.ty + box.y1 * cam.s, view.h);
+  return dx || dy ? { ...cam, tx: cam.tx + dx, ty: cam.ty + dy } : cam;
+}

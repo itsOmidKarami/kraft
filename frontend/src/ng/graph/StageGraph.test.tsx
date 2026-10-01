@@ -37,6 +37,12 @@ describe("StageGraph", () => {
     expect(btn(/^spec,/)).toHaveFocus();
   });
 
+  it("enters on the current node when nothing is selected", async () => {
+    render(<StageGraph name="c" nodes={nodes} />);
+    await userEvent.setup().tab();
+    expect(btn(/^implement/)).toHaveFocus();
+  });
+
   it("gives the Tab stop back to a new selection", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<StageGraph name="c" nodes={nodes} selected="spec" />);

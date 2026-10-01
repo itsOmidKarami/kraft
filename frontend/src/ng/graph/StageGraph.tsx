@@ -45,7 +45,8 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
     for (const s of seams) if (s.at === lay.items.length) out.push(seamKey(s.at));
     return out;
   }, [lay, seams]);
-  const roving = useRoving(selected && nodeKey(selected), stops[0]);
+  // Tab enters on the selected node, else the current one the camera opened on.
+  const roving = useRoving(selected && nodeKey(selected), cur ? nodeKey(cur.node.id) : stops[0]);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -99,7 +100,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               aria-pressed={n.id === selected}
               className={`graph-node${bold ? " is-bold" : ""}${n.state === "todo" ? " is-todo" : ""}${n.state === "ghost" ? " is-ghost" : ""}${n.mark === "add" ? (n.prob ? " is-bad" : " is-add") : ""}`}
               style={{ left: cx - w / 2, top: L.CY - L.BOX / 2, width: w }}
-              onFocus={() => roving.go(key)}
+              onFocus={() => { roving.go(key); camera.reveal({ x0: cx - w / 2, x1: cx + w / 2, y0: L.CY - L.BOX / 2, y1: L.CY + L.BOX / 2 + 40 }); }}
               onClick={() => onSelect?.(n.id)}
               onDoubleClick={() => onFocusNode?.(n.id)}
             >
@@ -124,7 +125,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               title={s.title ?? "Add a node or gate here"}
               className={`seam${s.open ? " is-open" : ""}${s.always ? " is-always" : ""}`}
               style={{ left: x - 10, top: L.CY - 10 }}
-              onFocus={() => roving.go(key)}
+              onFocus={() => { roving.go(key); camera.reveal({ x0: x - 10, x1: x + 10, y0: L.CY - 10, y1: L.CY + 10 }); }}
               onClick={() => onSeam?.(s.at)}
             >
               <span aria-hidden="true">+</span>

@@ -97,7 +97,7 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
         aria-pressed={sel}
         className={`graph-node is-task${sel || t.state === "current" ? " is-bold" : ""}${t.state === "todo" ? " is-todo" : ""}${t.state === "esc" || t.state === "amber" ? " is-warn" : ""}${extra}`}
         style={{ left: x - G.COL / 2, top: y - G.BOX / 2, width: G.COL }}
-        onFocus={() => roving.go(key)}
+        onFocus={() => { roving.go(key); camera.reveal({ x0: x - G.COL / 2, x1: x + G.COL / 2, y0: y - G.BOX / 2, y1: y + G.BOX / 2 + 36 }); }}
         onClick={() => onSelect?.(s)}
         onDoubleClick={() => onExpand?.(s)}
       >
@@ -143,7 +143,7 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
               aria-pressed={sel}
               className={`step-label${sel ? " is-sel" : ""}${st.mark ? ` mark-${st.mark}` : ""}`}
               style={{ left: cx - G.COL / 2, top: labelY, width: G.COL }}
-              onFocus={() => roving.go(key)}
+              onFocus={() => { roving.go(key); camera.reveal({ x0: cx - G.COL / 2, x1: cx + G.COL / 2, y0: labelY, y1: labelY + 20 }); }}
               onClick={() => onSelect?.({ step: st.id })}
               onDoubleClick={() => onExpand?.({ step: st.id })}
             >

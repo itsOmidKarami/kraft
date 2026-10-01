@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type MouseEvent as RMouseEvent } from "react";
-import { currentCam, DRAG_THRESHOLD, fitCam, STEP_IN, STEP_OUT, wheelFactor, zoomAt, type Cam, type CanvasKind, type Size } from "./camera";
+import { currentCam, DRAG_THRESHOLD, fitCam, revealCam, STEP_IN, STEP_OUT, wheelFactor, zoomAt, type Cam, type CanvasKind, type Size } from "./camera";
 
 export type CameraMode = "fit" | "current" | "free";
 type Opts = {
@@ -90,5 +90,11 @@ export function useCamera({ canvas, world, current, opening, reserve = 0 }: Opts
     reset: () => zoomCentre(1 / cam.s),
     fit: () => setMode("fit"),
     toCurrent: current ? () => setMode("current") : undefined,
+    /** Pan just enough to show a world box, e.g. the node keyboard focus moved to. */
+    reveal: (box: { x0: number; x1: number; y0: number; y1: number }) => {
+      if (!view) return;
+      const next = revealCam(camRef.current, box, view);
+      if (next !== camRef.current) { setCam(next); setMode("free"); }
+    },
   };
 }

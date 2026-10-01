@@ -65,7 +65,7 @@ export function Workbench({ page, open = true, width }: { page: string; open?: b
           gate={node?.kind === "gate" && s.sel.kind === "node"}
           icon={s.sel.kind === "chain" ? "workflow" : node?.icon}
           title={title}
-          sub={facts.sub}
+          sub={sel.kind === "node" && node?.kind === "gate" ? "gate" : facts.sub}
           prob={node?.prob ? { msg: "The run stopped here.", fix: "Raise the cap or retry." } : undefined}
           tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }]}
           tab={tab}

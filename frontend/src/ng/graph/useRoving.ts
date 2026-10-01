@@ -15,7 +15,8 @@ export function useRoving(selected: string | undefined, first: string | undefine
     go: (key: string | undefined) => {
       if (!key) return;
       setActive(key);
-      els.current.get(key)?.focus();
+      // The canvas pans to the stop itself (reveal); the browser must not scroll the clipped canvas.
+      els.current.get(key)?.focus({ preventScroll: true });
     },
   };
 }

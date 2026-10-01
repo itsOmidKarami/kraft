@@ -1281,3 +1281,13 @@ Baseline on `main` `c9ba7e4c`: 1170 cells, 179 flagged. Final on the branch reba
 - **169 changed:** 20 new `ng-` cells; `ng-shell/stub@1280~light` (the stub now follows the theme's mode); 148 shipped item-page cells from wall-clock text and main's #330 copy. The same 11 screens shot on `c9ba7e4c` and on the branch back to back: 853 of 854 identical, the one difference being the `flow-log-maximize` wheel flake.
 - **New screens:** `ng-tokens` (five surfaces at 1280 in both modes, Moss Mono in both, violet Full at 1920) and `ng-appearance` (default at 1280 in both modes and at 1024, Mono in both modes, slate/blue/Full, derived). **New key:** `ux2-W1`.
 - **Mock:** the theme fixture carries `surface`, `accent`, `colour_amount` and `derived`; `PUT /theme` merges, as the real route does since B30.
+
+## ux2-W3 — shared graph components (`ux2/W3`)
+
+Baseline on `main` `b08f1287` (built into its own dist, `SWEEP_DIST`): 1192 cells, 179 flagged. Final on the branch rebased onto `dc200e2d`. Full notes: `e2e-shots/DIFF-ux2-W3.md`.
+
+- `node sweep/wave.mjs ux2-W3`: **5/5 rules pass** (no contrast, offscreen, clipped-v or console flag on `^ng-`, no newly flagged cells). 8 new cells, all clean.
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1198 cells, 179 flagged, 0 newly flagged. Flag tallies are unchanged from the baseline (ellipsis 154, nested-scroll 24, console 7, clipped-v 4, target<44 4, setup 1). 55 shipped cells changed by 0–0.07% each: wall-clock text.
+- **New screen:** `ng-gallery` (`/ng/_gallery`, fixtures only): default at 1280 and 1920 in both modes, mono and full at 1280, overlay at 768, keyboard at 1280. **New key:** `ux2-W3`.
+- **Harness (R41):** `checks.ts`'s offscreen check exempts what a `data-pan` canvas clips while the canvas itself is in view, as it does for a sideways scroll strip; two `checks.spec.ts` cases, and `ng/css.contract.test.ts` keeps `data-pan` inside `src/ng/graph/`.
+- **Process:** never build into `frontend/dist` while a sweep from the same worktree is serving it. The first baseline here was shot while measuring builds into that dist and was thrown away; every later shot used `SWEEP_DIST`.

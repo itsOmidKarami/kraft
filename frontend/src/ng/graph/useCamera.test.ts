@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { currentCam, fitCam, openingView, wheelFactor, zoomAt, ZOOM } from "./camera";
+import { currentCam, fitCam, openingView, revealCam, wheelFactor, zoomAt, ZOOM } from "./camera";
 import { useCamera } from "./useCamera";
 
 describe("camera maths", () => {
@@ -35,6 +35,15 @@ describe("camera maths", () => {
   });
   it("zooms the wheel by exp(−deltaY · 0.0025)", () => {
     expect(wheelFactor(-400)).toBeCloseTo(Math.E);
+  });
+  it("pans just enough to show a box, 24px in from the edge, and not at all when it shows", () => {
+    const cam = { tx: 0, ty: 0, s: 0.5 }, view = { w: 400, h: 300 };
+    expect(revealCam(cam, { x0: 100, x1: 200, y0: 100, y1: 200 }, view)).toBe(cam);
+    // Right edge at 900 · 0.5 = 450 → 376.
+    expect(revealCam(cam, { x0: 800, x1: 900, y0: 100, y1: 200 }, view)).toEqual({ tx: -74, ty: 0, s: 0.5 });
+    // Left edge at −20 · 0.5 = −10 → 24; top at −40 · 0.5 = −20 → 24.
+    expect(revealCam(cam, { x0: -20, x1: 0, y0: -40, y1: 0 }, view)).toEqual({ tx: 34, ty: 44, s: 0.5 });
+    expect(revealCam(cam, { x0: 0, x1: 10, y0: 600, y1: 620 }, view).ty).toBe(300 - 24 - 310);
   });
   it("opens on the current node only while one is in progress", () => {
     for (const s of ["running", "waiting", "needs_you", "escalated", "paused", "failed"]) expect(openingView(s, true)).toBe("current");
