@@ -751,3 +751,24 @@ async def test_a_session_is_priced_on_its_launch_model_when_its_output_names_non
     await _exit(database, "s1", "done", None, Usage(tokens_in=1_000_000, model=reported))
     row = _row(database, "s1", "model, cost_usd")
     assert (row["model"], row["cost_usd"]) == (recorded, pytest.approx(cost))
+
+
+def _next_attempt(database, node_id="verify", hook_point="on.test.run"):
+    return database.read(lambda c: store.next_attempt(c, "w1", node_id, hook_point))
+
+
+async def test_next_attempt_is_the_count_so_far_plus_one(database):
+    """B2: `next_attempt` predicts the same number `create_session`'s own
+    `COUNT(*) + 1` would write for a session dispatched right now -- scoped to
+    the exact (work item, node, hook point), like `create_session`'s own
+    query, so a different hook point on the same node does not count towards
+    it."""
+    assert _next_attempt(database) == 1
+    await _session(database, "s1")
+    assert _next_attempt(database) == 2
+    # `create_session` itself agrees with the prediction it just confirmed.
+    await _session(database, "s2")
+    assert _row(database, "s2", "attempt")["attempt"] == 2
+    assert _next_attempt(database) == 3
+    # A different hook point on the same node starts its own count.
+    assert _next_attempt(database, hook_point="on.other.hook") == 1

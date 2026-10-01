@@ -7,11 +7,11 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import psutil
 from fastapi import HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kraft import builtins as builtins_mod
 from kraft import escalate, events, executor, node_runs, store
@@ -362,6 +362,56 @@ async def restore_work_item(wid: str, request: Request):
         raise HTTPException(409, "work item is not archived")
     await st.db.write(lambda c: store.restore_work_item(c, wid))
     return {"id": wid, "status": row["status"]}
+
+
+class Bulk(BaseModel):
+    action: Literal["pause", "cancel", "archive", "restore"]
+    ids: Annotated[list[str], Field(min_length=1, max_length=200)]
+    #: Required when `action` is `cancel` (`EndWorkItem.reason`'s own rule);
+    #: unused by the other three.
+    reason: str | None = None
+
+
+@api_router.post("/work-items/bulk")
+async def bulk_work_items(body: Bulk, request: Request):
+    """B9: the single-item route each action already has, called once per id,
+    in `ids` order, each in its own write -- a `/retry`-style all-or-nothing
+    claim would need a new one of those per action, and nothing here asks for
+    one. An id's `HTTPException` becomes a result rather than aborting the
+    rest, same posture as a CI matrix: one leg's failure does not cancel its
+    siblings. `cancel`'s reason is checked once, up front, so a request that
+    cannot possibly succeed touches nothing (`EndWorkItem.reason` would
+    otherwise answer the same 422 for the first id and silently skip it for
+    the rest)."""
+    if body.action == "cancel" and not (body.reason or "").strip():
+        raise HTTPException(422, "reason: cancel needs a non-blank reason")
+    results = [await _bulk_one(request, wid, body.action, body.reason) for wid in body.ids]
+    return {"results": results}
+
+
+async def _bulk_one(request: Request, wid: str, action: str, reason: str | None) -> dict:
+    st = request.app.state
+    try:
+        if action == "pause":
+            await pause_work_item(wid, request)
+        elif action == "cancel":
+            await cancel_work_item(wid, CancelWorkItem(reason=reason or ""), request)
+        elif action == "archive":
+            await archive_work_item(wid, request)
+        else:
+            await restore_work_item(wid, request)
+    except HTTPException as exc:
+        error = "not found" if exc.status_code == 404 else str(exc.detail)
+        row = st.db.read(
+            lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+        )
+        return {"id": wid, "ok": False, "error": error} | (
+            {"status": row["status"]} if row is not None else {}
+        )
+    row = st.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    return {"id": wid, "ok": True, "status": row["status"] if row is not None else None}
 
 
 @api_router.post("/work-items/{wid}/pause")
@@ -1006,6 +1056,11 @@ async def _retry(wid: str, body: Retry, request: Request):
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
+        # Computed ahead of `spawn`, which only schedules the walk task: a
+        # session for it may or may not exist by the time this request
+        # returns, so reading the count after would be a race either way --
+        # read it now, while it is still a clean prediction.
+        attempt = _retry_attempt(st.db, wid, node, target)
         try:
             deps.spawn(
                 request.app,
@@ -1041,7 +1096,33 @@ async def _retry(wid: str, body: Retry, request: Request):
             "path": target.path if target is not None else None,
             "loop": key,
             "steer": steer,
+            "attempt": attempt,
         }
+
+
+def _retry_attempt(db, wid: str, node, target: ChainPath | None) -> int:
+    """B2: the attempt number the task this retry launches will run as.
+
+    A `path` naming a task retries just that one; a `path` naming a step
+    retries every task in it; no `path` (and a `restart`, which also hands in
+    `target=None`) retries the whole node, so every one of its own tasks is a
+    candidate -- the highest next-attempt among them is the one that will
+    actually be reported once a session exists (`walk` dispatches the first
+    one that is not already `done`, and `next_attempt` is monotonic in
+    whichever that turns out to be). The dedicated escalation task is never a
+    candidate: its sessions are never written under its own path (they use
+    the literal hook_point `"escalation"`), so counting it would only ever
+    read a stale, always-empty 1.
+    """
+    if target is not None and target.task is not None:
+        paths = [target.task.path]
+    elif target is not None and target.step is not None:
+        paths = [t.path for t in target.step.tasks]
+    else:
+        paths = [t.path for t in node.tasks() if t is not node.escalation]
+    if not paths:
+        return 1
+    return max(db.read(lambda c, p=p: store.next_attempt(c, wid, node.id, p)) for p in paths)
 
 
 def _retry_target(chain, row, body: Retry) -> ChainPath | None:

@@ -157,6 +157,23 @@ export interface CancelPreview {
   spend: { spent_usd: number; cap_usd: number | null };
 }
 
+/** `POST /work-items/{id}/duplicate` (B3): a fresh, paused item from this
+ *  one's own title, description, repo, chain template, workspace selection
+ *  and attachments. Additive: not read by the shipped UI yet. */
+export interface DuplicateResponse {
+  id: string;
+  status: "paused";
+  duplicate_warning?: string;
+}
+
+/** One id's outcome in a `POST /work-items/bulk` (B9) batch, in request order. */
+export interface BulkResult {
+  id: string;
+  ok: boolean;
+  status?: WorkItemStatus;
+  error?: string;
+}
+
 /** The breach a spend-cap stop recorded (`kraft.caps.Breach`), tagged on
  *  `scope`. Only `work_item` is the item's own cap, the one Raise budget raises. */
 export type BudgetStop =

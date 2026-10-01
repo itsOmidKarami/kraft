@@ -377,6 +377,140 @@ async def create_work_item(body: NewWorkItem, request: Request):
     )
 
 
+def _duplicate_target(st, row):
+    """The source item's `WorkItemTarget` selection, rebuilt through
+    `deps.workspace_target` the way a create's own `NewWorkItem.workspace/
+    members/root_pointer_policy` would -- "resolved again", like B3's
+    `chain_template`, not read back verbatim from a frozen snapshot. `None`
+    for a single-repository item (`store.repos_for` is empty for one).
+
+    ponytail: the row has no column naming which declared workspace was
+    picked, only its root and member *paths* (`store.repos_for`,
+    `root_merge_policy`); this matches them back to a workspace declared
+    with that root, first one found. Good enough while `repos.yaml` holds at
+    most one workspace per root -- store the workspace id on intake instead
+    if that ever stops being true.
+    """
+    repo_rows = st.db.read(lambda c: store.repos_for(c, row["id"]))
+    if not repo_rows:
+        return None
+    root_path = next(r["path"] for r in repo_rows if r["role"] == "root")
+    member_paths = {r["path"] for r in repo_rows if r["role"] != "root"}
+    try:
+        repos = config_mod.load_repos(deps.repos_path(st))
+        workspaces = config_mod.load_workspaces(deps.repos_path(st))
+    except config_mod.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    by_path = {r.path: r for r in repos}
+    root_entry = by_path.get(root_path)
+    if root_entry is None or root_entry.id is None:
+        raise HTTPException(422, f"{root_path} is no longer a declared repository")
+    member_ids = [by_path[p].id for p in member_paths if p in by_path and by_path[p].id]
+    ws_id = next((wid for wid, ws in workspaces.items() if ws.root == root_entry.id), None)
+    if ws_id is None:
+        raise HTTPException(422, f"no workspace is declared with root {root_path}")
+    pointer_policy = (
+        RootPointerPolicy(row["root_merge_policy"]) if row["root_merge_policy"] else None
+    )
+    return deps.workspace_target(
+        st, row["repo"], workspace=ws_id, members=member_ids, root_pointer_policy=pointer_policy
+    )
+
+
+def _duplicate_attachments(row) -> list[dict]:
+    """The source's stored attachment copies, re-pointed as the new item's own
+    intake input: `source` keeps naming the existing file under
+    `run/attachments/<source id>/...` so `executor.intake`'s own
+    `_store_attachments` copies *that*, under the new item's id, rather than
+    re-reading `path` relative to the repo (which is the worktree
+    destination, not where Kraft keeps its copy). A copy that has since gone
+    missing answers 409 naming it, ahead of `executor.intake` -- which would
+    otherwise fold the same `OSError` into its own blanket 502."""
+    out = []
+    for a in entry.attachments_of(row):
+        src = a.get("source")
+        if not src or not Path(src).is_file():
+            raise HTTPException(
+                409, f"{a['kind']} attachment is missing its stored copy: {src or a['path']}"
+            )
+        out.append({"kind": a["kind"], "path": a["path"], "source": src})
+    return out
+
+
+@api_router.post("/work-items/{wid}/duplicate", status_code=201)
+async def duplicate_work_item(wid: str, request: Request):
+    """B3: a fresh, paused item from `wid`'s own title, description, repo,
+    chain template, workspace selection and attachments -- any source status
+    accepted, archived and cancelled included. No run state, override,
+    policy override, budget or bead link carries over; this is a fresh
+    intake, not a clone of the row.
+
+    An agent may call this the same way it may `POST /work-items`: the new
+    item always files paused, so there is nothing here for `autostart`'s
+    human-only rule to guard, and nothing of `wid`'s own run is touched --
+    `deps.forbid_self_action` is for an action *on* a live item, which this
+    is not.
+    """
+    st = request.app.state
+    if st.invalid_policy:
+        detail = "; ".join(st.invalid_policy)
+        raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
+    row = deps._work_item_row(st, wid)
+    chain_template, chain = deps.intake_chain_or_422(st, row["repo"], row["chain_template"])
+    attachments = _duplicate_attachments(row)
+    attachment_kinds = frozenset(a["kind"] for a in attachments)
+    # `materialize`/`intake` always take a real target, the same as `POST
+    # /work-items` falling back to a plain `single_repo_target` when nothing
+    # selected a workspace (`_duplicate_target` returns `None` for exactly
+    # that case, `workspace_target`'s own convention).
+    target = _duplicate_target(st, row) or entry.single_repo_target(row["repo"])
+    policy = deps.item_policy_or_422(st, row["repo"], target)
+    per_repository = deps.repository_policies_or_422(st, target)
+    repo_steering = deps.repository_steering_or_422(st, row["repo"], target)
+    try:
+        item_policy = chain.materialize(
+            target=target,
+            effective_policy=policy,
+            repository_policies=per_repository,
+            attachment_kinds=attachment_kinds,
+        ).item_policy
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    duplicates = st.db.read(lambda c: store.open_duplicates(c, row["repo"], row["title"], []))
+    try:
+        new_id = await executor.intake(
+            st.db,
+            st.run_dirs,
+            title=row["title"],
+            description=row["description"] or "",
+            repo=row["repo"],
+            chain=chain,
+            effective_policy=policy,
+            chain_template=chain_template,
+            bd_cwd=deps.bd_cwd(),
+            target=target,
+            repository_policies=per_repository,
+            repository_steering=repo_steering,
+            attachments=attachments,
+            status="paused",
+            auto_gate=True,
+            policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
+            if item_policy is not None
+            else None,
+        )
+    except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
+        raise HTTPException(502, f"intake failed: {exc}") from exc
+    extra = {}
+    if duplicates:
+        extra["duplicate_warning"] = (
+            "looks like open work item "
+            + "; ".join(f"{r['id']} ({r['status']}, {why})" for r, why in duplicates)
+            + ". To revise its spec or plan, use `kraft item set-attachments` on it "
+            "rather than filing again; abandon whichever of the two is not wanted"
+        )
+    return {"id": new_id, "status": "paused", **extra}
+
+
 class TriggerBody(BaseModel):
     repo: str
     title: str

@@ -80,6 +80,13 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         spend: { spent_usd: it.budget_cap?.spent_usd ?? 0, cap_usd: it.budget_cap?.cap_usd ?? null },
       });
     }
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
+      return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
+    }
+    if (method === "POST" && p === "/work-items/bulk") {
+      const ids: string[] = (req.postDataJSON() ?? {}).ids ?? [];
+      return json(route, { results: ids.map((id) => ({ id, ok: true, status: "paused" })) });
+    }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
     // below stays a static 200.
