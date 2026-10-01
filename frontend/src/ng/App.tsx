@@ -14,6 +14,7 @@ import { AppearancePage } from "./settings/AppearancePage";
 import { NotifyPage } from "./settings/NotifyPage";
 import { ReviewPage } from "./review/ReviewPage";
 import { resumeSession } from "./session";
+import { Alias, ALIASES, ShippedHash } from "./shell/aliases";
 import { Placeholder } from "./shell/Placeholder";
 import { ROUTES } from "./shell/routes";
 import { Shell } from "./shell/Shell";
@@ -39,6 +40,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
   if (locked) return <SignIn onSignedIn={async () => { await resumeSession(); setLocked(false); }} />;
   return (
     <BrowserRouter basename="/ng">
+      <ShippedHash />
       <Routes>
         <Route path="/_gallery" element={<Gallery />} />
         <Route element={<Shell />}>
@@ -58,6 +60,9 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           <Route path="/templates/chains/:chain" element={<ChainsPage />} />
           <Route path="/templates/chains/:chain/nodes/:node" element={<ChainsPage />} />
           <Route path="/_tokens" element={<TokenSheet />} />
+          {ALIASES.map(([from, to]) => (
+            <Route key={from} path={from} element={<Alias to={to} />} />
+          ))}
           <Route path="*" element={<Placeholder label="Not found" note="There is no page at this address in the new UI." />} />
         </Route>
       </Routes>
