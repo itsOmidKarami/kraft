@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+from kraft import apply
 from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft.api import config_check, deps
@@ -155,6 +156,7 @@ async def after_publish(app, written) -> None:
     if "intake.yaml" in written:
         st = app.state
         st.intake = config_mod.Intake.load(st.templates_dir / "intake.yaml").model_dump()
+        apply.record(st, "intake.yaml")
         await intake_mod.restart(app)
 
 

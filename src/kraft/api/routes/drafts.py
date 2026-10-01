@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
+from kraft import apply as apply_mod
 from kraft import config as config_mod
 from kraft import store as items
 from kraft.api import api_router, deps
@@ -266,6 +267,7 @@ async def publish_draft(area: str, key: str, request: Request):
         except Exception as exc:  # noqa: BLE001 -- the files are written: say so, keep the draft
             raise HTTPException(500, f"published, but applying it failed: {exc}") from exc
         await st.db.write(lambda c: store.delete(c, area, key))
+    apply_mod.notify(request.app)
     _, _, result = _state(st, area, key, None, [])
     return {"published": sorted(draft["files"]), "result": result}
 

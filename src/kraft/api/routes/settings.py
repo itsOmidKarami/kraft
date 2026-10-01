@@ -8,6 +8,7 @@ import yaml
 from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from kraft import apply as apply_mod
 from kraft import auth as auth_mod
 from kraft import config as config_mod
 from kraft import harness as harness_mod
@@ -410,8 +411,7 @@ async def reload_templates_endpoint(request: Request):
     chain past a `maxima:` ceiling is a lint issue; a policy that does not
     validate is refused and the running one kept (Kraft-m86uq)."""
     st = request.app.state
-    refused_policy = deps.reload_policy(st)
-    deps._reload_templates(st)
+    refused_policy = await apply_mod.reload(request.app)
     ids = st.library.chain_ids if st.library is not None else ()
     valid = sorted(id for id in ids if id not in st.invalid_chains)
     return {
@@ -577,7 +577,9 @@ async def put_intake(body: IntakeBody, request: Request):
     data = body.model_dump()
     config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
     st.intake = data
+    apply_mod.record(st, "intake.yaml")
     await intake_mod.restart(app_)
+    apply_mod.notify(app_)
     return data
 
 
@@ -620,6 +622,7 @@ async def put_access(body: AccessBody, request: Request):
         raise HTTPException(422, why)
     config_mod.Access.model_validate(access).save(st.templates_dir / "access.yaml")
     st.access = access
+    apply_mod.notify(request.app)
     # Only once the new hash is durable: revoking first and then failing to write
     # would sign everyone out while leaving the *old* password live.
     if body.password:
