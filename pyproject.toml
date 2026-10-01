@@ -57,7 +57,7 @@ dependencies = [
     # client.py imports these at runtime, not just under test. httpx was a dev
     # dependency until the agent surface existed; a `kraft mcp` installed from a
     # wheel has no dev group to fall back on.
-    "httpx>=0.28.1",
+    "httpx>=0.28.1,<1",
     # mcp 2.x: FastMCP was renamed MCPServer and list_tools() became sync, so
     # this is a floor on the API kraft/mcp.py actually uses, not just on bugfixes.
     "mcp>=2",
