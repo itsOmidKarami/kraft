@@ -37,6 +37,11 @@ describe("chainGraph", () => {
     expect(chainGraph(item, [], NOW).nodes[2]).toMatchObject(want);
   });
 
+  it("draws a gate waiting for you as the current gate (the amber diamond)", () => {
+    const item = detail({ current_node_id: "plan_approval", display_status: "needs_you", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } });
+    expect(chainGraph(item, [], NOW).nodes[1]).toMatchObject({ kind: "gate", state: "current", sub: "needs you" });
+  });
+
   it("hides the escalation badge on a capped node, shows it elsewhere", () => {
     const esc = sess("verification", { hook_point: "escalation" });
     const capped = detail({ display_status: "needs_you", stop: { kind: "cap", node: "verification", resume_at: null, reason: null }, worker_sessions: [esc] });

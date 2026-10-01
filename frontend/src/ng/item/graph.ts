@@ -49,7 +49,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
     if (capped === n.id) return { ...out, state: "current", capped: true, attemptStopped: true, meta: "capped", metaTone: "red" };
     if (status === "cancelled") return { ...out, state: "plain", meta: "cancelled" };
     if (status === "paused") return { ...out, state: "current", paused: true, sub: "paused", subTone: "muted" };
-    if (status === "needs_you") return { ...out, state: n.kind === "gate" ? "amber" : "current", sub: "needs you", subTone: "amber" };
+    if (status === "needs_you") return { ...out, state: "current", sub: "needs you", subTone: "amber" };
     // The attempt in flight: the latest session to start on the node.
     const started = work.map((s) => s.started_at).filter(Boolean).sort().at(-1);
     const step = item.summary?.step;
