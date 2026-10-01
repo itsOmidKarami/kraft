@@ -73,17 +73,20 @@ and a key the file leaves out takes its default.
 ### `palette` is legacy
 
 Before 1.5, `palette` (`nocturne`, `rose`, `forest`, `amber` or `slate`) chose
-the colours. Kraft still reads it, and no interface uses it. The first start
-after the upgrade migrates it once:
+the colours. No interface writes it any more, and Kraft converts it once at
+startup, before anything reads the theme:
 
 - `palette` is removed, and `surface`, `accent` and `colour_amount` are written
   to draw the same look. `nocturne` and `rose` become `ink` with a `violet`
   accent, `forest` becomes `moss` with `green`, `amber` becomes `sand` with
   `amber`, and `slate` becomes `slate` with `blue`. The amount of colour is the
-  file's own `colour_amount`, else `full`.
+  file's own `colour_amount`, else `full`. A file that already names its own
+  `surface` just loses the `palette`.
 - The original bytes are saved as `theme.yaml.pre-ux2` first. An existing copy
   is never overwritten.
-- A file with no `palette`, a missing file, and one that does not parse or
-  holds a value Kraft does not know are left alone.
+- A missing file, a file with no `palette`, and one that does not parse or
+  holds a value Kraft does not know are left alone. With no `theme.yaml` at
+  all, the look is `ink` with `violet` at `full`.
 
-A `palette` added after the migration is ignored.
+A `palette` that reappears, from an old browser tab's save or a hand edit, is
+read as it was and converted the same way at the next start.
