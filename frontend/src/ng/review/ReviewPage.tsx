@@ -18,7 +18,7 @@ import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
 import { Toolbar } from "./Toolbar";
 import { useReviewPlace } from "./url";
-import { useCompare, useThreads, useViewed } from "./useReview";
+import { useArtifact, useCompare, useThreads, useViewed } from "./useReview";
 // The item header's styles live with it; this page can be the first one loaded.
 import "../item/item.css";
 import "./review.css";
@@ -63,7 +63,8 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   // With no file chosen, the tree's first: what one-file mode shows.
   const current = place.file && files.some((f) => f.path === place.file) ? place.file : folders(files)[0]?.files[0]?.path ?? null;
   const comments = useComments({ itemId: item.id, compare: compare.state === "ready" ? compare.data : null, files, patch, threads: threadList, reload: threads.reload });
-  const submit = useSubmit(item, place.gate, threadList, threads.reload);
+  const artifact = useArtifact(item);
+  const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null);
   // Finish your review: closed, or open on an outcome (the bar's Request changes opens it there).
   const [finish, setFinish] = useState<{ outcome?: ReviewOutcome } | null>(null);
   const select = (file: string) => {
@@ -151,6 +152,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           files={files}
           threads={threadList}
           isViewed={viewed.isViewed}
+          doc={artifact}
           approve={() => submit("approve", "")}
           onReviewChanges={(file) => setPlace({ doc: false, ...(file && { file }) })}
           onRequestChanges={() => {
