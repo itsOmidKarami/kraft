@@ -13,7 +13,7 @@
 | src/kraft/adapters/forge/\_\_init\_\_.py     |        8 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py               |       45 |        0 |    100% |           |
 | src/kraft/adapters/forge/gh.py               |      156 |       14 |     91% |172, 252, 276, 282-292, 314-315, 370, 421 |
-| src/kraft/adapters/forge/git.py              |      132 |        4 |     97% |47, 288-289, 467 |
+| src/kraft/adapters/forge/git.py              |      132 |        5 |     96% |47, 282-289, 467 |
 | src/kraft/adapters/forge/glab.py             |      180 |        9 |     95% |239-240, 327, 359-360, 426, 429, 442, 464 |
 | src/kraft/adapters/forge/models.py           |      170 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py               |      124 |        5 |     96% |74, 197, 249, 315-316 |
@@ -88,7 +88,7 @@
 | src/kraft/executor/dispatch.py               |      688 |       21 |     97% |216, 253, 320, 342-343, 429, 453, 549, 560, 563, 594-595, 746-747, 963-964, 1286, 1294, 1944, 2296, 2302 |
 | src/kraft/executor/entry.py                  |      122 |        1 |     99% |       313 |
 | src/kraft/executor/fallback.py               |       82 |        0 |    100% |           |
-| src/kraft/executor/gates.py                  |      326 |       12 |     96% |95, 223, 338, 341, 344, 347, 587, 720, 802, 855-856, 1154 |
+| src/kraft/executor/gates.py                  |      326 |       11 |     97% |95, 223, 338, 341, 344, 347, 587, 720, 855-856, 1154 |
 | src/kraft/executor/prompts.py                |      197 |        6 |     97% |144-150, 237, 670 |
 | src/kraft/executor/read\_only.py             |       75 |        2 |     97% |    70, 83 |
 | src/kraft/executor/resuming.py               |       82 |        1 |     99% |       168 |
