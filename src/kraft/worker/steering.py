@@ -45,12 +45,12 @@ class Steering(BaseModel):
     #: money on each.
     MAX_BYTES: ClassVar[int] = 8192
     HEADING: ClassVar[str] = "\n\n## Project standards\n\n"
-    _SEP: ClassVar[str] = "\n\n"
+    SEP: ClassVar[str] = "\n\n"
 
     @classmethod
     def block(cls, bodies: Sequence[str]) -> str:
         """The text a launch's context carries for these bodies, `""` for none."""
-        return cls.HEADING + cls._SEP.join(bodies) if bodies else ""
+        return cls.HEADING + cls.SEP.join(bodies) if bodies else ""
 
     @classmethod
     def check_budget(cls, bodies: Sequence[str], *, where: str) -> None:

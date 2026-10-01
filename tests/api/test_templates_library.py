@@ -181,3 +181,58 @@ def test_a_chain_already_broken_does_not_block_an_unrelated_save(client, templat
     text = path.read_text() + "# unrelated\n"
     assert client.put("/api/templates/library", json={"text": text}).status_code == 200
     assert path.read_text() == text
+
+
+# ── GET /templates/steering/preview (B23) ──
+
+
+def _demo_repo(templates_dir):
+    """A repository `demo` that selects a steering profile of its own."""
+    entry = {
+        "path": "/srv/demo",
+        "name": "demo",
+        "steering": ["never-signal-processes-you-didnt-start"],
+        "intent_dir": "docs/intent",
+    }
+    (templates_dir / "repos.yaml").write_text(yaml.safe_dump({"repos": [entry]}))
+
+
+def _preview(client, **query):
+    params = {"chain": "default", "task": "spec.main.author", "repo": "demo"} | query
+    return client.get("/api/templates/steering/preview", params=params)
+
+
+@pytest.mark.api_client(edit_templates=_demo_repo)
+def test_the_steering_preview_shows_a_task_launch_section_by_section(client):
+    response = _preview(client)
+    assert response.status_code == 200, response.text
+    sections = response.json()["sections"]
+
+    assert [(s["kind"], s["source"]) for s in sections] == [
+        ("contract", "kraft"),
+        ("document", "spec"),
+        ("skill", "kraft:spec"),
+        ("intent", "docs/intent"),
+        ("steering", "repo:never-signal-processes-you-didnt-start"),
+        ("steering", "task:project-standards"),
+    ]
+    contract, *_, task_steering = (s["text"] for s in sections)
+    assert "Work item: <work item id>" in contract and "Worker session: <session id>" in contract
+    assert "Keep changes focused." in task_steering
+
+
+@pytest.mark.api_client(edit_templates=_demo_repo)
+@pytest.mark.parametrize(
+    "query",
+    [{"chain": "no-such-chain"}, {"task": "spec.main.nobody"}, {"repo": "elsewhere"}],
+    ids=["chain", "task", "repo"],
+)
+def test_the_steering_preview_404s_what_it_cannot_find(client, query):
+    assert _preview(client, **query).status_code == 404
+
+
+@pytest.mark.api_client(edit_templates=_demo_repo)
+def test_the_steering_preview_refuses_a_task_that_is_not_an_agent(client):
+    response = _preview(client, task="verification.tests.test_changed_scopes")
+    assert response.status_code == 422
+    assert "not an agent task" in response.json()["detail"]

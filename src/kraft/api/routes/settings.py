@@ -10,10 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
+from kraft import harness as harness_mod
 from kraft import intake as intake_mod
 from kraft import policy as policy_mod
+from kraft import skill as skill_mod
 from kraft import store
-from kraft.adapters import beads
+from kraft.adapters import agent, beads
 from kraft.api import api_router, config_check, deps, perimeter
 from kraft.api.config_check import IntakeBody
 from kraft.templates import catalogue, positions
@@ -24,7 +26,8 @@ from kraft.templates.library import (
     TemplateLibrary,
     TemplateLibraryError,
 )
-from kraft.templates.models import GateNode, ResolvedChain
+from kraft.templates.models import AgentInput, AgentTask, GateNode, ResolvedChain
+from kraft.worker import steering as steering_mod
 
 # ══ settings (design 5a–5e) ═════════════════════════════════════════════════
 #
@@ -186,6 +189,68 @@ async def get_resolved_template(tid: str, request: Request):
         return _resolved_view(library.resolve_chain(tid))
     except TemplateLibraryError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@api_router.get("/templates/steering/preview")
+async def steering_preview(chain: str, task: str, repo: str, request: Request):
+    """What one agent task of a saved chain would read at launch in one
+    repository (`repo`: its entry's `name` or `path`), section by section
+    (`agent.context_sections`), resolved the way dispatch resolves it. The
+    per-launch values are placeholders; nothing launches."""
+    st = request.app.state
+    library = deps.library_or_503(st)
+    if chain not in library.chain_ids:
+        raise HTTPException(404, f"unknown chain template {chain!r}")
+    try:
+        resolved = library.resolve_chain(chain)
+    except TemplateLibraryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    found = next(((n, t) for n in resolved.nodes for t in n.tasks() if t.path == task), None)
+    if found is None:
+        raise HTTPException(404, f"chain {chain!r} has no task {task!r}")
+    node, rt = found
+    if not isinstance(rt.task, AgentTask):
+        raise HTTPException(422, f"{task} is a {rt.task.kind} task, not an agent task")
+    try:
+        repos = config_mod.load_repos(deps.repos_path(st))
+    except config_mod.ConfigError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    entry = next((r for r in repos if repo in (r.name, r.path)), None)
+    if entry is None:
+        raise HTTPException(404, f"no connected repository {repo!r}")
+    harnesses = harness_mod.load(None)
+    try:
+        inv = agent.resolve_agent_task(
+            rt.task,
+            entry,
+            deps.library_steering(st),
+            skills_dir=st.skills_dir,
+            harnesses=harnesses,
+            steering=resolved.steering,
+        )
+    except (agent.HarnessUnavailable, skill_mod.SkillError, steering_mod.SteeringError) as exc:
+        raise HTTPException(422, f"{task}: {exc}") from exc
+    # `inv.steering_texts` is the repository's then the task's, as launched.
+    names = [f"repo:{n}" for n in entry.steering] + [f"task:{n}" for n in rt.task.steering]
+    sections = agent.context_sections(
+        usage_source=harnesses.valid[inv.harness].capabilities["usage"].source,
+        title="<title>",
+        task_instruction="<task instruction>",
+        repo_path=entry.path,
+        work_item_id="<work item id>",
+        node_id=node.id,
+        hook_point=rt.path,
+        session_id="<session id>",
+        artifact=rt.task.produces,
+        review_package=(
+            "<review package>" if AgentInput.REVIEW_PACKAGE in rt.task.inputs else None
+        ),
+        method_text=inv.method_text,
+        skill=rt.task.skill,
+        intent_dir=entry.intent_dir,
+        steering=list(zip(names, inv.steering_texts, strict=True)),
+    )
+    return {"sections": [{"kind": k, "source": s, "text": t} for k, s, t in sections]}
 
 
 class ResolveBody(BaseModel):

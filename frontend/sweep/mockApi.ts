@@ -329,6 +329,14 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
+    /* the steering preview (B23): one agent task's launch context, section by section */
+    if (p === "/templates/steering/preview") return json(route, { sections: [
+      { kind: "contract", source: "kraft", text: `You are working on a Kraft work item.\nTitle: <title>\nTask: <task instruction>\nRepo: /Users/me/code/kraft\nWork item: <work item id>\nNode: ${q.get("task")?.split(".")[0] ?? "spec"}\nHook point: ${q.get("task") ?? ""}\nWorker session: <session id>\n` },
+      { kind: "document", source: "spec", text: "\n\nWrite the spec to .engineering/specs/<work item id>.md." },
+      { kind: "skill", source: "kraft:spec", text: "\n\n## Method\n\nUse the kraft:spec skill." },
+      { kind: "steering", source: "repo:never-signal-processes-you-didnt-start", text: "\n\n## Project standards\n\nNever signal a process you did not start." },
+      { kind: "steering", source: "task:project-standards", text: "\n\nKeep changes focused. Run the relevant checks before finishing.\n" },
+    ] });
     if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1]));
       if (!tpl) return json(route, { detail: `unknown chain template ${JSON.stringify(m[1])}` }, 404);
