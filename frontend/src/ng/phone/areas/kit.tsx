@@ -1,5 +1,5 @@
 import { ChevronRight, Pencil, Plus, type LucideIcon } from "lucide-react";
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { showToast } from "../../ui/Toast";
 import { ChoiceSheet, EditSheet, useSheet, type Option } from "../nav/Sheet";
@@ -26,17 +26,26 @@ export interface RowSpec {
   disabled?: boolean;
   danger?: boolean;
   onClick?: () => void;
+  /** A save-on-change row's refusal, in words, under the label. */
+  error?: string;
+  /** Something to draw before the label (a swatch). */
+  lead?: ReactNode;
+  /** One of a set of rows that is the choice: a radio, with a ✓ when it is the one. */
+  selected?: boolean;
 }
 
 function RowBody({ r }: { r: RowSpec }) {
   const Icon = r.icon;
   return (
     <>
+      {r.lead}
       {Icon && <span className="ph-row-icon"><Icon size={15} aria-hidden="true" /></span>}
       <span className="ph-row-text">
         <span className={`ph-row-label${r.mono ? " ph-mono" : ""}`}>{r.label}</span>
         {r.sub && <span className="ph-row-hint">{r.sub}</span>}
+        {r.error && <span className="ph-row-error" role="alert">{r.error}</span>}
       </span>
+      {r.selected && <span className="ph-row-check" aria-hidden="true">✓</span>}
       {r.chips && <span className="ph-chips-end">{r.chips.map((c) => <span key={c.label} className={`ph-chipword${c.tone ? ` ph-tone-${c.tone}` : ""}`}>{c.label}</span>)}</span>}
       {r.value != null && r.value !== "" && (
         <span className={`ph-row-value${r.changed ? " ph-is-changed" : ""}${r.mono ? " ph-mono" : ""}`}>
@@ -60,7 +69,7 @@ export function Row({ r }: { r: RowSpec }) {
     );
   if (r.to) return <Link to={r.to} className="ph-row"><RowBody r={r} /></Link>;
   const act = r.onEdit ?? r.onClick;
-  if (act) return <button type="button" disabled={r.disabled} className={`ph-row${r.danger ? " ph-is-danger" : ""}`} onClick={act}><RowBody r={r} /></button>;
+  if (act) return <button type="button" role={r.selected != null ? "radio" : undefined} aria-checked={r.selected} disabled={r.disabled} className={`ph-row${r.danger ? " ph-is-danger" : ""}`} onClick={act}><RowBody r={r} /></button>;
   return <div className="ph-row ph-row-static"><RowBody r={r} /></div>;
 }
 
@@ -105,8 +114,12 @@ export function useEditor() {
     setError(null);
     const err = await spec.set(v);
     setBusy(false);
-    if (err) setError(err);
-    else sheet.close();
+    if (!err) return sheet.close();
+    // A choice sheet has no line for the refusal: say it, and leave the control as it was.
+    if (spec.kind === "choice") {
+      showToast(err);
+      sheet.close();
+    } else setError(err);
   };
   const pick = async (m: Extract<Edit, { kind: "menu" }>, v: string) => {
     const next = m.pick(v);
@@ -130,4 +143,32 @@ export function useEditor() {
       )
     ) : null;
   return { edit, node, sheet };
+}
+
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Save on change (Decisions §13): each control runs its own write; a refusal is kept per key to show under that row, a success shows `saved` beside it for a moment. */
+export function useSaves() {
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
+  const [saved, setSaved] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const run = useCallback(async (key: string, write: () => Promise<unknown>): Promise<string | null> => {
+    setErrors((e) => ({ ...e, [key]: null }));
+    try {
+      await write();
+      setSaved(key);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setSaved(null), 1800);
+      return null;
+    } catch (e) {
+      setErrors((x) => ({ ...x, [key]: message(e) }));
+      return message(e);
+    }
+  }, []);
+  /** The row fields a save leaves behind: the refusal, or `saved`. */
+  const sheet = useSheet();
+  // Under an open sheet the refusal is the sheet's to show, so it is not announced twice.
+  const mark = (key: string): Pick<RowSpec, "error" | "chips"> => ({ ...(errors[key] && sheet.openId === null ? { error: errors[key]! } : {}), ...(saved === key ? { chips: [{ label: "saved", tone: "ok" as const }] } : {}) });
+  return { run, mark, errors };
 }

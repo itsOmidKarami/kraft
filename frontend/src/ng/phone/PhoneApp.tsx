@@ -5,7 +5,11 @@ import { Item } from "./item/Item";
 import { ChainNodeView, ChainsList, ChainView } from "./areas/Chains";
 import { HarnessesList, HarnessView, ProfileView } from "./areas/Harnesses";
 import { LibraryComponentView, LibraryList } from "./areas/Library";
+import { AboutScreen } from "./areas/About";
+import { AccessScreen } from "./areas/Access";
+import { AppearanceScreen } from "./areas/Appearance";
 import { IntakeScreen, ScheduleScreen } from "./areas/Intake";
+import { NotificationChannel, NotificationsList } from "./areas/Notifications";
 import { PolicyScreen } from "./areas/Policy";
 import { ReposList, RepoView } from "./areas/Repos";
 import { More } from "./more/More";
@@ -65,6 +69,11 @@ export function PhoneApp() {
           <Route path="/settings/policy/:section" element={<PolicyScreen />} />
           <Route path="/settings/auto-intake" element={<IntakeScreen />} />
           <Route path="/settings/auto-intake/schedules/:index" element={<ScheduleScreen />} />
+          <Route path="/settings/notifications" element={<NotificationsList />} />
+          <Route path="/settings/notifications/:channel" element={<NotificationChannel />} />
+          <Route path="/settings/access" element={<AccessScreen />} />
+          <Route path="/settings/appearance" element={<AppearanceScreen />} />
+          <Route path="/settings/about" element={<AboutScreen />} />
           <Route path="/settings/*" element={<Soon title="Settings" />} />
           {/* The shipped addresses that moved (spec §11.2), after the screens: /search is a phone screen and wins over its alias to the board. */}
           {ALIASES.map(([from, to]) => <Route key={from} path={from} element={<Alias to={to} />} />)}

@@ -43,6 +43,7 @@ const ALLOWED = [
   "templates/draft/types",
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
+  "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
   "settings/policy/ctx", // the policy sections' shared context type and problemAt
   "settings/policy/keys", // the set_value keys the Policy page sends
   "settings/policy/sections", // which section a key or a problem belongs to
@@ -108,9 +109,9 @@ describe("ng/phone imports", () => {
 });
 
 describe("the apply restart call", () => {
-  it("is made from one place in ng/phone, More, behind its own confirm", () => {
+  it("is made from two places in ng/phone, More and Access, each behind its own confirm", () => {
     const hits = sources(join(ng, "phone")).filter((f) => /runRestart\(/.test(readFileSync(f, "utf-8")));
-    expect(hits.map((f) => relative(ng, f))).toEqual([join("phone", "more", "More.tsx")]);
+    expect(hits.map((f) => relative(ng, f)).sort()).toEqual([join("phone", "areas", "Access.tsx"), join("phone", "more", "More.tsx")]);
     expect(sources(join(ng, "phone")).filter((f) => readFileSync(f, "utf-8").includes("/apply/restart"))).toEqual([]);
   });
 });
