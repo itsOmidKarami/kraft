@@ -27,7 +27,7 @@ export const cells: Case[] = [
   { screen: "ng-item-cap", variant: "no-limit", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, null) },
   { screen: "ng-item-cap", variant: "no-limit", data: "default", widths: [768], run: (c) => capped(c, null) },
   { screen: "ng-item-cap", variant: "limit", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS) },
-  { screen: "ng-item-cap", variant: "limit", data: "long", widths: [1280], run: (c) => capped(c, ATTEMPTS) },
+  { screen: "ng-item-cap", variant: "limit-long", data: "long", widths: [1280], run: (c) => capped(c, ATTEMPTS) },
   // The editor: a fix loop's attempts with a maximum, the work item's time cap with none, a refusal inline.
   { screen: "ng-item-cap", variant: "editor-attempts", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => capped(c, ATTEMPTS, open) },
   { screen: "ng-item-cap", variant: "editor-attempts", data: "default", widths: [768, 1024], run: (c) => capped(c, ATTEMPTS, open) },
