@@ -25,6 +25,8 @@ export interface Case {
   /** With `locked`: what the mock's POST /login answers. */
   login?: "ok" | "wrong" | "locked";
   fullPage?: boolean;
+  /** Not the screen's first-case ~light cell at 1280: a phone-only screen has no 1280 shape (ux2-W17). */
+  noLight?: true;
   /** Also shoot `~light-firstpaint` at 1280: reload and screenshot at DOMContentLoaded, 0ms settle. */
   firstpaint?: boolean;
   /** More of the mock's options (ux2-W6: the /ng board's fixtures and states). */

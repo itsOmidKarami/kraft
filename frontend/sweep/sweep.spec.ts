@@ -51,7 +51,7 @@ for (const cs of CASES) {
     if (Object.keys(shell).length && width !== 1280 && cs.shells === SHELLS_1280) continue;
     combos.push([width, shell]);
   }
-  if (FIRST_OF_SCREEN.has(cs) && !combos.some(([w, s]) => w === 1280 && s.mode === "light")) combos.push([1280, { mode: "light" }]);
+  if (FIRST_OF_SCREEN.has(cs) && !cs.noLight && !combos.some(([w, s]) => w === 1280 && s.mode === "light")) combos.push([1280, { mode: "light" }]);
   if (cs.firstpaint) combos.push([1280, { mode: "light", firstpaint: true }]);
   for (const [width, shell] of combos) {
     if (WIDTHS && !WIDTHS.includes(width)) continue;
