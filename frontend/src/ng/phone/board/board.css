@@ -3,7 +3,7 @@
 .ph-pill { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 22px; background: transparent; font-size: 12.5px; color: var(--text-sub); cursor: pointer; }
 .ph-fab { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 22px; background: var(--text); color: var(--bg); }
 .ph-chips { flex: none; display: flex; gap: 8px; padding: 6px 16px 12px; overflow-x: auto; }
-.ph-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 22px; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
+.ph-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 22px; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
 .ph-chip.ph-is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
 .ph-chip-n { font-size: 11px; opacity: .7; }
 .ph-board { gap: 6px; padding-top: 0; }

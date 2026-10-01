@@ -1,7 +1,7 @@
 /* The phone item screen, composers and the chain list (W17 C). */
 .ph-item-top { display: flex; flex-direction: column; gap: 10px; }
 .ph-item-tagline { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ph-tag { flex: none; padding: 3px 8px; border-radius: 5px; font: 600 10.5px system-ui, sans-serif; letter-spacing: .06em; background: var(--line); color: var(--text-sub); }
+.ph-tag { flex: none; padding: 3px 8px; border-radius: 5px; font: 600 10.5px system-ui, sans-serif; letter-spacing: .06em; border: 1px solid currentColor; background: transparent; color: var(--text-sub); }
 .ph-tag-info { color: var(--info); }
 .ph-tag-warn { color: var(--warn); }
 .ph-tag-bad { color: var(--bad); }
@@ -10,7 +10,7 @@
 .ph-item-title { margin: 0; font-size: 21px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-brief { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ph-brief.ph-is-open { -webkit-line-clamp: 20; }
-.ph-linkbtn { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; padding: 0; border: 0; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
+.ph-linkbtn { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; min-width: 44px; padding: 0; border: 0; background: transparent; font-size: 13px; color: var(--text-sub); cursor: pointer; }
 .ph-underline { text-decoration: underline; text-underline-offset: 3px; }
 .ph-add { color: var(--ok); }
 .ph-del { color: var(--bad); }

@@ -1,6 +1,6 @@
 .ph-log { display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--side); font: 12px/1.5 ui-monospace, Menlo, monospace; }
 .ph-log-line { display: flex; gap: 8px; }
-.ph-log-t { flex: none; min-width: 30px; color: var(--text-faint); }
+.ph-log-t { flex: none; min-width: 30px; color: var(--text-muted); }
 .ph-log-src { flex: none; width: 40px; color: var(--text-muted); }
 .ph-src-agent { color: var(--info); }
 .ph-src-tool { color: var(--ok); }
