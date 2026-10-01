@@ -21,7 +21,7 @@ describe("Policy limits (N.1)", () => {
     expect(within(instance).getByRole("button", { name: /^per day/ })).toHaveTextContent("$50");
     expect(within(instance).getByRole("button", { name: /^per item/ })).toHaveTextContent("$10");
     const work = screen.getByRole("region", { name: "work item" });
-    expect(within(work).getByRole("button", { name: /^running/ })).toHaveTextContent("default 480 min · max 1440 min");
+    expect(within(work).getByRole("button", { name: /^running/ })).toHaveTextContent("default 480 min max 1440 min");
     expect(within(work).getByRole("button", { name: /^tokens/ })).toHaveTextContent("max 2,000,000");
     expect(within(screen.getByRole("region", { name: "nodes" })).getByRole("button", { name: /^running/ })).toHaveTextContent("max from work item");
   });
@@ -29,7 +29,7 @@ describe("Policy limits (N.1)", () => {
   it("says no bound for a null maximum, and does not draw 'set below policy'", async () => {
     open();
     const work = await screen.findByRole("region", { name: "work item" });
-    expect(within(work).getByRole("button", { name: /^wall clock/ })).toHaveTextContent("default not set · max no bound");
+    expect(within(work).getByRole("button", { name: /^wall clock/ })).toHaveTextContent("default not set max no bound");
     expect(screen.queryByText(/below policy/i)).toBeNull();
   });
 

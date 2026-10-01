@@ -54,3 +54,5 @@
 .ph-notice-body { color: var(--text-sub); overflow-wrap: anywhere; }
 .ph-notice-link { color: var(--text-muted); font: 11.5px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
 .ph-command { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--side); font: 12.5px/1.5 ui-monospace, Menlo, monospace; color: var(--text); user-select: all; overflow-wrap: anywhere; }
+.ph-row-value { white-space: pre-line; }
+a.ph-row, a.ph-row:hover { color: inherit; text-decoration: none; }

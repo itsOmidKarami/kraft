@@ -91,7 +91,7 @@ function pair({ ctx, edit }: Edits, label: string, dk: KeySpec, dv: number | nul
   return {
     key: `${dk.key}|${mk.key}`,
     label,
-    value: `default ${show(dk.unit, dv)} · max ${show(mk.unit, mv, true)}`,
+    value: `default ${show(dk.unit, dv)}\nmax ${show(mk.unit, mv, true)}`,
     sub: bad ? bad.message : sub,
     changed: !!ch,
     chips: bad ? [{ label: "problem", tone: "bad" }] : undefined,
