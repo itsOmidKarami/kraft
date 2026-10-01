@@ -25,7 +25,7 @@ from templates.test_workspace_publication import (
     _repos,
 )
 
-from kraft import executor, store
+from kraft import events, executor, store
 from kraft.adapters import forge
 from kraft.executor.context import LaunchContext
 from kraft.policy import InstancePolicy, InstancePolicyInput, SandboxPolicy, TemplatePolicyOverride
@@ -125,7 +125,10 @@ async def test_a_sandboxed_workspace_item_walks_to_merged_with_its_pointer_bumpe
         if status != "waiting":
             break
 
-    assert status == "completed"
+    # A stop names its own reason: say it, so a flaky runner shows why instead of "needs_human".
+    seen = database.read(lambda c: events.read_after(c, 0, row["id"]))
+    stops = [e["payload"] for e in seen if e["type"] == "work_item_needs_human"]
+    assert status == "completed", f"stopped: {stops}; events: {[e['type'] for e in seen][-25:]}"
     assert _repos(database, row) == {"root": "merged", "submodule": "merged"}
     assert [e for e in landing.order if e[0] == "merge"] == [("merge", "pkg"), ("merge", wt.name)]
     merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
