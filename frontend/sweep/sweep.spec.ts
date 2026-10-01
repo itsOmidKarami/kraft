@@ -2,7 +2,7 @@ import { test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { buildScenario, settingsFor, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
-import { installMocks } from "./mockApi";
+import { installMocks, type MockOptions } from "./mockApi";
 import { NG_NOW, NG_SCENARIOS } from "./ngItems";
 import { chromeRects, runChecks, scrollAllToBottom, type Checks } from "./checks";
 
@@ -46,6 +46,8 @@ interface Case {
   fullPage?: boolean;
   /** Also shoot `~light-firstpaint` at 1280: reload and screenshot at DOMContentLoaded, 0ms settle. */
   firstpaint?: boolean;
+  /** More of the mock's options (ux2-W6: the /ng board's fixtures and states). */
+  mock?: MockOptions;
   run: (c: Ctx) => Promise<void>;
 }
 
@@ -117,6 +119,12 @@ async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { si
 async function ngItem(c: Ctx, sc: string, opts: { tail?: string; side?: "pinned" | "rail"; then?: (p: Page) => Promise<void> } = {}) {
   await c.page.clock.setFixedTime(new Date(NG_NOW));
   await ng(c, `/ng/work-items/${c.S.ng[sc]}${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
+  if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
+}
+/** The /ng board (ux2-W6), served its own fixtures (`mock: { ngBoard }`), the clock fixed at NG_NOW so ages read the same every run. */
+async function ngBoard(c: Ctx, opts: { tail?: string; side?: "pinned" | "rail"; then?: (p: Page) => Promise<void> } = {}) {
+  await c.page.clock.setFixedTime(new Date(NG_NOW));
+  await ng(c, `/ng/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
 /** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
@@ -332,6 +340,9 @@ const CASES: Case[] = [
     await settle(c.page, 300);
   } },
 
+  // ux2-W6: the board at /ng, its own fixtures (ngBoard.ts).
+  { screen: "ng-board", variant: "default", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c) },
+
   // ux2-W5: the item page, every scenario the prototype draws (plus paused), at 1280 and with long data.
   // Three of them also at 1024 and 1920, light and 700px tall.
   ...NG_SCENARIOS.map<Case>((sc) => {
@@ -399,7 +410,7 @@ for (const cs of CASES) {
         const h = shell.short ? 700 : h0;
         await page.setViewportSize({ width: w, height: h });
         const S = buildScenario(cs.data, { mode: shell.mode, density: shell.density, group_by: shell.group_by });
-        await installMocks(page, S, { locked: cs.locked, login: cs.login });
+        await installMocks(page, S, { locked: cs.locked, login: cs.login, ...cs.mock });
         await page.addInitScript((sb) => {
           if (sb) localStorage.setItem("kraft.sidebar_collapsed", sb === "rail" ? "true" : "false");
           else localStorage.removeItem("kraft.sidebar_collapsed");

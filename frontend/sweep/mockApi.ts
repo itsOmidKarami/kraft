@@ -6,6 +6,8 @@ export interface MockOptions {
   locked?: boolean;
   /** What POST /login answers while locked: 200, a 401, or a 429 with Retry-After (default 200). */
   login?: "ok" | "wrong" | "locked";
+  /** ux2-W6: GET /work-items answers the /ng board's fixtures (`S.ngBoard`, `S.ngArchived`); "empty" answers none. */
+  ngBoard?: boolean | "empty";
 }
 
 /** A chain file as its author would write it: one mapping per node, nulls left out. */
@@ -50,7 +52,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
 
     /* work items */
     if (p === "/work-items" && method === "GET") {
-      const list = q.get("archived") === "true" ? S.archived : S.items;
+      const arch = q.get("archived") === "true";
+      const list = opts.ngBoard ? (opts.ngBoard === "empty" ? [] : arch ? S.ngArchived : S.ngBoard) : arch ? S.archived : S.items;
       return json(route, { items: list, cursor: 4242 });
     }
     if (p === "/work-items" && method === "POST" && q.get("dry_run")) {

@@ -27,6 +27,8 @@ interface Row {
   open: () => void;
 }
 
+/** The board's composer (W6 brief A.2). */
+const NEW_ITEM = { path: "/?new=1", label: "New work item" };
 const has = (hay: string, q: string) => hay.toLowerCase().includes(q.toLowerCase());
 const SECTIONS: Record<Row["section"], string> = { needs: "Needs you", items: "Work items", docs: "Documents", beads: "Beads", goto: "Go to" };
 
@@ -35,17 +37,17 @@ function Snippet({ text }: { text: string }) {
   return <>{text.split(/(\[[^\]]*\])/).map((p, i) => (p.startsWith("[") && p.endsWith("]") ? <mark key={i}>{p.slice(1, -1)}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
 }
 
-const itemRow = (i: WorkItem, section: "needs" | "items"): Row => ({
+const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => void): Row => ({
   id: `${section}:${i.id}`,
   section,
   label: i.title,
   sub: [repoName(i.repo), section === "needs" ? i.pending_gate : i.status].filter(Boolean).join(" · "),
-  note: "opens the work item on the current UI",
-  open: () => openShipped(`/work-items/${i.id}`),
+  note: "opens the work item",
+  open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
 });
 
-/** The ⌘K palette. Items, documents and beads open on the shipped UI until the
- *  pages they belong to are built; Go to rows stay inside /ng. */
+/** The ⌘K palette. Items and Go to rows stay inside /ng; documents and beads
+ *  open on the shipped UI until the pages they belong to are built. */
 export function SearchOverlay({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const ref = useModal<HTMLDivElement>(onClose);
@@ -96,8 +98,8 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
       : [...rest].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 2);
     const withBead = new Set(all.map((i) => i.bead_id).filter(Boolean));
     const out: Row[] = [
-      ...needsYou.map((i) => itemRow(i, "needs")),
-      ...items.map((i) => itemRow(i, "items")),
+      ...needsYou.map((i) => itemRow(i, "needs", navigate)),
+      ...items.map((i) => itemRow(i, "items", navigate)),
       ...docs.results.map((r): Row => {
         const wid = r.links[0]?.work_item_id;
         return {
@@ -120,7 +122,7 @@ export function SearchOverlay({ onClose }: { onClose: () => void }) {
           note: "starts a work item for this bead on the current UI",
           open: () => openShipped(`/?q=${encodeURIComponent(b.id)}`),
         })),
-      ...ROUTES.filter((r) => !query || has(r.label, query)).map((r): Row => ({
+      ...[...ROUTES, NEW_ITEM].filter((r) => !query || has(r.label, query)).map((r): Row => ({
         id: `goto:${r.path}`,
         section: "goto",
         label: r.label,

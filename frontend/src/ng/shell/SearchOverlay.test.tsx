@@ -13,7 +13,10 @@ import { Shell } from "./Shell";
 
 vi.mock("./nav", () => ({ openShipped: vi.fn() }));
 
-const Where = () => <span data-testid="where">{useLocation().pathname}</span>;
+const Where = () => {
+  const l = useLocation();
+  return <><span data-testid="where">{l.pathname}</span><span data-testid="search">{l.search}</span></>;
+};
 const mount = () =>
   render(
     <MemoryRouter initialEntries={["/analytics"]}>
@@ -87,7 +90,8 @@ describe("SearchOverlay", () => {
     const { user, input } = await open();
     await user.type(input, "work");
     await screen.findByText("Caching spec");
-    expect(headings()).toEqual(["Needs you", "Work items", "Documents", "Beads"]);
+    // "work" also finds the Go to row "New work item".
+    expect(headings()).toEqual(["Needs you", "Work items", "Documents", "Beads", "Go to"]);
     expect(screen.getByText("documents come from a lagging index, not live state")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Items 2" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Documents 2" })).toBeInTheDocument();
@@ -122,7 +126,8 @@ describe("SearchOverlay", () => {
       await user.click(within(screen.getByRole("listbox")).getByText(name));
     };
     await go("Gated work");
-    expect(nav.openShipped).toHaveBeenLastCalledWith("/work-items/wi_gate");
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
+    expect(nav.openShipped).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
 
     for (const [name, to] of [["Caching spec", "/work-items/wi_gate"], ["Free spec", "/search"], ["New bead", "/?q=kraft-new"]] as const) {
@@ -141,6 +146,10 @@ describe("SearchOverlay", () => {
     for (const r of ROUTES) expect(screen.getByRole("option", { name: r.label })).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Archived" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/archived");
+    await user.keyboard("{Meta>}k{/Meta}");
+    await user.click(await screen.findByRole("option", { name: "New work item" }));
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+    expect(screen.getByTestId("search")).toHaveTextContent("?new=1");
     expect(nav.openShipped).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -163,7 +172,7 @@ describe("SearchOverlay", () => {
     await user.type(input, "plain");
     await screen.findByText("Plain work");
     await user.keyboard("{Enter}");
-    expect(nav.openShipped).toHaveBeenCalledWith("/work-items/wi_plain");
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_plain");
   });
 
   it("keeps Items and Go to and says so inline when the document search fails", async () => {

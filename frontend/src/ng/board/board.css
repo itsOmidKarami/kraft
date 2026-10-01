@@ -1,0 +1,14 @@
+/* The board (ux2-W6). Colours only through theme.css tokens; breakpoints 767 / 1023 / 1279 (+ max-height 719).
+   The page never scrolls: the list scrolls inside its own region, the peek's tab body inside the pane. */
+.board-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; }
+.board-body { position: relative; flex: 1 1 0; min-height: 0; }
+.board-list { position: absolute; inset: 0; overflow: auto; }
+.board-list-inner { max-width: 1180px; margin: 0 auto; padding: 0 6px 90px; }
+
+.board-group-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 16px 14px 6px 46px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.board-count { padding: 0 6px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); letter-spacing: 0; font-size: 10.5px; }
+.board-empty { margin: 0; padding: 6px 14px 6px 54px; font-size: 12px; color: var(--text-muted); }
+.board-more { all: unset; cursor: pointer; display: inline-block; margin: 2px 0 0 54px; padding: 4px 8px; border-radius: 5px; font-size: 12px; color: var(--text-sub); }
+.board-more:hover { background: var(--surface-2); color: var(--text); }
+.board-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.board-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
