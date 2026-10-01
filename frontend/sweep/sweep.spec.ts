@@ -164,6 +164,12 @@ async function ngReview(c: Ctx, opts: { sc?: string; tail?: string; side?: "pinn
   }
   if (opts.then) { await opts.then(p); await settle(p, 400); }
 }
+/** Pick new line 5 of the review's file by its number, open the composer with Enter, type. */
+async function ngComment(p: Page, text: string) {
+  await p.getByRole("button", { name: "Pick new line 5", exact: true }).first().click();
+  await p.getByRole("group", { name: /^Lines of / }).first().press("Enter");
+  await p.getByRole("textbox", { name: "Comment" }).fill(text);
+}
 /** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
   if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
@@ -472,6 +478,9 @@ const CASES: Case[] = [
   { screen: "ng-review", variant: "menu-settings", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: "Diff settings" }).click(); } }) },
   { screen: "ng-review", variant: "split", data: "default", widths: [1280, 1920], run: (c) => ngReview(c, { settings: ["Side-by-side"] }) },
   { screen: "ng-review", variant: "all-files", data: "default", widths: [1280], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
+  { screen: "ng-review", variant: "threads", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
+  { screen: "ng-review", variant: "composer", data: "default", widths: [1280], run: (c) => ngReview(c, { then: (p) => ngComment(p, "Name the fallback here, so the next reader does not have to find `default=0`.") }) },
+  { screen: "ng-review", variant: "suggest", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await ngComment(p, "Say what it returns:"); await p.getByRole("button", { name: "± Suggest change" }).click(); } }) },
   { screen: "ng-review", variant: "long", data: "long", widths: [1280, 1920], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
 
   // Login

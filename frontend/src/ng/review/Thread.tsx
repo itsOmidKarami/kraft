@@ -1,0 +1,134 @@
+import { useState, type ReactNode } from "react";
+import type { ReviewComment, ReviewThread, Suggestion, ThreadLabel } from "../../types";
+import { detailOf, jsonBody, request } from "../http";
+import { Button } from "../ui/Button";
+import { Markdown } from "../ui/Markdown";
+import { languageOf, tokenizeSide } from "./tokenize";
+
+/** Fenced code in a comment, coloured by the review's own tokenizer. */
+export function codeBlock(text: string, lang: string | undefined): ReactNode {
+  return tokenizeSide(text.split("\n"), languageOf(`x.${lang ?? ""}`)).map((line, i) => (
+    <span key={i}>
+      {i > 0 && "\n"}
+      {line.map((t, j) => <span key={j} className={t.cls ? `tok-${t.cls}` : undefined}>{t.text}</span>)}
+    </span>
+  ));
+}
+const Body = ({ text }: { text: string }) => <Markdown text={text} code={codeBlock} />;
+
+export const LABELS: [ThreadLabel | null, string][] = [[null, "No label"], ["must_fix", "Must fix"], ["question", "Question"], ["nit", "Nit"]];
+const TAG: Record<ThreadLabel, string> = { must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" };
+const CLAIM: Record<NonNullable<ReviewComment["claim"]>, string> = { fixed: "✓ claimed fixed", answered: "✓ answered", should_fix: "should fix" };
+const STATUS = (t: ReviewThread) => (t.draft ? "pending" : t.state);
+
+/** What a refused write said, or null when it landed. */
+type Act = () => Promise<string | null>;
+const send = async (path: string, init: RequestInit): Promise<string | null> => {
+  const { status, body } = await request(path, init);
+  return status >= 200 && status < 300 ? null : detailOf(body);
+};
+
+/** The replaced lines of a suggestion: `−` the lines it anchors to, `+` the replacement. */
+function SuggestionBlock({ s, old }: { s: Suggestion; old: string[] }) {
+  return (
+    <div className="rv-suggest">
+      <div className="rv-suggest-head">Suggested change</div>
+      {old.map((l, i) => <div key={`o${i}`} className="rv-suggest-line is-del"><span aria-hidden="true">−</span>{l}</div>)}
+      {s.replacement.split("\n").map((l, i) => <div key={`n${i}`} className="rv-suggest-line is-add"><span aria-hidden="true">+</span>{l}</div>)}
+    </div>
+  );
+}
+
+/** One review thread in the diff (prototype 433–466). */
+export function Thread({ thread, oldLines, onChanged, onEdit }: {
+  thread: ReviewThread;
+  /** The new-side text of lines `a..b`, for a suggestion's `−` rows. */
+  oldLines: (a: number, b: number) => string[];
+  onChanged: () => void;
+  /** A draft thread's Edit: reopen the composer on it. */
+  onEdit: (t: ReviewThread) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [replying, setReplying] = useState(false);
+  const [reply, setReply] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const run = async (act: Act) => {
+    const e = await act();
+    setError(e);
+    if (!e) onChanged();
+    return e;
+  };
+  const [first, ...rest] = thread.comments;
+  const who = (c: ReviewComment) => (c.author === "you" ? "You" : c.author);
+  return (
+    <article className={`rv-thread${thread.state === "resolved" ? " is-resolved" : ""}`} aria-label={`Thread on ${thread.file_path ?? "the item"}`}>
+      <div className="rv-thread-head">
+        <span className="rv-who">{first ? who(first) : "You"}</span>
+        {thread.label && <span className={`rv-tag is-${thread.label}`}>{TAG[thread.label]}</span>}
+        <span className="rv-status">{STATUS(thread)}</span>
+      </div>
+      {first && <Body text={first.body} />}
+      {first?.suggestion && <SuggestionBlock s={first.suggestion} old={oldLines(first.suggestion.start_line, first.suggestion.end_line)} />}
+      {thread.draft && (
+        <div className="rv-links">
+          <button type="button" className="rv-link" onClick={() => onEdit(thread)}>Edit</button>
+          <span aria-hidden="true">·</span>
+          <button type="button" className="rv-link" onClick={() => run(() => send(`/threads/${thread.id}`, { method: "DELETE" }))}>Delete</button>
+        </div>
+      )}
+      {rest.map((c) => (
+        <div key={c.id} className={`rv-reply${c.author === "you" ? "" : " is-agent"}`}>
+          <div className="rv-thread-head">
+            <span className="rv-who rv-mono">{who(c)}</span>
+            {c.attempt !== null && c.author !== "you" && <span className="rv-muted">attempt {c.attempt}</span>}
+            {c.claim && <span className={`rv-claim is-${c.claim}`}>{CLAIM[c.claim]}</span>}
+            {c.draft && <span className="rv-status">pending</span>}
+          </div>
+          {editing === c.id ? (
+            <div className="rv-reply-edit">
+              <textarea className="rv-textarea" aria-label="Edit reply" value={editText} onChange={(e) => setEditText(e.target.value)} />
+              <div className="rv-row-actions">
+                <Button onClick={() => setEditing(null)}>Cancel</Button>
+                <Button variant="primary" disabled={!editText.trim()} onClick={async () => !(await run(() => send(`/comments/${c.id}`, jsonBody("PATCH", { body: editText.trim() })))) && setEditing(null)}>Save</Button>
+              </div>
+            </div>
+          ) : (
+            <Body text={c.body} />
+          )}
+          {c.suggestion && <SuggestionBlock s={c.suggestion} old={oldLines(c.suggestion.start_line, c.suggestion.end_line)} />}
+          {c.draft && editing !== c.id && (
+            <div className="rv-links">
+              <button type="button" className="rv-link" onClick={() => { setEditing(c.id); setEditText(c.body); }}>Edit</button>
+              <span aria-hidden="true">·</span>
+              <button type="button" className="rv-link" onClick={() => run(() => send(`/comments/${c.id}`, { method: "DELETE" }))}>Delete</button>
+            </div>
+          )}
+        </div>
+      ))}
+      {!thread.draft && replying && (
+        <div className="rv-reply-edit">
+          <textarea className="rv-textarea" aria-label="Reply" placeholder="Reply…" value={reply} onChange={(e) => setReply(e.target.value)} autoFocus />
+          <div className="rv-row-actions">
+            <span className="rv-muted">Sent with your next review</span>
+            <span className="rv-spacer" />
+            <Button onClick={() => { setReplying(false); setReply(""); }}>Cancel</Button>
+            <Button variant="primary" disabled={!reply.trim()} onClick={async () => {
+              if (!(await run(() => send(`/threads/${thread.id}/comments`, jsonBody("POST", { body: reply.trim() }))))) { setReplying(false); setReply(""); }
+            }}>Add reply</Button>
+          </div>
+        </div>
+      )}
+      {!thread.draft && !replying && (
+        <div className="rv-row-actions">
+          <span className="rv-spacer" />
+          {thread.state !== "resolved" && <Button onClick={() => setReplying(true)}>Reply</Button>}
+          {thread.state === "resolved"
+            ? <Button onClick={() => run(() => send(`/threads/${thread.id}/reopen`, { method: "POST" }))}>Reopen</Button>
+            : <Button variant="primary" onClick={() => run(() => send(`/threads/${thread.id}/resolve`, { method: "POST" }))}>Resolve</Button>}
+        </div>
+      )}
+      {error && <p className="rv-error" role="alert">{error}</p>}
+    </article>
+  );
+}

@@ -7,6 +7,7 @@ import { placeUrl } from "../item/url";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
+import { useComments } from "./Comments";
 import { DiffView, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
 import { byNodes, folders, unresolved } from "./model";
@@ -49,8 +50,6 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   useEffect(() => setTreeOpen(!overlay), [overlay]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [picked, setPicked] = useState<Pick | null>(null);
-  // Where the composer is open: a pick, or a whole file (F).
-  const [, setComposer] = useState<Pick | { path: string } | null>(null);
   const viewed = useViewed(item.id, place.to, compare);
   const all = compare.state === "ready" ? compare.data.files : [];
   const files = byNodes(all, place.nodes);
@@ -60,6 +59,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const threadList = threads.state === "ready" ? threads.data : [];
   // With no file chosen, the tree's first: what one-file mode shows.
   const current = place.file && files.some((f) => f.path === place.file) ? place.file : folders(files)[0]?.files[0]?.path ?? null;
+  const comments = useComments({ itemId: item.id, compare: compare.state === "ready" ? compare.data : null, files, patch, threads: threadList, reload: threads.reload });
   const select = (file: string) => {
     setPlace({ file });
     if (overlay) setTreeOpen(false);
@@ -121,11 +121,21 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               threadCount={(path) => threadList.filter((t) => t.file_path === path && unresolved(t)).length}
               picked={picked}
               onPick={setPicked}
-              onCompose={setComposer}
-              onFileComment={(path) => setComposer({ path })}
+              onCompose={comments.openPick}
+              onFileComment={(path) => {
+                setCollapsed((s) => {
+                  const n = new Set(s);
+                  n.delete(path);
+                  return n;
+                });
+                comments.openFile(path);
+              }}
+              after={comments.after}
+              top={comments.top}
               truncated={compare.data.truncated ? { bytes: compare.data.diff_max_bytes, files: notShown.size } : null}
             />
           )}
+          {compare.state === "ready" && comments.elsewhere}
         </section>
       </div>
     </div>

@@ -195,7 +195,7 @@ function RowView({ row, isPicked, onClick, after }: { row: Row; isPicked: (a: An
     return (
       <>
         <div className={`rv-row${kind(c)}${isPicked(row.at) ? " is-picked" : ""}`}>
-          <button type="button" tabIndex={-1} className="rv-num" aria-label={`Pick line ${row.at.line}`} onClick={onClick(row.at)}>{c.old ?? ""}</button>
+          <button type="button" tabIndex={-1} className="rv-num" aria-label={`Pick ${row.at.side} line ${row.at.line}`} onClick={onClick(row.at)}>{c.old ?? ""}</button>
           <button type="button" tabIndex={-1} className="rv-num" aria-hidden="true" onClick={onClick(row.at)}>{c.new ?? ""}</button>
           <span className="rv-mark" aria-hidden="true">{MARK[c.kind]}</span>
           <Code cell={c} />
