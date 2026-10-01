@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CompareFile } from "../../types";
@@ -135,6 +136,26 @@ describe("DiffView", () => {
     key("ArrowDown", true);
     key("Enter");
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 5, head: 6 });
+  });
+
+  it("after a click on a line number, Enter and c compose on that line (Kraft-9d8b2.50)", async () => {
+    const onCompose = vi.fn();
+    render(<View onCompose={onCompose} />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Pick new line 5" })[0]);
+    expect(screen.getByRole("group", { name: /^Lines of search\/cache.py/ })).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 5, head: 5 });
+    onCompose.mockClear();
+    await userEvent.keyboard("c");
+    expect(onCompose).toHaveBeenCalledTimes(1);
+  });
+
+  it("is read-only on an ended item: no line picks and no file comment button (Kraft-9d8b2.51)", async () => {
+    const onPick = vi.fn();
+    render(<View readOnly onPick={onPick} />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Pick new line 5" })[0]);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Comment on this file" })).toBeNull();
   });
 
   it("leaves keys typed into a thread or the composer alone", () => {

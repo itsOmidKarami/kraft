@@ -41,6 +41,7 @@ export function ReviewPage() {
 }
 
 function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
+  const ended = item.display_status === "done" || item.display_status === "cancelled" || item.display_status === "archived";
   const navigate = useNavigate();
   const toItem = (p: Parameters<typeof placeUrl>[1]) => navigate(placeUrl(item.id, p));
   const [place, setPlace] = useReviewPlace(item);
@@ -140,6 +141,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               after={comments.after}
               top={comments.top}
               truncated={compare.data.truncated ? { bytes: compare.data.diff_max_bytes, files: notShown.size } : null}
+              readOnly={ended}
             />
           )}
           {compare.state === "ready" && comments.elsewhere}
@@ -162,7 +164,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           onClose={() => toItem({ sel: { kind: "chain" } })}
         />
       )}
-      <BottomBar item={item} gate={place.gate} threads={threadList} onFinish={(outcome) => setFinish({ outcome })} submit={submit} />
+      <BottomBar item={item} gate={place.gate} threads={threadList} readOnly={ended} onFinish={(outcome) => setFinish({ outcome })} submit={submit} />
       {finish && <FinishDialog item={item} gate={place.gate} threads={threadList} initial={finish.outcome} submit={submit} onClose={() => setFinish(null)} />}
     </div>
   );

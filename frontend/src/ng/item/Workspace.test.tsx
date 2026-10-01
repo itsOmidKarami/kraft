@@ -17,12 +17,12 @@ function Where() {
   nav = useNavigate();
   return <output data-testid="where">{loc.pathname + loc.search}</output>;
 }
-const mount = (path = "/work-items/w1") =>
+const mount = (path = "/work-items/w1", over: Parameters<typeof detail>[0] = {}) =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         {["/work-items/:id", "/work-items/:id/nodes/:node"].map((p) => (
-          <Route key={p} path={p} element={<><Workspace item={detail()} reload={() => {}} /><Where /></>} />
+          <Route key={p} path={p} element={<><Workspace item={detail(over)} reload={() => {}} /><Where /></>} />
         ))}
       </Routes>
     </MemoryRouter>,
@@ -36,6 +36,11 @@ describe("Workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "plan, node, done" }));
     expect(where()).toBe("/work-items/w1?sel=plan");
     expect(screen.getByRole("complementary", { name: "plan pane" })).toBeInTheDocument();
+  });
+
+  it("names the chain of an item filed with no chain by the chain it runs (Kraft-9d8b2.52)", () => {
+    mount("/work-items/w1", { chain_template: null } as never);
+    expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();
   });
 
   it("restores the selection and tab from a shared URL", () => {

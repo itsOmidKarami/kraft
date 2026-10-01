@@ -18,6 +18,7 @@ from support.harness import make_repo
 from support.server import child_env
 
 from kraft import client, db, mcp
+from kraft.update import installed
 
 
 def _tools():
@@ -141,6 +142,10 @@ def test_kraft_mcp_starts_over_real_stdio(tmp_path):
         cwd=Path(__file__).resolve().parents[1],
     )
     assert '"serverInfo"' in proc.stdout, proc.stderr
+    # Clients that show the server's version (Claude Code's /mcp, Codex) get it from here.
+    version = json.loads(proc.stdout.splitlines()[0])["result"]["serverInfo"]["version"]
+    assert version
+    assert version == installed()
 
 
 def test_create_work_item_forwards_auto_gate(monkeypatch):

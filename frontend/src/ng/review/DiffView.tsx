@@ -43,6 +43,8 @@ export interface DiffViewProps {
   top?: (path: string) => ReactNode;
   /** Set when the server cut the diff: its byte cap and how many files it left out. */
   truncated: { bytes: number; files: number } | null;
+  /** An ended item takes no comment (the server refuses it): no line picks, no file comment button. */
+  readOnly?: boolean;
 }
 
 /** The diff column's content (prototype 419–492). The split view always
@@ -98,8 +100,13 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
 
   const pick = (a: Anchor, extend: boolean) =>
+    !p.readOnly &&
     p.onPick(extend && picked && picked.side === a.side ? { ...picked, head: a.line } : { path: file.path, side: a.side, anchor: a.line, head: a.line });
-  const onClick = (a: Anchor) => (e: MouseEvent) => pick(a, e.shiftKey);
+  const onClick = (a: Anchor) => (e: MouseEvent) => {
+    pick(a, e.shiftKey);
+    // Enter and `c` are read off the line group, so a click on a number hands focus back to it.
+    e.currentTarget.closest<HTMLElement>(".rv-lines")?.focus({ preventScroll: true });
+  };
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     // Only the line area's own keys: a thread or the composer sits inside it, and its typing is its own.
@@ -141,7 +148,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         <span className="rv-file-note">{note(file, pf)}</span>
         {collapsed && threads > 0 && <span className="rv-file-threads">{threads} {threads === 1 ? "thread" : "threads"}</span>}
         <span className="rv-spacer" />
-        <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={15} aria-hidden /></IconButton>
+        {!p.readOnly && <IconButton label="Comment on this file" onClick={() => p.onFileComment(file.path)}><MessageSquare size={15} aria-hidden /></IconButton>}
         <button type="button" className="rv-viewed-btn" aria-pressed={viewed} onClick={() => p.onViewed(file.path, !viewed)}>
           <span aria-hidden="true">{viewed ? "☑" : "☐"}</span> Viewed
         </button>

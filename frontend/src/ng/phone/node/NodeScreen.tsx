@@ -20,6 +20,7 @@ import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
 import { nodeBar, overrideWords, reviewPath, type NodeAct } from "./model";
 import { Strip } from "./Strip";
+import { chainName } from "../../item/chainName";
 import "./node.css";
 
 export type NodeTab = "overview" | "log" | "config";
@@ -140,7 +141,7 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
         {tab === "config" && (
           <>
             <Facts rows={[
-              ["chain", `${item.chain_template} · frozen at intake`],
+              ["chain", `${chainName(item)} · frozen at intake`],
               ...(api.fix_loop ? ([["fix loop", <span key="f" className="ph-mono">{api.fix_loop}</span>]] as [string, React.ReactNode][]) : []),
               ["on failure", api.on_failure?.length ? api.on_failure.map(taskName).join(", ") : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
               ["overrides", overrideWords(item, nodeId) ? `${overrideWords(item, nodeId)} · changed for this item` : "none"],

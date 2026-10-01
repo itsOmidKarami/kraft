@@ -180,7 +180,7 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
     return (
       <ChoiceSheet
         title="Raise budget"
-        text={`${item.stop?.reason ?? "The budget ran out"}. Raising it applies to this item only, and resumes it at once.`}
+        text={`${(item.stop?.reason ?? "The budget ran out").replace(/\.+$/, "")}. Raising it applies to this item only, and resumes it at once.`}
         options={[
           { value: "5", label: `+$5`, hint: `$${cap + 5}` },
           { value: "10", label: `+$10`, hint: `$${cap + 10}` },

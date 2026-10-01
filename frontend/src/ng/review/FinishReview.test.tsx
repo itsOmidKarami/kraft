@@ -126,14 +126,20 @@ describe("FinishDialog", () => {
 });
 
 describe("BottomBar", () => {
-  const bar = (threads: ReviewThread[], it = item()) => {
+  const bar = (threads: ReviewThread[], it = item(), readOnly = false) => {
     const onFinish = vi.fn();
     function B() {
-      return <BottomBar item={it} gate="final_review" threads={threads} onFinish={onFinish} submit={useSubmit(it, "final_review", threads, () => {})} />;
+      return <BottomBar item={it} gate="final_review" threads={threads} readOnly={readOnly} onFinish={onFinish} submit={useSubmit(it, "final_review", threads, () => {})} />;
     }
     routed(<B />);
     return onFinish;
   };
+
+  it("says it is read only on an ended item and offers neither Finish review nor Approve (Kraft-9d8b2.51)", () => {
+    bar([th({ draft: false })], item(), true);
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
 
   it("before anything is published: drafts by label, agent replies, Finish review", () => {
     const onFinish = bar([th({ label: "must_fix" }), th({ id: "t2" }), th({ id: "t3", draft: false, comments: [c({ draft: false }), c({ id: "a", author: "implementation", draft: false })] })].filter((t) => t.draft));

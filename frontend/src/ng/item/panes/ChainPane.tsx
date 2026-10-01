@@ -7,6 +7,7 @@ import type { Applied } from "../draft/applied";
 import { appliedRows } from "../draft/AppliedRows";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
+import { chainName } from "../chainName";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -192,7 +193,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
           </ol>
         </>
       )}
-      <p className="ip-foot is-mono">{item.chain_template} chain · {repoName(item.repo)} · frozen at intake</p>
+      <p className="ip-foot is-mono">{chainName(item)} chain · {repoName(item.repo)} · frozen at intake</p>
     </>
   );
 }

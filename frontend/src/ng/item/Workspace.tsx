@@ -25,6 +25,7 @@ import { pushes, placeUrl, readPlace, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import type { ItemDetail } from "./useItem";
+import { chainName } from "./chainName";
 
 const PAGE = "item";
 
@@ -148,7 +149,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
           />
         ) : (
           <StageGraph
-            name={item.chain_template}
+            name={chainName(item)}
             nodes={graph.nodes}
             arcs={graph.arcs(selectedNode)}
             seams={draft?.seams}

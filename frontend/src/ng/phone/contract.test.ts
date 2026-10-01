@@ -24,6 +24,7 @@ const ALLOWED = [
   "item/actions",
   "item/url",
   "item/paths",
+  "item/chainName",
   "item/nodeGraph",
   "item/graph",
   "board/model",
