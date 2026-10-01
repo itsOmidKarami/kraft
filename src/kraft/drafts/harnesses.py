@@ -20,7 +20,12 @@ from kraft.drafts import authored, config, store
 from kraft.drafts import resolve as resolve_mod
 from kraft.drafts.ops import OpError, _check_id
 from kraft.executor import fallback as fallback_mod
-from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.policy import (
+    DEFAULT_ESCALATION_HARNESS,
+    FOLLOW_ITEM,
+    InstancePolicy,
+    InstancePolicyInput,
+)
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import TemplateIssue
 from kraft.templates.models import PATH_SEPARATOR
@@ -348,9 +353,11 @@ def _launch_problems(st, table, providers, path, chosen) -> list[dict]:
     ]
 
 
-def _lint_problems(st, policy: object) -> list[dict]:
+def _lint_problems(st, policy: object, chosen=()) -> list[dict]:
     """The library lint against the draft's own instance policy: a task that
-    selects a harness the draft made `never` is where this surfaces."""
+    selects a harness the draft made `never` is where this surfaces. Its message
+    opens with the task's path (`<path>: harness ...`), which is the problem's
+    `path` when it names a task of that chain; otherwise `path` stays null."""
     try:
         instance = InstancePolicy.from_input(
             InstancePolicyInput.model_validate(
@@ -361,7 +368,17 @@ def _lint_problems(st, policy: object) -> list[dict]:
         return []  # the policy file's own problem, which `check` reports
     library = getattr(st, "library", None)
     issues = library.lint(instance) if library is not None else []
-    return [_problem(st, i.chain, None, None, i.message) for i in issues if i.chain is not None]
+    paths = {(chain, path) for chain, path, _ in chosen}
+
+    def path_of(chain: str, message: str) -> str | None:
+        head = message.partition(": ")[0]
+        return head if (chain, head) in paths else None
+
+    return [
+        _problem(st, i.chain, path_of(i.chain, i.message), None, i.message)
+        for i in issues
+        if i.chain is not None
+    ]
 
 
 def _fallback_problems(st, chosen, table, states, linted: list[dict]) -> list[dict]:
@@ -382,12 +399,59 @@ def _fallback_problems(st, chosen, table, states, linted: list[dict]) -> list[di
     return out
 
 
-def _harness_view(id: str, body: object, state: str, providers) -> dict:
-    provider = providers.get(body.get("provider")) if isinstance(body, dict) else None
-    exe = (body.get("executable") if isinstance(body, dict) else None) or (
-        provider.command[0] if provider else None
-    )
-    return {"id": id, "state": state, "executable_found": bool(exe and shutil.which(exe))}
+def _harness_view(id: str, body: object, state: str, providers, tasks: list[dict]) -> dict:
+    body = body if isinstance(body, dict) else {}
+    provider = providers.get(body.get("provider"))
+    exe = body.get("executable") or (provider.command[0] if provider else None)
+    return {
+        "id": id,
+        "state": state,
+        "executable_found": bool(exe and shutil.which(exe)),
+        "provider": body.get("provider"),
+        "enabled": body.get("enabled", True),
+        "executable": body.get("executable"),
+        "defaults": body.get("defaults") if isinstance(body.get("defaults"), dict) else {},
+        "tasks": tasks,
+    }
+
+
+def _tasks_by_harness(chosen, table) -> dict[str, list[dict]]:
+    """The agent tasks each harness runs: the ones that select it, and the ones
+    whose `fallback:` list lands on it (`fallback: true`). Without a loadable
+    table a fallback list cannot be read, so only the selections are listed."""
+    out: dict[str, list[dict]] = {}
+    for chain, path, task in chosen:
+        out.setdefault(task.harness, []).append(
+            {"chain": chain, "path": path, "profile": task.profile, "fallback": False}
+        )
+        if table is None:
+            continue
+        entries, _ = fallback_mod.fallback_list(task, table)
+        for entry in entries:
+            landed = fallback_mod.apply(task, entry)
+            out.setdefault(landed.harness, []).append(
+                {"chain": chain, "path": path, "profile": landed.profile, "fallback": True}
+            )
+    return out
+
+
+def _escalation_problem(states: dict[str, str], harness: object) -> list[dict]:
+    """Escalation runs on a harness set to Never (Decisions §11): the policy's
+    own default when the key is unset."""
+    on = harness if isinstance(harness, str) else DEFAULT_ESCALATION_HARNESS
+    if on == FOLLOW_ITEM or states.get(on) != "never":
+        return []
+    return [
+        {
+            "path": "defaults.escalation_harness",
+            "field": "escalation_harness",
+            "message": f"escalation runs on {on!r}, which is set to Never",
+            "file": "policy.yaml",
+            "line": None,
+            "col": None,
+            "fix": "Pick another harness, or set this one to Available or Override.",
+        }
+    ]
 
 
 def _profile_changes(before: dict, after: dict) -> list[dict]:
@@ -424,12 +488,15 @@ def resolve(st, key, raw, files, published) -> dict:
     except TemplateEnvironmentError:
         table = None
     chosen = config_check.selections(getattr(st, "library", None))
-    linted = _lint_problems(st, policy)
+    linted = _lint_problems(st, policy, chosen)
+    escalation = _section(policy, "defaults").get("escalation_harness")
     out["problems"] += (
         _launch_problems(st, table, providers, path, chosen)
         + linted
         + _fallback_problems(st, chosen, table, states, linted)
+        + _escalation_problem(states, escalation)
     )
+    tasks = _tasks_by_harness(chosen, table)
 
     profiles = _section(harnesses_yaml, "profiles")
     efforts = {
@@ -438,13 +505,20 @@ def resolve(st, key, raw, files, published) -> dict:
     }
     out["resolved"] = {
         "harnesses": [
-            _harness_view(h, _section(harnesses_yaml, "harnesses")[h], states[h], providers)
+            _harness_view(
+                h, _section(harnesses_yaml, "harnesses")[h], states[h], providers, tasks.get(h, [])
+            )
             for h in universe
         ],
         "allowed_tools": _section(policy, "maxima").get("allowed_tools"),
         "escalation": {
             "harness": _section(policy, "defaults").get("escalation_harness"),
             "grants": _section(policy, "defaults").get("escalation_grants"),
+        },
+        # `escalation` is what the file says; this is what a launch does.
+        "escalation_effective": {
+            "harness": escalation if isinstance(escalation, str) else DEFAULT_ESCALATION_HARNESS,
+            "set": isinstance(escalation, str),
         },
         "profiles": {
             name: {

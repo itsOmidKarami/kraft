@@ -251,3 +251,79 @@ def test_rename_profile_retargets_fallbacks_and_reports_the_tasks_it_broke(clien
     assert profiles["fast"]["fallback"] == [{"profile": "heavy"}]
     [result] = [o for o in r.json()["ops"] if o["op"] == "rename_profile"]
     assert isinstance(result["result"]["broken"], list)
+
+
+# ── what the lanes need (W14 A) ──
+
+
+def resolved(client, *batch):
+    return ops(client, *batch).json()["result"]
+
+
+def test_each_harness_lists_its_tasks_and_its_own_fields(client):
+    """Mutate: build `tasks` from the library's tasks instead of the resolved
+    chains', and the chain's own task goes missing."""
+    view = {
+        h["id"]: h
+        for h in resolved(client, *access({"codex": "override"}))["resolved"]["harnesses"]
+    }
+    claude = view["claude"]
+    assert {"chain": "default", "path": "spec.main.author"} == {
+        k: claude["tasks"][0][k] for k in ("chain", "path")
+    }
+    assert all(t["fallback"] is False for t in claude["tasks"])
+    assert set(claude) >= {"provider", "enabled", "executable", "defaults", "tasks"}
+    assert claude["enabled"] is True and isinstance(claude["defaults"], dict)
+
+
+def test_a_fallback_lists_its_task_under_the_harness_it_lands_on(client, templates_dir):
+    path = templates_dir / "library.yaml"
+    library = yaml.safe_load(path.read_text())
+    task = next(t for t in library["tasks"].values() if t.get("harness") == "claude")
+    task["fallback"] = [{"harness": "codex"}]
+    path.write_text(yaml.safe_dump(library, sort_keys=False))
+    client.post("/api/templates/reload")
+
+    view = {
+        h["id"]: h
+        for h in resolved(client, *access({"codex": "override"}))["resolved"]["harnesses"]
+    }
+    assert [(t["path"], t["fallback"]) for t in view["codex"]["tasks"]] == [
+        ("spec.main.author", True)
+    ]
+    assert view["claude"]["tasks"][0]["fallback"] is False
+
+
+def test_a_never_problem_names_its_task_by_path(client):
+    """Mutate: leave `path` None, and the page cannot mark the task's glyph."""
+    problems = resolved(client, *access({"claude": "never"}))["problems"]
+    assert problems[0]["path"] == "spec.main.author"
+    assert problems[0]["chain"] == "default"
+
+
+def test_escalation_on_a_never_harness_is_a_problem_and_blocks_publish(client):
+    """Mutate: skip the check, and a Never harness could be the escalation one."""
+    result = resolved(
+        client,
+        {"op": "set_escalation", "harness": "codex", "grants": None},
+        *access({"codex": "never"}),
+    )
+    mine = [p for p in result["problems"] if p["path"] == "defaults.escalation_harness"]
+    assert [p["message"] for p in mine] == ["escalation runs on 'codex', which is set to Never"]
+    assert mine[0]["file"] == "policy.yaml"
+    assert client.post(f"{URL}/publish").status_code == 422
+
+    cleared = resolved(client, {"op": "set_escalation", "harness": "item", "grants": None})
+    assert not [p for p in cleared["problems"] if p["path"] == "defaults.escalation_harness"]
+
+
+def test_an_unset_escalation_harness_is_claude_so_never_on_claude_is_a_problem(client):
+    result = resolved(client, *access({"claude": "never"}))
+    assert any(p["path"] == "defaults.escalation_harness" for p in result["problems"])
+    assert result["resolved"]["escalation_effective"] == {"harness": "claude", "set": False}
+    assert result["resolved"]["escalation"] == {"harness": None, "grants": None}
+
+
+def test_the_effective_escalation_harness_follows_the_file(client):
+    result = resolved(client, {"op": "set_escalation", "harness": "codex", "grants": None})
+    assert result["resolved"]["escalation_effective"] == {"harness": "codex", "set": True}
