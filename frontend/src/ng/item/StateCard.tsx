@@ -207,6 +207,8 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (item.display_status !== "paused") return null;
+  // No agent task paused at this node: the server refuses a steer, so offer plain Resume only.
+  const steerable = item.steerable !== false;
   const what = item.current_node_id ? ` at ${item.current_node_id}` : "";
   const resume = async (withSteer: boolean) => {
     setBusy(true);
@@ -220,8 +222,8 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   return (
     <section className="item-card is-neutral" aria-label="Paused">
       <h2 className="item-card-head"><Pause size={14} aria-hidden /> <span className="item-card-title">Paused</span><span className="item-card-where">{what.trim()}</span></h2>
-      <textarea aria-label="Steer" className="item-input" rows={2} placeholder="Steer the next agent (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} />
-      {paused.length > 1 && (
+      {steerable && <textarea aria-label="Steer" className="item-input" rows={2} placeholder="Steer the next agent (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} />}
+      {steerable && paused.length > 1 && (
         <label className="item-check">
           steer goes to
           <select className="item-select" value={target} onChange={(e) => setTarget(e.target.value)}>
@@ -232,8 +234,8 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
       )}
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
-        <Button variant="primary" disabled={busy || !steer.trim()} onClick={() => resume(true)}>Resume with steer</Button>
-        <Button disabled={busy} onClick={() => resume(false)}>Resume</Button>
+        {steerable && <Button variant="primary" disabled={busy || !steer.trim()} onClick={() => resume(true)}>Resume with steer</Button>}
+        <Button variant={steerable ? "secondary" : "primary"} disabled={busy} onClick={() => resume(false)}>Resume</Button>
       </div>
     </section>
   );
