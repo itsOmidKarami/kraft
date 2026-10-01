@@ -1,0 +1,11 @@
+{
+  "title": "UX V2 fix: a dialog with nothing to focus takes focus; the document dialog has a Close button (Kraft-9d8b2.23)",
+  "screens": ["ng-item-doc"],
+  "specs": ["sweep.spec.ts"],
+  "rules": [
+    { "kind": "no-flag", "flag": "contrast", "match": "^ng-item-doc/" },
+    { "kind": "no-flag", "flag": "offscreen", "match": "^ng-item-doc/" },
+    { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-item-doc/" },
+    { "kind": "no-console", "match": "^ng-item-doc/" }
+  ]
+}
