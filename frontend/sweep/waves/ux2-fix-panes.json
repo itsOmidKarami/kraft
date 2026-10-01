@@ -1,0 +1,27 @@
+{
+  "title": "UX V2 fix: Repos, Auto-intake and Harnesses load with their pane on its rail",
+  "screens": [
+    "repos",
+    "repos-first",
+    "intake",
+    "intake-first",
+    "harnesses",
+    "harnesses-first",
+    "library",
+    "flow-repo-connect",
+    "flow-repo-refused",
+    "flow-intake-schedule",
+    "flow-harness-never-blocks-publish",
+    "flow-harness-lanes-fit-the-pane"
+  ],
+  "specs": [
+    "sweep.spec.ts",
+    "interactions.spec.ts"
+  ],
+  "rules": [
+    { "kind": "flow-completes", "match": "^flow-(repo|intake|harness)" },
+    { "kind": "no-flag", "flag": "contrast", "match": "^(repos|intake|harnesses|library)" },
+    { "kind": "no-flag", "flag": "overflow-x", "match": "^(repos|intake|harnesses|library)" },
+    { "kind": "no-console", "match": "^(repos|intake|harnesses|library)" }
+  ]
+}

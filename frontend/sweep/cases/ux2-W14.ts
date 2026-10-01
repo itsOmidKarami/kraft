@@ -11,6 +11,7 @@ export const cells: Case[] = [
   })),
   { screen: "harnesses", variant: "floor-config", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { harnesses: "floor" }, run: async (c) => {
     await ng(c, "/templates/harnesses", {});
+    await c.page.getByRole("button", { name: "Expand harnesses" }).click();
     await c.page.getByRole("tab", { name: "Config" }).click(); await settle(c.page, 300);
   } },
   { screen: "harnesses", variant: "problems", data: "default", widths: [1280], shells: [{ mode: "light" }], mock: { harnesses: "problems" }, run: (c) => ng(c, "/templates/harnesses", {}) },
