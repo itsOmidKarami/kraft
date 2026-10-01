@@ -4,11 +4,11 @@ import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
 import { useApply } from "../apply/store";
-import { HeaderActions } from "../shell/HeaderActions";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import { Block, SetRow } from "./parts";
+import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 
 const LOOPBACK = "127.0.0.1";
@@ -131,9 +131,20 @@ export function AccessPage() {
     }
   };
 
+  const running = health?.bind != null && health.port != null && (health.bind !== access.bind || health.port !== access.port);
+  const yaml = [
+    `bind: ${access.bind}`,
+    `port: ${access.port}`,
+    "allowed_hosts:",
+    ...access.allowed_hosts.map((h) => `  - ${h}`),
+    access.password_set ? 'password: "********"  # stored hashed, never shown' : "# password: not set",
+    `session_expiry_days: ${access.session_expiry_days}`,
+    ...(running ? ["", `# running now: bind ${health.bind}, port ${health.port}, until a restart`] : []),
+  ].join("\n");
+
   return (
-    <div className="ng-settings">
-      <HeaderActions><span className="saved-note">{items.length ? "restart to apply" : "saved on change"}</span></HeaderActions>
+    <>
+    <YamlFrame pageKey="access" file="access.yaml" title="access" icon="shield" status={items.length ? "restart to apply" : "saved on change"} yaml={yaml} yamlNote="The password is stored hashed and never shown. Bind and port are read at startup, so an edit here waits for a restart.">
       <div className="set-page">
         <h1>Access</h1>
         <p className="lede">Auth is off on localhost and on for anything else.</p>
@@ -246,6 +257,7 @@ export function AccessPage() {
           </Block>
         )}
       </div>
+    </YamlFrame>
       {revoking && (
         <Dialog
           title={revoking.current ? "Sign out of this session?" : "Revoke this session?"}
@@ -255,6 +267,6 @@ export function AccessPage() {
           <p>{revoking.current ? "It signs you out here." : `${parseUserAgent(revoking.label)} has to sign in again.`}</p>
         </Dialog>
       )}
-    </div>
+    </>
   );
 }

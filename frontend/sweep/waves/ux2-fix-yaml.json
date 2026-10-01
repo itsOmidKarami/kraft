@@ -1,0 +1,18 @@
+{
+  "title": "UX V2 fix: Access and Appearance get the header YAML button",
+  "screens": [
+    "access",
+    "access-yaml",
+    "appearance",
+    "appearance-yaml"
+  ],
+  "specs": [
+    "sweep.spec.ts"
+  ],
+  "rules": [
+    { "kind": "no-flag", "flag": "contrast", "match": "^(access|appearance)" },
+    { "kind": "no-flag", "flag": "overflow-x", "match": "^(access|appearance)" },
+    { "kind": "no-flag", "flag": "offscreen", "match": "^(access|appearance)" },
+    { "kind": "no-console", "match": "^(access|appearance)" }
+  ]
+}

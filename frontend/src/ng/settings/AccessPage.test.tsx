@@ -5,6 +5,7 @@ import * as api from "../../api";
 import type { Access, AuthSession } from "../../types";
 import { useApply } from "../apply/store";
 import { AccessPage, portProblem } from "./AccessPage";
+import { WithHeader } from "./testkit";
 
 const LAN: Access = { bind: "0.0.0.0", port: 8765, session_expiry_days: 7, password_set: true, auth_required: true, allowed_hosts: ["localhost", "kraft.local"] };
 const SESSIONS: AuthSession[] = [
@@ -20,7 +21,7 @@ function setup(access: Partial<Access> = {}, running: { bind?: string; port?: nu
   vi.spyOn(api, "getAuthSessions").mockResolvedValue({ sessions: SESSIONS });
   vi.spyOn(api, "getNotify").mockResolvedValue({ enabled: false, url_set: false, base_url: null, events: [], last_test: null });
   const put = vi.spyOn(api, "putAccess").mockImplementation(async (body) => ({ ...served, ...body }) as Access);
-  render(<AccessPage />);
+  render(<WithHeader><AccessPage /></WithHeader>);
   return put;
 }
 
@@ -142,5 +143,23 @@ describe("ng AccessPage", () => {
     expect(await screen.findByText("Not used on 127.0.0.1")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Sessions" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /Local network/ }));
+  });
+
+  it("shows access.yaml from the page's state under the header's YAML button, the password never", async () => {
+    setup();
+    await screen.findByRole("heading", { name: "Access" });
+    expect(screen.queryByLabelText("access.yaml")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
+    expect(screen.getByLabelText("access.yaml").textContent).toBe('bind: 0.0.0.0\nport: 8765\nallowed_hosts:\n  - localhost\n  - kraft.local\npassword: "********"  # stored hashed, never shown\nsession_expiry_days: 7');
+  });
+
+  it("says in the YAML what is running while a bind or port waits for a restart, and when no password is set", async () => {
+    setup({ password_set: false, port: 9000 }, { port: 8765 });
+    await screen.findByRole("heading", { name: "Access" });
+    await waitFor(() => expect(api.getHealth).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
+    await waitFor(() => expect(screen.getByLabelText("access.yaml").textContent).toContain("# running now: bind 0.0.0.0, port 8765, until a restart"));
+    expect(screen.getByLabelText("access.yaml").textContent).toContain("port: 9000\n");
+    expect(screen.getByLabelText("access.yaml").textContent).toContain("# password: not set");
   });
 });
