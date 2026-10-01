@@ -1,7 +1,7 @@
 import { test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { buildScenario, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
+import { buildScenario, settingsFor, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
 import { installMocks } from "./mockApi";
 import { chromeRects, runChecks, scrollAllToBottom, type Checks } from "./checks";
 
@@ -129,6 +129,24 @@ async function ngLogin(c: Ctx, opts: { fill?: boolean; submit?: boolean } = {}) 
   await ng(c, "/ng", {});
   if (opts.fill || opts.submit) await c.page.getByLabel(/^Password/).fill("hunter2");
   if (opts.submit) { await c.page.keyboard.press("Enter"); await c.page.locator('[role="alert"], [role="timer"]').first().waitFor({ timeout: 4000 }); }
+  await settle(c.page, 400);
+}
+/** The /ng board with no repo connected. A fresh install has the default chain, which the "empty" data lacks, so it's put back. The page clock is installed after load, so the probe rows' reveal steps are ours to advance. */
+async function ngFirstRun(c: Ctx, stage: "step1" | "probing" | "probed" | "step2" | "step3") {
+  c.S.settings.templates = settingsFor("default", {}).templates;
+  await ng(c, "/ng", {}, { side: "pinned" });
+  await c.page.getByRole("heading", { name: "Nothing on the board yet" }).waitFor({ timeout: 4000 });
+  if (stage === "step1") return;
+  await c.page.clock.install();
+  await c.page.getByLabel(/Path to a local git checkout/).fill("/Users/dev/code/acme");
+  await c.page.getByRole("button", { name: "+ Add repo" }).click();
+  await c.page.getByRole("list", { name: "Probe results" }).waitFor({ timeout: 4000 });
+  if (stage === "probing") { await c.page.clock.runFor(500); return settle(c.page, 200); }
+  await c.page.clock.runFor(2000);
+  if (stage === "probed") return settle(c.page, 200);
+  await c.page.getByRole("button", { name: "Add repo", exact: true }).click();
+  await c.page.getByRole("button", { name: "Continue" }).click();
+  if (stage === "step3") await c.page.getByRole("button", { name: "Continue" }).click();
   await settle(c.page, 400);
 }
 async function settings(c: Ctx, to: string) {
@@ -274,6 +292,12 @@ const CASES: Case[] = [
   { screen: "ng-login", variant: "filled", data: "default", widths: [1280], locked: true, run: (c) => ngLogin(c, { fill: true }) },
   { screen: "ng-login", variant: "error", data: "default", widths: [1280], locked: true, login: "wrong", run: (c) => ngLogin(c, { submit: true }) },
   { screen: "ng-login", variant: "locked", data: "default", widths: [1280], locked: true, login: "locked", shells: [{ mode: "light" }], run: (c) => ngLogin(c, { submit: true }) },
+  { screen: "ng-firstrun", variant: "step1", data: "empty", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngFirstRun(c, "step1") },
+  { screen: "ng-firstrun", variant: "step1", data: "empty", widths: [1024, 1920], run: (c) => ngFirstRun(c, "step1") },
+  { screen: "ng-firstrun", variant: "probing", data: "empty", widths: [1280], run: (c) => ngFirstRun(c, "probing") },
+  { screen: "ng-firstrun", variant: "probed", data: "empty", widths: [1280], run: (c) => ngFirstRun(c, "probed") },
+  { screen: "ng-firstrun", variant: "step2", data: "empty", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngFirstRun(c, "step2") },
+  { screen: "ng-firstrun", variant: "step3", data: "empty", widths: [1280], run: (c) => ngFirstRun(c, "step3") },
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },
   { screen: "ng-tokens", variant: "graphite-violet-full", data: "default", widths: [1920], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { accent: "violet", colour_amount: "full" }) },
