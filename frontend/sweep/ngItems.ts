@@ -240,5 +240,6 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
   });
   const total = byNode.reduce((a, r) => ({ tokens_in: a.tokens_in + r.tokens_in, tokens_out: a.tokens_out + r.tokens_out, cost_usd: a.cost_usd + r.cost_usd, wall_ms: a.wall_ms + r.wall_ms }), { tokens_in: 0, tokens_out: 0, cost_usd: 0, wall_ms: 0 });
   item.usage = { total: { ...total, cost_complete: true, sessions: sessions.length, rounds: 1, capped_out: 0 }, by_node: byNode };
-  return { item, sessions, events, logs };
+  const threads = sc === "needs-gate" ? [{ id: "th1", work_item_id: id, gate: null, node_id: "local_review", file_path: "search/cache.py", side: "new", start_line: 40, end_line: 44, label: "question", state: "open", created_at: t(90), comments: [{ id: "c1", author: "you", body: "cache has no size bound", created_at: t(90) }] }] : [];
+  return { item, sessions, events, logs, threads };
 }

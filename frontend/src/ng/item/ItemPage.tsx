@@ -6,6 +6,7 @@ import { Banner, QuestionCard } from "./Banner";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
 import { PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title } from "./Top";
+import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
 import { Workspace } from "./Workspace";
 import { useItem, type ItemDetail } from "./useItem";
@@ -55,7 +56,7 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />
-      <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
+      <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "task", node: item.stop.node, step: ESCALATION, task: ESCALATION } }))} />
       <Workspace item={item} reload={reload} />
     </div>
   );

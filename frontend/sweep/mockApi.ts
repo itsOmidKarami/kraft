@@ -128,6 +128,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/diff$/))) return json(route, diffFor(m[1], S.variant));
+    if ((m = p.match(/^\/work-items\/([^/]+)\/threads$/)) && method === "GET") return json(route, S.bundles[m[1]]?.threads ?? []);
     if ((m = p.match(/^\/work-items\/([^/]+)\/compare$/))) {
       return json(route, compareFor(m[1], S.variant, ["1", "true"].includes(q.get("ignore_whitespace") ?? ""), viewedMarks));
     }

@@ -173,6 +173,8 @@ export interface ItemBundle {
   sessions: any[];
   events: Ev[];
   logs: Record<string, any[]>;
+  /** GET /work-items/{id}/threads (ux2-W5's gate pane). */
+  threads?: any[];
 }
 
 export function logLines(sessionId: string, n: number, long: boolean): any[] {

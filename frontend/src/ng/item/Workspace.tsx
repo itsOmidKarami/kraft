@@ -2,16 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { create } from "zustand";
 import * as api from "../../api";
-import { elapsed, shortId } from "../../format";
-import type { Policy } from "../../types";
+import type { Policy, WorkItemDocument } from "../../types";
 import { openingView } from "../graph/camera";
 import { Inspector } from "../graph/Inspector";
 import { StageGraph } from "../graph/StageGraph";
-import { paneReducer, type PaneAction, type PaneState } from "../graph/usePaneSelection";
+import { ChainStrip } from "../graph/ChainStrip";
+import { GateView } from "../graph/GateView";
+import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
+import { paneReducer, type PaneAction, type PaneState, type Sel } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { chainGraph } from "./graph";
-import { ChainConfig, ChainOverview } from "./panes/ChainPane";
+import { DocViewer } from "./DocViewer";
+import { gateView } from "./gateView";
+import { nodeGraph } from "./nodeGraph";
+import { taskName } from "./paths";
+import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
+import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import type { ItemDetail } from "./useItem";
 
@@ -33,10 +40,13 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
   const [search] = useSearchParams();
   const nodes = item.chain_definition.nodes ?? [];
   const place = readPlace(nodeParam, search, nodes);
-  const { pane, setPane } = usePaneMemory();
+  const { pane: pane_, setPane } = usePaneMemory();
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
   const events = useEvents(item.id, item.updated_at);
+  const docs = useDocuments(item.id, item.updated_at);
+  const [doc, setDoc] = useState<WorkItemDocument | null>(null);
+  const [artifact, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
@@ -46,7 +56,7 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     return () => clearInterval(t);
   }, []);
 
-  const state: PaneState = { level: place.node ? "node" : "chain", node: place.node, sel: place.sel, open: pane.open, userCollapsed: pane.userCollapsed };
+  const state: PaneState = { level: place.node ? "node" : "chain", node: place.node, sel: place.sel, open: pane_.open, userCollapsed: pane_.userCollapsed };
   const go = (to: Place) => {
     const url = placeUrl(item.id, to);
     if (url !== placeUrl(item.id, place)) navigate(url, { replace: !pushes(place, to) });
@@ -61,74 +71,107 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
   const tabParam = search.get("tab");
   const lastTab = useRef(tabParam);
   useEffect(() => {
-    if (tabParam && tabParam !== lastTab.current && !pane.open) setPane({ open: true, userCollapsed: false });
+    if (tabParam && tabParam !== lastTab.current && !pane_.open) setPane({ open: true, userCollapsed: false });
     lastTab.current = tabParam;
-  }, [tabParam, pane.open]);
+  }, [tabParam, pane_.open]);
+
+  // Entering or leaving a node view swaps the canvas under the focus: hand it to
+  // the new canvas's Tab stop, so the keyboard path goes on (R6).
+  const areaRef = useRef<HTMLDivElement>(null);
+  const lastNode = useRef(place.node);
+  useEffect(() => {
+    if (lastNode.current === place.node) return;
+    lastNode.current = place.node;
+    const f = requestAnimationFrame(() => areaRef.current?.querySelector<HTMLElement>('[role="group"] [tabindex="0"]')?.focus());
+    return () => cancelAnimationFrame(f);
+  }, [place.node]);
 
   const graph = useMemo(() => chainGraph(item, events, now), [item, events, now]);
   const selectedNode = place.sel.kind === "chain" ? undefined : place.sel.node;
-  const reserve = size.overlay ? 0 : pane.open ? size.width : 40;
-  const cover = size.overlay && pane.open ? size.width : 0;
+  const reserve = size.overlay ? 0 : pane_.open ? size.width : 40;
+  const cover = size.overlay && pane_.open ? size.width : 0;
   const hasCurrent = graph.nodes.some((n) => n.state === "current" || n.state === "failed" || n.state === "amber");
 
   const sel = place.sel;
-  const chainCrumb = item.bead_id || shortId(item.id);
-  let body: JSX.Element;
-  let head: { crumbs: { label: string; onClick?: () => void }[]; icon?: string; gate?: boolean; title: string; sub?: string; tabs?: { value: string; label: string }[] };
-  const tab = place.tab ?? "overview";
-  if (sel.kind === "chain") {
-    head = { crumbs: [{ label: chainCrumb }], icon: "workflow", title: item.chain_template, sub: `this item's chain · ${nodes.length} nodes · frozen at intake`, tabs: [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }] };
-    body = tab === "config"
-      ? <ChainConfig item={item} policy={policy} reload={reload} editBudget={editBudget} onEditBudget={setEditBudget} />
-      : <ChainOverview item={item} events={events} now={now} onSelect={(node) => dispatch({ type: "pick", sel: { kind: "node", node } })} />;
-  } else {
-    const n = nodes.find((x) => x.id === sel.node);
-    const g = graph.nodes.find((x) => x.id === sel.node);
-    const by = item.usage?.by_node.find((r) => r.node === sel.node);
-    const word = ({ done: "done", current: "running", todo: "not started", failed: "failed", amber: "waiting for you", plain: "stopped" } as Record<string, string>)[g?.state ?? "plain"] ?? "";
-    head = { crumbs: [{ label: item.chain_template, onClick: () => dispatch({ type: "pick", sel: { kind: "chain" } }) }], gate: n?.kind === "gate", title: sel.node, sub: `${n?.kind === "gate" ? "gate" : "exec"} node · ${word}`, tabs: [{ value: "overview", label: "Overview" }] };
-    body = (
-      <dl className="item-facts ip-facts">
-        <div><dt>status</dt><dd>{[word, g?.meta, g?.sub].filter(Boolean).join(" · ")}</dd></div>
-        {(n?.steps?.length ?? 0) > 0 && <div><dt>steps</dt><dd>{n!.steps!.length} · {n!.tasks.length} tasks</dd></div>}
-        {g?.attempt && g.attempt > 1 && <div><dt>attempts</dt><dd>{g.attempt}</dd></div>}
-        {by && <div><dt>ran</dt><dd>{by.sessions} sessions · {elapsed(by.wall_ms)}</dd></div>}
-      </dl>
-    );
-  }
+  const pick = (to: Sel) => dispatch({ type: "pick", sel: to });
+  const tab = place.tab ?? "";
+  const pane = paneContent({
+    item, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,
+    focus: (node) => dispatch({ type: "focus", node }),
+    attempt: place.attempt,
+    setAttempt: (attempt) => go({ ...place, attempt }),
+    onDoc: setDoc,
+    onArtifact: () => setArtifact(true),
+  });
+  const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
+  const inside = viewing && nodeGraph(item, viewing, now);
+  const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
   return (
     <div className="item-canvas" ref={frame}>
-      <StageGraph
-        name={item.chain_template}
-        nodes={graph.nodes}
-        arcs={graph.arcs(selectedNode)}
-        selected={selectedNode}
-        opening={openingView(item.display_status ?? "", hasCurrent)}
-        reserve={reserve}
-        cover={cover}
-        onSelect={(node) => dispatch({ type: "pick", sel: { kind: "node", node } })}
-        onOpen={(node) => dispatch({ type: "expand", sel: { kind: "node", node } })}
-        onEscape={() => dispatch({ type: "escape" })}
-        onBackground={() => dispatch({ type: "background" })}
-      />
-      <Inspector
-        id="item-pane"
-        open={pane.open}
-        size={size}
-        crumbs={head.crumbs}
-        icon={head.icon}
-        gate={head.gate}
-        title={head.title}
-        sub={head.sub}
-        tabs={head.tabs}
-        tab={tab}
-        onTab={(t) => go({ ...place, tab: t === "overview" ? undefined : t })}
-        onCollapse={() => dispatch({ type: "collapse" })}
-        onExpand={() => dispatch({ type: "expand" })}
-      >
-        {body}
-      </Inspector>
+      {viewing && <ChainStrip nodes={graph.nodes} viewing={viewing.id} onOpen={(node) => dispatch({ type: "focus", node })} onBack={() => dispatch({ type: "back" })} />}
+      <div className="item-area" ref={areaRef}>
+        {viewing?.kind === "gate" ? (
+          <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
+            onGate={() => pick({ kind: "node", node: viewing.id })}
+            onReviewer={() => { const t = viewing.tasks[0]; if (t) pick({ kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) }); }}
+            onBackground={() => dispatch({ type: "background" })}
+          />
+        ) : viewing && inside ? (
+          <NodeGraph
+            name={viewing.id}
+            steps={inside.steps}
+            side={inside.side}
+            loop={inside.loop}
+            onFailure={inside.onFailure}
+            reserve={reserve}
+            selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined } : undefined}
+            onSelect={(x) => pick(nodeSel(x))}
+            onOpen={(x) => dispatch({ type: "expand", sel: nodeSel(x) })}
+            onExpand={(x) => dispatch({ type: "expand", sel: nodeSel(x) })}
+            onEscape={() => dispatch({ type: "escape" })}
+            onBackground={() => dispatch({ type: "background" })}
+          />
+        ) : (
+          <StageGraph
+            name={item.chain_template}
+            nodes={graph.nodes}
+            arcs={graph.arcs(selectedNode)}
+            selected={selectedNode}
+            opening={openingView(item.display_status ?? "", hasCurrent)}
+            reserve={reserve}
+            cover={cover}
+            onSelect={(node) => pick({ kind: "node", node })}
+            onOpen={(node) => dispatch({ type: "expand", sel: { kind: "node", node } })}
+            onFocusNode={(node) => dispatch({ type: "focus", node })}
+            onEscape={() => dispatch({ type: "escape" })}
+            onBackground={() => dispatch({ type: "background" })}
+          />
+        )}
+        <Inspector
+          id="item-pane"
+          open={pane_.open}
+          size={size}
+          crumbs={pane.crumbs}
+          icon={pane.icon}
+          taskKind={pane.taskKind}
+          gate={pane.gate}
+          title={pane.title}
+          sub={pane.sub}
+          tabs={pane.tabs}
+          // The pane's first tab when the URL names none (Thread, on an escalation).
+          tab={pane.tabs?.some((t) => t.value === tab) ? tab : pane.tabs?.[0]?.value}
+          onTab={(t) => go({ ...place, tab: t === pane.tabs?.[0]?.value ? undefined : t })}
+          onCollapse={() => dispatch({ type: "collapse" })}
+          onExpand={() => dispatch({ type: "expand" })}
+          onFocus={state.level === "chain" && sel.kind === "node" ? () => dispatch({ type: "focus", node: sel.node }) : undefined}
+          footer={pane.footer}
+        >
+          {pane.body}
+        </Inspector>
+      </div>
+      {doc && <DocViewer source={{ kind: "document", id: doc.document_id, by: [doc.node_id, doc.hook_point?.split(".").at(-1), doc.attempt ? `attempt ${doc.attempt}` : ""].filter(Boolean).join(" › ") }} onClose={() => setDoc(null)} />}
+      {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id }} onClose={() => setArtifact(false)} />}
     </div>
   );
 }

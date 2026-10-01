@@ -117,6 +117,17 @@ test("checks/ellipsis: the /ng header's .ng-crumb-repo and .ng-crumb-current cut
   expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(2);
 });
 
+/** Allowlist use: the /ng item page's one-line question banner in a node view (UX V2 W5, Decisions §4), whole in title. */
+test("checks/ellipsis: the /ng question banner's .item-one-line cut is allowed, an unmarked one still counts", async ({ page }) => {
+  const q = "The race needs a reindex API change the plan froze. Allow the change, or accept the finding and move on?";
+  const line = (attr: string) =>
+    `<span class="item-banner-text item-one-line" ${attr} title="${q}" style="display:block;width:240px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:13px sans-serif">${q}</span>`;
+  await page.setContent(line("data-allow-ellipsis"));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
+  await page.setContent(line(""));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
+});
+
 /** Allowlist use: the document pane's title and path lines (W12.2), each one line cut, whole in title. */
 test("checks/ellipsis: the document pane's .doc-modal-name and .doc-path cuts are allowed, unmarked ones still count", async ({ page }) => {
   const path = ".engineering/reviews/2026-09-13-design-the-caching-layer-for-document-search-embedding-cache.md";

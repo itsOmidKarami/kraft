@@ -291,6 +291,27 @@ const FLOWS: Flow[] = [
       await expect(p.getByRole("region", { name: "New work item" })).toHaveCount(0);
       await expect(p).toHaveURL(/[?&]sel=/);
     }, wait: 700 },
+  // ux2-W5 G (R6): chain → node view → a task's pane → back, keyboard only.
+  { name: "ng-node-keyboard", widths: [1280], keyboard: true, start: ngItem("running"), steps: [
+    { name: "tab-into-chain", run: async (p) => { await p.locator('.graph-node[tabindex="0"]').focus(); await expect(p.getByRole("button", { name: /^verification, node, running/ })).toBeFocused(); } },
+    { name: "cmd-enter-node-view", run: async (p) => { await p.keyboard.press("ControlOrMeta+Enter"); await expect(p).toHaveURL(/\/nodes\/verification$/); await expect(p.getByRole("group", { name: "verification" })).toBeVisible(); await expect(p.locator('.graph-node[tabindex="0"]').first()).toBeFocused(); } },
+    { name: "arrows-to-a-task", run: async (p) => { await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowDown"); await expect(p.getByRole("button", { name: /^typecheck,/ })).toBeFocused(); } },
+    { name: "enter-opens-pane", run: async (p) => { await p.keyboard.press("Enter"); await expect(p).toHaveURL(/sel=verification\.checks\.typecheck/); await expect(p.getByRole("complementary", { name: "typecheck pane" })).toBeVisible(); } },
+    // Escape from the canvas collapses the pane and leaves focus on the canvas.
+    { name: "escape-collapses", run: async (p) => { await p.getByRole("button", { name: /^typecheck,/ }).focus(); await p.keyboard.press("Escape"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeVisible(); await expect(p.getByRole("button", { name: /^typecheck,/ })).toBeFocused(); } },
+    { name: "escape-back-to-chain", run: async (p) => { await p.keyboard.press("Escape"); await expect(p).toHaveURL(/\/work-items\/[0-9a-f]+$/); await expect(p.locator('.graph-node[tabindex="0"]').first()).toBeFocused(); } },
+  ] },
+  // ux2-W5 H: retry a failed item from its failed task, through the task pane; the request names the task's path.
+  { name: "ng-retry-task", widths: [1280], start: ngItem("failed"), steps: [
+    { name: "open-node", run: async (p) => { await p.getByRole("button", { name: "Open merge_request →" }).click(); await expect(p.getByRole("complementary", { name: "merge_request pane" })).toBeVisible(); } },
+    { name: "focus", run: async (p) => { await p.getByRole("button", { name: /Focus/ }).click(); await expect(p).toHaveURL(/\/nodes\/merge_request$/); } },
+    { name: "task-pane", run: async (p) => { await p.getByRole("button", { name: /^open_draft,/ }).click(); await expect(p.getByRole("complementary", { name: "open_draft pane" })).toBeVisible(); await expect(p.getByText("attempt 3 of 3")).toBeVisible(); } },
+    { name: "retry-confirm", run: async (p) => { await p.getByRole("complementary", { name: "open_draft pane" }).getByRole("button", { name: "Retry" }).click(); await expect(p.getByRole("group", { name: "Retry merge_request.open.open_draft" })).toBeVisible(); } },
+    { name: "retry-sent", run: async (p) => {
+      const sent = p.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/retry"));
+      await p.getByRole("group", { name: "Retry merge_request.open.open_draft" }).getByRole("button", { name: "Retry" }).click();
+      expect((await sent).postDataJSON()).toEqual({ path: "merge_request.open.open_draft" });
+    } },
   ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.

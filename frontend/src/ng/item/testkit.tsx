@@ -27,6 +27,17 @@ export const detail = (over: Partial<ItemDetail> = {}): ItemDetail =>
 
 export type Call = { method: string; path: string; body: unknown };
 
+/** What an unstubbed read answers: the route's own empty shape, so a component
+ *  a test didn't mean to feed never sees an object where the API sends a list. */
+function emptyAnswer(method: string, path: string): [number, unknown] {
+  if (method !== "GET") return [200, {}];
+  if (/\/events$/.test(path) || /\/threads$/.test(path)) return [200, []];
+  if (/\/diff$/.test(path)) return [200, { work_item_id: "w1", base_ref: null, files: [], diff: "", untracked: [], truncated: false }];
+  if (/\/documents$/.test(path)) return [200, { work_item_id: "w1", documents: [] }];
+  if (/\/log$/.test(path)) return [200, { session_id: "", status: "done", lines: [] }];
+  return [200, {}];
+}
+
 /** Stub fetch: `answers` maps "METHOD /path" (no /api) to [status, body]; anything else answers 200 {}. */
 export function stubFetch(answers: Record<string, [number, unknown]> = {}) {
   const calls: Call[] = [];
@@ -34,7 +45,7 @@ export function stubFetch(answers: Record<string, [number, unknown]> = {}) {
     const path = String(url).replace(/^\/api/, "").split("?")[0];
     const method = init?.method ?? "GET";
     calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    const [status, body] = answers[`${method} ${path}`] ?? [200, {}];
+    const [status, body] = answers[`${method} ${path}`] ?? emptyAnswer(method, path);
     return new Response(JSON.stringify(body), { status });
   }));
   return calls;
@@ -42,7 +53,8 @@ export function stubFetch(answers: Record<string, [number, unknown]> = {}) {
 
 export const inShell = (ui: ReactElement, path = "/work-items/w1") =>
   render(
-    <MemoryRouter initialEntries={[path]}>
+    // The app's basename, so a router link reads as the browser sees it (/ng/…).
+    <MemoryRouter basename="/ng" initialEntries={[`/ng${path}`]}>
       <Routes>
         <Route element={<Shell />}>
           <Route path="*" element={ui} />

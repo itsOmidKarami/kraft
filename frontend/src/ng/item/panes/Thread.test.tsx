@@ -1,0 +1,26 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { detail, stubFetch } from "../testkit";
+import { Thread } from "./Thread";
+
+afterEach(() => vi.unstubAllGlobals());
+const msg = (seq: number, thread: number, turn: number, message: string, node_id: string, auto = false) => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread, turn, message, auto }, node_id, created_at: "2026-09-13T09:00:00Z" });
+
+describe("Thread", () => {
+  it("shows each thread's turns with who wrote them, links other nodes, and replies in the thread or a new one", async () => {
+    const calls = stubFetch({ "GET /work-items/w1/events": [200, [msg(1, 1, 1, "Which eviction policy?", "implementation", true), msg(2, 1, 2, "Allow the change?", "verification"), { seq: 3, work_item_id: "w1", type: "node_started", payload: {}, node_id: "x", created_at: "t" }]] });
+    const onNode = vi.fn();
+    const reload = vi.fn();
+    render(<Thread item={detail()} node="verification" reload={reload} onNode={onNode} />);
+    expect(await screen.findByText("Which eviction policy?")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Thread 1" })).toHaveTextContent("thread 1 · 2 turns");
+    expect(screen.getAllByText("kraft")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "open node →" }));
+    expect(onNode).toHaveBeenCalledWith("implementation");
+    await userEvent.type(screen.getByLabelText("Reply to the escalation"), "Accept it.");
+    await userEvent.click(screen.getByRole("button", { name: "Send in a new thread" }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/escalate", body: { message: "Accept it.", new_thread: true } }]);
+  });
+});
