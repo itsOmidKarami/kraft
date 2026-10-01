@@ -26,6 +26,11 @@ export async function requestPermission(): Promise<NotificationPermission> {
   return Notification.requestPermission();
 }
 
+/** What a notification says for `event`: the work item's title over the event's own words. */
+export function notificationText(event: { label: string }, title: string): { title: string; body: string } {
+  return { title, body: event.label };
+}
+
 export function maybeNotify(ev: KraftEvent, title: string): void {
   if (!isEnabled()) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
@@ -33,7 +38,8 @@ export function maybeNotify(ev: KraftEvent, title: string): void {
   const event = NOTIFY_EVENTS.find((e) => e.id === ev.type);
   if (!event) return;
 
-  const n = new Notification(title, { body: event.label, tag: ev.work_item_id, icon: "/icon.svg" });
+  const text = notificationText(event, title);
+  const n = new Notification(text.title, { body: text.body, tag: ev.work_item_id, icon: "/icon.svg" });
   n.onclick = () => {
     window.focus();
     location.href = "/work-items/" + ev.work_item_id;

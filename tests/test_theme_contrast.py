@@ -20,6 +20,7 @@ sys.modules["gen_theme"] = gen
 _SPEC.loader.exec_module(gen)
 
 BLOCKS, ACCENTS, _LOG = gen.generate()
+CODE = gen.schemes(BLOCKS, _LOG)
 contrast = gen.contrast
 COMBOS = [(s, m, a) for s in gen.SURFACES for m in gen.MODES for a in gen.AMOUNTS]
 
@@ -72,4 +73,23 @@ def test_mono_and_none_accent_is_the_text_colour():
 
 
 def test_the_checked_in_theme_css_is_the_generators_output():
-    assert gen.OUT.read_text() == gen.render(BLOCKS, ACCENTS), "run dev/gen_theme.py"
+    assert gen.OUT.read_text() == gen.render(BLOCKS, ACCENTS, CODE), "run dev/gen_theme.py"
+
+
+@pytest.mark.parametrize(("scheme", "mode"), sorted(CODE))
+def test_code_scheme_tokens_clear_the_floor_on_every_ground(scheme, mode):
+    """A named scheme is picked apart from surface and amount, so each token
+    has to read on the page and card ground of all of them (W16 D.4)."""
+    for role, colour in CODE[scheme, mode].items():
+        for (_s, m, _a), t in BLOCKS.items():
+            if m == mode:
+                for ground in ("bg", "surface"):
+                    assert contrast(colour, t[ground]) >= gen.TOKEN_FLOOR, (role, ground)
+
+
+def test_the_named_schemes_are_the_config_literals():
+    """`config.CodeScheme`'s literals, no more and no fewer."""
+    assert {m: set(v) | {"auto", "none"} for m, v in gen.SCHEMES.items()} == {
+        "light": {"auto", "none", "solarized-light"},
+        "dark": {"auto", "none", "solarized-dark", "monokai", "dracula"},
+    }

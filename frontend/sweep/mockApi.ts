@@ -14,6 +14,11 @@ export interface MockOptions {
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
    *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
   boardState?: "loading" | "offline";
+  /** ux2-W16: what GET /apply answers. Unset answers nothing pending, so the shell's apply chip stays out of every other cell; `both` is a restart item beside a refused policy.
+   *  After POST /apply/restart it answers nothing pending and /health fails twice, as a server coming back does. */
+  apply?: "none" | "reload" | "restart" | "problem" | "unmanaged" | "both";
+  /** ux2-W16: what GET /update answers: a newer release (default), none, or a feed that did not answer. */
+  update?: "available" | "current" | "unknown";
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
   /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
@@ -117,6 +122,7 @@ const json = (route: Route, body: unknown, status = 200) =>
 export async function installMocks(page: Page, S: Scenario, opts: MockOptions = {}) {
   // Every sweep page is mocked here, before it navigates: fixed time keeps the app's relative durations ("17d 10h") off the wall clock. Timers still run; a case that needs another instant sets its own after.
   await page.clock.setFixedTime(new Date(NG_NOW));
+  let restarted = 0;
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
   let listReads = 0;
@@ -151,7 +157,10 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     const method = req.method();
     const q = url.searchParams;
 
-    if (p === "/health") return json(route, S.settings.health);
+    if (p === "/health") {
+      if (restarted && restarted++ <= 3) return route.abort("connectionrefused");
+      return json(route, S.settings.health);
+    }
     if (opts.locked) {
       if (p === "/login" && method === "POST") {
         if (opts.login === "wrong") return json(route, { detail: "Wrong password." }, 401);
@@ -522,15 +531,22 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       { id: 3, at: new Date(Date.now() - 60_000).toISOString(), ready: 2, started: ["w-2"], skipped: [{ bead_id: "B-9", reason: "max_concurrent" }] },
       { id: 2, at: new Date(Date.now() - 360_000).toISOString(), ready: 0, started: [], skipped: [] },
     ]);
-    if (p === "/apply" || p === "/apply/reload") return json(route, {
-      restart: [{ id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" }],
-      reload: [{ id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded", problem: "defaults: Input should be a valid dictionary" }],
-      managed: true,
-    });
-    if (p === "/apply/restart") return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) });
-    if (p === "/update" || p === "/update/check") return json(route, {
-      installed: "1.4.0", latest: "v1.5.0", channel: "stable", behind: true, checked_at: new Date(Date.now() - 3_600_000).toISOString(),
-    });
+    if (p === "/apply" || p === "/apply/reload") {
+      const port = { id: "access.port", file: "access.yaml", text: "port changes from 8765 to 9100" };
+      const disk = { id: "disk:policy.yaml", file: "policy.yaml", text: "policy.yaml changed on disk since it was loaded" };
+      const bad = { ...disk, problem: "defaults: Input should be a valid dictionary" };
+      const by = { none: [[], []], reload: [[], [disk]], restart: [[port], []], problem: [[], [bad]], unmanaged: [[port], []], both: [[port], [bad]] } as const;
+      const [restart, reload] = restarted ? [[], []] : by[opts.apply ?? "none"];
+      return json(route, { restart, reload, managed: opts.apply !== "unmanaged" });
+    }
+    if (p === "/apply/restart") { restarted = 1; return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) }); }
+    if (p === "/update" || p === "/update/check") {
+      const at = new Date(Date.now() - 3_600_000).toISOString();
+      const u = opts.update ?? "available";
+      return json(route, u === "unknown"
+        ? { installed: "1.4.0", latest: null, channel: "stable", behind: null, checked_at: null }
+        : { installed: "1.4.0", latest: u === "current" ? "v1.4.0" : "v1.5.0", channel: "stable", behind: u === "available", checked_at: at });
+    }
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
     if (p === "/notify") return json(route, st.notify);

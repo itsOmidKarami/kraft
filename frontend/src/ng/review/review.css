@@ -4,12 +4,12 @@
 .review-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
 /* Syntax (C.4): the five classes on W1 status tokens, so `auto` follows the
-   colour amount. `code_scheme: none` sets .is-plain-code on the page. */
-.tok-kw { color: var(--info); }
-.tok-str { color: var(--ok); }
-.tok-num { color: var(--warn); }
-.tok-com { color: var(--text-muted); font-style: italic; }
-.tok-name { color: var(--text); font-weight: 500; }
+   colour amount; a named scheme sets --tok-* (W16 D, theme.css). `code_scheme: none` sets .is-plain-code on the page. */
+.tok-kw { color: var(--tok-kw, var(--info)); }
+.tok-str { color: var(--tok-str, var(--ok)); }
+.tok-num { color: var(--tok-num, var(--warn)); }
+.tok-com { color: var(--tok-com, var(--text-muted)); font-style: italic; }
+.tok-name { color: var(--tok-name, var(--text)); font-weight: 500; }
 .is-plain-code :is(.tok-kw, .tok-str, .tok-num, .tok-com, .tok-name) { color: inherit; font-style: inherit; font-weight: inherit; }
 
 /* Toolbar (prototype 352–410). */

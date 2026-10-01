@@ -5,6 +5,8 @@ import { useIconSet } from "./iconSet";
 export { Bot, FileText, LocateFixed, Maximize2, Minus, PanelRightClose, PanelRightOpen, Plus, Scan, Siren } from "lucide-react";
 // The item page's (ux2-W5).
 export { Archive, ArchiveRestore, ChevronDown, CircleAlert, CircleCheck, CircleHelp, Clock, Copy, EllipsisVertical, Pause, Play, RotateCcw, X } from "lucide-react";
+// The apply chip's (ux2-W16).
+export { ExternalLink, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
 // The review page's (ux2-W8).
 export { ChevronsDownUp, ChevronsUpDown, List, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 

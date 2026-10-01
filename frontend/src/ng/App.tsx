@@ -1,11 +1,15 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { ArchivedPage } from "./board/ArchivedPage";
 import { BoardPage } from "./board/BoardPage";
 import { DraftItemPage } from "./board/draft/DraftItemPage";
 import { Gallery } from "./graph/Gallery";
 import { ItemPage } from "./item/ItemPage";
+import { AboutPage } from "./settings/AboutPage";
+import { AccessPage } from "./settings/AccessPage";
 import { AppearancePage } from "./settings/AppearancePage";
+import { NotifyPage } from "./settings/NotifyPage";
 import { ReviewPage } from "./review/ReviewPage";
 import { resumeSession } from "./session";
 import { Placeholder } from "./shell/Placeholder";
@@ -18,7 +22,7 @@ import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/settings/appearance": <AppearancePage />, "/templates/chains": <ChainsIndex /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);

@@ -1,0 +1,23 @@
+/* The apply chip and its restart dialogs (W16 A). Colours only from W1 tokens. */
+.apply-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--warn); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer; }
+.apply-chip > svg { color: var(--warn); }
+.apply-chip.is-bad { border-color: var(--bad); }
+.apply-chip.is-bad > svg { color: var(--bad); }
+.apply-chip:hover { background: var(--surface-2); }
+.apply-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.apply-chip-count { padding: 0 5px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: 600 9.5px/15px ui-monospace, Menlo, monospace; }
+.apply-pop { width: 340px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; font-size: 12px; color: var(--text); }
+.apply-block { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 10px; }
+.apply-block + .apply-block { border-top: 1px solid var(--line); }
+.apply-block-head { display: flex; align-items: baseline; gap: 8px; font-weight: 500; }
+.apply-row { display: flex; flex-direction: column; gap: 2px; line-height: 1.45; color: var(--text-sub); }
+.apply-src { font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); }
+.apply-problem { margin: 0; padding: 0 14px 6px; font-size: 11.5px; color: var(--bad); }
+.apply-row .apply-problem { padding: 0; }
+.apply-muted { font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+.apply-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.apply-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; text-decoration: none; }
+.apply-btn:hover:not(:disabled) { background: var(--line); }
+.apply-btn.is-primary { border-color: transparent; background: var(--text); color: var(--bg); font-weight: 500; }
+.apply-btn:disabled { opacity: .5; cursor: default; }
+.apply-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
