@@ -40,7 +40,7 @@ export function hex(seed: number): string {
 }
 
 export const T0 = Date.parse("2026-09-13T08:00:00Z");
-const NOW = Date.now();
+const NOW = T0 + 130 * 60_000; // NG_NOW: the instant the sweep page clock is frozen at
 export const t = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
 /** Relative to now, for "next check in 4m" style fields. */
 const fromNow = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
