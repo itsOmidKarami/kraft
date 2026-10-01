@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 
@@ -14,6 +14,30 @@ function width(phone: boolean) {
   };
 }
 afterEach(() => window.history.pushState({}, "", "/"));
+
+describe("the shipped addresses that moved, at phone width", () => {
+  it("lands an old address on the screen that replaced it", async () => {
+    width(true);
+    window.history.pushState({}, "", "/ng/settings/notify?x=1");
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/ng/settings/notifications?x=1"));
+  });
+
+  it("opens the review for a shipped #tab=changes address", async () => {
+    width(true);
+    window.history.pushState({}, "", "/ng/work-items/abc#tab=changes");
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe("/ng/work-items/abc/review"));
+  });
+
+  it("does not send /search to the board: the phone has a Search screen", () => {
+    width(true);
+    window.history.pushState({}, "", "/ng/search");
+    render(<App />);
+    expect(window.location.pathname).toBe("/ng/search");
+    expect(screen.getByRole("heading", { level: 1, name: "Search" })).toBeInTheDocument();
+  });
+});
 
 describe("ng App at phone width (A.1)", () => {
   it("renders the phone app with the tab bar, not the desktop shell", () => {

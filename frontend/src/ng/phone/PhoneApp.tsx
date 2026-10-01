@@ -4,6 +4,7 @@ import { Item } from "./item/Item";
 import { GateReviewRoute } from "./review/GateReview";
 import { NewItem } from "./new/NewItem";
 import { NodeRoute } from "./node/NodeRoute";
+import { Alias, ALIASES, ShippedHash } from "../shell/aliases";
 import { Soon } from "./nav/Soon";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
@@ -27,6 +28,7 @@ function Frame() {
 export function PhoneApp() {
   return (
     <BrowserRouter basename="/ng">
+      <ShippedHash />
       <Routes>
         <Route element={<Frame />}>
           <Route path="/" element={<Board />} />
@@ -40,6 +42,8 @@ export function PhoneApp() {
           <Route path="/templates/*" element={<Soon title="Templates" />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/*" element={<Soon title="Settings" />} />
+          {/* The shipped addresses that moved (spec §11.2), after the screens: /search is a phone screen and wins over its alias to the board. */}
+          {ALIASES.map(([from, to]) => <Route key={from} path={from} element={<Alias to={to} />} />)}
           <Route path="*" element={<Soon title="Not found" />} />
         </Route>
       </Routes>
