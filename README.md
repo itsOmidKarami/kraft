@@ -16,6 +16,7 @@ grade itself on, and a person at the decisions that matter.
 Hand Claude Code (or another coding agent) a spec and walk away. It's for
 developers tired of babysitting a session to the end of a task.
 
+<!-- TODO(Omid): re-record the 30-second tour below on the 1.5.0 interface; it still shows the old one. -->
 ![A 30-second tour: file a work item, read the spec an agent wrote at its gate, and look at a finished item's diff](https://github.com/user-attachments/assets/34d3197d-b07b-4f9a-a13b-04f0c377230e)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
@@ -49,7 +50,7 @@ then approve, or reject with a note that re-runs the node that wrote it.
 </td>
 <td width="35%">
 
-**Same board, phone-sized.** Reach it from another device through a tunnel; see
+**Same app, phone-sized.** Below 768 pixels it switches to a phone layout on its own. Reach it from another device through a tunnel; see
 [Remote access](https://itsomidkarami.github.io/kraft/guides/remote-access).
 
 ![The board at a 390px phone viewport, with bottom tab navigation](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)

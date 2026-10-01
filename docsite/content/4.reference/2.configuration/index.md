@@ -9,7 +9,7 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/templates/` (def
 
 Kraft seeds the directory from the packaged defaults on first run and never
 overwrites it afterwards, so an upgrade cannot clobber an edited policy. The
-Settings screens in the UI edit these same files, and editing them by hand is
+Templates and Settings screens in the UI edit these same files, and editing them by hand is
 equally supported.
 
 - `kraft admin doctor` reports anything that does not parse.
@@ -46,10 +46,47 @@ template format (V1). Kraft refuses a home that still holds them until you run
 
 ## Settings-only files
 
-`notify.yaml` and `theme.yaml` are written by the Settings screens, and Kraft rereads `notify.yaml` after each save. You can edit
+`notify.yaml` and `theme.yaml` are written by the Settings screens (Notifications and Appearance), and Kraft rereads `notify.yaml` after each save. You can edit
 them by hand, but nothing else in this section depends on them.
 
 | File | Fields |
 |---|---|
 | `notify.yaml` | `enabled`; `url`, the webhook Kraft posts to, which is a secret and is never shown back; `base_url`, the address links in a notification use; and `events`, the event types that send one. See [Notifications](/reference/events#notifications) for the payload and every event type. |
-| `theme.yaml` | `surface` (`graphite`, `slate`, `ink`, `sand` or `moss`), `accent` (`none`, `blue`, `violet`, `green`, `amber` or `rose`) and `colour_amount` (`mono`, `subtle` or `full`; `mono` takes only `accent: none`); with no `surface` the look is `ink`, `violet`, `full`. `mode` (`light`, `dark` or `system`; default `dark`); `density` (`compact` or `comfortable`; default `compact`); `board` with `group_by` (`status`, `repo` or `template`), `show_done` (default `5`) and `open_in` (`peek` or `full`); `code_scheme` (`light`: `auto`, `none` or `solarized-light`; `dark`: `auto`, `none`, `solarized-dark`, `monokai` or `dracula`); and `diff` (`layout`, `colours`, `show_whitespace`, `word_highlight`, `wrap_lines`, `one_file_at_a_time`). A save changes only the keys it sends. `palette` is the old interface's key: on startup Kraft writes the look it stood for as `surface`, `accent` and `colour_amount`, removes it, and keeps the file as it was in `theme.yaml.pre-ux2`. |
+| `theme.yaml` | The look: `surface`, `accent` and `colour_amount`; `mode` and `density`; `code_scheme`, `diff` and `board`. See [theme.yaml](#theme-yaml). |
+
+## theme.yaml
+
+Settings, Appearance writes this file. A save changes only the keys it sends,
+and a key the file leaves out takes its default.
+
+| Key | Values | Default |
+|---|---|---|
+| `surface` | `graphite`, `slate`, `ink`, `sand` or `moss`: the base colours of the page. | `ink` |
+| `accent` | `none`, `blue`, `violet`, `green`, `amber` or `rose`. | `violet`; with a `surface` set and no `accent`, `none` |
+| `colour_amount` | `mono`, `subtle` or `full`: how much colour the surfaces, the accent and the status colours carry; `mono` leaves only grey. `mono` takes only `accent: none`, and a file that pairs them is refused. | `full`; with a `surface` set and no amount, `subtle` |
+| `mode` | `light`, `dark` or `system`. | `dark` |
+| `density` | `compact` or `comfortable`: how tightly rows and text are spaced. | `compact` |
+| `code_scheme` | `light`: `auto`, `none` or `solarized-light`; `dark`: `auto`, `none`, `solarized-dark`, `monokai` or `dracula`. The syntax colours in review diffs, chosen separately for light and dark. | `auto` for both |
+| `diff` | The review page's diff: `layout` (`unified` or `split`), `colours` (`theme`, `safe` or `plain`), and the switches `show_whitespace` (`true`), `word_highlight` (`true`), `wrap_lines` (`false`) and `one_file_at_a_time` (`true`). | as shown |
+| `board` | `group_by` (`status`, `repo` or `template`), `show_done` (the Done group's size, at least `1`; `5`) and `open_in` (`peek` or `full`: whether opening an item shows the side panel or the item page; `peek`). | as shown |
+
+### `palette` is legacy
+
+Before 1.5, `palette` (`nocturne`, `rose`, `forest`, `amber` or `slate`) chose
+the colours. No interface writes it any more, and Kraft converts it once at
+startup, before anything reads the theme:
+
+- `palette` is removed, and `surface`, `accent` and `colour_amount` are written
+  to draw the same look. `nocturne` and `rose` become `ink` with a `violet`
+  accent, `forest` becomes `moss` with `green`, `amber` becomes `sand` with
+  `amber`, and `slate` becomes `slate` with `blue`. The amount of colour is the
+  file's own `colour_amount`, else `full`. A file that already names its own
+  `surface` just loses the `palette`.
+- The original bytes are saved as `theme.yaml.pre-ux2` first. An existing copy
+  is never overwritten.
+- A missing file, a file with no `palette`, and one that does not parse or
+  holds a value Kraft does not know are left alone. With no `theme.yaml` at
+  all, the look is `ink` with `violet` at `full`.
+
+A `palette` that reappears, from an old browser tab's save or a hand edit, is
+read as it was and converted the same way at the next start.
