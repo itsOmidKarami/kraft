@@ -52,7 +52,7 @@ function TargetPicker({ heading, value, options, item, onPick }: { heading: stri
       heading={heading}
       triggerClass="rv-word"
       // A text trigger is named by its text (W1 Menu): the heading rides along, hidden.
-      trigger={<><span className="review-visually-hidden">{heading} </span>{shown}<ChevronDown size={12} aria-hidden /></>}
+      trigger={<><span className="review-visually-hidden">{heading}</span>{" "}{shown}<ChevronDown size={12} aria-hidden /></>}
       items={options.map((o) => ({ label: o.label, sub: o.sub, disabled: o.disabled, checked: o.value === value, onSelect: () => o.value && onPick(o.value) }))}
     />
   );
