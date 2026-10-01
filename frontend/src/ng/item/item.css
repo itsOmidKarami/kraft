@@ -191,4 +191,4 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .dv-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
 .dv-close { margin-left: auto; }
 /* The document viewer's dialog: two classes, so it outranks ui's `.dialog` width (R59: item styles its own class). */
-.dv-dialog.dialog { width: min(760px, 100%); }
+.dv-dialog.dialog { box-sizing: border-box; width: min(760px, 100%); }
