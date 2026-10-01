@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { repoName, tokens, usd } from "../../../format";
-import type { KraftEvent, Policy } from "../../../types";
+import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { Applied } from "../draft/applied";
@@ -17,8 +17,9 @@ const statusLine = (item: ItemDetail) => {
 };
 
 /** The chain pane's Overview (Decisions §5 Chain pane): status, progress,
- *  current (a link), spend, and Recent, whose lines select their node. */
-export function ChainOverview({ item, events, now, onSelect }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void }) {
+ *  current (a link), spend, the documents attached at intake (each opens when
+ *  the caller can open it) and Recent, whose lines select their node. */
+export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void }) {
   const sum = item.summary;
   const cap = item.budget_cap;
   const recent = [...events].reverse().flatMap((e) => {
@@ -32,6 +33,23 @@ export function ChainOverview({ item, events, now, onSelect }: { item: ItemDetai
         <div><dt>status</dt><dd>{statusLine(item)}</dd></div>
         {sum && <div><dt>progress</dt><dd>{sum.nodes_done} of {sum.nodes_total} nodes · {sum.gates_passed} {sum.gates_passed === 1 ? "gate" : "gates"} passed</dd></div>}
         {live && item.current_node_id && <div><dt>current</dt><dd><button type="button" className="item-link is-strong is-mono" onClick={() => onSelect(item.current_node_id!)}>{item.current_node_id}</button></dd></div>}
+        {!!item.attachments?.length && (
+          <div>
+            <dt title="attached at intake">attached</dt>
+            <dd>
+              {item.attachments.map((a) => {
+                const doc = docs?.find((d) => d.attachment_kind === a.kind);
+                const name = a.path.split("/").at(-1);
+                return (
+                  <span key={a.kind} className="ip-attached">
+                    {a.kind}{" "}
+                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button> : <span className="is-mono" title={a.path}>{name}</span>}
+                  </span>
+                );
+              })}
+            </dd>
+          </div>
+        )}
         {cap && <div><dt>spent</dt><dd>{usd(cap.spent_usd)}{cap.cap_usd != null ? ` of ${usd(cap.cap_usd)}` : ""}</dd></div>}
       </dl>
       <h3 className="ip-h">Recent</h3>
