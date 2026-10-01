@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { buildScenario, type DisplayState, type Scenario } from "./fixtures";
-import { installMocks } from "./mockApi";
+import { installMocks, type MockOptions } from "./mockApi";
 import { NG_NOW } from "./ngItems";
 import { focusRingMissing } from "./checks";
 
@@ -23,7 +23,7 @@ const VP: Record<number, [number, number]> = { 390: [390, 844], 1280: [1280, 800
 // `kbd` / `keyboard`: the step is driven from the keyboard, so the focus-ring
 // check judges whatever holds focus, not only a :focus-visible element.
 type Step = { name: string; run: (p: Page, S: Scenario) => Promise<void>; wait?: number; kbd?: true };
-interface Flow { name: string; data?: "default" | "long"; state?: DisplayState; widths: number[]; start: (p: Page, S: Scenario) => Promise<void>; steps: Step[]; keyboard?: true }
+interface Flow { name: string; data?: "default" | "long"; state?: DisplayState; widths: number[]; start: (p: Page, S: Scenario) => Promise<void>; steps: Step[]; keyboard?: true; mock?: MockOptions }
 
 const settle = (p: Page, ms = 400) => p.waitForTimeout(ms);
 const item = (st: DisplayState) => async (p: Page, S: Scenario) => { await p.goto(`/work-items/${S.byState[st].item.id}`); await p.locator(".detail, .item-page, .phone-item").first().waitFor(); await settle(p, 600); };
@@ -43,6 +43,8 @@ const NOTE = "Add an invalidation section for blob_sha changes mid-query.";
 const ng = (url: string) => async (p: Page) => { await p.goto(url); await p.locator("main h1").first().waitFor({ timeout: 8000 }); await settle(p, 600); };
 // ux2-W5: the /ng item page for one of ngItems.ts's scenarios, the clock fixed.
 const ngItem = (sc: string) => async (p: Page, S: Scenario) => { await p.clock.setFixedTime(new Date(NG_NOW)); await ng(`/ng/work-items/${S.ng[sc]}`)(p); };
+// ux2-W6: the /ng board on its own fixtures (`mock: { ngBoard: true }`).
+const ngBoard = (tail = "") => async (p: Page) => { await p.clock.setFixedTime(new Date(NG_NOW)); await ng(`/ng/${tail}`)(p); };
 const sideWidth = async (p: Page) => (await p.locator(".ng-sidebar").boundingBox())!.width;
 const sideIs = async (p: Page, mode: "pinned" | "rail") => {
   expect(await p.evaluate(() => document.documentElement.dataset.sidebar)).toBe(mode);
@@ -232,6 +234,26 @@ const FLOWS: Flow[] = [
     { name: "rail-expands", run: async (p) => { await p.getByRole("button", { name: "Expand pane" }).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("button", { name: "Collapse pane" })).toBeVisible(); }, kbd: true },
     { name: "escape-collapses", run: async (p) => { await p.getByRole("tab", { name: "Overview" }).focus(); await p.keyboard.press("Escape"); await expect(p.getByRole("button", { name: "Expand pane" })).toBeFocused(); }, kbd: true },
   ] },
+  // ux2-W6 D.4 (R3): check two rows by keyboard, Cancel… with a reason, and the one bulk request goes only after the window.
+  { name: "ng-board-select-bulk", widths: [1280], keyboard: true, mock: { ngBoard: true }, start: ngBoard(), steps: [
+    { name: "space-checks-a-row", run: async (p) => { await p.getByRole("button", { name: /^Bump the VS Code/ }).focus(); await p.keyboard.press("Space"); await expect(p.getByRole("checkbox", { name: /^Select Bump the VS Code/ })).toBeChecked(); await expect(p.getByText("1 selected")).toBeVisible(); } },
+    { name: "arrow-and-space-checks-another", run: async (p) => { await p.keyboard.press("ArrowDown"); await p.keyboard.press("Space"); await expect(p.getByText("2 selected")).toBeVisible(); } },
+    { name: "cancel-asks", run: async (p) => { await p.getByRole("button", { name: "Cancel 2…" }).focus(); await p.keyboard.press("Enter"); await expect(p.getByRole("textbox", { name: /Reason/ })).toBeFocused(); await expect(p.getByRole("button", { name: "Cancel 2", exact: true })).toBeDisabled(); } },
+    { name: "reason", run: async (p) => { await p.keyboard.type("Superseded by kraft-cb61"); } },
+    { name: "confirm-holds-the-send", run: async (p) => {
+      const sent: { at: number; body: unknown }[] = [];
+      p.on("request", (r) => { if (r.method() === "POST" && /\/work-items\/(bulk|[^/]+\/(cancel|abandon))$/.test(r.url())) sent.push({ at: Date.now(), body: r.postDataJSON() }); });
+      const t0 = Date.now();
+      await p.keyboard.press("Tab"); await p.keyboard.press("Enter");
+      await expect(p.getByText("Cancelling 2 items…")).toBeVisible();
+      await p.waitForTimeout(4000);
+      expect(sent).toEqual([]);
+      await expect.poll(() => sent.length, { timeout: 4000 }).toBe(1);
+      expect(sent[0].at - t0).toBeGreaterThanOrEqual(4900);
+      expect(sent[0].body).toEqual({ action: "cancel", ids: expect.any(Array), reason: "Superseded by kraft-cb61" });
+      expect((sent[0].body as { ids: string[] }).ids).toHaveLength(2);
+    }, wait: 600 },
+  ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
     { name: "collapse", run: async (p) => { const b = p.getByRole("button", { name: /collapse/i }); if (await b.count()) await b.click(); } },
@@ -260,7 +282,7 @@ for (const f of FLOWS) for (const width of f.widths) {
     const [w, h] = VP[width] ?? [width, 800];
     await page.setViewportSize({ width: w, height: h });
     const S = buildScenario(f.data ?? "default");
-    await installMocks(page, S);
+    await installMocks(page, S, f.mock);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message.slice(0, 200)));
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice(0, 200)); });

@@ -13,6 +13,8 @@ import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
 import type { RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
+import { BulkBar } from "./BulkBar";
+import { useBulk } from "./bulk";
 import "./board.css";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
@@ -71,6 +73,11 @@ export function BoardPage() {
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
   const { load, refresh, offline } = useListLoad();
+  // A bulk answer with failures: those items stay checked (D.6).
+  const last = useBulk((s) => s.last);
+  useEffect(() => {
+    if (last) setChecked(new Set("results" in last ? last.results.filter((r) => !r.ok).map((r) => r.id) : last.ids));
+  }, [last]);
 
   useEffect(() => {
     api.getRepos().then((r) => setFresh(r.repos.length === 0)).catch(() => {});
@@ -239,6 +246,7 @@ export function BoardPage() {
             ))}
           </div>
         </div>
+        <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
     </div>
   );

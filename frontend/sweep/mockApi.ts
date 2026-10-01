@@ -11,6 +11,8 @@ export interface MockOptions {
   /** ux2-W6 board states. `loading`: boot's list read fails, every later one never answers.
    *  `offline`: boot's read answers, every later one fails to connect, and the event socket closes. */
   boardState?: "loading" | "offline";
+  /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
+  bulkFail?: string[];
 }
 
 /** A chain file as its author would write it: one mapping per node, nulls left out. */
@@ -76,6 +78,24 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       });
     }
     if (p === "/work-items" && method === "POST") return json(route, { id: S.items[0]?.id ?? "00000000000000000000000000000000" });
+    if (method === "POST" && p === "/work-items/bulk") {
+      // B9: each id through its own route's door, with that door's words (lifecycle.py).
+      const { action, ids = [], reason } = req.postDataJSON() ?? {};
+      if (action === "cancel" && !String(reason ?? "").trim()) return json(route, { detail: "reason: cancel needs a non-blank reason" }, 422);
+      const known = [...S.ngBoard, ...S.ngArchived, ...S.items, ...S.archived];
+      const fail = new Set((opts.bulkFail ?? []).map((bead) => known.find((i) => i.bead_id === bead)?.id));
+      return json(route, { results: (ids as string[]).map((id) => {
+        const i = known.find((x) => x.id === id);
+        const status = i?.status ?? "active";
+        const ended = status === "completed" || status === "abandoned";
+        const error = fail.has(id) ? `work item is paused, not running`
+          : action === "pause" && !["active", "waiting"].includes(status) ? `work item is ${status}, not running`
+          : action === "cancel" && ended ? `work item is ${status}; its chain does not run again`
+          : action === "archive" && !ended ? "only a completed or abandoned item can be archived"
+          : action === "restore" && !i?.archived_at ? "work item is not archived" : null;
+        return error ? { id, ok: false, status, error } : { id, ok: true, status: action === "pause" ? "paused" : action === "cancel" ? "abandoned" : status };
+      }) });
+    }
     if ((m = p.match(/^\/work-items\/([^/]+)$/))) {
       const b = S.bundles[m[1]];
       if (!b) return json(route, { detail: "work item not found" }, 404);
@@ -127,10 +147,6 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
       return json(route, { id: `${m[1]}-dup`, status: "paused" }, 201);
-    }
-    if (method === "POST" && p === "/work-items/bulk") {
-      const ids: string[] = (req.postDataJSON() ?? {}).ids ?? [];
-      return json(route, { results: ids.map((id) => ({ id, ok: true, status: "paused" })) });
     }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else

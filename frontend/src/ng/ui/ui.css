@@ -55,3 +55,7 @@
 
 .toasts { position: fixed; top: 16px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; }
 .toast { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12.5px; }
+.toast:has(.toast-action) { display: flex; align-items: center; gap: 14px; }
+.toast-action { padding: 2px 4px; border: 0; border-radius: 4px; background: transparent; font: inherit; font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; }
+.toast-action:is(:hover, :focus-visible) { text-decoration: underline; }
+.toast-action:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

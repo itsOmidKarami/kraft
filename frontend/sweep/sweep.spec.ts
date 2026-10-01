@@ -127,6 +127,10 @@ async function ngBoard(c: Ctx, opts: { tail?: string; side?: "pinned" | "rail"; 
   await ng(c, `/ng/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
+/** Check board rows by the start of their titles. */
+const checkRows = (titles: string[]) => async (p: Page) => {
+  for (const t of titles) await p.getByRole("checkbox", { name: new RegExp(`^Select ${t}`) }).check();
+};
 /** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
   if (opts.noBeads) await c.page.route("**/api/beads/search*", (r) => r.fulfill({ status: 200, contentType: "application/json", body: '{"query":"","beads":[]}' }));
@@ -354,6 +358,18 @@ const CASES: Case[] = [
   { screen: "ng-board", variant: "fresh", data: "empty", widths: [1280], mock: { ngBoard: "empty" }, run: (c) => ngBoard(c) },
   { screen: "ng-board", variant: "loading", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "loading" }, run: (c) => ngBoard(c) },
   { screen: "ng-board", variant: "offline", data: "default", widths: [1280], mock: { ngBoard: true, boardState: "offline" }, run: (c) => ngBoard(c, { then: async (p) => { await p.getByText("OFFLINE").waitFor(); } }) },
+  // D: selection in every group, the bulk Cancel's inline confirm, and a partial answer.
+  { screen: "ng-board", variant: "selected", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: checkRows(["Bump the VS Code", "Fix flaky retry", "Remove the legacy poller"]) }) },
+  { screen: "ng-board", variant: "bulk-cancel-confirm", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { then: async (p) => {
+    await checkRows(["Bump the VS Code", "Fix flaky retry"])(p);
+    await p.getByRole("button", { name: "Cancel 2…" }).click();
+    await p.getByRole("textbox", { name: /Reason/ }).fill("Superseded by kraft-cb61");
+  } }) },
+  { screen: "ng-board", variant: "bulk-results", data: "default", widths: [1280], mock: { ngBoard: true, bulkFail: ["kraft-2c77"] }, run: (c) => ngBoard(c, { then: async (p) => {
+    await checkRows(["Bump the VS Code", "Lint fan-out"])(p);
+    await p.getByRole("button", { name: "‖ Pause 2" }).click();
+    await p.getByText("1 of 2 items paused").waitFor();
+  } }) },
   { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
   { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 

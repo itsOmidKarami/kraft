@@ -8,6 +8,7 @@ import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
 import { Shell } from "../shell/Shell";
 import { BoardPage } from "./BoardPage";
+import { useBulk } from "./bulk";
 import { resetBoardPrefs } from "./prefs";
 
 const item = (id: string, display_status: DisplayStatus, over: Partial<WorkItem> = {}): WorkItem =>
@@ -45,6 +46,7 @@ beforeEach(() => {
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);
   theme();
   put();
+  useBulk.setState({ last: null });
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -219,5 +221,19 @@ describe("BoardPage", () => {
     await act(async () => {});
     expect(vi.mocked(api.listWorkItems).mock.calls.length).toBe(reads + 1);
     expect(screen.queryByText("OFFLINE")).toBeNull();
+  });
+
+  it("selects Done's rows with Select all, and keeps the ones a bulk action failed on checked", async () => {
+    put(item("d1", "done", { status: "completed" }), item("d2", "done", { status: "completed" }), item("r3", "running"));
+    stubFetch({ "POST /work-items/bulk": [200, { results: [{ id: "d1", ok: true }, { id: "d2", ok: false, error: "only a completed or abandoned item can be archived" }] }] });
+    board();
+    const done = await screen.findByRole("region", { name: "Done" });
+    expect(within(screen.getByRole("region", { name: "Running" })).queryByRole("button", { name: "Select all" })).toBeNull();
+    await userEvent.click(within(done).getByRole("button", { name: "Select all" }));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Archive 2" }));
+    expect(await screen.findByText("1 of 2 items archived")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Item d2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Item d1" })).not.toBeChecked();
   });
 });
