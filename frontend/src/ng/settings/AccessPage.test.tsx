@@ -74,7 +74,7 @@ describe("ng AccessPage", () => {
 
   it("adds a host and will not remove the one this browser is on", async () => {
     const put = setup();
-    await userEvent.click(await screen.findByRole("button", { name: "+ add" }));
+    await userEvent.click(await screen.findByRole("button", { name: "add" }));
     await userEvent.type(screen.getByRole("textbox", { name: "Add a host or IP" }), "10.0.0.5{Enter}");
     await waitFor(() => expect(put).toHaveBeenCalledWith({ allowed_hosts: ["localhost", "kraft.local", "10.0.0.5"] }));
     await userEvent.click(screen.getByRole("button", { name: "Remove localhost" }));
@@ -161,5 +161,39 @@ describe("ng AccessPage", () => {
     await waitFor(() => expect(screen.getByLabelText("access.yaml").textContent).toContain("# running now: bind 0.0.0.0, port 8765, until a restart"));
     expect(screen.getByLabelText("access.yaml").textContent).toContain("port: 9000\n");
     expect(screen.getByLabelText("access.yaml").textContent).toContain("# password: not set");
+  });
+
+  it("draws Port, Allowed hosts, Password and Sessions as cards, each with its aside at the top right", async () => {
+    setup();
+    await screen.findByRole("heading", { name: "Access" });
+    const card = (name: string) => screen.getByRole("region", { name }) as HTMLElement;
+    for (const [name, aside] of [["Port", "saved on change"], ["Allowed hosts", "saved on change"], ["Password", "writes access.yaml"], ["Sessions", "live"]]) {
+      expect(card(name)).toHaveClass("is-card");
+      expect(within(card(name)).getByText(aside)).toBeInTheDocument();
+    }
+    expect(within(card("Sessions")).getByText("live")).toHaveClass("set-block-pill");
+    expect(within(card("Port")).getByText("Used by both binds. Takes effect on restart. 1024–65535.")).toBeInTheDocument();
+  });
+
+  it("says in the Port card's aside when the port waits for a restart", async () => {
+    useApply.setState({ restart: [PORT_ITEM] });
+    setup({ port: 9000 }, { port: 8765 });
+    expect(await within(await screen.findByRole("region", { name: "Port" })).findByText("waits for a restart")).toBeInTheDocument();
+  });
+
+  it("offers the two reaches as radio cards with their address and what each means, and Sign out here for the current session", async () => {
+    setup();
+    const machine = await screen.findByRole("radio", { name: /This machine only/ });
+    expect(machine).toHaveTextContent("127.0.0.1:8765");
+    expect(machine).toHaveTextContent("No password. Only loopback names are accepted.");
+    expect(machine).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("radio", { name: /Local network/ })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("button", { name: /Sign out Mac/ })).toHaveTextContent("Sign out here");
+  });
+
+  it("keeps what loopback does not use in a dashed card of its own", async () => {
+    setup({ bind: "127.0.0.1" });
+    const unused = await screen.findByRole("region", { name: "Not used on 127.0.0.1" });
+    expect(unused).toHaveClass("is-card", "is-dashed");
   });
 });
