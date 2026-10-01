@@ -59,6 +59,7 @@
 
 .dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px; overflow-y: auto; background: color-mix(in oklab, var(--side) 70%, transparent); }
 .dialog { width: min(480px, 100%); padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.dialog:focus-visible { outline: none; }
 .dialog-title { margin: 0 0 12px; font-size: 15px; font-weight: 500; }
 .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 

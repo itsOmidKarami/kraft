@@ -39,6 +39,20 @@ describe("DocViewer", () => {
     expect(screen.queryByRole("button", { name: "VS Code" })).toBeNull();
   });
 
+  it("has a Close button, in the editors' row for an indexed document and alone for an artifact", async () => {
+    stubFetch({ "GET /documents/d1": [200, doc], "GET /work-items/w1/artifact": [200, { title: "Plan", path: "p.md", content: "# Plan\n\nStep one." }] });
+    const onClose = vi.fn();
+    const { unmount } = render(<DocViewer source={{ kind: "artifact", workItemId: "w1" }} onClose={onClose} />);
+    await screen.findByText("Step one.");
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Close"]);
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    unmount();
+    render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={onClose} />);
+    await screen.findByText("no size bound");
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([...EDITORS.map((e) => e.name), "Copy path", "Close"]);
+  });
+
   it("closes on Escape and hands focus back", async () => {
     stubFetch({ "GET /documents/d1": [200, doc] });
     render(<Harness source={{ kind: "document", id: "d1" }} />);

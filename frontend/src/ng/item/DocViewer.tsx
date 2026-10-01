@@ -46,13 +46,18 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
       className="dv-dialog"
       title={doc?.title ?? "Document"}
       onClose={onClose}
-      footer={indexed && doc ? (
+      footer={(
         <div className="dv-footer">
-          <span className="item-muted">Open in</span>
-          {EDITORS.map((e) => <Button key={e.name} onClick={() => open(e.id)}>{e.name}</Button>)}
-          <Button onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+          {indexed && doc && (
+            <>
+              <span className="item-muted">Open in</span>
+              {EDITORS.map((e) => <Button key={e.name} onClick={() => open(e.id)}>{e.name}</Button>)}
+              <Button onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+            </>
+          )}
+          <Button className="dv-close" onClick={onClose}>Close</Button>
         </div>
-      ) : undefined}
+      )}
     >
       <div className="dv">
         {doc && <p className="dv-path"><span className="is-mono">{doc.path}</span>{source.kind === "document" && source.by && <> · {source.by}</>}</p>}

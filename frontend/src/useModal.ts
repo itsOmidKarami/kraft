@@ -18,7 +18,9 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     // A dialog names its first field with data-autofocus (W6.9: the intake
     // title, not the ✕ that happens to come first in the DOM).
-    (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
+    // A dialog with nothing focusable takes focus itself, so Escape reaches it
+    // and not whatever behind it had focus (a container needs tabIndex -1).
+    (node?.querySelector<HTMLElement>("[data-autofocus]") ?? node?.querySelector<HTMLElement>(FOCUSABLE) ?? node)?.focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -28,7 +30,10 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
       }
       if (e.key !== "Tab" || !node) return;
       const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)];
-      if (!items.length) return;
+      if (!items.length) {
+        e.preventDefault(); // nothing to cycle: focus stays on the dialog
+        return;
+      }
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;

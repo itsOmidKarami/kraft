@@ -11,7 +11,7 @@ export function Dialog({ title, onClose, children, footer, dirty, className }: {
   const id = useId();
   return createPortal(
     <div className="dialog-backdrop" {...backdropProps(onClose, dirty)}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} className={className ? `dialog ${className}` : "dialog"}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1} className={className ? `dialog ${className}` : "dialog"}>
         <h2 id={id} className="dialog-title">{title}</h2>
         <div className="dialog-body">{children}</div>
         {footer && <div className="dialog-footer">{footer}</div>}

@@ -3,6 +3,21 @@ import { describe, expect, it, vi } from "vitest";
 import { Dialog } from "./Dialog";
 
 describe("ng Dialog", () => {
+  it("takes focus itself when it holds nothing focusable, so Escape reaches it and not the pane behind", () => {
+    const behind = vi.fn((e: React.KeyboardEvent) => e.stopPropagation());
+    const onClose = vi.fn();
+    render(<div onKeyDown={behind}><button>Read the spec</button></div>);
+    screen.getByRole("button", { name: "Read the spec" }).focus();
+    render(<Dialog title="Spec" onClose={onClose}><p>Only text.</p></Dialog>);
+    const dialog = screen.getByRole("dialog", { name: "Spec" });
+    expect(dialog).toHaveFocus();
+    // fireEvent answers false when the key's default (Tab walking out) was prevented.
+    expect(fireEvent.keyDown(document.activeElement!, { key: "Tab" })).toBe(false);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(behind).not.toHaveBeenCalled();
+  });
+
   it("is a named modal that traps Tab, closes on Escape and gives focus back", () => {
     const opener = document.createElement("button");
     document.body.append(opener);
