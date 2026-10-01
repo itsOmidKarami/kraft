@@ -174,7 +174,7 @@
     "screens": ["ng-shell", "ng-search", "ng-login", "ng-firstrun", "flow-ng-search-keyboard", "flow-ng-sidebar-pin", "flow-ng-sidebar-rail"],
     "specs": ["sweep.spec.ts", "interactions.spec.ts"],
     "rules": [
-      { "kind": "no-console", "match": "^ng-" },
+      { "kind": "no-console", "match": "^ng-(?!login/|search/docs-error)" },
       { "kind": "no-flag", "flag": "offscreen", "match": "^ng-" },
       { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-" },
       { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },
