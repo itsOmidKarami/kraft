@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { Board } from "./board/Board";
 import { Item } from "./item/Item";
+import { Search } from "./search/Search";
 import { GateReviewRoute } from "./review/GateReview";
 import { NewItem } from "./new/NewItem";
 import { NodeRoute } from "./node/NodeRoute";
@@ -32,7 +33,7 @@ export function PhoneApp() {
       <Routes>
         <Route element={<Frame />}>
           <Route path="/" element={<Board />} />
-          <Route path="/search" element={<Soon title="Search" />} />
+          <Route path="/search" element={<Search />} />
           <Route path="/analytics" element={<Soon title="Analytics" />} />
           <Route path="/more" element={<Soon title="More" />} />
           <Route path="/work-items/new" element={<NewItem />} />

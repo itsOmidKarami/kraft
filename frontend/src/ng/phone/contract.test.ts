@@ -43,6 +43,7 @@ const ALLOWED = [
   "templates/draft/types",
   "apply/store",
   "analytics/weeks",
+  "shell/routes", // the list of /ng pages, as data: Search's Go to rows
 ];
 
 const ng = join(dirname(fileURLToPath(import.meta.url)), "..");
