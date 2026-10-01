@@ -22,8 +22,8 @@ describe("harness pane", () => {
     renderPage("?harness=claude");
     const p = await pane("claude");
     expect(within(p).getByText("acceptEdits")).toBeInTheDocument();
-    expect(within(p).getByText("effort: low, medium, high, xhigh, max")).toBeInTheDocument();
-    expect(within(p).getByText("models: sonnet, opus, haiku")).toBeInTheDocument();
+    expect(await within(p).findByText("effort: low, medium, high, xhigh, max")).toBeInTheDocument();
+    expect(await within(p).findByText("models: sonnet, opus, haiku")).toBeInTheDocument();
   });
 
   it("the Access control sends set_access once per change with the state's own name", async () => {
