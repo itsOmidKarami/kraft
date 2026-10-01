@@ -8,7 +8,8 @@ import type { PaneKind } from "./describe";
 import type { PaneCtx } from "./Overview";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 
-type Row = { field: string; value: unknown; source: string; locked?: string };
+/** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
+export type Row = { field: string; value: unknown; source?: string; locked?: string };
 
 /** "on base change" restarts from this node or an earlier exec node. */
 function restartTargets(ctx: PaneCtx): string[] {
@@ -52,9 +53,9 @@ function ChainConfig({ ctx }: { ctx: PaneCtx }) {
   );
 }
 
-function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
+export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
   const meta = fieldMeta(row.field);
-  const own = row.source === "chain";
+  const own = row.source === "chain" || row.source === undefined;
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const label = meta.label;
@@ -83,8 +84,8 @@ function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
       ) : (
         <Editor meta={meta} field={row.field} value={editing} ctx={ctx} onSave={save} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
       )}
-      {own && <span className="cfg-dot" aria-label="overridden here" />}
-      <span className={`cfg-chip${own ? " is-own" : ""}`} title={row.source}>{sourceWord(row.source)}</span>
+      {own && row.source !== undefined && <span className="cfg-dot" aria-label="overridden here" />}
+      {row.source !== undefined && <span className={`cfg-chip${own ? " is-own" : ""}`} title={row.source}>{sourceWord(row.source)}</span>}
       {row.locked ? (
         <span className="cfg-lock" title={row.locked}>locked</span>
       ) : (

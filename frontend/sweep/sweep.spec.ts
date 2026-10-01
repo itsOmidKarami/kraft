@@ -112,6 +112,14 @@ async function ngChains(c: Ctx, key: string, node?: string) {
   await c.page.locator(".canvas, .tpl-note").first().waitFor({ timeout: 8000 });
   await settle(c.page, 700);
 }
+/** The /ng Library (ux2-W12) on its draft fixture (`mock: { ngLibrary }`), sidebar pinned, once the list has drawn. */
+async function ngLibrary(c: Ctx, ref = "") {
+  await c.page.addInitScript(() => localStorage.setItem("kraft.sidebar.v2", "pinned"));
+  await c.page.goto(`/ng/templates/library${ref ? `/${ref}` : ""}`);
+  await c.page.locator(".lib-row, .lib-note").first().waitFor({ timeout: 8000 });
+  if (ref) await c.page.locator(".pane").first().waitFor({ timeout: 8000 });
+  await settle(c.page, 700);
+}
 /** A /ng page under a given look: the mock's theme is what GET /theme answers. */
 async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { side?: "pinned" | "rail"; hover?: boolean } = {}) {
   Object.assign(c.S.settings.theme, look);
@@ -600,7 +608,49 @@ const CASES: Case[] = [
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { tail: "?doc=1", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   // W10: the Chains editor on the mock's real draft answers (sweep/draftViews.json).
+  { screen: "ng-library", variant: "list", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c) },
+  { screen: "ng-library", variant: "list-blocked", data: "default", widths: [1280], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c) },
+  { screen: "ng-library", variant: "task", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c, "tasks.implementer") },
+  { screen: "ng-library", variant: "node", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c, "nodes.verification");
+    // The fix loop's tab opens the bottom pane on it and picks the loop.
+    await c.page.getByRole("tab", { name: "Fix loop" }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-library", variant: "gate", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "nodes.approval") },
+  { screen: "ng-library", variant: "step", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "steps.checks") },
+  { screen: "ng-library", variant: "task-glyph", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "tasks.fixer") },
+  { screen: "ng-library", variant: "steering", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c, "steering.project-standards");
+    await c.page.locator(".lib-section-row").first().waitFor({ timeout: 8000 });
+    await c.page.locator(".lib-section-row").nth(4).click();
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-library", variant: "review", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: async (c) => {
+    await ngLibrary(c);
+    await c.page.getByRole("button", { name: /Review & publish/ }).click();
+    await c.page.getByRole("heading", { name: /Draft ·/ }).waitFor({ timeout: 8000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-library", variant: "review-clean", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c);
+    await c.page.getByRole("button", { name: /Review & publish/ }).click();
+    await c.page.getByRole("heading", { name: /Draft ·/ }).waitFor({ timeout: 8000 });
+    await settle(c.page, 300);
+  } },
+  { screen: "ng-library", variant: "task-config", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c, "tasks.implementer");
+    await c.page.getByRole("tab", { name: "Config" }).click();
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngChains(c, "default") },
+  { screen: "ng-chains", variant: "move-to-library", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec, node" }).click();
+    await c.page.getByRole("button", { name: "Move to library…" }).click();
+    await c.page.getByRole("dialog", { name: "Move to library" }).waitFor({ timeout: 8000 });
+    await settle(c.page, 400);
+  } },
   { screen: "ng-chains", variant: "pane-gate", data: "default", widths: [1280], shells: [{ mode: "light" }], run: async (c) => {
     await ngChains(c, "default");
     await c.page.getByRole("button", { name: "spec_approval, gate" }).click();

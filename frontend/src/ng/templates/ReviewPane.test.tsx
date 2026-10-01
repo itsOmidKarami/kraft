@@ -51,7 +51,7 @@ describe("Review & publish pane", () => {
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
     expect(screen.getByText("'steps' must not be empty")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Fix →" }));
-    expect(onFix).toHaveBeenCalledWith("lint");
+    expect(onFix).toHaveBeenCalledWith("lint", expect.objectContaining({ path: "lint" }));
     document.body.innerHTML = "";
     mount({ result: { yaml_error: { file: "chains/default.yaml", line: 4, col: 3, message: "expected ']'" } } });
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();

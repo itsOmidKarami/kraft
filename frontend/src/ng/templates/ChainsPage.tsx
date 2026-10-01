@@ -25,7 +25,7 @@ import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
 /** An element's width and height, kept current. */
-function useBox() {
+export function useBox() {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 600 });
   useEffect(() => {
@@ -75,6 +75,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const [reviewOpen, setReviewOpen] = useState(true);
   const [highlight, setHighlight] = useState<string | undefined>();
   const [published, setPublished] = useState<{ text: string; nodes: { id: string; kind: "exec" | "gate" }[] } | null | undefined>(undefined);
+  // The published library's text: the second file's diff when this draft moved a component into it (R47).
+  const [libText, setLibText] = useState<string | null | undefined>(undefined);
   const [nextProblem, setNextProblem] = useState(0);
   // Leaving a chain with a draft asks first (Decisions §9 Unpublished changes, brief Decided 5).
   const [pendingGo, setPendingGo] = useState<SwitchTo | null>(null);
@@ -160,6 +162,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
       const nodes = ((f.chain.nodes as { id: string; kind?: string; extends?: string }[] | undefined) ?? []).map((n) => ({ id: n.id, kind: (n.kind === "gate" ? "gate" : "exec") as "exec" | "gate" }));
       setPublished({ text: f.text, nodes });
     }).catch(() => setPublished(null));
+    api.getLibrary().then((l) => setLibText(l.text)).catch(() => setLibText(null));
   }, [chain]);
   const startReview = () => {
     if (s.level === "node") {
@@ -354,6 +357,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {s.level === "node" && s.node && selNode && kindOf(r, selNode) === "exec" && (
           <BottomPane
+            scope={scope}
             node={s.node}
             draft={draft}
             selPath={selPath}
@@ -378,6 +382,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             draft={draft}
             scope={scope}
             published={published === undefined ? undefined : published?.text ?? null}
+            libraryPublished={libText}
             open={reviewOpen}
             size={size}
             onCollapse={() => setReviewOpen(false)}

@@ -221,3 +221,16 @@ test("checks/input<16: 15.5px and up passes (Safari rounds to 16), under that co
   await page.setContent(`<input style="font-size:15.4px"><select style="font-size:14px"><option>a</option></select>`);
   expect((await runChecks(page, true, [])).smallInputs.count).toBe(2);
 });
+
+/** Allowlist use: the /ng Library list's component name (UX V2 W12, R10): 14 characters at least, a longer id cut, whole in title. */
+test("checks/ellipsis: the /ng Library list's .lib-name cut is allowed, an unmarked name still counts", async ({ page }) => {
+  const id = "never-signal-processes-you-didnt-start";
+  const row = (attr: string) =>
+    `<div style="display:flex;width:250px;gap:8px;font:11.5px ui-monospace,Menlo,monospace">` +
+    `<span class="lib-name" ${attr} title="${id}" style="flex:1 1 auto;min-width:14ch;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${id}</span>` +
+    `<span style="flex:none">unpublished</span></div>`;
+  await page.setContent(row("data-allow-ellipsis"));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(0);
+  await page.setContent(row(""));
+  expect((await runChecks(page, false, [])).clippedEllipsis.count).toBe(1);
+});

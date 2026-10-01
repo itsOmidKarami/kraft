@@ -5,6 +5,7 @@ import { ArchivedPage } from "./board/ArchivedPage";
 import { BoardPage } from "./board/BoardPage";
 import { DraftItemPage } from "./board/draft/DraftItemPage";
 import { Gallery } from "./graph/Gallery";
+import { LibraryPage } from "./library/LibraryPage";
 import { ItemPage } from "./item/ItemPage";
 import { AboutPage } from "./settings/AboutPage";
 import { AccessPage } from "./settings/AccessPage";
@@ -22,7 +23,7 @@ import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);
@@ -44,6 +45,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           <Route path="/work-items/:id" element={<ItemPage />} />
           <Route path="/work-items/:id/nodes/:node" element={<ItemPage />} />
           <Route path="/work-items/:id/review" element={<ReviewPage />} />
+          <Route path="/templates/library/:ref" element={<LibraryPage />} />
           <Route path="/templates/chains/:chain" element={<ChainsPage />} />
           <Route path="/templates/chains/:chain/nodes/:node" element={<ChainsPage />} />
           <Route path="/_tokens" element={<TokenSheet />} />

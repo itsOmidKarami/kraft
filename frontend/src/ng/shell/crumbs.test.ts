@@ -75,4 +75,10 @@ describe("crumbsFor", () => {
     expect(cs.map((c) => c.text)).toEqual(["Templates", "Chains"]);
     expect(cs[1].to).toBe("/templates/chains");
   });
+
+  it("gives a library component's page Templates and a link back to Library; the page adds the name", () => {
+    const cs = crumbsFor("/templates/library/tasks.implementer", none);
+    expect(cs.map((c) => c.text)).toEqual(["Templates", "Library"]);
+    expect(cs[1].to).toBe("/templates/library");
+  });
 });
