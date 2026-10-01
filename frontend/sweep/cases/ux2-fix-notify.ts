@@ -1,10 +1,9 @@
 import { ng, settle, type Case } from "../cellKit";
 import { NG_NOW } from "../ngItems";
 
-const stub = (permission: string) => `window.Notification = class { static permission = ${JSON.stringify(permission)}; static requestPermission = async () => ${JSON.stringify(permission)}; };`;
 const open = (permission: string, then: (c: Parameters<Case["run"]>[0]) => Promise<void>): Case["run"] => async (c) => {
   await c.page.clock.setFixedTime(new Date(NG_NOW));
-  await c.page.addInitScript(stub(permission));
+  await c.page.addInitScript((p) => { (window as any).Notification = class { static permission = p; static requestPermission = async () => p; }; }, permission);
   await ng(c, "/settings/notifications", {});
   await then(c);
   await settle(c.page, 300);
