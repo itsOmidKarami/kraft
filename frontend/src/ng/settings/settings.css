@@ -144,3 +144,5 @@
 
 .ys-body { position: absolute; left: 0; top: 0; bottom: 0; overflow: auto; }
 .ys-yaml { margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font: 11.5px/1.7 ui-monospace, Menlo, monospace; color: var(--text); }
+.set-mono { font: 12px ui-monospace, Menlo, monospace; color: var(--text-sub); overflow-wrap: anywhere; }
+.set-warn { color: var(--warn); }

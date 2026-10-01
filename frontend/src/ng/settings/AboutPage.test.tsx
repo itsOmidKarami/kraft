@@ -84,4 +84,42 @@ describe("ng AboutPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(write).toHaveBeenLastCalledWith("kraft admin update");
   });
+
+  const instance = { status: "ok" as const, invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "1.4.0", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 120 };
+
+  it("draws the run directory, the process and the search index from /health", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 214, last_scan_at: new Date(Date.now() - 120_000).toISOString(), errors: [] } });
+    render(<AboutPage />);
+    expect(await screen.findByText("/Users/you/.kraft")).toBeInTheDocument();
+    expect(screen.getByText("pid 41822 · up 3d 4h")).toBeInTheDocument();
+    expect(screen.getByText("214 documents · scanned 2m ago")).toBeInTheDocument();
+  });
+
+  it("says when the index has not scanned yet and counts its errors", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 0, last_scan_at: null, errors: ["a: unreadable", "b: unreadable"] } });
+    render(<AboutPage />);
+    expect(await screen.findByText("0 documents · not scanned yet · 2 scan errors")).toHaveClass("set-warn");
+  });
+
+  it("adds the same three lines to the copied diagnostics", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 214, last_scan_at: null, errors: [] } });
+    const write = vi.fn(async (_text: string) => {});
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: write }, userAgent: "jsdom" });
+    render(<AboutPage />);
+    await screen.findByText("/Users/you/.kraft");
+    await userEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+    expect(write.mock.calls[0][0]).toContain("run dir: /Users/you/.kraft\nprocess: pid 41822 · up 3d 4h\nindex: 214 documents · not scanned yet");
+  });
+
+  it("leaves the three rows out for a server that does not send them, and shows a pid without an uptime", async () => {
+    render(<AboutPage />);
+    await screen.findByText("ok · all chains and policy valid");
+    expect(screen.queryByText("run directory")).toBeNull();
+    expect(screen.queryByText("process")).toBeNull();
+    expect(screen.queryByText("search index")).toBeNull();
+    document.body.innerHTML = "";
+    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, uptime_s: undefined });
+    render(<AboutPage />);
+    expect(await screen.findByText("pid 41822")).toBeInTheDocument();
+  });
 });

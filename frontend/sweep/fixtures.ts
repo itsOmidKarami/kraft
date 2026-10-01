@@ -719,7 +719,7 @@ export function settingsFor(variant: Variant, theme: { mode?: string; density?: 
       { id: hex(5001), label: long ? "Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1" : "Safari on iPhone", ip: "10.0.0.44", created_at: t(-3000), last_seen_at: t(100), expires_at: t(4000), current: false },
       ...(long ? Array.from({ length: 8 }, (_, i) => ({ id: hex(5010 + i), label: null, ip: `10.0.${i}.${i * 17}`, created_at: t(-i * 400), last_seen_at: t(i * 20), expires_at: t(5000), current: false })) : []),
     ] },
-    health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3" },
+    health: { status: long ? "degraded" : "ok", invalid_templates: long ? { "docs-only": "node 'implement' references unknown task on.docs.write" } : {}, invalid_policy: long ? ["loops.an_extremely_long_loop_name_that_nobody_should_have_typed.wall_clock_s exceeds 24h"] : [], bind: "127.0.0.1", port: 8765, session_expiry_days: 7, version: "0.9.3", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 240, index: { documents: 214, last_scan_at: null as string | null, errors: [] as string[] } },
   };
 }
 

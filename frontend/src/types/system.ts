@@ -14,6 +14,13 @@ export interface Health {
   /** This build's installed version, or "0.0.0+source" for a checkout that
    *  was never installed (`kraft.update.installed()`). Sidebar footer only. */
   version?: string;
+  /** The directory holding this instance's databases, logs and worktrees. */
+  run_dir?: string;
+  pid?: number;
+  /** Seconds this server process has been up (UX V2 About); absent on an older server. */
+  uptime_s?: number;
+  /** The search index: how many documents, when the repos were last scanned, and what failed. */
+  index?: { documents: number; last_scan_at: string | null; errors: string[] };
   /** Whether this request carries a live session (Kraft-yx79s): lets a
    *  locked instance open on Login without a 401 probe. Absent on a server
    *  that does not send it yet, and then main.tsx probes /api/theme. */
