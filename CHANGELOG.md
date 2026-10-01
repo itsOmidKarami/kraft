@@ -5,6 +5,38 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.4.0
+
+### New
+
+- The dollar caps (`budget.work_item_usd`, `budget.daily_usd`, `--budget`) now count Codex sessions at an estimate from the model they were launched with, now that Kraft's price table includes OpenAI models. They also estimate Amp sessions on a priced model. Spend Kraft still cannot price, such as Cursor or a model missing from the table, is counted as $0 as before, but the item's timeline and `kraft admin doctor` now warn about it. Use `token_budget` to bound that spend. (#314)
+
+- Sandbox credentials take `phase` (only the setup command or only agent sessions get them) and `source` (read the value from a named daemon variable, which never reaches the container). (#325)
+
+- Sandbox `kind: kit`: run a Docker Sandbox Kit you built, pinned by digest, with exactly the egress, credentials and limits it declares; `sandbox.yaml` binds each Kit credential to a daemon variable. (#332)
+
+- `kraft item set-policy ID --policy budget_usd=none` clears an item's dollar cap, which is the way past a stop on spend a harness never reported. It is refused under a `maxima.work_item.budget_usd`.
+- A session that sends more than a model's long-context size, for example OpenAI's 272k tokens, is now estimated at that higher rate. This applies when its log shows each request (Claude, Amp). Codex is still estimated at the base rate. (#336)
+
+### Fixes
+
+- `kraft view list --status` rejects an unknown status instead of showing an empty board.
+- `kraft item create --skip-nodes` refuses a node marked `skippable: false`.
+- `kraft admin templates lint` reports an agent task its harness can't launch (for example `profile: fast` on Codex), instead of leaving it to fail at launch.
+- `kraft admin doctor`: no capabilities upgrade guide on a fresh home, adopted capabilities are no longer listed, and a repo without Kraft's MCP registration is a warning naming the harness that would be refused.
+- `kraft admin harnesses` shows which chains select each harness; `kraft admin start --host` says how other commands reach the instance. (#323)
+
+- The VS Code extension's Marketplace page now explains what Kraft is, how to get started, and what each feature does, with screenshots and links to the docs. (#328)
+
+- Raise-budget's refusal for a stopped item's policy cap now points at `set-policy` instead of a `policy.yaml` edit that can't reach an already-filed item; the board's Done group no longer claims a fixed 30-day auto-archive window; a few other refusal messages no longer leak an internal ruling citation. (#330)
+
+- VS Code: **Review Changes** in a gate document's title bar now opens the diff; before, it did nothing.
+- VS Code: each review finding is listed once in the Problems panel instead of twice.
+- VS Code: the activity-bar icon shows a K instead of a solid grey square. (#331)
+
+- The review diff (web UI, VS Code, `kraft view diff`) no longer lists Kraft's own untracked session notes as changed files.
+- VS Code: review findings are marked on the diff's lines, with the message beside the line, so minor findings show on added lines too. (#340)
+
 ## 1.3.1
 
 ### Fixes
