@@ -1274,23 +1274,3 @@ async def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(
     assert set(json.loads(_row(database, wid)["implements_beads"])) == {sub, bundlemate}
 
     assert await _run(database, run_dirs, wid, tracker) == "completed"
-
-
-@pytest.mark.parametrize(
-    ("ran_out", "door", "expected"),
-    [
-        (True, {}, {"path": "verify", "key": "max_attempts", "value": 3}),
-        (False, {}, {"path": "verify", "key": "timeout_minutes", "value": 30}),
-        (True, {"attempts": 1}, None),
-        (False, {"wall_clock_s": 60}, None),
-        # The other bound's door does not hide this one.
-        (False, {"attempts": 1}, {"path": "verify", "key": "timeout_minutes", "value": 30}),
-    ],
-)
-def test_a_fix_loop_stop_names_the_bound_that_ran_out_unless_node_overrides_set_it(
-    ran_out, door, expected
-):
-    row = {"node_overrides": json.dumps({"verify": door})}
-    cap = _policy.Cap(attempts=3, wall_clock_s=1800)
-
-    assert walk._fix_loop_limit(row, "verify", cap, attempts_ran_out=ran_out) == expected

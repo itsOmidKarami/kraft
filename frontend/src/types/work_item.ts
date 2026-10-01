@@ -153,6 +153,15 @@ export type StopKind =
 /** `stop` on a work item response (B.3/B.4): `null` unless `status` is
  *  `needs_human`, `waiting` or `rate_limited`. The list omits `task`,
  *  `attempt` and `facts`; only the detail endpoint sends them. */
+/** What raises the limit a `cap` stop hit (detail only; absent when no `PATCH policy` can):
+ *  `path` is `""` for the item's own cap, else the fix loop's node id. */
+export interface StopLimit {
+  path: string;
+  key: "max_attempts" | "timeout_minutes" | "time_cap_minutes" | "total_time_cap_minutes";
+  value: number;
+  maximum: number | null;
+}
+
 export interface WorkItemStop {
   kind: StopKind;
   node: string | null;
@@ -161,6 +170,7 @@ export interface WorkItemStop {
   resume_at: string | null;
   reason: string | null;
   facts?: Record<string, unknown>;
+  limit?: StopLimit;
 }
 
 /** `GET /work-items/{id}/cancel-preview` (B4): what `POST .../cancel` would

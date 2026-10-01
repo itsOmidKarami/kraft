@@ -88,7 +88,7 @@ function Overview({ item, reload, onRaise }: { item: ItemDetail; reload: () => v
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
-        <Banner item={item} onOpenGate={openNode} onRaise={onRaise} />
+        <Banner item={item} onOpenGate={openNode} onRaise={onRaise} reload={reload} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />

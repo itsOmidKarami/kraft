@@ -1,11 +1,14 @@
+import json
 import shlex
 import sys
 from pathlib import Path
 
+import pytest
 from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
 from kraft import events, executor, policy, store
+from kraft.executor import walk
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE = f"{sys.executable} {_FAKE_AGENT}"
@@ -118,8 +121,6 @@ async def test_fix_loop_wall_clock_breach_names_timeout_minutes_as_the_limit(
     """The loop's clock ran out with attempts to spare: `stop.limit` is the
     node's `timeout_minutes`, not its `max_attempts`."""
     from datetime import UTC, datetime, timedelta
-
-    from kraft.executor import walk
 
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     # An hour past the counter's own start, whatever the real run took.
@@ -472,3 +473,23 @@ def test_ci_fix_loop_reads_the_repair_s_re_measure_not_the_stale_pre_repair_find
     messages = [f["message"] for f in after["payload"]["findings"]]
     assert any("expected 3, got 5" in m for m in messages), messages
     assert not any("expected 3, got 4" in m for m in messages), messages
+
+
+@pytest.mark.parametrize(
+    ("ran_out", "door", "expected"),
+    [
+        (True, {}, {"path": "verify", "key": "max_attempts", "value": 3}),
+        (False, {}, {"path": "verify", "key": "timeout_minutes", "value": 30}),
+        (True, {"attempts": 1}, None),
+        (False, {"wall_clock_s": 60}, None),
+        # The other bound's door does not hide this one.
+        (False, {"attempts": 1}, {"path": "verify", "key": "timeout_minutes", "value": 30}),
+    ],
+)
+def test_a_fix_loop_stop_names_the_bound_that_ran_out_unless_node_overrides_set_it(
+    ran_out, door, expected
+):
+    row = {"node_overrides": json.dumps({"verify": door})}
+    cap = policy.Cap(attempts=3, wall_clock_s=1800)
+
+    assert walk._fix_loop_limit(row, "verify", cap, attempts_ran_out=ran_out) == expected
