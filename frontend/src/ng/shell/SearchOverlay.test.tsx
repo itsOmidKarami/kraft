@@ -206,7 +206,7 @@ describe("SearchOverlay", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     await user.type(await screen.findByRole("combobox"), "work");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByRole("link", { name: "Sign in on the current UI" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     window.history.pushState({}, "", "/");
   });
 });

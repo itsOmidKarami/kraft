@@ -40,6 +40,8 @@ interface Case {
   widths: number[];
   shells?: Shell[];
   locked?: boolean;
+  /** With `locked`: what the mock's POST /login answers. */
+  login?: "ok" | "wrong" | "locked";
   fullPage?: boolean;
   /** Also shoot `~light-firstpaint` at 1280: reload and screenshot at DOMContentLoaded, 0ms settle. */
   firstpaint?: boolean;
@@ -119,6 +121,14 @@ async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?
   const box = c.page.getByRole("combobox", { name: /search/i });
   await box.waitFor({ timeout: 4000 });
   if (q) { await box.fill(q); await c.page.waitForTimeout(700); }
+  await settle(c.page, 400);
+}
+/** The /ng sign-in card; `submit` types a password and presses Enter, against the mock's 401 or 429. The clock's fixed so the countdown reads the same every run. */
+async function ngLogin(c: Ctx, opts: { fill?: boolean; submit?: boolean } = {}) {
+  await c.page.clock.setFixedTime(new Date("2026-01-01T00:00:00Z"));
+  await ng(c, "/ng", {});
+  if (opts.fill || opts.submit) await c.page.getByLabel(/^Password/).fill("hunter2");
+  if (opts.submit) { await c.page.keyboard.press("Enter"); await c.page.locator('[role="alert"], [role="timer"]').first().waitFor({ timeout: 4000 }); }
   await settle(c.page, 400);
 }
 async function settings(c: Ctx, to: string) {
@@ -259,6 +269,11 @@ const CASES: Case[] = [
   { screen: "ng-search", variant: "results", data: "default", widths: [1024, 1920], run: (c) => ngSearch(c, "gate") },
   { screen: "ng-search", variant: "no-match", data: "empty", widths: [1280], run: (c) => ngSearch(c, "zzzqx", { noBeads: true }) },
   { screen: "ng-search", variant: "docs-error", data: "default", widths: [1280], run: (c) => ngSearch(c, "gate", { docsError: true }) },
+  { screen: "ng-login", variant: "idle", data: "default", widths: [1280], locked: true, shells: [{ mode: "light" }], run: (c) => ngLogin(c) },
+  { screen: "ng-login", variant: "idle", data: "default", widths: [1024, 1920], locked: true, run: (c) => ngLogin(c) },
+  { screen: "ng-login", variant: "filled", data: "default", widths: [1280], locked: true, run: (c) => ngLogin(c, { fill: true }) },
+  { screen: "ng-login", variant: "error", data: "default", widths: [1280], locked: true, login: "wrong", run: (c) => ngLogin(c, { submit: true }) },
+  { screen: "ng-login", variant: "locked", data: "default", widths: [1280], locked: true, login: "locked", shells: [{ mode: "light" }], run: (c) => ngLogin(c, { submit: true }) },
   ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
   { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },
   { screen: "ng-tokens", variant: "graphite-violet-full", data: "default", widths: [1920], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { accent: "violet", colour_amount: "full" }) },
@@ -337,14 +352,14 @@ for (const cs of CASES) {
         const h = shell.short ? 700 : h0;
         await page.setViewportSize({ width: w, height: h });
         const S = buildScenario(cs.data, { mode: shell.mode, density: shell.density, group_by: shell.group_by });
-        await installMocks(page, S, { locked: cs.locked });
+        await installMocks(page, S, { locked: cs.locked, login: cs.login });
         await page.addInitScript((sb) => {
           if (sb) localStorage.setItem("kraft.sidebar_collapsed", sb === "rail" ? "true" : "false");
           else localStorage.removeItem("kraft.sidebar_collapsed");
         }, shell.sidebar ?? "");
         // A locked page cannot read /api/theme, so the mode shell reaches it the
         // only way a real one does: the theme this browser saved last session.
-        if (cs.locked && shell.mode) await page.addInitScript((mode) => localStorage.setItem("kraft.theme", JSON.stringify({ palette: "nocturne", mode })), shell.mode);
+        if (cs.locked && shell.mode) await page.addInitScript((mode) => { localStorage.setItem("kraft.theme", JSON.stringify({ palette: "nocturne", mode })); localStorage.setItem("kraft.theme.v2", JSON.stringify({ surface: "graphite", mode })); }, shell.mode);
         const consoleErrors: string[] = [];
         page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 300)); });
         page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 300)}`));

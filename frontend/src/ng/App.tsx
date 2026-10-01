@@ -1,15 +1,14 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Gallery } from "./graph/Gallery";
-import { legacyPath } from "./legacyPath";
 import { AppearancePage } from "./settings/AppearancePage";
+import { resumeSession } from "./session";
 import { Placeholder } from "./shell/Placeholder";
 import { ROUTES } from "./shell/routes";
 import { Shell } from "./shell/Shell";
+import { SignIn } from "./shell/SignIn";
 import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
-
-const currentUi = () => legacyPath(window.location);
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
 const BUILT: Record<string, ReactElement> = { "/settings/appearance": <AppearancePage /> };
@@ -21,8 +20,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
     window.addEventListener("kraft:unauthenticated", lock);
     return () => window.removeEventListener("kraft:unauthenticated", lock);
   }, []);
-  // W2 E replaces this with the Sign-in screen.
-  if (locked) return <main><a href={currentUi()}>Sign in on the current UI</a></main>;
+  if (locked) return <SignIn onSignedIn={async () => { await resumeSession(); setLocked(false); }} />;
   return (
     <BrowserRouter basename="/ng">
       <Routes>

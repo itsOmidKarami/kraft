@@ -4,9 +4,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import * as api from "../api";
 import { useStore } from "../store";
-import { connectEvents } from "../ws";
 import { App } from "./App";
 import { legacyPath } from "./legacyPath";
+import { startEvents } from "./session";
 import { applyInitialSidebar } from "./shell/sidebarPref";
 import { applyTheme, cachedLook, DEFAULT_LOOK, lookOf } from "./theme/applyTheme";
 
@@ -41,7 +41,7 @@ async function boot() {
     } catch (e) {
       console.error("bootstrap failed", e);
     }
-    connectEvents();
+    startEvents();
   }
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
