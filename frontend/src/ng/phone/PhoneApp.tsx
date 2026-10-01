@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { Board } from "./board/Board";
+import { Item } from "./item/Item";
 import { Soon } from "./nav/Soon";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
@@ -30,7 +31,7 @@ export function PhoneApp() {
           <Route path="/analytics" element={<Soon title="Analytics" />} />
           <Route path="/more" element={<Soon title="More" />} />
           <Route path="/work-items/new" element={<Soon title="New work item" />} />
-          <Route path="/work-items/:id" element={<Soon title="Work item" />} />
+          <Route path="/work-items/:id" element={<Item />} />
           <Route path="/work-items/:id/nodes/:node" element={<Soon title="Node" />} />
           <Route path="/work-items/:id/review" element={<Soon title="Review" />} />
           <Route path="/templates/*" element={<Soon title="Templates" />} />

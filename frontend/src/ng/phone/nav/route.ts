@@ -14,14 +14,12 @@ const join = (pathname: string, q: URLSearchParams) => (q.size ? `${pathname}?${
 /** The address Back goes to, or null on a root (a tab's own page). */
 export function parentOf(href: string): string | null {
   const { pathname, q } = split(href);
-  // A document or the YAML view sits over its screen.
-  if (q.has("doc")) {
-    q.delete("doc");
-    return join(pathname, q);
-  }
-  if (q.has("yaml")) {
-    q.delete("yaml");
-    return join(pathname, q);
+  // A document, a composer or the YAML view sits over its screen.
+  for (const over of ["compose", "doc", "yaml"]) {
+    if (q.has(over)) {
+      q.delete(over);
+      return join(pathname, q);
+    }
   }
   const seg = pathname.split("/").filter(Boolean);
   if (!seg.length || (seg.length === 1 && ["search", "analytics", "more"].includes(seg[0]))) return null;
@@ -56,7 +54,7 @@ export function parentOf(href: string): string | null {
 export function backLabel(href: string): string {
   const { pathname, q } = split(href);
   const parent = parentOf(href);
-  if (q.has("doc") || q.has("yaml")) return "Back";
+  if (q.has("doc") || q.has("yaml") || q.has("compose")) return "Back";
   if (parent === "/") return "Board";
   if (parent === "/more") return "More";
   if (pathname.includes("/nodes/")) return q.has("sel") ? "Node" : "Chain";

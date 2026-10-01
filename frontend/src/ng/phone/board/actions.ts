@@ -19,7 +19,8 @@ export function cardButtons(item: WorkItem): CardButton[] {
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];
   if (item.display_status === "failed") return [{ kind: "open", label: "Retry…" }];
   switch (item.stop?.kind) {
-    case "cap": return [{ kind: "raise", label: "Raise cap…" }];
+    // A running-time or wall-clock cap has no raise the item API can make (Kraft-x8qzu): the card opens the item, where Retry is the way on.
+    case "cap": return [{ kind: "open", label: "Open" }];
     case "budget": return [{ kind: "raise", label: "Raise budget…" }];
     case "question": return [{ kind: "answer", label: "Answer…" }];
     default: return [{ kind: "open", label: a.label }];

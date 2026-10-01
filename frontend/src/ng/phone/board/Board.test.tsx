@@ -169,15 +169,15 @@ describe("a card's inline actions (B.4)", () => {
     mount();
     await screen.findByText("Item c1");
     const card = (id: string) => within(document.querySelector(`[data-row="${id}"]`) as HTMLElement);
-    expect(card("c1").getByRole("button", { name: "Raise cap…" })).toBeInTheDocument();
+    expect(card("c1").getByRole("button", { name: "Open" })).toBeInTheDocument();
     expect(card("b2").getByRole("button", { name: "Raise budget…" })).toBeInTheDocument();
     expect(card("q3").getByRole("button", { name: "Answer…" })).toBeInTheDocument();
     expect(card("f4").getByRole("button", { name: "Retry…" })).toBeInTheDocument();
     // A running card has its tap target and nothing inline.
     expect(card("r6").getAllByRole("button")).toHaveLength(1);
 
-    await userEvent.click(card("c1").getByRole("button", { name: "Raise cap…" }));
-    expect(where()).toContain("/work-items/c1");
+    await userEvent.click(card("b2").getByRole("button", { name: "Raise budget…" }));
+    expect(where()).toContain("/work-items/b2");
     expect(where()).toContain('"phSheet":"raise"');
     expect(calls).toEqual([]);
   });

@@ -12,6 +12,7 @@ const ALLOWED = [
   "theme/",
   "graph/NodeGlyph",
   "graph/types",
+  "graph/layout", // the ChainNode type only
   "icons",
   "http",
   "live",

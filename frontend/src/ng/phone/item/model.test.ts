@@ -1,0 +1,96 @@
+import { describe, expect, it } from "vitest";
+import type { DisplayStatus, WorkItemStop } from "../../../types";
+import { chainGraph } from "../../item/graph";
+import { detail } from "../../item/testkit";
+import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
+
+const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
+const mk = (display_status: DisplayStatus, s: WorkItemStop | null = null, over = {}) => detail({ display_status, stop: s, ...over });
+const ids = (i: ReturnType<typeof detail>) => {
+  const p = pairOf(i);
+  return [p.secondary?.id ?? null, p.primary?.id ?? null];
+};
+
+describe("pairOf (C.5): one pair, by status and stop kind", () => {
+  it.each([
+    ["running", mk("running"), [ "pause", "steer"]],
+    ["escalated", mk("escalated"), ["pause", "steer"]],
+    ["paused mid-chain", mk("paused"), ["steer", "resume"]],
+    ["not started", mk("paused", null, { current_node_id: null }), [null, "start"]],
+    ["gate", mk("needs_you", stop("gate", { node: "plan_approval" })), ["reject", "review"]],
+    ["budget", mk("needs_you", stop("budget")), ["steer", "raise"]],
+    ["cap", mk("needs_you", stop("cap")), ["steer", "retry"]],
+    ["question", mk("needs_you", stop("question")), ["escalate", "answer"]],
+    ["conflict", mk("needs_you", stop("conflict")), ["cancel", "conflicts"]],
+    ["mr closed", mk("needs_you", stop("mr_closed")), ["cancel", "reopen-mr"]],
+    ["failed", mk("failed", stop("failed")), ["escalate", "retry"]],
+    ["rate limit", mk("waiting", stop("rate_limit")), ["pause", "retry-now"]],
+    ["waiting on CI", mk("waiting", stop("wait")), ["pause", "retry-now"]],
+    ["done", mk("done"), [null, "board"]],
+    ["cancelled", mk("cancelled"), [null, "board"]],
+    ["archived", mk("archived"), [null, "restore"]],
+  ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
+
+  it("never offers Retry on a running item (Decisions §5)", () => {
+    for (const s of ["running", "escalated"] as const) expect(ids(mk(s))).not.toContain("retry");
+  });
+  it("has at most two buttons in every state", () => {
+    for (const s of ["running", "waiting", "needs_you", "escalated", "failed", "paused", "done", "cancelled", "archived"] as const) {
+      const p = pairOf(mk(s, s === "needs_you" ? stop("gate") : null));
+      expect([p.secondary, p.primary].filter(Boolean).length).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
+describe("kebabOf", () => {
+  it("lists what the bar does not, cancel last and in the danger style", () => {
+    const k = kebabOf(mk("running", null, { mr_ref: { number: 142, url: "https://x/142" } }));
+    expect(k.map((a) => a.id)).toEqual(["escalate", "settings", "open-mr", "duplicate", "complete", "cancel"]);
+    expect(k.at(-1)).toMatchObject({ id: "cancel", danger: true });
+    expect(k.find((a) => a.id === "open-mr")?.label).toBe("Open MR !142");
+  });
+  it("does not repeat a button the bar has, and archives only an ended item", () => {
+    expect(kebabOf(mk("failed", stop("failed"))).map((a) => a.id)).not.toContain("escalate");
+    expect(kebabOf(mk("running", null)).map((a) => a.id)).not.toContain("archive");
+    expect(kebabOf(mk("cancelled")).map((a) => a.id)).toContain("archive");
+  });
+});
+
+describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
+  it("has none for a plain running item and one for each stop", () => {
+    expect(cardOf(mk("running"))).toBeNull();
+    expect(cardOf(mk("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval" }))).toMatchObject({ title: "Waiting for your approval", where: "at plan_approval" });
+    expect(cardOf(mk("needs_you", stop("budget", { reason: "The budget ran out." })))).toMatchObject({ tone: "bad", title: "The budget ran out", where: "at verification" });
+    expect(cardOf(mk("needs_you", stop("cap", { reason: "Running time hit its 8h cap" })))?.text).toMatch(/Retry runs the node again/);
+    expect(cardOf(mk("needs_you", stop("question", { task: "verification.review.code_review" }), { needs_context_question: "Allow it?" }))).toMatchObject({ title: "Needs you", text: "“Allow it?”", where: "asked by code_review · on verification" });
+    expect(cardOf(mk("failed", stop("failed", { reason: "exit 1", task: "verification.review.code_review", attempt: 2 })))).toMatchObject({ tone: "bad", title: "Failed", text: "exit 1", where: "verification › review › code_review · attempt 2" });
+    expect(cardOf(mk("waiting", stop("rate_limit", { facts: { harness: "claude", fallback_allowed: ["codex"] } })))?.text).toMatch(/claude hit its rate limit/);
+    expect(cardOf(mk("needs_you", stop("conflict", { facts: { unresolved: ["a.py"], resolved: ["b.py"] } })))?.facts).toEqual([["unresolved", "a.py"], ["resolved", "b.py"]]);
+    expect(cardOf(mk("paused"))).toMatchObject({ title: "Paused", where: "at verification" });
+    expect(cardOf(mk("paused", null, { current_node_id: null }))).toBeNull();
+    expect(cardOf(mk("done", null, { mr_ref: { number: 7, url: "u" } }))).toMatchObject({ tone: "ok", where: "MR !7 merged" });
+  });
+  it("draws a worker-lost card only with the B5 fields (R2)", () => {
+    expect(cardOf(mk("waiting", stop("worker_lost" as never)))).toBeNull();
+    expect(cardOf(mk("waiting", stop("worker_lost" as never, { facts: { last_seen_at: "2026-09-13T08:00:00Z", reassign_at: "2026-09-13T09:00:00Z" } })))?.title).toBe("Worker lost");
+  });
+  it("names the closer of a closed MR and the reason of a cancel from the events", () => {
+    const ev = (type: string, payload: object) => ({ type, payload, created_at: "2026-09-13T08:00:00Z", node_id: null }) as never;
+    expect(cardOf(mk("needs_you", stop("mr_closed", { facts: { ref: 142 } })), [ev("mr_closed", { by: "dana" })])?.where).toMatch(/closed by dana/);
+    expect(cardOf(mk("cancelled"), [ev("work_item_cancelled", { reason: "wrong repo" })])?.facts).toContainEqual(["reason", "wrong repo"]);
+  });
+});
+
+describe("nodeSub: a chain row's words", () => {
+  const graph = (i: ReturnType<typeof detail>) => chainGraph(i, [], Date.parse("2026-09-13T10:00:00Z")).nodes;
+  it("reads each node's state", () => {
+    const g = graph(mk("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval" }));
+    expect(nodeSub(g.find((n) => n.id === "plan")!).tone).toBe("muted");
+    expect(nodeSub(g.find((n) => n.id === "plan_approval")!)).toEqual({ text: "waiting for you", tone: "warn" });
+    expect(nodeSub(g.find((n) => n.id === "verification")!)).toEqual({ text: "not started", tone: "muted" });
+    expect(nodeSub(graph(mk("running")).find((n) => n.id === "verification")!).text).toMatch(/^running/);
+    expect(nodeSub(graph(mk("failed", stop("failed"))).find((n) => n.id === "verification")!)).toEqual({ text: "failed", tone: "bad" });
+    expect(nodeSub(graph(mk("needs_you", stop("cap"))).find((n) => n.id === "verification")!)).toEqual({ text: "stopped at the cap", tone: "bad" });
+    expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "warn" });
+  });
+});

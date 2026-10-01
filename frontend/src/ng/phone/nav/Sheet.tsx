@@ -32,8 +32,10 @@ export function useSheet() {
     navigate(-1);
   }, [navigate]);
   /** Leave for another address from inside a sheet: the sheet's entry is replaced, so Back comes to the screen under it. */
+  /** Another sheet in place of this one: still one history entry. */
+  const swap = useCallback((id: string) => navigate(loc.pathname + loc.search, { replace: true, state: { phSheet: id } }), [navigate, loc.pathname, loc.search]);
   const goTo = useCallback((to: string) => navigate(to, { replace: true }), [navigate]);
-  return { openId, is: (id: string) => openId === id, open, close, closeThen, goTo };
+  return { openId, is: (id: string) => openId === id, open, close, closeThen, swap, goTo };
 }
 
 function Frame({ title, text, onClose, children }: { title: string; text?: string; onClose: () => void; children: ReactNode }) {
