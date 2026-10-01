@@ -34,6 +34,19 @@ describe("ng CSS", () => {
     expect(shrink("\\.ng-crumb-mid")).toBeGreaterThan(shrink("\\.ng-crumb-current"));
     expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-mid"));
   });
+
+  // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
+  // shipped css.contract.test.ts, which the cutover deletes.
+  it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {
+    const allowed = new Set(["(max-width: 767px)", "(max-width: 1023px)", "(max-width: 1279px)", "(max-height: 719px)"]);
+    const bad: string[] = [];
+    for (const file of cssFiles(here)) {
+      const css = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const m of css.matchAll(/@media\s*([^{]+)\{/g))
+        if (!allowed.has(m[1].trim())) bad.push(`${relative(here, file)}: @media ${m[1].trim()}`);
+    }
+    expect(bad).toEqual([]);
+  });
 });
 
 const sources = (dir: string): string[] =>
