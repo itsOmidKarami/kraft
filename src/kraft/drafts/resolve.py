@@ -163,7 +163,14 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         return resolution.split(loc) if resolution is not None and file == name else (None, loc)
 
     resolved = None
-    if not isinstance(data, dict):
+    impact = _impact(st, key)
+    if data is None:
+        # The draft deletes the chain: only a repo still defaulting to it stops that.
+        problems = [
+            {**_not_a_mapping(name), "message": f"repo {repo} defaults to it"}
+            for repo in impact["repos"]
+        ]
+    elif not isinstance(data, dict):
         problems = [_not_a_mapping(name)]
     else:
         issues = config_check.chain_issues(
@@ -181,7 +188,7 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         "resolved": resolved,
         "problems": problems,
         "changes": changes(_flat(before), _flat(after)),
-        "impact": _impact(st, key),
+        "impact": impact,
     }
 
 

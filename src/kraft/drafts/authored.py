@@ -49,6 +49,7 @@ NESTED_KEYS = {
 #: shipped files are.
 _SPACED = frozenset(LIBRARY_KEYS)
 _ORDER = {Namespace.NODES: NODE_KEYS, Namespace.STEPS: STEP_KEYS, Namespace.TASKS: TASK_KEYS}
+_NAMESPACE = {keys: namespace for namespace, keys in _ORDER.items()}
 
 
 def parse(text: str | None) -> object:
@@ -64,7 +65,11 @@ def load(text: str | None) -> object:
     """The file's mapping, every node's, handler's and fix loop's `tasks:` as
     one step `main` (`task-group-shorthand-resolves-to-one-step`). Raises
     `yaml.YAMLError`."""
-    data = parse(text)
+    return normalise(parse(text))
+
+
+def normalise(data: object) -> object:
+    """`data` with the shorthand normalised in place, as `load` does."""
     if isinstance(data, dict):
         _walk(data, _normalise)
     return data
@@ -136,6 +141,44 @@ def put(
     _insert(obj, last, value, order)
 
 
+def own(
+    mapping: Mapping,
+    path: str,
+    key: str,
+    *,
+    file: str = CHAIN,
+    library: Mapping | None = None,
+) -> object:
+    """`key` of the component at `path`, copied into `mapping` first when the
+    component inherits it (the prototype's `own`). Raises `KeyError` when the
+    file has no component there."""
+    walk = _Walk(_parents(mapping, file, library), True)
+    found = walk.file(mapping, path, file)
+    if found is None:
+        raise KeyError(path)
+    obj, order = found
+    return walk.child(obj, key, _NAMESPACE.get(tuple(order)))
+
+
+def inherited(library: Mapping, namespace: Namespace, name: object) -> Mapping:
+    """Library component `name` merged onto its own `extends` parents; `{}`
+    when the library has none."""
+    return _Walk(library, False)._resolved(namespace, name, ())
+
+
+def collapses(container: Mapping) -> bool:
+    """Whether `dump` writes this container's steps as the `tasks:` shorthand."""
+    steps = container.get("steps")
+    return (
+        isinstance(steps, list)
+        and len(steps) == 1
+        and isinstance(steps[0], dict)
+        and steps[0].get("id") == MAIN_STEP
+        and set(steps[0]) == {"id", "tasks"}
+        and "tasks" not in container
+    )
+
+
 # ── the shorthand ──
 
 
@@ -152,16 +195,8 @@ def _normalise(container: dict) -> None:
 
 
 def _collapse(container: dict) -> None:
-    steps = container.get("steps")
-    if (
-        isinstance(steps, list)
-        and len(steps) == 1
-        and isinstance(steps[0], dict)
-        and steps[0].get("id") == MAIN_STEP
-        and set(steps[0]) == {"id", "tasks"}
-        and "tasks" not in container
-    ):
-        _rekey(container, "steps", "tasks", steps[0]["tasks"])
+    if collapses(container):
+        _rekey(container, "steps", "tasks", container["steps"][0]["tasks"])
 
 
 def _dicts(value: object) -> list[dict]:
@@ -240,9 +275,12 @@ def _by_id(value: object, id: str) -> dict | None:
     return next((x for x in _dicts(value) if x.get("id") == id), None)
 
 
+def _parents(mapping, file: str, library: Mapping | None) -> Mapping | None:
+    return library if library is not None or file == CHAIN else mapping
+
+
 def _locate(mapping, path: str, file: str, library: Mapping | None, write: bool) -> _Found:
-    parents = library if library is not None or file == CHAIN else mapping
-    return _Walk(parents, write).file(mapping, path, file)
+    return _Walk(_parents(mapping, file, library), write).file(mapping, path, file)
 
 
 class _Walk:

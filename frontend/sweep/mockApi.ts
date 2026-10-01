@@ -298,8 +298,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
-    /* config drafts: one static answer per key; `stale` publishes to a 409 */
-    if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish)|\/files\/(.+))?$/))) {
+    /* config drafts: one static answer per key; `stale` publishes to a 409, `yaml-error` refuses ops */
+    if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops)|\/files\/(.+))?$/))) {
       const [, area, key, action, file] = m;
       const name = area === "library" ? "library.yaml" : `chains/${key}.yaml`;
       const text = file ? req.postDataJSON()?.text : area === "library" ? "tasks: {}\n" : chainYaml(st.templates[0]?.nodes ?? []);
@@ -317,7 +317,13 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         if (key === "stale") return json(route, { detail: `published since this draft began: ${name}`, files: { [name]: { published: text, draft: text, diff: `--- published/${name}\n+++ draft/${name}\n@@ -3 +3 @@\n-    model: sonnet\n+    model: opus\n` } } }, 409);
         return json(route, { published: [name], result: { ...result, changes: [] } });
       }
-      return json(route, { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result });
+      const view = { area, key, draft: true, files: { [name]: text }, base: { [name]: "9f2c".padEnd(64, "0") }, updated_at: "2026-10-01T09:12:00Z", result };
+      if (action === "ops") {
+        if (key === "yaml-error") return json(route, { detail: "fix the YAML first" }, 409);
+        const ops: { op: string }[] = req.postDataJSON()?.ops ?? [];
+        return json(route, { ...view, ops: ops.map((o) => ({ op: o.op })) });
+      }
+      return json(route, view);
     }
     if (p === "/drafts") return json(route, ["default", "broken", "yaml-error", "stale"].map((key) => ({ area: "chains", key, files: [`chains/${key}.yaml`], changes: 1, problems: key === "broken" ? 1 : 0, updated_at: "2026-10-01T09:12:00Z" })));
     if (p === "/templates/chains") return json(route, opts.ngBoard ? NG_CHAINS : st.templates);

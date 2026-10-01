@@ -120,3 +120,55 @@ def test_discard_is_final(client):
 def test_a_request_outside_an_area_is_refused(client, method, url, status):
     body = {"json": {"text": "x: 1\n"}} if method == "put" else {}
     assert getattr(client, method)(url, **body).status_code == status
+
+
+ADD_GATE = {"op": "add_node", "at": 0, "id": "first", "kind": "gate"}
+
+
+def post_ops(client, *batch, key="default", query=""):
+    return client.post(f"/api/drafts/chains/{key}/ops{query}", json={"ops": list(batch)})
+
+
+def test_ops_are_one_undo_step_and_rewrite_the_file_whole(client, templates_dir):
+    shipped = (templates_dir / "chains" / "default.yaml").read_text()
+    r = post_ops(client, ADD_GATE, {"op": "add_node", "at": 1, "id": "second", "kind": "gate"})
+    assert r.status_code == 200
+    assert r.json()["ops"] == [{"op": "add_node"}, {"op": "add_node"}]
+    assert [c["path"] for c in r.json()["result"]["changes"]] == ["first", "second"]
+    # The shipped file has comments; the op wrote it without them.
+    assert r.json()["result"]["warnings"] == [
+        {"file": "chains/default.yaml", "message": "comments in this file will be dropped"}
+    ]
+    # A PUT is the text as typed: the file is no longer one an op wrote.
+    text = r.json()["files"]["chains/default.yaml"]
+    assert put(client, "default", text).json()["result"]["warnings"] == []
+
+    client.post(f"{DEFAULT}/undo")
+    undone = client.post(f"{DEFAULT}/undo").json()
+    assert (undone["draft"], undone["files"]) == (False, {"chains/default.yaml": shipped})
+
+
+def test_a_preview_saves_nothing(client):
+    r = post_ops(client, ADD_GATE, query="?preview=1")
+    assert [c["path"] for c in r.json()["result"]["changes"]] == ["first"]
+    assert client.get(DEFAULT).json()["draft"] is False
+
+
+def test_a_failing_op_answers_422_with_its_index_and_saves_nothing(client):
+    r = post_ops(client, ADD_GATE, {"op": "add_node", "at": 0, "id": "first", "kind": "gate"})
+    assert (r.status_code, r.json()) == (422, {"detail": "'first' is already taken here", "op": 1})
+    assert client.get(DEFAULT).json()["draft"] is False
+
+
+def test_ops_on_a_draft_with_a_yaml_error_answer_409(client):
+    put(client, "default", "nodes: [\n")
+    r = post_ops(client, ADD_GATE)
+    assert (r.status_code, r.json()["detail"]) == (409, "fix the YAML first")
+
+
+def test_new_chain_creates_a_key_that_had_neither_a_file_nor_a_draft(client):
+    assert client.get("/api/drafts/chains/fresh").status_code == 404
+    assert post_ops(client, {"op": "new_chain"}, ADD_GATE, key="fresh").status_code == 200
+    got = client.get("/api/drafts/chains/fresh").json()
+    assert got["draft"] is True
+    assert got["result"]["model"]["chains/fresh.yaml"]["nodes"] == [{"id": "first", "kind": "gate"}]

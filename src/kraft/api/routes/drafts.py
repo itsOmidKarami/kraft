@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from kraft import config as config_mod
 from kraft.api import api_router, deps
-from kraft.drafts import resolve, store
+from kraft.drafts import ops, resolve, store
 
 
 def _area(area: str, key: str) -> store.Area:
@@ -111,6 +111,53 @@ async def put_draft_file(area: str, key: str, file: str, body: FileText, request
         )
     )
     return _view(st, area, key, files, published, result)
+
+
+class Ops(BaseModel):
+    ops: list[dict]
+
+
+@api_router.post("/drafts/{area}/{key}/ops")
+async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, preview: bool = False):
+    """Apply `ops` in order, all or nothing, as one undo step: each op's file
+    is written back whole (`authored.dump`), comments dropped. With
+    `?preview=1`, the result without saving."""
+    st = request.app.state
+    _area(area, key)
+    if area != "chains":
+        raise HTTPException(422, f"no ops on the {area} draft")
+    old = st.db.read(lambda c: store.get(c, area, key))
+    history = old["history"] if old else []
+    current, published, result = _state(st, area, key, old, history)
+    if "yaml_error" in result:
+        raise HTTPException(409, "fix the YAML first")
+    exists = old is not None or any(t is not None for t in published.values())
+    working = ops.Draft(st, key, current, exists=exists)
+    try:
+        answers = ops.apply(working, body.ops)
+    except ops.OpError as exc:
+        return JSONResponse(status_code=422, content={"detail": str(exc), "op": exc.index})
+    written = working.finish()
+    names = {*(old["files"] if old else ()), *working.dirty}
+    draft = {
+        "files": {n: written.get(n) for n in names},
+        "serialized": sorted({*(old["serialized"] if old else ()), *working.dirty}),
+    }
+    history = [*history, {"files": old["files"] if old else {}}]
+    files, published, result = _state(st, area, key, draft, history)
+    if not preview:
+        await st.db.write(
+            lambda c: store.write(
+                c,
+                area,
+                key,
+                draft["files"],
+                published,
+                serialized=draft["serialized"],
+                counts=_counts(result),
+            )
+        )
+    return {**_view(st, area, key, files, published, result), "ops": answers}
 
 
 @api_router.post("/drafts/{area}/{key}/undo")
