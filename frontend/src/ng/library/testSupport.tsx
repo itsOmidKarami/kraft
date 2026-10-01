@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
 import { Shell } from "../shell/Shell";
+import { Toaster } from "../ui/Toast";
 import { resetHarnessOptions } from "../templates/panes/useHarnessOptions";
 import * as d from "../templates/draft/draftApi";
 import type { Result } from "../templates/draft/types";
@@ -30,6 +31,7 @@ export const mount = (path = "/templates/library") =>
           <Route path="/templates/library/:ref" element={<LibraryPage />} />
         </Route>
       </Routes>
+      <Toaster />
     </MemoryRouter>,
   );
 

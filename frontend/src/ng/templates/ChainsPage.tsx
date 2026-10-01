@@ -25,7 +25,7 @@ import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
 /** An element's width and height, kept current. */
-function useBox() {
+export function useBox() {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 600 });
   useEffect(() => {
@@ -354,6 +354,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
         )}
         {s.level === "node" && s.node && selNode && kindOf(r, selNode) === "exec" && (
           <BottomPane
+            scope={scope}
             node={s.node}
             draft={draft}
             selPath={selPath}

@@ -58,6 +58,10 @@ export function LibraryPane({ draft, path, uses, open, size, goTo, onLibrary, on
       case "gate": return `${prefix}gate`;
       case "step": return `${prefix}step · ${plural(((own?.tasks as unknown[] | undefined) ?? []).length, "task")}`;
       case "steering": return `${prefix.replace(" · ", "")}`;
+      case "fixloop": return `repairs, then re-measures from ${(normalise(authoredAt(r, scope, path.split(".").slice(0, 2).join(".")) as NodeA | null)?.steps ?? [])[0]?.id ?? "the start"}`;
+      case "judge": return "judge · decides continue, accept or stop";
+      case "esc": return "escalation task · runs when the node is stuck";
+      case "review": return "gate reviewer";
       default: return `${prefix}${taskKind ? `${taskKind} task` : "task"}${ext}`;
     }
   })();

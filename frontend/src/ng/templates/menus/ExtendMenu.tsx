@@ -6,9 +6,9 @@ import { PickList } from "./PickList";
 
 /** "extend a node from the library" (Decisions §9 Extend from library): a
  *  searchable menu of library nodes. Picking one fills the canvas with its steps. */
-export function ExtendMenu({ anchor, title = "Extend a library node", note = "Edits you make afterwards override it for this chain.", onPick, onClose }: { anchor: RefObject<HTMLElement | null>; title?: string; note?: string; onPick: (base: string) => void; onClose: () => void }) {
+export function ExtendMenu({ anchor, title = "Extend a library node", note = "Edits you make afterwards override it for this chain.", exclude, onPick, onClose }: { anchor: RefObject<HTMLElement | null>; title?: string; note?: string; /** A node that cannot extend itself: the one being edited in the Library. */ exclude?: string; onPick: (base: string) => void; onClose: () => void }) {
   const library = useLibrary();
-  const nodes = typeof library === "string" ? [] : library.filter((c) => c.kind === "nodes");
+  const nodes = typeof library === "string" ? [] : library.filter((c) => c.kind === "nodes" && c.name !== exclude);
   const summary = (d: Record<string, unknown>) => {
     const steps = (d.steps as { id: string; tasks?: { id: string }[] }[] | undefined) ?? (d.tasks ? [{ id: "main", tasks: d.tasks as { id: string }[] }] : []);
     return steps.map((s) => (s.id === "main" ? (s.tasks ?? []).map((t) => t.id).join(", ") : s.id)).join(" → ") + (d.fix_loop ? " · fix loop" : "");

@@ -13,7 +13,7 @@ function mount(node: string, o: { sel?: string; tab?: BottomTab; open?: boolean 
     resolvedNode: (id: string) => resolvedNode(DEFAULT_VIEW.result, id),
   } as unknown as ConfigDraft;
   const cb = { onTab: vi.fn(), onToggle: vi.fn(), onPick: vi.fn(), onOpen: vi.fn(), onLeave: vi.fn() };
-  render(<BottomPane node={node} draft={draft} selPath={o.sel ?? node} tab={o.tab ?? "on_failure"} open={o.open ?? true} canvasH={600} right={380} {...cb} />);
+  render(<BottomPane scope={{ area: "chains", key: "default" }} node={node} draft={draft} selPath={o.sel ?? node} tab={o.tab ?? "on_failure"} open={o.open ?? true} canvasH={600} right={380} {...cb} />);
   return { draft, ...cb };
 }
 const tabs = () => within(screen.getByRole("tablist")).getAllByRole("tab").map((t) => t.textContent);

@@ -611,6 +611,15 @@ const CASES: Case[] = [
   { screen: "ng-library", variant: "list", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c) },
   { screen: "ng-library", variant: "list-blocked", data: "default", widths: [1280], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c) },
   { screen: "ng-library", variant: "task", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c, "tasks.implementer") },
+  { screen: "ng-library", variant: "node", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c, "nodes.verification");
+    // The fix loop's tab opens the bottom pane on it and picks the loop.
+    await c.page.getByRole("tab", { name: "Fix loop" }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-library", variant: "gate", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "nodes.approval") },
+  { screen: "ng-library", variant: "step", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "steps.checks") },
+  { screen: "ng-library", variant: "task-glyph", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "tasks.fixer") },
   { screen: "ng-library", variant: "task-config", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
     await ngLibrary(c, "tasks.implementer");
     await c.page.getByRole("tab", { name: "Config" }).click();

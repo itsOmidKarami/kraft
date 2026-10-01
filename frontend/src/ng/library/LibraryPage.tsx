@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useResizable, useWidth } from "../graph/useResizable";
+import { useResizable } from "../graph/useResizable";
 import { detailOf, request } from "../http";
 import { isTextField } from "../keys";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
@@ -8,7 +8,10 @@ import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { useConfigDraft, type ConfigDraft } from "../templates/draft/useConfigDraft";
 import { counts } from "../templates/draft/view";
+import { useBox } from "../templates/ChainsPage";
+import { DraftLibrary } from "../templates/useLibrary";
 import { YamlView } from "../templates/YamlView";
+import { LibraryCanvas } from "./LibraryCanvas";
 import { LibraryList } from "./LibraryList";
 import { LibraryPane } from "./LibraryPane";
 import { componentOf } from "./problemTarget";
@@ -40,10 +43,12 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const [published] = usePublished();
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const [nextProblem, setNextProblem] = useState(0);
-  // The part of the component picked (a step or task inside a node); the component's root until one is.
+  // The part of the component picked (a step or task inside a node), or null for the component itself, and
+  // whether the pane shows it; a pane the person collapsed stays collapsed through picks (Decisions §9 Selection).
   const [sub, setSub] = useState<string | null>(null);
   const [paneOpen, setPaneOpen] = useState(true);
-  const [frame, mainW] = useWidth();
+  const [collapsed, setCollapsed] = useState(false);
+  const [frame, mainW, mainH] = useBox();
   const size = useResizable("library", mainW);
   const rows = useMemo(() => listRows(r, published === "failed" ? [] : published?.components ?? null), [r, published]);
   const sel = parseRef(refId);
@@ -58,8 +63,27 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   // A new component starts at its root, pane open.
   useEffect(() => {
     setSub(null);
-    setPaneOpen(true);
+    setPaneOpen(!collapsed);
+    // Only when the component changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  const pick = (p: string) => {
+    setSub(p === id ? null : p);
+    setPaneOpen(!collapsed);
+  };
+  const expand = (p?: string) => {
+    if (p) setSub(p === id ? null : p);
+    setPaneOpen(true);
+    setCollapsed(false);
+  };
+  const collapse = () => {
+    setPaneOpen(false);
+    setCollapsed(true);
+  };
+  const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
+  const uses = published === null || published === "failed" ? null : published.components.find((c) => c.id === id)?.used_by_paths ?? null;
+  // What the menus offer: the draft's own components, so one just added or renamed is there before it is published.
+  const draftLibrary = useMemo(() => rows.map((x) => ({ id: x.id, kind: x.section, name: x.name, definition: ((r.model["library.yaml"] ?? {}) as Record<string, Record<string, Record<string, unknown>>>)[x.section]?.[x.name] ?? {}, used_by: [], issues: [] })), [rows, r]);
 
   // ⌘Z undoes the last request, outside a text field.
   const undo = draft.undo;
@@ -95,6 +119,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   };
 
   return (
+    <DraftLibrary.Provider value={draftLibrary}>
     <div className="lib-page" data-ref={refId}>
       <HeaderTail>
         {sel && (
@@ -130,19 +155,36 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
           </div>
         )}
         {surface === "canvas" && row && (
-          <LibraryPane
-            draft={draft}
-            path={sub ?? row.id}
-            uses={published === null || published === "failed" ? null : published.components.find((c) => c.id === row.id)?.used_by_paths ?? null}
-            open={paneOpen}
-            size={size}
-            goTo={(p) => { setSub(p === row.id ? null : p); setPaneOpen(true); }}
-            onLibrary={() => navigate("/templates/library")}
-            onCollapse={() => setPaneOpen(false)}
-            onExpand={() => setPaneOpen(true)}
-          />
+          <>
+            <LibraryCanvas
+              key={row.id}
+              draft={draft}
+              row={row}
+              path={sub ?? row.id}
+              reserve={reserve}
+              height={mainH}
+              onPick={pick}
+              onOpen={(p) => expand(p)}
+              onEscape={paneOpen ? collapse : () => {}}
+              onBackground={() => pick(row.id)}
+              onGoTo={(x) => navigate(refUrl(x))}
+            />
+            {uses && <p className="lib-used-line">{uses.length ? `used by ${[...new Set(uses.map((u) => u.chain))].join(", ")}` : "not used by any chain"}</p>}
+            <LibraryPane
+              draft={draft}
+              path={sub ?? row.id}
+              uses={uses}
+              open={paneOpen}
+              size={size}
+              goTo={(p) => expand(p)}
+              onLibrary={() => navigate("/templates/library")}
+              onCollapse={collapse}
+              onExpand={() => expand()}
+            />
+          </>
         )}
       </main>
     </div>
+    </DraftLibrary.Provider>
   );
 }

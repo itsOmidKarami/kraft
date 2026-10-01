@@ -47,6 +47,8 @@
 /* In a node view the side pane starts under the strip, as on the item page (W3 Workbench). */
 .tpl-area.has-strip > .pane, .tpl-area.has-strip > .pane-rail { top: 64px; }
 .tpl-node-area { position: absolute; left: 0; right: 0; top: 64px; bottom: 0; }
+/* The Library's node view has no chain rail above it. */
+.tpl-node-area.no-strip { top: 0; }
 /* The canvas keeps its zoom bar above the bottom pane's tab bar; the open pane overlays it (no reflow). */
 .tpl-area.has-bottom .tpl-node-area { bottom: 38px; }
 .tpl-empty-node { position: absolute; left: 40px; top: 48px; max-width: 460px; padding: 22px 24px; border: 1.5px dashed var(--border); border-radius: 12px; font-size: 13px; line-height: 1.6; color: var(--text-sub); }

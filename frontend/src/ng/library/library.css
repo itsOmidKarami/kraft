@@ -59,3 +59,11 @@
 .lib-use-chain:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .lib-use-path { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); overflow-wrap: anywhere; }
 .lib-chip { padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; font-size: 10.5px; color: var(--text-sub); }
+
+/* A task on the canvas: its one glyph, centred in what the pane leaves. */
+.lib-glyph-area { position: absolute; left: 0; top: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.lib-glyph { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 14px; border: 0; border-radius: 12px; background: transparent; cursor: pointer; }
+.lib-glyph:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lib-glyph-name { font: 12px ui-monospace, Menlo, monospace; color: var(--text); }
+.lib-glyph-sub { font-size: 11px; color: var(--text-muted); }
+.lib-used-line { position: absolute; left: 14px; top: 12px; z-index: 3; max-width: max(230px, calc(100% - 420px)); box-sizing: border-box; margin: 0; padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); font-size: 11px; line-height: 1.5; color: var(--text-sub); pointer-events: none; }

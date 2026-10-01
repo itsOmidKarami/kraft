@@ -79,10 +79,14 @@ function libraryState(mode: "clean" | "draft" | "blocked") {
   let drafted = mode !== "clean";
   if (drafted) {
     (model.tasks ??= {}).fixer = { kind: "agent", prompt: "Fix what the review found." };
+    (model.nodes ??= {}).approval = { kind: "gate", message: "Review and approve." };
+    (model.steps ??= {}).checks = { tasks: [{ id: "lint", extends: "verify_changed_scopes" }] };
     changes.push(
       { path: "tasks.implementer.prompt", kind: "change", summary: "prompt", fields: ["prompt"], reaches: ["default", "quick-task"] },
       { path: "steering.project-standards", kind: "change", summary: "instructions", fields: ["instructions"], reaches: ["default"] },
       { path: "tasks.fixer", kind: "add", summary: "added", reaches: [] },
+      { path: "nodes.approval", kind: "add", summary: "added", reaches: [] },
+      { path: "steps.checks", kind: "add", summary: "added", reaches: [] },
     );
   }
   if (mode === "blocked")

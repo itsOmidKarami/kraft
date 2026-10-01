@@ -7,7 +7,8 @@ import type { TaskKind } from "../icons";
 import { Button } from "../ui/Button";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Op } from "./draft/types";
-import { changeAt, normalise, problemsAt, type NodeA, type Step, type Task } from "./draft/view";
+import type { Scope } from "./draft/types";
+import { authoredAt, changeAt, normalise, problemsAt, valueAt, type NodeA, type Step, type Task } from "./draft/view";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { nextStepId, uniq } from "./NodeView";
 import { problemWord } from "./problems";
@@ -59,7 +60,9 @@ const markOf = (k?: string) => (k === "add" ? "add" : k === "change" ? "change" 
 /** The node canvas's bottom pane (Decisions §9 Bottom pane, On failure, Fix
  *  loop, Escalation, On conflict): collapsed to its tab bar on entry, docked
  *  under the canvas up to the side pane's edge. */
-export function BottomPane({ node, draft, selPath, tab, open, canvasH, right, onTab, onToggle, onPick, onOpen, onLeave }: {
+export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, right, onTab, onToggle, onPick, onOpen, onLeave }: {
+  scope: Scope;
+  /** The node's canonical path: a chain's node id, or the library's `nodes.<name>`. */
   node: string;
   draft: ConfigDraft;
   selPath: string;
@@ -76,7 +79,8 @@ export function BottomPane({ node, draft, selPath, tab, open, canvasH, right, on
   onLeave: () => void;
 }) {
   const r = draft.view!.result;
-  const n = draft.resolvedNode(node) as (NodeA & Record<string, unknown>) | null;
+  // The library draft has no resolved chain: its node is drawn as written (R18). `node` is a canonical path, dots and all.
+  const n = (scope.area === "library" ? normalise(authoredAt(r, scope, node)) : draft.resolvedNode(node)) as (NodeA & Record<string, unknown>) | null;
   const conflict = (n?.on_base_changed as Record<string, unknown> | null | undefined) ?? null;
   const tabs = tabsFor(selPath, node, !!conflict);
   const shown = tabs.includes(tab) ? tab : tabs[0];
@@ -110,8 +114,8 @@ export function BottomPane({ node, draft, selPath, tab, open, canvasH, right, on
   // The handler being shown, its container path, and what an add or a remove sends.
   const owner = (() => {
     if (shown !== "on_failure") return { path: node, label: node };
-    const m = /^([^.]+)\.([^.]+)(?:\.([^.]+))?$/.exec(handlerOf(selPath) ? "" : selPath);
-    const ctx = { step: m?.[2] ?? null, task: m?.[3] ?? null };
+    const rel = !handlerOf(selPath) && selPath.startsWith(`${node}.`) ? selPath.slice(node.length + 1).split(".") : [];
+    const ctx = { step: rel.length >= 1 && rel.length <= 2 ? rel[0] : null, task: rel.length === 2 ? rel[1] : null };
     const levels = [ctx.task && "task", ctx.step && "step", "node"].filter(Boolean) as ("task" | "step" | "node")[];
     const lv = level && levels.includes(level) ? level : levels[0];
     const path = lv === "task" ? `${node}.${ctx.step}.${ctx.task}` : lv === "step" ? `${node}.${ctx.step}` : node;
@@ -120,7 +124,7 @@ export function BottomPane({ node, draft, selPath, tab, open, canvasH, right, on
 
   const at = (path: string): Record<string, unknown> | null => {
     if (path === node) return n;
-    const [, a, b] = path.split(".");
+    const [a, b] = path.slice(node.length + 1).split(".");
     const st = (n?.steps as Step[] | undefined)?.find((s) => s.id === a);
     return b ? (st?.tasks.find((t) => t.id === b) as Record<string, unknown> | undefined) ?? null : (st as Record<string, unknown> | undefined) ?? null;
   };
@@ -133,7 +137,7 @@ export function BottomPane({ node, draft, selPath, tab, open, canvasH, right, on
 
   const item = (path: string, t: Task): GraphItem => {
     const probs = problemsAt(r, path);
-    const kind = String(t.kind ?? "");
+    const kind = String(t.kind ?? valueAt(r, scope, path, "kind") ?? "");
     return { id: t.id, icon: typeof t.icon === "string" ? t.icon : undefined, taskKind: TASK_KINDS.has(kind) ? (kind as TaskKind) : undefined, mark: markOf(changeAt(r, path)?.kind), prob: probs.length > 0, meta: probs.length ? problemWord(probs[0]) : undefined, metaTone: probs.length ? "red" : undefined };
   };
   const steps: NodeStep[] = (handler?.steps ?? []).map((s) => ({

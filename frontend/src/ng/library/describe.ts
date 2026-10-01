@@ -18,6 +18,9 @@ export interface LibDescription {
 
 const CONTAINERS = new Set(["on_failure", "fix_loop", "escalation", "on_base_changed", "on_conflict"]);
 
+/** Whether what lies inside a node (`review.code_review`, `fix_loop.main.repair`) is a task: it sits in a step, below any handler. */
+export const isTaskInside = (rest: string[]) => (CONTAINERS.has(rest[0]) ? rest.slice(1) : rest).length >= 2;
+
 /** What a library path names (`tasks.implementer`, `nodes.verification.review.code_review`, `steering.x`), for its pane. */
 export function libDescribe(r: Result, path: string): LibDescription | null {
   const segs = path.split(".");
@@ -38,8 +41,7 @@ export function libDescribe(r: Result, path: string): LibDescription | null {
   if (segs[segs.length - 2] === "escalation") return { ...base, kind: "esc" };
   // `steps.checks.lint` is a task; in a node, `review` is a step and `review.code_review` its task.
   if (ref.section === "steps") return { ...base, kind: "task" };
-  const below = CONTAINERS.has(rest[0]) ? rest.slice(1) : rest;
-  return { ...base, kind: below.length >= 2 ? "task" : "step" };
+  return { ...base, kind: isTaskInside(rest) ? "task" : "step" };
 }
 
 /** The pane's crumbs after "Library": the component and each container above the selection, each a path to select. */
