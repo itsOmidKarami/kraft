@@ -13,7 +13,7 @@
 .is-plain-code :is(.tok-kw, .tok-str, .tok-num, .tok-com, .tok-name) { color: inherit; font-style: inherit; font-weight: inherit; }
 
 /* Toolbar (prototype 352–410). */
-.rv-toolbar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--text-muted); }
+.rv-toolbar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 16px; font-size: 12.5px; color: var(--text-muted); }
 .rv-compare { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .rv-word { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); font: 500 12.5px ui-monospace, Menlo, monospace; cursor: pointer; }
 .rv-word:is(:hover, :focus-visible), .rv-word[aria-expanded="true"] { border-color: var(--border); background: var(--line); }
@@ -38,14 +38,15 @@
 .rv-del { color: color-mix(in oklab, var(--diff-del-theme) 80%, var(--text)); font: 11px ui-monospace, Menlo, monospace; }
 
 /* The body: the tree and the diff column, the page's only scrollers. */
-.rv-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; }
-.rv-diff { flex: 1 1 0; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+/* The prototype's two panels: the tree and the diff, each a rounded card. */
+.rv-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; gap: 12px; padding: 0 16px; }
+.rv-diff { flex: 1 1 0; min-width: 0; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .rv-empty { padding: 28px; font-size: 12.5px; color: var(--text-muted); }
 .rv-empty p { margin: 0 0 12px; }
 
 /* File tree (prototype 412–417). Under 1024 it opens over the diff (R7). */
-.rv-tree { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--bg); }
-.rv-body.is-overlay .rv-tree { position: absolute; inset: 0 auto 0 0; z-index: 5; width: min(300px, calc(100% - 40px)); box-shadow: 4px 0 18px color-mix(in oklab, var(--side) 50%, transparent); }
+.rv-tree { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.rv-body.is-overlay .rv-tree { position: absolute; inset: 0 auto 0 16px; z-index: 5; width: min(300px, calc(100% - 40px)); box-shadow: 4px 0 18px color-mix(in oklab, var(--side) 50%, transparent); }
 .rv-tree-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; font-size: 12px; color: var(--text-sub); }
 .rv-tree-count { flex: 1 1 auto; }
 .rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; }
@@ -68,11 +69,11 @@
 
 /* Diff (prototype 419–490). Tints follow theme.diff.colours; the marks stay,
    so the diff reads without colour (Decisions §13). */
-.rv-files { --rv-add: var(--diff-add-theme); --rv-del: var(--diff-del-theme); display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; padding: 14px 16px 24px; }
+.rv-files { --rv-add: var(--diff-add-theme); --rv-del: var(--diff-del-theme); display: flex; flex-direction: column; box-sizing: border-box; }
 .rv-files[data-colours="safe"] { --rv-add: var(--diff-add-safe); --rv-del: var(--diff-del-safe); }
 .rv-files[data-colours="plain"] { --rv-add: var(--diff-add-plain); --rv-del: var(--diff-del-plain); }
-.rv-file { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.rv-file-head { position: sticky; top: -14px; z-index: 2; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 6px 8px; border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; background: var(--surface); font-size: 12px; }
+.rv-file { border-bottom: 1px solid var(--line); }
+.rv-file-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; }
 .rv-fold { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 .rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; }
@@ -145,7 +146,7 @@
 .rv-elsewhere h2 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 
 /* Bottom bar and Finish your review (prototype 496–526). */
-.rv-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-top: 1px solid var(--line); background: var(--surface); font-size: 12.5px; }
+.rv-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; margin: 12px 16px 16px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 12.5px; }
 .rv-bar > .rv-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-bar-title { color: var(--text); font-weight: 500; white-space: nowrap; }
 .rv-finish { display: flex; flex-direction: column; gap: 12px; }
@@ -177,7 +178,7 @@
 .rv-gate-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
 .rv-gate-side-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 6px; font-size: 12px; color: var(--text-sub); }
 .rv-gate-side-head > span:first-child { font-size: 11px; letter-spacing: .06em; color: var(--text-muted); }
-.rv-gate-side > .rv-tree { flex: 1 1 0; width: auto; border-right: 0; }
+.rv-gate-side > .rv-tree { flex: 1 1 0; width: auto; border: 0; border-radius: 0; }
 .rv-gate-side > .rv-tree .rv-tree-head { display: none; }
 .rv-gate-side-foot { padding: 10px 12px; border-top: 1px solid var(--line); }
 .rv-gate-side-foot .btn { width: 100%; justify-content: center; }
