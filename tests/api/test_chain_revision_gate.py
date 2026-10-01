@@ -134,3 +134,38 @@ def test_a_revision_approval_that_carries_no_digest_is_refused(client, repo):
     assert r.status_code == 409, r.text
     assert "kraft view artifact" in r.json()["detail"]
     _unrevised(client, wid)
+
+
+def _review(client, wid, digest=None):
+    body = {"outcome": "approve"}
+    if digest is not None:
+        body["digest"] = digest
+    return client.post(f"/api/work-items/{wid}/review", json=body)
+
+
+def test_a_review_approval_carries_the_digest_to_the_gate(client, repo):
+    wid = _filed(client, repo)
+    digest = client.get(f"/api/work-items/{wid}/artifact").json()["digest"]
+
+    r = _review(client, wid, digest)
+
+    assert r.status_code == 200, r.text
+    assert _chain_ids(client, wid) == ["revise", "revision_approval", "build", "checked"]
+
+
+def test_a_review_approval_without_a_digest_or_with_a_stale_one_is_refused(
+    client, repo, templates_dir
+):
+    wid = _filed(client, repo)
+    stale = client.get(f"/api/work-items/{wid}/artifact").json()["digest"]
+    _library(templates_dir, "echo something-else")
+    client.app.state.library = TemplateLibrary.from_yaml_dir(templates_dir)
+    client.get(f"/api/work-items/{wid}/artifact")
+
+    none = _review(client, wid)
+    old = _review(client, wid, stale)
+
+    assert none.status_code == 409 and "kraft view artifact" in none.json()["detail"]
+    assert old.status_code == 409
+    assert "changed since you viewed it; review it again" in old.json()["detail"]
+    _unrevised(client, wid)
