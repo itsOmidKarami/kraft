@@ -135,7 +135,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         <button type="button" className="rv-fold" aria-expanded={!collapsed} aria-label={collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`} onClick={() => p.onCollapse(file.path, !collapsed)}>
           {collapsed ? "▸" : "▾"}
         </button>
-        <span className="rv-file-path rv-mono" title={file.path}>{file.path}</span>
+        <span className="rv-file-path rv-mono" title={file.path} data-allow-ellipsis="">{file.path}</span>
         <span className="rv-add">+{file.insertions}</span>
         <span className="rv-del">−{file.deletions}</span>
         <span className="rv-file-note">{note(file, pf)}</span>

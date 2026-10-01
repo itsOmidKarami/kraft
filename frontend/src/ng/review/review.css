@@ -1,7 +1,7 @@
 /* The review page and the gate review overlay (W8). Colours only from W1 tokens. */
 
 .review-page { position: relative; display: flex; flex-direction: column; height: calc(100vh - 44px); min-height: 0; overflow: hidden; box-sizing: border-box; }
-.review-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.review-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
 
 /* Syntax (C.4): the five classes on W1 status tokens, so `auto` follows the
    colour amount. `code_scheme: none` sets .is-plain-code on the page. */
@@ -34,12 +34,12 @@
 .rv-muted { color: var(--text-muted); }
 .rv-error { margin: 0; font-size: 12px; color: var(--bad); }
 .rv-bar-error { padding: 4px 16px; }
-.rv-add { color: var(--diff-add-theme); font: 11px ui-monospace, Menlo, monospace; }
-.rv-del { color: var(--diff-del-theme); font: 11px ui-monospace, Menlo, monospace; }
+.rv-add { color: color-mix(in oklab, var(--diff-add-theme) 80%, var(--text)); font: 11px ui-monospace, Menlo, monospace; }
+.rv-del { color: color-mix(in oklab, var(--diff-del-theme) 80%, var(--text)); font: 11px ui-monospace, Menlo, monospace; }
 
 /* The body: the tree and the diff column, the page's only scrollers. */
 .rv-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; }
-.rv-diff { flex: 1 1 0; min-width: 0; overflow: auto; }
+.rv-diff { flex: 1 1 0; min-width: 0; overflow-x: hidden; overflow-y: auto; }
 .rv-empty { padding: 28px; font-size: 12.5px; color: var(--text-muted); }
 .rv-empty p { margin: 0 0 12px; }
 
@@ -58,7 +58,7 @@
 .rv-file-row.is-nested { padding-left: 20px; }
 .rv-file-row.is-on { background: var(--line); }
 .rv-file-row:hover { background: color-mix(in oklab, var(--line) 60%, transparent); }
-.rv-viewed { flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.rv-viewed { flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); font-size: 11px; cursor: pointer; }
 .rv-viewed.is-on { color: var(--ok); }
 .rv-viewed:is(:hover, :focus-visible) { background: var(--line); }
 .rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
@@ -68,12 +68,11 @@
 
 /* Diff (prototype 419–490). Tints follow theme.diff.colours; the marks stay,
    so the diff reads without colour (Decisions §13). */
-.rv-files { --rv-add: var(--diff-add-theme); --rv-del: var(--diff-del-theme); display: flex; flex-direction: column; gap: 14px; min-width: 100%; width: max-content; box-sizing: border-box; padding: 14px 16px 24px; }
+.rv-files { --rv-add: var(--diff-add-theme); --rv-del: var(--diff-del-theme); display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; padding: 14px 16px 24px; }
 .rv-files[data-colours="safe"] { --rv-add: var(--diff-add-safe); --rv-del: var(--diff-del-safe); }
 .rv-files[data-colours="plain"] { --rv-add: var(--diff-add-plain); --rv-del: var(--diff-del-plain); }
-.rv-files.is-wrap { width: auto; }
 .rv-file { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.rv-file-head { position: sticky; top: -14px; left: 0; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 6px 8px; border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; background: var(--surface); font-size: 12px; }
+.rv-file-head { position: sticky; top: -14px; z-index: 2; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 6px 8px; border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; background: var(--surface); font-size: 12px; }
 .rv-fold { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .rv-fold:is(:hover, :focus-visible) { background: var(--line); color: var(--text); }
 .rv-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12px; }
@@ -85,13 +84,16 @@
 .rv-collapsed { display: block; width: 100%; padding: 8px 12px; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; text-align: left; cursor: pointer; }
 .rv-collapsed:is(:hover, :focus-visible) { color: var(--text-sub); }
 .rv-file-msg { margin: 0; padding: 10px 12px; color: var(--text-muted); font-size: 12px; }
-.rv-lines { font: 12px/1.6 ui-monospace, Menlo, monospace; }
+/* A file's lines scroll sideways inside the file (wrap off); its threads and composer keep to the visible width. */
+.rv-body-file { overflow-x: auto; overflow-y: hidden; container-type: inline-size; }
+.rv-lines { width: max-content; min-width: 100%; font: 12px/1.6 ui-monospace, Menlo, monospace; }
+.rv-files.is-wrap .rv-lines { width: auto; }
 .rv-lines:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .rv-hunk { padding: 3px 12px; background: var(--surface-2); color: var(--text-muted); font-size: 11.5px; white-space: pre; }
 .rv-row { display: flex; align-items: stretch; min-width: 100%; }
 .rv-row.is-split > .rv-half { flex: 1 1 50%; min-width: 0; display: flex; }
 .rv-row.is-split > .rv-half + .rv-half { border-left: 1px solid var(--line); }
-.rv-num { flex: none; align-self: flex-start; min-height: 1lh; width: 44px; padding: 0 8px 0 0; border: 0; background: transparent; color: var(--text-faint); font: inherit; text-align: right; cursor: pointer; user-select: none; }
+.rv-num { flex: none; align-self: flex-start; min-height: 1lh; width: 44px; padding: 0 8px 0 0; border: 0; background: transparent; color: var(--text-muted); font: inherit; text-align: right; cursor: pointer; user-select: none; }
 .rv-num:hover { color: var(--text-sub); }
 .rv-mark { flex: none; align-self: flex-start; width: 16px; color: var(--text-muted); text-align: center; user-select: none; }
 .rv-code { flex: 1 1 auto; padding-right: 16px; color: var(--text-sub); font: inherit; white-space: pre; }
@@ -101,10 +103,10 @@
 :is(.rv-row, .rv-half).is-del { background: color-mix(in oklab, var(--rv-del) 9%, transparent); }
 :is(.rv-row, .rv-half).is-del .rv-mark { color: var(--rv-del); }
 .rv-half.is-none { background: var(--surface-2); }
-.is-add .rv-word-change { background: color-mix(in oklab, var(--rv-add) 30%, transparent); border-radius: 2px; }
-.is-del .rv-word-change { background: color-mix(in oklab, var(--rv-del) 30%, transparent); border-radius: 2px; }
+.is-add .rv-word-change { background: color-mix(in oklab, var(--rv-add) 22%, transparent); border-radius: 2px; }
+.is-del .rv-word-change { background: color-mix(in oklab, var(--rv-del) 22%, transparent); border-radius: 2px; }
 :is(.rv-row, .rv-half).is-picked { box-shadow: inset 3px 0 0 var(--text-sub); background: color-mix(in oklab, var(--selection) 10%, transparent); }
-.rv-after { padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: Inter, system-ui, sans-serif; }
+.rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: Inter, system-ui, sans-serif; }
 
 /* Threads and the composer (prototype 433–486). */
 .rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; color: var(--text-sub); }
@@ -114,8 +116,8 @@
 .rv-who { color: var(--text); font-weight: 500; }
 .rv-status { color: var(--text-muted); }
 .rv-tag { padding: 1px 7px; border-radius: 5px; font: 600 10px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; white-space: nowrap; }
-.rv-tag.is-must_fix { background: color-mix(in oklab, var(--bad) 18%, transparent); color: var(--bad); }
-.rv-tag.is-question { background: color-mix(in oklab, var(--info) 18%, transparent); color: var(--info); }
+.rv-tag.is-must_fix { background: color-mix(in oklab, var(--bad) 12%, transparent); color: color-mix(in oklab, var(--bad) 80%, var(--text)); }
+.rv-tag.is-question { background: color-mix(in oklab, var(--info) 12%, transparent); color: color-mix(in oklab, var(--info) 80%, var(--text)); }
 .rv-tag.is-nit { background: var(--surface-2); color: var(--text-muted); }
 .rv-claim { padding: 1px 7px; border-radius: 5px; font-size: 11px; background: var(--surface-2); color: var(--text-sub); }
 .rv-claim.is-fixed, .rv-claim.is-answered { color: var(--ok); }
@@ -153,18 +155,20 @@
 .rv-outcomes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
 .rv-outcome { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .rv-outcome.is-on { border-color: var(--text-sub); background: var(--line); }
-.rv-outcome.is-off { cursor: default; opacity: .6; }
+.rv-outcome.is-off { cursor: default; border-style: dashed; }
+.rv-outcome.is-off .rv-outcome-label { color: var(--text-muted); }
 .rv-outcome:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rv-outcome input { margin: 3px 0 0; accent-color: var(--text); }
 .rv-outcome-text { display: flex; flex-direction: column; gap: 3px; }
 .rv-outcome-label { color: var(--text); font-weight: 500; font-size: 13px; }
 .rv-outcome-sub { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.rv-outcome.is-on .rv-outcome-sub { color: var(--text-sub); }
 
 /* Gate review overlay (prototype 292–321): a layer over the review page. */
 .rv-gate { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
 .rv-gate-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .rv-gate-name { color: var(--text); font-size: 13px; }
-.rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
+.rv-gate-tag { padding: 2px 8px; border-radius: 5px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: color-mix(in oklab, var(--warn) 80%, var(--text)); font: 600 10.5px/1.5 ui-monospace, Menlo, monospace; letter-spacing: .04em; }
 .rv-gate-body { flex: 1 1 0; min-height: 0; display: flex; }
 .rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: 13.5px; line-height: 1.65; }
 .rv-gate-doc > .md { max-width: 760px; }
@@ -181,4 +185,11 @@
   .rv-gate-body { flex-direction: column; }
   .rv-gate-doc { flex: 1 1 0; padding: 16px; }
   .rv-gate-side { width: auto; flex: 0 1 45%; border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* Narrow screens wrap: a sideways scroll there hides most of a line. */
+@media (max-width: 1023px) {
+  .rv-lines { width: auto; }
+  .rv-code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rv-after { padding-left: 12px; }
 }

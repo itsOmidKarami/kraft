@@ -44,7 +44,7 @@ export function FileTree(p: {
             {dir && (
               <button type="button" className="rv-folder-row" aria-expanded={!closed.has(dir)} onClick={() => fold(dir)}>
                 <span aria-hidden="true">{closed.has(dir) ? "▸" : "▾"}</span>
-                <span className="rv-mono">{dir}</span>
+                <span className="rv-mono" title={dir} data-allow-ellipsis="">{dir}</span>
               </button>
             )}
             {!closed.has(dir) &&
@@ -60,7 +60,7 @@ export function FileTree(p: {
                     ) : (
                       <span className={`rv-viewed${v ? " is-on" : ""}`} title={v ? "Viewed" : "Not viewed"} aria-label={v ? "viewed" : undefined}>{v ? "✓" : "○"}</span>
                     )}
-                    <button type="button" className="rv-file-name" aria-current={p.selected === f.path ? "true" : undefined} title={f.path} onClick={() => p.onSelect(f.path)}>
+                    <button type="button" className="rv-file-name" data-allow-ellipsis="" aria-current={p.selected === f.path ? "true" : undefined} title={f.path} onClick={() => p.onSelect(f.path)}>
                       <span className="rv-mono">{f.path.slice(dir.length)}</span>
                       {p.notShown.has(f.path) && <span className="rv-muted"> not shown</span>}
                     </button>
