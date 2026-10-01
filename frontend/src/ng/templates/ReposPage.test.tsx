@@ -151,14 +151,13 @@ describe("Repos page: the Config rows", () => {
   });
 
   it("leaves the input open with the server's message, and saves nothing, when the preview adds a problem", async () => {
-    vi.mocked(d.postOps).mockImplementation((_a, _k, _o, preview) => ok({ ...reposView({ problems: preview ? [problemAt("/src/platform", "time_cap_minutes", "time_cap_minutes 200 cannot exceed the instance policy's 90")] : [] }, true), ops: [] }));
+    vi.mocked(d.postOps).mockImplementation((_a, _k, _o, preview) => ok({ ...reposView({ problems: preview ? [problemAt("/src/platform", "allowed_tools", "'allowed_tools' cannot widen the inherited safety ceiling ['Read']; ['Bash'] is not allowed")] : [] }, true), ops: [] }));
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
-    await userEvent.click(screen.getByRole("button", { name: /^tasks running cap \(min\), 60/ }));
-    await userEvent.clear(screen.getByLabelText("tasks running cap (min)"));
-    await userEvent.type(screen.getByLabelText("tasks running cap (min)"), "200{Enter}");
-    expect(await screen.findByText(/Refused: time_cap_minutes 200 cannot exceed the instance policy's 90/)).toBeInTheDocument();
-    expect(screen.getByLabelText("tasks running cap (min)")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^allowed tools, not set/ }));
+    await userEvent.type(screen.getByRole("textbox", { name: "allowed tools" }), "Bash{Enter}");
+    expect(await screen.findByText(/Refused: 'allowed_tools' cannot widen the inherited safety ceiling/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "allowed tools" })).toBeInTheDocument();
     expect(vi.mocked(d.postOps).mock.calls.every((c) => c[3] === true)).toBe(true);
   });
 
@@ -180,6 +179,11 @@ describe("Repos page: the Config rows", () => {
     await userEvent.type(screen.getByLabelText("tasks running cap (min)"), "45{Enter}");
     await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { policy: { time_cap_minutes: 45 } } }]);
+    // A list-valued policy key goes inside the block too.
+    await userEvent.click(screen.getByRole("button", { name: /^allowed tools, not set/ }));
+    await userEvent.type(screen.getByRole("textbox", { name: "allowed tools" }), "Read, Grep{Enter}");
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(4));
+    expect(vi.mocked(d.postOps).mock.calls[2][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { policy: { time_cap_minutes: 60, allowed_tools: ["Read", "Grep"] } } }]);
   });
 });
 

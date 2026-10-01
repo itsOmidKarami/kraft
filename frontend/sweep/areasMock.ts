@@ -39,7 +39,7 @@ export function yamlOf(v: unknown, pad = ""): string {
 
 /* ── the three states ─────────────────────────────────────────────────────── */
 
-const INSTANCE_TASK_CAP = 90;
+const TOOL_CEILING = ["Read", "Grep"];
 const RUNNING: Record<string, number> = { "/Users/me/src/platform": 1 };
 
 const repoSeed = (): Obj[] => [
@@ -122,7 +122,8 @@ export function makeAreas(variant: AreaVariant = "default") {
     const problems: Obj[] = [];
     const views = s.map((e) => {
       const set = new Set(Object.keys(e.policy ?? {}));
-      if (e.policy?.time_cap_minutes > INSTANCE_TASK_CAP) problems.push({ path: "time_cap_minutes", field: "time_cap_minutes", message: `${e.path}: time_cap_minutes ${e.policy.time_cap_minutes} cannot exceed the instance policy's ${INSTANCE_TASK_CAP}`, file: "repos.yaml", line: 1, col: 1, repo: e.path });
+      const wide = (e.policy?.allowed_tools ?? []).filter((t: string) => !TOOL_CEILING.includes(t));
+      if (wide.length) problems.push({ path: "allowed_tools", field: "allowed_tools", message: `'allowed_tools' cannot widen the inherited safety ceiling ${JSON.stringify(TOOL_CEILING).replace(/"/g, "'")}; [${wide.map((t: string) => `'${t}'`).join(", ")}] is not allowed`, file: "repos.yaml", line: 1, col: 1, repo: e.path });
       if (e.managed !== false && variant === "broken" && e.name === "docs-site") problems.push({ path: "path", field: "path", message: `${e.path} is not a git repository`, file: "repos.yaml", line: 1, col: 1, repo: e.path });
       const entry = Object.fromEntries(Object.entries(e).filter(([k]) => !["managed"].includes(k)));
       return {

@@ -36,6 +36,8 @@ export const FIELDS: RepoField[] = [
   policy("total_time_cap_minutes", "tasks wall clock cap (min)", whole("Minutes")),
   policy("token_budget", "tokens cap", whole("Tokens")),
   policy("budget_usd", "dollars cap", dollars),
+  { ...policy("allowed_tools", "allowed tools", list), placeholder: "tool, tool" },
+  { ...policy("allowed_harnesses", "allowed harnesses", list), placeholder: "harness, harness" },
 ];
 
 export const FORGES = ["gitlab", "github", "none"];
