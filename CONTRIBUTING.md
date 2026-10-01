@@ -165,19 +165,25 @@ its `enforced-by:` pins, which break when you rename a pinned test.
 
 ### What CI checks
 
-Every pull request runs these. `just ci-test` runs the first two jobs, in CI's
-order, on the full suite.
+Every pull request runs these, except that a docs-only one skips the five
+marked *(code)*. A pull request is docs-only when every file it changes is a
+root-level `*.md`, `docsite/**`, `.github/assets/**`, or `docs/*.md` (not
+`docs/intent/`). In their place, `docs tests` runs every unit test file that
+names one of those paths. `just ci-test` runs `lint` and the test matrix, in
+CI's order, on the full suite.
 
 | CI job | What it runs | Run it locally with |
 |---|---|---|
 | `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
-| `test (python 3.12 / 3.13 / 3.14)` | the unit tier (`-m "not e2e"`), then `python -m kraft.intent`, on each supported Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
-| `test` | passes only when every `test (python …)` leg does; the one check branch protection requires, so the supported range can change without editing repo settings | nothing to run |
-| `e2e (real CLIs)` | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
+| `changes` | decides whether the pull request is docs-only | nothing to run |
+| `test (python 3.12 / 3.13 / 3.14)` *(code)* | the unit tier (`-m "not e2e"`), then `python -m kraft.intent`, on each supported Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
+| `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
+| `test` | passes only when every `test (python …)` leg does, or, on a docs-only pull request, when `docs tests` does; the one check branch protection requires, so the supported range can change without editing repo settings | nothing to run |
+| `e2e (real CLIs)` *(code)* | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
 | `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
-| `frontend` | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
-| `vscode` | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
-| `playwright` | the browser e2e suite against a fixture server | `just e2e-ci` |
+| `frontend` *(code)* | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
+| `vscode` *(code)* | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
+| `playwright` *(code)* | the browser e2e suite against a fixture server | `just e2e-ci` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label | see [Pull requests and release labels](#pull-requests-and-release-labels) |
 | `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code | `just docs-site` |

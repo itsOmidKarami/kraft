@@ -39,8 +39,8 @@ jobs:
     # prose nothing in the heavy jobs reads: root-level *.md, docsite/ (docs.yml
     # builds it), .github/assets/, and docs/*.md (not docs/intent/, whose pins
     # the test job checks). Pushes to main run everything, and so does a PR if
-    # this job fails: the heavy jobs skip only on an explicit 'false'. The one
-    # unit test that reads README.md also runs in lint, which never skips.
+    # this job fails: the heavy jobs skip only on an explicit 'false'. The unit
+    # tests that read those files still run, in `docs-tests`.
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
@@ -78,9 +78,6 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run python dev/check_docs_coverage.py
       - run: uv run python dev/check_tests.py
-      # Reads README.md, which a docs-only pull request may change while the
-      # test matrix skips.
-      - run: uv run pytest tests/test_distribution_surface.py -q
 
   test:
     # The unit tier on every supported Python (`requires-python` in pyproject.toml
@@ -164,6 +161,35 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  docs-tests:
+    # On a docs-only pull request, the unit tests that read a docs file stand
+    # in for the skipped matrix: a test that parses a docsite page's policy
+    # example, the README's install URL, docs/templates-v1-design.md's YAML. The
+    # grep names the same trees `changes` calls docs-only, so a new test that
+    # reads one is picked up without editing a list. Python 3.14 only, like
+    # every job but the matrix.
+    name: docs tests
+    needs: changes
+    if: needs.changes.outputs.code == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: git identity
+        run: |
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
+      - run: uv sync --frozen
+      - run: |
+          git grep -lE 'docsite|"docs"|docs/|\.github/assets|"assets"|[A-Z_]+\.md' -- 'tests/**/test_*.py' 'tests/test_*.py' > "$RUNNER_TEMP/docs-tests.txt"
+          cat "$RUNNER_TEMP/docs-tests.txt"
+          xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
+
   test-gate:
     # One check named exactly `test`, for branch protection to require. The matrix
     # above reports as `test (python 3.12)`, `test (python 3.13)`, ... so a rule
@@ -174,18 +200,23 @@ jobs:
     # reports "skipped", and a skipped required check passes -- so without it a
     # red matrix would leave this check green. The shell test below is what
     # turns a failed or cancelled matrix into a failed check. A skipped matrix
-    # passes only when `changes` said docs-only.
+    # passes only when `changes` said docs-only and `docs-tests` passed.
     name: test
-    needs: [changes, test]
+    needs: [changes, test, docs-tests]
     if: always()
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.changes.outputs.code }}
       MATRIX_RESULT: ${{ needs.test.result }}
+      DOCS_RESULT: ${{ needs.docs-tests.result }}
     steps:
       - run: |
           if [ "$CODE" = false ] && [ "$MATRIX_RESULT" = skipped ]; then
-            echo "docs-only change: test matrix skipped"
+            if [ "$DOCS_RESULT" != success ]; then
+              echo "::error::docs-only change: docs tests finished '$DOCS_RESULT', not 'success'"
+              exit 1
+            fi
+            echo "docs-only change: test matrix skipped, docs tests passed"
           elif [ "$MATRIX_RESULT" != "success" ]; then
             echo "::error::the test matrix finished '$MATRIX_RESULT', not 'success'"
             exit 1
