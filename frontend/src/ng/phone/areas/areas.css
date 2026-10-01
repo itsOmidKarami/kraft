@@ -39,3 +39,4 @@
 .ph-yaml-btn[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
 .ph-actions-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .ph-actions-row > .ph-btn { flex: 1; }
+.ph-area-search { margin: 0; }

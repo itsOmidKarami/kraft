@@ -2,6 +2,8 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 import { Board } from "./board/Board";
 import { Analytics } from "./analytics/Analytics";
 import { Item } from "./item/Item";
+import { ChainNodeView, ChainsList, ChainView } from "./areas/Chains";
+import { LibraryComponentView, LibraryList } from "./areas/Library";
 import { More } from "./more/More";
 import { Search } from "./search/Search";
 import { GateReviewRoute } from "./review/GateReview";
@@ -42,6 +44,12 @@ export function PhoneApp() {
           <Route path="/work-items/:id" element={<Item />} />
           <Route path="/work-items/:id/nodes/:node" element={<NodeRoute />} />
           <Route path="/work-items/:id/review" element={<GateReviewRoute />} />
+          <Route path="/templates" element={<Navigate to="/templates/chains" replace />} />
+          <Route path="/templates/chains" element={<ChainsList />} />
+          <Route path="/templates/chains/:chain" element={<ChainView />} />
+          <Route path="/templates/chains/:chain/nodes/:node" element={<ChainNodeView />} />
+          <Route path="/templates/library" element={<LibraryList />} />
+          <Route path="/templates/library/:ref" element={<LibraryComponentView />} />
           <Route path="/templates/*" element={<Soon title="Templates" />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/*" element={<Soon title="Settings" />} />
