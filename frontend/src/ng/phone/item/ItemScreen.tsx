@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
+import { detailOf, jsonBody, request } from "../../http";
 import { actionPath } from "../../item/paths";
 import { act } from "../../item/actions";
 import { isEscalation } from "../../item/nodeGraph";
@@ -19,7 +20,7 @@ import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block } from "../ui/Rows";
 import { ChainList } from "./ChainList";
 import { PauseSheet } from "./PauseSheet";
-import { cardOf, kebabOf, pairOf, type Act, type ActId } from "./model";
+import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act, type ActId } from "./model";
 import { useDo } from "./useDo";
 import "./item.css";
 
@@ -46,6 +47,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const hs = headerState(item);
   const card = cardOf(item, events);
   const bar = pairOf(item);
+  const limit = stopLimitOf(item);
   const ended = status === "done" || status === "cancelled" || status === "archived";
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
@@ -111,6 +113,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             <h2 className="ph-statecard-title">{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
+            {limit && <button type="button" className="ph-linkbtn" onClick={() => sheet.open("raise-cap")}>Raise the {limitWords(limit).noun}…</button>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
                 {card.facts.map(([k, v]) => <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
@@ -196,6 +199,7 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
         onClose={sheet.close}
       />
     );
+  if (sheet.is("raise-cap")) return <RaiseCapSheet item={item} node={node} sheet={sheet} reload={reload} />;
   if (sheet.is("raise-amount"))
     return (
       <EditSheet
@@ -216,4 +220,42 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
       />
     );
   return null;
+}
+
+/** Raise the limit that stopped the item, then retry (R73): one number, the same two calls the desktop's editor makes. */
+function RaiseCapSheet({ item, node, sheet, reload }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
+  const limit = stopLimitOf(item);
+  const { busy, run } = useDo(reload);
+  const [error, setError] = useState<string | null>(null);
+  if (!limit) return null;
+  const words = limitWords(limit);
+  const where = limit.path ? ` on ${limit.path}` : "";
+  const submit = async (text: string) => {
+    const n = Number(text.trim());
+    if (!Number.isInteger(n) || n <= 0) return setError(`Enter a whole number of ${words.unit}.`);
+    if (n <= limit.value) return setError(`It has to be above the current ${limit.value}.`);
+    if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${limit.maximum}.`);
+    setError(null);
+    const patched = await request(`/work-items/${encodeURIComponent(item.id)}`, jsonBody("PATCH", limitPatch(limit, n)));
+    if (patched.status >= 300) return setError(detailOf(patched.body));
+    const nodeNow = item.chain_definition.nodes.find((x) => x.id === node);
+    const r = await run(act.retry(item.id, nodeNow ? { path: actionPath(nodeNow, item.stop?.task) } : {}), "Raised. Retrying.");
+    if (r.ok) sheet.close();
+    else {
+      reload();
+      setError(`Raised to ${n}, but the retry was refused: ${r.error}`);
+    }
+  };
+  return (
+    <EditSheet
+      title={`Raise the ${words.noun}`}
+      text={`Now ${limit.value} ${words.unit}${where}. ${limit.maximum != null ? `The policy maximum is ${limit.maximum}.` : "The policy sets no maximum."} Applies to this item only, then retries.`}
+      initial={String(limit.value)}
+      submitLabel="Save & retry"
+      error={error}
+      busy={busy}
+      onSubmit={(v) => void submit(v)}
+      onClose={sheet.close}
+    />
+  );
 }

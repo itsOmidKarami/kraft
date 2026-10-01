@@ -174,3 +174,30 @@ export function nodeSub(n: ChainNode): { text: string; tone: "warn" | "info" | "
     default: return { text: gate ? "you" : "not started", tone: "muted" };
   }
 }
+
+/** The limit a cap stop hit (R73): where it is set, how much it is, and the policy ceiling. Present only when the server says; without it a cap stop keeps Steer and Retry. */
+export interface StopLimit {
+  /** "" is item-wide; otherwise a node id (a fix loop). */
+  path: string;
+  key: "time_cap_minutes" | "total_time_cap_minutes" | "max_attempts" | "timeout_minutes";
+  value: number;
+  maximum: number | null;
+}
+
+const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string }> = {
+  time_cap_minutes: { noun: "running time cap", unit: "minutes of running time" },
+  total_time_cap_minutes: { noun: "wall-clock cap", unit: "minutes of wall-clock time" },
+  max_attempts: { noun: "attempts cap", unit: "attempts" },
+  timeout_minutes: { noun: "timeout", unit: "minutes per attempt" },
+};
+export const limitWords = (l: StopLimit) => LIMIT_WORDS[l.key];
+
+/** The `stop.limit` of a cap stop, or null: absent, or not the shape the server sends. */
+export function stopLimitOf(item: ItemDetail): StopLimit | null {
+  const l = (item.stop as { limit?: Partial<StopLimit> } | null)?.limit;
+  if (item.stop?.kind !== "cap" || !l || typeof l.value !== "number" || typeof l.key !== "string" || !(l.key in LIMIT_WORDS)) return null;
+  return { path: typeof l.path === "string" ? l.path : "", key: l.key as StopLimit["key"], value: l.value, maximum: typeof l.maximum === "number" ? l.maximum : null };
+}
+
+/** The PATCH body that sets one limit: item-wide under `policy`, a node's under `policy.paths`. */
+export const limitPatch = (l: StopLimit, value: number) => ({ policy: l.path ? { paths: { [l.path]: { [l.key]: value } } } : { [l.key]: value } });

@@ -49,6 +49,17 @@ export const cells: Case[] = [
     b.budget_cap = { cap_usd: 10, source: "item", spent_usd: 10 };
     await ph(c, item(c, "capped"), click(/Raise budget/));
   }),
+  // R73: a cap stop whose stop.limit the server sends offers the raise; the cell sets it on the seeded item.
+  cell("ng-phone-item", "capped-limit", async (c) => {
+    const b = (c.S.bundles as any)[c.S.ng.capped].item;
+    b.stop = { ...b.stop, limit: { path: "", key: "time_cap_minutes", value: 480, maximum: 1440 } };
+    await ph(c, item(c, "capped"));
+  }),
+  cell("ng-phone-item", "capped-raise", async (c) => {
+    const b = (c.S.bundles as any)[c.S.ng.capped].item;
+    b.stop = { ...b.stop, limit: { path: "", key: "time_cap_minutes", value: 480, maximum: 1440 } };
+    await ph(c, item(c, "capped"), click(/^Raise the running time cap/));
+  }),
   cell("ng-phone-composer", "steer-running", (c) => ph(c, item(c, "running", "?compose=steer"))),
   cell("ng-phone-composer", "steer-paused", (c) => ph(c, item(c, "paused", "?compose=steer"))),
   cell("ng-phone-composer", "reject", (c) => ph(c, item(c, "needs-gate", "?compose=reject"))),
