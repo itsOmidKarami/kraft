@@ -6,7 +6,7 @@
 .ph-row-static { cursor: default; }
 .ph-row.ph-is-danger { color: var(--bad); }
 .ph-chips-end { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 150px; }
-.ph-chipword { padding: 2px 7px; border-radius: 5px; font-size: 11px; background: var(--line); color: var(--text-sub); }
+.ph-chipword { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 11px; color: var(--text-sub); }
 .ph-chipword.ph-tone-ok { color: var(--ok); }
 .ph-chipword.ph-tone-warn { color: var(--warn); }
 .ph-chipword.ph-tone-bad { color: var(--bad); }
@@ -16,7 +16,7 @@
 .ph-area-head { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
 .ph-area-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ph-area-title h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
-.ph-status { padding: 3px 8px; border-radius: 5px; font: 600 10.5px system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; background: var(--line); color: var(--text-muted); }
+.ph-status { padding: 3px 8px; border-radius: 5px; font: 600 10.5px system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; background: var(--line); color: var(--text-sub); }
 .ph-status.ph-tone-warn { color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, transparent); }
 .ph-status.ph-tone-bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 16%, transparent); }
 .ph-area-sub { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-sub); overflow-wrap: anywhere; }
