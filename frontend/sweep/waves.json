@@ -222,7 +222,7 @@
   },
   "ux2-W10": {
     "title": "UX V2 Chains editor: canvas, panes, drafts, publish; sidebar draft dots",
-    "screens": ["ng-chains", "ng-shell", "flow-ng-chain-add-node", "flow-ng-chain-publish"],
+    "screens": ["ng-chains", "ng-shell", "flow-ng-chain-add-node", "flow-ng-chain-publish", "flow-ng-chain-yaml", "flow-ng-chain-switch-guard"],
     "specs": ["sweep.spec.ts", "interactions.spec.ts"],
     "rules": [
       { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },

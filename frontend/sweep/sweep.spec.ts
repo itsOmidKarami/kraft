@@ -630,6 +630,8 @@ const CASES: Case[] = [
     await c.page.getByRole("button", { name: "spec, node" }).click();
     await c.page.getByRole("button", { name: "Remove node" }).click();
     await c.page.getByRole("dialog", { name: "Remove node" }).waitFor({ timeout: 4000 });
+    // The pointer off the footer button: its hover tint is W1's (Kraft-xjv0h), not this cell's subject.
+    await c.page.mouse.move(400, 600);
     await settle(c.page, 300);
   } },
   { screen: "ng-chains", variant: "reorder", data: "default", widths: [1280], run: async (c) => {
