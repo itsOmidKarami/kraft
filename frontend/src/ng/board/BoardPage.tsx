@@ -253,6 +253,7 @@ export function BoardPage() {
                     checked={checked.has(i.id)}
                     offline={offline}
                     error={rowErrors[i.id]}
+                    compact={!!query.sel && paneOpen && !size.overlay}
                     onSelect={select}
                     onOpen={open}
                     onCheck={toggle}

@@ -51,4 +51,15 @@ describe("Row", () => {
     mount("running");
     expect(screen.getByText("kraft-cb59")).toHaveClass("board-meta-id");
   });
+
+  it("beside the open peek drops the tick strip first, and keeps the id and the age as their own unshrinking parts", () => {
+    const { container } = render(<Row item={detail({ display_status: "running" })} selected={false} checked={false} offline={false} now={Date.parse("2026-09-13T10:00:00Z")} onSelect={() => {}} onOpen={() => {}} onCheck={() => {}} onAction={() => {}} />);
+    expect(container.querySelector(".ticks")).not.toBeNull();
+    container.remove();
+    const c2 = render(<Row compact item={detail({ display_status: "running" })} selected={false} checked={false} offline={false} now={Date.parse("2026-09-13T10:00:00Z")} onSelect={() => {}} onOpen={() => {}} onCheck={() => {}} onAction={() => {}} />).container;
+    expect(c2.querySelector(".ticks")).toBeNull();
+    expect(c2.querySelector(".board-row")).toHaveClass("is-compact");
+    expect(c2.querySelector(".board-meta-age")).toHaveTextContent("1h ago");
+    expect(c2.querySelector(".board-meta-id")).toHaveTextContent("kraft-cb59");
+  });
 });
