@@ -115,3 +115,15 @@
 .bulk-results ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; max-height: 120px; overflow: auto; color: var(--text-sub); }
 .bulk-fail-title { color: var(--text); }
 .bulk-fail-id { font: 11.5px ui-monospace, Menlo, monospace; }
+
+/* The peek (AreaBoard 95–121): W3's Inspector docked at the list's right. */
+.peek-overview { display: flex; flex-direction: column; gap: 14px; }
+.peek-cards { display: flex; flex-direction: column; gap: 10px; }
+.peek-cards:empty { display: none; }
+.peek-events { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1px; }
+.peek-events li { display: flex; gap: 10px; padding: 5px 0; font-size: 12px; line-height: 1.45; color: var(--text-sub); }
+.peek-ev-t { flex: none; width: 52px; font: 10.5px/1.7 ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.peek-ev-link { padding: 0; border: 0; background: transparent; font: inherit; color: var(--text); text-align: left; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
+.peek-ev-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.peek-earlier { margin: 8px 0 0; }
+.peek-error { font-size: 11.5px; }

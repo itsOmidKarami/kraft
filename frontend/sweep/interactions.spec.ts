@@ -254,6 +254,24 @@ const FLOWS: Flow[] = [
       expect((sent[0].body as { ids: string[] }).ids).toHaveLength(2);
     }, wait: 600 },
   ] },
+  // ux2-W6 E: the peek by keyboard, its width kept across a reload, and ⌘/Ctrl-Enter to the item page.
+  { name: "ng-peek-open", widths: [1280], keyboard: true, mock: { ngBoard: true }, start: ngBoard(), steps: [
+    { name: "arrow-to-a-row", run: async (p) => { await p.getByRole("button", { name: /^Design the caching layer/ }).focus(); await p.keyboard.press("ArrowDown"); await expect(p.getByRole("button", { name: /^Fix flaky retry test/ })).toBeFocused(); } },
+    { name: "enter-opens-the-peek", run: async (p) => { await p.keyboard.press("Enter"); await expect(p.getByRole("complementary", { name: "kraft-7d21 pane" })).toBeVisible(); await expect(p).toHaveURL(/[?&]sel=/); } },
+    { name: "keys-widen-it", run: async (p) => {
+      const h = p.getByRole("separator", { name: "Resize pane" });
+      await h.focus();
+      const w0 = Number(await h.getAttribute("aria-valuenow"));
+      for (let i = 0; i < 4; i++) await p.keyboard.press("ArrowLeft");
+      await expect(h).toHaveAttribute("aria-valuenow", String(w0 + 64));
+    } },
+    { name: "reload-keeps-the-width", run: async (p) => {
+      const w = await p.getByRole("separator", { name: "Resize pane" }).getAttribute("aria-valuenow");
+      await p.reload(); await p.locator("main h1").first().waitFor();
+      await expect(p.getByRole("separator", { name: "Resize pane" })).toHaveAttribute("aria-valuenow", w!);
+    }, wait: 700 },
+    { name: "ctrl-enter-opens-the-item", run: async (p) => { await p.getByRole("button", { name: /^Fix flaky retry test/ }).focus(); await p.keyboard.press("Control+Enter"); await expect(p).toHaveURL(/\/ng\/work-items\/[0-9a-f]+$/); } },
+  ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
     { name: "collapse", run: async (p) => { const b = p.getByRole("button", { name: /collapse/i }); if (await b.count()) await b.click(); } },

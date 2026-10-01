@@ -127,6 +127,16 @@ async function ngBoard(c: Ctx, opts: { tail?: string; side?: "pinned" | "rail"; 
   await ng(c, `/ng/${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
   if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
+/** A board row per peek variant, by the start of its title (ngBoard.ts). */
+const PEEK_ROWS = {
+  "needs-gate": "Design the caching layer", question: "Add rate limit headers", capped: "Fix flaky retry test", failed: "Retry on 429",
+  paused: "Trim the review prompts", running: "Bump the VS Code", "not-started": "Spike: stream logs", done: "Release notes for 0.14", cancelled: "Rename the harness profiles",
+} as const;
+/** Click a board row and wait for its peek. */
+const peekRow = (title: string) => async (p: Page) => {
+  await p.getByRole("button", { name: new RegExp(`^${title}`) }).click();
+  await p.locator(".pane .pane-tabs").waitFor();
+};
 /** Check board rows by the start of their titles. */
 const checkRows = (titles: string[]) => async (p: Page) => {
   for (const t of titles) await p.getByRole("checkbox", { name: new RegExp(`^Select ${t}`) }).check();
@@ -370,6 +380,16 @@ const CASES: Case[] = [
     await p.getByRole("button", { name: "‖ Pause 2" }).click();
     await p.getByText("1 of 2 items paused").waitFor();
   } }) },
+  // E: the peek on one row of each kind, its other tabs, the overlay under 1024 and a short window.
+  ...Object.entries(PEEK_ROWS).map<Case>(([v, title]) => ({
+    screen: "ng-board-peek", variant: v, data: "default", widths: [1280], ...(v === "needs-gate" ? { shells: [{ short: true }] } : {}), mock: { ngBoard: true },
+    run: (c) => ngBoard(c, { then: peekRow(title) }),
+  })),
+  ...(["activity", "config"] as const).map<Case>((tab) => ({
+    screen: "ng-board-peek", variant: tab, data: "default", widths: [1280], mock: { ngBoard: true },
+    run: (c) => ngBoard(c, { then: async (p) => { await peekRow(PEEK_ROWS.capped)(p); await p.getByRole("tab", { name: tab === "activity" ? "Activity" : "Config" }).click(); } }),
+  })),
+  { screen: "ng-board-peek", variant: "running", data: "default", widths: [768], mock: { ngBoard: true }, run: (c) => ngBoard(c, { side: "rail", then: peekRow(PEEK_ROWS.running) }) },
   { screen: "ng-board", variant: "group-repo", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?group=repo" }) },
   { screen: "ng-board", variant: "filtered", data: "default", widths: [1280], mock: { ngBoard: true }, run: (c) => ngBoard(c, { tail: "?q=docs&chain=docs_only" }) },
 

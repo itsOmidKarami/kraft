@@ -14,6 +14,8 @@ import { Row } from "./Row";
 import type { RowAction } from "./rowText";
 import { useBoardQuery } from "./url";
 import { BulkBar } from "./BulkBar";
+import { Peek, type PeekTab } from "./Peek";
+import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
 import "./board.css";
 
@@ -70,6 +72,11 @@ export function BoardPage() {
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const filterRef = useRef<HTMLInputElement>(null);
+  const [peekTab, setPeekTab] = useState<PeekTab>("overview");
+  const [budgetEdit, setBudgetEdit] = useState(false);
+  const [paneOpen, setPaneOpen] = useState(true);
+  const [body, bodyW] = useWidth();
+  const size = useResizable("board", bodyW);
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
   const { load, refresh, offline } = useListLoad();
@@ -97,7 +104,13 @@ export function BoardPage() {
   const needsN = items.filter((i) => groupOf(i) === "needs").length;
 
   const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
-  const select = useCallback((id: string) => (prefs?.open_in === "full" ? open(id) : setQuery({ sel: id })), [prefs?.open_in, open, setQuery]);
+  const peek = useCallback((id: string, tab: PeekTab = "overview", budget = false) => {
+    setQuery({ sel: id, new: false });
+    setPeekTab(tab);
+    setBudgetEdit(budget);
+    setPaneOpen(true);
+  }, [setQuery]);
+  const select = useCallback((id: string) => (prefs?.open_in === "full" ? open(id) : peek(id)), [prefs?.open_in, open, peek]);
   const toggle = useCallback((id: string) => setChecked((c) => {
     const n = new Set(c);
     if (n.has(id)) n.delete(id);
@@ -106,13 +119,13 @@ export function BoardPage() {
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
     if (a.kind === "gate") return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
-    if (a.kind === "peek") return setQuery({ sel: item.id });
+    if (a.kind === "peek") return peek(item.id, a.tab, !!a.budget);
     const r = await act.resume(item.id);
     setRowErrors((e) => {
       const { [item.id]: _, ...rest } = e;
       return r.ok ? rest : { ...rest, [item.id]: r.error };
     });
-  }, [open, setQuery]);
+  }, [open, peek]);
 
   // "/" focuses the filter; Escape clears the selection once menus have had it.
   useEffect(() => {
@@ -204,8 +217,13 @@ export function BoardPage() {
         />
       </div>
 
-      <div className="board-body">
-        <div className="board-list" onKeyDown={onListKey}>
+      <div className="board-body" ref={body}>
+        <div
+          className="board-list"
+          style={{ right: query.sel && !size.overlay ? (paneOpen ? size.width : 40) : 0 }}
+          onKeyDown={onListKey}
+          onClick={(e) => { if (query.sel && !(e.target as Element).closest(".board-row, .board-group-head, button, a, input")) setQuery({ sel: "" }); }}
+        >
           <div className="board-list-inner">
             {load.state === "loading" && items.length === 0 ? <Skeleton /> : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
@@ -246,6 +264,20 @@ export function BoardPage() {
             ))}
           </div>
         </div>
+        {query.sel && (
+          <Peek
+            key={query.sel}
+            id={query.sel}
+            tab={peekTab}
+            onTab={setPeekTab}
+            budget={budgetEdit}
+            onBudget={setBudgetEdit}
+            offline={offline}
+            size={{ ...size, open: paneOpen, onOpen: setPaneOpen }}
+            onClose={() => setQuery({ sel: "" })}
+            onRepo={(repo) => setQuery({ repo })}
+          />
+        )}
         <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
     </div>

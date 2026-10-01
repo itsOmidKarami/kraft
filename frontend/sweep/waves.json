@@ -196,15 +196,15 @@
   },
   "ux2-W6": {
     "title": "UX V2 board: list, menus, states, bulk, peek, composer, draft item page, archived",
-    "screens": ["ng-board", "flow-ng-board-select-bulk"],
+    "screens": ["ng-board", "ng-board-peek", "flow-ng-board-select-bulk", "flow-ng-peek-open"],
     "specs": ["sweep.spec.ts", "interactions.spec.ts"],
     "rules": [
-      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(board|new-item|draft-item|archived)" },
-      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-(board|new-item|draft-item|archived)" },
-      { "kind": "no-flag", "flag": "contrast", "match": "^ng-(board|new-item|draft-item|archived)" },
-      { "kind": "no-console", "match": "^ng-(?!board/(loading|offline))(board|new-item|draft-item|archived)" },
+      { "kind": "no-flag", "flag": "offscreen", "match": "^ng-(board|board-peek|new-item|draft-item|archived)/" },
+      { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-(board|board-peek|new-item|draft-item|archived)/" },
+      { "kind": "no-flag", "flag": "contrast", "match": "^ng-(board|board-peek|new-item|draft-item|archived)/" },
+      { "kind": "no-console", "match": "^ng-(?!board/(loading|offline))(board|board-peek|new-item|draft-item|archived)/" },
       { "kind": "flow-completes", "match": "^flow-ng-" },
-      { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-(board|new-item|draft-item|archived)" }
+      { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-(board|board-peek|new-item|draft-item|archived)/" }
     ]
   }
 }

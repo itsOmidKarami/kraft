@@ -1,0 +1,107 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { KraftEvent } from "../../types";
+import { useResizable } from "../graph/useResizable";
+import { detail, stubFetch } from "../item/testkit";
+import type { ItemDetail } from "../item/useItem";
+import { Peek, type PeekTab } from "./Peek";
+
+const Where = () => <span data-testid="where">{useLocation().pathname + useLocation().search}</span>;
+
+function Harness({ start = "overview", budget = false }: { start?: PeekTab; budget?: boolean }) {
+  const [tab, setTab] = useState<PeekTab>(start);
+  const [b, setB] = useState(budget);
+  const [open, setOpen] = useState(true);
+  const size = useResizable("board", 1400);
+  return <Peek id="w1" tab={tab} onTab={setTab} budget={b} onBudget={setB} offline={false} size={{ ...size, open, onOpen: setOpen }} onClose={() => {}} onRepo={() => {}} />;
+}
+
+const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
+
+const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[] } = {}) => {
+  const calls = stubFetch({ "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}] });
+  render(
+    <MemoryRouter initialEntries={["/"]}>
+      <Routes>
+        <Route path="/" element={<><Harness start={opts.start} budget={opts.budget} /><Where /></>} />
+        <Route path="*" element={<Where />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  return calls;
+};
+const stop = (kind: string, more: object = {}) => ({ kind, node: "verification", task: null, attempt: 1, reason: null, resume_at: null, facts: {}, ...more }) as ItemDetail["stop"];
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
+
+describe("Peek", () => {
+  it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
+    expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open gate" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
+  });
+
+  it.each([
+    [{ status: "needs_human", display_status: "failed", stop: stop("failed", { reason: "The forge refused." }) }, /Failed/],
+    [{ status: "needs_human", display_status: "needs_you", needs_context_question: "Keep the header?", stop: stop("question", { reason: "needs_context: Keep the header?" }) }, /Keep the header\?/],
+    [{ status: "paused", display_status: "paused" }, /Paused/],
+  ] as [Partial<ItemDetail>, RegExp][])("draws %# of the item page's cards", async (over, text) => {
+    mount(over);
+    expect((await screen.findAllByText(text)).length).toBeGreaterThan(0);
+  });
+
+  it("opens Config with the budget editor from a budget stop's Raise cap", async () => {
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
+    fireEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
+    expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+  });
+
+  it("starts a never-started item with /resume", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: null });
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await act(async () => {});
+    expect(calls.find((c) => c.method === "POST")).toMatchObject({ path: "/work-items/w1/resume" });
+  });
+
+  it("puts the item's main action in the footer: Pause asks first, Archive once done, and Open item", async () => {
+    const calls = mount({ display_status: "running" });
+    fireEvent.click(await screen.findByRole("button", { name: "‖ Pause" }));
+    expect(screen.getByRole("dialog", { name: "Pause this item?" })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Open item ↗" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1");
+  });
+
+  it("archives a done item from the footer", async () => {
+    const calls = mount({ status: "completed", display_status: "done" });
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    await act(async () => {});
+    expect(calls.find((c) => c.method === "POST")).toMatchObject({ path: "/work-items/w1/archive" });
+  });
+
+  it("lists Activity newest first and pages back with before_seq; a node's line opens the item there", async () => {
+    const page = Array.from({ length: 50 }, (_, k) => ev(51 + k, "node_started", k === 49 ? "verification" : null));
+    mount({}, { start: "activity", events: page });
+    const list = await screen.findByRole("list");
+    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("verification");
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier" }));
+    await act(async () => {});
+    const urls = vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/events?"));
+    expect(urls.at(-1)).toContain("before_seq=51&limit=50");
+    fireEvent.click(within(list).getAllByRole("button")[0]);
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=verification");
+  });
+
+  it("says so when the item is gone", async () => {
+    stubFetch({ "GET /work-items/w1": [404, { detail: "work item not found" }] });
+    render(<MemoryRouter><Harness /></MemoryRouter>);
+    expect(await screen.findByText("This item is gone.")).toBeInTheDocument();
+  });
+});
