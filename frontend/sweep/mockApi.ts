@@ -4,6 +4,7 @@ import { NG_CHAINS, NG_REPOS, NG_WORKSPACES, ngDryRun } from "./ngBoard";
 import { artifactFor, compareFor, diffFor, fixTargetFor, documentDetail, searchFor, type Scenario } from "./fixtures";
 import { makeAreas, type AreaVariant } from "./areasMock";
 import { NG_NOW, ngThreads } from "./ngItems";
+import { harnessesServer, PROVIDER_STATUS, type Scenario as HarnessesScenario } from "./ngHarnesses";
 
 export interface MockOptions {
   /** Every call except /health answers 401 → the Login screen. */
@@ -22,6 +23,8 @@ export interface MockOptions {
   update?: "available" | "current" | "unknown";
   /** ux2-W15: the repos, policy and intake drafts, answered as W13's server does (areasMock.ts); the value seeds the cell's state. */
   areas?: AreaVariant;
+  /** ux2-W14: the /ng Harnesses page's draft (sweep/ngHarnesses.ts): `floor` clean, `problems` (a Never harness with a task, a profile missing an entry, escalation on a Never harness), `empty` (no profiles). Unset: the routes answer as before. */
+  harnesses?: HarnessesScenario;
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
   /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
@@ -238,6 +241,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
   // Every sweep page is mocked here, before it navigates: fixed time keeps the app's relative durations ("17d 10h") off the wall clock. Timers still run; a case that needs another instant sets its own after.
   await page.clock.setFixedTime(new Date(NG_NOW));
   let restarted = 0;
+  const hs = opts.harnesses ? harnessesServer(opts.harnesses) : null;
   // The live-events socket: accept and stay silent so the shell reads "live".
   await page.routeWebSocket(/\/api\/ws\/events/, (ws) => { if (opts.boardState === "offline") ws.close(); });
   let listReads = 0;
@@ -550,6 +554,26 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
+    if (hs) {
+      if (p === "/harnesses") return json(route, PROVIDER_STATUS);
+      if (p === "/policy") return json(route, { maxima: { allowed_tools: ["git", "shell"] }, defaults: { escalation_grants: ["git-commit"] } });
+      if (p === "/drafts") return json(route, [{ area: "harnesses", key: "harnesses", files: ["harnesses.yaml", "policy.yaml"], changes: hs.view().result.changes.length, problems: hs.problems().length, updated_at: "2026-10-01T09:12:00Z" }]);
+      if ((m = p.match(/^\/drafts\/harnesses\/harnesses(?:\/(undo|publish|ops|rebase|fragment))?$/))) {
+        if (method === "DELETE") return route.fulfill({ status: 204 });
+        if (m[1] === "ops") {
+          const ops: Record<string, unknown>[] = req.postDataJSON()?.ops ?? [];
+          hs.apply(ops);
+          return json(route, { ...hs.view(), ops: ops.map((o) => ({ op: o.op })) });
+        }
+        if (m[1] === "publish") {
+          const blocking = hs.problems();
+          if (blocking.length) return json(route, { detail: `${blocking.length} problem(s) to fix before publishing`, problems: blocking }, 422);
+          hs.publish();
+          return json(route, { published: ["harnesses.yaml", "policy.yaml"], result: hs.view().result });
+        }
+        return json(route, hs.view());
+      }
+    }
     if (p === "/harnesses") return json(route, [
       { id: "claude", label: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: [], capabilities: {} },
       { id: "codex", label: "codex", executable: "codex", executable_found: false, efforts: [], models: [], capabilities: {} },

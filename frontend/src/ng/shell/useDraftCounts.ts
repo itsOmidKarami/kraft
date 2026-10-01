@@ -11,6 +11,7 @@ const ROW_OF: Record<string, string> = {
   repos: "/templates/repos",
   policy: "/settings/policy",
   intake: "/settings/auto-intake",
+  harnesses: "/templates/harnesses",
 };
 
 /** Per sidebar row path, whether its area has an open draft and how many

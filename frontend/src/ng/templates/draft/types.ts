@@ -1,6 +1,6 @@
 /** W9's config-draft answers, field for field (docsite 4.reference/7.http-api.md "Drafts"). */
 
-export type Area = "chains" | "library" | "repos" | "policy" | "intake";
+export type Area = "chains" | "library" | "repos" | "policy" | "intake" | "harnesses";
 
 /** What a config draft edits: an area and its key (a chain id, or `library`). */
 export type Scope = { area: Area; key: string };

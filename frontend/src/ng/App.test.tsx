@@ -40,7 +40,8 @@ describe("ng App", () => {
     window.history.pushState({}, "", "/ng/templates/harnesses");
     render(<App initiallyLocked />);
     await userEvent.type(screen.getByLabelText(/^Password/), "pw{Enter}");
-    expect(await screen.findByRole("heading", { name: "Harnesses" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Harnesses/ })).toHaveAttribute("aria-current", "page");
+    expect(window.location.pathname).toBe("/ng/templates/harnesses");
     expect(session.resumeSession).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
