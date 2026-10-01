@@ -160,7 +160,7 @@
   },
   "ux2-W16": {
     "title": "UX V2 Notifications, Access, Appearance, About, Analytics, Apply chip",
-    "screens": ["ng-appearance", "ng-analytics", "ng-apply", "ng-access", "ng-notifications", "flow-ng-apply-restart"],
+    "screens": ["ng-appearance", "ng-analytics", "ng-apply", "ng-access", "ng-notifications", "ng-about", "flow-ng-apply-restart"],
     "specs": ["sweep.spec.ts", "interactions.spec.ts"],
     "rules": [
       { "kind": "no-flag", "flag": "contrast", "match": "^ng-" },

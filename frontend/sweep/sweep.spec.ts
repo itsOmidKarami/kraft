@@ -425,6 +425,12 @@ const CASES: Case[] = [
     },
   })),
 
+  // W16 E: About. The feed's answer decides the verdict; an unreachable feed reads "unknown".
+  ...(["available", "current", "unknown"] as const).map<Case>((update) => ({
+    screen: "ng-about", variant: update === "available" ? "default" : update, data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { update },
+    run: (c) => ng(c, "/ng/settings/about", {}),
+  })),
+
   // W16 F: Analytics under /ng, fed by the same analyticsFor() fixtures as the shipped page.
   { screen: "ng-analytics", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },
   { screen: "ng-analytics", variant: "long", data: "long", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => { await c.page.clock.setFixedTime(new Date(NG_NOW)); await ng(c, "/ng/analytics", {}); } },

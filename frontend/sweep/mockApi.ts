@@ -17,6 +17,8 @@ export interface MockOptions {
   /** ux2-W16: what GET /apply answers. Unset answers nothing pending, so the shell's apply chip stays out of every other cell; `both` is a restart item beside a refused policy.
    *  After POST /apply/restart it answers nothing pending and /health fails twice, as a server coming back does. */
   apply?: "none" | "reload" | "restart" | "problem" | "unmanaged" | "both";
+  /** ux2-W16: what GET /update answers: a newer release (default), none, or a feed that did not answer. */
+  update?: "available" | "current" | "unknown";
   /** Bead ids whose bulk action fails as if someone paused it a moment before (a partial answer). */
   bulkFail?: string[];
   /** ux2-W11: the running /ng item's chain draft. Unset or `none`: no draft (the + seam's menu reads the real library `/ng` gets). `applied`: none, but its applied draft is in the events. */
@@ -538,9 +540,13 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { restart, reload, managed: opts.apply !== "unmanaged" });
     }
     if (p === "/apply/restart") { restarted = 1; return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ restarting: true }) }); }
-    if (p === "/update" || p === "/update/check") return json(route, {
-      installed: "1.4.0", latest: "v1.5.0", channel: "stable", behind: true, checked_at: new Date(Date.now() - 3_600_000).toISOString(),
-    });
+    if (p === "/update" || p === "/update/check") {
+      const at = new Date(Date.now() - 3_600_000).toISOString();
+      const u = opts.update ?? "available";
+      return json(route, u === "unknown"
+        ? { installed: "1.4.0", latest: null, channel: "stable", behind: null, checked_at: null }
+        : { installed: "1.4.0", latest: u === "current" ? "v1.4.0" : "v1.5.0", channel: "stable", behind: u === "available", checked_at: at });
+    }
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
     if (p === "/notify") return json(route, st.notify);
