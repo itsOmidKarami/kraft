@@ -1,5 +1,5 @@
 import { ago, until, usd } from "../../../format";
-import type { KraftEvent } from "../../../types";
+import type { KraftEvent, StopLimit } from "../../../types";
 import { headerState, archivable } from "../../item/status";
 import { taskName } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
@@ -174,3 +174,17 @@ export function nodeSub(n: ChainNode): { text: string; tone: "warn" | "info" | "
     default: return { text: gate ? "you" : "not started", tone: "muted" };
   }
 }
+
+const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string }> = {
+  time_cap_minutes: { noun: "running time cap", unit: "minutes of running time" },
+  total_time_cap_minutes: { noun: "wall-clock cap", unit: "minutes of wall-clock time" },
+  max_attempts: { noun: "attempts cap", unit: "attempts" },
+  timeout_minutes: { noun: "timeout", unit: "minutes per attempt" },
+};
+export const limitWords = (l: StopLimit) => LIMIT_WORDS[l.key];
+
+/** The `stop.limit` of a cap stop, or null: without it a cap stop keeps Steer and Retry. */
+export const stopLimitOf = (item: ItemDetail): StopLimit | null => (item.stop?.kind === "cap" ? (item.stop.limit ?? null) : null);
+
+/** The PATCH body that sets one limit: item-wide under `policy`, a node's under `policy.paths`. */
+export const limitPatch = (l: StopLimit, value: number) => ({ policy: l.path ? { paths: { [l.path]: { [l.key]: value } } } : { [l.key]: value } });

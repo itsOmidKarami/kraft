@@ -16,7 +16,6 @@ const ALLOWED = [
   "icons",
   "http",
   "live",
-  "legacyPath", // the Soon placeholder's link to the shipped page
   "shell/aliases", // the shipped addresses that moved, and the #hash fixer (W18 PR 1)
   "item/useItem",
   "item/useEvents",
@@ -41,8 +40,29 @@ const ALLOWED = [
   "templates/draft/useConfigDraft",
   "templates/draft/draftApi",
   "templates/draft/types",
-  "apply/store",
-  "analytics/weeks",
+  "templates/draft/view", // counts(), the pure helpers
+  "templates/problems", // problemText
+  "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
+  "settings/policy/ctx", // the policy sections' shared context type and problemAt
+  "settings/policy/keys", // the set_value keys the Policy page sends
+  "settings/policy/sections", // which section a key or a problem belongs to
+  "settings/policy/types", // the policy draft's resolve
+  "settings/policy/units", // how a number reads and parses
+  "settings/intake/checks", // the check sentence and its time
+  "settings/intake/cron", // a cron in words
+  "settings/intake/types", // the intake draft's resolve and a check row
+  "settings/intake/units", // minutes on the page, seconds on the wire
+  "harnesses/model", // the harnesses draft's resolve, as types and pure helpers
+  "harnesses/ops", // entryOp: the one set_profile patch
+  "harnesses/useProviders", // the providers' accepted efforts and models
+  "templates/repos/fields", // the Repos rows: label, parse, patch, source
+  "templates/repos/types", // reposOf, runningOf, problemsOf
+  "templates/repos/RepoConfig", // setRepo only: the preview-checked set_repo
+  "library/rows", // listRows: the library draft's rows, as data
+  "library/types", // the four sections and the ref grammar
+  "shell/useDraftCounts", // the draft dots of More
+  "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
+  "shell/routes", // the list of /ng pages, as data: Search's Go to rows
 ];
 
 const ng = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -51,7 +71,7 @@ const src = join(ng, "..");
 
 const sources = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) && !e.name.includes(".test.") ? [join(dir, e.name)] : [],
+    e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) && !e.name.includes(".test.") && !e.name.startsWith("testkit") ? [join(dir, e.name)] : [],
   );
 
 /** Every relative import of a file that leaves `ng/phone` for another part of `ng/`, or reaches `deriveState`. */
@@ -88,8 +108,9 @@ describe("ng/phone imports", () => {
 });
 
 describe("the apply restart call", () => {
-  it("has no call site in ng/phone yet (K adds the one, behind a confirm)", () => {
-    const hits = sources(join(ng, "phone")).filter((f) => readFileSync(f, "utf-8").includes("apply/restart"));
-    expect(hits.map((f) => relative(ng, f))).toEqual([]);
+  it("is made from two places in ng/phone, More and Access, each behind its own confirm", () => {
+    const hits = sources(join(ng, "phone")).filter((f) => /runRestart\(/.test(readFileSync(f, "utf-8")));
+    expect(hits.map((f) => relative(ng, f)).sort()).toEqual([join("phone", "areas", "Access.tsx"), join("phone", "more", "More.tsx")]);
+    expect(sources(join(ng, "phone")).filter((f) => readFileSync(f, "utf-8").includes("/apply/restart"))).toEqual([]);
   });
 });

@@ -256,4 +256,95 @@ describe("pair actions that call straight through", () => {
   });
 });
 
+describe("raising the cap that stopped the item (R73)", () => {
+  const limit = (over = {}) => ({ path: "", key: "time_cap_minutes", value: 480, maximum: 1440, ...over });
+  const capped = (l?: unknown) => item("needs_you", { ...stop("cap", { reason: "Running time hit its 8h cap" }), ...(l ? { limit: l } : {}) } as WorkItemStop);
+  const sent = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
+  const openSheet = async () => {
+    await userEvent.click(await screen.findByRole("button", { name: /^Raise the running time cap/ }));
+    return screen.findByRole("dialog");
+  };
+  const type = async (v: string) => {
+    const box = screen.getByLabelText("Raise the running time cap", { selector: "input" });
+    await userEvent.clear(box);
+    await userEvent.type(box, `${v}{Enter}`);
+  };
+
+  it("without stop.limit a cap stop keeps Steer and Retry and offers no raise", async () => {
+    mount(capped());
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Steer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Raise/ })).toBeNull();
+  });
+
+  it("with stop.limit the card offers the raise beside Steer and Retry, and the sheet shows the value and the maximum", async () => {
+    mount(capped(limit()));
+    const dialog = await openSheet();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Now 480 minutes of running time. The policy maximum is 1440.");
+    expect(screen.getByLabelText("Raise the running time cap", { selector: "input" })).toHaveValue("480");
+    expect(within(dialog).getByRole("button", { name: "Save & retry" })).toBeInTheDocument();
+  });
+
+  it("says there is no policy maximum when the server sends none", async () => {
+    mount(capped(limit({ maximum: null })));
+    expect(await openSheet()).toHaveTextContent("The policy sets no maximum.");
+  });
+
+  it("Save & retry patches the item's own policy, then retries, in that order", async () => {
+    const calls = mount(capped(limit()));
+    await openSheet();
+    await type("600");
+    await waitFor(() => expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ policy: { time_cap_minutes: 600 } });
+    expect(calls.find((c) => c.path === "/work-items/w1/retry")!.body).toEqual({});
+  });
+
+  it("a node's own limit goes under policy.paths", async () => {
+    const calls = mount(capped(limit({ path: "verification", key: "max_attempts", value: 3 })));
+    await userEvent.click(await screen.findByRole("button", { name: /^Raise the attempts cap/ }));
+    const box = screen.getByLabelText("Raise the attempts cap", { selector: "input" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "5{Enter}");
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ policy: { paths: { verification: { max_attempts: 5 } } } }));
+  });
+
+  it("a number that is not above the current value, or above the maximum, is refused before any call", async () => {
+    const calls = mount(capped(limit()));
+    await openSheet();
+    await type("480");
+    expect(await screen.findByRole("alert")).toHaveTextContent("above the current 480");
+    await type("2000");
+    expect(await screen.findByRole("alert")).toHaveTextContent("The policy maximum is 1440.");
+    await type("many");
+    expect(await screen.findByRole("alert")).toHaveTextContent("whole number");
+    expect(sent(calls)).toEqual([]);
+  });
+
+  it("a refused patch shows the server's words and does not retry", async () => {
+    const calls = mount(capped(limit()), "/work-items/w1", { "PATCH /work-items/w1": [422, { detail: "time_cap_minutes exceeds the policy maximum 480" }] });
+    await openSheet();
+    await type("600");
+    expect(await screen.findByRole("alert")).toHaveTextContent("exceeds the policy maximum 480");
+    expect(sent(calls)).toEqual(["PATCH /work-items/w1"]);
+  });
+
+  it("a retry refused after the patch says the value was raised", async () => {
+    const calls = mount(capped(limit()), "/work-items/w1", { "POST /work-items/w1/retry": [409, { detail: "already running" }] });
+    await openSheet();
+    const reads = () => calls.filter((c) => c.method === "GET" && c.path === "/work-items/w1").length;
+    const before = reads();
+    await type("600");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Raised to 600, but the retry was refused: already running");
+    expect(reads()).toBeGreaterThan(before);
+    expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]);
+  });
+
+  it("a stop.limit on a stop that is not a cap draws nothing", async () => {
+    mount(item("needs_you", { ...stop("budget"), limit: limit() } as WorkItemStop));
+    expect(await screen.findByRole("button", { name: /Raise budget/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Raise the/ })).toBeNull();
+  });
+});
+
 void act;

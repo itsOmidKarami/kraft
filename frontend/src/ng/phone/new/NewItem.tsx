@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { useStore } from "../../../store";
@@ -17,7 +17,9 @@ export function NewItem() {
   const back = useBack();
   const navigate = useNavigate();
   const sheet = useSheet();
-  const [d, setD] = useState<NewDraft>(loadDraft);
+  const [params] = useSearchParams();
+  // A bead found in Search arrives as ?title=, prefilled only into an empty draft.
+  const [d, setD] = useState<NewDraft>(() => { const x = loadDraft(); return x.title || x.brief ? x : { ...x, title: params.get("title") ?? "" }; });
   const [repos, setRepos] = useState<Repo[]>([]);
   const [chains, setChains] = useState<TemplateSummary[]>([]);
   const [kind, setKind] = useState<AttachKind>("spec");

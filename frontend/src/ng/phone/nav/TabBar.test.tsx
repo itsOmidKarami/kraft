@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { useApply } from "../../apply/store";
 import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { groupOf } from "../../board/model";
@@ -58,6 +59,13 @@ describe("TabBar (A.4)", () => {
     }
     open("/settings/access");
     expect(screen.getByRole("link", { name: "More" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("puts a dot on More while a reload or restart is pending, named in its accessible name", () => {
+    useApply.setState({ reload: [{ id: "disk:x", file: "x", text: "x changed" }], restart: [] });
+    open("/");
+    expect(screen.getByRole("link", { name: "More, 1 pending" })).toBeInTheDocument();
+    useApply.setState({ reload: [], restart: [] });
   });
 
   it("goes to a tab's root with replace, so the stack resets", async () => {

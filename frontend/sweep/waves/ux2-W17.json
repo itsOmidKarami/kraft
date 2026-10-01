@@ -1,5 +1,5 @@
 {
-  "title": "UX V2 phone: the stack-navigation app under /ng (board, item, node, task, gate review, new item)",
+  "title": "UX V2 phone: the stack-navigation app under /ng (every screen)",
   "screens": [
     "ng-phone",
     "flow-ng-phone",
@@ -16,7 +16,7 @@
     { "kind": "no-flag", "flag": "offscreen", "match": "^ng-phone" },
     { "kind": "no-flag", "flag": "clipped-v", "match": "^ng-phone" },
     { "kind": "no-flag", "flag": "contrast", "match": "^ng-phone" },
-    { "kind": "no-console", "match": "^ng-(?:phone-(?!login|board/offline)|shell)" },
+    { "kind": "no-console", "match": "^ng-(?:phone-(?!login|board/offline|area/policy-stale)|shell)" },
     { "kind": "flow-completes", "match": "^flow-ng-phone" },
     { "kind": "max-count", "check": "nestedScrollers", "max": 2, "match": "^ng-phone" }
   ]

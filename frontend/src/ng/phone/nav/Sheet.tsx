@@ -73,13 +73,14 @@ function Frame({ title, text, onClose, children }: { title: string; text?: strin
   );
 }
 
-export function ConfirmSheet({ title, text, confirm, onClose, busy, error }: { title: string; text?: string; confirm: { label: string; danger?: boolean; run: () => void }; onClose: () => void; busy?: boolean; error?: string | null }) {
+export function ConfirmSheet({ title, text, confirm, onClose, busy, error, children }: { title: string; text?: string; confirm: { label: string; danger?: boolean; disabled?: boolean; run: () => void }; onClose: () => void; busy?: boolean; error?: string | null; children?: ReactNode }) {
   return (
     <Frame title={title} text={text} onClose={onClose}>
+      {children}
       {error && <p className="ph-sheet-error" role="alert">{error}</p>}
       <div className="ph-sheet-pair">
         <Button className="ph-btn" onClick={onClose}>Cancel</Button>
-        <Button className="ph-btn ph-btn-primary" variant={confirm.danger ? "danger" : "primary"} disabled={busy} onClick={confirm.run}>{confirm.label}</Button>
+        <Button className="ph-btn ph-btn-primary" variant={confirm.danger ? "danger" : "primary"} disabled={busy || confirm.disabled} onClick={confirm.run}>{confirm.label}</Button>
       </div>
     </Frame>
   );
