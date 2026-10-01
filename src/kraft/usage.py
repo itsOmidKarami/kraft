@@ -587,7 +587,11 @@ def net_of_earlier(
     `reader` names the logs' schema (Kraft-wge0e). Claude's log can hold
     result envelopes of more than one CLI session, so it is read for `cli`'s;
     any other harness's envelope is its own running total -- codex's
-    `turn.completed` usage is the thread's."""
+    `turn.completed` usage is the thread's. A reader whose log counts only
+    its own requests (`Reader.running_totals` False) has nothing to net:
+    `own` is already this session's share, returned as read (Kraft-tugdf.23)."""
+    if not READERS[reader].running_totals:
+        return own, False
 
     def cumulative(path: Path) -> Usage | None:
         if reader == "claude-stream-json":
@@ -1153,6 +1157,13 @@ class Reader:
     #: amp): its sessions are priced from `prices.json` or not at all, which
     #: `kraft admin doctor` checks per harness (Kraft-9efnk.10).
     reports_cost: bool = True
+    #: True when a resumed session's envelope repeats the CLI session's
+    #: earlier spend (claude's `modelUsage` and cost, codex's thread usage,
+    #: opencode's session export), so `net_of_earlier` subtracts the earlier
+    #: log's. False when the log counts only its own requests (cursor's
+    #: per-invocation `result`, amp's per-request `assistant` lines,
+    #: antigravity's steps): netting those would zero a resume (Kraft-tugdf.23).
+    running_totals: bool = True
 
 
 READERS: dict[str, Reader] = {
@@ -1184,6 +1195,7 @@ READERS: dict[str, Reader] = {
         rate_limit=lambda _log_path: None,
         session_id=_session_id_claude,
         reports_cost=False,
+        running_totals=False,
     ),
     # Amp's `--stream-json` is Claude Code's shape (ampcode.com/docs/cli/
     # streaming-json, Kraft-gvrke): live progress off `assistant` lines and the
@@ -1200,6 +1212,7 @@ READERS: dict[str, Reader] = {
         rate_limit=lambda _log_path: None,
         session_id=_session_id_claude,
         reports_cost=False,
+        running_totals=False,
     ),
     "opencode-json": Reader(
         name="opencode-json",
@@ -1215,6 +1228,7 @@ READERS: dict[str, Reader] = {
         rate_limit=_rate_limit_antigravity,
         session_id=_session_id_antigravity,
         reports_cost=False,
+        running_totals=False,
     ),
 }
 

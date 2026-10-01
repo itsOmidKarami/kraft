@@ -124,6 +124,17 @@ def test_cache_reads_come_off_uncached_input_whichever_way_agy_counts_them(total
     assert (got.tokens_in, got.tokens_cache_read) == (total - 500 - 4000, 4000)
 
 
+def test_a_resumed_conversation_is_not_netted_against_the_earlier_log(tmp_path):
+    """Kraft-tugdf.23: a resumed session's own log holds only its own steps,
+    12405, so subtracting the earlier session's 12198 would undercount it."""
+    (tmp_path / "earlier").mkdir()
+    log = _log(tmp_path, _RESUMED)
+    own = usage.read(log, tmp_path / "none.json", _READER)
+    earlier = _log(tmp_path / "earlier", _FIRST)
+    assert usage.net_of_earlier(own, log, earlier, _SID, _READER) == (own, False)
+    assert own.tokens_in == 12405
+
+
 def test_the_conversation_id_is_read_off_init(tmp_path):
     reader = usage.READERS[_READER]
     assert reader.session_id(_log(tmp_path, _RESUMED)) == _SID

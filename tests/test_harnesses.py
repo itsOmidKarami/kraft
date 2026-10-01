@@ -24,7 +24,7 @@ def test_only_cursor_is_refused_under_a_network_policy():
 
 def test_the_shipped_harnesses_declare_how_their_keys_are_proxy_managed():
     """Spec §6's declarations, each sentinel shaped like the real key a CLI
-    may check the form of; amp, opencode and cursor are unverified, so none."""
+    may check the form of; amp, opencode, cursor and antigravity are unverified, so none."""
     declared = {
         name: [
             (c.env, c.sentinel, *((r.domain, r.header, r.format) for r in c.inject))

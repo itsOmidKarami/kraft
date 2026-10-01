@@ -489,8 +489,17 @@ def _selected_profiles(live: Path) -> set[str]:
     }
 
 
+#: What the `mcp server` row does not read (Kraft-9efnk.43): each other
+#: agent keeps its registration in its own files and scopes, and doctor never
+#: launches an agent CLI to ask it.
+_MCP_SCOPE = (
+    "Claude Code's registration only; Codex, Cursor, OpenCode, Amp, Antigravity "
+    "and Gemini CLI are not checked, see each one's own MCP list command"
+)
+
+
 async def _mcp_check(server_up: bool) -> dict:
-    """Is the Kraft MCP server registered with the agent CLI?
+    """Is the Kraft MCP server registered with Claude Code?
 
     Next to `_agent_checks` because it answers the same question: can this
     machine actually launch a worker. Every unsandboxed Claude launch names
@@ -529,7 +538,7 @@ async def _mcp_check(server_up: bool) -> dict:
                 True,
                 f"no kraft MCP server registered for Claude workers in {', '.join(refused)}: "
                 f"an unsandboxed task there on harness {' or '.join(asking)} is refused; "
-                f"{registration.FIX}",
+                f"{registration.FIX} ({_MCP_SCOPE})",
                 warn=True,
             )
         found = found or next(iter(per_repo.values()), None)
@@ -538,11 +547,12 @@ async def _mcp_check(server_up: bool) -> dict:
         # server-dependent check here.
         return _check("mcp server", True, "skipped: no server", skipped=True)
     if found:
-        return _check("mcp server", True, f"{found[0]}, registered in {found[1]}")
+        return _check("mcp server", True, f"{found[0]}, registered in {found[1]} ({_MCP_SCOPE})")
     return _check(
         "mcp server",
         False,
-        f"no kraft MCP server registered, so Claude workers are refused; {registration.FIX}",
+        f"no kraft MCP server registered, so Claude workers are refused; {registration.FIX} "
+        f"({_MCP_SCOPE})",
     )
 
 

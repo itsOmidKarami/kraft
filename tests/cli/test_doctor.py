@@ -390,6 +390,8 @@ def test_mcp_check_passes_on_a_user_scope_registration(app, tmp_path):
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is True
     assert ".claude.json" in check["detail"]
+    # Kraft-9efnk.43: a pass says whose registration it read, and whose not.
+    assert "Claude Code's registration only; Codex, Cursor" in check["detail"]
 
 
 def test_mcp_check_passes_on_a_committed_repo_scope_mcp_json(app, tmp_path):
@@ -415,6 +417,7 @@ def test_mcp_check_passes_on_the_plugin_alone_and_fails_on_nothing(app, plugins,
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is ok
     assert ("mcp__plugin_kraft_kraft__" if ok else "kraft admin init") in check["detail"]
+    assert "Claude Code's registration only" in check["detail"]
 
 
 def test_path_check_fails_when_another_kraft_shadows_this_one(monkeypatch):

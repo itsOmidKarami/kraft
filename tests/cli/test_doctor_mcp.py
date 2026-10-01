@@ -41,3 +41,4 @@ def test_mcp_check_warns_naming_a_repo_whose_committed_settings_turn_the_plugin_
     assert check["ok"] is True and check["warn"] is True
     assert str(repo) in check["detail"]
     assert "on harness claude" in check["detail"]
+    assert "Claude Code's registration only" in check["detail"]

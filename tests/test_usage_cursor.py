@@ -76,3 +76,14 @@ def test_cursor_reader_session_id_is_the_init_lines(tmp_path):
     reader = usage.READERS["cursor-stream-json"]
     assert reader.session_id(_log(tmp_path, _CURSOR_RUN)) == _SID
     assert reader.session_id(tmp_path / "nope.log") is None
+
+
+def test_a_resumed_chat_is_not_netted_against_the_earlier_log(tmp_path):
+    """Kraft-tugdf.23: the resumed session's own log holds only its own 745
+    input; subtracting the earlier session's 18393 would zero it."""
+    (tmp_path / "earlier").mkdir()
+    log = _log(tmp_path, _RESUMED)
+    own = usage.read(log, tmp_path / "none.json", "cursor-stream-json")
+    earlier = _log(tmp_path / "earlier", _CURSOR_RUN)
+    assert usage.net_of_earlier(own, log, earlier, _SID, "cursor-stream-json") == (own, False)
+    assert own.tokens_in == 745

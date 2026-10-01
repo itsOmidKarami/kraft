@@ -105,13 +105,17 @@ def test_an_amp_error_result_fails_the_session(tmp_path):
     assert agent._envelope_is_error("done", log, 0, "amp-stream-json") == "failed"
 
 
-def test_netting_a_resumed_thread_keeps_its_own_largest_context(tmp_path):
-    """Kraft-tugdf.14: what picks a long-context tier survives netting a
-    resume against the thread's earlier session."""
+def test_a_resumed_thread_keeps_its_own_requests(tmp_path):
+    """Kraft-tugdf.23: a resumed thread's log holds only its own requests, not
+    running totals, so netting it against the earlier session's log must not
+    subtract that session's requests -- here the resume made only the second,
+    smaller request, which netting zeroed. Its largest context survives too
+    (Kraft-tugdf.14)."""
     earlier = tmp_path / "earlier"
     earlier.mkdir()
-    own = usage.read(_log(tmp_path, _AMP_RUN), tmp_path / "none.json", "amp-stream-json")
-    netted, _ = usage.net_of_earlier(
-        own, tmp_path / "amp.log", _log(earlier, _AMP_RUN), _THREAD, "amp-stream-json"
-    )
-    assert netted.peak_context == 13290
+    log = _log(tmp_path, [_AMP_RUN[0], *_AMP_RUN[4:]])
+    own = usage.read(log, tmp_path / "none.json", "amp-stream-json")
+    assert own.tokens_out == 13
+    netted = usage.net_of_earlier(own, log, _log(earlier, _AMP_RUN), _THREAD, "amp-stream-json")
+    assert netted == (own, False)
+    assert own.peak_context == 13290
