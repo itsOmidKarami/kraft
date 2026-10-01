@@ -241,6 +241,24 @@ const CASES: Case[] = [
   // An old theme.yaml with only `palette`: GET /theme derives the look (rule A.3).
   { screen: "ng-appearance", variant: "derived", data: "default", widths: [1280], run: (c) => ng(c, "/ng/settings/appearance", { palette: "forest", surface: "moss", accent: "green", colour_amount: "full", derived: true }) },
 
+  // W3: the graph components' gallery, fed by fixtures.
+  { screen: "ng-gallery", variant: "default", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_gallery", {}) },
+  { screen: "ng-gallery", variant: "mono", data: "default", widths: [1280], fullPage: true, run: (c) => ng(c, "/ng/_gallery", { colour_amount: "mono" }) },
+  { screen: "ng-gallery", variant: "full", data: "default", widths: [1280], fullPage: true, run: (c) => ng(c, "/ng/_gallery", { accent: "violet", colour_amount: "full" }) },
+  // Under 1024 the pane overlays the canvas (R7).
+  { screen: "ng-gallery", variant: "overlay", data: "default", widths: [768], fullPage: true, run: (c) => ng(c, "/ng/_gallery", {}) },
+  // R6 by keyboard: Tab lands on the workbench's current node, → moves to the next, Enter opens its pane with the ring on it.
+  { screen: "ng-gallery", variant: "keyboard", data: "default", widths: [1280], run: async (c) => {
+    await ng(c, "/ng/_gallery", {});
+    const bench = c.page.locator('section[aria-labelledby="g-pane"] [role="group"]').first();
+    await bench.scrollIntoViewIfNeeded();
+    await c.page.keyboard.press("Shift");
+    await bench.locator('.graph-node[tabindex="0"]').focus();
+    await c.page.keyboard.press("ArrowRight");
+    await c.page.keyboard.press("Enter");
+    await settle(c.page, 300);
+  } },
+
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },
   { screen: "login", variant: "filled", data: "default", widths: [390, 1280], locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 600); await c.page.locator('input[type="password"]').fill("hunter2").catch(() => {}); await settle(c.page); } },

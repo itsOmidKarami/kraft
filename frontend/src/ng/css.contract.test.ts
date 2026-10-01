@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -25,5 +25,21 @@ describe("ng CSS", () => {
         if (LITERAL.test(m[1])) bad.push(`${relative(here, file)}: ${m[1].trim()}`);
     }
     expect(bad).toEqual([]);
+  });
+});
+
+const sources = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sources(join(dir, e.name)) : /\.(tsx?|css)$/.test(e.name) && !e.name.includes(".test.") ? [join(dir, e.name)] : [],
+  );
+
+describe("data-pan", () => {
+  // The sweep's offscreen check exempts what a data-pan canvas clips (R41): only
+  // the graph components may claim it, so it can't become a blanket mute.
+  it("appears in no source file outside ng/graph", () => {
+    const src = join(here, "..");
+    const graph = join(here, "graph") + sep;
+    const bad = sources(src).filter((f) => !f.startsWith(graph) && readFileSync(f, "utf-8").includes("data-pan"));
+    expect(bad.map((f) => relative(src, f))).toEqual([]);
   });
 });

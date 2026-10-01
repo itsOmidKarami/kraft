@@ -32,6 +32,10 @@ e2e-shots/sweep/
 
 Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical`, `smallTargets` (<44px, phone), `smallInputs` (<16px, phone), `nestedScrollers`, `consoleErrors`, `chromeMoved` (header/action bar/tabs moved after scroll), `setupError`.
 
+### `offscreenRight` exemptions: scroll strips and `data-pan` canvases
+
+`offscreenRight` exempts an element cut off by a sideways scroll strip (`overflow-x: auto | scroll`) that sits in the viewport, since scrolling reaches it. A graph canvas carrying `data-pan` gets the same treatment: it clips with `overflow: hidden`, but drag, scroll and fit reach what it cuts off, so its content is exempt while the canvas itself is in view; a canvas that runs past the edge still counts (R41, ux2-W3). Only `StageGraph` and `NodeGraph` under `src/ng/graph/` carry it, and `ng/css.contract.test.ts` fails if any other source file does: a page that needs a pannable canvas goes through a graph component. Both sides have a `checks.spec.ts` case.
+
 ### `data-allow-ellipsis` — an allowlist, not a style
 
 `clippedEllipsis` skips an element carrying `data-allow-ellipsis`: a deliberate one-line cut with the whole text in its `title`. Only the element carrying it (W10.D). Do not use this attribute anywhere else — it is allowed on exactly these seven, each with its own `checks.spec.ts` case:

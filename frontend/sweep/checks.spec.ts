@@ -40,6 +40,20 @@ test("checks/offscreen: overflow hidden still counts", async ({ page }) => {
   expect((await runChecks(page, true, [])).offscreenRight.count).toBeGreaterThan(0);
 });
 
+const canvas = (width: number) => `
+  <style>body { margin: 0; } .canvas { position: relative; width: ${width}px; height: 200px; overflow: hidden; } .world { position: absolute; left: 0; width: 2000px; height: 100px; } .world button { margin-left: 340px; width: 80px; }</style>
+  <div class="canvas" data-pan><div class="world"><button>node</button></div></div>`;
+
+test("checks/offscreen: a pannable canvas (data-pan) in view reaches what it clips", async ({ page }) => {
+  await page.setContent(canvas(360));
+  expect((await runChecks(page, true, [])).offscreenRight.count).toBe(0);
+});
+
+test("checks/offscreen: a pannable canvas that itself runs past the edge still counts", async ({ page }) => {
+  await page.setContent(canvas(600));
+  expect((await runChecks(page, true, [])).offscreenRight.examples.some((e) => e.startsWith("button"))).toBe(true);
+});
+
 test("checks/offscreen: no clipping ancestor still counts", async ({ page }) => {
   await page.setContent(row(null));
   expect((await runChecks(page, true, [])).offscreenRight.count).toBeGreaterThan(0);
