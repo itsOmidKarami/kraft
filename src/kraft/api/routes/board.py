@@ -44,13 +44,75 @@ _STOP_BOUNDARY = (
 )
 
 
+def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
+    """The `work_item_needs_human` payload of the stop the item is *currently*
+    sitting on (or None if anything in `_STOP_BOUNDARY` superseded it), and
+    whether an `escalation_message` landed after that boundary event -- the
+    same episode `deriveState` bounds client-side (an escalation from an
+    earlier, already-superseded stop must not read as live). One event scan
+    for both, so `display_status` costs the detail route nothing beyond what
+    `_current_stop` already read."""
+    evs = st.db.read(lambda c: events.read_after(c, 0, wid))
+    boundary = None
+    for e in reversed(evs):
+        if e["type"] in _STOP_BOUNDARY:
+            boundary = e
+            break
+    stop = (
+        boundary["payload"]
+        if boundary is not None and boundary["type"] == "work_item_needs_human"
+        else None
+    )
+    escalated = boundary is not None and any(
+        e["type"] == "escalation_message" and e["seq"] > boundary["seq"] for e in evs
+    )
+    return stop, escalated
+
+
 def _current_stop(st, wid: str) -> dict | None:
     """The `work_item_needs_human` payload of the stop the item is *currently*
     sitting on, or None if anything in `_STOP_BOUNDARY` superseded it."""
-    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
-        if e["type"] in _STOP_BOUNDARY:
-            return e["payload"] if e["type"] == "work_item_needs_human" else None
-    return None
+    return _stop_episode(st, wid)[0]
+
+
+def display_status(row, stop_kind: str | None, escalated: bool, pending_gate: str | None) -> str:
+    """The design vocabulary's status badge (Kraft Design Decisions §1, §14):
+    exactly one of `archived`, `done`, `cancelled`, `paused`, `running`,
+    `waiting`, `needs_you`, `escalated`, `failed`. The stored `status` column
+    (`kraft.store.work_items`) is unchanged by this -- `display_status` is a
+    read-side view over it, `stop_kind`, whether an escalation is live, and
+    whether a gate is pending.
+
+    `infra` shows as `failed`, not `needs_you`: a daemon restart
+    that lost a session, a git refresh that failed, or a forge that 403'd
+    three times in a row (Decisions §14's own example) are all stops where no
+    handler applies and no timer will change that -- auto-escalation did not
+    or cannot run for them (Item States requirement 1). A `stuck` stop still
+    counts as `needs_you` until its escalation turn actually starts, at which
+    point `escalated` takes over.
+    """
+    if row["archived_at"] is not None:
+        return "archived"
+    status = row["status"]
+    if status == "completed":
+        return "done"
+    if status == "abandoned":
+        return "cancelled"
+    if status == "paused":
+        return "paused"
+    if status == "active":
+        return "running"
+    if status in ("waiting", "rate_limited"):
+        return "waiting"
+    if status == "needs_human":
+        if pending_gate:
+            return "needs_you"
+        if escalated:
+            return "escalated"
+        if stop_kind in ("failed", "config", "infra"):
+            return "failed"
+        return "needs_you"
+    return "running"
 
 
 def _stop_reason(st, wid: str) -> str | None:
@@ -113,9 +175,23 @@ async def list_work_items(request: Request):
             "  WHERE type IN ('launch_fallback', 'worker_session_started')"
             "  GROUP BY work_item_id, type)"
         ).fetchall()
-        return rows, cursor, gates, launches
+        # The latest `_STOP_BOUNDARY` event per item, and the latest
+        # `escalation_message` per item -- `display_status`/`stop` (B.4) need
+        # both, and the list reads no sessions per row, so this is the one
+        # grouped query that stands in for `_stop_episode`'s per-item scan.
+        boundaries = c.execute(
+            "SELECT work_item_id, type, payload, seq FROM events WHERE seq IN ("
+            f"  SELECT MAX(seq) FROM events WHERE type IN ({','.join('?' * len(_STOP_BOUNDARY))})"
+            "  GROUP BY work_item_id)",
+            _STOP_BOUNDARY,
+        ).fetchall()
+        escalations = c.execute(
+            "SELECT work_item_id, MAX(seq) AS seq FROM events "
+            "WHERE type = 'escalation_message' GROUP BY work_item_id"
+        ).fetchall()
+        return rows, cursor, gates, launches, boundaries, escalations
 
-    rows, cursor, gate_rows, launch_rows = st.db.read(_read)
+    rows, cursor, gate_rows, launch_rows, boundary_rows, escalation_rows = st.db.read(_read)
     latest: dict[tuple[str, str], dict] = {
         (e["work_item_id"], e["type"]): json.loads(e["payload"]) for e in launch_rows
     }
@@ -124,6 +200,13 @@ async def list_work_items(request: Request):
         for g in gate_rows
         if g["type"] == "gate_requested"
     }
+    boundary_by_item = {b["work_item_id"]: b for b in boundary_rows}
+    escalation_seq_by_item = {e["work_item_id"]: e["seq"] for e in escalation_rows}
+
+    def _list_escalated(wid: str) -> bool:
+        boundary = boundary_by_item.get(wid)
+        return boundary is not None and escalation_seq_by_item.get(wid, -1) > boundary["seq"]
+
     items = [
         {
             "id": r["id"],
@@ -147,10 +230,33 @@ async def list_work_items(request: Request):
             "archived_by": r["archived_by"],
             "progress": _board_progress(st, r),
             "fallback": _ran_on_fallback(latest, r["id"]),
+            "display_status": display_status(
+                r, r["stop_kind"], _list_escalated(r["id"]), pending.get(r["id"])
+            ),
+            "stop": _list_stop(r, pending.get(r["id"]), boundary_by_item.get(r["id"])),
         }
         for r in rows
     ]
     return {"items": items, "cursor": cursor}
+
+
+def _list_stop(row, pending_gate: str | None, boundary) -> dict | None:
+    """`stop` on the list (B.4): like the detail's, minus `facts`, `task` and
+    `attempt` -- the board reads no sessions per row, and `boundary` is this
+    item's latest `_STOP_BOUNDARY` row from the one grouped query `_read`
+    already ran, not a per-item scan."""
+    status = row["status"]
+    if status not in ("needs_human", "waiting", "rate_limited"):
+        return None
+    reason = None
+    if boundary is not None and boundary["type"] == "work_item_needs_human":
+        reason = json.loads(boundary["payload"])["reason"]
+    return {
+        "kind": _stop_kind(row["stop_kind"], status, pending_gate),
+        "node": row["current_node_id"],
+        "resume_at": row["retry_at"],
+        "reason": reason,
+    }
 
 
 def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
@@ -328,6 +434,81 @@ def _rate_limit_retries(st, row) -> dict | None:
     return {"count": counter["count"] if counter else 0, "cap": cap}
 
 
+def _stop_kind(stop_kind: str | None, status: str, pending_gate: str | None) -> str:
+    """`stop.kind` (B.3): the stored `stop_kind`, unless a gate is pending
+    (`gate` -- a gate stop writes no `stop_kind`, it is `gate_requested`), or
+    the row predates migration 45 and carries none, in which case the status
+    itself says whether it was a wait or a rate limit."""
+    if pending_gate:
+        return "gate"
+    if stop_kind is not None:
+        return stop_kind
+    return "wait" if status == "waiting" else "rate_limit"
+
+
+def _stop_task_and_attempt(sessions, node_id: str | None) -> tuple[str | None, int | None]:
+    """The `hook_point`/`attempt` of `node_id`'s latest session that is not an
+    escalation turn -- `sessions` ordered oldest first, as `get_work_item`
+    already loads them, so the latest match scanning backward is the one."""
+    for s in reversed(sessions):
+        if s["node_id"] == node_id and s["hook_point"] != "escalation":
+            return s["hook_point"], s["attempt"]
+    return None, None
+
+
+def _rate_limit_facts(st, row, task_path: str | None) -> dict:
+    """B6: a rate-limited stop's `retries`, plus -- when the stopped task's
+    frozen chain names a `fallback:` -- that list and the subset its resolved
+    policy still allows. Reuses `MaterializedChain.policy_for`, the same
+    resolution `TemplateLibrary.lint`'s `fallback-never-escapes-allowed-
+    harnesses` check already trusts, rather than re-deriving it."""
+    facts: dict = {"retries": _rate_limit_retries(st, row)}
+    if task_path is None:
+        return facts
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        return facts
+    task = next(
+        (t for node in chain.chain.nodes for t in node.tasks() if t.path == task_path), None
+    )
+    from kraft.templates.models import AgentTask  # deferred: pulls in policy/harness schema
+
+    if not isinstance(getattr(task, "task", None), AgentTask):
+        return facts
+    fallback = [e.harness for e in task.task.fallback or () if e.harness]
+    if not fallback:
+        return facts
+    allowed = chain.policy_for(task).allowed_harnesses
+    facts["fallback"] = fallback
+    facts["fallback_allowed"] = (
+        fallback if allowed is None else [h for h in fallback if h in allowed]
+    )
+    return facts
+
+
+def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None) -> dict | None:
+    """`stop` on the detail response (B.3): `None` unless the item is
+    currently `needs_human`, `waiting` or `rate_limited`."""
+    status = row["status"]
+    if status not in ("needs_human", "waiting", "rate_limited"):
+        return None
+    node = row["current_node_id"]
+    task, attempt = _stop_task_and_attempt(sessions, node)
+    kind = _stop_kind(row["stop_kind"], status, pending_gate)
+    facts = dict(stop_payload.get("facts") or {}) if stop_payload else {}
+    if kind == "rate_limit":
+        facts.update(_rate_limit_facts(st, row, task))
+    return {
+        "kind": kind,
+        "node": node,
+        "task": task,
+        "attempt": attempt,
+        "resume_at": row["retry_at"],
+        "reason": stop_payload["reason"] if stop_payload else None,
+        "facts": facts,
+    }
+
+
 @api_router.get("/work-items/{wid}")
 async def get_work_item(wid: str, request: Request):
     from kraft.api.routes import lifecycle
@@ -340,6 +521,7 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
+    stop_payload, escalated = _stop_episode(st, wid)
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
     # merely not crashing. `steerable` below reads the frozen snapshot directly.
     chain = store.chain_view(row)
@@ -408,11 +590,16 @@ async def get_work_item(wid: str, request: Request):
         "gate_artifact": _gate_artifact(st, row, pending),
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
-        "stop_reason": _stop_reason(st, wid),
+        "stop_reason": stop_payload["reason"] if stop_payload else None,
         # What the chain or a repair concluded a person should do about that
         # stop -- `{action: skip|retry|abandon, reason}` -- or None
         # (Kraft-s7c04.27). Each action is one existing verb.
-        "suggested_action": (_current_stop(st, wid) or {}).get("suggested_action"),
+        "suggested_action": (stop_payload or {}).get("suggested_action"),
+        # The board's status badge (Kraft UI v2 · B1), and the stop it names
+        # when there is one -- {kind, node, task, attempt, resume_at, reason,
+        # facts} -- `None` off `needs_human`/`waiting`/`rate_limited`.
+        "display_status": display_status(row, row["stop_kind"], escalated, pending),
+        "stop": _stop(st, row, sessions, pending, stop_payload),
         "deferred_findings": _deferred_findings(st, wid),
         "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),

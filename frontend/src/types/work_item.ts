@@ -101,6 +101,53 @@ export interface WorkItemAttachment {
   path: string;
 }
 
+/** Kraft UI v2 · B1's badge, derived server-side (`board.display_status`):
+ *  exactly one of these, so a pending gate, a plain failure and a
+ *  stuck-but-not-yet-escalated stop -- all `needs_human` in `status` -- read
+ *  apart without re-deriving `deriveState`'s logic a second time. Additive:
+ *  the shipped UI keeps its own `deriveState` and does not read this yet. */
+export type DisplayStatus =
+  | "archived"
+  | "done"
+  | "cancelled"
+  | "paused"
+  | "running"
+  | "waiting"
+  | "needs_you"
+  | "escalated"
+  | "failed";
+
+/** `work_items.stop_kind` (Kraft UI v2 · B1), plus `gate` (a pending gate,
+ *  never written to the column itself) and `worker_lost` (added by B5,
+ *  elsewhere). */
+export type StopKind =
+  | "gate"
+  | "question"
+  | "cap"
+  | "budget"
+  | "failed"
+  | "conflict"
+  | "mr_closed"
+  | "config"
+  | "infra"
+  | "stuck"
+  | "wait"
+  | "rate_limit"
+  | "worker_lost";
+
+/** `stop` on a work item response (B.3/B.4): `null` unless `status` is
+ *  `needs_human`, `waiting` or `rate_limited`. The list omits `task`,
+ *  `attempt` and `facts`; only the detail endpoint sends them. */
+export interface WorkItemStop {
+  kind: StopKind;
+  node: string | null;
+  task?: string | null;
+  attempt?: number | null;
+  resume_at: string | null;
+  reason: string | null;
+  facts?: Record<string, unknown>;
+}
+
 /** The breach a spend-cap stop recorded (`kraft.caps.Breach`), tagged on
  *  `scope`. Only `work_item` is the item's own cap, the one Raise budget raises. */
 export type BudgetStop =
@@ -213,6 +260,12 @@ export interface WorkItem {
   /** Whether an agent may review this item's `auto_escalate` gates before a
    *  human sees them (Kraft-zr3s). Set at intake; the column is on every row. */
   auto_gate?: boolean;
+  /** The board's status badge (Kraft UI v2 · B1). Additive; the shipped UI
+   *  keeps deriving its own via `deriveState` and does not read this. */
+  display_status?: DisplayStatus;
+  /** The stop `display_status` is reporting on; `null` off `needs_human`,
+   *  `waiting` and `rate_limited`. Additive, unread by the shipped UI. */
+  stop?: WorkItemStop | null;
 }
 
 export interface Finding {
