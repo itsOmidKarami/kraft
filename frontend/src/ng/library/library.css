@@ -67,3 +67,23 @@
 .lib-glyph-name { font: 12px ui-monospace, Menlo, monospace; color: var(--text); }
 .lib-glyph-sub { font-size: 11px; color: var(--text-muted); }
 .lib-used-line { position: absolute; left: 14px; top: 12px; z-index: 3; max-width: max(230px, calc(100% - 420px)); box-sizing: border-box; margin: 0; padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); font-size: 11px; line-height: 1.5; color: var(--text-sub); pointer-events: none; }
+
+/* A steering profile on the canvas: what an agent task reads at launch, in order. */
+.lib-preview { position: absolute; left: 0; top: 0; bottom: 0; box-sizing: border-box; overflow-y: auto; padding: 56px 24px 24px; }
+.lib-preview-title { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--text); }
+.lib-preview-pick { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; font-size: 11.5px; color: var(--text-muted); }
+.lib-preview-pick label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lib-preview-pick select { max-width: 280px; min-height: 26px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; }
+.lib-preview-pick select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.lib-preview-note { margin: 4px 0 10px; font-size: 12px; color: var(--text-muted); }
+.lib-preview-note.is-bad { color: var(--bad); }
+.lib-sections { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-width: 720px; }
+.lib-section { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.lib-section.is-mine { border-color: var(--ok); }
+.lib-section-row { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 12px; color: var(--text-sub); cursor: pointer; }
+.lib-section-row:hover { background: var(--surface-2); }
+.lib-section-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.lib-section-row[aria-expanded="true"] .lib-section-chev { transform: rotate(90deg); }
+.lib-section-kind { font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+.lib-section-source { min-width: 0; overflow-wrap: anywhere; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); }
+.lib-section-text { margin: 0; padding: 8px 12px 12px 30px; max-height: 260px; overflow: auto; font: 11.5px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-sub); }

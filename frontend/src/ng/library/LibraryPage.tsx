@@ -81,7 +81,8 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
     setCollapsed(true);
   };
   const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
-  const uses = published === null || published === "failed" ? null : published.components.find((c) => c.id === id)?.used_by_paths ?? null;
+  // A component the published library does not list (one just added) has no uses yet.
+  const uses = published === null || published === "failed" ? null : published.components.find((c) => c.id === id)?.used_by_paths ?? [];
   // What the menus offer: the draft's own components, so one just added or renamed is there before it is published.
   const draftLibrary = useMemo(() => rows.map((x) => ({ id: x.id, kind: x.section, name: x.name, definition: ((r.model["library.yaml"] ?? {}) as Record<string, Record<string, Record<string, unknown>>>)[x.section]?.[x.name] ?? {}, used_by: [], issues: [] })), [rows, r]);
 
@@ -160,6 +161,7 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               key={row.id}
               draft={draft}
               row={row}
+              uses={uses}
               path={sub ?? row.id}
               reserve={reserve}
               height={mainH}

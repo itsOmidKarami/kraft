@@ -49,7 +49,7 @@ export const PUBLISHED: PublishedLibrary = {
   file: "templates/library.yaml",
   text: "tasks: {}\n",
   components: [
-    comp("steering.project-standards", ["default"]),
+    comp("steering.project-standards", ["default"], [{ chain: "default", path: "implementation.main.implement", overrides: false }, { chain: "quick-task", path: "build.main.go", overrides: false }]),
     comp("tasks.implementer", ["default", "quick-task"], [
       { chain: "default", path: "implementation.main.implement", overrides: true },
       { chain: "quick-task", path: "build.main.go", overrides: false, via: "build" },

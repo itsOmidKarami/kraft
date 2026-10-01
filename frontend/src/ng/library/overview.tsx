@@ -71,10 +71,6 @@ export function LibraryOverview({ d, ctx, uses }: { d: LibDescription; ctx: Pane
           </>
         );
       }
-      case "steering": {
-        const text = str(own?.instructions);
-        return <PauseText label="instructions" long rows={10} value={text} required bad={!text.trim()} sub={!text.trim() ? "Required." : undefined} onText={(t) => draft.field(path, "instructions", t, true)} onBlur={draft.flush} />;
-      }
       default:
         return <Overview kind={d.kind as never} ctx={ctx} />;
     }

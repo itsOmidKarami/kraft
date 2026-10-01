@@ -10,10 +10,13 @@ import { problemText } from "../templates/problems";
 import { LibraryConfig } from "./config";
 import { libCrumbs, libDescribe } from "./describe";
 import { LibraryOverview } from "./overview";
+import { Instructions } from "./steering";
+import { UsedBy } from "./UsedBy";
 import type { Use } from "./types";
 
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }, { value: "yaml", label: "YAML" }];
-const FIXED_ICON: Record<string, string> = { fixloop: "refresh-cw", judge: "scale" };
+const STEERING_TABS = [{ value: "instructions", label: "Instructions" }, { value: "used", label: "Used by" }, { value: "yaml", label: "YAML" }];
+const FIXED_ICON: Record<string, string> = { fixloop: "refresh-cw", judge: "scale", steering: "scroll-text" };
 const SINGULAR = { nodes: "node", steps: "step", tasks: "task", steering: "steering profile" } as const;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -65,8 +68,8 @@ export function LibraryPane({ draft, path, uses, open, size, goTo, onLibrary, on
       default: return `${prefix}${taskKind ? `${taskKind} task` : "task"}${ext}`;
     }
   })();
-  const tabs = d.kind === "fixloop" ? undefined : TABS;
-  const shown = tabs?.some((x) => x.value === tab) ? tab : "overview";
+  const tabs = d.kind === "fixloop" ? undefined : d.kind === "steering" ? STEERING_TABS : TABS;
+  const shown = tabs?.some((x) => x.value === tab) ? tab : tabs?.[0].value;
   const pickable = ["node", "step", "task", "esc", "review"].includes(d.kind);
 
   return (
@@ -91,7 +94,9 @@ export function LibraryPane({ draft, path, uses, open, size, goTo, onLibrary, on
       >
         {d.kind === "fixloop" ? (
           <LibraryOverview d={d} ctx={ctx} uses={null} />
-        ) : shown === "config" ? <LibraryConfig ctx={ctx} />
+        ) : shown === "instructions" ? <Instructions draft={draft} path={path} />
+          : shown === "used" ? <UsedBy uses={uses ?? []} />
+          : shown === "config" ? <LibraryConfig ctx={ctx} />
           : shown === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
             : <LibraryOverview d={d} ctx={ctx} uses={uses} />}
       </Inspector>

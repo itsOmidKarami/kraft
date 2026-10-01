@@ -37,6 +37,15 @@ export const mount = (path = "/templates/library") =>
 
 export const draftWith = (extra: Partial<Result> = {}, draft = false) => vi.mocked(d.getDraft).mockImplementation(() => ok(libView(extra, draft)));
 
+/** What the preview and repos routes answer; a test replaces them. */
+export const served: { preview: (url: string) => { status: number; body: unknown }; repos: string[] } = { preview: () => ({ status: 200, body: {} }), repos: [] };
+export const PREVIEW = [
+  { kind: "contract", source: "kraft", text: "You are working on a Kraft work item." },
+  { kind: "skill", source: "kraft:spec", text: "Use the kraft:spec skill." },
+  { kind: "steering", source: "repo:never-signal-processes-you-didnt-start", text: "Never signal a process." },
+  { kind: "steering", source: "task:project-standards", text: "Keep changes focused." },
+];
+
 /** Call in `beforeEach`; pair with `vi.unstubAllGlobals()` in `afterEach`. */
 export function setup() {
   resetHarnessOptions();
@@ -51,6 +60,17 @@ export function setup() {
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);
   vi.spyOn(d, "listDrafts").mockResolvedValue({ status: 200, body: [] });
   vi.spyOn(d, "getDraft").mockImplementation(() => ok(libView()));
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(PUBLISHED), { status: 200 })));
+  served.preview = () => ({ status: 200, body: { sections: PREVIEW } });
+  served.repos = ["kraft", "other"];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const u = String(url);
+    const send = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+    if (u.includes("/templates/steering/preview")) {
+      const r = served.preview(u);
+      return send(r.status, r.body);
+    }
+    if (u.endsWith("/repos")) return send(200, { repos: served.repos.map((name) => ({ name })) });
+    return send(200, PUBLISHED);
+  }));
   useStore.setState({ workItems: {}, connection: "open" } as never);
 }

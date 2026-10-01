@@ -8,14 +8,18 @@ import type { ConfigDraft } from "../templates/draft/useConfigDraft";
 import { authoredAt, normalise, valueAt } from "../templates/draft/view";
 import { NodeView } from "../templates/NodeView";
 import type { Row } from "./rows";
+import { SteeringCanvas } from "./steering";
+import type { Use } from "./types";
 import { libSel } from "./sel";
 
 /** The Library's canvas (Decisions §10): a node as its steps and tasks, with its failure handlers in the bottom
  *  pane; a step as one step; a task as its one glyph. Drawn from the draft as written (R18). The page keys it by
  *  component, so a new component starts the canvas over. */
-export function LibraryCanvas({ draft, row, path, reserve, height, onPick, onOpen, onEscape, onBackground, onGoTo }: {
+export function LibraryCanvas({ draft, row, uses, path, reserve, height, onPick, onOpen, onEscape, onBackground, onGoTo }: {
   draft: ConfigDraft;
   row: Row;
+  /** The published uses of the component, for a steering profile's preview; null until the library has loaded. */
+  uses: Use[] | null;
   /** The selected path: the component's own, or a part of it. */
   path: string;
   /** Px the side pane covers on the right. */
@@ -122,5 +126,5 @@ export function LibraryCanvas({ draft, row, path, reserve, height, onPick, onOpe
       </div>
     );
   }
-  return null;
+  return <SteeringCanvas row={row} uses={uses} reserve={reserve} />;
 }

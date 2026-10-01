@@ -620,6 +620,12 @@ const CASES: Case[] = [
   { screen: "ng-library", variant: "gate", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "nodes.approval") },
   { screen: "ng-library", variant: "step", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "steps.checks") },
   { screen: "ng-library", variant: "task-glyph", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c, "tasks.fixer") },
+  { screen: "ng-library", variant: "steering", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: async (c) => {
+    await ngLibrary(c, "steering.project-standards");
+    await c.page.locator(".lib-section-row").first().waitFor({ timeout: 8000 });
+    await c.page.locator(".lib-section-row").nth(4).click();
+    await settle(c.page, 300);
+  } },
   { screen: "ng-library", variant: "task-config", data: "default", widths: [1280], mock: { ngLibrary: "draft" }, run: async (c) => {
     await ngLibrary(c, "tasks.implementer");
     await c.page.getByRole("tab", { name: "Config" }).click();
