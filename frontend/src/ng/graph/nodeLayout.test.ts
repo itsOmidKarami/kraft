@@ -59,7 +59,10 @@ describe("node layout", () => {
     const lay = nodeLayout([step("a", 3), step("b", 1)], { loop: true });
     // Bottom row at TY + 92, its box half 22, label and meta 40: 154 below the axis.
     expect(lay.loopY).toBe(lay.TY + Math.ceil(1.8 * 154));
-    expect(lay.H).toBe(lay.loopY + 10);
     expect(loopArc(lay).d).toContain(`C${lay.endX} ${lay.loopY} 23 ${lay.loopY}`);
+    // The label follows the swoop's lowest point, and the world ends 16px under it.
+    const labelY = lay.TY + 0.75 * (lay.loopY - lay.TY) + 14;
+    expect(loopArc(lay, "fix").label!.y).toBe(labelY);
+    expect(lay.H).toBe(labelY + 16);
   });
 });

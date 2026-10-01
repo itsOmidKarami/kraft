@@ -122,3 +122,47 @@
 .seam.is-node:is(:hover, :focus-visible) { opacity: 1; }
 .node-footer { position: absolute; padding: 0 4px; background: var(--bg); font-size: 11px; white-space: nowrap; color: var(--text-muted); }
 .gallery-frame.is-tall { height: 460px; }
+
+/* ChainStrip */
+.strip { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.strip-back { flex: none; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent; font-size: 11.5px; color: var(--text-sub); white-space: nowrap; cursor: pointer; }
+.strip-back:is(:hover, :focus-visible) { background: var(--surface-2); }
+.strip-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.strip-scroll::-webkit-scrollbar { display: none; }
+.strip-world { position: relative; margin: 0 auto; }
+.strip-world svg { position: absolute; left: 0; top: 0; }
+.strip-edge { stroke: var(--border); stroke-width: 1.5; fill: none; }
+.strip-edge.is-todo { stroke: var(--line); stroke-dasharray: 3 3; }
+.strip-node { position: absolute; width: 90px; display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none; z-index: 1; }
+.strip-btn { display: flex; margin: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; pointer-events: auto; }
+.strip-btn:hover .glyph-box:not(.is-sel) { border-color: var(--text-muted); }
+.strip-label { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--text); white-space: nowrap; }
+
+/* GateView */
+.gateview { position: absolute; top: 0; left: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; }
+.gateview-col { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 440px; }
+.gateview-row { display: flex; align-items: flex-start; justify-content: center; }
+.gateview-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 140px; margin: 0; padding: 4px 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.gateview-label { padding: 0 3px; background: var(--bg); font: 400 11px ui-monospace, Menlo, monospace; color: var(--text-sub); }
+.gateview-label.is-gate, .gateview-item.is-sel .gateview-label { color: var(--text); }
+.gateview-item.is-sel .gateview-label { font-weight: 600; }
+.gateview-label.is-add { color: var(--ok); }
+.gateview-chip { padding: 1px 8px; border-radius: 999px; background: var(--bg); font-size: 10.5px; color: var(--text-muted); text-align: center; }
+.gateview-chip.tone-green { background: color-mix(in srgb, var(--ok) 18%, var(--bg)); color: var(--ok); }
+.gateview-chip.tone-red { background: color-mix(in srgb, var(--bad) 20%, var(--bg)); color: var(--bad); }
+.gateview-chip.tone-amber { background: color-mix(in srgb, var(--warn) 18%, var(--bg)); color: var(--warn); }
+.gateview-line { width: 56px; flex: none; margin-top: 27px; height: 0; border-top: 2px dashed var(--border); }
+.gateview-line.is-ran { border-top-style: solid; }
+.gateview-msg { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: 12.5px; line-height: 1.6; color: var(--text-sub); text-wrap: pretty; }
+.gateview-msg.is-empty { color: var(--text-muted); }
+.gateview-doc { display: flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); font: 11.5px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
+.gateview-doc:not(:disabled):is(:hover, :focus-visible) { background: var(--surface-2); }
+.gateview-doc:disabled { cursor: default; }
+.gateview-reject { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.gateview-reject-line { width: 0; height: 22px; border-left: 1.5px dashed var(--bad); }
+.gateview-reject-word { padding: 0 4px; background: var(--bg); font: 10.5px ui-monospace, Menlo, monospace; color: var(--bad); }
+.gateview-target { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--bad); background: var(--bg); font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
+.gateview-target:is(:hover, :focus-visible) { background: var(--surface-2); }
+.gateview-note { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: 11px; line-height: 1.55; color: var(--text-muted); text-wrap: pretty; }
+.gallery-frame.is-stack { display: flex; flex-direction: column; }
+.gallery-area { position: relative; flex: 1; min-height: 0; }

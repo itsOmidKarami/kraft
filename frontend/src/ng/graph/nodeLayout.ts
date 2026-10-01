@@ -36,11 +36,14 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
   // The loop's control depth. The prototype's (H − 10 once the loop's 34px are added)
   // never drew a parallel first step: its swoop reaches only ~0.56 of that depth at the
   // first column, so deeper rows push it down to 1.8× their bottom, labels included (R40).
-  let loopY = 0;
+  // Its label sits 14px under the swoop's lowest point, 0.75 of the control depth.
+  let loopY = 0, loopLabelY = 0;
   if (o.loop) {
     const bottom = ((maxRows - 1) / 2) * G.ROW + G.BOX / 2 + 40;
-    loopY = Math.max(H + 34 - 10, TY + Math.ceil(1.8 * bottom));
-    H = loopY + 10;
+    const proto = H + 34 - 10;
+    loopY = Math.max(proto, TY + Math.ceil(1.8 * bottom));
+    loopLabelY = TY + 0.75 * (loopY - TY) + 14;
+    H = Math.max(proto + 10, loopLabelY + 16);
   }
   const footerY = H + 4;
   if (o.footer) H += 26;
@@ -50,7 +53,7 @@ export function nodeLayout(steps: NodeStep[], o: { side?: boolean; loop?: boolea
     const frame = st.tasks.length >= 2 ? { x: cx[k] - G.COL / 2 - 6, y: y[0] - G.BOX / 2 - 16, w: G.COL + 12, h: (y.length - 1) * G.ROW + G.BOX + 60 } : null;
     return { cx: cx[k], ys: y, frame, labelY: y[0] - G.BOX / 2 - 38 };
   });
-  return { TY, cx, endX, W, H, cols, maxRows, footerY, loopY };
+  return { TY, cx, endX, W, H, cols, maxRows, footerY, loopY, loopLabelY };
 }
 export type NodeLayout = ReturnType<typeof nodeLayout>;
 
@@ -90,6 +93,6 @@ export function loopArc(lay: NodeLayout, label?: string) {
   return {
     d: `M${e} ${lay.TY + 9} C${e} ${y} ${x1} ${y} ${x1} ${lay.TY + 10}`,
     arrow: `M${x1 - 5} ${lay.TY + 17} L${x1} ${lay.TY + 10} L${x1 + 5} ${lay.TY + 17}`,
-    label: label ? { x: (e + x1) / 2, y: y - 15, text: label } : undefined,
+    label: label ? { x: (e + x1) / 2, y: lay.loopLabelY, text: label } : undefined,
   };
 }

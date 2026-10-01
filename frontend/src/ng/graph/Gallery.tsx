@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { BADGES, NODE_EDIT, NODE_VERIFY, NODE_VERIFY_SIDE, CHAIN_15, CHAIN_15_ARCS, CHAIN_15_SEAMS, CHAIN_STOPPED, EXEC_STATES, GATE_STATES, SIZES } from "./gallery.fixtures";
+import { ChainStrip } from "./ChainStrip";
+import { GateView } from "./GateView";
 import { NodeGlyph } from "./NodeGlyph";
 import { NodeGraph, type NodeSel } from "./NodeGraph";
 import { StageGraph } from "./StageGraph";
@@ -44,11 +46,30 @@ export function Gallery() {
       </section>
       <section aria-labelledby="g-node">
         <h2 id="g-node">NodeGraph</h2>
-        <div className="gallery-frame is-tall">
+        <div className="gallery-frame is-tall is-stack">
+          <ChainStrip nodes={CHAIN_15} viewing="verification" onOpen={setSel} />
+          <div className="gallery-area">
           <NodeGraph name="verification" steps={NODE_VERIFY} selected={task} onSelect={setTask} onOpen={setTask} side={NODE_VERIFY_SIDE} loop={{ tone: "active", label: "fix loop · attempt 2 of 3" }} onFailure="retry_flaky, then re-measure" />
+          </div>
         </div>
         <div className="gallery-frame">
           <NodeGraph name="security_scan" steps={NODE_EDIT} seamAfter />
+        </div>
+      </section>
+      <section aria-labelledby="g-gate">
+        <h2 id="g-gate">GateView</h2>
+        <div className="gallery-frame is-tall">
+          <GateView
+            gate={{ id: "review_gate", state: "current" }}
+            reviewer={{ id: "auto_review", state: "done", chip: "approve · 2 notes", chipTone: "green" }}
+            message="Read the review notes, then approve to open the merge request."
+            doc={{ label: "review.md", onClick: noop }}
+            reject={{ id: "implement", icon: "layers", onClick: noop }}
+            note="Approving moves the item to merge_request. Rejecting sends it back to implement with your note."
+          />
+        </div>
+        <div className="gallery-frame">
+          <GateView gate={{ id: "approve_plan", state: "plain" }} onAdd={noop} />
         </div>
       </section>
       <section aria-labelledby="g-zoom">
