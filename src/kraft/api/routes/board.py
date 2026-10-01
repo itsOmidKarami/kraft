@@ -8,6 +8,7 @@ from kraft import config as config_mod
 from kraft import events, executor, store
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
+from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
 
 
@@ -402,6 +403,73 @@ def _mr_ref(st, wid: str) -> dict | None:
         if e["type"] == "mr_opened":
             return {"number": e["payload"]["number"], "url": e["payload"]["url"]}
     return None
+
+
+async def _mr_state(st, row) -> str | None:
+    """The item's merge request's live state, for the cancel preview and the
+    close-on-cancel check: the recorded ref is only `{number, url}`, so this is
+    one `find_mr` call. None when the forge no longer knows it. Raises
+    `ForgeError`; the preview catches it, the close reports it."""
+    worktree = st.run_dirs.worktrees / row["id"]
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+    found = await forge_mod.resolve(backend).find_mr(repo=worktree, branch=store.branch_for(row))
+    return found.state if found else None
+
+
+def _running_session(st, wid: str) -> dict | None:
+    """The session a cancel would stop (D.2's `running`): the same row
+    `store.running_sessions_for_node` finds, read for the fields the preview
+    shows rather than the ones a signal needs."""
+    s = st.db.read(
+        lambda c: c.execute(
+            "SELECT s.node_id, s.hook_point, s.attempt FROM worker_sessions s "
+            "JOIN work_items w ON w.id = s.work_item_id "
+            "WHERE s.work_item_id = ? AND s.status IN ('running', 'pending') "
+            "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') "
+            "ORDER BY s.created_at DESC LIMIT 1",
+            (wid,),
+        ).fetchone()
+    )
+    return {"node": s["node_id"], "task": s["hook_point"], "attempt": s["attempt"]} if s else None
+
+
+def _open_thread_count(st, wid: str) -> int:
+    threads = st.db.read(lambda c: store.threads_for(c, wid))
+    return sum(1 for t in threads if t["state"] != "resolved")
+
+
+@api_router.get("/work-items/{wid}/cancel-preview")
+async def cancel_preview(wid: str, request: Request):
+    """What `/cancel` would do (B4): read-only, so the UI can show it before
+    the person commits. Refuses the same way `/cancel` itself does, once the
+    item has already ended (`_live_work_item_row`)."""
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
+    cap_usd, _source = store.effective_work_item_cap(row, budget)
+    spent_usd, _daily = st.db.read(lambda c: store.budget_spend(c, wid))
+    ref = _mr_ref(st, wid)
+    mr = None
+    if ref is not None:
+        try:
+            state = await _mr_state(st, row)
+        except forge_mod.ForgeError:
+            # Read-only: a forge that cannot answer leaves the state unknown
+            # rather than failing the preview of a cancel that needs no forge.
+            state = None
+        mr = {"ref": ref["number"], "url": ref["url"], "state": state}
+    return {
+        "running": _running_session(st, wid),
+        "kept": {
+            "branch": store.branch_for(row),
+            "worktree": str(st.run_dirs.worktrees / wid),
+            "findings": len(_deferred_findings(st, wid)),
+            "threads": _open_thread_count(st, wid),
+        },
+        "mr": mr,
+        "spend": {"spent_usd": spent_usd, "cap_usd": cap_usd},
+    }
 
 
 def _needs_context_question(st, wid: str) -> str | None:

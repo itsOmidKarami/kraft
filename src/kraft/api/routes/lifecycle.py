@@ -86,6 +86,14 @@ class CompleteWorkItem(EndWorkItem):
     close_beads: bool = False
 
 
+class CancelWorkItem(EndWorkItem):
+    #: Close the item's open merge request on the forge once cancel has ended
+    #: it (B4). Off by default -- cancel never touches the forge on its own.
+    #: `/complete` does not take this: a completed item's MR is the one the
+    #: walk's own `merge` node already landed or left open on purpose.
+    close_mr: bool = False
+
+
 class Escalate(BaseModel):
     message: str
     new_thread: bool = False
@@ -1389,11 +1397,50 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
 
 
 @api_router.post("/work-items/{wid}/cancel")
-async def cancel_work_item(wid: str, body: EndWorkItem, request: Request):
+async def cancel_work_item(wid: str, body: CancelWorkItem, request: Request):
     """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
-    archiving reclaims it later, the same as for any ended item."""
-    await _end_work_item(request, wid, "cancel", body.reason)
-    return deps._work_item_row(request.app.state, wid)
+    archiving reclaims it later, the same as for any ended item.
+
+    `body.close_mr` (B4) closes the item's open merge request once the cancel
+    itself has landed -- a forge failure never undoes it, it only shows up in
+    the response's `close_mr`.
+    """
+    row = await _end_work_item(request, wid, "cancel", body.reason)
+    result = dict(deps._work_item_row(request.app.state, wid))
+    if body.close_mr:
+        result["close_mr"] = await _close_cancelled_mr(request.app.state, wid, row)
+    return result
+
+
+async def _close_cancelled_mr(st, wid: str, row) -> dict:
+    """B4: close the just-cancelled item's open merge request. `{ok: True}`
+    on success; `{ok: False, error}` for no open MR or a forge failure --
+    cancel itself already stands by the time this runs, so neither undoes it.
+    """
+    ref = board._mr_ref(st, wid)
+    if ref is None:
+        return {"ok": False, "error": "no open merge request"}
+    try:
+        state = await board._mr_state(st, row)
+    except forge_mod.ForgeError as exc:
+        return {"ok": False, "error": str(exc)}
+    if state != "open":
+        return {"ok": False, "error": "no open merge request"}
+    worktree = st.run_dirs.worktrees / wid
+    mr_ref = forge_mod.MRRef(number=ref["number"], url=ref["url"], state="open")
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
+    forge = forge_mod.resolve(backend)
+    try:
+        await forge.close_mr(repo=worktree, mr=mr_ref)
+    except forge_mod.ForgeError as exc:
+        return {"ok": False, "error": str(exc)}
+    await st.db.write(
+        lambda c: events.append(
+            c, wid, "mr_closed", {"ref": ref["number"], "url": ref["url"], "by": "cancel"}
+        )
+    )
+    return {"ok": True}
 
 
 async def _end_work_item(request: Request, wid: str, action: str, reason: str):

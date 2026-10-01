@@ -490,6 +490,12 @@ class GlabCli(mr_ops.CliWaits):
         target = [str(mr.number)] if mr.number > 0 else []
         await git.run_git(repo, ["glab", "mr", "merge", *target, "--yes"])
 
+    async def close_mr(self, *, repo: Path, mr: MRRef) -> None:
+        await git.run_git(repo, ["glab", "mr", "close", str(mr.number)])
+
+    async def reopen_mr(self, *, repo: Path, mr: MRRef) -> None:
+        await git.run_git(repo, ["glab", "mr", "reopen", str(mr.number)])
+
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
         # --all, or a merged merge request reads as no merge request at all.
         raw = await git.run_git(

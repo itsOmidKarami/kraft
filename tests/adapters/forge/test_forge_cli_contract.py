@@ -27,6 +27,8 @@ GLAB = SimpleNamespace(
     merged_list=outputs.GLAB_MR_LIST_MERGED,
     queued_list=outputs.GLAB_MR_LIST_AUTO_MERGE,
     find_args={"mr": "list", "--all": None, "--source-branch": "kraft/abc"},
+    close_argv=["mr", "close", "54"],
+    reopen_argv=["mr", "reopen", "54"],
 )
 GH = SimpleNamespace(
     name="gh",
@@ -47,6 +49,8 @@ GH = SimpleNamespace(
         "--head": "kraft/abc",
         "--json": "number,url,state,autoMergeRequest,mergeCommit",
     },
+    close_argv=["pr", "close", "7"],
+    reopen_argv=["pr", "reopen", "7"],
 )
 
 
@@ -128,6 +132,22 @@ async def test_mark_ready_unsets_draft(be, cli, tmp_path):
     await be.cls().mark_ready(repo=tmp_path, branch="kraft/abc", mr=forge.MR(be.number, "u"))
 
     assert cli.argv(be.name) == be.ready_argv
+
+
+async def test_close_mr_runs_the_forges_close_command(be, cli, tmp_path):
+    """B4: cancel closing the item's merge request, the same shape as
+    `merge`'s own runner and timeout."""
+    await be.cls().close_mr(repo=tmp_path, mr=forge.MRRef(be.number, be.url, state="open"))
+
+    assert cli.argv(be.name) == be.close_argv
+
+
+async def test_reopen_mr_runs_the_forges_reopen_command(be, cli, tmp_path):
+    """B8 (E), tested here with the rest of this pair: `reopen-mr` undoing an
+    externally-closed merge request."""
+    await be.cls().reopen_mr(repo=tmp_path, mr=forge.MRRef(be.number, be.url, state="closed"))
+
+    assert cli.argv(be.name) == be.reopen_argv
 
 
 async def test_update_mr_rewrites_the_description(be, cli, tmp_path):

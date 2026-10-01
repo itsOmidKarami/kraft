@@ -69,6 +69,17 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const b = S.bundles[m[1]];
       return b ? json(route, artifactFor(b.item, S.variant)) : json(route, { detail: "no artifact" }, 404);
     }
+    if ((m = p.match(/^\/work-items\/([^/]+)\/cancel-preview$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json(route, { detail: "work item not found" }, 404);
+      const it = b.item;
+      return json(route, {
+        running: it.current_node_id ? { node: it.current_node_id, task: it.current_node_id, attempt: 1 } : null,
+        kept: { branch: `kraft/${it.id}`, worktree: `/tmp/kraft/worktrees/${it.id}`, findings: (it.deferred_findings ?? []).length, threads: 0 },
+        mr: it.mr_ref ? { ref: it.mr_ref.number, url: it.mr_ref.url, state: "open" } : null,
+        spend: { spent_usd: it.budget_cap?.spent_usd ?? 0, cap_usd: it.budget_cap?.cap_usd ?? null },
+      });
+    }
     // The four mutations post-action frames need (W6.3): the scenario changes
     // so the next GET shows the state the action produced. Everything else
     // below stays a static 200.
