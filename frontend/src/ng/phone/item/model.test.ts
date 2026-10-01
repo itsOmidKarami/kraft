@@ -31,6 +31,14 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["archived", mk("archived"), [null, "restore"]],
   ] as const)("%s", (_name, item, want) => expect(ids(item)).toEqual(want));
 
+  it("hides Steer when no agent task can read a note, and keeps the rest (#387)", () => {
+    expect(ids(mk("paused", null, { steerable: false }))).toEqual([null, "resume"]);
+    expect(ids(mk("running", null, { steerable: false }))).toEqual([null, "pause"]);
+    expect(ids(mk("needs_you", stop("budget"), { steerable: false }))).toEqual([null, "raise"]);
+    expect(ids(mk("paused", null, { steerable: true }))).toEqual(["steer", "resume"]);
+    expect(ids(mk("paused", null, {}))).toEqual(["steer", "resume"]);
+  });
+
   it("never offers Retry on a running item (Decisions §5)", () => {
     for (const s of ["running", "escalated"] as const) expect(ids(mk(s))).not.toContain("retry");
   });

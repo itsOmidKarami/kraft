@@ -108,8 +108,15 @@ export interface Act {
 }
 const a = (id: ActId, label: string, danger = false): Act => ({ id, label, ...(danger && { danger }) });
 
-/** The bottom bar: `secondary · primary` (or one button), by status and stop kind. A status the table does not list has no bar. */
+/** The bottom bar: `secondary · primary` (or one button), by status and stop kind. A status the table does not list has no bar. An item no agent task can read a note on (`steerable: false`) has no Steer, as on the desktop's paused card (#387). */
 export function pairOf(item: ItemDetail): { secondary: Act | null; primary: Act | null } {
+  const p = pairTable(item);
+  if (item.steerable !== false) return p;
+  const rest = [p.secondary, p.primary].filter((a): a is Act => !!a && a.id !== "steer");
+  return rest.length === 2 ? { secondary: rest[0], primary: rest[1] } : { secondary: null, primary: rest[0] ?? null };
+}
+
+function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | null } {
   const stop = item.stop;
   const none = { secondary: null, primary: null };
   switch (item.display_status) {
