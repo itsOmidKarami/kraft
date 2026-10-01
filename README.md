@@ -13,7 +13,7 @@
 | src/kraft/adapters/forge/\_\_init\_\_.py     |        8 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py               |       45 |        0 |    100% |           |
 | src/kraft/adapters/forge/gh.py               |      156 |       14 |     91% |172, 252, 276, 282-292, 314-315, 370, 421 |
-| src/kraft/adapters/forge/git.py              |      132 |        5 |     96% |47, 282-289, 467 |
+| src/kraft/adapters/forge/git.py              |      132 |        4 |     97% |47, 288-289, 467 |
 | src/kraft/adapters/forge/glab.py             |      180 |        9 |     95% |239-240, 327, 359-360, 426, 429, 442, 464 |
 | src/kraft/adapters/forge/models.py           |      170 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py               |      124 |        5 |     96% |74, 197, 249, 315-316 |
@@ -93,7 +93,7 @@
 | src/kraft/executor/read\_only.py             |       75 |        2 |     97% |    70, 83 |
 | src/kraft/executor/resuming.py               |       82 |        1 |     99% |       168 |
 | src/kraft/executor/retry.py                  |       25 |        0 |    100% |           |
-| src/kraft/executor/stops.py                  |      140 |        0 |    100% |           |
+| src/kraft/executor/stops.py                  |      144 |        0 |    100% |           |
 | src/kraft/executor/walk.py                   |      575 |       13 |     98% |550, 667, 968, 992, 1000, 1073-1088, 1133, 1361, 1533, 1668, 1725, 1771 |
 | src/kraft/findings.py                        |      111 |        0 |    100% |           |
 | src/kraft/gate\_review.py                    |       68 |        4 |     94% |102-105, 110, 186 |
@@ -169,7 +169,7 @@
 | src/kraft/worker/steering.py                 |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py           |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **26195** | **1378** | **95%** |           |
+| **TOTAL**                                    | **26199** | **1377** | **95%** |           |
 
 
 ## Setup coverage badge
