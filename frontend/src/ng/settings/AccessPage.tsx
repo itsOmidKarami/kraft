@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Laptop, Pencil, Plus, RotateCw, Wifi } from "lucide-react";
 import * as api from "../../api";
 import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
@@ -145,12 +146,12 @@ export function AccessPage() {
   return (
     <>
     <YamlFrame pageKey="access" file="access.yaml" title="access" icon="shield" status={items.length ? "restart to apply" : "saved on change"} yaml={yaml} yamlNote="The password is stored hashed and never shown. Bind and port are read at startup, so an edit here waits for a restart.">
-      <div className="set-page">
-        <h1>Access</h1>
-        <p className="lede">Auth is off on localhost and on for anything else.</p>
+      <div className="set-page is-cards">
+        <div className="set-title"><h1>Access</h1><p className="lede">Auth is off on localhost and on for anything else.</p></div>
 
         {items.length > 0 && (
           <div className="set-pending" role="status">
+            <span className="set-pending-icon" aria-hidden><RotateCw size={15} /></span>
             <div className="set-pending-text">
               <strong>Restart to apply</strong>
               {items.map((i) => <span key={i.id}>{i.text}</span>)}
@@ -159,35 +160,40 @@ export function AccessPage() {
             </div>
             <div className="set-pending-actions">
               <button type="button" className="set-btn" onClick={() => void undo()}>Undo</button>
-              {managed && <button type="button" className="set-btn is-primary" onClick={() => void askRestart()}>Restart Kraft</button>}
+              {managed && <button type="button" className="set-btn is-primary" onClick={() => void askRestart()}><RotateCw size={12} aria-hidden /> Restart Kraft</button>}
             </div>
           </div>
         )}
 
-        <Block id="set-reach" title="Reach">
-          <div className="set-modes" role="radiogroup" aria-label="Reach">
+        <section aria-labelledby="set-reach">
+          <h2 id="set-reach" className="adr-sr">Reach</h2>
+          <div className="set-modes is-cards" role="radiogroup" aria-label="Reach">
             {[
-              { bind: LOOPBACK, title: "This machine only", note: "No password." },
-              { bind: "0.0.0.0", title: "Local network", note: "Password required. For the phone view." },
+              { bind: LOOPBACK, icon: <Laptop size={15} />, title: "This machine only", note: "No password. Only loopback names are accepted." },
+              { bind: "0.0.0.0", icon: <Wifi size={15} />, title: "Local network", note: "Password required. For the phone view." },
             ].map((m) => (
-              <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode" onClick={() => void put("bind", { bind: m.bind })}>
-                <span className="set-mode-title">{m.title}</span>
-                <span className="set-mode-addr">{m.bind}:{access.port}</span>
-                <span className="set-hint">{m.note}</span>
+              <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode is-card" onClick={() => void put("bind", { bind: m.bind })}>
+                <span className="set-mode-icon" aria-hidden>{m.icon}</span>
+                <span className="set-mode-text">
+                  <span className="set-mode-title">{m.title}</span>
+                  <span className="set-mode-addr">{m.bind}:{access.port}</span>
+                  <span className="set-hint">{m.note}</span>
+                </span>
+                <span className="set-mode-dot" aria-hidden />
               </button>
             ))}
           </div>
           {errors.bind && <span className="set-error" role="alert">{errors.bind}</span>}
           {overridden("bind") && <span className="set-hint">Running on {health?.bind}: the KRAFT_HOST environment setting wins over this.</span>}
           <span className="set-hint">Takes effect on restart. Kraft never binds publicly; use a tunnel if you need remote access.</span>
-        </Block>
+        </section>
 
-        <Block id="set-port" title="Port">
+        <Block id="set-port" title="Port" card aside={items.some((i) => i.id === "access.port") ? "waits for a restart" : "saved on change"}>
           <SetRow label="port" error={errors.port} hint="Used by both binds. Takes effect on restart. 1024–65535.">
             {editing === "port" ? (
               <input ref={field} className="set-input" aria-label="Port" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void savePort())} onBlur={() => void savePort()} />
             ) : (
-              <button type="button" className="set-value" aria-label={`Port ${access.port}, edit`} onClick={() => edit("port", String(access.port))}>{access.port}</button>
+              <button type="button" className="set-value" aria-label={`Port ${access.port}, edit`} onClick={() => edit("port", String(access.port))}>{access.port} <Pencil size={12} aria-hidden /></button>
             )}
           </SetRow>
           {overridden("port") && <span className="set-hint">Running on {health?.port}: the KRAFT_PORT environment setting wins over this.</span>}
@@ -195,7 +201,7 @@ export function AccessPage() {
 
         {lan ? (
           <>
-            <Block id="set-hosts" title="Allowed hosts" aside="saved on change">
+            <Block id="set-hosts" title="Allowed hosts" aside="saved on change" card>
               <SetRow label="hosts" error={errors.host} hint="Off loopback, a browser request is refused (403) unless its Host is on this list: the DNS-rebinding guard. On 127.0.0.1 the list is ignored.">
                 <ul className="set-chips">
                   {access.allowed_hosts.map((h) => (
@@ -205,7 +211,7 @@ export function AccessPage() {
                     {editing === "host" ? (
                       <input ref={field} className="set-input" aria-label="Add a host or IP" placeholder="host or IP" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void addHost())} onBlur={() => void addHost()} />
                     ) : (
-                      <button type="button" className="set-chip" onClick={() => edit("host")}>+ add</button>
+                      <button type="button" className="set-chip is-add" onClick={() => edit("host")}><Plus size={11} aria-hidden /> add</button>
                     )}
                   </li>
                 </ul>
@@ -214,7 +220,7 @@ export function AccessPage() {
               {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}
             </Block>
 
-            <Block id="set-password" title="Password" aside="writes access.yaml">
+            <Block id="set-password" title="Password" aside="writes access.yaml" card>
               <SetRow label="password" error={errors.password} hint="A new password signs every session out.">
                 {editing === "password" ? (
                   <span className="set-inline">
@@ -224,8 +230,10 @@ export function AccessPage() {
                   </span>
                 ) : (
                   <span className="set-inline">
-                    <span>{access.password_set ? "•••••••• set" : "not set"}</span>
-                    <button type="button" className="set-btn" onClick={() => edit("password")}>{access.password_set ? "Change" : "Set a password"}</button>
+                    <span className={access.password_set ? "set-mono" : undefined}>{access.password_set ? "•••••••• set" : "not set"}</span>
+                    {access.password_set
+                      ? <button type="button" className="set-pencil" aria-label="Change" title="Change the password" onClick={() => edit("password")}><Pencil size={12} aria-hidden /></button>
+                      : <button type="button" className="set-btn" onClick={() => edit("password")}>Set a password</button>}
                   </span>
                 )}
               </SetRow>
@@ -234,7 +242,7 @@ export function AccessPage() {
               </SetRow>
             </Block>
 
-            <Block id="set-sessions" title="Sessions" aside="live">
+            <Block id="set-sessions" title="Sessions" aside="live" pill card>
               {errors.sessions && <span className="set-error" role="alert">{errors.sessions}</span>}
               {sessions.length === 0 && <p className="set-hint">No sessions: auth is off.</p>}
               <ul className="set-sessions">
@@ -243,14 +251,14 @@ export function AccessPage() {
                     <span className="set-session-who"><span>{parseUserAgent(s.label)}{s.current && <span className="set-current"> current</span>}</span><span className="set-hint">{s.ip}</span></span>
                     <span className="set-hint">seen {ago(s.last_seen_at)}</span>
                     <span className="set-hint">expires {until(s.expires_at)}</span>
-                    <button type="button" className="set-btn is-danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out" : "Revoke"}</button>
+                    <button type="button" className="set-btn is-danger" aria-label={`${s.current ? "Sign out" : "Revoke"} ${parseUserAgent(s.label)}`} onClick={() => setRevoking(s)}>{s.current ? "Sign out here" : "Revoke"}</button>
                   </li>
                 ))}
               </ul>
             </Block>
           </>
         ) : (
-          <Block id="set-unused" title="Not used on 127.0.0.1">
+          <Block id="set-unused" title="Not used on 127.0.0.1" card="dashed">
             {[["allowed hosts", "Only loopback names are accepted."], ["password", "Needed once Kraft is reachable from the network."], ["sessions", "None: there is nothing to sign in to."]].map(([k, v]) => (
               <div key={k} className="set-unused"><span className="set-row-label">{k}</span><span className="set-hint">{v}</span></div>
             ))}
