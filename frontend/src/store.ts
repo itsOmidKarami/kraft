@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import * as api from "./api";
-import { deriveState, type DerivedState } from "./deriveState";
 import type { KraftEvent, WorkItem, WorkerSession } from "./types";
 
 type Connection = "connecting" | "open" | "reconnecting";
@@ -382,24 +381,6 @@ function blankSession(workItemId: string, createdAt: string): WorkerSession {
     model: null,
     head_sha: null,
   };
-}
-
-/** `deriveState` with the sessions and events this client already holds for
- *  each item — without them a list item's running escalation turn reads as
- *  the stop underneath it (W11 · J). */
-export function useItemStates(): (item: WorkItem) => DerivedState {
-  const sessions = useStore((s) => s.sessionsByItem);
-  const events = useStore((s) => s.eventsByItem);
-  return (item) => deriveState(item, sessions[item.id] ?? [], events[item.id] ?? []);
-}
-
-/** A session by id, whichever work item it belongs to — the log pane has only the id. */
-export function findSession(sid: string): WorkerSession | undefined {
-  for (const rows of Object.values(useStore.getState().sessionsByItem)) {
-    const hit = rows.find((r) => r.id === sid);
-    if (hit) return hit;
-  }
-  return undefined;
 }
 
 function upsert(rows: WorkerSession[], row: WorkerSession): WorkerSession[] {

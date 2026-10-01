@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { elapsedBetween } from "../../../format";
 import { useStore } from "../../../store";
 import { Clock, EllipsisVertical } from "../../icons";
-import { legacyPath } from "../../legacyPath";
 import { HeaderActions } from "../../shell/HeaderActions";
 import { Menu, type MenuItem } from "../../ui/Menu";
 import { Popover } from "../../ui/Popover";
@@ -29,9 +28,6 @@ export function useDuplicate(id: string, onError: (e: string) => void) {
     navigate(`/work-items/${encodeURIComponent(r.body.id)}`);
   };
 }
-
-/** The shipped page for an /ng path (review, the board): a full load until its wave lands. */
-export const goShipped = (ngPath: string) => window.location.assign(legacyPath({ pathname: ngPath, search: "" }));
 
 type Props = {
   item: ItemDetail;

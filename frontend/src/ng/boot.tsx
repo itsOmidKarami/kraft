@@ -12,8 +12,8 @@ import { applyTheme, cachedLook, DEFAULT_LOOK, lookOf } from "./theme/applyTheme
 
 void boot();
 
-// The shipped boot's order (../boot.tsx): public /health, then the theme
-// fetch as the session probe, then bootstrap and the event socket.
+// Public /health, then the theme fetch as the session probe, then bootstrap
+// and the event socket.
 async function boot() {
   // The cached look before the first await, so the page never paints another.
   applyTheme(cachedLook() ?? DEFAULT_LOOK);

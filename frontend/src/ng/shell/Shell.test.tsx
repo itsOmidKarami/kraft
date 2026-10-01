@@ -3,9 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../App";
-import { legacyPath } from "../legacyPath";
 import { HeaderActions } from "./HeaderActions";
-import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 
 afterEach(() => window.history.pushState({}, "", "/"));
@@ -38,23 +36,11 @@ describe("ng Shell", () => {
     expect(within(screen.getByRole("main")).queryByRole("button", { name: "Save" })).toBeNull();
   });
 
-  it.each(ROUTES.filter((r) => !r.built))(
-    "$path renders its placeholder, linking to the same page on the current UI",
-    (r) => {
-      window.history.pushState({}, "", `/ng${r.path === "/" ? "" : r.path}`);
-      render(<App />);
-      expect(screen.getByRole("heading", { name: r.label })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Open it on the current UI ↗" })).toHaveAttribute(
-        "href",
-        legacyPath({ pathname: `/ng${r.path}`, search: "" }),
-      );
-    },
-  );
-
   // The review route was a placeholder until W8 built it (App.test.tsx covers it now).
   it("renders an unknown path as the not-found placeholder without throwing", () => {
-    window.history.pushState({}, "", "/ng/nope/at/all");
+    window.history.pushState({}, "", "/nope/at/all");
     render(<App />);
     expect(screen.getByRole("heading", { name: "Not found" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to the board" })).toHaveAttribute("href", "/");
   });
 });

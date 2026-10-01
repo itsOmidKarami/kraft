@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, elapsed, runLabel, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokenSplit, tokenTotal, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -126,28 +126,6 @@ describe("tokens / usd", () => {
   });
 });
 
-describe("tokenTotal / tokenSplit (Ruling 211)", () => {
-  const split = { tokens_in: 1_200, tokens_cache_write: 3_000, tokens_cache_read: 80_000, tokens_out: 11_000 };
-
-  it("counts every kind, the cache included, in the one number shown", () => {
-    expect(tokenTotal(split)).toBe(95_200);
-    expect(tokenTotal({ tokens_in: null, tokens_out: null })).toBe(0);
-  });
-
-  it("names each kind apart", () => {
-    expect(tokenSplit(split)).toBe("1.2k in · 3k cache write · 80k cache read · 11k out");
-  });
-
-  it.each([
-    ["an older session, its cache kinds null", { tokens_in: 5_000, tokens_cache_write: null, tokens_cache_read: null, tokens_out: 10 }],
-    ["an older session, from before the fields", { tokens_in: 5_000, tokens_out: 10 }],
-    ["a rollup holding older sessions", { ...split, tokens_in: 5_000, tokens_out: 10, split_complete: false }],
-  ])("says so when the split is unknown: %s", (_name, r) => {
-    expect(tokenSplit(r)).toMatch(/^5k in \(cache not split on older sessions\) · /);
-    expect(tokenSplit(r)).toMatch(/ · 10 out$/);
-  });
-});
-
 describe("until", () => {
   it("points forwards, so a deadline never reads as 'just now'", () => {
     const now = Date.parse("2026-09-04T12:00:00Z");
@@ -172,16 +150,6 @@ describe("logLineText", () => {
     ["passes plain stdout/sys text through untouched", { src: "stdout", text: "collected 12 items" }, "collected 12 items"],
   ])("%s", (_, over, want) => {
     expect(logLineText(logLine(over))).toBe(want);
-  });
-});
-
-describe("statusWord", () => {
-  it.each([
-    ["rate_limited", "rate limited"],
-    ["waiting", "waiting on CI"],
-    ["active", "active"], // anything unmapped falls back to the raw string
-  ])("renders %s as %s", (status, word) => {
-    expect(statusWord(status)).toBe(word);
   });
 });
 
@@ -211,20 +179,6 @@ describe("cleanTitle (W13 · B.3)", () => {
     ["still finds a bead id without the item", "Chain-review diff review (Kraft-df4tc)", undefined, "Chain-review diff review"],
   ])("%s", (_, title, it_, want) => {
     expect(cleanTitle({ title }, it_)).toBe(want);
-  });
-});
-
-describe("runLabel (W13 · B.1)", () => {
-  it("names a turn, a round or an attempt from the hook and the run", () => {
-    expect(runLabel("escalation", 2, 0)).toBe("turn 2");
-    expect(runLabel("on.test.run", 1, 3)).toBe("round 3");
-    expect(runLabel("on.fix.apply", 1, 0)).toBe("round 0");
-    expect(runLabel("on.judge.decide", 1, 0)).toBe("round 0");
-    expect(runLabel("on.review.requested", 2, 0)).toBe("attempt 2");
-  });
-  it("is null when the server sent no run info", () => {
-    expect(runLabel("on.test.run", undefined, undefined)).toBeNull();
-    expect(runLabel("on.test.run", null, null)).toBeNull();
   });
 });
 

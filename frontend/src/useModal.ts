@@ -64,8 +64,8 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
  * the backdrop would otherwise close it mid-drag. The target test keeps a
  * click that merely bubbled up from the dialog itself from counting.
  *
- * `dirty` (Kraft-avvz): a form holding typed, unsaved input (IntakeModal,
- * Settings' AddRepo) must not vanish on a stray outside press — skip the
+ * `dirty` (Kraft-avvz): a form holding typed, unsaved input (the escalate
+ * message, a review's note) must not vanish on a stray outside press — skip the
  * close and leave the explicit Cancel/X as the only way out. Read-only
  * modals never pass it, so their click-outside-to-close is unchanged.
  */

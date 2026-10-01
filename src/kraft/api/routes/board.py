@@ -75,7 +75,7 @@ def _stop_episode(st, wid: str) -> tuple[dict | None, bool]:
     """The `work_item_needs_human` payload of the stop the item is *currently*
     sitting on (or None if anything in `_STOP_BOUNDARY` superseded it), and
     whether an `escalation_message` landed after that boundary event -- the
-    same episode `deriveState` bounds client-side (an escalation from an
+    same episode the shipped UI's `deriveState` bounded client-side (an escalation from an
     earlier, already-superseded stop must not read as live). One event scan
     for both, so `display_status` costs the detail route nothing beyond what
     `_current_stop` already read."""
@@ -824,7 +824,7 @@ async def get_work_item(wid: str, request: Request):
         # source line (point 4). Deliberately not `budget` -- that key is
         # `item.budget` client-side, `{scope, spent_usd, cap_usd} | null`,
         # derived purely from a `work_item_needs_human` event's payload
-        # (`store.applyEvent`) and used by `deriveState`/`BudgetCard` to mean
+        # (`store.applyEvent`) and used by the shipped UI's budget card to mean
         # "a spend cap is what stopped this item right now". This is a
         # different, always-present question -- the item's effective cap and
         # where it comes from -- and reusing the name would make every GET

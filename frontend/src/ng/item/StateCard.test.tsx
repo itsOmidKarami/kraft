@@ -39,6 +39,13 @@ describe("StateCard", () => {
     expect(h.onOpenNode).toHaveBeenCalledWith("merge_request");
   });
 
+  it("an infra failure opens Repos in the new UI, not the shipped page", async () => {
+    stubFetch();
+    show({ display_status: "failed", stop: stop("infra") });
+    await userEvent.click(within(screen.getByRole("region", { name: "Failed" })).getByRole("button", { name: "Open Repos" }));
+    expect(where).toBe("/templates/repos");
+  });
+
   it("waiting on the provider: Retry now, and the fallback only when policy allows it", async () => {
     const calls = stubFetch();
     const s = stop("rate_limit", { node: "verification", task: "verification.review.code_review", facts: { harness: "claude-code", fallback: ["codex", "gemini"], fallback_allowed: ["codex"] } });

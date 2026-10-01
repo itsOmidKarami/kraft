@@ -6,7 +6,6 @@ import type { KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { goShipped } from "./header/ItemHeader";
 import { actionPath, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 
@@ -33,7 +32,7 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, onRepos: () => navigate("/templates/repos"), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -70,7 +69,7 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
 
 type Run = (p: Promise<{ ok: true } | { ok: false; error: string }>) => Promise<void>;
 
-function cardFor(item: ItemDetail, h: Handlers & { onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
@@ -85,7 +84,7 @@ function cardFor(item: ItemDetail, h: Handlers & { onReview: (nodes?: string) =>
       facts: [...fs.slice(0, 3), ...(spent ? [spent] : [])],
       actions: [
         { label: stop.task ? `Retry from ${taskName(stop.task)}` : "Retry", primary: true, run: () => run(act.retry(item.id, node ? { path: actionPath(node, stop.task) } : {})) },
-        ...(stop.kind === "infra" ? [{ label: "Open Repos", run: () => goShipped("/ng/templates/repos") }] : []),
+        ...(stop.kind === "infra" ? [{ label: "Open Repos", run: h.onRepos }] : []),
         { label: "Escalate…", run: h.onEscalate },
       ],
     };

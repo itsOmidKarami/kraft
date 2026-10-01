@@ -7,7 +7,6 @@ import * as api from "../../api";
 import type { Health } from "../../types";
 import { NAV_ICON } from "../icons";
 import { isTextField } from "../keys";
-import { legacyPath } from "../legacyPath";
 import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
@@ -119,7 +118,6 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           <NavLink to="/settings/about" end className="ng-side-meta ng-side-label">
             {health ? `${bind}${health.version ? ` · v${health.version}` : ""}` : ""}
           </NavLink>
-          <a className="ng-side-meta ng-side-label" href={legacyPath({ pathname: `/ng${location.pathname}`, search: location.search })}>Current UI ↗</a>
           <button
             type="button"
             className="ng-side-pin"
