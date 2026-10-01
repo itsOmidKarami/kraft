@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { useStore } from "../store";
-import { AppNav } from "./AppNav";
+import { AppNav, newUiPath } from "./AppNav";
 import type { WorkItem } from "../types";
 
 const ITEM: WorkItem = {
@@ -141,5 +141,12 @@ describe("AppNav", () => {
     expect(await screen.findByText(/broken/)).toBeInTheDocument();
     expect(await screen.findByText(/127\.0\.0\.1:8765/)).toBeInTheDocument();
     expect(await screen.findByText(/v0\.9\.4/)).toBeInTheDocument();
+  });
+
+  it("links to the same page in the new UI where it has one, else its board (UX V2 R11)", () => {
+    renderAt("/work-items/wi_1");
+    expect(screen.getByRole("link", { name: "Try the new UI ↗" })).toHaveAttribute("href", "/ng/work-items/wi_1");
+    expect(newUiPath("/settings/policy")).toBe("/ng");
+    expect(newUiPath("/")).toBe("/ng");
   });
 });
