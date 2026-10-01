@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { KraftEvent } from "../../../types";
+import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { detail, stubFetch } from "../testkit";
 import { ChainConfig, ChainOverview } from "./ChainPane";
 
@@ -21,6 +21,24 @@ describe("ChainOverview", () => {
     expect(onSelect).toHaveBeenCalledWith("plan");
     await userEvent.click(screen.getByRole("button", { name: "verification" }));
     expect(onSelect).toHaveBeenLastCalledWith("verification");
+  });
+
+  it("lists the spec and plan attached at intake, each opening its document when the page can open one", async () => {
+    const onDoc = vi.fn();
+    const attachments = [{ kind: "spec" as const, path: "docs/specs/ws.md" }, { kind: "plan" as const, path: "docs/plans/ui.md" }];
+    const docs = [{ document_id: "d-plan", attachment_kind: "plan", path: "docs/plans/ui.md" }, { document_id: "d-spec", attachment_kind: "spec", path: "docs/specs/ws.md" }, { document_id: "d-x", attachment_kind: null, path: "x.md" }] as WorkItemDocument[];
+    const { unmount } = render(<ChainOverview item={detail({ attachments })} events={[]} now={NOW} onSelect={() => {}} docs={docs} onDoc={onDoc} />);
+    expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ui.md");
+    await userEvent.click(screen.getByRole("button", { name: "ui.md" }));
+    expect(onDoc).toHaveBeenCalledWith(docs[0]);
+    unmount();
+    // The board's peek has no documents to open: the names still show, as text.
+    const peek = render(<ChainOverview item={detail({ attachments })} events={[]} now={NOW} onSelect={() => {}} />);
+    expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ui.md");
+    expect(screen.queryByRole("button", { name: "ws.md" })).toBeNull();
+    peek.unmount();
+    render(<ChainOverview item={detail({ attachments: [] })} events={[]} now={NOW} onSelect={() => {}} />);
+    expect(screen.queryByText("attached")).toBeNull();
   });
 });
 

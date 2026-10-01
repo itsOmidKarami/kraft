@@ -79,7 +79,7 @@ export function paneContent(a: PaneArgs): PaneContent {
           <DraftNotes />
           {a.tab === "config"
             ? <ChainConfig item={item} policy={a.policy} reload={a.reload} editBudget={a.editBudget} onEditBudget={a.setEditBudget} applied={a.applied} />
-            : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} />}
+            : <ChainOverview item={item} events={a.events} now={a.now} onSelect={(node) => a.pick({ kind: "node", node })} docs={a.docs} onDoc={a.onDoc} />}
         </>
       ),
     };
