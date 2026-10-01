@@ -75,14 +75,15 @@ def _dead(pid: int) -> bool:
 
 
 def _sweep_dead_runs(cli: str) -> None:
-    """Remove the relays and volume a test process left behind when it died
-    before its teardown ran (pytest-timeout's thread method ends the process
-    with `os._exit`; a kill -9 does the same): the worker container goes with
-    `--rm`, but the relays are `close_session`'s to remove (Kraft-bwaok).
-    Kraft's own `sweep` would at that home's next start, which a test's home
-    never has. Only what `launch` names, `s<pid>`, for a pid no longer
-    running and a home under pytest's temp root, so a concurrent run's live
-    session is left alone."""
+    """Remove what a test process left behind when it died before its
+    teardown ran (pytest-timeout's thread method ends the process with
+    `os._exit`; a kill -9 does the same): its relays and volume, which are
+    `close_session`'s to remove, and under podman its exited worker, whose
+    `--rm` was the killed client's to do (Kraft-bwaok). Kraft's own `sweep`
+    would at that home's next start, which a test's home never has. Only
+    what `launch` names, `s<pid>`, for a pid no longer running and a home
+    under pytest's temp root, so a concurrent run's live session is left
+    alone."""
 
     def run(*argv: str) -> str:
         return subprocess.run([cli, *argv], capture_output=True, text=True).stdout
@@ -91,9 +92,11 @@ def _sweep_dead_runs(cli: str) -> None:
         ("container", ("ps", "-a", "--format", "{{.Names}}"), ".Config.Labels"),
         ("volume", ("volume", "ls", "--format", "{{.Name}}"), ".Labels"),
     ):
-        role = "relay" if kind == "container" else "egress-volume"
-        for name in run(*listing, "--filter", f"label=kraft.role={role}").split():
-            owner = re.fullmatch(r"kraft-(?:relay-(?:b-)?|egress-)s(\d+)", name)
+        # The worker before the relay whose network it joined, which podman
+        # refuses to remove first.
+        names = sorted(run(*listing, "--filter", "label=kraft.home").split(), key=len)
+        for name in names:
+            owner = re.fullmatch(r"kraft-(?:relay-(?:b-)?|egress-)?s(\d+)", name)
             if owner is None or not _dead(int(owner[1])):
                 continue
             home = run(kind, "inspect", "-f", f'{{{{index {labels} "kraft.home"}}}}', name)
