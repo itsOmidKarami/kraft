@@ -188,4 +188,5 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .dv-path { margin: 0; font-size: 12px; color: var(--text-sub); overflow-wrap: anywhere; }
 .dv-body { max-height: 56vh; overflow: auto; padding-right: 6px; font-size: 13px; line-height: 1.6; color: var(--text); }
 .dv-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.dialog:has(.dv) { width: min(760px, 100%); }
+/* The document viewer's dialog: two classes, so it outranks ui's `.dialog` width (R59: item styles its own class). */
+.dv-dialog.dialog { width: min(760px, 100%); }

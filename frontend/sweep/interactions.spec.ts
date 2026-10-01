@@ -363,7 +363,7 @@ const FLOWS: Flow[] = [
   // W10 F: Review & publish, then a stale draft's 409 with the server's diff.
   { name: "ng-chain-publish", widths: [1280], start: chains("default"), steps: [
     { name: "review", run: async (p) => { await p.getByRole("button", { name: "Review & publish" }).click(); await expect(p.getByRole("heading", { name: /^Draft · \d+ changes?$/ })).toBeVisible(); } },
-    { name: "yaml-diff", run: async (p) => { await p.getByRole("tab", { name: "YAML diff" }).click(); await expect(p.locator(".rv-line.is-add").first()).toBeVisible(); } },
+    { name: "yaml-diff", run: async (p) => { await p.getByRole("tab", { name: "YAML diff" }).click(); await expect(p.locator(".tpl-rv-line.is-add").first()).toBeVisible(); } },
     { name: "publish", run: async (p) => { await p.getByRole("button", { name: "Publish", exact: true }).click(); await expect(p.locator(".toast", { hasText: "Published default" })).toBeVisible(); }, wait: 300 },
     { name: "stale-chain", run: async (p) => { await chains("stale")(p); await p.getByRole("button", { name: "Review & publish" }).click(); } },
     { name: "stale-publish", run: async (p) => { await p.getByRole("button", { name: "Publish", exact: true }).click(); await expect(p.getByText("Published since this draft began", { exact: true })).toBeVisible(); await expect(p.getByRole("button", { name: "Keep my version and publish" })).toBeVisible(); } },

@@ -37,6 +37,7 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
   const indexed = source.kind === "document";
   return (
     <Dialog
+      className="dv-dialog"
       title={doc?.title ?? "Document"}
       onClose={onClose}
       footer={indexed && doc ? (
