@@ -95,6 +95,17 @@ describe("Move to library", () => {
     expect(screen.getByRole("dialog", { name: "Move to library" })).toBeInTheDocument();
   });
 
+  it("links a component that extends a library one to it", async () => {
+    mountPane("spec.main.author");
+    expect(screen.getByText("tasks.spec_author")).toHaveClass("lib-hint-link");
+    document.body.innerHTML = "";
+    mountPane("verification");
+    expect(screen.getByText("nodes.verification")).toHaveClass("lib-hint-link");
+    document.body.innerHTML = "";
+    mountPane("lint.main.run");
+    expect(screen.queryByText(/In the library:/)).toBeNull();
+  });
+
   it("uses the nodes section for an exec node", async () => {
     const u = userEvent.setup();
     mountPane("lint");

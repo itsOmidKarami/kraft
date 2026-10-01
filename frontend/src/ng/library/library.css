@@ -96,3 +96,8 @@
 
 /* The Move to library card's lines. */
 .lib-line { display: block; margin-top: 3px; }
+
+/* A chain component's link to the library component it extends. */
+.lib-hint { margin: 0 0 10px; font-size: 12px; color: var(--text-sub); }
+.lib-hint-link { font: 12px ui-monospace, Menlo, monospace; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.lib-hint-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }

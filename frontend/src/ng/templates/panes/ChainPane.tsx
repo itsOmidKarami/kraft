@@ -17,6 +17,7 @@ import { refsTo } from "../cards/refs";
 import { ExtendMenu } from "../menus/ExtendMenu";
 import { IconPicker } from "../IconPicker";
 import { showToast } from "../../ui/Toast";
+import { LibraryHint } from "../../library/LibraryHint";
 import { MoveToLibraryCard } from "../../library/MoveToLibraryCard";
 import { movable } from "../../library/moveToLibrary";
 import { detailOf } from "../../http";
@@ -221,7 +222,10 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
         </>
       ) : shownTab === "config" ? <Config kind={d.kind} ctx={ctx} />
         : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} scope={scope} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
-          : <Overview kind={d.kind} ctx={ctx} />}
+          : <>
+            {typeof own?.extends === "string" && (d.kind === "node" || d.kind === "task") && <LibraryHint section={d.kind === "node" ? "nodes" : "tasks"} name={own.extends} />}
+            <Overview kind={d.kind} ctx={ctx} />
+          </>}
     </Inspector>
     {card?.t === "move" && moveWhat && own && <MoveToLibraryCard anchor={anchor} draft={draft} path={path} id={d.id} own={own} what={moveWhat} onMoved={() => {}} onClose={closeCard} />}
     {card?.t === "rename" && (

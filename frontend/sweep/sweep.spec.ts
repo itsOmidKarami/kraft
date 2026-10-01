@@ -608,9 +608,9 @@ const CASES: Case[] = [
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { tail: "?doc=1", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   { screen: "ng-gate-review", variant: "default", data: "default", widths: [768], run: (c) => ngReview(c, { tail: "?doc=1", side: "rail", then: async (p) => { await p.getByText("WAITING FOR YOU").waitFor(); } }) },
   // W10: the Chains editor on the mock's real draft answers (sweep/draftViews.json).
-  { screen: "ng-library", variant: "list", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c) },
+  { screen: "ng-library", variant: "list", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: (c) => ngLibrary(c) },
   { screen: "ng-library", variant: "list-blocked", data: "default", widths: [1280], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c) },
-  { screen: "ng-library", variant: "task", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c, "tasks.implementer") },
+  { screen: "ng-library", variant: "task", data: "default", widths: [1024, 1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "blocked" }, run: (c) => ngLibrary(c, "tasks.implementer") },
   { screen: "ng-library", variant: "node", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], mock: { ngLibrary: "draft" }, run: async (c) => {
     await ngLibrary(c, "nodes.verification");
     // The fix loop's tab opens the bottom pane on it and picks the loop.
