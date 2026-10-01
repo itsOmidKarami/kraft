@@ -11,6 +11,8 @@ kept is verbatim. The rate-limit line is not captured: no run was limited.
 from __future__ import annotations
 
 import json
+import os
+import pwd
 import subprocess
 
 import pytest
@@ -154,9 +156,13 @@ def test_argv_skips_permissions_and_resumes_by_conversation():
 
 
 @pytest.mark.e2e("agy")
-def test_real_agy_stream_is_what_the_reader_reads(tmp_path):
+def test_real_agy_stream_is_what_the_reader_reads(tmp_path, monkeypatch):
     """The contract: a tiny prompt on the shipped argv, then a resume of its
     conversation. Two real turns of the signed-in account's quota."""
+    # agy's sign-in lives under the operator's real HOME (~/.gemini); the
+    # suite's throwaway one makes agy ask for a fresh OAuth login, which a test
+    # cannot answer. KRAFT_HOME still isolates Kraft.
+    monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
     h = harness.load(None).valid["antigravity"]
     log = tmp_path / "agy.log"
 
@@ -170,7 +176,12 @@ def test_real_agy_stream_is_what_the_reader_reads(tmp_path):
         )
         with log.open("a") as out:
             done = subprocess.run(
-                argv, cwd=tmp_path, stdout=out, stderr=subprocess.STDOUT, timeout=300
+                argv,
+                cwd=tmp_path,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                timeout=300,
             )
         assert done.returncode == 0, log.read_text()[-2000:]
 
