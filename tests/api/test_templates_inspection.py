@@ -150,6 +150,16 @@ def test_resolved_lists_per_gate_the_documents_earlier_nodes_produce(client):
     ]
 
 
+def test_a_kind_two_earlier_nodes_produce_is_listed_once(client):
+    nodes = [
+        exec_node("draft", extends="spec_author"),
+        exec_node("redraft", extends="spec_author"),
+        {"id": "review", "kind": "gate"},
+    ]
+    body = client.post("/api/templates/resolve", json={"chain": {"id": "c", "nodes": nodes}})
+    assert body.json()["chains"][0]["documents"] == {"review": ["spec"]}
+
+
 def test_a_resolved_node_carries_its_icon(client):
     node = {**exec_node("build", extends="implementer"), "icon": "hammer"}
     body = client.post("/api/templates/resolve", json={"chain": {"id": "c", "nodes": [node]}})
