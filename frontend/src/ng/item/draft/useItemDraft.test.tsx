@@ -96,7 +96,7 @@ describe("useItemDraft", () => {
   });
 
   it("fetches nothing for an ended item", async () => {
-    const { result } = renderHook(() => useItemDraft(item("ship", "completed")));
+    const { result } = renderHook(() => useItemDraft(item("ship", "done")));
     expect(result.current.status).toBe("off");
     expect(m.getDraft).not.toHaveBeenCalled();
   });

@@ -4,9 +4,10 @@ import * as api from "./itemDraftApi";
 import type { DraftView, Op, Refusal } from "./types";
 import { stripPassed } from "./view";
 
-const ENDED = new Set(["completed", "abandoned"]);
+/** Ended by the server's own word for it (`display_status`): the chain does not run again. */
+const ENDED = new Set(["done", "cancelled", "archived"]);
 export type DraftStatus = "loading" | "ready" | "error" | "off";
-type ItemLike = { id: string; status: string; current_node_id: string | null };
+type ItemLike = { id: string; display_status?: string; current_node_id: string | null };
 
 const shaped = (b: unknown): b is DraftView => Array.isArray((b as DraftView | null)?.ops);
 
@@ -16,7 +17,7 @@ const shaped = (b: unknown): b is DraftView => Array.isArray((b as DraftView | n
  *  again on focus and when the item moves to another node or status (Decided 9). */
 export function useItemDraft(item: ItemLike) {
   const { id, current_node_id: node } = item;
-  const ended = ENDED.has(item.status);
+  const ended = ENDED.has(item.display_status ?? "");
   const [view, setView] = useState<DraftView | null>(null);
   const [status, setStatus] = useState<DraftStatus>(ended ? "off" : "loading");
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export function useItemDraft(item: ItemLike) {
       live.current = false;
       window.removeEventListener("focus", onFocus);
     };
-  }, [ended, read, node, item.status]);
+  }, [ended, read, node, item.display_status]);
 
   /** Apply `fn` to the ops of the latest answer and send the whole list. `path` lights the pending highlight. */
   const edit = useCallback((fn: (ops: Op[]) => Op[], path?: string) => enqueue(async (): Promise<Answer<DraftView | Refusal> | null> => {

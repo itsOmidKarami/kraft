@@ -73,9 +73,9 @@ describe("issues", () => {
   it("lists server problems and passed ops by op index, never recomputing the flag", () => {
     const got = issues({ ops, problems: [{ op: 2, message: "over the maximum" }] });
     expect(got).toEqual([
-      { index: 0, node: "build", message: "The run has passed this point.", passed: true },
-      { index: 1, node: "scan", message: "The run has passed this point.", passed: true },
-      { index: 2, node: "ship", message: "over the maximum", passed: false },
+      { index: 0, node: "build", path: "build.main.run", message: "The run has passed this point.", passed: true },
+      { index: 1, node: "scan", path: "scan", message: "The run has passed this point.", passed: true },
+      { index: 2, node: "ship", path: "ship", message: "over the maximum", passed: false },
     ]);
     expect(issuesAt({ ops, problems: [] }, "build")).toHaveLength(1);
   });
@@ -90,9 +90,9 @@ describe("editable and seams", () => {
     expect(NODES.map((n) => editable(item(null), NODES, n.id))).toEqual([true, true, true, true]);
   });
   it("allows nothing on an ended item or once the run is past the chain", () => {
-    expect(editable(item("build", "completed"), NODES, "ship")).toBe(false);
+    expect(editable(item("build", "done"), NODES, "ship")).toBe(false);
     expect(editable(item("elsewhere"), NODES, "ship")).toBe(false);
-    expect(seams(item("build", "abandoned"), NODES)).toEqual([]);
+    expect(seams(item("build", "cancelled"), NODES)).toEqual([]);
   });
   it("puts seams after the current node and every later one, never before it", () => {
     expect(seams(item("build"), NODES)).toEqual([{ at: 2 }, { at: 3 }, { at: 4 }]);

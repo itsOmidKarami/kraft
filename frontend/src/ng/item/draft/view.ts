@@ -2,8 +2,9 @@ import type { ChainNode } from "../../../types";
 import type { Seam } from "../../graph/layout";
 import type { DraftView, MarkedOp, Op, OverrideOp } from "./types";
 
-const ENDED = new Set(["completed", "abandoned"]);
-type ItemLike = { status: string; current_node_id: string | null };
+/** Ended by the server's own word for it (`display_status`): the chain does not run again. */
+const ENDED = new Set(["done", "cancelled", "archived"]);
+type ItemLike = { display_status?: string; current_node_id: string | null };
 type Group = "task_config" | "policy";
 
 /** The node an op acts on: the new node's id, the removed node, or the path's first segment. */
@@ -59,12 +60,13 @@ export const stripPassed = (ops: (Op | MarkedOp)[]): Op[] => ops.map((o) => {
 });
 
 /** Something the person has to deal with before applying: a server problem, or an op the run has passed. */
-export type Issue = { index: number; node: string; message: string; passed: boolean };
+export type Issue = { index: number; node: string; path: string; message: string; passed: boolean };
+const pathOf = (op: Op) => (op.op === "add_node" || op.op === "remove_node" ? nodeOf(op) : op.path);
 export const PASSED = "The run has passed this point.";
 
 export function issues(view: Pick<DraftView, "ops" | "problems">): Issue[] {
-  const out: Issue[] = view.problems.map((p) => ({ index: p.op, node: nodeOf(view.ops[p.op]), message: p.message, passed: false }));
-  view.ops.forEach((o, index) => { if (o.passed) out.push({ index, node: nodeOf(o), message: PASSED, passed: true }); });
+  const out: Issue[] = view.problems.map((p) => ({ index: p.op, node: nodeOf(view.ops[p.op]), path: pathOf(view.ops[p.op]), message: p.message, passed: false }));
+  view.ops.forEach((o, index) => { if (o.passed) out.push({ index, node: nodeOf(o), path: pathOf(o), message: PASSED, passed: true }); });
   return out.sort((a, b) => a.index - b.index);
 }
 export const issuesAt = (view: Pick<DraftView, "ops" | "problems">, node: string) => issues(view).filter((i) => i.node === node);
@@ -73,7 +75,7 @@ const idx = (nodes: ChainNode[], id: string | null) => (id == null ? -1 : nodes.
 
 /** The index of the node the run stands on: -1 before it starts, null when it is past the chain or the item ended. */
 function standing(item: ItemLike, nodes: ChainNode[]): number | null {
-  if (ENDED.has(item.status)) return null;
+  if (ENDED.has(item.display_status ?? "")) return null;
   if (item.current_node_id == null) return -1;
   const i = idx(nodes, item.current_node_id);
   return i < 0 ? null : i;

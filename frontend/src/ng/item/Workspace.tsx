@@ -11,6 +11,8 @@ import { GateView } from "../graph/GateView";
 import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
 import { paneReducer, type PaneAction, type PaneState, type Sel } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
+import { useDraft } from "./draft/context";
+import { markNodes, markSteps } from "./draft/draftGraph";
 import { chainGraph } from "./graph";
 import { DocViewer } from "./DocViewer";
 import { gateView } from "./gateView";
@@ -34,7 +36,9 @@ export const usePaneMemory = create<{ pane: { open: boolean; userCollapsed: bool
 /** The canvas and its side pane. The URL holds where the person is (node
  *  view, selection, tab, attempt: spec §6.2); this keeps only whether the pane
  *  is open, which survives moving between items within a session. */
-export function Workspace({ item, reload }: { item: ItemDetail; reload: () => void }) {
+export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () => void }) {
+  const draft = useDraft();
+  const item = draft?.shown ?? raw;
   const navigate = useNavigate();
   const { node: nodeParam } = useParams();
   const [search] = useSearchParams();
@@ -86,7 +90,11 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     return () => cancelAnimationFrame(f);
   }, [place.node]);
 
-  const graph = useMemo(() => chainGraph(item, events, now), [item, events, now]);
+  const marks = useMemo(() => ({ view: draft?.draft.view ?? null, pending: draft?.draft.pending ?? null, own: new Set(raw.chain_definition.nodes.map((n) => n.id)) }), [draft?.draft.view, draft?.draft.pending, raw]);
+  const graph = useMemo(() => {
+    const g = chainGraph(item, events, now);
+    return draft ? { ...g, nodes: markNodes(g.nodes, marks) } : g;
+  }, [item, events, now, draft, marks]);
   const selectedNode = place.sel.kind === "chain" ? undefined : place.sel.node;
   const reserve = size.overlay ? 0 : pane_.open ? size.width : 40;
   const cover = size.overlay && pane_.open ? size.width : 0;
@@ -104,7 +112,8 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
     onArtifact: () => setArtifact(true),
   });
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
-  const inside = viewing && nodeGraph(item, viewing, now);
+  const plain = viewing && nodeGraph(item, viewing, now);
+  const inside = plain && draft ? { ...plain, steps: markSteps(plain.steps, viewing.id, marks) } : plain;
   const nodeSel = (x: NodeSel): Sel => (x.task ? { kind: "task", node: viewing!.id, step: x.step, task: x.task } : { kind: "step", node: viewing!.id, step: x.step });
 
   return (

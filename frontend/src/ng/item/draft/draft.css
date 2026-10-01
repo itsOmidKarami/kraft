@@ -1,0 +1,5 @@
+/* The item draft (W11): the header state, passed and problem blocks, the review and leave dialogs. */
+.idr-chip { flex: none; margin-left: 4px; padding: 0; border: 0; background: none; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .06em; color: var(--warn); cursor: pointer; }
+.idr-chip:is(:hover, :focus-visible) { text-decoration: underline; }
+.idr-problems { flex: none; padding: 2px 8px; border: 1px solid var(--bad); border-radius: 10px; background: transparent; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--bad); cursor: pointer; }
+.idr-problems:is(:hover, :focus-visible) { background: color-mix(in oklab, var(--bad) 14%, transparent); }
