@@ -4,6 +4,8 @@ import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { Banner, QuestionCard } from "./Banner";
 import { ItemDraftProvider } from "./draft/context";
+import { LeaveGuard } from "./draft/LeaveDialog";
+import { ReviewDialog } from "./draft/ReviewDialog";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
 import { PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title } from "./Top";
@@ -29,6 +31,8 @@ export function ItemPage() {
   return (
     <ItemDraftProvider item={loaded.item} reload={loaded.reload}>
       <Item item={loaded.item} reload={loaded.reload} />
+      <ReviewDialog />
+      <LeaveGuard />
     </ItemDraftProvider>
   );
 }
