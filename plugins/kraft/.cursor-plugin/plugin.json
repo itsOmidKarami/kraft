@@ -1,0 +1,19 @@
+{
+  "name": "kraft",
+  "version": "1.3.1",
+  "description": "Drive Kraft from an agent session: file work, read the board, act on gates, recover stopped work.",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Omid Karami"
+  },
+  "skills": "./skills",
+  "mcpServers": {
+    "kraft": {
+      "command": "kraft",
+      "args": [
+        "admin",
+        "mcp"
+      ]
+    }
+  }
+}
