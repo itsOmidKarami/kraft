@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { elapsedBetween } from "../../../format";
 import { useStore } from "../../../store";
 import { Clock, EllipsisVertical } from "../../icons";
@@ -109,9 +109,10 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   return (
     <HeaderActions>
       {others > 0 && (
-        <a className="item-others" href="/">
+        // The /ng board (W6 makes it the landing page; its stub renders until then).
+        <Link className="item-others" to="/">
           <span className="item-dot" aria-hidden /> {others} {others === 1 ? "other needs" : "others need"} you
-        </a>
+        </Link>
       )}
       <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
         <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt)}
