@@ -280,6 +280,27 @@ describe("Settings · repo detail (5b)", () => {
     expect(del).toHaveBeenCalled();
   });
 
+  it("shows the server's refusal when Disconnect hits a repo with running items", async () => {
+    const refusal = "/repo-a has 2 running item(s); finish or abandon them first";
+    vi.spyOn(api, "deleteRepo").mockRejectedValue(new Error(refusal));
+    renderAt("/settings/repos?repo=/repo-a");
+    const btn = () => screen.findByRole("button", { name: /disconnect repo-a/i });
+    await userEvent.click(await btn());
+    await userEvent.click(await btn());
+    expect(await screen.findByText(refusal)).toBeInTheDocument();
+  });
+
+  it("shows the refusal from the list's Disconnect menu too", async () => {
+    const refusal = "/repo-a has 2 running item(s); finish or abandon them first";
+    vi.spyOn(api, "deleteRepo").mockRejectedValue(new Error(refusal));
+    renderAt("/settings/repos");
+    await screen.findByText("repo-a");
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    expect(await screen.findByText(refusal)).toBeInTheDocument();
+  });
+
   it("test scopes are editable and round-trip through patchRepo", async () => {
     const repoC = repo({
       path: "/repo-c",

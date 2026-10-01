@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from support.api import _client
 from support.harness import (
+    connect_repo,
     fake_templates_dir,
     isolated_bd,
     make_repo,
@@ -361,6 +363,43 @@ def test_patch_repo_can_clear_test_scopes_with_an_explicit_null(client, tmp_path
     r = client.patch(f"/api/repos?path={repo}", json={"test_scopes": None})
     assert r.status_code == 200, r.text
     assert r.json()["test_scopes"] is None
+
+
+@pytest.mark.parametrize(
+    ("status", "refused"),
+    [("active", True), ("paused", True), ("needs_human", True), ("abandoned", False)],
+)
+def test_delete_repo_is_refused_while_a_live_item_uses_it(
+    client, repo, templates_dir, status, refused
+):
+    """Kraft-d2ire. Mutate: drop the `open_counts_by_repo` guard in `remove_repo`,
+    or count only `active`, and the paused/needs_human rows return 204."""
+    connect_repo(repo, templates_dir, name="r", enabled=False, managed=True)
+    path = str(repo.resolve())
+    conn = sqlite3.connect(RunDirs(Path(os.environ["KRAFT_RUN_DIR"])).db)
+    try:
+        store.create_work_item(
+            conn,
+            id="w-live",
+            bead_id="B-1",
+            title="t",
+            repo=path,
+            chain_template="quick-task",
+            chain_definition="{}",
+            status=status,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    before = (templates_dir / "repos.yaml").read_text()
+
+    r = client.delete(f"/api/repos?path={path}")
+
+    if refused:
+        assert r.status_code == 409 and "1 running item" in r.json()["detail"], r.text
+        assert (templates_dir / "repos.yaml").read_text() == before
+    else:
+        assert r.status_code == 204, r.text
 
 
 def _seed_active_work_item(
