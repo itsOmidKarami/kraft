@@ -88,9 +88,12 @@ async def put_draft_file(area: str, key: str, file: str, body: FileText, request
     """One file's text as typed, comments kept. One undo step, shared with the
     PUTs to the same file just before it (`store.COALESCE_S`)."""
     st = request.app.state
-    if file not in _area(area, key).files(key):
-        raise HTTPException(422, f"{file!r} is not a file of {area} {key!r}")
+    found = _area(area, key)
     old = st.db.read(lambda c: store.get(c, area, key))
+    # A renamed draft's new file came in through the `rename` op.
+    moved = found.renames and old is not None and file in old["files"]
+    if file not in found.files(key) and not moved:
+        raise HTTPException(422, f"{file!r} is not a file of {area} {key!r}")
     draft = {
         "files": {**(old["files"] if old else {}), file: body.text},
         "serialized": [f for f in (old["serialized"] if old else []) if f != file],
@@ -136,7 +139,9 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
     try:
         answers = ops.apply(working, body.ops)
     except ops.OpError as exc:
-        return JSONResponse(status_code=422, content={"detail": str(exc), "op": exc.index})
+        return JSONResponse(
+            status_code=422, content={"detail": str(exc), "op": exc.index, **exc.extra}
+        )
     written = working.finish()
     names = {*(old["files"] if old else ()), *working.dirty}
     draft = {

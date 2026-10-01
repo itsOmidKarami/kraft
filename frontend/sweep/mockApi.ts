@@ -306,7 +306,15 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const change = { path: "implement.main.implement", kind: "change", summary: "model", fields: ["model"] };
       const result = {
         model: { [name]: { nodes: st.templates[0]?.nodes ?? [] } },
-        resolved: null, sources: {}, warnings: [],
+        resolved: null, warnings: [],
+        sources: area === "chains" ? { "implement.main.implement": {
+          model: { value: "opus", source: "chain" },
+          harness: { value: "claude", source: "library:tasks.implementer" },
+          "policy.time_cap_minutes": { value: 120, source: "library:tasks.implementer" },
+          "policy.budget_usd": { value: 2, source: "policy" },
+          effort: { value: null, source: "default" },
+        } } : {},
+        policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 1 },
         impact: area === "chains" ? { running: 2, repos: ["/Users/me/code/kraft"] } : null,
         problems: key === "broken" ? [{ path: "implement.main.implement", field: "bogus", message: "Extra inputs are not permitted", file: name, line: 7, col: 9 }] : [],
         changes: key === "library" ? [] : [change],

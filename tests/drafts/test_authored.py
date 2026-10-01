@@ -5,11 +5,12 @@ addressing with the copy of an inherited container."""
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
-from kraft.drafts import authored
+from kraft.drafts import authored, ops
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary
 from kraft.templates.models import (
     AgentTask,
@@ -216,3 +217,14 @@ def test_library_paths_are_prefixed_by_their_section():
     assert at["nodes.implementation.main.implement"]["extends"] == "implementer"
     assert at["tasks.implementer"]["profile"] == "strong"
     assert "instructions" in at["steering.project-standards"]
+
+
+@pytest.mark.parametrize("file", CHAINS, ids=lambda p: p.name)
+def test_set_then_reset_of_a_field_on_every_task_resolves_the_same(library, file):
+    st = SimpleNamespace(templates_dir=TEMPLATES, library=library)
+    draft = ops.Draft(st, file.stem, {f"chains/{file.name}": file.read_text()}, exists=True)
+    for path in library.resolve_chain(file.stem).task_paths:
+        field = {"path": path, "field": "policy.budget_usd"}
+        ops.apply(draft, [{"op": "set_field", **field, "value": 7}, {"op": "reset_field", **field}])
+    candidate, id = library.with_chain(file, yaml.safe_load(draft.finish()[f"chains/{file.name}"]))
+    assert resolved(candidate, id) == resolved(library, id)

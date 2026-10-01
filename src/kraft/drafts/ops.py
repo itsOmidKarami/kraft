@@ -10,13 +10,16 @@ result reports, never re-targeted (Decisions §9).
 
 from __future__ import annotations
 
+import copy
 import inspect
 from collections.abc import Callable, Mapping
 
 import yaml
 from pydantic import TypeAdapter, ValidationError
+from yaml import YAMLError
 
 from kraft.drafts import authored, resolve, store
+from kraft.templates import positions
 from kraft.templates.environment import Identifier
 from kraft.templates.library import LIBRARY_FILE, Namespace
 from kraft.templates.models import (
@@ -35,6 +38,8 @@ _SLOT_IDS = {JUDGE_SEGMENT: "judge", "escalation": "escalate", AUTO_REVIEW_SEGME
 _HANDLERS = ("on_failure", "fix_loop", "on_conflict")
 #: What `remove` drops as a key of its container rather than a list entry.
 _SLOTS = ("fix_loop", JUDGE_SEGMENT, "escalation", AUTO_REVIEW_SEGMENT)
+#: What `reset_field` with no field keeps (the prototype's `resetAll`).
+_KEPT = ("id", "extends", "icon", "on_failure")
 
 
 class OpError(Exception):
@@ -42,6 +47,11 @@ class OpError(Exception):
 
     #: The failing op's position in its request, set by `apply`.
     index: int | None = None
+
+    def __init__(self, message: str, **extra: object) -> None:
+        super().__init__(message)
+        #: More of the 422's body: a fragment's `line` and `col`.
+        self.extra = extra
 
 
 def _check_id(id: object, taken) -> str:
@@ -90,9 +100,9 @@ class Draft:
 
     def __init__(self, st, key: str, files: Mapping[str, str | None], *, exists: bool) -> None:
         self.st = st
-        self.key = key
-        self.name = f"chains/{key}.yaml"
         self.files = dict(files)
+        self.name = resolve.chain_file(key, self.files)
+        self.key = self.name.removeprefix("chains/").removesuffix(".yaml")
         #: Whether the key had a file or a draft before this request.
         self.exists = exists
         self.dirty: set[str] = set()
@@ -169,10 +179,10 @@ class Draft:
         if (authored.at(self.expanded(), path) or {}).get(key) is not None:
             self.put(path, key, None)
 
-    def expanded(self) -> dict:
-        """The chain as it stands, `extends` expanded and the shorthand
-        normalised; as written where it does not expand."""
-        raw = authored.parse(authored.dump(self.chain))
+    def expanded(self, chain: Mapping | None = None) -> dict:
+        """The chain as it stands (or `chain` in its place), `extends` expanded
+        and the shorthand normalised; as written where it does not expand."""
+        raw = authored.parse(authored.dump(self.chain if chain is None else chain))
         data, _ = resolve._expand(
             getattr(self.st, "library", None), self.st.templates_dir / self.name, self.key, raw
         )
@@ -495,7 +505,139 @@ def delete_chain(d: Draft) -> None:
     d._chain = None
 
 
-#: Every op by name. E and F add theirs here.
+# ── field ops ──
+
+
+def _get(obj: object, field: str) -> object:
+    for key in field.split(PATH_SEPARATOR):
+        obj = obj.get(key) if isinstance(obj, Mapping) else None
+    return obj
+
+
+def _unset(obj: dict, field: str) -> None:
+    """Delete dotted `field` from `obj`, and each mapping above it that it empties."""
+    *outer, last = field.split(PATH_SEPARATOR)
+    trail = [obj]
+    for key in outer:
+        if not isinstance(trail[-1].get(key), dict):
+            return
+        trail.append(trail[-1][key])
+    trail[-1].pop(last, None)
+    for parent, key in zip(reversed(trail[:-1]), reversed(outer), strict=True):
+        if parent[key]:
+            break
+        del parent[key]
+
+
+def set_field(d: Draft, path: str, field: str, value: object) -> None:
+    """The prototype's `setField` and `setTaskField`: `field` dotted."""
+    if field == "id":
+        raise OpError("rename it with rename")
+    target = d.at(path)
+    if field == "on_base_changed.restart_from" and value in (None, ""):
+        d.drop(path, "on_base_changed")
+        return
+    if value in (None, "") or (field == "artifact_required" and value is False):
+        _unset(target, field)
+        if field == "artifact":
+            _unset(target, "artifact_required")
+        return
+    d.put(path, field, value)
+    # The value the component would have without the key: inherited, not set.
+    without = copy.deepcopy(d.chain)
+    _unset(authored.at(without, path), field)
+    if _get(authored.at(d.expanded(without), path), field) == value:
+        _unset(target, field)
+    if field == "profile":
+        target.pop("model", None)
+        target.pop("effort", None)
+    elif field in ("model", "effort"):
+        target.pop("profile", None)
+
+
+def reset_field(d: Draft, path: str, field: str | None = None) -> None:
+    """Remove `field` from the file so the inherited or default value applies;
+    with none, every override of a component that extends a library one."""
+    target = d.at(path)
+    if field is not None:
+        _unset(target, field)
+        return
+    if not target.get("extends"):
+        raise OpError(f"{path} extends nothing, so it has no overrides to reset")
+    for key in [k for k in target if k not in _KEPT]:
+        del target[key]
+
+
+def _rename_chain(d: Draft, id: str) -> dict:
+    area = store.AREAS["chains"]
+    if not (area.renames and area.valid(id)):
+        raise OpError(f"{id!r} is not a chain id")
+    (name,) = area.files(id)
+    # A file this draft holds is taken unless an earlier rename nulled it.
+    taken = (
+        d.files[name] is not None
+        if name in d.files
+        else resolve.published(d.st.templates_dir, [name])[name] is not None
+        or d.st.db.read(lambda c: store.get(c, "chains", id)) is not None
+    )
+    if taken:
+        raise OpError(f"chain {id!r} already exists")
+    authored.put(d.chain, "", "id", id)
+    d.files[d.name] = None
+    d.dirty.add(d.name)
+    d.key, d.name = id, name
+    d.dirty.add(name)
+    return {"updated": []}
+
+
+def rename(d: Draft, path: str, id: str) -> dict:
+    """A node or gate with every `reject_to` and `restart_from` naming it; a
+    step, a task or a slot's task, its id only; the chain (`path: ""`), its
+    file."""
+    parent, _, old = path.rpartition(PATH_SEPARATOR)
+    if id == (old if path else d.key):
+        return {"updated": []}
+    if not path:
+        return _rename_chain(d, id)
+    if old in (JUDGE_SEGMENT, AUTO_REVIEW_SEGMENT, "escalation") or (
+        parent.rpartition(PATH_SEPARATOR)[2] == "escalation"
+    ):
+        d.put(path, "id", _check_id(id, ()))
+        return {"updated": []}
+    what, items = d.member(path)
+    _check_id(id, _ids(items))
+    refs: list[dict] = []
+    if what == "node":
+        nodes = d.expanded()["nodes"]
+        refs = references(nodes, old)
+        if any(n.get("id") == old and _restart_from(n) == old for n in nodes):
+            d.put(old, "on_base_changed.restart_from", id)
+        for ref in refs:
+            d.put(ref["path"], ref["field"], id)
+    items[_index(items, old)]["id"] = id
+    return {"updated": refs}
+
+
+def set_fragment(d: Draft, path: str, yaml: str) -> None:
+    """The per-component YAML tab: the fragment replaces the authored
+    component at `path`."""
+    try:
+        fragment = authored.parse(yaml)
+    except YAMLError as exc:
+        line, col = positions.yaml_mark(exc) or (1, 1)
+        message = getattr(exc, "problem", None) or str(exc)
+        raise OpError(f"line {line}, column {col}: {message}", line=line, col=col) from None
+    if not isinstance(fragment, dict):
+        raise OpError("the fragment is not a mapping")
+    target = d.at(path)
+    if fragment.get("id") != target.get("id"):
+        raise OpError("the fragment changes the id; rename it with rename")
+    target.clear()
+    target.update(fragment)
+    authored.normalise(d.chain)
+
+
+#: Every op by name. F adds its own here.
 OPS: dict[str, Callable[..., dict | None]] = {
     "add_node": add_node,
     "add_step": add_step,
@@ -508,6 +650,10 @@ OPS: dict[str, Callable[..., dict | None]] = {
     "change_base": change_base,
     "new_chain": new_chain,
     "delete_chain": delete_chain,
+    "set_field": set_field,
+    "reset_field": reset_field,
+    "rename": rename,
+    "set_fragment": set_fragment,
 }
 
 

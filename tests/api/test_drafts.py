@@ -172,3 +172,22 @@ def test_new_chain_creates_a_key_that_had_neither_a_file_nor_a_draft(client):
     got = client.get("/api/drafts/chains/fresh").json()
     assert got["draft"] is True
     assert got["result"]["model"]["chains/fresh.yaml"]["nodes"] == [{"id": "first", "kind": "gate"}]
+
+
+def test_a_renamed_chain_keeps_its_draft_and_publishes_under_the_new_id(client, templates_dir):
+    rename = {"op": "rename", "path": "", "id": "quick"}
+    assert post_ops(client, rename, key="quick-task").status_code == 200
+    # The next request edits the moved file, by op and as typed.
+    assert post_ops(client, ADD_GATE, key="quick-task").status_code == 200
+    text = client.get("/api/drafts/chains/quick-task").json()["files"]["chains/quick.yaml"]
+    r = client.put("/api/drafts/chains/quick-task/files/chains/quick.yaml", json={"text": text})
+    assert r.json()["result"]["resolved"]["id"] == "quick"
+
+    assert client.post("/api/drafts/chains/quick-task/publish").status_code == 200
+    assert not (templates_dir / "chains" / "quick-task.yaml").exists()
+    assert (templates_dir / "chains" / "quick.yaml").read_text() == text
+
+
+def test_a_fragment_yaml_error_answers_its_line_and_column(client):
+    r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": "id: spec\nkind: [\n"})
+    assert (r.status_code, r.json()["line"], r.json()["col"]) == (422, 3, 1)

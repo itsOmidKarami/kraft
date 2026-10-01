@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from kraft.drafts import authored, resolve
+from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.library import TemplateLibrary
 
 CHAIN = "chains/scratch.yaml"
@@ -118,3 +119,41 @@ async def test_a_serialized_file_warns_when_its_published_text_has_a_comment(
 ):
     result = scratch(st, SCRATCH, published=published, serialized=serialized)
     assert bool(result["warnings"]) is warned
+
+
+async def test_sources_name_the_layer_each_value_comes_from(st):
+    st.instance_policy = InstancePolicy.from_input(
+        InstancePolicyInput.model_validate({"defaults": {"tasks": {"budget_usd": 2}}})
+    )
+    name = "chains/default.yaml"
+    files = resolve.published(st.templates_dir, [name])
+    own = files[name].replace(
+        "extends: spec_author\n", "extends: spec_author\n        prompt: Mine.\n"
+    )
+    sources = resolve.resolve(st, "chains", "default", {name: own}, files)["sources"]
+    task = sources["implementation.main.implement"]
+    assert sources["spec.main.author"]["prompt"] == {"value": "Mine.", "source": "chain"}
+    assert sources["spec_approval"]["reject_to"] == {"value": "spec", "source": "chain"}
+    assert task["harness"] == {"value": "claude", "source": "library:tasks.implementer"}
+    assert task["policy.time_cap_minutes"] == {"value": 120, "source": "library:tasks.implementer"}
+    assert task["policy.budget_usd"] == {"value": 2, "source": "policy"}
+    assert task["model"] == {"value": None, "source": "default"}
+    # The nearest ancestor that sets it: the library node, not the judge's own base.
+    assert sources["verification.fix_loop.judge"]["id"]["source"] == "library:nodes.verification"
+    assert sources["verification.fix_loop.judge"]["skill"]["source"] == "library:tasks.strict_judge"
+
+
+@pytest.mark.parametrize(
+    ("policy", "values"),
+    [
+        (None, {"auto_escalate_delay_s": 0, "auto_review_attempts": 1}),
+        (
+            SimpleNamespace(auto_escalate_delay_s=30, auto_review_attempts=2),
+            {"auto_escalate_delay_s": 30, "auto_review_attempts": 2},
+        ),
+    ],
+    ids=["defaults", "configured"],
+)
+async def test_policy_values_are_the_instances(st, policy, values):
+    st.policy = policy
+    assert scratch(st, SCRATCH)["policy_values"] == values

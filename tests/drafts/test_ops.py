@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kraft.drafts import ops, resolve
+from kraft.drafts import authored, ops, resolve
 from kraft.templates.library import TemplateLibrary
 
 
@@ -32,9 +32,11 @@ def apply(st, *batch, key="default"):
     answers = ops.apply(draft, [{"op": op, **fields} for op, fields in batch])
     files = draft.finish()
     result = resolve.resolve(st, "chains", key, files, published)
-    model = result["model"][name]
+    model = result["model"][resolve.chain_file(key, files)]
     return SimpleNamespace(
         answers=[a.get("result") for a in answers],
+        files=files,
+        model=model,
         text=files[name],
         nodes={n["id"]: n for n in model["nodes"]} if model else None,
         order=[n["id"] for n in model["nodes"]] if model else None,
@@ -240,3 +242,160 @@ async def test_delete_chain_is_a_problem_only_while_a_repo_defaults_to_it(st):
     assert r.text is None
     assert r.problems == [(None, None, "repo /b defaults to it")]
     assert apply(st, ("delete_chain", {}), key="quick-task").problems == []
+
+
+def fields(path, *pairs):
+    return [("set_field", {"path": path, "field": f, "value": v}) for f, v in pairs]
+
+
+GATE = {
+    "id": "spec_approval",
+    "kind": "gate",
+    "message": "Review and approve the specification.",
+    "artifact": "spec",
+    "reject_to": "spec",
+}
+
+
+@pytest.mark.parametrize(
+    ("path", "pairs", "after"),
+    [
+        (
+            "spec.main.author",
+            [("model", "opus"), ("effort", "high"), ("profile", "strong")],
+            {"id": "author", "extends": "spec_author", "profile": "strong"},
+        ),
+        (
+            "spec.main.author",
+            [("profile", "strong"), ("model", "opus")],
+            {"id": "author", "extends": "spec_author", "model": "opus"},
+        ),
+        (
+            "implementation.main.implement",
+            [("policy.time_cap_minutes", 120)],
+            {"id": "implement", "extends": "implementer"},
+        ),
+        (
+            "implementation.main.implement",
+            [("policy.time_cap_minutes", 90)],
+            {"id": "implement", "extends": "implementer", "policy": {"time_cap_minutes": 90}},
+        ),
+        ("spec_approval", [("message", "")], {k: v for k, v in GATE.items() if k != "message"}),
+        (
+            "spec_approval",
+            [("artifact_required", True), ("artifact", None)],
+            {k: v for k, v in GATE.items() if k != "artifact"},
+        ),
+        ("spec_approval", [("artifact_required", True), ("artifact_required", False)], GATE),
+    ],
+    ids=[
+        "profile-drops-model-and-effort",
+        "model-drops-profile",
+        "equal-to-inherited-leaves-no-key",
+        "an-override-stays",
+        "empty-removes",
+        "no-artifact-drops-artifact-required",
+        "artifact-required-false-removes",
+    ],
+)
+async def test_set_field(st, path, pairs, after):
+    r = apply(st, *fields(path, *pairs))
+    assert authored.at(r.model, path) == after
+    assert r.problems == []
+
+
+async def test_an_empty_restart_from_drops_on_base_changed_whole(st):
+    path = "merge_request_feedback"
+    r = apply(
+        st,
+        ("add_handler", {"path": path, "kind": "on_conflict"}),
+        *fields(path, ("on_base_changed.restart_from", "")),
+    )
+    assert authored.at(r.model, path) == {"id": path, "extends": "post_draft_feedback"}
+
+
+async def test_set_field_refuses_the_id(st):
+    assert "rename it with rename" in refused(st, *fields("spec", ("id", "x")))
+
+
+async def test_reset_field_removes_one_override_or_every_one(st):
+    path = "implementation.main.implement"
+    overrides = fields(path, ("icon", "hammer"), ("model", "opus"), ("policy.budget_usd", 2))
+    one = apply(st, *overrides, ("reset_field", {"path": path, "field": "policy.budget_usd"}))
+    assert authored.at(one.model, path) == {
+        "id": "implement", "extends": "implementer", "icon": "hammer", "model": "opus"
+    }  # fmt: skip
+    every = apply(st, *overrides, ("reset_field", {"path": path}))
+    assert authored.at(every.model, path) == {
+        "id": "implement",
+        "extends": "implementer",
+        "icon": "hammer",
+    }
+    assert "extends nothing" in refused(st, ("reset_field", {"path": "spec_approval"}))
+
+
+async def test_renaming_a_node_rewrites_and_lists_every_reference_to_it(st):
+    r = apply(
+        st,
+        *fields("merge_request_feedback", ("on_base_changed.restart_from", "implementation")),
+        ("rename", {"path": "implementation", "id": "build"}),
+    )
+    assert r.answers[1] == {
+        "updated": [
+            {"path": "local_review", "field": "reject_to"},
+            {"path": "merge_request_feedback", "field": "on_base_changed.restart_from"},
+            {"path": "final_review", "field": "reject_to"},
+        ]
+    }
+    assert r.nodes["local_review"]["reject_to"] == r.nodes["final_review"]["reject_to"] == "build"
+    assert r.nodes["merge_request_feedback"]["on_base_changed"] == {"restart_from": "build"}
+    assert r.problems == []
+
+
+async def test_renaming_a_task_or_a_slot_changes_its_id_only(st):
+    r = apply(
+        st,
+        ("rename", {"path": "spec.main.author", "id": "writer"}),
+        ("rename", {"path": "verification.fix_loop.judge", "id": "arbiter"}),
+    )
+    assert r.answers == [{"updated": []}, {"updated": []}]
+    assert "spec.main.writer" in r.paths
+    assert authored.at(r.model, "verification.fix_loop.judge")["id"] == "arbiter"
+    assert "already taken" in refused(
+        st, ("rename", {"path": "draft_merge_request.open", "id": "rebase"})
+    )
+
+
+async def test_renaming_the_chain_moves_its_file(st):
+    (st.templates_dir / "repos.yaml").write_text("repos:\n  - {path: /b}\n")
+    r = apply(st, ("rename", {"path": "", "id": "renamed"}))
+    assert r.files["chains/default.yaml"] is None
+    assert r.files["chains/renamed.yaml"].startswith("id: renamed\n")
+    assert "spec.main.author" in r.paths
+    assert r.problems == [(None, None, "repo /b defaults to it")]
+    assert "already exists" in refused(st, ("rename", {"path": "", "id": "quick-task"}))
+    back = apply(st, *[("rename", {"path": "", "id": id}) for id in ("renamed", "default")])
+    assert back.files["chains/renamed.yaml"] is None
+    assert back.text.startswith("id: default\n")
+
+
+async def test_set_fragment_replaces_the_component(st):
+    fragment = "id: spec\nkind: exec\ntasks:\n  - {id: author, extends: spec_author, model: opus}\n"
+    r = apply(
+        st,
+        ("set_fragment", {"path": "spec", "yaml": fragment}),
+        *fields("spec.main.author", ("effort", "high")),
+    )
+    assert authored.at(r.model, "spec.main.author") == {
+        "id": "author", "extends": "spec_author", "model": "opus", "effort": "high"
+    }  # fmt: skip
+    assert "spec.main.author" in r.paths
+    why = refused(st, ("set_fragment", {"path": "spec", "yaml": "id: other\nkind: exec\n"}))
+    assert "rename it with rename" in why
+
+
+async def test_a_fragment_yaml_error_is_at_the_fragments_own_line(st):
+    with pytest.raises(ops.OpError) as exc:
+        apply(st, ("set_fragment", {"path": "spec", "yaml": "id: spec\nkind: exec\ntasks: [\n"}))
+    assert exc.value.extra == {"line": 4, "col": 1}
+    assert str(exc.value).startswith("line 4, column 1: ")
