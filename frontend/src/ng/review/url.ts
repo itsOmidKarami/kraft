@@ -7,7 +7,7 @@ import type { CompareTarget, WorkItem } from "../../types";
 export interface ReviewPlace {
   from: CompareTarget;
   to: CompareTarget;
-  /** null: every node. */
+  /** null: every node; empty: none (the All box unticked). */
   nodes: string[] | null;
   file: string | null;
   gate: string | null;
@@ -27,11 +27,10 @@ export function defaultFrom(item: Defaults): CompareTarget {
 export function readReview(search: URLSearchParams, item: Defaults): ReviewPlace {
   const from = search.get("from");
   const to = search.get("to");
-  const nodes = search.get("nodes");
   return {
     from: isTarget(from) && from !== "latest" ? from : defaultFrom(item),
     to: isTarget(to) ? to : "latest",
-    nodes: nodes ? nodes.split(",").filter(Boolean) : null,
+    nodes: search.has("nodes") ? (search.get("nodes") ?? "").split(",").filter(Boolean) : null,
     file: search.get("file") || null,
     gate: search.get("gate") || item.pending_gate || null,
     doc: search.get("doc") === "1",

@@ -11,3 +11,56 @@
 .tok-com { color: var(--text-muted); font-style: italic; }
 .tok-name { color: var(--text); font-weight: 500; }
 .is-plain-code :is(.tok-kw, .tok-str, .tok-num, .tok-com, .tok-name) { color: inherit; font-style: inherit; font-weight: inherit; }
+
+/* Toolbar (prototype 352–410). */
+.rv-toolbar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--text-muted); }
+.rv-compare { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.rv-word { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); font: 500 12.5px ui-monospace, Menlo, monospace; cursor: pointer; }
+.rv-word:is(:hover, :focus-visible), .rv-word[aria-expanded="true"] { border-color: var(--border); background: var(--line); }
+.rv-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-sub); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.rv-pill:is(:hover, :focus-visible), .rv-pill[aria-expanded="true"] { background: var(--line); color: var(--text); }
+.rv-tree-toggle { border: 1px solid var(--border); }
+.rv-spacer { flex: 1 1 auto; }
+.rv-checklist { display: flex; flex-direction: column; min-width: 240px; }
+.rv-check { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12.5px; text-align: left; cursor: pointer; }
+.rv-check:is(:hover, :focus-visible) { background: var(--line); }
+.rv-check-label { flex: 1 1 auto; }
+.rv-check-count { color: var(--text-muted); font-size: 11.5px; }
+.rv-check-rule { height: 1px; margin: 4px 0; background: var(--line); }
+.rv-box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; line-height: 1; color: transparent; }
+.rv-box.is-on { border-color: var(--text-sub); background: var(--text-sub); color: var(--bg); }
+.rv-tick { flex: none; width: 16px; text-align: center; }
+.rv-mono { font-family: ui-monospace, Menlo, monospace; }
+.rv-muted { color: var(--text-muted); }
+.rv-error { margin: 0; font-size: 12px; color: var(--bad); }
+.rv-bar-error { padding: 4px 16px; }
+.rv-add { color: var(--diff-add-theme); font: 11px ui-monospace, Menlo, monospace; }
+.rv-del { color: var(--diff-del-theme); font: 11px ui-monospace, Menlo, monospace; }
+
+/* The body: the tree and the diff column, the page's only scrollers. */
+.rv-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; }
+.rv-diff { flex: 1 1 0; min-width: 0; overflow: auto; }
+.rv-empty { padding: 28px; font-size: 12.5px; color: var(--text-muted); }
+.rv-empty p { margin: 0 0 12px; }
+
+/* File tree (prototype 412–417). Under 1024 it opens over the diff (R7). */
+.rv-tree { flex: none; width: 260px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--bg); }
+.rv-body.is-overlay .rv-tree { position: absolute; inset: 0 auto 0 0; z-index: 5; width: min(300px, calc(100% - 40px)); box-shadow: 4px 0 18px color-mix(in oklab, var(--side) 50%, transparent); }
+.rv-tree-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; font-size: 12px; color: var(--text-sub); }
+.rv-tree-count { flex: 1 1 auto; }
+.rv-tree-filter { margin: 0 10px 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; }
+.rv-tree-body { flex: 1 1 0; min-height: 0; overflow: auto; padding: 0 6px 6px; }
+.rv-folder-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 11.5px; text-align: left; cursor: pointer; }
+.rv-folder-row.is-static { cursor: default; }
+.rv-folder-row:not(.is-static):is(:hover, :focus-visible) { background: var(--line); }
+.rv-file-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; }
+.rv-file-row.is-nested { padding-left: 20px; }
+.rv-file-row.is-on { background: var(--line); }
+.rv-file-row:hover { background: color-mix(in oklab, var(--line) 60%, transparent); }
+.rv-viewed { flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.rv-viewed.is-on { color: var(--ok); }
+.rv-viewed:is(:hover, :focus-visible) { background: var(--line); }
+.rv-file-name { flex: 1 1 auto; min-width: 0; padding: 3px 0; border: 0; background: transparent; color: var(--text-sub); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.rv-file-row.is-on .rv-file-name { color: var(--text); }
+.rv-tree-threads { flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-2); color: var(--text-sub); font-size: 10.5px; text-align: center; }
+.rv-tree-foot { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--text-muted); }

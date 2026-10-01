@@ -50,3 +50,23 @@ export function useThreads(id: string) {
   }, [relevant, fetchNow]);
   return { ...got, reload: fetchNow };
 }
+
+/** Viewed marks (B11): the comparison's own, overlaid by what was clicked since
+ *  it loaded. A click is sent at once and taken back, with the server's words,
+ *  if refused. */
+export function useViewed(id: string, to: CompareTarget, compare: Fetched<Compare>) {
+  const [marks, setMarks] = useState<Record<string, boolean>>({});
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setMarks({}), [compare]);
+  const files = compare.state === "ready" ? compare.data.files : [];
+  const isViewed = (path: string) => marks[path] ?? files.find((f) => f.path === path)?.viewed ?? false;
+  const toggle = async (path: string, viewed: boolean) => {
+    setMarks((m) => ({ ...m, [path]: viewed }));
+    const q = new URLSearchParams({ file: path, to });
+    const { status, body } = await request(`/work-items/${encodeURIComponent(id)}/viewed?${q}`, { method: viewed ? "PUT" : "DELETE" });
+    if (status === 200) return setError(null);
+    setMarks((m) => ({ ...m, [path]: !viewed }));
+    setError(detailOf(body));
+  };
+  return { isViewed, toggle, error };
+}

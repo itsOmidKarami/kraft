@@ -11,14 +11,16 @@ export interface MenuItem {
   checked?: boolean;
   /** Right-aligned and muted, e.g. a count. */
   hint?: string;
+  /** A second, quieter line under the label. */
+  sub?: string;
 }
 
 /** A button that opens a list of actions. Focus moves into the list; ↑/↓,
  *  Home and End move it; Escape, or picking an item, closes the list and
  *  hands focus back to the button. With `triggerClass` the trigger is a text
  *  button named by its own text (the list keeps `label`); `note` is a line
- *  under the items. */
-export function Menu({ label, trigger, items, triggerClass, note }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string }) {
+ *  under the items, `heading` a small title above them. */
+export function Menu({ label, trigger, items, triggerClass, note, heading }: { label: string; trigger: ReactNode; items: MenuItem[]; triggerClass?: string; note?: string; heading?: string }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -50,6 +52,7 @@ export function Menu({ label, trigger, items, triggerClass, note }: { label: str
       </button>
       <Popover anchor={button} open={open} onClose={close} role="menu" label={label}>
         <div onKeyDown={onKey} className="menu">
+          {heading && <span className="menu-heading" aria-hidden="true">{heading}</span>}
           {items.map((it, i) => (
             <button
               key={it.label}
@@ -66,7 +69,14 @@ export function Menu({ label, trigger, items, triggerClass, note }: { label: str
               }}
             >
               {it.checked !== undefined && <span className="menu-mark" aria-hidden>{it.checked ? "✓" : ""}</span>}
-              {it.label}
+              {it.sub ? (
+                <span className="menu-text">
+                  <span>{it.label}</span>
+                  <span className="menu-sub">{it.sub}</span>
+                </span>
+              ) : (
+                it.label
+              )}
               {it.hint && <span className="menu-hint">{it.hint}</span>}
             </button>
           ))}
