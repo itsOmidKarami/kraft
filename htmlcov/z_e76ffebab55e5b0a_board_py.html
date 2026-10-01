@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_check_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-01 17:09 +0000
+            created at 2026-10-01 18:06 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -157,7 +157,7 @@
     <p class="pln"><span class="n"><a id="t75" href="#t75">75</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The `work_item_needs_human` payload of the stop the item is *currently*</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t76" href="#t76">76</a></span><span class="t"><span class="str">    sitting on (or None if anything in `_STOP_BOUNDARY` superseded it), and</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t77" href="#t77">77</a></span><span class="t"><span class="str">    whether an `escalation_message` landed after that boundary event -- the</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t78" href="#t78">78</a></span><span class="t"><span class="str">    same episode `deriveState` bounds client-side (an escalation from an</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t78" href="#t78">78</a></span><span class="t"><span class="str">    same episode the shipped UI&#x27;s `deriveState` bounded client-side (an escalation from an</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t79" href="#t79">79</a></span><span class="t"><span class="str">    earlier, already-superseded stop must not read as live). One event scan</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t80" href="#t80">80</a></span><span class="t"><span class="str">    for both, so `display_status` costs the detail route nothing beyond what</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t81" href="#t81">81</a></span><span class="t"><span class="str">    `_current_stop` already read.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
@@ -906,7 +906,7 @@
     <p class="run run2"><span class="n"><a id="t824" href="#t824">824</a></span><span class="t">        <span class="com"># source line (point 4). Deliberately not `budget` -- that key is</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t825" href="#t825">825</a></span><span class="t">        <span class="com"># `item.budget` client-side, `{scope, spent_usd, cap_usd} | null`,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t826" href="#t826">826</a></span><span class="t">        <span class="com"># derived purely from a `work_item_needs_human` event&#x27;s payload</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t827" href="#t827">827</a></span><span class="t">        <span class="com"># (`store.applyEvent`) and used by `deriveState`/`BudgetCard` to mean</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t827" href="#t827">827</a></span><span class="t">        <span class="com"># (`store.applyEvent`) and used by the shipped UI&#x27;s budget card to mean</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t828" href="#t828">828</a></span><span class="t">        <span class="com"># &quot;a spend cap is what stopped this item right now&quot;. This is a</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t829" href="#t829">829</a></span><span class="t">        <span class="com"># different, always-present question -- the item&#x27;s effective cap and</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t830" href="#t830">830</a></span><span class="t">        <span class="com"># where it comes from -- and reusing the name would make every GET</span>&nbsp;</span><span class="r"></span></p>
@@ -1023,7 +1023,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_check_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-01 17:09 +0000
+            created at 2026-10-01 18:06 +0000
         </p>
     </div>
 </footer>
