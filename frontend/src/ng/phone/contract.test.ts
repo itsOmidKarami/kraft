@@ -43,6 +43,15 @@ const ALLOWED = [
   "templates/draft/types",
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
+  "settings/policy/ctx", // the policy sections' shared context type and problemAt
+  "settings/policy/keys", // the set_value keys the Policy page sends
+  "settings/policy/sections", // which section a key or a problem belongs to
+  "settings/policy/types", // the policy draft's resolve
+  "settings/policy/units", // how a number reads and parses
+  "settings/intake/checks", // the check sentence and its time
+  "settings/intake/cron", // a cron in words
+  "settings/intake/types", // the intake draft's resolve and a check row
+  "settings/intake/units", // minutes on the page, seconds on the wire
   "harnesses/model", // the harnesses draft's resolve, as types and pure helpers
   "harnesses/ops", // entryOp: the one set_profile patch
   "harnesses/useProviders", // the providers' accepted efforts and models

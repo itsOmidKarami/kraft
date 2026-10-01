@@ -44,7 +44,7 @@ export function parentOf(href: string): string | null {
     // Policy's section is a tab of one screen, not a page.
     if (area === "/settings/policy" || !rest.length) return "/more";
     if (rest.length >= 2 && rest[rest.length - 2] === "nodes") return `${area}${rest.slice(0, -2).map((s) => `/${s}`).join("")}`;
-    if (rest.length >= 2 && rest[0] === "profiles") return area;
+    if (rest.length >= 2 && (rest[0] === "profiles" || rest[0] === "schedules")) return area;
     return `${area}${rest.slice(0, -1).map((s) => `/${s}`).join("")}`;
   }
   return "/";

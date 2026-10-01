@@ -40,3 +40,5 @@
 .ph-actions-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .ph-actions-row > .ph-btn { flex: 1; }
 .ph-area-search { margin: 0; }
+.ph-intake-status { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--text-muted); border-radius: 10px; background: var(--side); font-size: 13.5px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.ph-intake-status.ph-is-on { border-left-color: var(--ok); }

@@ -5,6 +5,8 @@ import { Item } from "./item/Item";
 import { ChainNodeView, ChainsList, ChainView } from "./areas/Chains";
 import { HarnessesList, HarnessView, ProfileView } from "./areas/Harnesses";
 import { LibraryComponentView, LibraryList } from "./areas/Library";
+import { IntakeScreen, ScheduleScreen } from "./areas/Intake";
+import { PolicyScreen } from "./areas/Policy";
 import { ReposList, RepoView } from "./areas/Repos";
 import { More } from "./more/More";
 import { Search } from "./search/Search";
@@ -59,6 +61,10 @@ export function PhoneApp() {
           <Route path="/templates/repos/:repo" element={<RepoView />} />
           <Route path="/templates/*" element={<Soon title="Templates" />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
+          <Route path="/settings/policy" element={<Navigate to="/settings/policy/limits" replace />} />
+          <Route path="/settings/policy/:section" element={<PolicyScreen />} />
+          <Route path="/settings/auto-intake" element={<IntakeScreen />} />
+          <Route path="/settings/auto-intake/schedules/:index" element={<ScheduleScreen />} />
           <Route path="/settings/*" element={<Soon title="Settings" />} />
           {/* The shipped addresses that moved (spec §11.2), after the screens: /search is a phone screen and wins over its alias to the board. */}
           {ALIASES.map(([from, to]) => <Route key={from} path={from} element={<Alias to={to} />} />)}

@@ -25,6 +25,8 @@ describe("parentOf", () => {
     expect(parentOf("/templates/chains/default/nodes/verification")).toBe("/templates/chains/default");
     expect(parentOf("/templates/library/implementation")).toBe("/templates/library");
     expect(parentOf("/templates/harnesses/profiles/strong")).toBe("/templates/harnesses");
+    expect(parentOf("/settings/auto-intake/schedules/2")).toBe("/settings/auto-intake");
+    expect(parentOf("/settings/auto-intake")).toBe("/more");
     expect(parentOf("/settings/policy/loops")).toBe("/more");
     expect(parentOf("/settings/about")).toBe("/more");
   });

@@ -1,6 +1,7 @@
 import { ChevronRight, Pencil, Plus, type LucideIcon } from "lucide-react";
 import { useCallback, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { showToast } from "../../ui/Toast";
 import { ChoiceSheet, EditSheet, useSheet, type Option } from "../nav/Sheet";
 import "./areas.css";
 
@@ -83,8 +84,9 @@ export function Group({ title, add, note, rows, foot, children }: { title?: stri
 
 /** What an edit sheet asks: a choice of options, or text. `set` answers the server's refusal, or null once it took. */
 export type Edit =
+  | { kind: "menu"; title: string; help?: string; options: Option[]; pick: (v: string) => Edit | Promise<string | null> }
   | { kind: "choice"; title: string; help?: string; options: Option[]; value: string | null; set: (v: string) => Promise<string | null> }
-  | { kind: "text"; title: string; help?: string; value: string; placeholder?: string; secret?: boolean; submit?: string; set: (v: string) => Promise<string | null> };
+  | { kind: "text"; title: string; help?: string; value: string; placeholder?: string; secret?: boolean; multiline?: boolean; submit?: string; set: (v: string) => Promise<string | null> };
 
 /** The one edit sheet of an area: `edit(spec)` opens it, a refusal stays inside it, a taken value closes it. */
 export function useEditor() {
@@ -106,12 +108,25 @@ export function useEditor() {
     if (err) setError(err);
     else sheet.close();
   };
+  const pick = async (m: Extract<Edit, { kind: "menu" }>, v: string) => {
+    const next = m.pick(v);
+    if (!("then" in next)) {
+      setSpec(next);
+      setError(null);
+      return;
+    }
+    const err = await next;
+    if (err) showToast(err);
+    sheet.close();
+  };
   const node =
     sheet.is("edit") && spec ? (
-      spec.kind === "choice" ? (
+      spec.kind === "menu" ? (
+        <ChoiceSheet title={spec.title} text={spec.help} options={spec.options} onPick={(v) => void pick(spec, v)} onClose={sheet.close} />
+      ) : spec.kind === "choice" ? (
         <ChoiceSheet title={spec.title} text={spec.help} options={spec.options} value={spec.value} onPick={(v) => void submit(v)} onClose={sheet.close} />
       ) : (
-        <EditSheet title={spec.title} text={spec.help} initial={spec.value} placeholder={spec.placeholder} secret={spec.secret} submitLabel={spec.submit ?? "Set"} error={error} busy={busy} onSubmit={(v) => void submit(v)} onClose={sheet.close} />
+        <EditSheet title={spec.title} text={spec.help} initial={spec.value} placeholder={spec.placeholder} secret={spec.secret} multiline={spec.multiline} submitLabel={spec.submit ?? "Set"} error={error} busy={busy} onSubmit={(v) => void submit(v)} onClose={sheet.close} />
       )
     ) : null;
   return { edit, node, sheet };
