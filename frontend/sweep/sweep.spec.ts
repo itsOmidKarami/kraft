@@ -583,6 +583,27 @@ const CASES: Case[] = [
     await c.page.getByRole("button", { name: "Review & publish" }).click();
     await settle(c.page, 500);
   } },
+  { screen: "ng-chains", variant: "yaml", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "YAML", exact: true }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "problems", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "broken");
+    await c.page.getByRole("button", { name: "YAML", exact: true }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "yaml-error", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "yaml-error");
+    await c.page.getByRole("button", { name: "YAML", exact: true }).click();
+    await settle(c.page, 500);
+  } },
+  { screen: "ng-chains", variant: "item-yaml", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec_approval, gate" }).click();
+    await c.page.getByRole("tab", { name: "YAML" }).click();
+    await settle(c.page, 500);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");

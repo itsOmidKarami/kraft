@@ -6,12 +6,15 @@ import type { ConfigDraft } from "../draft/useConfigDraft";
 import { authoredAt, authoredNodes, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
 import { problemText } from "../problems";
 import { Config } from "./Config";
+import { ItemYaml } from "./ItemYaml";
 import { crumbPath, describe, type PaneKind } from "./describe";
 import { Overview, type PaneCtx } from "./Overview";
 import "./panes.css";
 
 const FIXED_ICON: Partial<Record<PaneKind, string>> = { chain: "workflow", fixloop: "refresh-cw", judge: "scale" };
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }];
+/** Every pane but the chain's has its own YAML (Decisions §9 Item YAML). */
+const TABS_YAML = [...TABS, { value: "yaml", label: "YAML" }];
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** Keys a component that extends a library one can own without being an override. */
 const NOT_OVERRIDES = new Set(["id", "extends", "icon", "kind", "on_failure"]);
@@ -66,7 +69,8 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
         return `${taskKind ? `${taskKind} task` : "task"}${ext}${valueAt(r, chain, path, "scope") === "each_repository" ? " · × each repository" : ""}`;
     }
   })();
-  const tabs = d.kind === "fixloop" ? undefined : TABS;
+  const tabs = d.kind === "fixloop" ? undefined : d.kind === "chain" ? TABS : TABS_YAML;
+  const shownTab = tabs?.some((x) => x.value === tab) ? tab : "overview";
   const node = d.node ? (authoredNodes(r, chain).find((n) => n.id === d.node) as NodeA | undefined) : undefined;
   const icon = FIXED_ICON[d.kind] ?? (typeof res?.icon === "string" ? res.icon : undefined);
   const footer = overrides > 0 ? <Button onClick={() => draft.ops([{ op: "reset_field", path }])}>Reset all overrides</Button> : undefined;
@@ -83,7 +87,7 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
       sub={sub}
       prob={probs.length ? { msg: problemText(probs[0]) + (probs.length > 1 ? ` (+${probs.length - 1} more)` : ""), fix: probs[0].field ? `at ${probs[0].field}${probs[0].line ? `, line ${probs[0].line}` : ""}` : probs[0].line ? `line ${probs[0].line}` : undefined } : undefined}
       tabs={tabs}
-      tab={tabs ? tab : undefined}
+      tab={tabs ? shownTab : undefined}
       onTab={setTab}
       onCollapse={onCollapse}
       onExpand={onExpand}
@@ -95,7 +99,9 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
           <Config kind={d.kind} ctx={ctx} />
           <Overview kind={d.kind} ctx={ctx} />
         </>
-      ) : tab === "config" ? <Config kind={d.kind} ctx={ctx} /> : <Overview kind={d.kind} ctx={ctx} />}
+      ) : shownTab === "config" ? <Config kind={d.kind} ctx={ctx} />
+        : shownTab === "yaml" ? <ItemYaml key={path} draft={draft} chain={chain} path={path} extendsName={typeof own?.extends === "string" ? own.extends : undefined} />
+          : <Overview kind={d.kind} ctx={ctx} />}
     </Inspector>
   );
 }

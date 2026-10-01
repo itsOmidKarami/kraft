@@ -172,4 +172,21 @@ describe("Chains page: the chain canvas", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("complementary", { name: "Draft · 2 changes pane" })).toBeNull();
   });
+
+  it("switches to the YAML view and back, and keeps you there while the YAML does not parse", async () => {
+    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "chains/default.yaml", text: "id: default\n", chain: {} });
+    mount();
+    await canvas();
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
+    expect(screen.getByRole("region", { name: "chains/default.yaml, YAML" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Chain settings" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "⇄ Canvas" }));
+    expect(screen.queryByRole("region", { name: "chains/default.yaml, YAML" })).toBeNull();
+
+    vi.mocked(d.getDraft).mockImplementation(() => ok(view({ yaml_error: { file: "chains/default.yaml", line: 2, col: 1, message: "bad" } })));
+    await userEvent.click(screen.getByRole("button", { name: "YAML" }));
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(screen.getByRole("button", { name: "⇄ Canvas" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "⇄ Canvas" })).toHaveAttribute("title", "Fix line 2 first, or revert");
+  });
 });

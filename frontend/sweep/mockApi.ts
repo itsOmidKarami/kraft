@@ -40,6 +40,19 @@ const chainView = (key: string) => {
   out.result.model[`chains/${key}.yaml`].id = key;
   return out;
 };
+/** Block YAML of a mapping, for the fragment route's sweep answer only (the server writes the real one). */
+const yamlOf = (v: unknown, ind = ""): string => {
+  if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? `${ind}- ${yamlOf(x, `${ind}  `).trimStart()}` : `${ind}- ${x}\n`)).join("");
+  if (v && typeof v === "object") return Object.entries(v).map(([k, x]) => (x && typeof x === "object" ? `${ind}${k}:\n${yamlOf(x, `${ind}  `)}` : `${ind}${k}: ${x}\n`)).join("");
+  return `${ind}${v}\n`;
+};
+/** The authored component at a canonical path in a view's model, as the fragment route answers it. */
+function fragmentOf(view: ReturnType<typeof chainView>, path: string) {
+  const [id, ...rest] = path.split(".");
+  let at = (view.result.model[`chains/${view.key}.yaml`].nodes as Record<string, any>[]).find((n) => n.id === id);
+  for (const seg of rest) at = at?.[seg] ?? at?.steps?.find((s: { id: string }) => s.id === seg) ?? at?.tasks?.find((x: { id: string }) => x.id === seg);
+  return at ? yamlOf(at) : `id: ${rest.pop() ?? id}\n`;
+}
 /** An op answered as the server would, for the ops the sweep's flows send. */
 function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknown>[]) {
   const file = `chains/${view.key}.yaml`;
@@ -366,6 +379,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         if (key === "broken" || key === "yaml-error") return json(route, { detail: "1 problem(s) to fix before publishing", problems: chainView(key).result.problems }, 422);
         return json(route, { published: [`chains/${key}.yaml`], result: { ...chainView(key).result, changes: [] } });
       }
+      if (action === "fragment") return json(route, { path: q.get("path"), text: fragmentOf(chainView(key), String(q.get("path"))) });
       const view = chainView(key);
       if (file) view.files[file] = req.postDataJSON()?.text ?? "";
       if (action === "ops") {

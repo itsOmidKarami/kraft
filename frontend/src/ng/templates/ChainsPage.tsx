@@ -13,6 +13,7 @@ import { BottomPane, handlerOf, type BottomTab } from "./BottomPane";
 import { NodeView } from "./NodeView";
 import { ChainPane } from "./panes/ChainPane";
 import { ReviewPane } from "./ReviewPane";
+import { YamlView } from "./YamlView";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
@@ -71,6 +72,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const [highlight, setHighlight] = useState<string | undefined>();
   const [published, setPublished] = useState<{ text: string; nodes: { id: string; kind: "exec" | "gate" }[] } | null | undefined>(undefined);
   const [nextProblem, setNextProblem] = useState(0);
+  // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
+  const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
 
   // The URL names the node view; the pane's level follows it.
@@ -128,19 +131,31 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     dispatch({ type: "expand", sel });
   }, [taskPaths, s.level, dispatch, navigate, chain, focusNode]);
 
+  /** The published file: the YAML diffs' left side, and where removed nodes stood. */
+  const loadPublished = useCallback(() => {
+    api.getTemplate(chain).then((f) => {
+      const nodes = ((f.chain.nodes as { id: string; kind?: string; extends?: string }[] | undefined) ?? []).map((n) => ({ id: n.id, kind: (n.kind === "gate" ? "gate" : "exec") as "exec" | "gate" }));
+      setPublished({ text: f.text, nodes });
+    }).catch(() => setPublished(null));
+  }, [chain]);
   const startReview = () => {
     if (s.level === "node") {
       dispatch({ type: "back" });
       navigate(chainUrl(chain));
     }
+    setSurface("canvas");
     setReview(true);
     setReviewOpen(true);
     setHighlight(undefined);
-    // The published file: the YAML diff's left side, and where removed nodes stood.
-    api.getTemplate(chain).then((f) => {
-      const nodes = ((f.chain.nodes as { id: string; kind?: string; extends?: string }[] | undefined) ?? []).map((n) => ({ id: n.id, kind: (n.kind === "gate" ? "gate" : "exec") as "exec" | "gate" }));
-      setPublished({ text: f.text, nodes });
-    }).catch(() => setPublished(null));
+    loadPublished();
+  };
+  const yamlErr = r.yaml_error;
+  const toggleYaml = () => {
+    // A syntax error keeps you here until it is fixed or reverted (Decisions §9 YAML): the button is disabled.
+    if (surface === "yaml") return setSurface("canvas");
+    draft.flush();
+    loadPublished();
+    setSurface("yaml");
   };
   const endReview = () => {
     setReview(false);
@@ -209,6 +224,11 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
       </HeaderTail>
       <HeaderActions>
         {s.level === "chain" && !review && (
+          <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
+            {surface === "yaml" ? "⇄ Canvas" : "YAML"}
+          </Button>
+        )}
+        {s.level === "chain" && !review && surface === "canvas" && (
           <IconButton label="Chain settings" onClick={() => dispatch({ type: "expand", sel: CHAIN_SEL })}>
             <Pencil size={14} aria-hidden />
           </IconButton>
@@ -270,6 +290,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onLeave={() => dispatch({ type: "background" })}
           />
         )}
+        {surface === "yaml" && s.level === "chain" && !review && <YamlView draft={draft} chain={chain} published={published === undefined ? undefined : published?.text ?? null} />}
         {review ? (
           <ReviewPane
             draft={draft}
