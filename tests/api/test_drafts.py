@@ -77,6 +77,61 @@ def test_publish_over_a_file_saved_since_answers_409_with_the_diff(client, templ
     assert client.get(DEFAULT).json()["draft"] is True
 
 
+def test_rebase_after_a_409_lets_the_next_publish_overwrite(client, templates_dir):
+    path = templates_dir / "chains" / "default.yaml"
+    shipped = path.read_text()
+    mine = shipped.replace("the implementation plan.", "the plan.")
+    put(client, "default", mine)
+    saved = shipped.replace("Review and approve the specification.", "Saved elsewhere.")
+    assert client.put("/api/templates/chains/default", json={"text": saved}).status_code == 200
+    assert client.post(f"{DEFAULT}/publish").status_code == 409
+
+    r = client.post(f"{DEFAULT}/rebase")
+    assert r.status_code == 200
+    assert r.json()["files"] == {"chains/default.yaml": mine}
+    assert path.read_text() == saved  # rebase writes nothing
+    assert client.post(f"{DEFAULT}/publish").status_code == 200
+    assert path.read_text() == mine
+
+
+def test_rebase_keeps_the_draft_text_and_pushes_no_undo_entry(client, templates_dir):
+    shipped = (templates_dir / "chains" / "default.yaml").read_text()
+    mine = shipped.replace("the implementation plan.", "the plan.")
+    put(client, "default", mine)
+    client.put("/api/templates/chains/default", json={"text": shipped + "\n"})
+    assert client.post(f"{DEFAULT}/rebase").json()["files"] == {"chains/default.yaml": mine}
+    # One entry (the PUT's): a second would leave the draft after this undo.
+    assert client.post(f"{DEFAULT}/undo").json()["draft"] is False
+
+
+def test_rebase_without_a_draft_is_404(client):
+    assert client.post(f"{DEFAULT}/rebase").status_code == 404
+
+
+def test_fragment_is_the_components_yaml_from_the_draft_else_the_published_file(client):
+    published = client.get(f"{DEFAULT}/fragment", params={"path": "spec"})
+    assert published.status_code == 200
+    assert published.json()["path"] == "spec"
+    assert yaml.safe_load(published.json()["text"])["id"] == "spec"
+
+    shipped = client.get(DEFAULT).json()["files"]["chains/default.yaml"]
+    put(client, "default", shipped.replace("Review and approve the specification.", "Read it."))
+    drafted = client.get(f"{DEFAULT}/fragment", params={"path": "spec_approval"}).json()["text"]
+    assert "Read it." in drafted
+    # What `set_fragment` writes back is what this serves.
+    r = post_ops(client, {"op": "set_fragment", "path": "spec_approval", "yaml": drafted})
+    assert r.status_code == 200
+    assert (
+        client.get(f"{DEFAULT}/fragment", params={"path": "spec_approval"}).json()["text"]
+        == drafted
+    )
+
+
+def test_fragment_of_an_unknown_path_is_404_and_a_missing_path_is_400(client):
+    assert client.get(f"{DEFAULT}/fragment", params={"path": "nope"}).status_code == 404
+    assert client.get(f"{DEFAULT}/fragment").status_code == 400
+
+
 def test_publish_with_a_problem_answers_422_and_writes_nothing(client, templates_dir):
     put(client, "scratch", SCRATCH.replace('command: "true"}', 'command: "true", bogus: 1}'))
 

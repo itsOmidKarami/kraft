@@ -314,7 +314,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
     /* config drafts: one static answer per key; `stale` publishes to a 409, `yaml-error` refuses ops */
-    if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops)|\/files\/(.+))?$/))) {
+    if ((m = p.match(/^\/drafts\/(chains|library)\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
       const [, area, key, action, file] = m;
       const name = area === "library" ? "library.yaml" : `chains/${key}.yaml`;
       const text = file ? req.postDataJSON()?.text : area === "library" ? "tasks: {}\n" : chainYaml(st.templates[0]?.nodes ?? []);
@@ -339,6 +339,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         ...(key === "yaml-error" ? { yaml_error: { file: name, line: 4, col: 3, message: "expected ',' or ']', but got '<stream end>'" } } : {}),
       };
       if (method === "DELETE") return route.fulfill({ status: 204 });
+      if (action === "fragment") return json(route, { path: new URL(req.url()).searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
       if (action === "publish") {
         if (key === "stale") return json(route, { detail: `published since this draft began: ${name}`, files: { [name]: { published: text, draft: text, diff: `--- published/${name}\n+++ draft/${name}\n@@ -3 +3 @@\n-    model: sonnet\n+    model: opus\n` } } }, 409);
         return json(route, { published: [name], result: { ...result, changes: [] } });
