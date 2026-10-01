@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ESCALATION, NEVER, NO_ENTRY, TASKS, problem, renderPage, resolved, serve, view } from "./testkit";
+import { ESCALATION, NEVER, NO_ENTRY, TASKS, problem, openAreaPane, renderPage, resolved, serve, view } from "./testkit";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -13,7 +13,7 @@ describe("problems", () => {
     expect(within(nav).getByRole("button", { name: "claude, Never, has a problem" })).toBeInTheDocument();
     expect(screen.getByLabelText("claude", { selector: "section" })).toHaveClass("is-red");
     expect(screen.getAllByRole("link", { name: /implement\.main\.implementer.*has a problem/ }).length).toBeGreaterThan(0);
-    const pane = screen.getByRole("complementary", { name: "harnesses pane" });
+    const pane = await openAreaPane();
     expect(pane).toHaveTextContent("implement.main.implementer: harness 'claude' is not in its allowed_harnesses");
     expect(tail).toHaveTextContent("1 PROBLEM");
   });
@@ -45,7 +45,7 @@ describe("problems", () => {
   it("escalation on a Never harness is in the Overview and on the runs-on control", async () => {
     serve(view(resolved({ access: { claude: "never" } }), { problems: [ESCALATION] }));
     renderPage();
-    const pane = await screen.findByRole("complementary", { name: "harnesses pane" });
+    const pane = await openAreaPane();
     expect(within(pane).getByRole("button", { name: /escalation runs on 'claude'/ })).toBeInTheDocument();
     await userEvent.click(within(pane).getByRole("button", { name: /escalation runs on 'claude'/ }));
     await userEvent.click(within(pane).getByRole("tab", { name: "Config" }));
@@ -56,7 +56,7 @@ describe("problems", () => {
     const odd = problem({ path: "profiles.x", message: "profiles.x: something nobody can place", file: "harnesses.yaml" });
     serve(view(resolved(), { problems: [odd, NEVER, NO_ENTRY] }));
     renderPage();
-    const pane = await screen.findByRole("complementary", { name: "harnesses pane" });
+    const pane = await openAreaPane();
     const items = within(pane).getAllByRole("listitem").map((li) => li.textContent);
     expect(items[0]).toContain("something nobody can place");
     expect(items).toHaveLength(3);
@@ -66,7 +66,7 @@ describe("problems", () => {
   it("clicking a problem selects what it is about", async () => {
     serve(view(resolved(), { problems: [NO_ENTRY] }));
     renderPage();
-    const pane = await screen.findByRole("complementary", { name: "harnesses pane" });
+    const pane = await openAreaPane();
     await userEvent.click(within(pane).getByRole("button", { name: /has no codex entry/ }));
     expect(await screen.findByRole("complementary", { name: "fast pane" })).toBeInTheDocument();
   });
@@ -74,7 +74,7 @@ describe("problems", () => {
   it("header badge, Overview and list agree on how many", async () => {
     serve(view(resolved(), { problems: [NO_ENTRY, NEVER] }));
     const { tail } = renderPage();
-    const pane = await screen.findByRole("complementary", { name: "harnesses pane" });
+    const pane = await openAreaPane();
     expect(tail).toHaveTextContent("2 PROBLEMS");
     expect(pane).toHaveTextContent("Problems · 2");
   });
@@ -82,7 +82,7 @@ describe("problems", () => {
   it("shows no problem and says every task can run, once cleared", async () => {
     serve(view(resolved(), { problems: [] }));
     const { tail } = renderPage();
-    const pane = await screen.findByRole("complementary", { name: "harnesses pane" });
+    const pane = await openAreaPane();
     expect(within(pane).getByText("Every task can run where it is set to.")).toBeInTheDocument();
     expect(tail).not.toHaveTextContent("PROBLEM");
     await waitFor(() => expect(tail).toHaveTextContent("published"));

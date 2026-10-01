@@ -248,3 +248,15 @@ describe("Repos fixture", () => {
     expect(repo("x").path).toBe("/src/x");
   });
 });
+
+describe("Repos page: the pane's first state", () => {
+  it("loads on the list with the pane on its rail, and a link to one repo opens it", async () => {
+    mount("/templates/repos");
+    await screen.findByRole("listbox", { name: "Repos" });
+    expect(screen.getByRole("complementary", { name: /pane, collapsed$/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: /sections$/ })).toBeNull();
+    document.body.innerHTML = "";
+    mount("/templates/repos/platform");
+    expect(await screen.findByRole("tablist", { name: /sections$/ })).toBeInTheDocument();
+  });
+});

@@ -33,7 +33,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const providers = useProviders();
   const published = usePublishedPolicy(view.draft);
   const [params, setParams] = useSearchParams();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(params.has("harness") || params.has("profile"));
   const [tab, setTab] = useState("overview");
   const { run, error: addError } = useRun(draft);
   const [adding, setAdding] = useState(false);
