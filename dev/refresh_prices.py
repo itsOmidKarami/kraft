@@ -1,5 +1,6 @@
-"""Refreshes `src/kraft/prices.json` from models.dev's Anthropic and OpenAI
-listings -- the providers the shipped harnesses launch (claude; codex).
+"""Refreshes `src/kraft/prices.json` from models.dev's Anthropic, OpenAI and Google
+listings -- the providers the shipped harnesses launch (claude; codex; gemini
+and antigravity).
 
 Not imported at runtime (`usage._prices` reads the committed JSON file, never
 the network -- see that function's docstring): this is a one-shot script a
@@ -18,7 +19,7 @@ from pathlib import Path
 SOURCE = "https://models.dev/api.json"
 #: Each provider's models go in under their own ids, which are the ids a
 #: harness is launched with (`harnesses.yaml`: codex's `gpt-5.6-sol`).
-PROVIDERS = ("anthropic", "openai")
+PROVIDERS = ("anthropic", "openai", "google")
 OUT = Path(__file__).resolve().parents[1] / "src" / "kraft" / "prices.json"
 
 

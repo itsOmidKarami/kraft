@@ -77,8 +77,8 @@ together is in
 - **`gh` or `glab`**, logged in, for the nodes that open and merge the pull
   request on GitHub or GitLab.
 
-**Supported agents:** Claude Code, Codex, Cursor, Gemini, OpenCode and Amp all
-run as [harnesses](https://itsomidkarami.github.io/kraft/reference/harnesses).
+**Supported agents:** Claude Code, Codex, Cursor, Gemini, Antigravity, OpenCode
+and Amp all run as [harnesses](https://itsomidkarami.github.io/kraft/reference/harnesses).
 The shipped chains use Claude Code only; to use another agent, edit the chains.
 
 ## What it costs

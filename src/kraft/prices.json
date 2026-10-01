@@ -2,7 +2,8 @@
   "source": "https://models.dev/api.json",
   "providers": [
     "anthropic",
-    "openai"
+    "openai",
+    "google"
   ],
   "snapshot_date": "2026-10-01",
   "note": "USD per million tokens. cache_read is models.dev's own cache-hit rate. For anthropic models cache_write is NOT models.dev's own figure -- that's Anthropic's 5-minute cache-creation tier (1.25x input); Claude Code writes 1-hour entries, billed at 2x input (see CACHE_WRITE_MULTIPLE in dev/refresh_prices.py for the derivation and the proof from a real session's total_cost_usd). Other providers' rates are models.dev's own. tiers: the rates a session is billed at once one request's context passes `above` tokens. Refresh with: just refresh-prices (dev/refresh_prices.py).",
@@ -512,6 +513,264 @@
       "input": 150,
       "output": 600,
       "cache_read": 150,
+      "cache_write": 0
+    },
+    "gemini-flash-latest": {
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "cache_write": 0
+    },
+    "gemini-omni-flash-preview": {
+      "input": 1.5,
+      "output": 17.5,
+      "cache_read": 1.5,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-image-preview": {
+      "input": 0.5,
+      "output": 60,
+      "cache_read": 0.5,
+      "cache_write": 0
+    },
+    "lyria-3-pro-preview": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-tts-preview": {
+      "input": 1,
+      "output": 20,
+      "cache_read": 1,
+      "cache_write": 0
+    },
+    "gemini-2.5-flash-image": {
+      "input": 0.3,
+      "output": 30,
+      "cache_read": 0.075,
+      "cache_write": 0
+    },
+    "gemini-flash-lite-latest": {
+      "input": 0.3,
+      "output": 2.5,
+      "cache_read": 0.03,
+      "cache_write": 0
+    },
+    "gemini-embedding-2": {
+      "input": 0.2,
+      "output": 0,
+      "cache_read": 0.2,
+      "cache_write": 0
+    },
+    "gemini-3.6-flash": {
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "cache_write": 0
+    },
+    "gemini-3-pro-image-preview": {
+      "input": 2,
+      "output": 120,
+      "cache_read": 2,
+      "cache_write": 0
+    },
+    "gemini-2.5-pro-preview-tts": {
+      "input": 1,
+      "output": 20,
+      "cache_read": 1,
+      "cache_write": 0
+    },
+    "gemini-3.5-flash-lite": {
+      "input": 0.3,
+      "output": 2.5,
+      "cache_read": 0.03,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-image": {
+      "input": 0.5,
+      "output": 60,
+      "cache_read": 0.5,
+      "cache_write": 0
+    },
+    "lyria-3-clip-preview": {
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "gemini-3.1-pro-preview": {
+      "input": 2,
+      "output": 12,
+      "cache_read": 0.2,
+      "cache_write": 0,
+      "tiers": [
+        {
+          "above": 200000,
+          "input": 4,
+          "output": 18,
+          "cache_read": 0.4,
+          "cache_write": 0
+        }
+      ]
+    },
+    "gemini-2.5-computer-use-preview-10-2025": {
+      "input": 1.25,
+      "output": 10,
+      "cache_read": 1.25,
+      "cache_write": 0,
+      "tiers": [
+        {
+          "above": 200000,
+          "input": 2.5,
+          "output": 15,
+          "cache_read": 2.5,
+          "cache_write": 0
+        }
+      ]
+    },
+    "gemini-3.5-flash": {
+      "input": 1.5,
+      "output": 9,
+      "cache_read": 0.15,
+      "cache_write": 0
+    },
+    "gemini-2.5-pro": {
+      "input": 1.25,
+      "output": 10,
+      "cache_read": 0.125,
+      "cache_write": 0,
+      "tiers": [
+        {
+          "above": 200000,
+          "input": 2.5,
+          "output": 15,
+          "cache_read": 0.25,
+          "cache_write": 0
+        }
+      ]
+    },
+    "gemini-3-pro-image": {
+      "input": 2,
+      "output": 120,
+      "cache_read": 2,
+      "cache_write": 0
+    },
+    "gemini-2.5-flash": {
+      "input": 0.3,
+      "output": 2.5,
+      "cache_read": 0.03,
+      "cache_write": 0
+    },
+    "gemini-2.5-flash-preview-tts": {
+      "input": 0.5,
+      "output": 10,
+      "cache_read": 0.5,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-lite-image": {
+      "input": 0.25,
+      "output": 30,
+      "cache_read": 0.25,
+      "cache_write": 0
+    },
+    "deep-research-preview-04-2026": {
+      "input": 2,
+      "output": 12,
+      "cache_read": 0.2,
+      "cache_write": 0,
+      "tiers": [
+        {
+          "above": 200000,
+          "input": 4,
+          "output": 18,
+          "cache_read": 0.4,
+          "cache_write": 0
+        }
+      ]
+    },
+    "deep-research-max-preview-04-2026": {
+      "input": 2,
+      "output": 12,
+      "cache_read": 0.2,
+      "cache_write": 0,
+      "tiers": [
+        {
+          "above": 200000,
+          "input": 4,
+          "output": 18,
+          "cache_read": 0.4,
+          "cache_write": 0
+        }
+      ]
+    },
+    "gemini-3.7-flash": {
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "cache_write": 0
+    },
+    "gemini-3.1-pro-preview-customtools": {
+      "input": 2,
+      "output": 12,
+      "cache_read": 0.2,
+      "cache_write": 0,
+      "tiers": [
+        {
+          "above": 200000,
+          "input": 4,
+          "output": 18,
+          "cache_read": 0.4,
+          "cache_write": 0
+        }
+      ]
+    },
+    "gemini-3-flash-preview": {
+      "input": 0.5,
+      "output": 3,
+      "cache_read": 0.05,
+      "cache_write": 0
+    },
+    "gemini-3.8-flash": {
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "cache_write": 0
+    },
+    "gemini-3.5-live-translate-preview": {
+      "input": 3.5,
+      "output": 21,
+      "cache_read": 3.5,
+      "cache_write": 0
+    },
+    "gemini-2.5-flash-lite": {
+      "input": 0.1,
+      "output": 0.4,
+      "cache_read": 0.01,
+      "cache_write": 0
+    },
+    "gemini-embedding-001": {
+      "input": 0.15,
+      "output": 0,
+      "cache_read": 0.15,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-lite-preview": {
+      "input": 0.25,
+      "output": 1.5,
+      "cache_read": 0.025,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-live-preview": {
+      "input": 0.75,
+      "output": 4.5,
+      "cache_read": 0.75,
+      "cache_write": 0
+    },
+    "gemini-3.1-flash-lite": {
+      "input": 0.25,
+      "output": 1.5,
+      "cache_read": 0.025,
       "cache_write": 0
     }
   }

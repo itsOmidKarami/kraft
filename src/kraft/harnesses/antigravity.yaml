@@ -1,0 +1,73 @@
+# Antigravity CLI, `agy` (Kraft-fjcpr). Google stopped serving Gemini CLI to
+# individual accounts on 2026-06-18; `agy` replaces it there, and gemini.yaml
+# stays for API-key and Code Assist users. Every flag below is in `agy --help`
+# of agy 1.2.14, and every one but `--dangerously-skip-permissions` was run,
+# signed in, on 2026-10-01 (that one: see `permission_mode`).
+#
+# The stream-json log is read by usage.READERS["antigravity-stream-json"],
+# checked against those runs' captured lines: tokens off each finished step,
+# the conversation id off `init`. No cost.
+#
+# Credentials: sign-in (`agy` once, interactively) keeps its tokens in the OS
+# keychain and its state under ~/.gemini/antigravity-cli/, both of which an
+# unsandboxed worker reaches (it keeps HOME). A headless run never signs in
+# by itself: "Headless mode requires cached credentials from a prior
+# interactive session" (antigravity.google/docs/cli/headless). The other way
+# is a Gemini API key: `"modelProvider": "gemini"` in that settings.json, and
+# GEMINI_API_KEY, which a worker gets only through the repo's
+# `env_passthrough` (unverified here: this machine signs in).
+id: antigravity
+kind: cli
+command: [agy]
+
+capabilities:
+  # No system-prompt flag; agy reads AGENTS.md-style rules from the workspace,
+  # which Kraft does not write. Context rides in the prompt, as gemini's.
+  context:         { channel: prompt }
+  structured_log:  { cli: ["--output-format", "stream-json"] }
+  # No `values:`, as in claude.yaml: `agy models` lists this account's, and the
+  # list changes without Kraft. A slug carries an effort (`gemini-3.8-flash-low`);
+  # the base id (`gemini-3.8-flash`) takes `effort` below instead, and is the
+  # one `prices.json` can price. A wrong model fails the launch at once (exit 1,
+  # "is not recognized as a known model").
+  model:           { cli: ["--model", "{value}"] }
+  # Checked by agy against the model: gemini-3.8-flash has no `max` and says so.
+  effort:          { cli: ["--effort", "{value}"], values: [low, medium, high, max] }
+  # Without it, headless agy soft-denies every tool that needs a permission
+  # (a file write, a shell command), and the run still exits 0 with status
+  # SUCCESS and `denied_actions` in its `result`: the silent denial
+  # gemini.yaml describes. The disposable worktree is the boundary.
+  # UNVERIFIED by a real run: this flag is the one the harness could not be
+  # launched with where it was written. `--mode accept-edits` is no help: it
+  # leaves shell commands denied, so a worker could not test or commit.
+  permission_mode: { cli: ["--{value}"], values: [dangerously-skip-permissions], always: dangerously-skip-permissions }
+  # `--conversation <id>`, the `init` event's `conversation_id`. Conversations
+  # live under ~/.gemini/antigravity-cli/, shared by every launch. Measured: a
+  # resumed run's `result` carries the whole conversation's tokens, which is
+  # why the reader sums steps instead.
+  resume:          { cli: ["--conversation", "{value}"] }
+  usage:             { source: envelope, reader: antigravity-stream-json }
+  rate_limit_signal: { reader: antigravity-stream-json }
+  # `-p` takes the prompt as its value, even one starting with a dash
+  # (measured). Declared last.
+  prompt:          { cli: ["-p", "{value}"] }
+
+# Absent, deliberately. A binding naming one of these is rejected at load,
+# naming this file.
+# - deny_tools, allowed_tools, restrict_tools: no per-launch tool flag, and
+#   permission rules live only in the user's own settings.json. agy runs a
+#   workspace `.agents/hooks.json` PreToolUse hook, even in a folder it does
+#   not trust, and a hook `deny` blocked the call (measured, default mode); a
+#   hook that crashed blocked it too. Kraft does not install one yet: whether
+#   a deny still holds under --dangerously-skip-permissions is unmeasured.
+#   A hook `allow` did not override a permission soft-deny, and a hook that
+#   printed `{}` was read as a deny.
+# - approval_channel: no flag hands approvals to an MCP tool.
+# - autocompact: no flag.
+# Unbound though they exist: --sandbox (agy's own terminal restrictions),
+# --mode plan, --print-timeout (Kraft times a task out itself; agy 1.2.14 waits
+# without limit by default), --agent, --project.
+
+# No `network:` hosts: which Google hosts a signed-in run reaches is not
+# established, and a sandboxed worker has no keychain to sign in from. Whether
+# agy honours HTTP(S)_PROXY is UNVERIFIED (`proxy_aware` defaults to true).

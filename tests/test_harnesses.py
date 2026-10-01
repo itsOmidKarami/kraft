@@ -10,7 +10,7 @@ from kraft.templates import environment as template_environment
 def test_bundled_harnesses_all_load():
     hs = harness.load(None)
     assert hs.invalid == {}
-    assert sorted(hs.valid) == ["amp", "claude", "codex", "cursor", "gemini", "opencode"]
+    assert sorted(hs.valid) == "amp antigravity claude codex cursor gemini opencode".split()
 
 
 def test_only_cursor_is_refused_under_a_network_policy():
@@ -59,6 +59,7 @@ def test_the_shipped_harnesses_declare_how_their_keys_are_proxy_managed():
         "amp": [],
         "opencode": [],
         "cursor": [],
+        "antigravity": [],
     }
 
 
