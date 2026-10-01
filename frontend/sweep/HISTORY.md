@@ -1391,3 +1391,13 @@ Rebased onto `main` `06da92d39` (W9 #347 merged; W5, W6, W8 on main). Baseline s
 - **New screen:** `ng-chains` (29 cells on real W9 answers in `sweep/draftViews.json`); flows `flow-ng-chain-add-node`, `flow-ng-chain-publish`. **New key:** `ux2-W10`. `ng-shell`'s cells moved to `/ng/settings/access`; `placeholder-chains` became `placeholder`.
 - **Mock:** real draft answers for the chains branch; the real chain file and library for `/ng` referers only; the harness routes.
 - **Process:** the port is contended (Kraft-kfw1e); every sweep here ran in a loop that waits for the port and retries on "already used".
+
+## ux2-W10 — Chains editor, PR 2: YAML, switcher, cards, icons (`ux2/W10b`)
+
+On top of #363. Baseline retaken on `main` `8120f6262` after #364 froze the page clock: 1520 cells. Full notes: `e2e-shots/DIFF-ux2-W10.md`.
+
+- `node sweep/wave.mjs ux2-W10`: **6/6 rules pass**. `node sweep/wave.mjs all`: **1/1**, 1544 cells, 239 flagged, 0 newly flagged. 64 changed: 24 new cells; 39 existing W10 cells that gained the YAML button, the switcher crumb and the icon trigger (0.06–0.35%); one shipped cell, W9's known `flow-log-maximize/03` scroll flake.
+- **New cells:** `ng-chains` yaml, problems, yaml-error, item-yaml, switcher, unsaved, rename, remove, reorder, change-base, icon-picker; flows `flow-ng-chain-yaml`, `flow-ng-chain-switch-guard` (both in `ux2-W10`).
+- **Mock:** fragments dumped from the view's model, change_base's preview, and the real shipped library for `/ng` referers (the shipped Library page keeps the scenario's).
+- **Beads:** Kraft-x2q3y (step-label ellipsis, W3), Kraft-xjv0h (danger hover contrast, W1); Kraft-osck9 fixed here.
+- **Process:** a first baseline was killed by another session's `pkill -f "wave.mjs all --baseline"` and its results were discarded; the whole run was redone from the baseline step.

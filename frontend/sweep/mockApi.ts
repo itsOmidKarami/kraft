@@ -40,6 +40,19 @@ const chainView = (key: string) => {
   out.result.model[`chains/${key}.yaml`].id = key;
   return out;
 };
+/** Block YAML of a mapping, for the fragment route's sweep answer only (the server writes the real one). */
+const yamlOf = (v: unknown, ind = ""): string => {
+  if (Array.isArray(v)) return v.map((x) => (x && typeof x === "object" ? `${ind}- ${yamlOf(x, `${ind}  `).trimStart()}` : `${ind}- ${x}\n`)).join("");
+  if (v && typeof v === "object") return Object.entries(v).map(([k, x]) => (x && typeof x === "object" ? `${ind}${k}:\n${yamlOf(x, `${ind}  `)}` : `${ind}${k}: ${x}\n`)).join("");
+  return `${ind}${v}\n`;
+};
+/** The authored component at a canonical path in a view's model, as the fragment route answers it. */
+function fragmentOf(view: ReturnType<typeof chainView>, path: string) {
+  const [id, ...rest] = path.split(".");
+  let at = (view.result.model[`chains/${view.key}.yaml`].nodes as Record<string, any>[]).find((n) => n.id === id);
+  for (const seg of rest) at = at?.[seg] ?? at?.steps?.find((s: { id: string }) => s.id === seg) ?? at?.tasks?.find((x: { id: string }) => x.id === seg);
+  return at ? yamlOf(at) : `id: ${rest.pop() ?? id}\n`;
+}
 /** An op answered as the server would, for the ops the sweep's flows send. */
 function applyOps(view: ReturnType<typeof chainView>, ops: Record<string, unknown>[]) {
   const file = `chains/${view.key}.yaml`;
@@ -360,18 +373,19 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if ((m = p.match(/^\/drafts\/chains\/([^/]+)(?:\/(undo|publish|ops|rebase|fragment)|\/files\/(.+))?$/))) {
       const [, key, action, file] = m;
       if (method === "DELETE") return route.fulfill({ status: 204 });
-      if (action === "fragment") return json(route, { path: new URL(req.url()).searchParams.get("path"), text: "model: opus\nprompt: Implement the change.\n" });
       if (action === "publish") {
         if (key === "stale") return json(route, DRAFTS.stale409, 409);
         if (key === "broken" || key === "yaml-error") return json(route, { detail: "1 problem(s) to fix before publishing", problems: chainView(key).result.problems }, 422);
         return json(route, { published: [`chains/${key}.yaml`], result: { ...chainView(key).result, changes: [] } });
       }
+      if (action === "fragment") return json(route, { path: q.get("path"), text: fragmentOf(chainView(key), String(q.get("path"))) });
       const view = chainView(key);
       if (file) view.files[file] = req.postDataJSON()?.text ?? "";
       if (action === "ops") {
         if (key === "yaml-error") return json(route, { detail: "fix the YAML first" }, 409);
         const ops: Record<string, unknown>[] = req.postDataJSON()?.ops ?? [];
-        if (q.get("preview")) return json(route, { ...view, ops: ops.map((o) => ({ op: o.op })) });
+        // change_base's preview: what the new base keeps and drops (W9's {kept, dropped}).
+        if (q.get("preview")) return json(route, { ...view, ops: ops.map((o) => ({ op: o.op, result: o.op === "change_base" ? { kept: ["skippable"], dropped: [{ key: "steps", why: `${o.base} has no step tests` }] } : undefined })) });
         return json(route, { ...applyOps(view, ops), ops: ops.map((o) => ({ op: o.op })) });
       }
       return json(route, view);
@@ -428,6 +442,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { id: tpl.id, file: `templates/chains/${tpl.id}.yaml`, text: chainYaml(tpl.nodes), chain: { nodes: tpl.nodes }, nodes: tpl.nodes });
     }
     // The Library screen (where Settings > Steering redirects): the scenario's hooks as its tasks.
+    // The /ng editors' pickers read the real shipped library; the shipped Library page keeps the scenario's.
+    if (p === "/templates/library" && method === "GET" && (req.headers()["referer"] ?? "").includes("/ng/")) return json(route, DRAFTS.library);
     if (p === "/templates/library" && method === "GET") {
       const hooks = Object.entries(st.hooks);
       const components = hooks.map(([name, definition]) => ({

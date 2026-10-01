@@ -24,6 +24,11 @@ type Props = {
   /** Review & publish (Decisions §9 Publish): the published node order, for the
    *  removed nodes' ghosts, and the node a change row points at. */
   review?: { published: { id: string; kind: "exec" | "gate" }[]; highlight?: string };
+  /** Nodes an open remove card lists: ringed red while it is open. */
+  marked?: string[];
+  /** Drag to reorder, and the strip that checks the move live (Decisions §9 Reorder). */
+  onDrag?: { over: (id: string, to: number) => void; drop: (id: string, to: number) => void; end: () => void };
+  strip?: { ok: boolean; text: string } | null;
 };
 
 /** The node an op touches, for the pending highlight (Decided 3). */
@@ -37,7 +42,7 @@ function rejectTarget(r: Result, nodes: NodeA[], i: number): string | undefined 
 }
 
 /** Level 1 of the editor: the chain drawn from the draft's model (brief B.2). */
-export function ChainCanvas({ chain, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review }: Props) {
+export function ChainCanvas({ chain, result: r, selected, pending, reserve, refused, onSelect, onOpen, onFocusNode, onEscape, onBackground, onAdd, review, marked = [], onDrag, strip }: Props) {
   const authored = authoredNodes(r, chain);
   const busy = useMemo(() => new Set((pending ?? []).map(opNode)), [pending]);
   const nodes: ChainNode[] = authored.map((n) => {
@@ -53,7 +58,7 @@ export function ChainCanvas({ chain, result: r, selected, pending, reserve, refu
       icon: typeof n.icon === "string" ? n.icon : r.resolved?.nodes.find((x) => x.id === n.id)?.icon ?? undefined,
       state: "plain",
       mark: change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
-      prob: probs.length > 0,
+      prob: probs.length > 0 || marked.includes(n.id),
       // Gates on the chain show only the diamond and name (Decisions §9).
       meta: probs.length && !gate ? problemWord(probs[0]) : undefined,
       metaTone: probs.length ? "red" : undefined,
@@ -94,6 +99,7 @@ export function ChainCanvas({ chain, result: r, selected, pending, reserve, refu
         seams={seams}
         opening="fit"
         fit={EDITOR_FIT}
+        onDrag={review ? undefined : onDrag}
         reserve={reserve}
         onSelect={onSelect}
         onOpen={onOpen}
@@ -106,6 +112,7 @@ export function ChainCanvas({ chain, result: r, selected, pending, reserve, refu
         }}
       />
       {!nodes.length && <p className="tpl-empty-chain">Add the first node with +</p>}
+      {strip && <p className={`tpl-strip${strip.ok ? "" : " is-bad"}`} role="status">{strip.text}</p>}
       {menu !== null && (
         <SeamMenu
           anchor={anchor}

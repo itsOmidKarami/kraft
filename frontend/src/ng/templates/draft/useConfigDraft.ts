@@ -131,7 +131,9 @@ export function useConfigDraft(area: Area, key: string) {
     }, true);
   }, [area, key, enqueue, flush]);
 
-  const publish = useCallback(() => {
+  /** `reload: false` when the publish moves or deletes this key's file (a chain
+   *  rename or delete): the page goes elsewhere instead of reading a 404. */
+  const publish = useCallback((opts: { reload?: boolean } = {}) => {
     flush();
     return enqueue(async () => {
       const a = await d.publish(area, key);
@@ -141,7 +143,7 @@ export function useConfigDraft(area: Area, key: string) {
       // Its answer is `{published, result}`, not a draft view: the reload below takes over.
       // The review pane shows a 409's diff and a 422's problems itself: no toast.
     }, true, false, false).then(async (a) => {
-      if (a.status === 200) await load();
+      if (a.status === 200 && opts.reload !== false) await load();
       return a;
     });
   }, [area, key, enqueue, flush, load]);

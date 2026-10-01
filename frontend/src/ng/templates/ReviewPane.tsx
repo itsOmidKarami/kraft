@@ -6,7 +6,7 @@ import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Problem, StaleBody } from "./draft/types";
-import { chainFile, counts } from "./draft/view";
+import { chainFile, counts, liveChainFile } from "./draft/view";
 import { Head, Kv, Note } from "./panes/controls";
 import { problemText } from "./problems";
 import "./panes/panes.css";
@@ -30,7 +30,7 @@ const serverDiff = (diff: string) =>
 /** Review & publish's pane (Decisions §9 Publish): the draft's changes and
  *  problems, the YAML diff, who it affects; Discard confirms in place;
  *  Publish waits for zero problems. A 409 shows the server's diff (R45). */
-export function ReviewPane({ draft, chain, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone }: {
+export function ReviewPane({ draft, chain, published, open, size, onCollapse, onExpand, onFix, onHighlight, onDone, onGone }: {
   draft: ConfigDraft;
   chain: string;
   /** The published file's text; null for a chain never published. */
@@ -42,6 +42,8 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
   onFix: (path: string) => void;
   onHighlight: (path: string) => void;
   onDone: () => void;
+  /** After a publish that moved the chain's file (a rename) or deleted it: where to go. */
+  onGone?: (to: string | null) => void;
 }) {
   const [tab, setTab] = useState("changes");
   const [asking, setAsking] = useState(false);
@@ -51,14 +53,20 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
   const n = counts(r);
   const blocked = n.problems > 0;
   const stale: StaleBody | null = draft.stale;
-  const text = view.files[chainFile(chain)] ?? "";
+  const live = liveChainFile(view.files, chain);
+  const text = view.files[live] ?? "";
   const problems = refused?.length ? refused : r.problems;
 
+  // A rename moves the file to chains/<new id>.yaml; delete_chain makes it null.
+  const renamedTo = live === chainFile(chain) ? chain : live.slice("chains/".length, -".yaml".length);
+  const deleted = view.files[live] === null;
+  const gone = deleted || renamedTo !== chain;
   const publish = async () => {
-    const a = await draft.publish();
+    const a = await draft.publish({ reload: !gone });
     if (a.status === 200) {
-      showToast(`Published ${chain} · new items use it from now on`);
-      onDone();
+      showToast(deleted ? `Deleted ${chain}` : `Published ${renamedTo} · new items use it from now on`);
+      if (gone) onGone?.(deleted ? null : renamedTo);
+      else onDone();
     } else if (a.status === 422) setRefused((a.body as { problems?: Problem[] }).problems ?? null);
   };
   const discard = async () => {
@@ -102,7 +110,7 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
       crumbs={[{ label: chain }]}
       icon="git-compare"
       title={`Draft · ${plural(n.changes, "change")}`}
-      sub={blocked ? `✕ doesn't resolve · ${plural(n.problems, "problem")} block publishing` : "✓ resolves · ready to publish"}
+      sub={stale ? "⚠ published since this draft began · your draft is kept" : blocked ? `✕ doesn't resolve · ${plural(n.problems, "problem")} block publishing` : "✓ resolves · ready to publish"}
       tabs={TABS}
       tab={tab}
       onTab={setTab}
@@ -113,7 +121,7 @@ export function ReviewPane({ draft, chain, published, open, size, onCollapse, on
       {stale && (
         <div className="tpl-rv-stale" role="alert">
           <p className="tpl-rv-stale-head">Published since this draft began</p>
-          <p className="tpl-rv-stale-text">{stale.detail}. Publishing now would overwrite it, so nothing was written; your draft is kept.</p>
+          <p className="tpl-rv-stale-text">{Object.keys(stale.files).join(", ")} changed on disk after this draft began. Publishing now would overwrite it, so nothing was written; your draft is kept.</p>
           {Object.entries(stale.files).map(([file, f]) => (
             <div key={file}>
               <p className="tpl-rv-file">{file}</p>

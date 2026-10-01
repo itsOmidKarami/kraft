@@ -368,6 +368,19 @@ const FLOWS: Flow[] = [
     { name: "stale-chain", run: async (p) => { await chains("stale")(p); await p.getByRole("button", { name: "Review & publish" }).click(); } },
     { name: "stale-publish", run: async (p) => { await p.getByRole("button", { name: "Publish", exact: true }).click(); await expect(p.getByText("Published since this draft began", { exact: true })).toBeVisible(); await expect(p.getByRole("button", { name: "Keep my version and publish" })).toBeVisible(); } },
   ] },
+  // W10 H: the YAML view, an edit there, and back to the canvas.
+  { name: "ng-chain-yaml", widths: [1280], start: chains("default"), steps: [
+    { name: "open-yaml", run: async (p) => { await p.getByRole("button", { name: "YAML", exact: true }).click(); await expect(p.getByRole("textbox", { name: "chains/default.yaml, YAML" })).toBeVisible(); } },
+    { name: "type", run: async (p) => { const ta = p.getByRole("textbox", { name: "chains/default.yaml, YAML" }); await ta.click(); await p.keyboard.press("End"); await p.keyboard.type(" "); await expect(ta).toBeFocused(); }, kbd: true, wait: 600 },
+    { name: "escape-leaves", run: async (p) => { await p.keyboard.press("Escape"); await expect(p.getByRole("textbox", { name: "chains/default.yaml, YAML" })).not.toBeFocused(); }, kbd: true },
+    { name: "back-to-canvas", run: async (p) => { await p.getByRole("button", { name: "⇄ Canvas" }).click(); await expect(p.locator(".canvas").first()).toBeVisible(); } },
+  ] },
+  // W10 I: switching from a chain with a draft asks first; Stay stays.
+  { name: "ng-chain-switch-guard", widths: [1280], start: chains("default"), steps: [
+    { name: "switcher", run: async (p) => { await p.getByRole("button", { name: "Chain default, switch chain" }).click(); await expect(p.getByRole("option").first()).toBeVisible(); } },
+    { name: "pick-other", run: async (p) => { await p.getByRole("option").filter({ hasNotText: /^default/ }).first().click(); await expect(p.getByRole("dialog", { name: "You have unpublished changes" })).toBeVisible(); } },
+    { name: "stay", run: async (p) => { await p.getByRole("button", { name: "Stay" }).click(); await expect(p.getByRole("dialog", { name: "You have unpublished changes" })).toHaveCount(0); expect(new URL(p.url()).pathname).toBe("/ng/templates/chains/default"); } },
+  ] },
   { name: "sidebar-toggle", widths: [1280, 1100], start: board, steps: [
     // Under 1280 the sidebar starts as the rail (accepted, UI v3 · 45): there is no Collapse to press.
     { name: "collapse", run: async (p) => { const b = p.getByRole("button", { name: /collapse/i }); if (await b.count()) await b.click(); } },

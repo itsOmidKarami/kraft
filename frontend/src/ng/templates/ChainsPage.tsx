@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePaneSelection } from "../graph/usePaneSelection";
@@ -13,10 +13,14 @@ import { BottomPane, handlerOf, type BottomTab } from "./BottomPane";
 import { NodeView } from "./NodeView";
 import { ChainPane } from "./panes/ChainPane";
 import { ReviewPane } from "./ReviewPane";
+import { YamlView } from "./YamlView";
+import { Switcher, type SwitchTo } from "./Switcher";
+import { Dialog } from "../ui/Dialog";
+import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
-import { authoredNodes, counts, kindOf } from "./draft/view";
+import { authoredNodes, chainFile, counts, kindOf } from "./draft/view";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
@@ -71,6 +75,15 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const [highlight, setHighlight] = useState<string | undefined>();
   const [published, setPublished] = useState<{ text: string; nodes: { id: string; kind: "exec" | "gate" }[] } | null | undefined>(undefined);
   const [nextProblem, setNextProblem] = useState(0);
+  // Leaving a chain with a draft asks first (Decisions §9 Unpublished changes, brief Decided 5).
+  const [pendingGo, setPendingGo] = useState<SwitchTo | null>(null);
+  const [dupTick, setDupTick] = useState(0);
+  // The nodes an open remove card lists, marked red on the canvas (Decisions §9 Remove).
+  const [marked, setMarked] = useState<string[]>([]);
+  const [strip, setStrip] = useState<{ ok: boolean; text: string } | null>(null);
+  const [renameNow, setRenameNow] = useState<{ el: HTMLElement; tick: number } | null>(null);
+  // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
+  const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
 
   // The URL names the node view; the pane's level follows it.
@@ -108,6 +121,18 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     return () => window.removeEventListener("keydown", on);
   }, [undo]);
 
+  // ⌥←/⌥→ moves the selected node, or step in a node view, one place (Decisions §9 Reorder).
+  const moveSel = useRef<(dir: -1 | 1) => void>(() => {});
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || isTextField(e.target)) return;
+      e.preventDefault();
+      moveSel.current(e.key === "ArrowLeft" ? -1 : 1);
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, []);
+
   const focusNode = useCallback((id: string, sel?: TSel) => {
     dispatch({ type: "focus", node: id, sel });
     navigate(nodeUrl(chain, id));
@@ -128,24 +153,53 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     dispatch({ type: "expand", sel });
   }, [taskPaths, s.level, dispatch, navigate, chain, focusNode]);
 
+  /** The published file: the YAML diffs' left side, and where removed nodes stood. */
+  const loadPublished = useCallback(() => {
+    api.getTemplate(chain).then((f) => {
+      const nodes = ((f.chain.nodes as { id: string; kind?: string; extends?: string }[] | undefined) ?? []).map((n) => ({ id: n.id, kind: (n.kind === "gate" ? "gate" : "exec") as "exec" | "gate" }));
+      setPublished({ text: f.text, nodes });
+    }).catch(() => setPublished(null));
+  }, [chain]);
   const startReview = () => {
     if (s.level === "node") {
       dispatch({ type: "back" });
       navigate(chainUrl(chain));
     }
+    setSurface("canvas");
     setReview(true);
     setReviewOpen(true);
     setHighlight(undefined);
-    // The published file: the YAML diff's left side, and where removed nodes stood.
-    api.getTemplate(chain).then((f) => {
-      const nodes = ((f.chain.nodes as { id: string; kind?: string; extends?: string }[] | undefined) ?? []).map((n) => ({ id: n.id, kind: (n.kind === "gate" ? "gate" : "exec") as "exec" | "gate" }));
-      setPublished({ text: f.text, nodes });
-    }).catch(() => setPublished(null));
+    loadPublished();
+  };
+  const yamlErr = r.yaml_error;
+  const toggleYaml = () => {
+    // A syntax error keeps you here until it is fixed or reverted (Decisions §9 YAML): the button is disabled.
+    if (surface === "yaml") return setSurface("canvas");
+    draft.flush();
+    loadPublished();
+    setSurface("yaml");
   };
   const endReview = () => {
     setReview(false);
     setHighlight(undefined);
   };
+
+  /** Switch to a chain, or start a new one or a copy (`new_chain` on the new key). */
+  const perform = async (to: SwitchTo) => {
+    setPendingGo(null);
+    if (to.kind === "switch") return navigate(chainUrl(to.id));
+    const a = await postOps("chains", to.id, [{ op: "new_chain", ...(to.kind === "dup" ? { from: chain } : {}) }]);
+    if (a.status !== 200) return showToast(detailOf(a.body));
+    draftsChanged();
+    showToast(to.kind === "dup" ? `Duplicated as ${to.id}` : `New chain ${to.id} · add its first node with +`);
+    navigate(chainUrl(to.id));
+  };
+  const requestGo = (to: SwitchTo) => {
+    if (to.kind === "switch" && to.id === chain) return;
+    if (view.draft) setPendingGo(to);
+    else void perform(to);
+  };
+  const neverPublished = view.base[chainFile(chain)] === null;
 
   const onEscape = () => {
     if (review) return endReview();
@@ -168,6 +222,28 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     return true;
   };
 
+  /** A move, checked first with ?preview=1: a refusal says why and saves nothing. */
+  const move = async (path: string, to: number) => {
+    const op = { op: "move", path, to };
+    const check = await draft.ops([op], { preview: true });
+    if (check.status !== 200) return showToast(`Can't move ${path.split(".").pop()}: ${detailOf(check.body)}`);
+    await draft.ops([op]);
+  };
+  moveSel.current = (dir) => {
+    const cur = s.sel as TSel;
+    if (review || surface !== "canvas") return;
+    if (s.level === "chain" && cur.kind === "node") {
+      const i = authoredNodes(r, chain).findIndex((x) => x.id === cur.node);
+      const to = i + dir;
+      if (i >= 0 && to >= 0 && to < authoredNodes(r, chain).length) void move(cur.node, to);
+    } else if (s.level === "node" && cur.kind === "step" && s.node) {
+      const steps = draft.resolvedNode(s.node)?.steps ?? [];
+      const i = steps.findIndex((x) => `${s.node}.${x.id}` === pathOf(cur));
+      const to = i + dir;
+      if (i >= 0 && to >= 0 && to < steps.length) void move(pathOf(cur), to);
+    }
+  };
+
   const n = counts(r);
   const paneOpen = review ? reviewOpen : s.open;
   const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
@@ -181,7 +257,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     <div className="tpl-page" ref={frame}>
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
-        <span className="tpl-crumb-chain">{chain}</span>
+        <Switcher chain={chain} onGo={requestGo} startDup={dupTick} />
         {s.level === "node" && s.node && (
           <>
             <span className="tpl-crumb-sep" aria-hidden>›</span>
@@ -209,6 +285,11 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
       </HeaderTail>
       <HeaderActions>
         {s.level === "chain" && !review && (
+          <Button aria-pressed={surface === "yaml"} disabled={surface === "yaml" && !!yamlErr} title={surface === "yaml" && yamlErr ? `Fix line ${yamlErr.line} first, or revert` : undefined} onClick={toggleYaml}>
+            {surface === "yaml" ? "⇄ Canvas" : "YAML"}
+          </Button>
+        )}
+        {s.level === "chain" && !review && surface === "canvas" && (
           <IconButton label="Chain settings" onClick={() => dispatch({ type: "expand", sel: CHAIN_SEL })}>
             <Pencil size={14} aria-hidden />
           </IconButton>
@@ -224,13 +305,33 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             pending={draft.pending}
             reserve={reserve}
             refused={refused}
-            onSelect={(id) => (review ? setHighlight(id) : dispatch({ type: "pick", sel: selOf(id) }))}
+            onSelect={(id) => {
+              if (review) return setHighlight(id);
+              // A click on the selected node's name while its pane is open renames it (Decisions §9 Rename).
+              const btn = document.querySelector<HTMLElement>(`.graph-node[aria-label^="${id}, "]`);
+              if (sel.kind === "node" && sel.node === id && s.open && btn) return setRenameNow((p) => ({ el: btn, tick: (p?.tick ?? 0) + 1 }));
+              dispatch({ type: "pick", sel: selOf(id) });
+            }}
             onOpen={(id) => (review ? setHighlight(id) : dispatch({ type: "expand", sel: selOf(id) }))}
             onFocusNode={(id) => !review && focusNode(id)}
             onEscape={onEscape}
             onBackground={() => (review ? setHighlight(undefined) : dispatch({ type: "background" }))}
             onAdd={add}
             review={review ? { published: published?.nodes ?? [], highlight } : undefined}
+            marked={marked}
+            strip={strip}
+            onDrag={{
+              over: async (id, to) => {
+                setStrip({ ok: true, text: `Move ${id} here` });
+                const a = await draft.ops([{ op: "move", path: id, to }], { preview: true });
+                setStrip(a.status === 200 ? { ok: true, text: `Move ${id} here` } : { ok: false, text: `Can't move ${id}: ${detailOf(a.body)}` });
+              },
+              drop: (id, to) => {
+                const i = authoredNodes(r, chain).findIndex((x) => x.id === id);
+                if (i !== to) void move(id, to);
+              },
+              end: () => setStrip(null),
+            }}
           />
         ) : (
           <NodeView
@@ -270,6 +371,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onLeave={() => dispatch({ type: "background" })}
           />
         )}
+        {surface === "yaml" && s.level === "chain" && !review && <YamlView draft={draft} chain={chain} published={published === undefined ? undefined : published?.text ?? null} />}
         {review ? (
           <ReviewPane
             draft={draft}
@@ -285,6 +387,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
               goTo(p);
             }}
             onDone={endReview}
+            onGone={(to) => navigate(to ? chainUrl(to) : "/templates/chains")}
           />
         ) : (
           <ChainPane
@@ -297,9 +400,60 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onExpand={() => dispatch({ type: "expand" })}
             onFocus={s.level === "chain" && sel.kind === "node" && !isGate ? () => focusNode(sel.node) : undefined}
             goTo={goTo}
+            onDuplicate={() => setDupTick((k) => k + 1)}
+            onDeleted={startReview}
+            onMarking={setMarked}
+            renameNow={renameNow}
+            onRemoved={() => {
+              if (s.level === "node" && pathOf(s.sel as TSel) === s.node) {
+                // Removing the node you're in returns to the chain's rail (Decisions §9 Removing).
+                dispatch({ type: "back" });
+                navigate(chainUrl(chain));
+              } else dispatch({ type: "removed" });
+            }}
+            onRenamed={(from, to) => {
+              const sel2 = selOf(to, taskPaths);
+              if (s.level === "node" && from === s.node) {
+                dispatch({ type: "focus", node: to, sel: sel2 });
+                navigate(nodeUrl(chain, to));
+              } else if (from) dispatch({ type: "pick", sel: sel2 });
+            }}
           />
         )}
       </div>
+      {pendingGo && (
+        <Dialog
+          title="You have unpublished changes"
+          onClose={() => setPendingGo(null)}
+          footer={
+            <>
+              <Button variant="danger" onClick={async () => {
+                const a = await draft.discard();
+                if (a.status === 204 || a.status === 404) void perform(pendingGo);
+              }}>{neverPublished ? "Discard chain & continue" : "Discard & continue"}</Button>
+              <span className="bp-gap" />
+              <Button onClick={() => setPendingGo(null)}>Stay</Button>
+              {n.problems ? (
+                <Button variant="primary" onClick={() => { setPendingGo(null); startReview(); }}>Review problems</Button>
+              ) : (
+                <Button variant="primary" onClick={async () => {
+                  const a = await draft.publish();
+                  if (a.status === 200) void perform(pendingGo);
+                  else { setPendingGo(null); startReview(); }
+                }}>Publish &amp; continue</Button>
+              )}
+            </>
+          }
+        >
+          <div className="unsaved">
+            <p>
+              {chain} has {neverPublished ? "never been published" : `${n.changes} unpublished change${n.changes === 1 ? "" : "s"}`}. Publish or discard {neverPublished ? "it" : "them"} before{" "}
+              {pendingGo.kind === "switch" ? `switching to ${pendingGo.id}` : pendingGo.kind === "dup" ? `duplicating it as ${pendingGo.id}` : `creating ${pendingGo.id}`}.
+            </p>
+            {n.problems > 0 && <p>{n.problems} problem{n.problems === 1 ? "" : "s"} block publishing. Review them first, or discard.</p>}
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }
