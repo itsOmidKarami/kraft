@@ -97,7 +97,7 @@ A wave **adds files and edits no shared list**; `sweep.spec.ts`, `interactions.s
 - `sweep/cases/<wave>.ts` exports `cells: Case[]` (one entry per screen × variant, run by `sweep.spec.ts`), with the wave's own helpers above it.
 - `sweep/cases/<wave>.flows.ts` exports `flows: Flow[]` (run by `interactions.spec.ts`). It is a second file because cells and flows keep separate helper sets (`ng`, `ngItem`, `settle` differ in shape).
 - `sweep/waves/<wave>.json` is the wave's object (`title`, `screens`, `specs`, `rules`); the file name is its key, so `node sweep/wave.mjs <wave>` finds it.
-- `sweep/loadCases.ts` reads the directory: `shipped` first, then by wave number (`ux2-W2` before `ux2-W10`). The first case of a screen in that order also gets the `~light` cell at 1280, so keep one screen's cases in one file.
+- `sweep/loadCases.ts` reads the directory and takes any file name: `shipped` first, then `ux2-W<n>` by number (`ux2-W2` before `ux2-W10`), then every other file by name (a fix PR adds `cases/ux2-fix-<topic>.ts`, and `.flows.ts` beside it). The first case of a screen in that order also gets the `~light` cell at 1280, so keep one screen's first case in its wave's file; a fix file sorts last and only adds variants.
 - A helper two waves share goes in `cellKit.ts` (cells) or `flowKit.ts` (flows); the pre-`/ng` screens are `cases/shipped.ts` and `shipped.flows.ts`.
 
 ## History and briefs
