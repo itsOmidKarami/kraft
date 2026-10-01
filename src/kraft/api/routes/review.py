@@ -243,6 +243,8 @@ class ReviewIn(BaseModel):
     outcome: Literal["approve", "request_changes", "comment"]
     summary: str | None = None
     node: str | None = None
+    #: A chain revision's digest, passed to the gate approval as `POST .../approve` takes it.
+    digest: str | None = None
 
 
 async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
@@ -302,7 +304,9 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
     if body.outcome != "comment":
         try:
             if body.outcome == "approve":
-                result = await gate_routes.approve_gate(wid, gate, request, None)
+                result = await gate_routes.approve_gate(
+                    wid, gate, request, gate_routes.GateApprove(digest=body.digest)
+                )
             else:
                 result = await gate_routes.reject_gate(
                     wid, gate, gate_routes.GateReject(note=note, node=body.node), request
