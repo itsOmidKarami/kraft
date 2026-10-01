@@ -74,4 +74,4 @@ A throwaway `kraft` (own `KRAFT_HOME` in the worktree's `.dev/`, port 8773, the 
 
 ## Shared files touched
 
-`phone/**` only, plus: `ng/css.contract.test.ts` and `ng/phone/contract.test.ts` allow-lists for what the phone reads (settings policy and intake models, `review/prefs`, `shell/aliases`); the restart call now lives in two places (More and Access), each behind its own confirm. No desktop page, `ng/ui` or `ng/theme` changed.
+Nothing outside `ng/phone/**` and `sweep/`, except that `ng/phone/contract.test.ts`'s allow-list grew by what the phone reads (settings policy and intake models, `review/prefs`, `shell/aliases`); the restart call now lives in two places (More and Access), each behind its own confirm. No desktop page, `ng/ui` or `ng/theme` changed.
