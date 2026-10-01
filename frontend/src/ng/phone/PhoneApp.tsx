@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Board } from "./board/Board";
 import { Soon } from "./nav/Soon";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
@@ -24,7 +25,7 @@ export function PhoneApp() {
     <BrowserRouter basename="/ng">
       <Routes>
         <Route element={<Frame />}>
-          <Route path="/" element={<Soon title="Board" />} />
+          <Route path="/" element={<Board />} />
           <Route path="/search" element={<Soon title="Search" />} />
           <Route path="/analytics" element={<Soon title="Analytics" />} />
           <Route path="/more" element={<Soon title="More" />} />

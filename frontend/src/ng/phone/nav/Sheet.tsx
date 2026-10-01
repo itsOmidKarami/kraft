@@ -18,9 +18,22 @@ export function useSheet() {
   const openId = (loc.state as State)?.phSheet ?? null;
   const open = useCallback((id: string) => navigate(loc.pathname + loc.search, { state: { phSheet: id } }), [navigate, loc.pathname, loc.search]);
   const close = useCallback(() => navigate(-1), [navigate]);
+  // A change that rewrites the screen's own address (a filter) runs once the sheet's entry has been popped, so it lands on the screen and not on the entry the sheet was opened over.
+  const after = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (openId === null && after.current) {
+      const run = after.current;
+      after.current = null;
+      run();
+    }
+  }, [openId]);
+  const closeThen = useCallback((fn: () => void) => {
+    after.current = fn;
+    navigate(-1);
+  }, [navigate]);
   /** Leave for another address from inside a sheet: the sheet's entry is replaced, so Back comes to the screen under it. */
   const goTo = useCallback((to: string) => navigate(to, { replace: true }), [navigate]);
-  return { openId, is: (id: string) => openId === id, open, close, goTo };
+  return { openId, is: (id: string) => openId === id, open, close, closeThen, goTo };
 }
 
 function Frame({ title, text, onClose, children }: { title: string; text?: string; onClose: () => void; children: ReactNode }) {
