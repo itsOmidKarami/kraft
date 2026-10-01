@@ -246,6 +246,9 @@ export interface WorkItem {
   /** The gate waiting on a person, straight from the server — a rejected gate
    *  is not pending, which no client-side inference from sessions can see. */
   pending_gate?: string | null;
+  /** Where a request-changes review at the pending gate restarts the chain,
+   *  null with no gate pending. `round` is the one a rejection now would start. */
+  fix_target?: FixTarget | null;
   /** The `launch_fallback` payload when the item's current or last launch ran
    *  on a fallback candidate (Kraft-0a3h8); null otherwise. */
   fallback?: Record<string, unknown> | null;
@@ -452,4 +455,14 @@ export interface LogLine {
   /** present only on the marker row (`n: -1`) a reader gets in place of the
    *  lines it skipped, when the log is over the server's read cap */
   truncated?: { lines: number; bytes: number };
+}
+
+export interface FixTarget {
+  gate: string | null;
+  node: string;
+  /** The nodes between `node` and the gate (or through the current node, gateless), in order. */
+  then: string[];
+  round: { n: number; max: number } | null;
+  /** Only on GET /work-items/:id/fix-target: `gate`, `requested`, `threads on <file>` or `current node`. */
+  reason?: string;
 }

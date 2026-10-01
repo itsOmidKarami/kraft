@@ -154,6 +154,69 @@ def test_item_detail_carries_attempts_and_reject_default(client, gated):
     assert body["last_review_sha"] is None
 
 
+@_REVIEW
+def test_item_detail_carries_the_fix_target_of_the_pending_gate(client, gated):
+    body = client.get(f"/api/work-items/{gated}").json()
+    ft = body["fix_target"]
+    assert ft["node"] == body["reject_default"] == "implementation"
+    assert (ft["gate"], ft["then"]) == ("chain_review", ["work_item_summary"])
+    assert ft["round"]["n"] == 1 and ft["round"]["max"] >= 1
+
+
+@_REVIEW
+def test_fix_target_round_counts_rejections_against_the_stored_cap(client, gated):
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "request_changes"}
+    )
+    assert r.status_code == 200, r.text
+    _poll_node_started(client, gated, "implementation")
+    _await_gate(client, gated, "chain_review")
+    assert client.get(f"/api/work-items/{gated}").json()["fix_target"]["round"]["n"] == 2
+    # the cap the counter snapshotted wins over whatever the policy says now
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute("UPDATE retry_counters SET cap_attempts = 7 WHERE work_item_id = ?", (gated,))
+        conn.commit()
+    finally:
+        conn.close()
+    assert client.get(f"/api/work-items/{gated}").json()["fix_target"]["round"]["max"] == 7
+
+
+@_REVIEW
+def test_fix_target_route_follows_a_chosen_node_and_refuses_bad_ones(client, gated):
+    url = f"/api/work-items/{gated}/fix-target"
+    ft = client.get(url, params={"node": "work_item_summary"}).json()
+    assert (ft["node"], ft["then"], ft["gate"]) == ("work_item_summary", [], "chain_review")
+    assert client.get(url).json()["node"] == "implementation"
+    assert client.get(url, params={"node": "chain_review"}).status_code == 400
+    assert client.get(url, params={"node": "nowhere"}).status_code == 400
+    assert client.get(url, params={"gate": "other"}).status_code == 409
+
+
+@_REVIEW
+def test_fix_target_route_ends_with_the_item(client, gated):
+    assert client.post(f"/api/work-items/{gated}/abandon").status_code == 200
+    assert client.get(f"/api/work-items/{gated}/fix-target").status_code == 409
+
+
+@_REVIEW
+def test_gateless_fix_target_is_the_target_request_changes_then_returns(client, repo, monkeypatch):
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+    assert client.get(f"/api/work-items/{wid}").json()["fix_target"] is None
+    _target_thread(client, wid, "implementation")
+
+    ft = client.get(f"/api/work-items/{wid}/fix-target").json()
+    assert ft["gate"] is None and ft["round"] is None
+    assert ft["reason"] == "threads on implementation"
+    assert ft["then"] == ["work_item_summary"]
+    chosen = client.get(f"/api/work-items/{wid}/fix-target", params={"node": "work_item_summary"})
+    assert (chosen.json()["node"], chosen.json()["reason"]) == ("work_item_summary", "requested")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+    assert r.status_code == 200, r.text
+    assert r.json()["target"] == ft["node"]
+
+
 def _new_thread(client, wid, **kw):
     body = {
         "body": "use a set",

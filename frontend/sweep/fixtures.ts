@@ -397,6 +397,7 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       // escalation thread, and the gate stays pending through both.
       item.display_status = "needs_you";
       item.stop = mkStop("gate");
+      item.fix_target = fixTargetFor("code_review");
       item.deferred_findings = [
         { severity: "minor", message: "Docstring missing on `combine()`", file: "kraft/progress.py", line: 41, source_plugin: "ruff" },
         { severity: "minor", message: "Consider `functools.cache` here", file: "kraft/index/embed.py", line: 12, source_plugin: "reviewer" },
@@ -548,6 +549,12 @@ ${variant === "long" ? "+    # " + "a very long line that never wraps because it
       truncated: false,
     },
   };
+}
+
+export function fixTargetFor(gate: string | null, node?: string) {
+  const chain = ["implementation", "verify", "review"];
+  const at = node ? chain.indexOf(node) : 0;
+  return { gate, node: chain[Math.max(at, 0)], then: chain.slice(Math.max(at, 0) + 1), round: gate ? { n: 1, max: 3 } : null, reason: node ? "requested" : "gate" };
 }
 
 // The shape of GET /work-items/:id/compare. One whitespace-only file rides along
