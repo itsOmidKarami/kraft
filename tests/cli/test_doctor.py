@@ -493,6 +493,44 @@ def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
     assert "my-claude" in row["detail"]
 
 
+@pytest.mark.parametrize(
+    ("chains", "says"),
+    [
+        ({"c": "a", "agy-impl": "gone"}, "chain agy-impl can't run"),
+        ({"c": "a", "x": "gone", "y": "gone"}, "chains x, y can't run"),
+        ({"x": "gone", "y": "gone"}, "no chain can run"),
+    ],
+    ids=["one-of-two", "two-of-three", "all"],
+)
+def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains, says):
+    """Only the chains that select a profile need its executable: saying "no
+    chain can run" for one custom chain sent an operator after the rest."""
+    live = _live(tmp_path, monkeypatch, {"a": "claude", "gone": "claude"}, ["a", "gone"])
+    (live / "harnesses.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "harnesses": {
+                    "a": {"provider": "claude"},
+                    "gone": {"provider": "claude", "executable": "agy"},
+                }
+            }
+        )
+    )
+    (live / "chains" / "c.yaml").unlink()
+    task_of = {"a": "t0", "gone": "t1"}
+    for cid, pid in chains.items():
+        node = {"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": task_of[pid]}]}
+        (live / "chains" / f"{cid}.yaml").write_text(yaml.safe_dump({"id": cid, "nodes": [node]}))
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "claude").write_text("#!/bin/sh\n")
+    (fake / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake))
+    row = _by_name(doctor._agent_checks(), "agent: gone")
+    assert row["ok"] is False
+    assert row["detail"] == f"`agy` is not on PATH — {says}"
+
+
 def test_a_selected_profile_harnesses_yaml_lacks_fails(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {}, ["ghost"])
     row = _by_name(doctor._agent_checks(), "agent: ghost")

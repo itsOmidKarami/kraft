@@ -345,7 +345,9 @@ def _agent_checks() -> list[dict]:
         checks.append(_check("harnesses.yaml", False, detail))
         table = HarnessProfileTable(profiles={})
     profiles = table.profiles
-    for pid in sorted(_selected_profiles(live)):
+    chains = _resolved_chains(live)
+    selected = _selected_profiles(chains)
+    for pid in sorted(selected):
         profile = profiles.get(pid)
         if profile is None:
             checks.append(_check(f"agent: {pid}", False, "no such profile in harnesses.yaml"))
@@ -364,7 +366,11 @@ def _agent_checks() -> list[dict]:
         found = shutil.which(exe)
         if not found:
             checks.append(
-                _check(f"agent: {pid}", False, f"`{exe}` is not on PATH — no chain can run")
+                _check(
+                    f"agent: {pid}",
+                    False,
+                    f"`{exe}` is not on PATH — {_cannot_run(selected[pid], len(chains))}",
+                )
             )
             continue
         real = os.path.realpath(found)
@@ -479,14 +485,27 @@ def _resolved_chains(live: Path) -> list:
     return chains
 
 
-def _selected_profiles(live: Path) -> set[str]:
-    return {
-        t.task.harness
-        for chain in _resolved_chains(live)
-        for node in chain.nodes
-        for t in node.tasks()
-        if isinstance(t.task, AgentTask)
-    }
+def _selected_profiles(chains: list) -> dict[str, list[str]]:
+    """Each harness profile `chains` select, and the ids of the chains that do."""
+    selected: dict[str, list[str]] = {}
+    for chain in chains:
+        for pid in {
+            t.task.harness
+            for node in chain.nodes
+            for t in node.tasks()
+            if isinstance(t.task, AgentTask)
+        }:
+            selected.setdefault(pid, []).append(chain.id)
+    return selected
+
+
+def _cannot_run(chain_ids: list[str], of: int) -> str:
+    """What a missing agent stops: every chain only when it is in all of them."""
+    if len(chain_ids) == of:
+        return "no chain can run"
+    if len(chain_ids) == 1:
+        return f"chain {chain_ids[0]} can't run"
+    return f"chains {', '.join(sorted(chain_ids))} can't run"
 
 
 #: What the `mcp server` row does not read (Kraft-9efnk.43): each other
