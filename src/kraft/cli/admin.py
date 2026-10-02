@@ -961,7 +961,7 @@ def _cmd_mcp(ns: argparse.Namespace) -> None:
 
 
 def _cmd_permission_hook(ns: argparse.Namespace) -> None:
-    """What a harness's pre-tool hook runs, as `sys.executable -P -m kraft` so it
+    """What a harness's pre-tool hook runs, as `sys.executable -I -m kraft` so it
     is the daemon's own install. Client side only: no server import, since
     the CLI waits on this for every tool call (Kraft-4in7z). Always answers:
     any failure is the translator's deny when fail-closed, no opinion else."""

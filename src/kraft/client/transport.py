@@ -65,9 +65,32 @@ def http() -> httpx.AsyncClient:
 
 def _detail(response: httpx.Response) -> str:
     try:
-        return str(response.json().get("detail", response.text))
+        return detail_of(response.json())
     except ValueError:
         return response.text
+
+
+def detail_of(body: object) -> str:
+    """The reason an API answer gives, as one line. Kraft's own refusals carry
+    a sentence in `detail`; a body that does not fit a route's model gets
+    FastAPI's 422, whose `detail` is a list of pydantic errors, which would
+    otherwise reach a person or an agent as a Python repr. Each reads
+    `field: message`, joined with `; `."""
+    detail = body.get("detail", body) if isinstance(body, dict) else body
+    if isinstance(detail, list) and detail:
+        return "; ".join(_invalid_field(error) for error in detail)
+    return str(detail)
+
+
+def _invalid_field(error: object) -> str:
+    if not isinstance(error, dict) or "msg" not in error:
+        return str(error)
+    where = [str(p) for p in error.get("loc") or ()]
+    # A leading `body`, `query` or `path` says where FastAPI looked, not what
+    # was wrong: a field may itself be named `body`.
+    if where and where[0] in ("body", "query", "path"):
+        where = where[1:]
+    return f"{'.'.join(where)}: {error['msg']}" if where else str(error["msg"])
 
 
 # The lead some raised messages carry themselves: `kraft 404: ...` from the
@@ -75,12 +98,18 @@ def _detail(response: httpx.Response) -> str:
 _OWN_LEAD = re.compile(r"^kraft(?:: | (?=\d{3}: ))")
 
 
+def reason_of(message: str) -> str:
+    """`message` without the `kraft` lead it may carry: `404: unknown session`
+    for `kraft: 404: unknown session` or `kraft 404: unknown session`."""
+    return _OWN_LEAD.sub("", message, count=1)
+
+
 def refusal(exc: BaseException) -> str:
     """The one line both front doors show for a refused call: `kraft: `, then
     the reason. `kraft <verb>` prints it on stderr and `kraft admin mcp` hands
     it to the agent, so the two read the same. A message that already led with
     `kraft` would otherwise read `kraft: kraft 404: ...`."""
-    return f"kraft: {_OWN_LEAD.sub('', str(exc), count=1)}"
+    return f"kraft: {reason_of(str(exc))}"
 
 
 def segment(value: object) -> str:
@@ -145,7 +174,7 @@ async def _patch(path: str, payload: dict) -> dict:
     except ValueError:
         body = {"detail": response.text}
     if response.status_code >= 400:
-        raise ValueError(f"kraft {response.status_code}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {response.status_code}: {detail_of(body)}")
     return body
 
 
@@ -164,5 +193,5 @@ async def _post(path: str, payload: dict | None = None, **kwargs) -> tuple[int, 
 async def _act(path: str, payload: dict | None = None) -> dict:
     status, body = await _post(path, payload)
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {detail_of(body)}")
     return body

@@ -86,7 +86,7 @@ async def create_work_item(
         },
     )
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
     for warning in ("bead_warning", "duplicate_warning"):
         if body.get(warning):
@@ -130,7 +130,7 @@ async def probe_repo(path: str | None = None, *, detect: bool = True) -> dict:
         "/repos/probe", {"path": path, "detect": detect}, timeout=CONNECT_TIMEOUT_S
     )
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     return body
 
 
@@ -173,7 +173,7 @@ async def ensure_repo(
             "/repos/probe", {"path": path, "detect": False}
         )
         if probe_status >= 400:
-            raise ValueError(f"kraft {probe_status}: {probed.get('detail', probed)}")
+            raise ValueError(f"kraft {probe_status}: {transport.detail_of(probed)}")
         listing = await transport._get("/repos")
         stored = next(
             (r for r in listing.get("repos", []) if r.get("path") == probed.get("path")),
@@ -183,7 +183,7 @@ async def ensure_repo(
         # a stale read must degrade to the old behaviour, not raise.
         return {**(stored or probed), "already_connected": True}
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     return {**body, "already_connected": False}
 
 
