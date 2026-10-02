@@ -997,10 +997,18 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     )
     start.set_defaults(func=_cmd_start)
 
-    stop = subs.add_parser("stop", help="stop the running server")
+    stop = subs.add_parser(
+        "stop", help="stop the running server; any agent it is running stops with it"
+    )
     stop.set_defaults(func=_cmd_stop)
 
-    restart = subs.add_parser("restart", help="stop then start again, the same way it was running")
+    restart = subs.add_parser(
+        "restart",
+        help=(
+            "stop then start again, the same way it was running; this ends any running "
+            "agent, so pause running items first and retry any it stopped"
+        ),
+    )
     restart.set_defaults(func=_cmd_restart)
 
     install_service = subs.add_parser(
@@ -1041,7 +1049,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     update_p.add_argument(
         "--restart",
         action="store_true",
-        help="restart a running server after a successful update, the same way it was running",
+        help=(
+            "restart a running server after a successful update, the same way it was "
+            "running; this ends any running agent, so pause running items first"
+        ),
     )
     update_p.set_defaults(func=_cmd_update)
 
