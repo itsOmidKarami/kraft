@@ -7,6 +7,7 @@ description: Task-focused how-tos for driving, extending, and reaching Kraft.
 
 Each guide walks through one job from start to finish.
 
+- [The board and the web UI](/guides/the-board): a tour of every screen, from the board and an item's page to review, Templates, Settings and the phone.
 - [Use Kraft from your agent](/guides/agent-integration): drive Kraft with `/kraft:*` slash commands from a coding agent.
 - [Kraft Lite](/guides/kraft-lite): run a chain inside one agent session with no service.
 - [Remote access](/guides/remote-access): approve or reject a gate from a phone, over a tunnel.
