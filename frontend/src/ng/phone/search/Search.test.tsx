@@ -145,6 +145,7 @@ describe("Search (I)", () => {
     await waitFor(() => expect(where()).toContain("source=artifact"));
     await type("cache");
     await waitFor(() => expect(calls.some((c) => c.path === "/search")).toBe(true));
+    expect(calls.filter((c) => c.path === "/search").map((c) => [c.query.get("q"), c.query.get("source_kind")])).toEqual([["cache", "artifact"]]);
     expect(where()).toContain("q=cache");
   });
 });

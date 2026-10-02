@@ -1,16 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { holdFetch, stubFetch } from "./testkit";
+import { acceptWrites, holdFetch, stubFetch } from "./testkit";
 import { MemoryRouter } from "react-router-dom";
 import { Brief, DiffLine, Title } from "./Top";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("PATCH /work-items/w1");
 
 afterEach(() => vi.unstubAllGlobals());
 const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !== "GET");
 
 describe("Title", () => {
   it("renames in place on Enter, restores on Esc, and refuses a blank title", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const onSaved = vi.fn();
     render(<Title id="w1" title="Old" onSaved={onSaved} />);
     await userEvent.click(screen.getByRole("button", { name: "Old" }));
@@ -30,7 +33,7 @@ describe("Title", () => {
 
 describe("Brief", () => {
   it("edits in the same spot, says who reads it, and saves the description", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const onSaved = vi.fn();
     render(<Brief id="w1" brief="Cache embeddings." onSaved={onSaved} />);
     await userEvent.click(screen.getByRole("button", { name: "edit" }));
@@ -42,7 +45,7 @@ describe("Brief", () => {
   });
 
   it("saves on ⌘↵, a plain ↵ starting a new line", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const onSaved = vi.fn();
     render(<Brief id="w1" brief="Cache embeddings." onSaved={onSaved} />);
     await userEvent.click(screen.getByRole("button", { name: "edit" }));

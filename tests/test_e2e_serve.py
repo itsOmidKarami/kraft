@@ -136,11 +136,14 @@ def test_default_port_is_ephemeral(serve, monkeypatch):
             binds.append(addr)
 
         def getsockname(self):
+            if not binds:  # read before any bind: no port of the kernel's
+                return ("0.0.0.0", 0)
             return ("127.0.0.1", 54321 if binds[-1][1] == 0 else binds[-1][1])
 
     monkeypatch.setattr(serve, "socket", SimpleNamespace(socket=KernelPick))
-    assert serve.resolve_port() == "54321"
+    port = serve.resolve_port()
     assert binds == [("127.0.0.1", 0)]
+    assert port == "54321"
 
 
 def test_default_path_never_probes(serve, monkeypatch):

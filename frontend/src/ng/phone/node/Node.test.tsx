@@ -5,10 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { detail, holdFetch, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, holdFetch, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/pause", "POST /work-items/w1/retry", "POST /work-items/w1/skip");
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
 const session = (over: Partial<WorkerSession>): WorkerSession => ({ id: "s1", work_item_id: "w1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, thread: 1, round: 0, created_at: "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", exited_at: null, model: "claude-sonnet-4-5", tokens_in: 100, tokens_out: 50, cost_usd: 0.15, wall_ms: 60000, ...over }) as WorkerSession;
@@ -19,7 +22,7 @@ function Where() {
   return <output aria-label="where">{l.pathname + l.search}</output>;
 }
 function mount(it: ReturnType<typeof detail>, path: string, answers: Record<string, [number, unknown]> = {}) {
-  const calls = stubFetch({ "GET /work-items/w1": [200, it], "GET /worker-sessions/s1/log": [200, { lines: [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }, { n: 2, t: "0:05", src: "tool", text: "grep cache", summary: "grep cache" }] }], ...answers });
+  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, it], "GET /worker-sessions/s1/log": [200, { lines: [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }, { n: 2, t: "0:05", src: "tool", text: "grep cache", summary: "grep cache" }] }], ...answers });
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>

@@ -1,14 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { stubFetch } from "../testkit";
+import { acceptWrites, stubFetch } from "../testkit";
 import { CompleteDialog, EscalateDialog } from "./Dialogs";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/complete", "POST /work-items/w1/escalate");
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("item dialogs", () => {
   it("sends an escalation on ⌘↵ from its message, a plain ↵ staying a newline", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const onDone = vi.fn();
     render(<EscalateDialog id="w1" onClose={() => {}} onDone={onDone} />);
     await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Look at{Enter}the lint step");
@@ -19,7 +22,7 @@ describe("item dialogs", () => {
   });
 
   it("marks complete on Ctrl+↵ from its reason, and not while the reason is blank", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     render(<CompleteDialog id="w1" onClose={() => {}} onDone={() => {}} />);
     const reason = screen.getByRole("textbox", { name: /Reason/ });
     await userEvent.click(reason);
