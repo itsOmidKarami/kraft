@@ -740,7 +740,43 @@ def _detached_failure(log_path: Path, start_offset: int, tail_chars: int = 2000)
     return f"{head}\n{output[-tail_chars:]}\nkraft: the whole log is {log_path}"
 
 
-def _cmd_stop(ns: argparse.Namespace) -> None:
+def _confirm_running_agents(ns: argparse.Namespace, doing: str, *, ask: bool) -> None:
+    """Name the active items before a stop ends their agents, and, with `ask`,
+    let a person at a terminal back out.
+
+    A clean stop cancels every item's task, and the task kills its agent's
+    process group on the way out, so the next start finds the session dead
+    and stops the item (`reattach`). Without a terminal, or with `--yes`,
+    this only warns: a script must not hang on a question. A server that does
+    not answer has nothing to list."""
+    try:
+        items = asyncio.run(client.list_work_items("active"))
+    except Exception:
+        return
+    if not items:
+        return
+    print(
+        f"kraft: {doing} the server ends the agent of any active item ({len(items)}):",
+        file=sys.stderr,
+    )
+    for item in items:
+        print(
+            f"  {item['id']}  {item.get('current_node_id') or '-'}  {item['title']}",
+            file=sys.stderr,
+        )
+    print(
+        "  each one stops when Kraft starts again; retry it then. To avoid that, "
+        "pause them first (kraft item pause ID) and resume them after.",
+        file=sys.stderr,
+    )
+    if not ask or getattr(ns, "yes", False) or not sys.stdin.isatty():
+        return
+    if input("Go on? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("kraft: nothing stopped", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def _cmd_stop(ns: argparse.Namespace, *, warn: bool = True) -> None:
     """SIGTERM to the pid in the run dir, then wait for it to actually go.
 
     Nothing running is not a failure: `kraft admin stop` in a teardown script
@@ -751,6 +787,8 @@ def _cmd_stop(ns: argparse.Namespace) -> None:
     if pid is None:
         print("kraft: no server running")
         return
+    if warn:
+        _confirm_running_agents(ns, "stopping", ask=False)
     os.kill(pid, signal.SIGTERM)
     # 15s, not 5: the poll must not expire before the graceful-shutdown backstop
     # it is waiting on (`_serve`, timeout_graceful_shutdown=10).
@@ -804,6 +842,13 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
     someone's terminal can't be handed back to that terminal from here, so
     this only stops it and says so -- restarting it is that terminal's job.
     """
+    _confirm_running_agents(ns, "restarting", ask=True)
+    _restart(ns)
+
+
+def _restart(ns: argparse.Namespace) -> None:
+    """`_cmd_restart` once its question about running agents is answered:
+    `update --restart` asks it before installing, not after."""
     if _service_installed():
         _restart_service()
         return
@@ -814,7 +859,7 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
         return
     mode_path = RunDirs(pid_path.parent).mode
     detached = mode_path.is_file() and mode_path.read_text().strip() == "detached"
-    _cmd_stop(ns)
+    _cmd_stop(ns, warn=False)
     if detached:
         _start_detached()
     else:
@@ -993,6 +1038,9 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if not update.is_behind(release) and not ns.force:
         print(f"kraft {here} is up to date ({release.tag} is the newest release)")
         return
+    if ns.restart:
+        # Before installing, so answering no leaves nothing half done.
+        _confirm_running_agents(ns, "restarting", ask=True)
     print(f"kraft {here} -> {release.tag}")
     code = update.perform(release)
     if code != 0:
@@ -1004,7 +1052,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
             "hooks keep running it; uninstall it or reorder PATH (kraft admin doctor)"
         )
     if ns.restart:
-        _cmd_restart(ns)
+        _restart(ns)
     else:
         print("Restart a running server: kraft admin restart")
 
@@ -1023,7 +1071,14 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     start.set_defaults(func=_cmd_start)
 
     stop = subs.add_parser(
-        "stop", help="stop the running server; any agent it is running stops with it"
+        "stop",
+        help="stop the running server; any agent it is running stops with it",
+        description=(
+            "Stop the running server. Any agent it is running stops with it, and each "
+            "of those items stops when Kraft starts again. Pause running items first "
+            "(kraft item pause ID) and resume them after. This lists the active items, "
+            "but does not ask."
+        ),
     )
     stop.set_defaults(func=_cmd_stop)
 
@@ -1033,7 +1088,14 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
             "stop then start again, the same way it was running; this ends any running "
             "agent, so pause running items first and retry any it stopped"
         ),
+        description=(
+            "Stop then start again, the same way it was running. This ends any running "
+            "agent, and each of those items stops when Kraft starts again: pause running "
+            "items first (kraft item pause ID) and resume them after, or retry them. It "
+            "lists the active items first and, in a terminal, asks before going on."
+        ),
     )
+    restart.add_argument("-y", "--yes", action="store_true", help="do not ask about running agents")
     restart.set_defaults(func=_cmd_restart)
 
     install_service = subs.add_parser(
@@ -1068,7 +1130,8 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "accept replacing a Kraft 0.x template configuration (registry.yaml, "
-            "no library.yaml), which is backed up first"
+            "no library.yaml), which is backed up first; with --restart, do not ask "
+            "about running agents"
         ),
     )
     update_p.add_argument(
