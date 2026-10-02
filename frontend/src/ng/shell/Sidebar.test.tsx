@@ -118,6 +118,55 @@ describe("ng Sidebar", () => {
     expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
   });
 
+  it("collapses at once on unpin, with the pointer still on the pin, and keeps no focus that would hold it open", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    mount();
+    const pin = screen.getByRole("button", { name: "Collapse sidebar" });
+    await userEvent.click(pin);
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
+    expect(document.querySelector(".ng-sidebar")).not.toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("closes a revealed rail when one of its rows goes to a page", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
+    mount();
+    const row = screen.getByRole("link", { name: "Analytics" });
+    await userEvent.hover(row);
+    await userEvent.click(row);
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
+    expect(screen.getByRole("main")).toHaveFocus();
+  });
+
+  it("closes a revealed rail when the window loses focus, without a click back in the page", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
+    mount();
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
+    expect(document.querySelector(".ng-sidebar")).not.toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("reveals a closed rail again when the pointer comes back to it", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
+    mount();
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
+    await userEvent.hover(screen.getByRole("link", { name: "Analytics" }));
+    expect(document.querySelector(".ng-side")).not.toHaveAttribute("data-dismissed");
+  });
+
+  it("does not move focus out of a pinned sidebar when a row is clicked", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    mount();
+    const row = screen.getByRole("link", { name: "Analytics" });
+    await userEvent.click(row);
+    expect(row).toHaveFocus();
+  });
+
   it("leaves Escape alone while pinned", async () => {
     localStorage.setItem(SIDEBAR_KEY, "pinned");
     mount();
