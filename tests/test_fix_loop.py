@@ -269,10 +269,16 @@ async def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch, database, run_d
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     tracker = isolated_bd(tmp_path)
     # executor.check() reads the current time via kraft.executor.walk's own
-    # `_now` (a seam re-exported from store). Pin it far in the future so the
-    # very first breach check trips on elapsed wall-clock, regardless of the
-    # (large) attempts cap.
-    monkeypatch.setattr("kraft.executor.walk._now", lambda: "2099-01-01T00:00:00+00:00")
+    # `_now` (a seam re-exported from store). Run it a day ahead of the real
+    # clock so the very first breach check trips on elapsed wall-clock,
+    # regardless of the (large) attempts cap. Ahead of the real clock, not a
+    # fixed date: a fixed one stops being ahead of the counter's start once
+    # the calendar passes it.
+    from datetime import UTC, datetime, timedelta
+
+    monkeypatch.setattr(
+        "kraft.executor.walk._now", lambda: (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    )
 
     pol = loop_policy(tmp_path, "verify.fix_loop", attempts=99, wall_clock_s=1)
     wid = await executor.intake(
