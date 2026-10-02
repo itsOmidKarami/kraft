@@ -46,8 +46,8 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   goTo: (path: string) => void;
   /** The "Library" crumb: back to the list with nothing selected. */
   onLibrary: () => void;
-  /** After a rename: the path the selection moves to. */
-  onRenamed: (to: string) => void;
+  /** After a rename: the path renamed and its new path, for the selection to follow. */
+  onRenamed: (from: string, to: string) => void;
   /** After a remove: what was removed. */
   onRemoved: (path: string) => void;
   /** After Duplicate: the new component's id (`tasks.fixer_copy`). */
@@ -135,7 +135,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     const updated = (a.body.ops?.[0]?.result?.updated as unknown[] | undefined)?.length ?? 0;
     endRename();
     showToast(`Renamed ${d.id} → ${id}${updated ? ` · ${plural(updated, "reference")} updated` : ""}`);
-    onRenamed([...path.split(".").slice(0, -1), id].join("."));
+    onRenamed(path, [...path.split(".").slice(0, -1), id].join("."));
   };
   const remove = async () => {
     const a = await draft.ops([{ op: "remove", path: removePath }]);

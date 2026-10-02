@@ -106,6 +106,15 @@ describe("Config tab", () => {
     expect(draft.field).toHaveBeenCalledWith("verification", "skippable", false);
   });
 
+  it("says which caps apply only to a task's on-failure recovery", async () => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources["implementation.main.implement"]["policy.budget_usd"] = { value: 2, source: "chain", recovery: true };
+    mount("implementation.main.implement", { sources });
+    await configTab();
+    expect(rowOf("budget ($)")).toHaveTextContent("applies to its on-failure recovery");
+    expect(rowOf("running cap")).not.toHaveTextContent("applies to its on-failure recovery");
+  });
+
   it("disables a locked yes/no field's switch", async () => {
     const { draft } = mount("verification");
     await configTab();

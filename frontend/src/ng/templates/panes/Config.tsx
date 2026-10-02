@@ -10,7 +10,7 @@ import type { PaneCtx } from "./Overview";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 
 /** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
-export type Row = { field: string; value: unknown; source?: string; locked?: string };
+export type Row = { field: string; value: unknown; source?: string; locked?: string; recovery?: boolean };
 
 /** "on base change" restarts from this node or an earlier exec node. */
 function restartTargets(ctx: PaneCtx): string[] {
@@ -99,6 +99,7 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
           </>
         )
       )}
+      {row.recovery && <p className="cfg-note">applies to its on-failure recovery</p>}
       {err && <p className="cfg-err" role="alert">{err}</p>}
     </div>
   );

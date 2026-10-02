@@ -33,7 +33,7 @@ const NOT_OVERRIDES = new Set(["id", "extends", "icon", "kind", "on_failure"]);
 
 /** The side pane for whatever is selected (Decisions §9 Side pane): crumb,
  *  icon and title, subtitle, the problem row, Overview | Config, footer. */
-export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand, onFocus, goTo, onDuplicate, onDeleted, onRenamed, onRemoved, onMarking, renameNow }: {
+export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand, onFocus, goTo, onDuplicate, onDeleted, onRenamed, onRemoved, onMarking, renaming: renamingAt, onRenaming }: {
   draft: ConfigDraft;
   scope: Scope;
   path: string;
@@ -53,23 +53,22 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   onRemoved?: () => void;
   /** The paths the open remove card lists, for the canvas to mark red. */
   onMarking?: (nodes: string[]) => void;
-  /** The page asks for the title's rename (a click on the selected node's name) with a new
-   *  count, and ends it with 0 (a double-click opens the node view instead). */
-  renameNow?: number;
+  /** The path whose title is edited in place, when the page holds it (a click on the
+   *  selected node's name starts it; a double-click or another selection ends it). */
+  renaming?: string | null;
+  onRenaming?: (path: string | null) => void;
 }) {
   const [card, setCard] = useState<{ t: "move" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
-  // The path whose title is being renamed in place: another selection ends it.
-  const [renaming, setRenaming] = useState<string | null>(null);
+  // The path whose title is being renamed in place: the page's, else this pane's own.
+  const [ownRenaming, setOwnRenaming] = useState<string | null>(null);
+  const renaming = onRenaming ? renamingAt ?? null : ownRenaming;
+  const setRenaming = onRenaming ?? setOwnRenaming;
   const anchor = useRef<HTMLElement | null>(null);
-  useEffect(() => setRenaming(null), [path]);
   useEffect(() => {
-    if (renameNow === undefined) return;
-    setRenaming(renameNow ? path : null);
+    if (!onRenaming) setOwnRenaming(null);
     setRefused(null);
-    // Only when the page asks: the path is the one it asks about.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renameNow]);
+  }, [path, onRenaming]);
   const [asking, setAsking] = useState(false);
   const [tab, setTab] = useState("overview");
   const r = draft.view!.result;

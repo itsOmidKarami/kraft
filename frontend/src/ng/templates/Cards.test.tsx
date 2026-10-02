@@ -63,7 +63,7 @@ describe("rename", () => {
     await userEvent.click(within(pane()).getByRole("button", { name: "spec" }));
     const id = within(pane()).getByRole("textbox", { name: "Rename node" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(within(pane()).getByText(/Enter also updates 1 reference: spec_approval\.reject_to/)).toBeInTheDocument();
+    expect(within(pane()).getByText(/Renaming also updates 1 reference: spec_approval\.reject_to/)).toBeInTheDocument();
     await waitFor(() => expect(id).toHaveFocus());
     await userEvent.clear(id);
     await userEvent.type(id, "specification{Enter}");
@@ -114,6 +114,85 @@ describe("rename", () => {
     await pause(DOUBLE_CLICK_MS + 50);
     expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("never sends a blank id: Enter says why, a blur keeps the old one", async () => {
+    const post = vi.spyOn(d, "postOps").mockImplementation(() => opsAnswer());
+    mount();
+    const g = await canvas();
+    await userEvent.click(within(g).getByRole("button", { name: "spec, node" }));
+    await userEvent.click(within(pane()).getByRole("button", { name: "spec" }));
+    const id = within(pane()).getByRole("textbox", { name: "Rename node" });
+    await userEvent.clear(id);
+    await userEvent.keyboard("{Enter}");
+    expect(within(pane()).getByRole("alert")).toHaveTextContent("Type an id, or Esc to keep it.");
+    await userEvent.tab();
+    expect(within(pane()).queryByRole("textbox", { name: "Rename node" })).toBeNull();
+    expect(within(pane()).getByRole("button", { name: "spec" })).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("a click on another node while renaming commits the rename and keeps the new pick", async () => {
+    const post = vi.spyOn(d, "postOps").mockImplementation(() => opsAnswer());
+    mount();
+    const g = await canvas();
+    await userEvent.click(within(g).getByRole("button", { name: "spec, node" }));
+    await userEvent.click(within(pane()).getByRole("button", { name: "spec" }));
+    await userEvent.type(within(pane()).getByRole("textbox", { name: "Rename node" }), "x");
+    await userEvent.click(within(g).getByRole("button", { name: "implementation, node" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("chains", "default", [{ op: "rename", path: "spec", id: "specx" }], undefined));
+    await toasted(/Renamed spec → specx/);
+    expect(screen.getByRole("complementary", { name: "implementation pane" })).toBeInTheDocument();
+  });
+
+  it("a click on the selected node, then on the canvas, renames nothing later", async () => {
+    mount();
+    const g = await canvas();
+    const spec = within(g).getByRole("button", { name: "spec, node" });
+    await userEvent.click(spec);
+    await pause(DOUBLE_CLICK_MS + 50);
+    await userEvent.click(spec);
+    await userEvent.click(g);
+    await userEvent.click(screen.getByRole("button", { name: "Chain settings" }));
+    await pause(DOUBLE_CLICK_MS + 50);
+    expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();
+    // Nor when the node is picked again.
+    await userEvent.click(spec);
+    expect(pane()).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^Rename/ })).toBeNull();
+  });
+
+  it("a rename ended by Esc does not reopen after Review & publish", async () => {
+    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "", text: "", chain: {} });
+    mount();
+    const g = await canvas();
+    const spec = within(g).getByRole("button", { name: "spec, node" });
+    await userEvent.click(spec);
+    await pause(DOUBLE_CLICK_MS + 50);
+    await userEvent.click(spec);
+    await userEvent.type(await within(pane()).findByRole("textbox", { name: "Rename node" }), "{Escape}");
+    expect(within(pane()).queryByRole("textbox", { name: "Rename node" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    await pause(50);
+    expect(pane()).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
+  });
+
+  it("a click on the selected node just before Review & publish renames nothing after it", async () => {
+    vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "", text: "", chain: {} });
+    mount();
+    const g = await canvas();
+    const spec = within(g).getByRole("button", { name: "spec, node" });
+    await userEvent.click(spec);
+    await pause(DOUBLE_CLICK_MS + 50);
+    await userEvent.click(spec);
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    await pause(DOUBLE_CLICK_MS + 50);
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    expect(pane()).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Rename node" })).toBeNull();
   });
 
   it("with the pane collapsed, the first click on the selected node expands it instead", async () => {

@@ -41,6 +41,8 @@ export interface Source {
   value: unknown;
   /** `chain`, `library:<section>.<name>`, `policy` or `default`. */
   source: string;
+  /** A cap this task's kind does not read, which its `on_failure` recovery runs under. */
+  recovery?: boolean;
 }
 
 /** `GET /templates/chains/{id}/resolved`'s shape: the chain with `extends` expanded. */
