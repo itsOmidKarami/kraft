@@ -50,14 +50,26 @@ def impact_of(pr: dict) -> str:
     still editable after merge, so an undeclared PR fails the release by
     number instead of shipping under a guessed weight.
     """
+    # GitHub labels are free text, so a mistyped highlight would otherwise be
+    # ignored and the release would ship without its headline.
+    for label in pr["labels"]:
+        if label.strip().lower().startswith("notes::") and label != HIGHLIGHT:
+            raise ValueError(
+                f"#{pr['number']} has the label {label!r}; the only notes:: label is "
+                f"{HIGHLIGHT}. Fix it and run the release again"
+            )
+    highlighted = HIGHLIGHT in pr["labels"]
     impact = impact_from_labels(",".join(pr["labels"]))
     if impact is None:
+        # Without this, `release::none` reads as the fix and fails the next run.
+        hint = f" (it has {HIGHLIGHT}, so one that ships, not {PREFIX}none)"
+        hint = hint if highlighted else ""
         raise ValueError(
-            f"#{pr['number']} has no {PREFIX} label; label it and run the release again"
+            f"#{pr['number']} has no {PREFIX} label{hint}; label it and run the release again"
         )
     # A `release::none` PR has no line in the notes, so a highlight on it would
     # vanish without a word. One of the two labels is wrong; ask which.
-    if impact == "none" and HIGHLIGHT in pr["labels"]:
+    if impact == "none" and highlighted:
         raise ValueError(
             f"#{pr['number']} has {HIGHLIGHT} but {PREFIX}none, so it has no entry to "
             "highlight; fix one label and run the release again"
@@ -83,7 +95,9 @@ def changelog_entry(pr: dict) -> str:
 def release_notes(prs: list[dict]) -> str:
     """Markdown for every PR that ships something: highlights, then largest impact first.
 
-    A highlighted PR is listed once, under Highlights, whatever its impact.
+    A highlighted minor or patch PR is listed once, under Highlights. A
+    highlighted major one stays under Breaking changes too, so a breaking
+    release never ships without that section.
     Every section keeps the order `prs` came in, which release.yml's
     `unique_by(.number)` makes PR-number order.
     """
@@ -91,8 +105,13 @@ def release_notes(prs: list[dict]) -> str:
     sections: dict[str, list[str]] = {key: [] for key in headings}
     for pr in prs:
         impact = impact_of(pr)
-        if impact in GROUPS:
-            sections[HIGHLIGHT if HIGHLIGHT in pr["labels"] else impact].append(changelog_entry(pr))
+        if impact not in GROUPS:
+            continue
+        highlighted = HIGHLIGHT in pr["labels"]
+        if highlighted:
+            sections[HIGHLIGHT].append(changelog_entry(pr))
+        if not highlighted or impact == "major":
+            sections[impact].append(changelog_entry(pr))
     parts = [f"### {headings[key]}\n\n" + "\n\n".join(v) for key, v in sections.items() if v]
     return "\n\n".join(parts) + "\n" if parts else ""
 

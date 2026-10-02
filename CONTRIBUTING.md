@@ -242,8 +242,8 @@ its title.
 
 The release's headline change can also carry `notes::highlight`, next to its
 `release::` label. Its entry then opens the release notes under **Highlights**
-instead of sitting among the others, and its impact still counts toward the
-bump. Keep it for the change the release is about: rarely more than one or two
+instead of sitting among the others (a `release::major` one is also kept under
+Breaking changes), and its impact still counts toward the bump. Keep it for the change the release is about: rarely more than one or two
 per release. Write its `## Changelog` section as a headline. A `release::none`
 pull request with the label stops the release, since there is no entry to
 highlight. See [RELEASING.md](RELEASING.md#cut-a-release).
@@ -259,7 +259,8 @@ A maintainer can run the release workflow as a dry run (see
 [RELEASING.md](RELEASING.md#cut-a-release)). On the run's summary page, confirm
 that the version bump matches the largest label among the merged pull requests
 and that your pull request's `## Changelog` line appears under the right
-heading. If your pull request is missing or listed by its title, fix the label
+heading. A highlighted pull request's line is under Highlights, and a major one
+is under Breaking changes as well. If your pull request is missing or listed by its title, fix the label
 or the section in the description and run the dry run again.
 
 ## Branch hygiene

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -80,9 +81,31 @@ def test_highlights_keep_pr_order_whatever_their_impact():
         pr(5, "minor", title="new"),
         pr(9, "major", title="break", highlight=True),
     ]
-    assert plan_release.release_notes(prs) == (
-        "### Highlights\n\n- fix (#3)\n\n- break (#9)\n\n### New\n\n- new (#5)\n"
+    assert plan_release.release_notes(prs).startswith(
+        "### Highlights\n\n- fix (#3)\n\n- break (#9)\n\n### Breaking changes\n\n"
     )
+
+
+def test_a_highlighted_major_stays_under_breaking_changes_too():
+    prs = [pr(2, "major", title="old"), pr(9, "major", title="break", highlight=True)]
+    assert plan_release.release_notes([*prs, pr(11, "patch", title="fix", highlight=True)]) == (
+        "### Highlights\n\n- break (#9)\n\n- fix (#11)\n\n"
+        "### Breaking changes\n\n- old (#2)\n\n- break (#9)\n"
+    )
+
+
+@pytest.mark.parametrize("label", ["Notes::Highlight", "notes::highlight ", "notes::higlight"])
+def test_a_near_miss_notes_label_fails_the_release_by_number(label):
+    near_miss = pr(4, "minor")
+    near_miss["labels"].append(label)
+    with pytest.raises(ValueError, match=f"#4 has the label {re.escape(repr(label))}"):
+        plan_release.release_impact([pr(1, "patch"), near_miss])
+
+
+def test_an_unlabelled_highlight_is_told_to_take_a_shipping_label():
+    unlabelled = {"number": 7, "title": "t", "body": "", "labels": ["notes::highlight"]}
+    with pytest.raises(ValueError, match="#7 has no release:: label.*not release::none"):
+        plan_release.release_impact([unlabelled])
 
 
 def test_a_highlight_still_counts_toward_the_bump():
@@ -99,8 +122,8 @@ def test_a_highlighted_release_none_pr_fails_the_release_by_number():
 
 
 def test_no_highlight_leaves_real_notes_byte_identical(tmp_path, capsys):
-    """Ten merged 1.5.0 PRs as release.yml's jq writes them, and the notes the
-    release wrote for them before highlights existed."""
+    """Ten 1.5.0 PRs in the shape release.yml's jq writes, their bodies abridged
+    around a verbatim `## Changelog`, and the notes the pre-highlight code writes."""
     notes = tmp_path / "notes.md"
     plan_release.main(["plan", "v1.4.0", str(_FIXTURES / "prs-1.5.0.json"), str(notes)])
     assert capsys.readouterr().out == "v1.5.0\n"
