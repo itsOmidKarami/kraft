@@ -16,7 +16,7 @@ const at = (ms: number) => new Date(now - ms).toISOString();
 
 describe("ago", () => {
   it("steps through the units and stays quiet on bad input", () => {
-    expect(ago(at(30_000), now)).toBe("DELIBERATELY BROKEN");
+    expect(ago(at(30_000), now)).toBe("just now");
     expect(ago(at(12 * 60_000), now)).toBe("12m ago");
     expect(ago(at(3 * 3_600_000), now)).toBe("3h ago");
     expect(ago(at(4 * 86_400_000), now)).toBe("4d ago");
