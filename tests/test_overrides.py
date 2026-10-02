@@ -1,6 +1,8 @@
 """An operator's per-item override is held to one shape per kind: a work
 item's own model/effort (`agent_overrides`) and a node's (`node_overrides`)."""
 
+import pytest
+
 from kraft import overrides
 
 
@@ -48,3 +50,48 @@ def test_node_override_takes_an_extra_prompt_string_and_nothing_else():
     assert overrides.validate_node_override_fields({"extra_prompt": 3}) == [
         "'extra_prompt' must be a string or null"
     ]
+
+
+@pytest.mark.parametrize(
+    ("check", "fields"),
+    [
+        (overrides.validate_agent_overrides, {"model": None, "effort": None}),
+        (
+            overrides.validate_node_override_fields,
+            {"attempts": None, "effort": None, "auto_escalate_stuck": None},
+        ),
+    ],
+    ids=["agent", "node"],
+)
+def test_a_null_field_is_a_drop_and_is_not_checked_against_its_type(check, fields):
+    """A PATCH sends `null` to drop one field (`store.merge_fields`)."""
+    assert check(fields) == []
+
+
+def test_a_null_unknown_field_is_still_named():
+    assert overrides.validate_node_override_fields({"not_a_setting": None}) == [
+        "cannot override ['not_a_setting']"
+    ]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "opus",
+        "claude-sonnet-4-5",
+        "gpt-5.6-sol",
+        "us.anthropic.claude-opus:0",
+        "openrouter/x",
+        "opus[1m]",
+    ],
+)
+def test_a_model_id_is_accepted(model):
+    assert overrides.validate_agent_overrides({"model": model}) == []
+    assert overrides.validate_node_override_fields({"escalate_model": model}) == []
+
+
+@pytest.mark.parametrize("model", ["not a model; rm -rf", "", "-opus", "x" * 129, "opus\n"])
+def test_text_that_is_no_model_id_is_refused_naming_the_rule(model):
+    errs = overrides.validate_agent_overrides({"model": model})
+    assert len(errs) == 1 and "is not a model id" in errs[0] and "at most 128 characters" in errs[0]
+    assert "is not a model id" in overrides.validate_node_override_fields({"model": model})[0]

@@ -692,6 +692,13 @@ def node_started(conn: sqlite3.Connection, work_item_id: str, node_id: str) -> b
     return row is not None
 
 
+def merge_fields(current: dict, patch: dict) -> dict:
+    """`patch` over `current`, field by field: a value sets that field and a
+    `None` drops it. One rule for a node's override and the item-wide one."""
+    out = {**current, **patch}
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def set_node_overrides(conn: sqlite3.Connection, work_item_id: str, patch: dict[str, dict]) -> dict:
     """Merge `patch` into the item's stored `node_overrides` and return the new
     whole object.
@@ -699,8 +706,11 @@ def set_node_overrides(conn: sqlite3.Connection, work_item_id: str, patch: dict[
     `patch == {}` (the top-level object itself, not a node inside it) clears
     every override -- "Reset to template" (point 2). A non-empty `patch` is
     per-node: `{node_id: {}}` drops just that node's overrides, `{node_id:
-    {field: value}}` sets fields on it. The caller (the PATCH route) has
-    already validated node ids, field names and `node_started` locking.
+    {field: value}}` sets fields on it, and `{node_id: {field: None}}` drops
+    that one field, in the same write: a caller never re-sends the fields it
+    keeps from a copy that may be stale. A node left with no field goes. The
+    caller (the PATCH route) has already validated node ids, field names and
+    `node_started` locking.
     """
     row = conn.execute(
         "SELECT node_overrides FROM work_items WHERE id = ?", (work_item_id,)
@@ -711,8 +721,9 @@ def set_node_overrides(conn: sqlite3.Connection, work_item_id: str, patch: dict[
     else:
         new = dict(current)
         for node_id, fields in patch.items():
-            if fields:
-                new[node_id] = {**new.get(node_id, {}), **fields}
+            merged = merge_fields(new.get(node_id, {}), fields) if fields else {}
+            if merged:
+                new[node_id] = merged
             else:
                 new.pop(node_id, None)
     conn.execute(

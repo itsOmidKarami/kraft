@@ -328,8 +328,7 @@ def build() -> MCPServer:
         """Set or clear a Kraft work item's own model/effort override, applied
         to every agent node in its chain without changing the chain itself.
         `clear` resets every field back to the template's own binding; naming
-        a field replaces the whole stored override rather than merging with
-        it."""
+        a field sets it and keeps the fields it does not name."""
         return await client.set_agent_overrides(
             model, escalate_model, effort, clear=clear, work_item_id=work_item_id
         )
@@ -352,9 +351,8 @@ def build() -> MCPServer:
         appended to each of their instructions -- without touching the Policy
         screen's system defaults or the chain template everyone else uses. A
         model/effort the node's harness refuses is refused here. `clear` resets this node back to
-        the template's own binding; naming a field replaces the whole stored
-        override for that node rather than merging with it. 409s once the
-        node has started."""
+        the template's own binding; naming a field sets it and keeps the
+        node's other fields. 409s once the node has started."""
         return await client.set_node_overrides(
             node_id,
             auto_escalate,
