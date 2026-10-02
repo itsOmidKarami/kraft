@@ -303,6 +303,56 @@ describe("BoardPage", () => {
     expect(where()).toBe("/");
   });
 
+  it("keeps the peek on a right-click outside it, and on a press in a popover, dialog or toast, or on the list's scrollbar", async () => {
+    put(item("r1", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
+    board("/?sel=r1");
+    await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    fireEvent.pointerDown(document.querySelector(".ng-header")!, { button: 2 });
+    expect(where()).toBe("/?sel=r1");
+    // What a popover, dialog or toast portals into the body, as ui/ renders them.
+    for (const cls of ["popover", "dialog-backdrop", "toasts"]) {
+      const layer = document.body.appendChild(document.createElement("div"));
+      layer.className = cls;
+      const inside = layer.appendChild(document.createElement("button"));
+      fireEvent.pointerDown(inside);
+      layer.remove();
+      expect(where()).toBe("/?sel=r1");
+    }
+    const list = document.querySelector<HTMLElement>(".board-list")!;
+    Object.defineProperty(list, "clientWidth", { value: 600, configurable: true });
+    const onBar = new MouseEvent("pointerdown", { bubbles: true, button: 0 });
+    Object.defineProperty(onBar, "offsetX", { value: 605 });
+    act(() => void list.dispatchEvent(onBar));
+    expect(where()).toBe("/?sel=r1");
+    fireEvent.pointerDown(list);
+    expect(where()).toBe("/");
+  });
+
+  it("leaves Escape in a dialog opened from the peek to the dialog, the peek and what was typed staying", async () => {
+    const failed = item("f1", "failed", { status: "needs_human", stop: { kind: "failed", node: "verification", task: null, reason: "The forge refused.", resume_at: null } as WorkItem["stop"] });
+    put(failed);
+    stubFetch({ "GET /work-items/f1": [200, { ...failed, worker_sessions: [] }], "GET /work-items/f1/events": [200, []] });
+    board("/?sel=f1");
+    const pane = await screen.findByRole("complementary", { name: "kraft-f1 pane" });
+    await userEvent.click(await within(pane).findByRole("button", { name: "Escalate…" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Look at the lint step");
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toBe("/?sel=f1");
+    expect(screen.getByRole("complementary", { name: "kraft-f1 pane" })).toBeInTheDocument();
+  });
+
+  it("hands focus back to the row when Escape closes the peek with focus on the page", async () => {
+    put(item("r1", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
+    board("/?sel=r1");
+    await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    screen.getByRole("main").focus();
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toBe("/");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Item r1/ })).toHaveFocus());
+  });
+
   it("closes the peek completely from its collapse button and from Escape inside it, leaving no rail, focus back on the row", async () => {
     put(item("r1", "running"));
     stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });

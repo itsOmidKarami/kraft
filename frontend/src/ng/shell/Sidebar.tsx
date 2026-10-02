@@ -45,21 +45,23 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   };
   // Closes a revealed rail while the pointer is still over it, and takes focus
   // out of it: focus left on a clicked row or the pin would hold it open.
-  const retract = () => {
+  const retract = (moveFocus = true) => {
     setDismissed(true);
-    if (ref.current?.contains(document.activeElement)) document.getElementById("ng-main")?.focus({ preventScroll: true });
+    if (moveFocus && ref.current?.contains(document.activeElement)) document.getElementById("ng-main")?.focus({ preventScroll: true });
   };
-  const toggle = () => {
+  // Unpinning collapses it at once. From the keyboard, focus stays on the pin,
+  // so the person keeps their place.
+  const toggle = (fromPointer: boolean) => {
     const next = mode === "pinned" ? "rail" : "pinned";
     pick(next);
-    if (next === "rail") retract();
+    if (next === "rail") retract(fromPointer);
   };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "\\" || !(e.metaKey || e.ctrlKey) || isTextField(e.target)) return;
       e.preventDefault();
-      toggle();
+      toggle(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -68,8 +70,9 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   // Leaving the window closes it too, so it never waits for a click back in the page.
   useEffect(() => {
     if (mode === "pinned") return;
-    window.addEventListener("blur", retract);
-    return () => window.removeEventListener("blur", retract);
+    const onBlur = () => retract();
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
   });
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -146,7 +149,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
             aria-pressed={mode === "pinned"}
             title={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
             aria-label={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
-            onClick={toggle}
+            // A click's detail counts its presses; Enter or Space on the button reads 0.
+            onClick={(e) => toggle(e.detail > 0)}
           >
             <Pin size={16} aria-hidden />
           </button>

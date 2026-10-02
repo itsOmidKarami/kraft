@@ -57,7 +57,9 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
     );
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
+    // A dialog or popover opened from the pane is portaled out of it, but React
+    // still bubbles its keys here: its Escape is its own, not the pane's.
+    if (e.key !== "Escape" || !e.currentTarget.contains(e.target as Node)) return;
     e.preventDefault();
     e.stopPropagation();
     fromKeys.current = true;

@@ -136,6 +136,17 @@ export function BoardPage() {
     });
   }, [open, peek]);
 
+  // Escape and the peek's own collapse button close it as an outside press
+  // does, leaving no rail. Focus the peek held, or left on the
+  // page itself, goes back to the item's row; focus in the filter stays there.
+  const closePeek = useCallback(() => {
+    const id = query.sel;
+    const at = document.activeElement;
+    const lost = !at || at === document.body || at.id === "ng-main" || !!at.closest(".pane");
+    setQuery({ sel: "" });
+    if (lost) requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id)?.querySelector<HTMLElement>(".board-row-main")?.focus());
+  }, [query.sel, setQuery]);
+
   // "/" focuses the filter; Escape clears the selection once menus have had it.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -143,18 +154,20 @@ export function BoardPage() {
       if (e.key === "/" && !isTextField(e.target)) {
         e.preventDefault();
         filterRef.current?.focus();
-      } else if (e.key === "Escape" && query.sel) setQuery({ sel: "" });
+      } else if (e.key === "Escape" && query.sel) closePeek();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [query.sel, setQuery]);
+  }, [query.sel, closePeek]);
 
   // A press anywhere outside the peek closes it: the list, the header, the
   // sidebar. A row picks its own item, and a menu, popover, dialog or toast
-  // belongs to whatever opened it. A press on a scrollbar is not a click.
+  // belongs to whatever opened it. A press on a scrollbar is not a click, and
+  // a right or middle press is not one either.
   useEffect(() => {
     if (!query.sel) return;
     const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
       const t = e.target;
       if (!(t instanceof Element) || t.closest(".pane, .board-row, .popover, .dialog-backdrop, .toasts")) return;
       if (t instanceof HTMLElement && t.clientWidth > 0 && (e.offsetX > t.clientWidth || e.offsetY > t.clientHeight)) return;
@@ -162,13 +175,6 @@ export function BoardPage() {
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
-  }, [query.sel, setQuery]);
-  // The peek's own collapse button and Escape close it as an outside press
-  // does, leaving no rail, and hand focus back to the item's row.
-  const closePeek = useCallback(() => {
-    const id = query.sel;
-    setQuery({ sel: "" });
-    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id)?.querySelector<HTMLElement>(".board-row-main")?.focus());
   }, [query.sel, setQuery]);
 
   // ↑/↓ move between rows, across groups.

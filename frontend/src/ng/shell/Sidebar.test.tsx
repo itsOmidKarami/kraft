@@ -128,6 +128,17 @@ describe("ng Sidebar", () => {
     expect(document.querySelector(".ng-sidebar")).not.toContainElement(document.activeElement as HTMLElement);
   });
 
+  it("collapses on unpin from the keyboard too, keeping focus on the pin", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    mount();
+    const pin = screen.getByRole("button", { name: "Collapse sidebar" });
+    pin.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
+    expect(pin).toHaveFocus();
+  });
+
   it("closes a revealed rail when one of its rows goes to a page", async () => {
     localStorage.setItem(SIDEBAR_KEY, "rail");
     mount();
