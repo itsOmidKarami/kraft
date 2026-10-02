@@ -94,7 +94,7 @@ def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
     why rather than leaving the first work item to find out."""
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "saved disabled: no test command found" in out
+    assert "saved disabled: no test command proposed" in out
     assert "setup command: none found" in out
 
 
@@ -127,9 +127,9 @@ def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, ca
     out = capsys.readouterr().out
     assert "test command:" not in out
     assert "setup command: none found" in out
-    assert "saved disabled: no test command found" in out
+    assert "saved disabled: no test command proposed" in out
     assert "A pyproject.toml without uv.lock gets none." in out
-    assert "A pyproject.toml without uv.lock in either place gets none." in out
+    assert "none for a pyproject.toml without uv.lock at the root" in out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
@@ -470,7 +470,7 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     ],
     ids=["at-the-root", "one-level-down"],
 )
-def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(repo, layout):
+def test_a_lockless_pyproject_with_no_root_command_proposes_no_test_scope(repo, layout):
     """A `frontend/` scope alone is what a diff to the Python code fails open
     to, so it would pass on `npm test` with the Python suite never run."""
 
@@ -483,6 +483,52 @@ def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(repo, layou
     assert (probed["test_command"], probed["test_scopes"]) == (None, [])
     (repo / Path(layout[0]).parent / "uv.lock").write_text("version = 1\n")
     assert config.probe_repo(repo)["test_command"] is not None
+
+
+#: Layout -> (probed test_command, each scope's command, the directory whose
+#: change must select the root scope by its paths rather than fail open).
+_COVERED_BY_THE_ROOT = {
+    "a-uv-workspace-member": (
+        ["pyproject.toml", "uv.lock", "foo/pyproject.toml"],
+        ("uv run pytest -q", ["uv run pytest -q"], "foo"),
+    ),
+    "a-justfile-test-recipe-and-a-lockless-backend": (
+        ["justfile", "backend/pyproject.toml"],
+        ("just test", ["just test"], "backend"),
+    ),
+    "a-justfile-test-recipe-a-lockless-backend-and-a-frontend": (
+        ["justfile", "backend/pyproject.toml", "frontend/package.json"],
+        ("just test", ["just test", "npm test"], "backend"),
+    ),
+    "a-uv-lock-and-a-frontend": (
+        ["pyproject.toml", "uv.lock", "frontend/package.json"],
+        ("uv run pytest -q", ["uv run pytest -q", "npm test"], "src"),
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("layout", "expected"), _COVERED_BY_THE_ROOT.values(), ids=_COVERED_BY_THE_ROOT
+)
+def test_a_lockless_pyproject_one_level_down_is_covered_by_the_root_command(repo, layout, expected):
+    """A uv workspace member never has a lock of its own, and `uv run` there
+    writes none: the root's covers it. Any other lockless subdirectory is the
+    root command's to test as well, rather than the whole repo going without."""
+
+    from kraft import config
+    from kraft.executor import dispatch
+
+    (repo / "src").mkdir()
+    for path in layout:
+        (repo / path).parent.mkdir(exist_ok=True)
+        (repo / path).write_text("test:\n    pytest\n" if path == "justfile" else "{}")
+    command, scope_commands, covered = expected
+    probed = config.probe_repo(repo)
+    assert probed["test_command"] == command
+    assert [s["command"] for s in probed["test_scopes"]] == scope_commands
+    root_scope = probed["test_scopes"][0]
+    assert any(fnmatch.fnmatchcase(f"{covered}/x.py", p) for p in root_scope["paths"])
+    assert dispatch._matched_scopes(probed["test_scopes"], [f"{covered}/x.py"]) == [root_scope]
 
 
 def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(repo):

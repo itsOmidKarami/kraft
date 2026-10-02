@@ -650,8 +650,9 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 #: locks before it runs, so on a `pyproject.toml` with no `uv.lock` it writes
 #: one into the worktree, every verify, for the worker to commit. Such a repo
 #: connects disabled, and is not handed the `package.json` beside it either:
-#: `npm test` would leave its Python suite unrun with nothing to say so. That
-#: holds one level down too: `_probe_test_scopes` drops every scope then.
+#: `npm test` would leave its Python suite unrun with nothing to say so. One
+#: level down it only matters when the root has no command of its own: see
+#: `_probe_test_scopes`.
 _TEST_COMMANDS: list[tuple[str, str | None]] = [
     ("Justfile", "just test"),
     ("justfile", "just test"),
@@ -768,22 +769,25 @@ def _probe_test_scopes(
     `test_command`, when given, takes the root's marker-derived command's place
     rather than suppressing probing, so nested scopes are still found (Kraft-k4mx).
 
-    A stop marker (a `pyproject.toml` with no `uv.lock`) at the root or in any
-    subdirectory proposes nothing at all: a scope left for the rest would be
-    what a diff to that Python code fails open to (`dispatch._matched_scopes`),
-    and its suite would never run. With `test_command` given, a stopped
-    subdirectory is just not claimed, so the root scope's command covers it.
+    A stop marker (a `pyproject.toml` with no `uv.lock`) at the root, with no
+    `test_command` given, proposes nothing at all. One in a subdirectory is
+    left unclaimed: the root scope's command covers it, as it covers a uv
+    workspace member, which never has a lock of its own (`uv run` there uses
+    the root's). With no root command to cover it, nothing is proposed either:
+    the other scopes would be what a diff to that Python code fails open to
+    (`dispatch._matched_scopes`), and its suite would never run.
     """
     found = None if test_command else _first_test_marker(root)
+    root_command = test_command or (found and found[1])
     try:
         subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
     except OSError:
         subdirs = []
     probed = [(d.name, hit) for d in subdirs if (hit := _first_test_marker(d))]
-    if not test_command and any(hit and hit[1] is None for hit in [found, *dict(probed).values()]):
-        return None, [], []
-    root_command = test_command or (found and found[1])
     hits = [(name, hit) for name, hit in probed if hit[1]]
+    if not root_command and (found or len(hits) < len(probed)):
+        # `found` here can only be a stop: anything else is a root command.
+        return None, [], []
     nested = [(name, cmd) for name, (_, cmd) in hits]
     markers = ([found[0]] if found else []) + [f"{name}/{marker}" for name, (marker, _) in hits]
 

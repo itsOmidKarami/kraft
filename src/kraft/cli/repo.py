@@ -87,10 +87,11 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         )
     if result.get("enabled") is False:
         print(
-            "saved disabled: no test command found (it looks for a justfile `test` recipe, "
-            "uv.lock, package.json, Cargo.toml or go.mod, at the root and one level down). "
-            "A pyproject.toml without uv.lock in either place gets none. Set `test_command` "
-            "in its repos.yaml entry, then `enabled: true`"
+            "saved disabled: no test command proposed. It reads a justfile `test` recipe, "
+            "uv.lock, package.json, Cargo.toml or go.mod at the root and one level down, "
+            "and proposes none for a pyproject.toml without uv.lock at the root, or one "
+            "level down when the root has no command of its own. Set `test_command` in its "
+            "repos.yaml entry, then `enabled: true`"
         )
 
 
