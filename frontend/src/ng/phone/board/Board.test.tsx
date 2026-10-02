@@ -134,14 +134,33 @@ describe("the phone board (B)", () => {
 });
 
 describe("a card's inline actions (B.4)", () => {
-  it("gate stop: Approve calls act.approve once, Reject… opens the reject composer", async () => {
+  it("gate stop: Approve asks first, then calls act.approve once; Reject… opens the reject composer", async () => {
+    put(gate("g1", { chain_definition: { template_id: "default", nodes: [{ id: "plan_approval" }, { id: "implementation" }] } as never }));
+    const calls = stubFetch();
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    // One tap only asks: a passed gate is not taken back.
+    const sheet = screen.getByRole("dialog", { name: "Approve plan_approval?" });
+    expect(sheet).toHaveTextContent("Item g1 moves on to implementation at once.");
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    await userEvent.click(within(sheet).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/g1/gates/plan_approval/approve", body: {} }]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    expect(where()).toContain("/work-items/g1?compose=reject");
+  });
+
+  it("Cancel in the approve sheet sends nothing, and Open the review goes to the gate's review", async () => {
     put(gate("g1"));
     const calls = stubFetch();
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/g1/gates/plan_approval/approve", body: {} }]));
-    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
-    expect(where()).toContain("/work-items/g1?compose=reject");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Open the review" }));
+    await waitFor(() => expect(where()).toContain("/work-items/g1/review?gate=plan_approval"));
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
   });
 
   it("a refusal that needs the document opens the gate review; another refusal stays on the card", async () => {
@@ -152,11 +171,14 @@ describe("a card's inline actions (B.4)", () => {
     });
     mount();
     await screen.findByText("Item g1");
-    const approve = (id: string) => within(document.querySelector(`[data-row="${id}"]`) as HTMLElement).getByRole("button", { name: "Approve" });
-    await userEvent.click(approve("g2"));
+    const approve = async (id: string) => {
+      await userEvent.click(within(document.querySelector(`[data-row="${id}"]`) as HTMLElement).getByRole("button", { name: "Approve" }));
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
+    };
+    await approve("g2");
     expect(await screen.findByRole("alert")).toHaveTextContent("is not pending");
     expect(where()).toBe("/null");
-    await userEvent.click(approve("g1"));
+    await approve("g1");
     await waitFor(() => expect(where()).toContain("/work-items/g1/review?gate=plan_approval"));
   });
 
