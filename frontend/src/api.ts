@@ -28,6 +28,17 @@ import type {
  *  outside it (EventSource, a plain-text fetch) and need the same prefix. */
 const apiUrl = (path: string) => `/api${path}`;
 
+/** An error body's `detail` as one line: a string as it is, and FastAPI's
+ *  validation list (`[{loc, msg, type}]`) as its messages, without pydantic's
+ *  "Value error, " prefix. Every caller renders it straight into the UI. */
+export function detailText(detail: unknown): string | undefined {
+  if (detail == null) return undefined;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail))
+    return detail.map((d) => (typeof d?.msg === "string" ? d.msg.replace(/^Value error, /, "") : JSON.stringify(d))).join("; ");
+  return JSON.stringify(detail);
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -50,7 +61,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      detail = (await res.json())?.detail ?? detail;
+      detail = detailText((await res.json())?.detail) ?? detail;
     } catch {
       /* non-JSON body */
     }

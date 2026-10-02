@@ -30,6 +30,12 @@ describe("api", () => {
     await expect(api.getWorkItem("nope")).rejects.toThrow("bad repo");
   });
 
+  it("throws a validation list's messages, not [object Object]", async () => {
+    const msg = "Value error, path must be absolute, not 'code/proj': resolve it where you stand";
+    vi.stubGlobal("fetch", mockFetch(422, { detail: [{ type: "value_error", loc: ["body", "path"], msg, input: "code/proj" }] }));
+    await expect(api.probeRepo("code/proj")).rejects.toThrow(/^path must be absolute, not 'code\/proj': resolve it where you stand$/);
+  });
+
   it("logUrl builds the log path", () => {
     expect(api.logUrl("s9")).toBe("/worker-sessions/s9/log");
   });

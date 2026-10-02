@@ -71,8 +71,12 @@ export interface TaskProgress {
  *  `item` source tag (UI v2 · 04 point 4). Named `budget_cap`, not `budget`
  *  -- `WorkItem.budget` is a different, event-derived field (see there). */
 export interface BudgetCap {
+  /** The lower of the item's own cap and its chain policy's item-wide
+   *  `budget_usd` (which a stop's Raise cap writes into `policy_override`). */
   cap_usd: number | null;
   source: "item" | "policy";
+  /** The `PATCH` field that changes `cap_usd`: the item's own `budget_usd`, or its policy's. */
+  key?: "budget_usd" | "policy.budget_usd";
   spent_usd: number;
   /** The instance's spend since local midnight against `policy.budget.daily_usd`
    *  (B10, `GET /budget/today`'s own shape) -- optional/unused by the shipped
@@ -339,6 +343,13 @@ export interface WorkItem {
   /** This item's effective spend cap and its source. Only on the detail
    *  endpoint. */
   budget_cap?: BudgetCap;
+  /** Whether the item set its own dollar cap, and that cap (null: no cap).
+   *  Unset, the policy's `work_item_usd` holds it. Only on the detail endpoint. */
+  budget_set?: number | boolean;
+  budget_usd?: number | null;
+  /** The item's own policy override: item-wide fields, and `paths` for one
+   *  node, step or task's. Null when it has none. Only on the detail endpoint. */
+  policy_override?: (Record<string, unknown> & { paths?: Record<string, Record<string, unknown>> }) | null;
   /** UI v2 · 06 rate-limited sub-row: relaunches used vs `policy.rate_limit_retries`.
    *  null off a non-rate_limited item. Only on the detail endpoint. */
   rate_limit?: { count: number; cap: number } | null;

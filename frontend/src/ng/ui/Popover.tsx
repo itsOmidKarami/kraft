@@ -38,8 +38,12 @@ export function Popover({ anchor, open, onClose, children, role, label }: { anch
   }, [open, onClose, anchor]);
 
   if (!open) return null;
+  // Measured unplaced, but never `visibility: hidden`: a browser refuses focus
+  // to a hidden element, and what opens this (Menu, an autoFocus field) moves
+  // focus in before the placed frame. That frame comes before the first paint;
+  // until then nothing in it takes a pointer.
   return createPortal(
-    <div ref={ref} role={role} aria-label={label} className="popover" style={pos ?? { visibility: "hidden" }}>
+    <div ref={ref} role={role} aria-label={label} className="popover" style={pos ?? { opacity: 0, pointerEvents: "none" }}>
       {children}
     </div>,
     document.body,
