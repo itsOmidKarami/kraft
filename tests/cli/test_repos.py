@@ -176,6 +176,27 @@ def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monk
     assert (entry["test_command"], entry["setup_command"]) == ("go test ./...", "go mod download")
 
 
+def test_a_number_with_no_option_is_asked_again_not_saved(app, capsys, repo, monkeypatch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["7", "2", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert "7 is not one of the 2 listed" in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == "go test ./..."
+
+
+def test_connect_names_origins_branch_whole(capsys):
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected({"path": "/r", "read_from": "refs/remotes/origin/release/main"})
+    assert "read from origin/release/main, where work items start" in capsys.readouterr().out
+
+
 def test_connect_yes_takes_the_proposal_without_asking(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")

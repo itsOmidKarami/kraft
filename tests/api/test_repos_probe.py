@@ -3,9 +3,12 @@ tell, when they read detectors.yaml, and that they never block the server."""
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 import yaml
-from support.harness import commit_all, make_repo
+from support.harness import commit_all, make_repo, make_repo_with_submodule
+from support.probe import JEST
 
 
 def test_a_repo_that_declares_no_tests_connects_enabled(tmp_path, client, templates_dir):
@@ -116,3 +119,59 @@ def test_a_pyproject_gets_uv_run_pytest_only_beside_a_uv_lock(tmp_path, client, 
     )
     entry = client.post("/api/repos", json={"path": str(repo)}).json()
     assert (entry["test_command"], entry["enabled"]) == (expected, lockfile)
+
+
+def _workspace_with_tested_submodule(tmp_path):
+    """A root with one submodule whose tests live in `api/` and `web/`. The
+    files are committed to the submodule's origin and fetched: the probe
+    reads origin's branch, as a work item's worktree is cut from it."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    for rel, text in {"api/go.mod": "module a\n", "web/package.json": JEST}.items():
+        (sub / rel).parent.mkdir(parents=True, exist_ok=True)
+        (sub / rel).write_text(text)
+    commit_all(sub)
+    subprocess.run(["git", "-C", str(root / "repos" / "pkg"), "fetch", "-q", "origin"], check=True)
+    return root
+
+
+def test_an_auto_connected_submodule_keeps_every_nested_scope(tmp_path, client, templates_dir):
+    root = _workspace_with_tested_submodule(tmp_path)
+    r = client.post("/api/repos", json={"path": str(root), "enabled": False})
+    assert r.status_code == 201, r.text
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())["repos"]
+    child = next(e for e in on_disk if e["path"].endswith("repos/pkg"))
+    assert [s["paths"] for s in child["test_scopes"]] == [["api/**"], ["web/**"]]
+
+
+def test_a_connect_awaits_nothing_between_reading_repos_yaml_and_saving_it(
+    tmp_path, client, monkeypatch
+):
+    """PATCH and DELETE save without the connect lock: a connect that awaited
+    after its read would save a stale list over theirs."""
+    from kraft.api.routes import repos as routes
+
+    order = []
+    real_thread, real_read = routes.asyncio.to_thread, routes._editable_repos
+    real_save = routes.config_mod.save_repos
+
+    async def thread(fn, *args, **kwargs):
+        order.append(f"thread:{fn.__name__}")
+        return await real_thread(fn, *args, **kwargs)
+
+    def read(*args, **kwargs):
+        order.append("read")
+        return real_read(*args, **kwargs)
+
+    def save(*args, **kwargs):
+        order.append("save")
+        return real_save(*args, **kwargs)
+
+    monkeypatch.setattr(routes.asyncio, "to_thread", thread)
+    monkeypatch.setattr(routes.config_mod, "save_repos", save)
+    monkeypatch.setattr(routes, "_editable_repos", read)
+    root = _workspace_with_tested_submodule(tmp_path)
+    assert client.post("/api/repos", json={"path": str(root), "enabled": False}).status_code == 201
+    assert "thread:_probe_children" in order
+    last_read = len(order) - 1 - order[::-1].index("read")
+    between = order[last_read : order.index("save")]
+    assert not [o for o in between if o.startswith("thread:")], order

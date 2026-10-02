@@ -3,9 +3,12 @@ a throwaway worktree."""
 
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 from pathlib import Path
 
+import pytest
 from support.harness import commit_all, make_repo
 
 from kraft.cli import verify
@@ -158,3 +161,27 @@ def test_a_sandboxed_repo_is_rehearsed_on_the_host_only_when_asked(tmp_path):
     assert not ok and "pass --on-host" in said
     ok, said = _verify(entry, on_host=True)
     assert ok, said
+
+
+def test_an_interrupted_step_is_killed_with_its_children(tmp_path, monkeypatch):
+    """Its own session keeps Ctrl-C from reaching it, so `_run` kills it:
+    a watch-mode runner interrupted by hand must not outlive verify."""
+    pidfile = tmp_path / "child.pid"
+    real = verify.subprocess.Popen
+
+    class Interrupted(real):
+        def wait(self, timeout=None):
+            if timeout is None:
+                return super().wait()
+            for _ in range(200):  # until the child has said who it is
+                if pidfile.exists() and pidfile.read_text().strip():
+                    break
+                time.sleep(0.01)
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(verify.subprocess, "Popen", Interrupted)
+    argv = ["sh", "-c", f"sleep 60 & echo $! > {pidfile}; wait"]
+    with pytest.raises(KeyboardInterrupt):
+        verify._run(argv, tmp_path, dict(os.environ), tmp_path / "log", 60)
+    status = Path(f"/proc/{pidfile.read_text().strip()}/status")
+    assert not status.exists() or "zombie" in status.read_text(), "the child was left running"

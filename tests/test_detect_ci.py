@@ -3,6 +3,8 @@ evidence, which directory each belongs to, and how they rank."""
 
 from __future__ import annotations
 
+import shlex
+
 import pytest
 from support.probe import JEST, PYTEST
 from support.probe import chosen as _chosen
@@ -173,3 +175,44 @@ def test_a_devcontainer_provisioning_the_container_is_not_a_candidate(tmp_path):
     dc = '{"postCreateCommand": "sudo apt-get install -y libpq-dev && npm ci"}'
     p = _propose(_repo(tmp_path, {".devcontainer.json": dc, "Makefile": "test:\n"}))
     assert [c for c in p.candidates if c["tier"] == "devenv"] == []
+
+
+def _yaml_quoted(text: str) -> str:
+    return "'" + text.replace("'", "''") + "'"
+
+
+def test_a_cd_on_its_own_line_holds_for_the_rest_of_its_script(tmp_path):
+    """The lines of one `run: |` share a shell: `npm test` after a bare
+    `cd frontend` is frontend's, not the root's."""
+    steps = (
+        "      - run: |\n          cd frontend\n          npm ci\n          npm test\n"
+        "      - run: pytest -x\n"
+    )
+    files = {
+        "pyproject.toml": PYTEST,
+        "uv.lock": "",
+        "frontend/package.json": JEST,
+        "frontend/package-lock.json": "",
+        **_workflow(steps),
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert p.test_command == "uv run pytest"
+    assert ("frontend", "npm test") in [(c["dir"], c["command"]) for c in p.candidates]
+    assert ("", "npm test") not in [(c["dir"], c["command"]) for c in p.candidates]
+    assert ("", "pytest -x") in [(c["dir"], c["command"]) for c in p.candidates], (
+        "a new step, a new shell"
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    ['bash -c "npm run lint && npm test"', "npm test & npm run lint", "npm 'test"],
+    ids=["a-quoted-and", "a-background-job", "an-unbalanced-quote"],
+)
+def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
+    """A test command is split into argv: half a quoted `&&`, or an
+    unbalanced quote, would fail every verify (shlex refuses it)."""
+    p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
+    for c in p.candidates:
+        shlex.split(c["command"])
+    assert [c["command"] for c in p.candidates if c["command"].startswith("npm test")] == []

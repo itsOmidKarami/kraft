@@ -719,8 +719,9 @@ def _ci_lines(value: object) -> list[str]:
     return []
 
 
-def _ci_walk(node: object, wd: str, out: list[tuple[str, str, str]]) -> None:
-    """(working directory, key, line) for every command line under `node`."""
+def _ci_walk(node: object, wd: str, out: list[tuple[str, str, list[str]]]) -> None:
+    """(working directory, key, lines) for every script under `node`: one
+    entry per script, since its lines run in one shell, one after another."""
     if isinstance(node, list):
         for v in node:
             _ci_walk(v, wd, out)
@@ -738,7 +739,7 @@ def _ci_walk(node: object, wd: str, out: list[tuple[str, str, str]]) -> None:
         if key in _CI_COMMAND_KEYS and isinstance(value, dict):
             _ci_walk(value, wd, out)  # CircleCI's long form: `run: {command: ...}`
         elif key in _CI_COMMAND_KEYS or key in _CI_SETUP_KEYS:
-            out.extend((wd, str(key), line) for line in _ci_lines(value))
+            out.append((wd, str(key), _ci_lines(value)))
         else:
             _ci_walk(value, wd, out)
 
@@ -754,12 +755,35 @@ def _relative_dir(base: str, step: str) -> str | None:
     return d
 
 
-def _ci_split(wd: str, line: str) -> list[tuple[str | None, str]]:
+def _and_parts(line: str) -> list[str] | None:
+    """`line` cut at each `&&` outside quotes; None when its quotes do not
+    balance, which no part of it can be read without."""
+    parts, current, quote, i = [], [], None, 0
+    while i < len(line):
+        c = line[i]
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif line.startswith("&&", i):
+            parts.append("".join(current))
+            current, i = [], i + 2
+            continue
+        current.append(c)
+        i += 1
+    if quote:
+        return None
+    parts.append("".join(current))
+    return parts
+
+
+def _ci_split(wd: str | None, line: str) -> tuple[list[tuple[str | None, str]], str | None]:
     """`cd frontend && npm test` -> [("frontend", "npm test")]: each `&&` part
-    with the directory a `cd` before it moved to."""
+    with the directory a `cd` before it moved to, and the directory the line
+    leaves the shell in -- the next line of the same script starts there."""
     out: list[tuple[str | None, str]] = []
     here: str | None = wd
-    for part in line.split("&&"):
+    for part in _and_parts(line) or []:
         part = part.strip()
         words = part.split()
         if len(words) == 2 and words[0] == "cd":
@@ -771,7 +795,7 @@ def _ci_split(wd: str, line: str) -> list[tuple[str | None, str]]:
             out.append((_relative_dir(here, moved["dir"]), re.sub(r"\s+", " ", part)))
             continue
         out.append((here, part))
-    return out
+    return out, here
 
 
 #: `npm --prefix web ci`, `pnpm --dir web test`, `yarn --cwd web test`: a
@@ -786,8 +810,12 @@ def _shell_syntax(command: str) -> bool:
     something only inside the script around it, or only on CI."""
     if "$" in command or "`" in command:  # expanded inside double quotes too
         return True
+    try:
+        shlex.split(command)
+    except ValueError:  # an unbalanced quote: the command runs as argv, and cannot
+        return True
     bare = re.sub(r"'[^']*'|\"[^\"]*\"", "", command)
-    return bool(re.search(r"[|;<>(){}\\]", bare))
+    return bool(re.search(r"[|;&<>(){}\\]", bare))
 
 
 def _strip_env(command: str) -> str:
@@ -808,42 +836,44 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
                 data = yaml.safe_load(index.text(rel))
             except yaml.YAMLError:
                 continue
-            lines: list[tuple[str, str, str]] = []
-            _ci_walk(data, "", lines)
-            for wd, key, raw in lines:
-                base = _relative_dir("", wd) if wd else ""
-                if base is None:
+            scripts: list[tuple[str, str, list[str]]] = []
+            _ci_walk(data, "", scripts)
+            lines = []
+            for wd, key, block in scripts:
+                here = _relative_dir("", wd) if wd else ""
+                for raw in block:  # a `cd` on one line holds for the lines after it
+                    parts, here = _ci_split(here, raw.strip())
+                    lines += [(key, d, part) for d, part in parts]
+            for key, d, part in lines:
+                if d is None:
                     continue
-                for d, part in _ci_split(base, raw.strip()):
-                    if d is None:
+                command = _strip_env(part.strip())
+                if not command or command.startswith("#") or _shell_syntax(command):
+                    continue
+                head = command.split()[0]
+                if head in _CI_NOT_COMMANDS or "--version" in command or "--help" in command:
+                    continue
+                if d and d not in index.children:
+                    continue
+                if key in _CI_SETUP_KEYS or (
+                    head in _CI_SETUP_TOOLS
+                    and _CI_SETUP.search(command)
+                    and not _CI_TEST.search(command)
+                ):
+                    role = "setup"
+                    if _CI_GLOBAL_INSTALL.search(command):
                         continue
-                    command = _strip_env(part.strip())
-                    if not command or command.startswith("#") or _shell_syntax(command):
-                        continue
-                    head = command.split()[0]
-                    if head in _CI_NOT_COMMANDS or "--version" in command or "--help" in command:
-                        continue
-                    if d and d not in index.children:
-                        continue
-                    if key in _CI_SETUP_KEYS or (
-                        head in _CI_SETUP_TOOLS
-                        and _CI_SETUP.search(command)
-                        and not _CI_TEST.search(command)
-                    ):
-                        role = "setup"
-                        if _CI_GLOBAL_INSTALL.search(command):
-                            continue
-                    elif _CI_TEST.search(command):
-                        role = "test"
-                    else:
-                        continue
-                    if (d, role, command) in seen:
-                        continue
-                    seen.add((d, role, command))
-                    bare = role == "test" and not (
-                        head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
-                    )
-                    found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
+                elif _CI_TEST.search(command):
+                    role = "test"
+                else:
+                    continue
+                if (d, role, command) in seen:
+                    continue
+                seen.add((d, role, command))
+                bare = role == "test" and not (
+                    head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
+                )
+                found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
     # The repo's own test workflow before its e2e, release or docs ones.
     return sorted(found, key=lambda c: bool(_CI_LATE.search(posixpath.basename(c.marker))))
 

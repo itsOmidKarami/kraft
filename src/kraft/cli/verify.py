@@ -56,9 +56,11 @@ _TOLD = {
 def _run(
     argv: list[str] | str, cwd: Path, env: dict, log: Path, timeout_s: float
 ) -> tuple[str, float]:
-    """("passed" | "failed" | "timed out", seconds). A step that times out is
-    killed with every process it started: `sh -c` dying alone would leave
-    its npm and node children writing into a worktree being removed."""
+    """("passed" | "failed" | "timed out", seconds). A step that times out,
+    or is interrupted (Ctrl-C), is killed with every process it started:
+    `sh -c` dying alone would leave its npm and node children writing into a
+    worktree being removed. Its own session keeps the terminal's SIGINT from
+    reaching it, so the kill is this function's to do."""
     started = time.monotonic()
     with log.open("w") as out:
         try:
@@ -81,6 +83,10 @@ def _run(
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
             return "timed out", time.monotonic() - started
+        except BaseException:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+            raise
     return ("passed" if code == 0 else "failed"), time.monotonic() - started
 
 
@@ -174,6 +180,7 @@ def verify(stored: dict, *, say=print, timeout_minutes: float = 30, on_host: boo
         check=False,
     )
     if added.returncode != 0:
+        shutil.rmtree(worktree.parent, ignore_errors=True)
         say(f"verify: could not cut a worktree of {ref}: {added.stderr.strip()}")
         return False
     say(f"verify: a fresh worktree of {ref} at {worktree}")

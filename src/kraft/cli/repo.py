@@ -88,14 +88,18 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
         mark = "  [proposed]" if i == default else ""
         print(f"  {i}) {o['command']}    from {o['source']}{mark}")
     keep = f"Enter keeps {default}, " if default else ""
-    answer = input(f"  {keep}a number, - for none, or type a command: ").strip()
-    if not answer:
-        return proposed
-    if answer == "-":
-        return ""
-    if answer.isdigit() and 1 <= int(answer) <= len(options):
-        return options[int(answer) - 1]["command"]
-    return answer
+    while True:
+        answer = input(f"  {keep}a number, - for none, or type a command: ").strip()
+        if not answer:
+            return proposed
+        if answer == "-":
+            return ""
+        if not answer.isdigit():
+            return answer
+        if 1 <= int(answer) <= len(options):
+            return options[int(answer) - 1]["command"]
+        # A number with no option is a typo, never a command called "7".
+        print(f"  {answer} is not one of the {len(options)} listed")
 
 
 def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
@@ -122,7 +126,7 @@ def _say_connected(result: dict) -> None:
     ref = result.get("read_from")
     if ref and ref.startswith("refs/remotes/origin/"):
         # Work items start from origin, so a commit not pushed yet is not read.
-        print(f"  read from origin/{ref.rsplit('/', 1)[-1]}, where work items start")
+        print(f"  read from {ref.removeprefix('refs/remotes/')}, where work items start")
     elif ref:
         print(f"  read from {ref}")
     elif "read_from" in result:
