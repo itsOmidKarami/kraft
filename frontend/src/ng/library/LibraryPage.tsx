@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useResizable } from "../graph/useResizable";
 import { detailOf, request } from "../http";
@@ -59,6 +59,9 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
   const sel = parseRef(refId);
   const id = sel ? `${sel.section}.${sel.name}` : undefined;
   const row = rows.find((x) => x.id === id);
+  // What the pane shows now, for a rename that lands after another pick.
+  const shown = useRef("");
+  shown.current = sub ?? row?.id ?? "";
   const n = counts(r);
   const yamlErr = r.yaml_error;
 
@@ -187,10 +190,13 @@ function Editor({ refId, draft }: { refId: string | undefined; draft: ConfigDraf
               size={size}
               goTo={(p) => expand(p)}
               onLibrary={() => navigate("/templates/library")}
-              onRenamed={(to) => {
+              onRenamed={(from, to) => {
+                // A pick made since (a click elsewhere committed the rename) wins; one inside what was renamed follows it.
+                const cur = shown.current;
+                if (cur !== from && !cur.startsWith(`${from}.`)) return;
                 // A component's rename moves the URL; a part of one moves the selection.
                 if (to.split(".").length <= 2) navigate(refUrl(to), { replace: true });
-                else setSub(to);
+                else setSub(to + cur.slice(from.length));
               }}
               onRemoved={(removed) => {
                 if (removed.split(".").length > 2) return setSub(null);

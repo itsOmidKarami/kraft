@@ -42,6 +42,7 @@
 .cfg-lock { flex: none; font-size: 10.5px; color: var(--text-muted); }
 .cfg-edit { flex: 1; min-width: 0; min-height: 24px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; }
 .cfg-edit.is-long { flex-basis: 100%; font: 12px/1.45 inherit; }
+.cfg-note { flex-basis: 100%; margin: 0 0 0 110px; font-size: 11px; color: var(--text-muted); }
 .cfg-err { flex-basis: 100%; margin: 0; font-size: 11px; color: var(--bad); }
 
 /* Review & publish (Decisions §9 Publish). */

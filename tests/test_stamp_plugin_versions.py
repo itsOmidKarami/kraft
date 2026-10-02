@@ -95,3 +95,26 @@ def test_the_vscode_extension_is_stamped_and_keeps_its_own_shape(tmp_path):
     assert {k: v for k, v in after.items() if k != "version"} == {
         k: v for k, v in before.items() if k != "version"
     }
+
+
+def test_the_vscode_lockfile_is_stamped_in_both_places_and_nothing_else_moves(tmp_path):
+    """package-lock.json carries the version at the top and under
+    `packages[""]`. Left out of the stamp, it was still at 1.3.1 when
+    package.json was at 1.4.0."""
+    src = stamp_mod._ROOT / "vscode" / "package-lock.json"
+    assert src in stamp_mod.MANIFESTS
+    copy = tmp_path / "package-lock.json"
+    copy.write_text(src.read_text())
+    stamp("1.2.3", [copy])
+    before, after = json.loads(src.read_text()), json.loads(copy.read_text())
+    assert after["version"] == after["packages"][""]["version"] == "1.2.3"
+    before["version"] = before["packages"][""]["version"] = "1.2.3"
+    assert after == before
+    # Written as npm writes it, so the next `npm install` leaves it alone.
+    assert copy.read_text() == json.dumps(before, indent=2) + "\n"
+
+
+def test_the_vscode_lockfile_agrees_with_its_package_json():
+    package = json.loads((stamp_mod._ROOT / "vscode" / "package.json").read_text())
+    lock = json.loads((stamp_mod._ROOT / "vscode" / "package-lock.json").read_text())
+    assert lock["version"] == lock["packages"][""]["version"] == package["version"]

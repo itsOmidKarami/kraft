@@ -250,3 +250,29 @@ def _force_node(wid: str, node_id: str, status: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _budget_stopped_item(client, repo, breach: dict, **fields) -> str:
+    """An item stopped at `implementation` by the spend cap `breach` names,
+    the way `executor.stops.stop_for_budget` records one. `fields` go into
+    the create body (a `policy` override, say)."""
+    from kraft import store
+
+    wid = client.post(
+        "/api/work-items",
+        json={
+            "title": "t",
+            "repo": str(repo),
+            "chain_template": "quick-task",
+            "autostart": False,
+            **fields,
+        },
+    ).json()["id"]
+    with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
+        conn.execute(
+            "UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,)
+        )
+        store.mark_needs_human(
+            conn, wid, "implementation", "budget cap reached", None, breach, kind="budget"
+        )
+    return wid

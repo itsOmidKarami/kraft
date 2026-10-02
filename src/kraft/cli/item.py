@@ -439,8 +439,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     raise_budget = subs.add_parser(
         "raise-budget",
         parents=[common],
-        help="raise an item's own dollar cap (create --budget) once that cap stopped it, "
-        "and retry it",
+        help="raise the dollar cap that stopped an item, its own (create --budget) or its "
+        "policy's item-wide budget_usd, and retry it",
     )
     raise_budget.add_argument("id", nargs="?")
     raise_budget.add_argument(

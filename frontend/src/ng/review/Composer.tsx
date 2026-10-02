@@ -3,7 +3,7 @@ import type { ReviewThread, ThreadLabel } from "../../types";
 import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import type { Side } from "./rows";
-import { LABELS, codeBlock } from "./Thread";
+import { LABELS, codeBlock, rangeName } from "./Thread";
 import { sendOnModEnter } from "../keys";
 
 /** Where a comment goes: a line range on one side of a file, or the whole file. */
@@ -50,14 +50,20 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
     drafts.set(key, next);
   };
   const r = target.range;
-  const where = !r ? "Comment on this file" : r.start === r.end ? `Line ${r.start}` : `Lines ${r.start}–${r.end}`;
+  const where = r ? rangeName(r) : "Comment on this file";
+  // A range picked across a gap between hunks holds lines the diff doesn't show, so there is nothing to edit them from.
+  const gap = !!r && lines.length < r.end - r.start + 1;
   const cancel = () => {
     drafts.delete(key);
     onCancel();
   };
   const dirty = !!(d.body.trim() || d.suggest !== null);
-  const send = sendOnModEnter(() => submit(), !!d.body.trim() && !busy);
+  const ready = !!d.body.trim() && !busy;
+  // One ⌘↵ handler, on the wrapper, for both boxes: a second one on a box
+  // would send twice before React re-renders `ready`.
+  const send = sendOnModEnter(() => submit(), ready);
   const submit = async () => {
+    if (!ready) return;
     setBusy(true);
     const e = await onSubmit(d);
     setBusy(false);
@@ -70,6 +76,8 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
       role="group"
       aria-label={`Comment: ${where}`}
       onKeyDown={(e) => {
+        // ⌘↵ or Ctrl+↵ sends it from either box, as every composer does.
+        send(e);
         if (e.key !== "Escape") return;
         e.stopPropagation();
         if (dirty) setAsking(true);
@@ -91,13 +99,13 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
       {preview ? (
         <div className="rv-preview"><Markdown text={d.body || "Nothing to preview"} code={codeBlock} /></div>
       ) : (
-        <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} onKeyDown={send} />
+        <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
       )}
       {d.suggest !== null && r?.side === "new" && (
         <div className="rv-suggest">
           <div className="rv-suggest-head">Suggested change · {where.toLowerCase()}</div>
           {lines.map((l, i) => <div key={i} className="rv-suggest-line is-del"><span aria-hidden="true">−</span>{l}</div>)}
-          <textarea className="rv-textarea rv-mono" aria-label="Suggested change" value={d.suggest} onChange={(e) => set({ suggest: e.target.value })} onKeyDown={send} />
+          <textarea className="rv-textarea rv-mono" aria-label="Suggested change" value={d.suggest} onChange={(e) => set({ suggest: e.target.value })} />
         </div>
       )}
       {asking ? (
@@ -109,13 +117,14 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
         </div>
       ) : (
         <div className="rv-row-actions">
-          <span className="rv-muted">{preview ? "Rendered preview · Continue editing to change the text" : "Markdown supported"}</span>
+          <span className="rv-muted">{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ⌘↵ ${editing ? "save" : "add to review"}`}</span>
           <span className="rv-spacer" />
+          {r?.side === "new" && gap && <span className="rv-muted">No suggestion across lines the diff doesn't show</span>}
           {r?.side === "new" && (
-            <Button aria-pressed={d.suggest !== null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null })}>± Suggest change</Button>
+            <Button aria-pressed={d.suggest !== null} disabled={gap && d.suggest === null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null })}>± Suggest change</Button>
           )}
           <Button onClick={() => (dirty ? setAsking(true) : cancel())}>Cancel</Button>
-          <Button variant="primary" disabled={!d.body.trim() || busy} title={d.body.trim() ? undefined : "A comment needs some text"} onClick={submit}>
+          <Button variant="primary" disabled={!ready} title={d.body.trim() ? undefined : "A comment needs some text"} onClick={submit}>
             {editing ? "Save" : "Add to review"}
           </Button>
         </div>
