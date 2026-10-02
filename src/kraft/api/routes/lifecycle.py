@@ -23,6 +23,7 @@ from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
+from kraft.policy import NO_CAP, PolicyError
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
@@ -253,8 +254,11 @@ def _rescue_detached_head(repo: Path, worktree: Path, wid: str) -> dict:
 
     A rescue git refuses (a sandboxed item's repository may not have the
     commits at all) returns `worktree_kept` with the reason instead: the
-    worktree is then the only copy, and archive must leave it."""
-    if not worktree.is_dir():
+    worktree is then the only copy, and archive must leave it.
+
+    A repository moved or deleted since has no commits to name here, and no
+    directory to run git in: nothing to rescue."""
+    if not worktree.is_dir() or not repo.is_dir():
         return {}
     if git_read(worktree, "symbolic-ref", "-q", "HEAD", expected_failure=True):
         return {}
@@ -299,7 +303,7 @@ async def _remove_worktree(
     members: list[Path] | None = None,
     *,
     keep_branch_in: frozenset[str] = frozenset(),
-) -> bool:
+) -> dict:
     """Reclaim the worktree and its branch, and the same in each of `members`
     -- the connected repositories its workspace members were checked out
     from (`builtins.member_repositories`, Kraft-ju36l).
@@ -317,8 +321,28 @@ async def _remove_worktree(
     prune is between the two because a directory removed out from under git
     leaves an administrative entry that makes the branch delete fail --
     removing the root removes each member's directory with it, so a member
-    repository is pruned the same way. Only the root's outcome is returned.
+    repository is pruned the same way. Only the root's outcome is returned,
+    as `worktree_removed`.
+
+    A repository moved or deleted since leaves git nowhere to run: the
+    worktree directory is removed directly instead, since its `.git` link
+    points into the missing repository and nothing else could ever reclaim
+    it, and the answer names the path as `repo_missing`. Its branch, if the
+    repository was only moved, stays there.
     """
+    if not repo.is_dir():
+        logger.warning(
+            "abandon %s: repository %s is gone; removing the worktree directory itself",
+            branch,
+            repo,
+        )
+        existed = worktree.exists()
+        await asyncio.to_thread(shutil.rmtree, worktree, ignore_errors=True)
+        await _remove_members(members, branch, keep_branch_in)
+        return {
+            "worktree_removed": existed and not worktree.exists(),
+            "repo_missing": str(repo),
+        }
     ok = True
     steps = [
         ["git", "worktree", "remove", "--force", str(worktree)],
@@ -331,12 +355,26 @@ async def _remove_worktree(
             ["git", "update-ref", "-d", f"{PUSHED_REFS}/{branch}"],
         ]
     for args in steps:
-        done = await asyncio.to_thread(
-            subprocess.run, args, cwd=repo, capture_output=True, text=True
-        )
+        try:
+            done = await asyncio.to_thread(
+                subprocess.run, args, cwd=repo, capture_output=True, text=True
+            )
+        except OSError as exc:
+            logger.warning("abandon %s: %s failed: %s", branch, args[1], exc)
+            ok = False
+            continue
         if done.returncode != 0:
             logger.warning("abandon %s: %s failed: %s", branch, args[1], done.stderr.strip())
             ok = False
+    await _remove_members(members, branch, keep_branch_in)
+    # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
+    await asyncio.to_thread(node_runs.drop_refs, repo, wid)
+    return {"worktree_removed": ok}
+
+
+async def _remove_members(
+    members: list[Path] | None, branch: str, keep_branch_in: frozenset[str]
+) -> None:
     for member in members or []:
         # Best-effort per member, like the rest: a member repository moved or
         # deleted since must not keep the refs and attachments below alive.
@@ -347,9 +385,6 @@ async def _remove_worktree(
             await _remove_member_branch(member, branch, keep=str(member) in keep_branch_in)
         except OSError as exc:
             logger.warning("abandon %s in %s: %s", branch, member, exc)
-    # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
-    await asyncio.to_thread(node_runs.drop_refs, repo, wid)
-    return ok
 
 
 async def _remove_member_branch(member: Path, branch: str, *, keep: bool = False) -> None:
@@ -420,7 +455,7 @@ async def abandon_work_item(wid: str, request: Request):
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
     shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
-    return {"id": wid, "status": "abandoned", "worktree_removed": removed}
+    return {"id": wid, "status": "abandoned", **removed}
 
 
 async def _archive_one(app, row, by: str) -> dict:
@@ -461,7 +496,7 @@ async def _archive_one(app, row, by: str) -> dict:
     removed = await _remove_worktree(
         repo, worktree, branch, wid, members, keep_branch_in=frozenset(kept)
     )
-    return {"worktree_removed": removed, **extra}
+    return {**removed, **extra}
 
 
 # UI v2 · 03.
@@ -1307,20 +1342,28 @@ class RaiseBudget(BaseModel):
     budget_usd: float | None
 
 
-#: Why raising the item's own cap would not help, per breach scope
-#: (`kraft.caps.Breach`), and what does (docs: caps-and-budgets).
+#: `set-policy` replaces the item's whole policy override, so a hint that
+#: sends someone there has to say so, or the fields it already set are lost.
+_SET_POLICY_KEEPS_NOTHING = (
+    "set-policy replaces the item's whole policy override, so pass every field it "
+    "already sets too (policy_override in `kraft view show ID --json`)"
+)
+
+#: Why raising here would not help, per breach scope (`kraft.caps.Breach`),
+#: and what does (docs: caps-and-budgets).
 _NOT_ITEM_CAP = {
     "usd": (
-        "a policy budget_usd stopped this item, not its own cap: raise it with "
+        "a budget_usd on a node, step or task stopped this item: raise it with "
         "`kraft item set-policy ID --policy budget_usd=N` (item-wide, up to "
-        "maxima.work_item), then retry -- policy.yaml only applies to items "
+        "maxima.work_item; a cap the chain set on that node still binds), then "
+        f"retry -- {_SET_POLICY_KEEPS_NOTHING}; policy.yaml only applies to items "
         "filed after it changes"
     ),
     "tokens": (
-        "a token_budget stopped this item, not its own cap: raise it with "
+        "a token_budget stopped this item, not a dollar cap: raise it with "
         "`kraft item set-policy ID --policy token_budget=N` (item-wide, up to "
-        "maxima.work_item), then retry -- policy.yaml only applies to items "
-        "filed after it changes"
+        f"maxima.work_item), then retry -- {_SET_POLICY_KEEPS_NOTHING}; policy.yaml "
+        "only applies to items filed after it changes"
     ),
     "daily": (
         "the daily cap stopped this item, not its own cap: raise budget.daily_usd "
@@ -1331,9 +1374,9 @@ _NOT_ITEM_CAP = {
 #: (Kraft-tugdf.12).
 _UNKNOWN_SPEND = (
     "a budget_usd stopped this item on spend a harness never reported, which no "
-    "higher cap passes: clear it item-wide with `kraft item set-policy ID --policy "
-    "budget_usd=none` (refused under a maxima.work_item.budget_usd; a cap the chain "
-    "set on a node, step or task stays), then retry, or skip the node"
+    "higher cap passes: clear it item-wide with `kraft item raise-budget ID --usd none` "
+    "(refused under a maxima.work_item.budget_usd; a cap the chain set on a node, "
+    "step or task stays), or skip the node"
 )
 
 
@@ -1352,9 +1395,21 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     escalation turn is refused too: a spending cap is a person's call,
     like a gate.
 
-    Refuses, before the write, a stop that was not the item's own cap: a
-    per-scope `budget_usd` or `token_budget`, or
-    `budget.daily_usd`, would stop the item again right after.
+    A stop on the item-wide `budget_usd` of the item's policy raises that
+    one instead: `budget_usd` is merged into the item's stored policy
+    override, every other field it sets kept, and checked as a `PATCH` of
+    it would be (a 422 under `maxima.work_item`). Spend a harness never
+    reported is passed only by no cap at all, so that stop takes only
+    `null`. This is the composed action the interface's Raise cap takes in
+    two calls.
+
+    Refuses, before the write, any other stop: a node, step or task's
+    `budget_usd`, a `token_budget` or `budget.daily_usd` would stop the
+    item again right after. And refuses, before the write too, a retry that
+    could not start now (every slot busy, a walk still running), so a 409
+    never leaves the cap raised and the item stopped. The retry's own claim
+    is still what decides: if it refuses after all, the answer says the cap
+    was raised and the retry was not.
     """
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
@@ -1363,15 +1418,84 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
         raise HTTPException(409, "work item is not stopped")
     stop = (board._current_stop(st, wid) or {}).get("budget") or {}
     scope = stop.get("scope")
-    if scope != "work_item":
+    item_wide = scope == "usd" and stop.get("path") == ""
+    if item_wide and stop.get("unknown_launches") and body.budget_usd is not None:
+        raise HTTPException(409, _UNKNOWN_SPEND)
+    if scope != "work_item" and not item_wide:
         raise HTTPException(
             409,
             _UNKNOWN_SPEND
             if stop.get("unknown_launches")
             else _NOT_ITEM_CAP.get(scope, "work item was not stopped by a spend cap"),
         )
-    await st.db.write(lambda c: store.raise_budget(c, wid, body.budget_usd))
-    return await retry_work_item(wid, Retry(steer=None), request)
+    write = (
+        _raise_policy_budget(wid, body.budget_usd)
+        if item_wide
+        else (lambda c: store.raise_budget(c, wid, body.budget_usd))
+    )
+    _refuse_a_retry_that_cannot_start(request, wid)
+    await st.db.write(write)
+    try:
+        return await retry_work_item(wid, Retry(steer=None), request)
+    except HTTPException as exc:
+        raise HTTPException(
+            exc.status_code,
+            f"the cap was raised to {_usd(body.budget_usd)}, but the retry was refused: "
+            f"{exc.detail}. Retry it with `kraft item retry` once that is resolved",
+        ) from exc
+
+
+def _usd(value: float | None) -> str:
+    return "no cap" if value is None else f"${value:g}"
+
+
+def _raise_policy_budget(wid: str, budget_usd: float | None):
+    """The write that sets the item-wide `budget_usd` in the item's own
+    policy override, keeping every other field it sets: `set-policy` and a
+    `PATCH` replace the whole override, so the caller would otherwise have to
+    resend it. 422 when the merged override is refused (a maxima bound, say).
+
+    The override is read inside the write, not from the row the route read
+    first: a `PATCH` of `policy` queued in between would otherwise land and
+    then be overwritten by a merge of the older override."""
+
+    def write(c):
+        row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+        stored = store.policy_override_of(row)
+        merged = stored.model_dump(exclude_none=True, exclude_defaults=True) if stored else {}
+        merged["budget_usd"] = NO_CAP if budget_usd is None else budget_usd
+        chain = store.materialized_chain_of(row)
+        if chain is None:
+            raise HTTPException(
+                409, "this work item has no chain snapshot to hold a policy override"
+            )
+        try:
+            override = chain.with_item_policy(merged).item_policy
+        except PolicyError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        store.set_policy_override(c, wid, override)
+        events.append(
+            c, wid, "budget_raised", {"budget_usd": budget_usd, "key": "policy.budget_usd"}
+        )
+
+    return write
+
+
+def _refuse_a_retry_that_cannot_start(request: Request, wid: str) -> None:
+    """`_retry`'s own refusals that do not depend on the cap, asked before
+    `raise_budget` writes it: a full board, or a walk still running."""
+    st = request.app.state
+    limit = st.policy.max_concurrent if st.policy else 1
+    if st.db.read(store.active_count) >= limit:
+        raise HTTPException(
+            409,
+            f"all {limit} slots are busy; pause something or raise max_concurrent. "
+            "The cap was not changed",
+        )
+    if deps.task_is_live(request.app, wid):
+        raise HTTPException(
+            409, "a walk is already running for this work item; the cap was not changed"
+        )
 
 
 # Spec: docs/superpowers/specs/2026-09-11-skip-step-design.md.
