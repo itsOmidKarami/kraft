@@ -196,3 +196,18 @@ def test_connect_help_says_connecting_again_saves(capsys):
     text = " ".join(capsys.readouterr().out.split())
     assert "connect a repo; again, to fill what it left undecided" in text
     assert "idempotent" not in text
+
+
+def test_connecting_again_with_no_tests_says_what_it_saved(app, capsys, repo):
+    """The probe answers `test_command: None` for `""`, so connecting a
+    disabled repo again with `--no-tests` printed no test command line,
+    while it saved `""` and enabled the repo."""
+    cli.main(["repo", "connect", str(repo), "--setup-command", ""])
+    assert asyncio.run(client.repos())[0]["enabled"] is False
+    capsys.readouterr()
+    cli.main(["repo", "connect", str(repo), "--no-tests"])
+    out = capsys.readouterr().out
+    assert 'test command: "" (no tests)' in out
+    assert "saved enabled: its work items pass verification without running a test" in out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["enabled"]) == ("", True)

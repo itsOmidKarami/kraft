@@ -371,7 +371,10 @@ def _connect_again(
     if say:
         _print("  probed again, for what its entry leaves undecided:")
         if needs_tests:
-            _say_tests({**probed, "enabled": patch.get("enabled", stored.get("enabled"))})
+            # What is saved: the probe answers `test_command: None` for `""`.
+            test = patch.get("test_command", probed.get("test_command"))
+            enabled = patch.get("enabled", stored.get("enabled"))
+            _say_tests({**probed, "test_command": test, "enabled": enabled})
         if needs_setup:
             _say_setup(probed)
         _say_rest(probed)
