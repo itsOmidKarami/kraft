@@ -245,8 +245,16 @@ def _diff_trailer(payload: dict) -> list[str]:
 
 
 def _landed_head(payload: dict) -> str:
+    """Kraft commits after every task, so by a review gate the change is on the
+    branch already: this block, not the working tree, is what is under review."""
     n = len((payload.get("landed") or {}).get("commits") or [])
-    return f"landed — {n} commit{'' if n == 1 else 's'} already on this branch"
+    return (
+        f"the change under review — {n} commit{'' if n == 1 else 's'} on this branch since the base"
+    )
+
+
+_UNCOMMITTED_HEAD = "uncommitted — changes in the worktree, not committed yet"
+_NOTHING_UNCOMMITTED = "(nothing uncommitted)"
 
 
 def _colour_diff(diff: str) -> list[str]:
@@ -262,7 +270,7 @@ def diff_stat(payload: dict) -> str:
     if payload.get("base_ref") is None:
         return "no baseline recorded for this work item"
 
-    def block(files: list[dict]) -> str:
+    def block(files: list[dict], empty: str = "(no changes)") -> str:
         rows = [
             {
                 "path": f["path"],
@@ -271,7 +279,7 @@ def diff_stat(payload: dict) -> str:
             }
             for f in files
         ]
-        body = table(rows, [("PATH", "path"), ("", "ins"), ("", "del")]) if rows else "(no changes)"
+        body = table(rows, [("PATH", "path"), ("", "ins"), ("", "del")]) if rows else empty
         ins = sum(f["insertions"] for f in files)
         dels = sum(f["deletions"] for f in files)
         return f"{body}\n{len(files)} files, +{ins} -{dels}"
@@ -279,15 +287,17 @@ def diff_stat(payload: dict) -> str:
     out: list[str] = []
     landed_files = (payload.get("landed") or {}).get("files") or []
     if landed_files:
-        # Landed leads: it is what the reader scrolls past, and saying so is
-        # the whole point (Kraft-nceo).
+        # The committed block leads: it holds the change a reviewer reads. The
+        # working tree is whatever an agent has not committed yet, usually none.
         out += [
             paint(_landed_head(payload), DIM),
             block(landed_files),
             "",
-            paint("in flight — the change under review", DIM),
+            paint(_UNCOMMITTED_HEAD, DIM),
         ]
-    out.append(block(payload.get("files", [])))
+    out.append(
+        block(payload.get("files", []), _NOTHING_UNCOMMITTED if landed_files else "(no changes)")
+    )
     return "\n".join([*out, *_diff_trailer(payload)])
 
 
@@ -300,9 +310,9 @@ def diff_body(payload: dict) -> str:
     if landed:
         out.append(paint(_landed_head(payload), DIM))
         out += _colour_diff(landed)
-        out += ["", paint("in flight — the change under review", DIM)]
+        out += ["", paint(_UNCOMMITTED_HEAD, DIM)]
     body = _colour_diff(payload.get("diff", ""))
-    out += body or ["(no changes)"]
+    out += body or [_NOTHING_UNCOMMITTED if landed else "(no changes)"]
     return "\n".join([*out, *_diff_trailer(payload)])
 
 

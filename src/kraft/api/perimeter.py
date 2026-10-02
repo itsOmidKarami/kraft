@@ -269,10 +269,15 @@ _FRAME_HEADERS = {
 async def _frame_guard(request: Request, call_next):
     """Every response, the SPA shell and the API alike, says only Kraft's own
     pages may frame it. Declared last, so it is the outermost middleware and
-    a 401 or 403 from the ones inside carries the headers as well."""
+    a 401 or 403 from the ones inside carries the headers as well. A page
+    with a policy of its own (`apidocs`) gets the directive added to it."""
     response = await call_next(request)
     for name, value in _FRAME_HEADERS.items():
-        response.headers.setdefault(name, value)
+        own = response.headers.get(name)
+        if own is None:
+            response.headers[name] = value
+        elif name == "content-security-policy" and "frame-ancestors" not in own:
+            response.headers[name] = f"{own}; {value}"
     return response
 
 

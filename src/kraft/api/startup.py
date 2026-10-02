@@ -25,6 +25,7 @@ from kraft import intake as intake_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import triggers as triggers_mod
+from kraft.adapters import hook_install
 from kraft.adapters.forge import git as forge_git
 from kraft.api import deps
 from kraft.db import Database
@@ -153,6 +154,18 @@ async def lifespan(app: FastAPI):
     notify_cursor = database.read(
         lambda c: c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
     )
+
+    # Before reattach, so a cursor session adopted across an upgrade runs the
+    # permission hook as this Kraft writes it, not as an earlier one did.
+    # A thread: it reads a file in every worktree. Never a refused boot: a
+    # worker wrote each of those files.
+    try:
+        refreshed = await asyncio.to_thread(hook_install.refresh_cursor_hooks, run_dirs.worktrees)
+    except Exception:  # noqa: BLE001
+        logger.exception("cursor permission hook refresh failed; worktrees left as they were")
+        refreshed = []
+    for path in refreshed:
+        logger.info("%s: Kraft's permission hook now runs with -I", path)
 
     summary, adopted = await reattach.reattach(
         database,

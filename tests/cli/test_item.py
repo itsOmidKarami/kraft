@@ -28,3 +28,39 @@ def test_create_gives_its_title_a_help_line(capsys):
     assert "title the item's title: one line, as the board shows it" in _help(
         capsys, "item", "create"
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "advice"),
+    [
+        ("active", "To keep them, cancel the item instead."),
+        (
+            "abandoned",
+            "This item is already cancelled; abandoning it only reclaims its worktree and branch.",
+        ),
+    ],
+    ids=["open", "cancelled"],
+)
+def test_abandon_refusal_fits_the_items_state(monkeypatch, capsys, status, advice):
+    """It used to tell a cancelled item's owner to cancel it."""
+
+    async def get_work_item(item_id=None, **_):
+        return {"id": item_id, "status": status}
+
+    monkeypatch.setattr(cli.item.client, "get_work_item", get_work_item)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["item", "abandon", "w1"])
+    assert stopped.value.code == 1
+    err = capsys.readouterr().err
+    assert advice in err and "pass --yes" in err
+    assert ("cancel the item instead" in err) is (status != "abandoned")
+
+
+def test_abandon_refusal_still_works_when_the_item_cannot_be_read(monkeypatch, capsys):
+    async def get_work_item(item_id=None, **_):
+        raise ConnectionError("no server")
+
+    monkeypatch.setattr(cli.item.client, "get_work_item", get_work_item)
+    with pytest.raises(SystemExit):
+        cli.main(["item", "abandon", "w1"])
+    assert "To keep them, cancel the item instead." in capsys.readouterr().err

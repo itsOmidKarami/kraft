@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
+import threading
 
 import pytest
 from support.harness import make_repo_with_engineering
@@ -87,6 +89,93 @@ def test_scan_repo_finds_nested_md_ignores_others(tmp_path):
 def test_scan_repo_non_git_dir_returns_empty(tmp_path):
     (tmp_path / "plain").mkdir()
     assert ingest.scan_repo(tmp_path / "plain") == []
+
+
+SECRET = "SECRET_TOKEN=ghp_FAKEFAKEFAKE1234567890\n"
+
+
+def _commit(repo, message="change"):
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message)
+
+
+def _symlink_out(tmp_path, repo):
+    """A committed symlink to a file outside the repo, as a malicious repo or
+    a worker's merged branch could carry."""
+    (tmp_path / "secret.txt").write_text(SECRET)
+    (repo / ".engineering/specs/leak.md").symlink_to(tmp_path / "secret.txt")
+    _commit(repo)
+
+
+def _symlink_in(tmp_path, repo):
+    """A committed symlink to an untracked, ignored file inside the repo."""
+    (repo / ".gitignore").write_text(".env\n")
+    (repo / ".env").write_text(SECRET)
+    (repo / ".engineering/specs/leak.md").symlink_to("../../.env")
+    _commit(repo)
+
+
+def _directory_out(tmp_path, repo):
+    """A listed document under a directory swapped for a symlink since: git
+    cannot commit that, but the checkout on disk can hold it."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leak.md").write_text(SECRET)
+    (repo / ".engineering/notes/leak.md").parent.mkdir(parents=True)
+    (repo / ".engineering/notes/leak.md").write_text("# placeholder\n")
+    _commit(repo)
+    for f in (repo / ".engineering/notes").iterdir():
+        f.unlink()
+    (repo / ".engineering/notes").rmdir()
+    (repo / ".engineering/notes").symlink_to(outside)
+
+
+@pytest.mark.parametrize(
+    "plant", [_symlink_out, _symlink_in, _directory_out], ids=["out", "in", "directory"]
+)
+def test_scan_repo_never_reads_through_a_symlink(tmp_path, plant):
+    """Search serves what the index holds. Nothing reached through a symlink
+    is indexed, even one pointing inside the repo: it can name a file git
+    never tracked, like `.env`."""
+    repo = make_repo_with_engineering(tmp_path, {".engineering/specs/kept.md": "# Kept\n"})
+    plant(tmp_path, repo)
+    docs = ingest.scan_repo(repo)
+    assert [d.path for d in docs] == [".engineering/specs/kept.md"]
+    assert not [d for d in docs if "ghp_" in d.content]
+
+
+def test_scan_repo_skips_a_fifo_at_once(tmp_path):
+    """A listed document swapped for a FIFO: read blocking, it waits for a
+    writer that never comes, and the indexer with it."""
+    repo = make_repo_with_engineering(
+        tmp_path,
+        {".engineering/specs/kept.md": "# Kept\n", ".engineering/specs/pipe.md": "# Pipe\n"},
+    )
+    fifo = repo / ".engineering/specs/pipe.md"
+    fifo.unlink()
+    os.mkfifo(fifo)
+    found = []
+    scan = threading.Thread(target=lambda: found.extend(ingest.scan_repo(repo)), daemon=True)
+    scan.start()
+    scan.join(10)
+    if scan.is_alive():  # free it before failing: a writer ends its wait
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+    assert not scan.is_alive(), "scan_repo blocked on a FIFO"
+    assert [d.path for d in found] == [".engineering/specs/kept.md"]
+
+
+def test_scan_repo_never_runs_the_repos_fsmonitor(tmp_path, monkeypatch):
+    """`core.fsmonitor` is a program `git ls-files` runs, named by the repo's
+    own config. Outside the server nothing else pins it off."""
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\n"})
+    ran = tmp_path / "fsmonitor-ran"
+    monitor = tmp_path / "monitor.sh"
+    monitor.write_text(f"#!/bin/sh\ntouch {ran}\n")
+    monitor.chmod(0o755)
+    _git(repo, "config", "core.fsmonitor", str(monitor))
+    assert [d.path for d in ingest.scan_repo(repo)] == [".engineering/specs/a.md"]
+    assert not ran.exists()
 
 
 def test_reconcile_tolerates_non_json_front_matter(conn, tmp_path):

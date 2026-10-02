@@ -355,7 +355,7 @@ def _warn_if_pre_v1(templates_dir: Path) -> None:
 
 def _bind(templates_dir: Path) -> tuple[str, int]:
     """Bind address from access.yaml — this is the "takes effect on restart" in
-    Settings → Access (design 5e). Env still wins, for a one-off run."""
+    Settings › Access (design 5e). Env still wins, for a one-off run."""
     access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
     port = int(os.environ.get("KRAFT_PORT") or access.port)
@@ -364,7 +364,7 @@ def _bind(templates_dir: Path) -> tuple[str, int]:
         # it when Local network is picked, and PUT /api/access takes it alone.
         raise SystemExit(
             f"refusing to bind {host}: no password is set. Start Kraft on loopback with "
-            "`kraft admin start --host 127.0.0.1`, then set one in Settings → Access "
+            "`kraft admin start --host 127.0.0.1`, then set one in Settings › Access "
             "(picking Local network asks for it), or with "
             f"`curl -X PUT http://127.0.0.1:{port}/api/access "
             "-H 'Content-Type: application/json' -d '{\"password\": \"...\"}'`. "
@@ -685,7 +685,9 @@ def _start_detached() -> None:
         # Where this start's output begins: anything before it is an earlier run's.
         start_offset = log_file.tell()
         proc = subprocess.Popen(
-            [sys.executable, "-m", "kraft", "admin", "start"],
+            # `-P`: plain `-m` puts this shell's cwd first on `sys.path`, and a
+            # file there named like a module Kraft imports would run instead.
+            [sys.executable, "-P", "-m", "kraft", "admin", "start"],
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=log_file,
@@ -750,7 +752,7 @@ _LIST_TIMEOUT = 2.0
 
 
 def _confirm_running_agents(
-    ns: argparse.Namespace, doing: str, *, ask: bool, declined: str = "nothing stopped"
+    ns: argparse.Namespace, doing: str, *, ask: bool, declined: str = "nothing was restarted"
 ) -> None:
     """Name the active items before a stop ends their agents, and, with `ask`,
     let a person at a terminal back out.
@@ -759,7 +761,7 @@ def _confirm_running_agents(
     process group on the way out, so the next start finds the session dead
     and stops the item (`reattach`). Without a terminal, or with `--yes`,
     this only warns: a script must not hang on a question. `declined` is what
-    answering no left undone. A server that does
+    answering no left undone; answering no exits 1. A server that does
     not answer has nothing to list, and one that accepts the connection but
     never replies gets `_LIST_TIMEOUT`, not the client's 30 s: a wedged server
     is the usual reason to stop one, and the stop must not wait on it."""
@@ -959,7 +961,7 @@ def _cmd_mcp(ns: argparse.Namespace) -> None:
 
 
 def _cmd_permission_hook(ns: argparse.Namespace) -> None:
-    """What a harness's pre-tool hook runs, as `sys.executable -m kraft` so it
+    """What a harness's pre-tool hook runs, as `sys.executable -P -m kraft` so it
     is the daemon's own install. Client side only: no server import, since
     the CLI waits on this for every tool call (Kraft-4in7z). Always answers:
     any failure is the translator's deny when fail-closed, no opinion else."""
@@ -1052,12 +1054,15 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if is_pre_v1(templates_dir):
         _accept_major_update(templates_dir, ns.yes)
 
-    if ns.channel != "stable" and update._is_homebrew_install():
+    # An install follows its own channel unless told otherwise: a release
+    # candidate compared with the stable feed would be told v1.4.0 is the newest.
+    channel = ns.channel or update.channel_of(update.installed())
+    if channel != "stable" and update._is_homebrew_install():
         raise SystemExit(
             "kraft admin update: the Homebrew formula only tracks stable releases; "
-            f"install --channel {ns.channel} with `uv tool` instead."
+            f"install --channel {channel} with `uv tool` instead."
         )
-    release = update.latest(force=True, channel=ns.channel)
+    release = update.latest(force=True, channel=channel)
     if release is None:
         print(
             "kraft admin update: could not reach the release feed. Try again, "
@@ -1067,7 +1072,11 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
     here = update.installed()
     if not update.is_behind(release) and not ns.force:
-        print(f"kraft {here} is up to date ({release.tag} is the newest release)")
+        # Name the channel unless it is the stable one an install on a final
+        # release follows anyway, so a different channel never reads as the default.
+        named = channel != "stable" or channel != update.channel_of(here)
+        newest = "the newest release" + (f" on the {channel} channel" if named else "")
+        print(f"kraft {here} is up to date ({release.tag} is {newest})")
         return
     if ns.restart:
         # Before installing, so answering no leaves nothing half done.
@@ -1152,8 +1161,11 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     update_p.add_argument(
         "--channel",
         choices=list(CHANNELS),
-        default="stable",
-        help="stable (default), or a pre-release channel: rc, beta (beta and rc), alpha (any)",
+        default=None,
+        help=(
+            "stable, or a pre-release channel: rc, beta (beta and rc), alpha (any). "
+            "Default: the channel of the version you have installed"
+        ),
     )
     update_p.add_argument(
         "-y",

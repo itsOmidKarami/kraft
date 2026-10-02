@@ -112,7 +112,7 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
         raise ValueError(
             f"no work item: pass an id, or run from a Kraft worktree under {worktrees}"
         )
-    item = await transport._get(f"/work-items/{work_item_id}")
+    item = await transport._get(f"/work-items/{transport.segment(work_item_id)}")
     if full:
         return {**item, "next_node_id": _next_node_id(item)}
     keep = (
@@ -152,7 +152,9 @@ async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
     `worker_sessions` so an agent's context is not spent on it, which means the
     log verbs cannot reuse it.
     """
-    item = await transport._get(f"/work-items/{await context.resolve_work_item(work_item_id)}")
+    item = await transport._get(
+        f"/work-items/{transport.segment(await context.resolve_work_item(work_item_id))}"
+    )
     return item.get("worker_sessions", [])
 
 
@@ -172,7 +174,9 @@ async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[di
     saying" view.
     """
     target = await context.resolve_work_item(work_item_id)
-    return await transport._get(f"/work-items/{target}/events", after_seq=after_seq)
+    return await transport._get(
+        f"/work-items/{transport.segment(target)}/events", after_seq=after_seq
+    )
 
 
 async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
@@ -189,7 +193,9 @@ async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
     when it had to. `limit` is the reader's own cut, the marker the server's:
     it stays whenever the slice reaches back to it, so the cap is never silent.
     """
-    payload = await transport._get(f"/worker-sessions/{session_id}/log", format="jsonl")
+    payload = await transport._get(
+        f"/worker-sessions/{transport.segment(session_id)}/log", format="jsonl"
+    )
     lines = payload.get("lines", [])
     if limit is None:
         return lines
@@ -204,7 +210,9 @@ async def log_next_line(session_id: str) -> int:
     """The number the log's next line will get: a follow's cursor for "only
     what is written from now on", which no backlog line can give when none
     was printed (`-n 0`)."""
-    payload = await transport._get(f"/worker-sessions/{session_id}/log", format="jsonl")
+    payload = await transport._get(
+        f"/worker-sessions/{transport.segment(session_id)}/log", format="jsonl"
+    )
     return payload["next_line"]
 
 
@@ -227,7 +235,7 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
         try:
             async with session.stream(
                 "GET",
-                transport._api(f"/worker-sessions/{session_id}/log"),
+                transport._api(f"/worker-sessions/{transport.segment(session_id)}/log"),
                 params={"format": "jsonl", "follow": "true"},
                 timeout=None,
             ) as response:
@@ -291,7 +299,7 @@ async def permission_request(
         return {"behavior": failure, "message": "not a Kraft worker session"}
     try:
         status, body = await transport._post(
-            f"/worker-sessions/{sid}/permission",
+            f"/worker-sessions/{transport.segment(sid)}/permission",
             {
                 "tool_name": tool_name,
                 "input": input,
@@ -348,7 +356,7 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
 async def threads(work_item_id: str | None = None, open_only: bool = False) -> list:
     """Review threads on a work item, drafts included, oldest first."""
     wid = await context.resolve_work_item(work_item_id)
-    out = await transport._get(f"/work-items/{wid}/threads")
+    out = await transport._get(f"/work-items/{transport.segment(wid)}/threads")
     return [t for t in out if t["state"] != "resolved"] if open_only else out
 
 
@@ -362,7 +370,7 @@ async def compare(
     """Any two review targets diffed: base | attempt:N | last_review | latest."""
     wid = await context.resolve_work_item(work_item_id)
     return await transport._get(
-        f"/work-items/{wid}/compare",
+        f"/work-items/{transport.segment(wid)}/compare",
         **{"from": from_, "to": to, "nodes": nodes, "ignore_whitespace": ignore_whitespace or None},
     )
 
@@ -376,7 +384,7 @@ async def diff(work_item_id: str | None = None, ignore_whitespace: bool = False)
     """
     wid = await context.resolve_work_item(work_item_id)
     return await transport._get(
-        f"/work-items/{wid}/diff", ignore_whitespace=ignore_whitespace or None
+        f"/work-items/{transport.segment(wid)}/diff", ignore_whitespace=ignore_whitespace or None
     )
 
 
@@ -387,7 +395,7 @@ async def artifact(work_item_id: str | None = None) -> dict:
     reading a gate's artifact is only meaningful while the gate is open.
     """
     return await transport._get(
-        f"/work-items/{await context.resolve_work_item(work_item_id)}/artifact"
+        f"/work-items/{transport.segment(await context.resolve_work_item(work_item_id))}/artifact"
     )
 
 
@@ -395,13 +403,13 @@ async def documents(work_item_id: str | None = None) -> list[dict]:
     """The specs, plans and summaries the indexer linked to this item. No
     content: that is one `document()` call per id."""
     payload = await transport._get(
-        f"/work-items/{await context.resolve_work_item(work_item_id)}/documents"
+        f"/work-items/{transport.segment(await context.resolve_work_item(work_item_id))}/documents"
     )
     return payload.get("documents", [])
 
 
 async def document(doc_id: str) -> dict:
-    return await transport._get(f"/documents/{doc_id}")
+    return await transport._get(f"/documents/{transport.segment(doc_id)}")
 
 
 async def open_document(doc_id: str, editor: str | None = None) -> dict:
@@ -410,7 +418,9 @@ async def open_document(doc_id: str, editor: str | None = None) -> dict:
     Reuses the server's editor table and its 501-when-headless answer rather
     than growing a second launcher here.
     """
-    return await transport._act(f"/documents/{doc_id}/open", {"editor": editor} if editor else {})
+    return await transport._act(
+        f"/documents/{transport.segment(doc_id)}/open", {"editor": editor} if editor else {}
+    )
 
 
 async def repos() -> list[dict]:
@@ -477,13 +487,13 @@ async def lint_templates() -> dict:
 
 async def template(template_id: str) -> dict:
     """One chain template's file, as its author wrote it."""
-    return await transport._get(f"/templates/chains/{template_id}")
+    return await transport._get(f"/templates/chains/{transport.segment(template_id)}")
 
 
 async def resolved_template(template_id: str) -> dict:
     """One saved chain with its library components expanded, before any work
     item materializes it."""
-    return await transport._get(f"/templates/chains/{template_id}/resolved")
+    return await transport._get(f"/templates/chains/{transport.segment(template_id)}/resolved")
 
 
 async def library() -> dict:
@@ -494,7 +504,7 @@ async def library() -> dict:
 
 async def library_component(component_id: str) -> dict:
     """One library component, by `tasks.implementer` or a bare unique name."""
-    return await transport._get(f"/templates/library/{component_id}")
+    return await transport._get(f"/templates/library/{transport.segment(component_id)}")
 
 
 async def harnesses() -> dict:
@@ -505,4 +515,4 @@ async def harnesses() -> dict:
 
 async def harness(profile_id: str) -> dict:
     """One harness profile."""
-    return await transport._get(f"/harnesses/profiles/{profile_id}")
+    return await transport._get(f"/harnesses/profiles/{transport.segment(profile_id)}")

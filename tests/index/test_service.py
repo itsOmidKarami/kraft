@@ -205,6 +205,68 @@ async def test_ingest_session_summary_rejects_path_escape(tmp_path, database, co
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
 
+def _in_main_checkout_only(repo, wt):
+    (repo / ".engineering/sessions").mkdir(parents=True)
+    (repo / ".engineering/sessions/s1.md").write_text("SECRET_TOKEN=ghp_x\n")
+    return ".engineering/sessions/s1.md"
+
+
+def _not_markdown(repo, wt):
+    (wt / ".env").write_text("SECRET_TOKEN=ghp_x\n")
+    return ".env"
+
+
+def _markdown_link_to_env(repo, wt):
+    (wt / ".env").write_text("SECRET_TOKEN=ghp_x\n")
+    (wt / ".engineering/sessions").mkdir(parents=True)
+    (wt / ".engineering/sessions/s1.md").symlink_to("../../.env")
+    return ".engineering/sessions/s1.md"
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [_in_main_checkout_only, _not_markdown, _markdown_link_to_env],
+    ids=["main-checkout", "not-markdown", "md-link-to-env"],
+)
+async def test_a_summary_ref_reads_only_a_markdown_file_in_its_own_worktree(
+    tmp_path, database, conn, plant
+):
+    """A worker reports the ref. What it names lands in the index every
+    repo's agents search, so it may not name the main checkout's files (an
+    ignored `.env` among them) or anything but a summary."""
+    from kraft.paths import RunDirs
+
+    repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+    await _seed_work_item(database, str(repo))
+    rd = RunDirs(tmp_path / "run").ensure()
+    wt = rd.worktrees / "w1"
+    wt.mkdir()
+    await _seed_session(database, "s1", "w1", plant(repo, wt))
+    ix = Indexer(conn, database, repos_env="", run_dirs=rd)
+    assert await ix.ingest_session_summary("s1") is False
+    assert ix.search("ghp_x") == []
+
+
+async def test_a_summary_swapped_for_a_fifo_is_skipped_at_once(tmp_path, database, conn):
+    """Read blocking, a FIFO waits for a writer that never comes."""
+    import asyncio
+
+    from kraft.paths import RunDirs
+
+    repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
+    await _seed_work_item(database, str(repo))
+    rd = RunDirs(tmp_path / "run").ensure()
+    fifo = rd.worktrees / "w1/.engineering/sessions/s1.md"
+    fifo.parent.mkdir(parents=True)
+    os.mkfifo(fifo)
+    await _seed_session(database, "s1", "w1", ".engineering/sessions/s1.md")
+    ix = Indexer(conn, database, repos_env="", run_dirs=rd)
+    try:
+        assert await asyncio.wait_for(ix.ingest_session_summary("s1"), 5) is False
+    finally:  # free a blocked reader: a writer ends its wait
+        os.close(os.open(fifo, os.O_RDWR | os.O_NONBLOCK))
+
+
 async def test_links_resolved_in_search_and_document_and_by_work_item(tmp_path, database, conn):
     from kraft.paths import RunDirs
 
