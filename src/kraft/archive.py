@@ -40,7 +40,13 @@ async def tick(app) -> list[str]:
     )
     archived = []
     for row in due:
-        await _archive_one(app, row, "auto")
+        # One row's failure must not skip every later due row until the next
+        # hour's tick, which would meet the same row first again.
+        try:
+            await _archive_one(app, row, "auto")
+        except Exception:  # noqa: BLE001
+            logger.exception("auto-archive %s failed", row["id"])
+            continue
         archived.append(row["id"])
     return archived
 

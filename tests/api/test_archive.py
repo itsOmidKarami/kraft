@@ -120,6 +120,29 @@ def test_archive_keeps_the_worktree_when_the_rescue_fails(client, repo):
     assert payload["worktree_kept"] == r.json()["worktree_kept"]
 
 
+@pytest.mark.parametrize("action", ["archive", "abandon"])
+def test_a_moved_repository_still_lets_the_worktree_go(client, repo, action):
+    """Moving or deleting an old clone is normal. With no repository to run
+    git in, archive and abandon remove the worktree directory themselves,
+    since its `.git` link points into the missing repository and nothing
+    else could reclaim it, and they name the path they could not find."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
+    moved = repo.rename(repo.with_name("moved"))
+
+    r = client.post(f"/api/work-items/{wid}/{action}")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["worktree_removed"] is True
+    assert r.json()["repo_missing"] == str(repo)
+    assert not worktree.exists()
+    # The branch was in the repository, and moved with it.
+    assert git_read(moved, "branch", "--list", branch)
+
+
 def test_archive_refuses_an_active_item(client, repo):
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")

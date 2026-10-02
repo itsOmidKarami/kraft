@@ -299,7 +299,7 @@ async def _remove_worktree(
     members: list[Path] | None = None,
     *,
     keep_branch_in: frozenset[str] = frozenset(),
-) -> bool:
+) -> dict:
     """Reclaim the worktree and its branch, and the same in each of `members`
     -- the connected repositories its workspace members were checked out
     from (`builtins.member_repositories`, Kraft-ju36l).
@@ -317,8 +317,28 @@ async def _remove_worktree(
     prune is between the two because a directory removed out from under git
     leaves an administrative entry that makes the branch delete fail --
     removing the root removes each member's directory with it, so a member
-    repository is pruned the same way. Only the root's outcome is returned.
+    repository is pruned the same way. Only the root's outcome is returned,
+    as `worktree_removed`.
+
+    A repository moved or deleted since leaves git nowhere to run: the
+    worktree directory is removed directly instead, since its `.git` link
+    points into the missing repository and nothing else could ever reclaim
+    it, and the answer names the path as `repo_missing`. Its branch, if the
+    repository was only moved, stays there.
     """
+    if not repo.is_dir():
+        logger.warning(
+            "abandon %s: repository %s is gone; removing the worktree directory itself",
+            branch,
+            repo,
+        )
+        existed = worktree.exists()
+        await asyncio.to_thread(shutil.rmtree, worktree, ignore_errors=True)
+        await _remove_members(members, branch, keep_branch_in)
+        return {
+            "worktree_removed": existed and not worktree.exists(),
+            "repo_missing": str(repo),
+        }
     ok = True
     steps = [
         ["git", "worktree", "remove", "--force", str(worktree)],
@@ -331,12 +351,26 @@ async def _remove_worktree(
             ["git", "update-ref", "-d", f"{PUSHED_REFS}/{branch}"],
         ]
     for args in steps:
-        done = await asyncio.to_thread(
-            subprocess.run, args, cwd=repo, capture_output=True, text=True
-        )
+        try:
+            done = await asyncio.to_thread(
+                subprocess.run, args, cwd=repo, capture_output=True, text=True
+            )
+        except OSError as exc:
+            logger.warning("abandon %s: %s failed: %s", branch, args[1], exc)
+            ok = False
+            continue
         if done.returncode != 0:
             logger.warning("abandon %s: %s failed: %s", branch, args[1], done.stderr.strip())
             ok = False
+    await _remove_members(members, branch, keep_branch_in)
+    # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
+    await asyncio.to_thread(node_runs.drop_refs, repo, wid)
+    return {"worktree_removed": ok}
+
+
+async def _remove_members(
+    members: list[Path] | None, branch: str, keep_branch_in: frozenset[str]
+) -> None:
     for member in members or []:
         # Best-effort per member, like the rest: a member repository moved or
         # deleted since must not keep the refs and attachments below alive.
@@ -347,9 +381,6 @@ async def _remove_worktree(
             await _remove_member_branch(member, branch, keep=str(member) in keep_branch_in)
         except OSError as exc:
             logger.warning("abandon %s in %s: %s", branch, member, exc)
-    # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
-    await asyncio.to_thread(node_runs.drop_refs, repo, wid)
-    return ok
 
 
 async def _remove_member_branch(member: Path, branch: str, *, keep: bool = False) -> None:
@@ -420,7 +451,7 @@ async def abandon_work_item(wid: str, request: Request):
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
     shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
-    return {"id": wid, "status": "abandoned", "worktree_removed": removed}
+    return {"id": wid, "status": "abandoned", **removed}
 
 
 async def _archive_one(app, row, by: str) -> dict:
@@ -461,7 +492,7 @@ async def _archive_one(app, row, by: str) -> dict:
     removed = await _remove_worktree(
         repo, worktree, branch, wid, members, keep_branch_in=frozenset(kept)
     )
-    return {"worktree_removed": removed, **extra}
+    return {**removed, **extra}
 
 
 # UI v2 · 03.
