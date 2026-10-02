@@ -37,19 +37,31 @@ def board(monkeypatch):
 
 
 @pytest.fixture
-def terminal(monkeypatch):
+def terminal(monkeypatch, capsys):
     """A terminal answering `answer`, or `None` for no terminal at all.
-    `asked` records each question."""
+    `asked` records each question, as it stood on stderr when the answer was
+    read; a question on stdout is a failure, since `kraft admin restart > log`
+    would hide it."""
     state = SimpleNamespace(answer=None, asked=[])
 
-    def fake_input(prompt=""):
-        state.asked.append(prompt)
-        if state.answer is None:
-            pytest.fail(f"asked {prompt!r} with no terminal")
-        return state.answer
+    class Stdin:
+        def isatty(self):
+            return state.answer is not None
 
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: state.answer is not None, raising=False)
-    monkeypatch.setattr(builtins, "input", fake_input)
+        def readline(self):
+            seen = capsys.readouterr()
+            assert not seen.out.endswith("? [y/N] "), "the question went to stdout"
+            state.asked.append(seen.err.rsplit("\n", 1)[-1])
+            if state.answer is None:
+                pytest.fail("asked with no terminal")
+            sys.stderr.write(seen.err)
+            return state.answer + "\n"
+
+    def no_input(prompt=""):
+        pytest.fail(f"input() asked {prompt!r}: its prompt goes to stdout")
+
+    monkeypatch.setattr(sys, "stdin", Stdin())
+    monkeypatch.setattr(builtins, "input", no_input)
     return state
 
 
@@ -121,7 +133,7 @@ def test_stop_lists_active_items_but_never_asks(board, terminal, tmp_path, monke
 
 @pytest.mark.parametrize(("answer", "installs"), [("n", False), ("y", True)], ids=["no", "yes"])
 def test_update_restart_asks_before_installing(
-    board, terminal, restarted, tmp_path, monkeypatch, answer, installs
+    board, terminal, restarted, tmp_path, monkeypatch, capsys, answer, installs
 ):
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
     release = SimpleNamespace(tag="v9.9.9")
@@ -140,6 +152,8 @@ def test_update_restart_asks_before_installing(
     assert terminal.asked == ["Go on? [y/N] "]
     assert bool(performed) is installs
     assert bool(restarted) is installs
+    # Answering no stopped nothing, and installed nothing either.
+    assert ("kraft: nothing installed or stopped" in capsys.readouterr().err) is not installs
 
 
 def test_stop_does_not_wait_on_a_server_that_never_answers(tmp_path, monkeypatch, capsys):
