@@ -744,6 +744,11 @@ def _detached_failure(log_path: Path, start_offset: int, tail_chars: int = 2000)
     return f"{head}\n{output[-tail_chars:]}\nkraft: the whole log is {log_path}"
 
 
+#: How long `stop` and `restart` wait for the server to list its active items
+#: before they go ahead without the list.
+_LIST_TIMEOUT = 2.0
+
+
 def _confirm_running_agents(ns: argparse.Namespace, doing: str, *, ask: bool) -> None:
     """Name the active items before a stop ends their agents, and, with `ask`,
     let a person at a terminal back out.
@@ -752,9 +757,20 @@ def _confirm_running_agents(ns: argparse.Namespace, doing: str, *, ask: bool) ->
     process group on the way out, so the next start finds the session dead
     and stops the item (`reattach`). Without a terminal, or with `--yes`,
     this only warns: a script must not hang on a question. A server that does
-    not answer has nothing to list."""
+    not answer has nothing to list, and one that accepts the connection but
+    never replies gets `_LIST_TIMEOUT`, not the client's 30 s: a wedged server
+    is the usual reason to stop one, and the stop must not wait on it."""
     try:
-        items = asyncio.run(client.list_work_items("active"))
+        items = asyncio.run(
+            asyncio.wait_for(client.list_work_items("active"), timeout=_LIST_TIMEOUT)
+        )
+    except TimeoutError:
+        print(
+            f"kraft: the server did not list its active items within {_LIST_TIMEOUT:g}s; "
+            "any agent it is running ends with it",
+            file=sys.stderr,
+        )
+        return
     except Exception:
         return
     if not items:

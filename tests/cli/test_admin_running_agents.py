@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import builtins
 import os
+import socket
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -138,3 +140,38 @@ def test_update_restart_asks_before_installing(
     assert terminal.asked == ["Go on? [y/N] "]
     assert bool(performed) is installs
     assert bool(restarted) is installs
+
+
+def test_stop_does_not_wait_on_a_server_that_never_answers(tmp_path, monkeypatch, capsys):
+    """A wedged server is the usual reason to stop one. Its socket still
+    accepts, so the listing before SIGTERM would otherwise sit out the
+    client's 30 s timeout first."""
+    hung = socket.socket()
+    hung.bind(("127.0.0.1", 0))
+    hung.listen(8)  # the kernel completes the handshake; nobody ever reads or replies
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
+    monkeypatch.setenv("KRAFT_PORT", str(hung.getsockname()[1]))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(cli.admin, "_LIST_TIMEOUT", 0.3, raising=False)
+    run_dirs = RunDirs(tmp_path / "run")
+    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
+    run_dirs.pid.write_text("4171")
+    signalled = []
+
+    def fake_kill(pid, sig):
+        if sig == 0 and signalled:
+            raise ProcessLookupError
+        if sig != 0:
+            signalled.append(time.monotonic())
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+    began = time.monotonic()
+    try:
+        cli.main(["admin", "stop"])
+    finally:
+        hung.close()
+    assert signalled and signalled[0] - began < 5
+    captured = capsys.readouterr()
+    assert "did not list its active items within 0.3s" in captured.err
+    assert "stopped (pid 4171)" in captured.out
