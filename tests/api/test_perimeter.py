@@ -199,8 +199,9 @@ def test_a_rebound_host_is_refused_for_a_browser_request(client):
         {"host": "evil.example:8765"},
         {"host": "evil.example:8765", "origin": "http://evil.example:8765"},
         {"host": "[::1"},
+        {"host": "evil@127.0.0.1:8765"},
     ],
-    ids=["no-browser-headers", "origin-matches-host", "unparseable-host"],
+    ids=["no-browser-headers", "origin-matches-host", "unparseable-host", "userinfo-host"],
 )
 def test_a_loopback_bind_refuses_a_foreign_host_with_no_fetch_metadata(client, method, headers):
     """Chromium sends no Sec-Fetch-* headers to a plain-http origin on any name

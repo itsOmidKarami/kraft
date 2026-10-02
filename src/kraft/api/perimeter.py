@@ -243,7 +243,11 @@ async def _perimeter(request: Request, call_next):
 
 def _hostname(host: str) -> str | None:
     """The name in a `Host` header, lowercased and without its port. None for
-    one that does not parse (an unclosed IPv6 bracket), which no list holds."""
+    one that does not parse (an unclosed IPv6 bracket) or carries userinfo
+    (`evil@127.0.0.1`, which `urlsplit` would read as 127.0.0.1), which no
+    list holds."""
+    if "@" in host:
+        return None
     try:
         return urlsplit(f"//{host}").hostname
     except ValueError:
