@@ -1061,11 +1061,14 @@ def _steering_check(repo: config.RepoEntry, profiles: dict[str, str]) -> dict:
 
 async def _orphan_check() -> dict:
     """Worktrees with no work item row. Read-only, like every check here: which
-    of them is safe to delete is a judgement about uncommitted work."""
+    of them is safe to delete is a judgement about uncommitted work.
+
+    A cancelled item keeps its worktree until it is archived, so every row
+    counts, ended and archived ones included, not just the board's."""
     worktrees = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).worktrees
     if not worktrees.is_dir():
         return _check("worktrees", True, f"{worktrees} does not exist yet")
-    known = {item["id"] for item in await client.list_work_items()}
+    known = await client.work_item_ids()
     try:
         orphans = sorted(d.name for d in worktrees.iterdir() if d.is_dir() and d.name not in known)
     except OSError as exc:

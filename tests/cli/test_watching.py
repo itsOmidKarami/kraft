@@ -465,7 +465,7 @@ def test_log_backlog_keeps_the_truncation_marker_the_cap_put_there(monkeypatch):
 
 
 def test_events_follow_json_is_one_object_per_line(app, monkeypatch, capsys, make_item, repo):
-    """`kraft logs -f --json` is NDJSON and CLAUDE.md documents that contract.
+    """`kraft view events -f --json` is NDJSON, as the CLI reference documents.
     A followed stream that emits pretty-printed arrays breaks `read -r`, a
     `split("\\n")`, and any log shipper (Kraft-tom2)."""
     wid = make_item(repo)
@@ -475,9 +475,14 @@ def test_events_follow_json_is_one_object_per_line(app, monkeypatch, capsys, mak
         yield {"type": "work_item_completed", "seq": 202, "work_item_id": wid}
 
     monkeypatch.setattr(client, "stream_events", fake_stream)
-    cli.main(["view", "events", wid, "--after", "9999", "-f", "--json"])
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    # --after 9999 empties the backlog, so every line here is a streamed frame
-    parsed = [json.loads(line) for line in lines[1:]]
-    assert [event["seq"] for event in parsed] == [201, 202]
+    cli.main(["view", "events", wid, "--json"])
+    backlog = json.loads(capsys.readouterr().out)
+    assert backlog, "filing the item should have left an event to print"
+
+    cli.main(["view", "events", wid, "-f", "--json"])
+    # The backlog too, not only the streamed frames: an indented array ahead
+    # of the stream made the whole output neither JSON nor NDJSON.
+    parsed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert all(isinstance(event, dict) for event in parsed)
+    assert parsed[: len(backlog)] == backlog
+    assert [event["seq"] for event in parsed[len(backlog) :]] == [201, 202]

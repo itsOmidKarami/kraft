@@ -307,7 +307,7 @@ def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, clie
     assert "just test" in by_paths.values()
     # ...but the nested frontend scope _probe_test_scopes found on its own
     # survives untouched, not silently dropped by the override.
-    assert by_paths[("frontend/**",)] == "npm test"
+    assert by_paths[("frontend/**",)] == "npm --prefix frontend test"
 
 
 def test_add_repo_without_nested_scopes_does_not_persist_a_root_scope(tmp_path, client):
@@ -349,7 +349,9 @@ def test_add_repo_keeps_a_lone_nested_scope(tmp_path, client):
 
     r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert r.status_code == 201, r.text
-    assert r.json()["test_scopes"] == [{"paths": ["frontend/**"], "command": "npm test"}]
+    assert r.json()["test_scopes"] == [
+        {"paths": ["frontend/**"], "command": "npm --prefix frontend test"}
+    ]
 
 
 def test_patch_repo_sets_test_scopes_on_an_existing_entry(client, tmp_path):

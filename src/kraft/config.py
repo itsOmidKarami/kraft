@@ -15,6 +15,7 @@ import ipaddress
 import logging
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 from collections.abc import Iterator, Mapping
@@ -758,6 +759,28 @@ def _first_setup_command(directory: Path) -> str | None:
     return next((cmd for marker, cmd in _SETUP_COMMANDS if (directory / marker).is_file()), None)
 
 
+#: A `_TEST_COMMANDS` command -> the same command for a project one level down,
+#: run from the repository root. Verify runs every scope's command from the
+#: worktree root without a shell (`dispatch._select_scopes`), so a bare `npm
+#: test` there finds no `package.json`; each toolchain's own directory flag
+#: points it at the project instead. `{dir}` is the directory, `{manifest}`
+#: the marker file inside it, both shell-quoted for `shlex.split`.
+_NESTED_TEST_COMMANDS = {
+    "just test": "just --justfile {manifest} test",
+    "uv run pytest -q": "uv run --directory {dir} pytest -q",
+    "npm test": "npm --prefix {dir} test",
+    "cargo test": "cargo test --manifest-path {manifest}",
+    "go test ./...": "go -C {dir} test ./...",
+}
+
+
+def _nested_test_command(name: str, marker: str, command: str) -> str:
+    """`command`, found at `name/marker`, as it must be written to run from the root."""
+    return _NESTED_TEST_COMMANDS[command].format(
+        dir=shlex.quote(name), manifest=shlex.quote(f"{name}/{marker}")
+    )
+
+
 #: Root markers whose test command can run a stopped subdirectory's Python
 #: tests: the operator's own justfile recipe, or `uv run pytest -q` from a root
 #: `uv.lock` (a uv workspace). `npm test`, `cargo test` and `go test` cannot.
@@ -771,6 +794,7 @@ def _probe_test_scopes(
 
     Markers are read at the root and one level under it -- deliberately shallow,
     like Kraft's own `frontend/`. A subdirectory match becomes a nested scope,
+    its command written to run from the root (`_NESTED_TEST_COMMANDS`),
     and the root scope's `paths` exclude every directory one claimed, so a
     frontend-only diff cannot also match the backend. None -> `paths: ["**"]`.
 
@@ -798,7 +822,7 @@ def _probe_test_scopes(
     hits = [(name, hit) for name, hit in probed if hit[1]]
     if (found and not root_command) or (len(hits) < len(probed) and not covers_python):
         return None, [], []
-    nested = [(name, cmd) for name, (_, cmd) in hits]
+    nested = [(name, _nested_test_command(name, marker, cmd)) for name, (marker, cmd) in hits]
     markers = ([found[0]] if found else []) + [f"{name}/{marker}" for name, (marker, _) in hits]
 
     if not nested:

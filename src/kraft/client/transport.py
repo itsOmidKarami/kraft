@@ -11,6 +11,7 @@ regardless of which submodule it lives in.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -66,6 +67,19 @@ def _detail(response: httpx.Response) -> str:
         return str(response.json().get("detail", response.text))
     except ValueError:
         return response.text
+
+
+# The lead some raised messages carry themselves: `kraft 404: ...` from the
+# envelope below, `kraft: no gate is pending ...` from a few client checks.
+_OWN_LEAD = re.compile(r"^kraft(?:: | (?=\d{3}: ))")
+
+
+def refusal(exc: BaseException) -> str:
+    """The one line both front doors show for a refused call: `kraft: `, then
+    the reason. `kraft <verb>` prints it on stderr and `kraft admin mcp` hands
+    it to the agent, so the two read the same. A message that already led with
+    `kraft` would otherwise read `kraft: kraft 404: ...`."""
+    return f"kraft: {_OWN_LEAD.sub('', str(exc), count=1)}"
 
 
 def _api(path: str) -> str:

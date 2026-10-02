@@ -447,7 +447,17 @@ def abandon_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
     events.append(conn, work_item_id, "work_item_abandoned", {})
 
 
-def archive_work_item(conn: sqlite3.Connection, work_item_id: str, by: str) -> None:
+def archive_work_item(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    by: str,
+    *,
+    kept_branch: str | None = None,
+    unpushed_commits: int | None = None,
+    rescued_branch: str | None = None,
+    rescued_commits: int | None = None,
+    worktree_kept: str | None = None,
+) -> None:
     """Marks a completed/abandoned item archived without touching `status`
     (UI v2 · 03): "Ended as" keeps reading completed/abandoned, and every
     board count that filters on status still excludes an archived item only
@@ -455,14 +465,25 @@ def archive_work_item(conn: sqlite3.Connection, work_item_id: str, by: str) -> N
 
     `by` is `"you"` (the archive route) or `"auto"` (the poller) — shown in
     the Archived view's ARCHIVED column ("today · by you" / "2 days ago ·
-    auto").
+    auto"). `kept_branch` and `unpushed_commits` go on the event when the
+    archive left the item's branch in place because nothing else held its
+    commits; `rescued_branch` and `rescued_commits` when it named a detached
+    HEAD's commits; `worktree_kept` (the reason) when that failed and the
+    worktree stayed.
     """
     now = _now()
     conn.execute(
         "UPDATE work_items SET archived_at = ?, archived_by = ?, updated_at = ? WHERE id = ?",
         (now, by, now, work_item_id),
     )
-    events.append(conn, work_item_id, "work_item_archived", {"by": by})
+    payload: dict = {"by": by}
+    if kept_branch is not None:
+        payload |= {"kept_branch": kept_branch, "unpushed_commits": unpushed_commits}
+    if rescued_branch is not None:
+        payload |= {"rescued_branch": rescued_branch, "rescued_commits": rescued_commits}
+    if worktree_kept is not None:
+        payload["worktree_kept"] = worktree_kept
+    events.append(conn, work_item_id, "work_item_archived", payload)
 
 
 def restore_work_item(conn: sqlite3.Connection, work_item_id: str) -> None:
