@@ -53,8 +53,8 @@ def pin_wheel(wheel: Path, tag: str) -> None:
 
     Done on the built wheel because every other place to do it is worse: the
     tag's README is the one on `main`, and editing README.md before the build
-    dirties the tree, which setuptools-scm answers with a `+d20261002` local
-    version that PyPI refuses.
+    dirties the tree, which setuptools-scm answers with a dev version
+    (`1.5.0rc100.dev0+g1c4a7e8.d20261002`) instead of the tag's.
     """
     with zipfile.ZipFile(wheel) as src:
         infos = src.infolist()

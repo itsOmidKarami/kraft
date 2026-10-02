@@ -188,8 +188,9 @@ jobs:
         # description baked into the wheel. Left alone, every version's PyPI
         # page would show whatever UI `main` has today. On the built wheel, not
         # README.md: editing the tree before the build would make setuptools-scm
-        # version it `+d<date>`, which PyPI refuses. The tag is pushed below,
-        # before the publish, so the URLs resolve by the time PyPI shows them.
+        # call the version a dev build (`1.5.0rc100.dev0+g...`), not the tag.
+        # The tag is pushed below, before the publish, so the URLs resolve by
+        # the time PyPI shows them.
         if: steps.impact.outputs.tag != ''
         env:
           TAG: ${{ steps.impact.outputs.tag }}
