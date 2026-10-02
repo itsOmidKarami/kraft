@@ -7,7 +7,9 @@ import csv
 import hashlib
 import importlib.util
 import io
+import os
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -228,6 +230,58 @@ def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
         names.index("smoke test the wheel"),
     )
     assert build < pin < smoke
+
+
+def test_kraft_ships_everywhere_before_the_extension_is_published():
+    """A failed step stops every step after it, and the Marketplace token
+    expires. With the extension's steps last, an expired token fails the run
+    without leaving Homebrew on the old version or main unstamped."""
+    names = [n for n in _steps() if n]
+    assert names[-3:] == [
+        "publish the VS Code extension",
+        "publish the VS Code extension to Open VSX",
+        "check the Marketplace lists this release",
+    ]
+    extension = len(names) - 3
+    for kraft in [
+        "push the tag and create the release",
+        "publish to PyPI",
+        "stamp plugin manifests and CHANGELOG.md for this release",
+        "bump the homebrew tap",
+        "check PyPI serves this release",
+    ]:
+        assert names.index(kraft) < extension, kraft
+
+
+def _smoke_version_check() -> str:
+    text = RELEASE_YML.read_text()
+    step = text[text.index("- name: smoke test the wheel") : text.index("- name: build the VS")]
+    check = r"^( *)(VERSION=\$\(/tmp/smoke/bin/kraft --version\)\n.*?^\1fi\n)"
+    match = re.search(check, step, re.M | re.S)
+    assert match, "the smoke test no longer reads `kraft --version` into VERSION; update this test"
+    return match.group(2).replace("/tmp/smoke/bin/kraft --version", 'printf "%s\\n" "$SAYS"')
+
+
+@pytest.mark.parametrize(
+    ("tag", "says", "ok"),
+    [
+        ("v1.5.0", "kraft 1.5.0", True),
+        ("v1.5.0rc11", "kraft 1.5.0rc11", True),
+        ("v1.5.0", "kraft 1.5.0rc11", False),
+        ("v1.5.0", "kraft 1.5.0.post1", False),
+        ("v1.5.0", "kraft 11.5.0", False),
+    ],
+    ids=["stable", "rc", "rc-for-stable", "post-for-stable", "longer-major"],
+)
+def test_the_smoke_test_wants_the_wheel_to_report_exactly_the_tag(tag, says, ok):
+    """GitHub runs a step under `bash -eo pipefail`; so does this."""
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", _smoke_version_check()],
+        env={"PATH": os.environ["PATH"], "TAG": tag, "SAYS": says},
+        capture_output=True,
+        text=True,
+    )
+    assert (run.returncode == 0) is ok, run.stdout + run.stderr
 
 
 def test_the_extension_is_packed_with_the_release_tags_version_images_and_changelog():
