@@ -12,8 +12,9 @@ that enforces it is named: when this page and a test disagree, the test wins.
 ## Stack
 
 - React 18, [react-router](https://reactrouter.com) 7 (`BrowserRouter`),
-  [zustand](https://zustand.docs.pmnd.rs) 4 for the one shared store, and
-  [Vite](https://vite.dev) 8, in TypeScript.
+  [zustand](https://zustand.docs.pmnd.rs) 4 for state (`src/store.ts` holds the
+  work items, sessions and events; a few areas keep a small store of their own),
+  and [Vite](https://vite.dev) 8, in TypeScript.
 - Plain CSS, one file per area, no CSS framework. Colour comes from generated
   tokens ([Theme](#theme-tokens)); icons are [lucide-react](https://lucide.dev).
 - Tests: [vitest](https://vitest.dev) with jsdom and Testing Library for units,
@@ -38,7 +39,8 @@ websocket) to the backend, and every request the app makes is under `/api/`:
 `src/vite.proxy.test.ts` fails if `api.ts` asks for anything outside it.
 
 `npm run build` is `tsc -b && vite build` and writes `dist/`; that is the
-typecheck CI runs, and vitest alone does not do it. `just test-ui` runs both.
+typecheck CI runs, and vitest alone does not do it. `just test-ui` runs `tsc -b`
+and then vitest, which is the same typecheck without the bundling.
 The backend serves `dist/` from `KRAFT_FRONTEND_DIST`, and `just install`
 bundles it into the installed package.
 
@@ -54,12 +56,16 @@ main.tsx          entry: fixes an old address, then loads ng/boot
 api.ts            the typed REST client (every call under /api)
 store.ts          zustand: work items, sessions and events, kept current by ws.ts
 ws.ts             the event websocket, with reconnect backoff
-deriveState.ts    a work item's display state ("gate", "capped", "question", ...)
-statusGroups.ts   the board's Needs you / Running / Not started / Done grouping
+deriveState.ts    leftovers of the previous UI's client-side state derivation;
+statusGroups.ts   ng/ must not import either (its board and item contract tests)
 types/            the API's payload shapes, written by hand to match the server
 ng/               the UI itself; everything below is in here
 testFixtures.ts   older shared test factories (see Testing)
 ```
+
+The board's Needs you / Running / Not started / Done grouping is
+`STATUS_GROUPS` in `ng/board/model.ts`. Both layouts read a work item's state
+from the server's `display_status` and `stop` rather than deriving it.
 
 `ng` is the name this UI went by while it was served under `/ng` next to its
 predecessor. The predecessor is gone and the folder name stayed; treat `ng/`
@@ -89,8 +95,10 @@ socket (`session.ts`) before first render. `http.ts` is the request helper that
 keeps the status and body of a refusal, for pages that act on a 409 or 422;
 `live.ts` fans live websocket frames out to pages that subscribe to one type.
 
-A page that needs a new route adds a row to `ng/shell/routes.ts` and an element
-to `BUILT` in `ng/App.tsx`.
+A new desktop page adds a row to `ng/shell/routes.ts` with `built: true` and an
+element to `BUILT` in `ng/App.tsx`; without them it renders a placeholder.
+Routes with a parameter (a work item, its review) are declared in `App.tsx`
+itself, and the phone declares its own in `phone/PhoneApp.tsx`.
 
 ## Phone and desktop
 
@@ -102,8 +110,7 @@ either direction swaps the shape and keeps the URL.
 The two share data hooks, pure models and `ui/` primitives, never a pane. That
 is enforced by `ng/phone/contract.test.ts`: it reads every non-test file under
 `ng/phone/` and fails on a relative import that leaves `phone/` for anything
-not on its `ALLOWED` list, or that reaches `deriveState` (the phone reads the
-server's `display_status` and `stop` itself: see `phone/item/model.ts`). A
+not on its `ALLOWED` list, or that reaches `deriveState`. A
 module the phone genuinely should share gets a line in `ALLOWED` with the
 reason, in the same change that imports it. The same file pins that the restart call is made only from the phone's More and
 Access screens, each behind its own confirm.
@@ -135,8 +142,9 @@ the roles `--bg`, `--side`, `--surface`, `--surface-2`, `--line`, `--border`,
 `--selection`, the status colours `--ok --warn --bad --info`, and the diff and
 code-scheme colours; and `--accent` for each accent (`none`, `blue`, `violet`,
 `green`, `amber`, `rose`). `ng/theme/applyTheme.ts` writes the chosen look onto
-`<html>` as `data-surface`, `data-accent`, `data-amount`, `data-mode` and
-`data-density`, which is what the generated selectors key on. The look comes
+`<html>` as `data-surface`, `data-accent`, `data-amount` and `data-mode` (plus
+`data-code` for a named code scheme), which is what the generated selectors key
+on. The look comes
 from `theme.yaml` (the Appearance screen edits it) and is cached in
 `localStorage` so the first paint is not another look.
 
@@ -197,7 +205,7 @@ area that needs one has a helper module beside its tests, named `testkit.tsx`,
 | `ng/library/fixture.ts`, `testSupport.tsx` | a library draft and the page mounted on it |
 | `ng/harnesses/testkit.tsx` | the harnesses draft's tasks, problems and a fake server |
 | `ng/phone/areas/testkit.tsx` | draft views and `mountAt()` for the phone's area screens |
-| `ng/settings/policy/fixture.ts`, `ng/settings/intake/fixture.ts`, `ng/templates/repos/fixture.ts`, `ng/item/draft/` | per-screen fixtures |
+| `ng/settings/policy/fixture.ts`, `ng/settings/intake/fixture.ts`, `ng/templates/repos/fixture.ts`, `ng/templates/draft/fixture.default.ts`, `ng/item/draft/fixtures.ts` and `testkit.tsx` | per-screen fixtures |
 
 Reach for the nearest testkit first, and add a factory there the second time a
 setup recurs. `src/testFixtures.ts` is the older shared set (`item()`,
@@ -222,7 +230,9 @@ your branch. A new screen or state adds a cases file under `sweep/cases/`.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Five images are shown in the root README, and three of them on the docs site
+Five images are shown, in two places: the root README uses `board`, `gate`,
+`mobile` and `analytics`; the docs home uses `board`, `gate`, `search` and
+`analytics`, and the first-work-item page `board` and `gate`
 (`docsite/public/assets` is a link to this folder). Retake the ones whose
 screen changed, and all of them when a release is cut:
 
@@ -247,17 +257,22 @@ file more through the composer). To retake them:
    ```
 
 2. Give search something to find. It indexes only what git tracks under
-   `.engineering/`, so commit a spec and a plan, each with a `title:` in its
-   front matter, in the throwaway repo and reindex:
+   `.engineering/`, and the folder names the kind shown beside a hit
+   (`specs/`, `plans/`). Write a spec to `.dev/repo/.engineering/specs/` and a
+   plan to `.dev/repo/.engineering/plans/`, each a Markdown file with a
+   `title:` in its front matter, commit them in the throwaway repo and reindex:
 
    ```bash
    git -C .dev/repo add .engineering && git -C .dev/repo commit -m docs
    KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft admin reindex --repo .dev/repo
    ```
 
-3. Give the gate something to show. The seeded item's spec is the fake agent's
-   `fake spec body`: replace it with a short real one in
-   `.dev/run/worktrees/<id>/.engineering/specs/<id>.md` and commit it there.
+3. Give the gate something to show. The seeded item's spec is the fake agent's:
+   its front matter says `title: fake spec` (that becomes the heading) and its
+   body `fake spec body`. Replace both with something real in
+   `.dev/run/worktrees/<id>/.engineering/specs/<id>.md` and commit the change
+   with `git -C .dev/run/worktrees/<id> commit -am "spec"`; `-a` rather than
+   `add -A`, which would also stage the agent's `.engineering/sessions/` file.
    The item's id is in its address on the board.
 4. Save this as `frontend/e2e-shots/shot.mjs` (that folder is gitignored) and,
    with `npx playwright install chromium` done once, run it from `frontend/`
@@ -297,7 +312,8 @@ file more through the composer). To retake them:
    or a name of yours, and that its size is the table's.
 
 The footer under the sidebar prints the instance's address and its version. A
-checkout prints a `0.x.devN` version, while the committed set was taken from an
+checkout prints a dev version (`1.5.0rc11.dev1+g…` on a tagged clone, `0.1.devN`
+in one without tags), while the committed set was taken from an
 installed release (its footer reads `v1.5.0rc6`). For the set that goes out
 with a release, run that release's `kraft` against the seeded dev home rather
 than the checkout; `dev_env` in the root `justfile` lists the variables a dev

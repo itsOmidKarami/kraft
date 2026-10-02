@@ -97,15 +97,19 @@ Don't add new ones: cite a GitHub issue or pull request number instead.
 
 The frontend, its tests and its sweep carry a second set of references of the
 same kind. **UX V2** is the design programme behind the 1.5 interface;
-**W\<n>** (or `ux2-W<n>`) is one of its numbered waves of work; **spec §n**,
-**brief**, **Decided n**, **R\<n>** and **Ruling n** are a numbered section,
-decision or review finding in that programme's notes; and `design/handoff_*`
-is a folder of design handoffs. All of them point into the maintainer's
-private design notes, `design/` is gitignored, and none can be opened from a
-clone. Read them as you read a `Kraft-` ID. The rules the code actually
-enforces are stated in the tests that enforce them and summarised in
-[`frontend/README.md`](frontend/README.md), so ask there, or in an issue, when
-a comment's own words don't say what a rule is for. Don't add new ones.
+**ux2-W\<n>** (often written just `W<n>` in a comment) is one of its numbered
+waves of work; **spec §n**, **brief**, **Decided n**, **R\<n>** and
+**Ruling n** are a numbered section, decision or review finding in that
+programme's notes; and `design/handoff_*` is a folder of design handoffs. Those
+notes are the maintainer's private ones: `design/` is gitignored and none of it
+can be opened from a clone. Read them as you read a `Kraft-` ID. The exception
+is the earlier fix programme, plain `W0`–`W14`, whose briefs and receipts are
+tracked in `frontend/sweep/` (`briefs/W<n>_BRIEF.md`, `HISTORY.md`,
+`history/`), so a bare `W11` can be looked up there but a `ux2-W11` cannot. The
+rules the code actually enforces are stated in the tests that enforce them and
+summarised in [`frontend/README.md`](frontend/README.md), so ask there, or in
+an issue, when a comment's own words don't say what a rule is for. Don't add
+new ones.
 
 ## Repository layout
 

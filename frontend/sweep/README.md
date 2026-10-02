@@ -2,7 +2,7 @@
 
 Screenshots + machine checks for every screen × data variant × viewport × shell state, against **mocked** `/api/**` so every display state (rate_limited, capped, budget, escalated, archived…) is reachable in milliseconds. No orchestrator, no fake agent.
 
-CI does not run it. Run it before opening a pull request that changes how a screen looks or lays out (see [Before an MR](#before-an-mr)); [`../README.md`](../README.md#three-layers-and-when-each-is-required) says when that is and when vitest or Playwright is what you need. Labels like `W2`, `ux2-W<n>`, `R41` and "brief Decided 11" in this folder cite the maintainer's private design notes, which a clone does not have (see CONTRIBUTING.md); the text beside each says what it means.
+CI does not run it. Run it before opening a pull request that changes how a screen looks or lays out (see [Before an MR](#before-an-mr)); [`../README.md`](../README.md#three-layers-and-when-each-is-required) says when that is and when vitest or Playwright is what you need. Labels like `ux2-W<n>`, `R41` and "brief Decided 11" in this folder cite the maintainer's private UX V2 design notes, which a clone does not have (see CONTRIBUTING.md); the text beside each says what it means. The plain `W0`–`W14` waves are the earlier fix programme, and their briefs and receipts are tracked here (`briefs/`, `HISTORY.md`, `history/`).
 
 ## Install (once)
 

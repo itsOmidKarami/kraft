@@ -103,7 +103,9 @@ fixture refuses to answer a `param == "bd"` request against the fake).
   Frontend setup lives in the area's own testkit under
   `frontend/src/ng/<area>/`: a `testkit.tsx`, `fixture.ts` or
   `testSupport.tsx` beside the tests (`ng/item/testkit.tsx` has `detail()`
-  and `stubFetch()`; `ng/library/fixture.ts` a library draft) —
+  and `stubFetch()`; `ng/library/fixture.ts` a library draft; there are more
+  under `ng/settings/`, `ng/harnesses/`, `ng/phone/areas/`, `ng/templates/` and
+  `ng/item/draft/`) —
   factories that take overrides, not copy-pasted object literals. Add a
   factory to the nearest one the second time a setup recurs, not to a new
   top-level file. `frontend/src/testFixtures.ts` is the older shared set that
