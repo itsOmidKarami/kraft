@@ -113,10 +113,11 @@ def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "setup command: uv sync (from pyproject.toml)" in out
+    assert "setup command: uv sync (from uv.lock)" in out
     assert "none found" not in out
     assert "saved disabled" not in out
 
@@ -211,6 +212,20 @@ def test_reconnecting_survives_a_broken_detectors_file(app, capsys, repo, tmp_pa
     (templates / "detectors.yaml").write_text("detectorz: []\n")
     cli.main(["repo", "connect", str(repo)])
     assert "already connected" in capsys.readouterr().out
+
+
+def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, capsys, repo):
+    """`uv sync` and `uv run` would each write a `uv.lock` into the worktree,
+    so neither is proposed: the repo lands disabled, and connect names the
+    missing lockfile rather than leave the operator to guess."""
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "test command:" not in out
+    assert "setup command: none found" in out
+    assert "saved disabled: no test command found" in out
+    assert "no test command proposed: . is a pyproject.toml with no lockfile" in out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
@@ -530,6 +545,7 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     from kraft import config
 
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     frontend = repo / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
@@ -591,6 +607,7 @@ def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
     from kraft import config
 
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     src = repo / "src"
     src.mkdir()
     (src / "app.py").write_text("")

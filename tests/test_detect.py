@@ -126,13 +126,16 @@ KINDS = [
         "hatch test",
         "hatch env create",
     ),  # noqa: E501
-    ("pyproject-alone", {"pyproject.toml": PYTEST}, "uv run pytest", "uv sync"),
+    ("pyproject-alone-stops", {"pyproject.toml": PYTEST}, None, None),
     (
         "poe-task",
-        {"pyproject.toml": "[project]\nname='x'\n[tool.poe.tasks]\ntest = 'pytest -x'\n"},
+        {
+            "pyproject.toml": "[project]\nname='x'\n[tool.poe.tasks]\ntest = 'pytest -x'\n",
+            "uv.lock": "",
+        },
         "uv run poe test",
         "uv sync",
-    ),  # noqa: E501
+    ),
     (
         "requirements-txt",
         {"requirements.txt": "pytest\n"},
@@ -244,6 +247,7 @@ def test_every_packaged_detector_has_a_case(tmp_path):
     for n, (_, files, *_) in enumerate(KINDS):
         p = _propose(_repo(tmp_path / str(n), files))
         proposed |= {c["detector"] for c in p.candidates if c["chosen"]}
+        proposed |= {s["detector"] for s in p.stopped}
     for script in ("script/test", "bin/test"):  # runner scripts count only when executable
         p = _propose(_repo(tmp_path / script, {script: ""}, executable=(script,)))
         proposed |= {c["detector"] for c in p.candidates if c["chosen"]}
@@ -276,7 +280,7 @@ def test_a_runners_task_beats_the_toolchain_only_when_it_has_one(tmp_path, justf
     """Kraft-reriq, Kraft-enc5z: a justfile wins only when `just test` would
     run something; one without a `test` recipe falls through to the manifest
     beside it."""
-    p = _propose(_repo(tmp_path, {"Justfile": justfile, "pyproject.toml": PYTEST}))
+    p = _propose(_repo(tmp_path, {"Justfile": justfile, "pyproject.toml": PYTEST, "uv.lock": ""}))
     assert p.test_command == expected
 
 
@@ -318,6 +322,47 @@ def test_two_toolchains_at_one_root_are_both_prepared(tmp_path):
         "uv run pytest"
     ]
     assert p.setup_command == "npm ci && uv sync"
+
+
+#: Files in a directory -> the (test, setup) a pyproject.toml with no lockfile
+#: leaves there (#442): `uv sync` and `uv run` would each write a uv.lock.
+_STOPS = {
+    "a-pyproject-with-no-lockfile-gets-nothing": ({}, None, None),
+    "a-lockfile-install-beside-it-still-stands": ({"package-lock.json": ""}, None, "npm ci"),
+    "it-is-not-handed-go": ({"go.mod": "module x\n"}, None, None),
+    "it-is-not-handed-npm": ({"package.json": JEST}, None, None),
+    "a-runners-test-task-beside-it-is-kept": ({"Makefile": "test:\n\tpytest\n"}, "make test", None),
+    "a-uv-lock-is-what-it-needs": ({"uv.lock": ""}, "uv run pytest", "uv sync"),
+}
+
+
+@pytest.mark.parametrize(("files", "test", "setup"), _STOPS.values(), ids=_STOPS)
+def test_a_pyproject_with_no_lockfile_stops(tmp_path, files, test, setup):
+    p = _propose(_repo(tmp_path, {"pyproject.toml": PYTEST, **files}))
+    assert (p.test_command, p.setup_command) == (test, setup)
+    assert bool(p.stopped) == (test is None)
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [["pyproject.toml", "web/package.json"], ["backend/pyproject.toml", "web/package.json"]],
+    ids=["at-the-root", "one-level-down"],
+)
+def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(tmp_path, layout):
+    """A `web/` scope alone is what a diff to the Python code fails open to,
+    so it would pass on `npm test` with the Python suite never run (#442)."""
+    files = {layout[0]: PYTEST, layout[1]: JEST, "web/package-lock.json": ""}
+    p = _propose(_repo(tmp_path, files))
+    assert (p.test_command, p.test_scopes) == (None, [])
+    assert p.stopped[0]["dir"] == (layout[0].rpartition("/")[0] or ".")
+
+
+def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(tmp_path):
+    files = {"backend/pyproject.toml": PYTEST, "web/package.json": JEST}
+    p = _propose(_repo(tmp_path, files), test_command="make test")
+    root, nested = p.test_scopes
+    assert ("backend/**" in root["paths"], root["command"]) == (True, "make test")
+    assert nested == {"paths": ["web/**"], "command": "sh -c 'cd web && npm test'"}
 
 
 # ── scopes ──

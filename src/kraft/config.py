@@ -809,6 +809,7 @@ def probe_repo(
         "scopes": proposal.scopes,
         "candidates": proposal.candidates,
         "read_from": proposal.ref,
+        "stopped": proposal.stopped,
     }
 
 

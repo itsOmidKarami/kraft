@@ -126,6 +126,13 @@ class Detector(BaseModel):
     #: Its `files` are lockfiles: a workspace member it matches has its own
     #: lockfile, and installs on its own.
     lockfile: bool = False
+    #: A project Kraft has no safe command for (a pyproject.toml with no
+    #: lockfile, which `uv sync` and `uv run` would write one for). Where it
+    #: matches and nothing else of its family does, the directory proposes no
+    #: test and only lockfile installs, and the repo proposes no test command
+    #: unless one is given. `reason` says why, to the person connecting.
+    stop: bool = False
+    reason: str | None = None
     test: list[Command] = []
     setup: list[Command] = []
 
@@ -142,6 +149,12 @@ class Detector(BaseModel):
                 f"unknown task reader {v!r}; one of {', '.join(sorted(_TASK_READERS))}"
             )
         return v
+
+    @model_validator(mode="after")
+    def _a_stop_says_why(self) -> Detector:
+        if self.stop and not self.reason:
+            raise ValueError(f"{self.id}: a `stop` detector needs a `reason`")
+        return self
 
     @model_validator(mode="after")
     def _tasks_need_a_reader(self) -> Detector:
@@ -907,6 +920,9 @@ class Proposal:
     candidates: list[dict]
     #: The commit read (`source_ref`), or None for a repository with none.
     ref: str | None = None
+    #: Directories a `stop` detector stopped, with its reason: why there is
+    #: no test command when one was not given.
+    stopped: list[dict] = field(default_factory=list)
 
 
 def _depth(d: str) -> int:
@@ -1043,6 +1059,29 @@ def _names_dir(text: str, d: str) -> bool:
     return re.search(rf"{moved}|(?<![\w.-]){name}/", text) is not None
 
 
+def _stop(
+    by_dir: dict[str, list[Candidate]], matches: dict[str, list[_Match]], table: Table
+) -> dict[str, Detector]:
+    """The directories a `stop` detector stops, by reason, with their
+    candidates cut to what is still safe there: a runner's own tasks, and
+    lockfile installs. A runner's `test` task in the directory, or another
+    detector of the stopped family, means it is not stopped at all."""
+    locked = {d.id for d in table.detectors if d.lockfile}
+    out: dict[str, Detector] = {}
+    for d, ms in matches.items():
+        stops = [m.detector for m in ms if m.detector.stop]
+        others = {m.detector.family for m in ms if not m.detector.stop}
+        stop = next((s for s in stops if s.family not in others), None)
+        cands = by_dir.get(d, [])
+        if stop is None or any(c.role == "test" and c.tier == "runner" for c in cands):
+            continue
+        out[d] = stop
+        by_dir[d] = [
+            c for c in cands if c.tier == "runner" or (c.role == "setup" and c.detector in locked)
+        ]
+    return out
+
+
 def _corroborate(by_dir: dict[str, list[Candidate]], ci: list[Candidate]) -> None:
     """Fold `ci` into `by_dir`. CI running what a runner or toolchain already
     proposes is corroboration, said on that candidate, not a second one."""
@@ -1087,7 +1126,10 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
     _corroborate(by_dir, ci)
     if devenv is not None:
         by_dir[""].append(devenv)
-    by_dir = {d: cands for d, cands in by_dir.items() if cands or matches[d]}
+    # The root stays even with no evidence of its own: a given test command
+    # is its scope, whatever is found below it.
+    by_dir = {d: cands for d, cands in by_dir.items() if cands or matches[d] or not d}
+    stopped = _stop(by_dir, matches, table)
 
     # A workspace root covers its family's members: their setup always (the
     # root's install is what installs them), their tests when it has a test.
@@ -1119,6 +1161,8 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
                 if test_command
                 else None
             )
+        elif stopped and test_command is None:
+            test = None  # a suite Kraft cannot run would pass on the others'
         else:
             test = _first_by_tier([c for c in cands if c.role == "test"], TEST_TIERS)
         setup = _setups([c for c in cands if c.role == "setup"], covering & families)
@@ -1167,4 +1211,7 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
         scopes=shaped,
         candidates=[asdict(c) for cands in by_dir.values() for c in cands],
         ref=index.ref,
+        stopped=[
+            {"dir": d or ".", "reason": s.reason, "detector": s.id} for d, s in stopped.items()
+        ],
     )

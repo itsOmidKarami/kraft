@@ -175,6 +175,8 @@ def _say_connected(result: dict) -> None:
                 f" and {len(rest) - _ALSO_SHOWN} more (--json)" if len(rest) > _ALSO_SHOWN else ""
             )
             print(f"  also found for {role}: {shown}{more}")
+    for stop in result.get("stopped") or ():
+        print(f"  no test command proposed: {stop['dir']} is {stop['reason']}")
     if result.get("enabled") is False:
         print(
             "saved disabled: no test command found in its task runners, CI or toolchain "

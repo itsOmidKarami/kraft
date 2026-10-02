@@ -284,18 +284,15 @@ detectors:
     tier: toolchain
     family: python
     # A `[project]` table: a pyproject.toml holding only tool settings (ruff,
-    # black) is no evidence this is a Python project.
+    # black) is no evidence this is a Python project. With no lockfile there
+    # is no safe guess: `uv sync` and `uv run` both write a uv.lock into the
+    # worktree, which the worker then commits. So it stops: no test command
+    # for the repo unless one is given, and no fallback to a go.mod beside it.
     files: [pyproject.toml]
     contains: {pyproject.toml: '(?m)^\[(project|tool\.poetry|build-system)\]'}
     unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
-    tasks: poe
-    test:
-      - {tasks: [test], run: "uv run poe {task}"}
-      - {when: *pytest, run: "uv run pytest"}
-      - {when: [{files: [manage.py]}], run: "uv run python manage.py test"}
-    setup:
-      - {when: *pytest-in-extras, run: "uv sync --all-extras"}
-      - run: "uv sync"
+    stop: true
+    reason: "a pyproject.toml with no lockfile: `uv sync` and `uv run` would write uv.lock into every work item's worktree"
 
   - id: requirements
     tier: toolchain

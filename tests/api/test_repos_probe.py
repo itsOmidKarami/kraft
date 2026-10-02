@@ -3,6 +3,7 @@ tell, when they read detectors.yaml, and that they never block the server."""
 
 from __future__ import annotations
 
+import pytest
 import yaml
 from support.harness import commit_all, make_repo
 
@@ -79,3 +80,39 @@ def test_the_probe_runs_off_the_event_loop(tmp_path, client, monkeypatch):
     client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert ("probe_repo", True) in ran
     assert ran.count(("probe_repo", True)) == 2, ran
+
+
+@pytest.mark.parametrize(
+    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
+)
+@pytest.mark.parametrize("route", ["/api/repos/probe", "/api/repos"], ids=["probe", "add"])
+def test_add_repo_writes_the_probed_setup_command(tmp_path, client, route, lockfile, expected):
+    """The first-run and Templates › Repos probe proposes what connecting
+    writes: `uv sync` only beside a `uv.lock`, since it writes one otherwise."""
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    commit_all(repo)
+    entry = client.post(route, json={"path": str(repo)}).json()
+    assert entry["setup_command"] == expected
+
+
+@pytest.mark.parametrize(
+    ("lockfile", "expected"),
+    [(True, "uv run pytest"), (False, None)],
+    ids=["uv-lock", "no-uv-lock"],
+)
+def test_a_pyproject_gets_uv_run_pytest_only_beside_a_uv_lock(tmp_path, client, lockfile, expected):
+    """`uv run` writes a `uv.lock` when there is none, on every verify: the
+    probe proposes no test command then, and the repo is added disabled."""
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    commit_all(repo)
+    assert (
+        client.post("/api/repos/probe", json={"path": str(repo)}).json()["test_command"] == expected
+    )
+    entry = client.post("/api/repos", json={"path": str(repo)}).json()
+    assert (entry["test_command"], entry["enabled"]) == (expected, lockfile)

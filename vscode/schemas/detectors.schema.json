@@ -97,6 +97,18 @@
           "title": "Lockfile",
           "type": "boolean"
         },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
         "setup": {
           "default": [],
           "items": {
@@ -104,6 +116,11 @@
           },
           "title": "Setup",
           "type": "array"
+        },
+        "stop": {
+          "default": false,
+          "title": "Stop",
+          "type": "boolean"
         },
         "tasks": {
           "anyOf": [

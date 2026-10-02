@@ -42,7 +42,15 @@ from kraft.worker.env import worker_env
 #: Lines of a failed command's output shown; the rest is in the log it names.
 _TAIL = 20
 #: Fields the API tells beside an entry, which the entry itself does not have.
-_TOLD = {"already_connected", "test_markers", "candidates", "scopes", "missing_setup", "read_from"}
+_TOLD = {
+    "already_connected",
+    "test_markers",
+    "candidates",
+    "scopes",
+    "missing_setup",
+    "read_from",
+    "stopped",
+}
 
 
 def _run(

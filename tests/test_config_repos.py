@@ -447,11 +447,16 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
     assert Path(config.probe_repo(sub)["path"]) == sub.resolve()
 
 
-def test_probe_repo_suggests_a_setup_command(tmp_path):
+@pytest.mark.parametrize(
+    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
+)
+def test_probe_repo_suggests_a_setup_command(tmp_path, lockfile, expected):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
     commit_all(repo)
-    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+    assert config.probe_repo(repo)["setup_command"] == expected
 
 
 def test_probe_repo_reads_the_operators_detectors_file(tmp_path):
@@ -467,7 +472,7 @@ def test_probe_repo_reads_the_operators_detectors_file(tmp_path):
     )
     commit_all(repo)
     assert config.probe_repo(repo, templates_dir=templates)["setup_command"] == "pip install -e ."
-    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+    assert config.probe_repo(repo)["setup_command"] is None, "the packaged one stops"
 
 
 def test_probe_repo_names_the_marker_each_test_command_came_from(tmp_path):
