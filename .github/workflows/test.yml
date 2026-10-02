@@ -200,7 +200,9 @@ jobs:
     #
     # `e2e (real CLIs)` is in it too. The release workflow already refuses a
     # main whose whole test run isn't green, so leaving it out would only move
-    # its failure from the pull request that caused it to release day.
+    # its failure from the pull request that caused it to release day. Its one
+    # infrastructure failure so far, a 504 fetching bd, is why both bd
+    # downloads retry. "Re-run failed jobs" re-runs this gate with them.
     # `kraft-lite`, `removals declared` and the docs jobs are not: each is its
     # own check, and `removals declared` is re-run on its own after a body edit.
     #
@@ -269,7 +271,7 @@ jobs:
       - name: install bd
         run: |
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
+          curl -fsSL --retry 5 --retry-all-errors "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
             | sudo tar -xz -C /usr/local/bin bd
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
@@ -383,7 +385,7 @@ jobs:
         run: |
           apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
+          curl -fsSL --retry 5 --retry-all-errors "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
             | tar -xz -C /usr/local/bin bd
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
