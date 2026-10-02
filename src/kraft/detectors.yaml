@@ -222,7 +222,7 @@ detectors:
     contains: {pyproject.toml: '(?m)^\[(project|tool\.poetry|build-system)\]'}
     unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
     stop: true
-    reason: "a pyproject.toml with no lockfile: uv sync and uv run would write a uv.lock into every work item's worktree"
+    reason: "a pyproject.toml with no lockfile: uv sync and uv run would write a uv.lock into every work item's worktree. Commit one (uv lock) and connect again, or pass --test-command"
 
   - id: tox
     tier: toolchain

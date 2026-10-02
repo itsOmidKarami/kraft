@@ -75,3 +75,22 @@ export function readFrom(ref: string | null | undefined): string | null {
 export function withSource(command: string, source: string | null): string {
   return source ? `${command} — from ${source}` : command;
 }
+
+type Tested = { test_command?: unknown; test_scopes?: unknown };
+
+/** A repo's tests in the list: its test command, and how many scopes beside it,
+ *  so a monorepo's one command does not read as its whole suite. */
+export function testsCell(e: Tested): string {
+  const scopes = Array.isArray(e.test_scopes) ? e.test_scopes.length : 0;
+  const cmd = typeof e.test_command === "string" ? e.test_command : "";
+  if (!scopes) return cmd || "—";
+  return `${cmd || "no root command"} + ${scopes} scope${scopes === 1 ? "" : "s"}`;
+}
+
+/** Every command it runs, one per line, for the cell's title. */
+export function testsTitle(e: Tested): string | undefined {
+  const scopes = Array.isArray(e.test_scopes) ? (e.test_scopes as { paths?: string[]; command?: string }[]) : [];
+  const lines = scopes.map((s) => `${(s.paths ?? []).join(", ")}: ${s.command ?? ""}`);
+  const cmd = typeof e.test_command === "string" ? e.test_command : undefined;
+  return lines.length ? lines.join("\n") : cmd;
+}

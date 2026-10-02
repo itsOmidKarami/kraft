@@ -32,6 +32,15 @@ afterEach(() => {
 const mount = (onDone?: () => void) => render(<MemoryRouter><FirstRun onDone={onDone} /></MemoryRouter>);
 const stepButton = (n: number) => screen.queryByRole("button", { name: new RegExp(`^Step ${n}:`) });
 
+/** Probe and add, staying on the step that says what was added. */
+async function add(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+  await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 6000 });
+  await user.click(screen.getByRole("button", { name: "Add repo" }));
+  await screen.findByText("Added acme");
+}
+
 async function probeAndAdd(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
   await user.click(screen.getByRole("button", { name: "+ Add repo" }));
@@ -100,6 +109,32 @@ describe("FirstRun", () => {
     expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
   });
 
+  it("shows a monorepo's nested scopes, and for its unprepared ones no 'No setup needed'", { timeout: 15000 }, async () => {
+    const scopes = [{ paths: ["pyproject.toml", "src/**"], command: "uv run pytest -q" }, { paths: ["frontend/**"], command: "sh -c 'cd frontend && npm test'" }];
+    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_scopes: scopes, setup_command: null, missing_setup: ["frontend"] });
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true, setup_command: null } as never);
+    const user = userEvent.setup();
+    mount();
+    await add(user);
+    expect(screen.getByText("sh -c 'cd frontend && npm test'")).toBeInTheDocument();
+    const said = await screen.findByText(/frontend\/ has tests and nothing found prepares it/);
+    expect(said).not.toHaveTextContent("No setup needed");
+  });
+
+  it("reads the repo again when you come back, rather than keep a fixed problem", { timeout: 15000 }, async () => {
+    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_command: null, test_scopes: [], setup_command: null });
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: false, setup_command: null } as never);
+    const user = userEvent.setup();
+    mount();
+    await add(user);
+    expect(screen.getByText(/set its test command and Enable it/)).toBeInTheDocument();
+    expect(screen.getByText(/No setup command found/)).toBeInTheDocument();
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/acme", enabled: true, setup_command: "uv sync" }] } as never);
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(screen.queryByText(/No setup command found/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/set its test command and Enable it/)).not.toBeInTheDocument();
+  });
+
   it("sends the probe's scopes when it found a nested one", async () => {
     const scopes = [{ paths: ["pyproject.toml", "src/**"], command: "uv run pytest -q" }, { paths: ["frontend/**"], command: "npm test" }];
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_scopes: scopes });
@@ -120,7 +155,8 @@ describe("FirstRun", () => {
     await user.click(screen.getByRole("button", { name: "Add repo" }));
     expect(await screen.findByText("Added acme")).toBeInTheDocument();
     expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
-    expect(screen.getByText(/connected disabled until you set a test command/)).toBeInTheDocument();
+    // R8b-02: setting the command is not enough while the repo is disabled.
+    expect(screen.getByText(/set its test command and Enable it, then publish/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(await screen.findByRole("button", { name: "Continue" }));

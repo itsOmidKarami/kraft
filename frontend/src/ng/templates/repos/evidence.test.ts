@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProbeCandidate } from "../../../types/settings";
-import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "./evidence";
+import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, testsCell, testsTitle, withSource } from "./evidence";
 
 const c = (over: Partial<ProbeCandidate>): ProbeCandidate => ({
   dir: "", role: "test", command: "just test", tier: "runner", source: "justfile recipe `test`", marker: "justfile",
@@ -48,6 +48,14 @@ describe("probe evidence", () => {
     expect(missingLine([{ dir: "runtime-tests/deno", tool: "deno" }, { dir: ".", tool: "cargo" }]))
       .toBe("deno (runtime-tests/deno/), cargo (the root): not installed here, so a work item would fail on it");
     expect(missingLine([])).toBeNull();
+  });
+
+  it("lists a monorepo with its scopes, so its one command does not read as its whole suite", () => {
+    const scopes = [{ paths: ["src/**"], command: "uv run pytest" }, { paths: ["web/**"], command: "npm test" }];
+    expect(testsCell({ test_command: "uv run pytest", test_scopes: scopes })).toBe("uv run pytest + 2 scopes");
+    expect(testsTitle({ test_command: "uv run pytest", test_scopes: scopes })).toBe("src/**: uv run pytest\nweb/**: npm test");
+    expect(testsCell({ test_command: "make test" })).toBe("make test");
+    expect(testsCell({})).toBe("—");
   });
 
   it("names the root as the root in a stop", () => {

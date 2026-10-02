@@ -448,6 +448,8 @@ def test_a_pyproject_with_no_lockfile_stops(tmp_path, files, test, setup):
     p = _propose(_repo(tmp_path, {"pyproject.toml": PYTEST, **files}))
     assert (p.test_command, p.setup_command) == (test, setup)
     assert bool(p.stopped) == (test is None)
+    # R8a-04: what to do about it, not only why.
+    assert all("Commit one (uv lock)" in s["reason"] for s in p.stopped)
 
 
 #: Layouts whose lockless pyproject.toml no root command can run (#442, #446):
