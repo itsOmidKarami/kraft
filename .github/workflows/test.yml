@@ -192,49 +192,64 @@ jobs:
           xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
 
   test-gate:
-    # One check named exactly `test`, for branch protection to require. The matrix
-    # above reports as `test (python 3.12)`, `test (python 3.13)`, ... so a rule
-    # naming each leg has to be edited whenever the supported range changes; a
-    # rule naming this job never does.
+    # One check named exactly `test`, for branch protection to require. It
+    # stands for every job below that checks the code, not just the Python
+    # matrix: a red lint, frontend, playwright, vscode or e2e job turns it red.
+    # Naming this one job in the rule, rather than each check, means the
+    # supported Python range and the job list can change without a ruleset edit.
+    #
+    # `e2e (real CLIs)` is in it too. The release workflow already refuses a
+    # main whose whole test run isn't green, so leaving it out would only move
+    # its failure from the pull request that caused it to release day.
+    # `kraft-lite`, `removals declared` and the docs jobs are not: each is its
+    # own check, and `removals declared` is re-run on its own after a body edit.
     #
     # `if: ${{ !cancelled() }}` is load-bearing. A job skipped because its
     # `needs` failed reports "skipped", and a skipped required check passes --
-    # so a bare `needs` would leave this check green on a red matrix. Unlike
+    # so a bare `needs` would leave this check green on a red job. Unlike
     # `always()`, `!cancelled()` is false once the whole run is cancelled, which
     # concurrency does to the first run when a push follows another on the same
     # pull request. That run's gate is then skipped instead of failed. Cancelled
     # runs sit on an older head sha, so they no longer count against the merge;
     # what once made a duplicate run on the *same* sha (a `labeled` event after
     # `opened`) is gone with the `labeled` trigger. Cost: a run cancelled by
-    # hand also leaves a skipped gate, not a red one. The shell test below turns a failed matrix into a
-    # failed check. A skipped matrix passes only when `changes` said docs-only
-    # and `docs-tests` passed.
+    # hand also leaves a skipped gate, not a red one.
+    #
+    # The shell below reads every `needs` result. Each must be `success`, with
+    # two exceptions that follow `changes`: on a docs-only pull request the
+    # path-gated jobs report `skipped`, which passes, and `docs tests` must then
+    # succeed; on any other change `docs tests` is the one job expected to skip.
+    # Anything else -- failure, cancelled, or a skip nobody asked for -- fails.
     name: test
-    needs: [changes, test, docs-tests]
+    needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.changes.outputs.code }}
-      MATRIX_RESULT: ${{ needs.test.result }}
-      DOCS_RESULT: ${{ needs.docs-tests.result }}
+      NEEDS: ${{ toJSON(needs) }}
     steps:
       - run: |
-          if [ "$CODE" = false ] && [ "$MATRIX_RESULT" = skipped ]; then
-            if [ "$DOCS_RESULT" != success ]; then
-              echo "::error::docs-only change: docs tests finished '$DOCS_RESULT', not 'success'"
-              exit 1
-            fi
-            echo "docs-only change: test matrix skipped, docs tests passed"
-          elif [ "$MATRIX_RESULT" != "success" ]; then
-            echo "::error::the test matrix finished '$MATRIX_RESULT', not 'success'"
-            exit 1
-          fi
+          # Job ids, not check names: `e2e` is playwright, `e2e-cli` is
+          # e2e (real CLIs), and `test` is the whole python matrix.
+          status=0
+          fail() { echo "::error::$job finished '$result', not 'success'"; status=1; }
+          while read -r job result; do
+            echo "$job: $result"
+            case "$job:$result:$CODE" in
+              *:success:*) ;;
+              docs-tests:skipped:false) fail ;;  # docs-only: it stands in for the matrix
+              docs-tests:skipped:*) ;;           # a code change skips it
+              *:skipped:false) ;;                # docs-only: the path-gated jobs skip
+              *) fail ;;
+            esac
+          done < <(jq -r 'to_entries[] | "\(.key) \(.value.result)"' <<<"$NEEDS")
+          exit "$status"
 
   e2e-cli:
     # The e2e tier (Ruling 153): tests that run a real external CLI to check
     # its contract -- today bd's argv, subcommands and --json shape, and the
-    # bead behaviour Kraft relies on. Not a required check yet; that is Omid's
-    # call. KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd, docker or
+    # bead behaviour Kraft relies on. A failure fails the required `test`
+    # check (see test-gate). KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd, docker or
     # podman an error instead of a green job that skipped everything; the
     # runner's own docker daemon and its rootless podman run the sandbox's
     # ref-store test against a real container each. The paid
