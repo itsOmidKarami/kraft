@@ -196,7 +196,7 @@ def test_theme_migration_keeps_the_look(tmp_path, before):
     assert _look(p) == look
     kept = {k: v for k, v in yaml.safe_load(before).items() if k != "palette"}
     assert {k: after[k] for k in kept} == kept
-    assert (tmp_path / "theme.yaml.pre-ux2").read_text() == before
+    assert (tmp_path / "theme.yaml.pre-1.5").read_text() == before
 
 
 @pytest.mark.parametrize(
@@ -216,14 +216,14 @@ def test_theme_migration_leaves_files_without_palette_alone(tmp_path, before):
     assert p.exists() is (before is not None)
     if before is not None:
         assert p.read_text() == before
-    assert not (tmp_path / "theme.yaml.pre-ux2").exists()
+    assert not (tmp_path / "theme.yaml.pre-1.5").exists()
 
 
 def test_theme_migration_runs_once(tmp_path):
     from kraft import config
 
     p = tmp_path / "theme.yaml"
-    backup = tmp_path / "theme.yaml.pre-ux2"
+    backup = tmp_path / "theme.yaml.pre-1.5"
     p.write_text("palette: forest\n")
     assert config.migrate_theme(p) is True
     migrated = p.read_bytes()

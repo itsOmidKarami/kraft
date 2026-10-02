@@ -1117,13 +1117,13 @@ class Theme(_Model):
 
 
 def migrate_theme(path: str | Path) -> bool:
-    """UX V2 cutover (spec §11.3): write the look `palette` stands for as the
-    file's own `surface`, `accent` and `colour_amount`, then drop `palette`.
-    All three are written: a file with its own surface defaults to no accent at
-    subtle, so `surface` alone would change the look. `effective()` answers the
-    same before and after, which is the point (kickoff §4.5: silent).
+    """The 1.5 upgrade: write the look `palette` stands for as the file's own
+    `surface`, `accent` and `colour_amount`, then drop `palette`. All three are
+    written: a file with its own surface defaults to no accent at subtle, so
+    `surface` alone would change the look. `effective()` answers the same
+    before and after, which is the point: the user sees no change.
 
-    The original bytes go to `theme.yaml.pre-ux2` first, never overwriting an
+    The original bytes go to `theme.yaml.pre-1.5` first, never overwriting an
     earlier copy. A missing, unreadable or invalid file, or one without
     `palette`, is left alone. True when the file was rewritten."""
     path = Path(path)
@@ -1137,7 +1137,7 @@ def migrate_theme(path: str | Path) -> bool:
     if "surface" not in data:
         data.update({key: look[key] for key in THEME_V2_KEYS})
     del data["palette"]
-    backup = path.with_name(path.name + ".pre-ux2")
+    backup = path.with_name(path.name + ".pre-1.5")
     if not backup.exists():
         backup.write_bytes(path.read_bytes())
     write_yaml(path, data)

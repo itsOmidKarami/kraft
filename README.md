@@ -13,11 +13,16 @@ Kraft isn't another coding agent. It runs the one you already use, and adds
 what a single session can't: a process the agent can't skip, checks it doesn't
 grade itself on, and a person at the decisions that matter.
 
-Hand Claude Code (or another coding agent) a spec and walk away. It's for
+Hand Kraft a task and walk away. Your agent drafts the spec and the plan and
+stops for your approval of each, or starts from a spec you wrote. It's for
 developers tired of babysitting a session to the end of a task.
 
-<!-- TODO(Omid): re-record the 30-second tour below on the 1.5.0 interface; it still shows the old one. -->
-![A 30-second tour: file a work item, read the spec an agent wrote at its gate, and look at a finished item's diff](https://github.com/user-attachments/assets/34d3197d-b07b-4f9a-a13b-04f0c377230e)
+Kraft works with Claude Code out of the box, and you can drive it from Codex,
+Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
+their agent steps on Claude Code, and any step can
+[switch to another agent](https://itsomidkarami.github.io/kraft/guides/switch-harness).
+
+![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; reject with a note and the node that wrote it
@@ -34,9 +39,7 @@ developers tired of babysitting a session to the end of a task.
 
 New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
 
-*Kraft* is German for force, and the root of the English word *craft*. Your agent brings the craft; Kraft is the force that carries it from spec to pull request.
-
-![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
+*Kraft* is German for force; in English, its cousin *craft* means skill. Your agent brings the craft; Kraft is the force that carries it from spec to pull request.
 
 <table>
 <tr>
@@ -111,6 +114,12 @@ claude plugin marketplace add itsOmidKarami/kraft
 claude plugin install kraft@kraft
 ```
 
+Codex, Cursor and Antigravity install the same plugin; their commands are on
+the [install guide's agent tabs](https://itsomidkarami.github.io/kraft/get-started/install#connect-your-agent).
+If you drive Kraft from one of them, install the Claude Code plugin (or run
+`kraft admin init`) as well: the shipped chains run their workers on Claude
+Code.
+
 Start the server and leave it running in its own terminal:
 
 ```bash
@@ -130,8 +139,8 @@ To clear gates and review diffs from VS Code, install the
 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft),
 or from [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft) in VSCodium
 and Cursor (publisher `kraft-sdlc` on both). You can also download
-`kraft-<version>.vsix` from a
-[GitHub release](https://github.com/itsOmidKarami/kraft/releases) and run
+`kraft-<version>.vsix` from the latest
+[GitHub release](https://github.com/itsOmidKarami/kraft/releases/latest) and run
 `code --install-extension kraft-<version>.vsix`.
 
 Every install path, connecting your agent, and updating with
@@ -162,7 +171,7 @@ pipeline.
 - [Triggers](https://itsomidkarami.github.io/kraft/reference/triggers): start a chain from a schedule or an HTTP call.
 - [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
 
-Kraft Lite (`plugins/kraft-lite/`) runs a chain inside a single agent session
+Kraft Lite, a separate plugin, runs a chain inside a single agent session
 with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraft/guides/kraft-lite).
 
 ## Project status

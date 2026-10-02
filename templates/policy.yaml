@@ -59,7 +59,7 @@ forge_cli_timeout_s: 120
 
 # Completed and abandoned items older than this many days move to the
 # archive. Delete the key to keep them on the board. The board's Done header
-# says "after 30 days" whatever this is set to.
+# shows this number, and says nothing about archiving without it.
 archive:
   after_days: 30
 
