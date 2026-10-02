@@ -20,12 +20,12 @@ export function gateDecision(events: KraftEvent[], gate: string) {
 
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
  *  on, open threads, what it decides on, where reject goes, its status. */
-export function GateBody({ item, gate, events }: { item: ItemDetail; gate: ChainNode; events: KraftEvent[] }) {
-  const files = useDiffFiles(item.id, item.updated_at);
+export function GateBody({ item, version, gate, events }: { item: ItemDetail; version: string; gate: ChainNode; events: KraftEvent[] }) {
+  const files = useDiffFiles(item.id, version);
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   useEffect(() => {
     request<ThreadRow[]>(`/work-items/${encodeURIComponent(item.id)}/threads`).then((r) => setThreads(r.status === 200 && Array.isArray(r.body) ? r.body : []));
-  }, [item.id, item.updated_at]);
+  }, [item.id, version]);
   const open = threads.filter((t) => t.state !== "resolved");
   const pending = item.pending_gate === gate.id;
   const decided = gateDecision(events, gate.id);

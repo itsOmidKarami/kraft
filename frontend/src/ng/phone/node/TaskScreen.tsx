@@ -17,7 +17,7 @@ type TaskTab = "overview" | "log" | "config" | "thread";
 const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
 
 /** A task of a node, or the node's escalation (W17 brief E): its attempts, and Overview / Log / Config, with Thread first on an escalation. */
-export function TaskScreen({ item, docs, place, node: nodeId, now, setPlace }: PlaceProps & { place: Place & { sel: { kind: "task"; node: string; step: string; task: string } } }) {
+export function TaskScreen({ item, version, docs, place, node: nodeId, now, setPlace }: PlaceProps & { place: Place & { sel: { kind: "task"; node: string; step: string; task: string } } }) {
   const navigate = useNavigate();
   const path = selPath(place.sel)!;
   const esc = place.sel.step === ESCALATION;
@@ -51,7 +51,7 @@ export function TaskScreen({ item, docs, place, node: nodeId, now, setPlace }: P
         {sessions.length > 1 && (
           <div className="ph-attempts" role="group" aria-label="Attempts">
             {sessions.map((s) => (
-              <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: esc ? s.thread : s.attempt })}>
+              <button key={s.id} type="button" className={`ph-attempt${s === at ? " ph-is-on" : ""}`} aria-pressed={s === at} onClick={() => setPlace({ attempt: s === sessions.at(-1) ? undefined : esc ? s.thread : s.attempt })}>
                 {esc ? `thread ${s.thread}` : `#${s.attempt}`} · {sessionLook(s, now).running ? "running" : lookWord(sessionLook(s, now))}
               </button>
             ))}
@@ -108,7 +108,7 @@ export function TaskScreen({ item, docs, place, node: nodeId, now, setPlace }: P
             ...(at?.head_sha ? ([["head", <span key="h" className="ph-mono">{at.head_sha.slice(0, 10)}</span>]] as [string, React.ReactNode][]) : []),
           ]} />
         )}
-        {tab === "thread" && <Thread item={item} node={nodeId} upTo={at === sessions.at(-1) ? undefined : at} />}
+        {tab === "thread" && <Thread item={item} version={version} node={nodeId} upTo={at === sessions.at(-1) ? undefined : at} />}
       </div>
     </>
   );
@@ -132,11 +132,11 @@ function TaskLog({ session }: { session?: WorkerSession }) {
 }
 
 /** The node's escalation thread: every message through the picked thread's last turn, by thread and turn. */
-function Thread({ item, node, upTo }: { item: PlaceProps["item"]; node: string; upTo?: WorkerSession }) {
+function Thread({ item, version, node, upTo }: { item: PlaceProps["item"]; version: string; node: string; upTo?: WorkerSession }) {
   const [events, setEvents] = useState<KraftEvent[] | null>(null);
   useEffect(() => {
     api.getEvents(item.id).then(setEvents, () => setEvents([]));
-  }, [item.id, item.updated_at]);
+  }, [item.id, version]);
   const all = (events ?? []).filter((e) => e.type === "escalation_message" && (e.node_id ?? node) === node).map((e) => ({ thread: Number(e.payload.thread ?? 1), turn: Number(e.payload.turn ?? 1), who: e.payload.auto ? "kraft" : "you", text: String(e.payload.message ?? ""), at: e.created_at, node, session: typeof e.payload.session_id === "string" ? e.payload.session_id : null }));
   const turns = all.slice(0, messagesThrough(all, upTo, item));
   if (events == null) return <p className="ph-note">Reading the thread…</p>;

@@ -12,7 +12,7 @@ describe("Thread", () => {
     const calls = stubFetch({ "GET /work-items/w1/events": [200, [msg(1, 1, 1, "Which eviction policy?", "implementation", true), msg(2, 1, 2, "Allow the change?", "verification"), { seq: 3, work_item_id: "w1", type: "node_started", payload: {}, node_id: "x", created_at: "t" }]] });
     const onNode = vi.fn();
     const reload = vi.fn();
-    render(<Thread item={detail()} node="verification" reload={reload} onNode={onNode} />);
+    render(<Thread item={detail()} version="1" node="verification" reload={reload} onNode={onNode} />);
     expect(await screen.findByText("Which eviction policy?")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Thread 1" })).toHaveTextContent("thread 1 · 2 turns");
     expect(screen.getAllByText("kraft")).toHaveLength(1);
@@ -27,7 +27,7 @@ describe("Thread", () => {
   it("sends a reply in the thread on ⌘↵, a plain ↵ starting a new line", async () => {
     const calls = stubFetch({ "GET /work-items/w1/events": [200, [msg(1, 1, 1, "Allow the change?", "verification")]] });
     const reload = vi.fn();
-    render(<Thread item={detail()} node="verification" reload={reload} onNode={() => {}} />);
+    render(<Thread item={detail()} version="1" node="verification" reload={reload} onNode={() => {}} />);
     await userEvent.type(await screen.findByLabelText("Reply to the escalation"), "Accept it.{Enter}Then go on.");
     expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");

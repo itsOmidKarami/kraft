@@ -77,18 +77,18 @@ describe("GateFooter", () => {
 describe("GateBody", () => {
   it("says who passed a gate, and what a pending one decides on", async () => {
     stubFetch();
-    const { unmount } = render(<GateBody item={detail()} gate={gate} events={[approved("agent")]} />);
+    const { unmount } = render(<GateBody item={detail()} version="1" gate={gate} events={[approved("agent")]} />);
     expect(screen.getByText("passed · auto")).toBeInTheDocument();
     expect(screen.queryByText("decides on")).toBeNull();
     unmount();
-    render(<GateBody item={pending} gate={gate} events={[]} />);
+    render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
     expect(screen.getByText("waiting for you")).toBeInTheDocument();
     expect(screen.getByText("p.md")).toBeInTheDocument();
   });
 
   it("lists the open threads, not the resolved ones", async () => {
     stubFetch({ "GET /work-items/w1/threads": [200, [{ id: "a", state: "open", comments: [{ body: "no size bound" }] }, { id: "b", state: "resolved", comments: [{ body: "fixed already" }] }]] });
-    render(<GateBody item={pending} gate={gate} events={[]} />);
+    render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
     expect(await screen.findByText("no size bound")).toBeInTheDocument();
     expect(screen.queryByText("fixed already")).toBeNull();
   });

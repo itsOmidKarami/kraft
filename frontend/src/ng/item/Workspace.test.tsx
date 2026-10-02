@@ -22,7 +22,7 @@ const mount = (path = "/work-items/w1", over: Parameters<typeof detail>[0] = {})
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         {["/work-items/:id", "/work-items/:id/nodes/:node"].map((p) => (
-          <Route key={p} path={p} element={<><Workspace item={detail(over)} reload={() => {}} /><Where /></>} />
+          <Route key={p} path={p} element={<><Workspace item={detail(over)} version="1" reload={() => {}} /><Where /></>} />
         ))}
       </Routes>
     </MemoryRouter>,

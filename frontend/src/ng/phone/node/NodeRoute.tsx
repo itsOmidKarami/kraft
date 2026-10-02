@@ -15,7 +15,7 @@ export function NodeRoute() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const loaded = useItem(id);
-  const version = loaded.state === "ready" ? loaded.item.updated_at : "";
+  const version = loaded.state === "ready" ? loaded.version : "";
   const events = useEvents(id, version);
   const docs = useDocuments(id, version);
   const [now, setNow] = useState(() => Date.now());
@@ -43,7 +43,7 @@ export function NodeRoute() {
       </>
     );
   if (!place.node) return <Navigate to={`/work-items/${encodeURIComponent(id)}`} replace />;
-  const props = { item: loaded.item, events, docs, place, node: place.node, now, reload: loaded.reload, setPlace };
+  const props = { item: loaded.item, version, events, docs, place, node: place.node, now, reload: loaded.reload, setPlace };
   if (place.sel.kind === "task") return <TaskScreen {...props} place={place as Place & { sel: { kind: "task"; node: string; step: string; task: string } }} />;
   return <NodeScreen {...props} />;
 }

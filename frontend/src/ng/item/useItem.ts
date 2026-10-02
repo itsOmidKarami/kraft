@@ -4,7 +4,11 @@ import { useStore } from "../../store";
 import type { WorkItem, WorkerSession } from "../../types";
 
 export type ItemDetail = WorkItem & { worker_sessions: WorkerSession[] };
-export type Loaded = { state: "loading" } | { state: "missing"; error: string } | { state: "ready"; item: ItemDetail };
+/** `version` moves on every read of the item. Key what the page reads beside the
+ *  item (its events, documents, thread, diff) on it, not on `updated_at`: the
+ *  server leaves `updated_at` alone when only a session or an event changes, so
+ *  a new attempt or a reply in the thread would never reach them. */
+export type Loaded = { state: "loading" } | { state: "missing"; error: string } | { state: "ready"; item: ItemDetail; version: string };
 
 /** How long a burst of events is gathered before the one refetch it causes. */
 export const COALESCE_MS = 120;
@@ -18,11 +22,12 @@ export function useItem(id: string): Loaded & { reload: () => void } {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const live = useRef(id);
   live.current = id;
+  const reads = useRef(0);
 
   const fetchNow = useCallback(() => {
     api
       .getWorkItem(id)
-      .then((item) => live.current === id && setLoaded({ state: "ready", item }))
+      .then((item) => live.current === id && setLoaded({ state: "ready", item, version: String(++reads.current) }))
       .catch((e: Error) => live.current === id && setLoaded((l) => (l.state === "ready" ? l : { state: "missing", error: e.message })));
   }, [id]);
 

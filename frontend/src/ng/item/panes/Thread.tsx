@@ -14,14 +14,14 @@ type Turn = { thread: number; turn: number; who: string; text: string; at: strin
  *  every message through the turn picked above the tabs, by thread and turn,
  *  with the node it was about; a reply goes on in the same thread or starts a
  *  new one (GAP §2 #14). */
-export function Thread({ item, node, upTo, reload, onNode }: { item: ItemDetail; node: string; upTo?: WorkerSession; reload: () => void; onNode: (node: string) => void }) {
+export function Thread({ item, version, node, upTo, reload, onNode }: { item: ItemDetail; version: string; node: string; upTo?: WorkerSession; reload: () => void; onNode: (node: string) => void }) {
   const [events, setEvents] = useState<KraftEvent[] | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api.getEvents(item.id).then(setEvents, () => setEvents([]));
-  }, [item.id, item.updated_at]);
+  }, [item.id, version]);
   const all: Turn[] = (events ?? []).filter((e) => e.type === "escalation_message").map((e) => ({
     thread: Number(e.payload.thread ?? 1),
     turn: Number(e.payload.turn ?? 1),

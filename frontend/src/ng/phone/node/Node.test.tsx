@@ -1,7 +1,8 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
 import { detail, stubFetch, type Call } from "../../item/testkit";
@@ -174,6 +175,9 @@ describe("the task screen (E)", () => {
     expect(where()).toContain("attempt=1");
     expect(await screen.findByText(/attempt 1 of 2/)).toBeInTheDocument();
     expect(screen.getByText("1m")).toBeInTheDocument();
+    // Back on the newest, the pin drops: the screen follows the next attempt.
+    await userEvent.click(screen.getByRole("button", { name: /#2/ }));
+    expect(where()).not.toContain("attempt=");
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {
@@ -210,6 +214,22 @@ describe("the task screen (E)", () => {
     expect(screen.getByText("check the lock order too")).toBeInTheDocument();
     expect(screen.queryByText("start over on the lock")).toBeNull();
     expect(screen.getByText("1 later message after this thread.")).toBeInTheDocument();
+  });
+
+  it("shows a new thread on the latest without a reload, though the item's updated_at stays put", async () => {
+    const esc = (id: string, thread: number, created_at: string) => session({ id, hook_point: "verification.escalation.escalation", status: "failed", thread, attempt: thread, created_at });
+    const msg = (seq: number, thread: number, message: string, session_id: string) => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread, turn: 1, message, session_id }, node_id: "verification", created_at: "2026-09-13T09:00:00Z" });
+    const one = item("failed", stop("failed"), { worker_sessions: [esc("e1", 1, "2026-09-13T09:00:00Z")] });
+    useStore.setState({ eventsByItem: {} });
+    mount(one, "/work-items/w1/nodes/verification?sel=verification.escalation.escalation", { "GET /work-items/w1/events": [200, [msg(1, 1, "decide if the race is real", "e1")]] });
+    expect(await screen.findByText("decide if the race is real")).toBeInTheDocument();
+    stubFetch({
+      "GET /work-items/w1": [200, { ...one, worker_sessions: [...one.worker_sessions, esc("e2", 2, "2026-09-13T09:05:00Z")] }],
+      "GET /work-items/w1/events": [200, [msg(1, 1, "decide if the race is real", "e1"), msg(2, 2, "start over on the lock", "e2")]],
+    });
+    act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
+    expect(await screen.findByText("start over on the lock")).toBeInTheDocument();
+    expect(screen.getByText(/attempt 2 of 2/)).toBeInTheDocument();
   });
 
   it("says what a task that has not started waits for", async () => {
