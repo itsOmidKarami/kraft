@@ -23,6 +23,7 @@ export function parentOf(href: string): string | null {
   }
   const seg = pathname.split("/").filter(Boolean);
   if (!seg.length || (seg.length === 1 && ["search", "analytics", "more"].includes(seg[0]))) return null;
+  if (pathname === "/archived") return "/more";
   if (seg[0] === "work-items") {
     if (seg[1] === "new" || seg.length === 2) return "/";
     if (seg[2] === "review") return `/work-items/${seg[1]}`;
@@ -69,7 +70,7 @@ export function tabOf(href: string): Tab | null {
   if (pathname === "/" || pathname === "") return "board";
   if (pathname === "/search") return "search";
   if (pathname === "/analytics") return "analytics";
-  if (pathname === "/more" || AREA.test(pathname)) return "more";
+  if (pathname === "/more" || pathname === "/archived" || AREA.test(pathname)) return "more";
   return null;
 }
 

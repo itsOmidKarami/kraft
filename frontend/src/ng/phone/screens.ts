@@ -56,4 +56,5 @@ export const SCREENS: PhoneScreen[] = [
   { id: "access", route: "/settings/access", taps: more("Access"), heading: "Access" },
   { id: "appearance", route: "/settings/appearance", taps: more("Appearance"), heading: "Appearance" },
   { id: "about", route: "/settings/about", taps: more("About"), heading: "About" },
+  { id: "archived", route: "/archived", taps: more("Archived"), heading: "Archived" },
 ];
