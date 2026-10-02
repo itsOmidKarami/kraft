@@ -30,8 +30,10 @@ async def board(
     `with_cursor=True` flag on `list_work_items` that returns two different
     types: two fields, one caller that needs both.
     """
-    path = "/work-items?include_abandoned=true" if include_abandoned else "/work-items"
-    payload = await transport._get(path)
+    # As a param, not in the path: `_get` always hands httpx a `params` dict,
+    # and httpx replaces a query written into the URL with it.
+    wanted = include_abandoned or status == "abandoned"
+    payload = await transport._get("/work-items", include_abandoned="true" if wanted else None)
     return trim_work_items(payload["items"], status), payload["cursor"]
 
 
@@ -46,9 +48,21 @@ async def list_work_items(
 
     Abandoned items are off the board by default. Without the flag there is no
     way to see one again from the CLI, which makes `kraft item abandon` look like a
-    delete.
+    delete. Asking for `status="abandoned"` turns it on: that filter could
+    match nothing otherwise.
     """
     return (await board(status, include_abandoned=include_abandoned))[0]
+
+
+async def work_item_ids() -> set[str]:
+    """Every work item id the server has a row for: open, ended (cancelled
+    and abandoned items included) and archived. The list route answers
+    archived and unarchived items separately, so this asks for both."""
+    ids: set[str] = set()
+    for archived in (None, "true"):
+        payload = await transport._get("/work-items", include_abandoned="true", archived=archived)
+        ids |= {item["id"] for item in payload["items"]}
+    return ids
 
 
 def trim_work_items(items: list[dict], status: str | None = None) -> list[dict]:

@@ -204,12 +204,109 @@ def _forget_sandbox(run_dirs, worktree: Path, wid: str) -> None:
         backend.release(run_dirs, worktree, wid)
 
 
+def _unpushed_commits(repo: Path, branch: str) -> int | None:
+    """How many of `branch`'s commits only `branch` holds in `repo`: on no
+    other local branch (the base it merged into, say), no remote-tracking
+    branch, no tag, and not in what Kraft last pushed of any branch
+    (`forge.git.push`'s record, which still has a squash-merged branch the
+    forge has since deleted). 0 for a branch `repo` does not have; None when
+    git cannot say, which the caller treats as unpushed."""
+    ref = f"refs/heads/{branch}"
+    if not git_read(repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True):
+        return 0
+    count = git_read(
+        repo,
+        "rev-list",
+        "--count",
+        ref,
+        "--not",
+        f"--exclude={branch}",
+        "--branches",
+        "--remotes",
+        "--tags",
+        f"--glob={PUSHED_REFS}/*",
+    )
+    return int(count) if count and count.isdigit() else None
+
+
+def _branches_to_keep(repo: Path, branch: str, members: list[Path]) -> dict[str, int]:
+    """Archive's guard: each repository (`repo`, then each of `members`) whose
+    copy of `branch` holds commits nothing else does, with how many. Archive
+    leaves the branch there instead of deleting it with the worktree: an item
+    cancelled before it pushed has its work on that branch alone, and the
+    auto-archive poller reaches it with nobody watching. A count git could
+    not read keeps the branch too, counted as one."""
+    kept = {}
+    for where in [repo, *(m for m in members if m.is_dir())]:
+        count = _unpushed_commits(where, branch)
+        if count != 0:
+            kept[str(where)] = count or 1
+    return kept
+
+
+def _rescue_detached_head(repo: Path, worktree: Path, wid: str) -> dict:
+    """Archive's guard for the commits no branch has: the worktree's HEAD,
+    when it is detached and holds commits on no branch, remote-tracking
+    branch or tag and not in what Kraft pushed. Those are named
+    `kraft/rescued/<wid>` in `repo` before the worktree goes, and returned
+    as `rescued_branch` and `rescued_commits`; nothing to rescue is {}.
+
+    A rescue git refuses (a sandboxed item's repository may not have the
+    commits at all) returns `worktree_kept` with the reason instead: the
+    worktree is then the only copy, and archive must leave it."""
+    if not worktree.is_dir():
+        return {}
+    if git_read(worktree, "symbolic-ref", "-q", "HEAD", expected_failure=True):
+        return {}
+    head = git_read(worktree, "rev-parse", "--verify", "--quiet", "HEAD", expected_failure=True)
+    if not head:
+        return {}
+    count = git_read(
+        repo,
+        "rev-list",
+        "--count",
+        head,
+        "--not",
+        "--branches",
+        "--remotes",
+        "--tags",
+        f"--glob={PUSHED_REFS}/*",
+    )
+    if count == "0":
+        return {}
+    name = f"kraft/rescued/{wid}"
+    done = subprocess.run(
+        ["git", "update-ref", f"refs/heads/{name}", head],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        reason = done.stderr.strip() or f"git update-ref exited {done.returncode}"
+        logger.warning("archive %s: could not keep detached HEAD %s: %s", wid, head, reason)
+        return {"worktree_kept": f"rescue failed: {reason}"}
+    return {
+        "rescued_branch": name,
+        "rescued_commits": int(count) if count and count.isdigit() else 1,
+    }
+
+
 async def _remove_worktree(
-    repo: Path, worktree: Path, branch: str, wid: str, members: list[Path] | None = None
+    repo: Path,
+    worktree: Path,
+    branch: str,
+    wid: str,
+    members: list[Path] | None = None,
+    *,
+    keep_branch_in: frozenset[str] = frozenset(),
 ) -> bool:
     """Reclaim the worktree and its branch, and the same in each of `members`
     -- the connected repositories its workspace members were checked out
     from (`builtins.member_repositories`, Kraft-ju36l).
+
+    `keep_branch_in` names repositories (by path, `_branches_to_keep`'s keys)
+    whose branch, and Kraft's record of pushing it, stay: only their
+    worktree goes.
 
     Takes the branch rather than the work item id: the name is stored on the
     row now, and rebuilding it here would be a second derivation that can
@@ -223,13 +320,17 @@ async def _remove_worktree(
     repository is pruned the same way. Only the root's outcome is returned.
     """
     ok = True
-    for args in (
+    steps = [
         ["git", "worktree", "remove", "--force", str(worktree)],
         ["git", "worktree", "prune"],
-        ["git", "branch", "-D", branch],
-        # What Kraft last pushed of it (`forge.git.push`); absent is fine.
-        ["git", "update-ref", "-d", f"{PUSHED_REFS}/{branch}"],
-    ):
+    ]
+    if str(repo) not in keep_branch_in:
+        steps += [
+            ["git", "branch", "-D", branch],
+            # What Kraft last pushed of it (`forge.git.push`); absent is fine.
+            ["git", "update-ref", "-d", f"{PUSHED_REFS}/{branch}"],
+        ]
+    for args in steps:
         done = await asyncio.to_thread(
             subprocess.run, args, cwd=repo, capture_output=True, text=True
         )
@@ -243,7 +344,7 @@ async def _remove_worktree(
             logger.warning("abandon %s: member repository %s is gone", branch, member)
             continue
         try:
-            await _remove_member_branch(member, branch)
+            await _remove_member_branch(member, branch, keep=str(member) in keep_branch_in)
         except OSError as exc:
             logger.warning("abandon %s in %s: %s", branch, member, exc)
     # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
@@ -251,12 +352,14 @@ async def _remove_worktree(
     return ok
 
 
-async def _remove_member_branch(member: Path, branch: str) -> None:
+async def _remove_member_branch(member: Path, branch: str, *, keep: bool = False) -> None:
     """Prune `member`'s stale worktree entry and delete `branch` there, and
-    Kraft's record of pushing it."""
+    Kraft's record of pushing it -- unless `keep`, when only the prune runs."""
     await asyncio.to_thread(
         subprocess.run, ["git", "worktree", "prune"], cwd=member, capture_output=True
     )
+    if keep:
+        return
     ref = f"refs/heads/{branch}"
     if git_read(member, "rev-parse", "--verify", "--quiet", ref, expected_failure=True):
         done = await asyncio.to_thread(
@@ -285,7 +388,8 @@ def _connected_members(st, row) -> list[Path]:
 # Kraft-x85; reaping what else ran in the worktree: Kraft-ugm6.
 @api_router.post("/work-items/{wid}/abandon")
 async def abandon_work_item(wid: str, request: Request):
-    """Terminal state plus worktree and branch reclaim.
+    """Terminal state plus worktree and branch reclaim, a cancelled item's
+    included.
 
     Refuses while the item is active rather than killing its sessions itself:
     `pause` already owns stopping an attempt, and doing both here would leave
@@ -298,9 +402,12 @@ async def abandon_work_item(wid: str, request: Request):
     row = deps._work_item_row(st, wid)
     if row["status"] == "active":
         raise HTTPException(409, "work item is active; pause it before abandoning")
-    if row["status"] == "abandoned":
-        return {"id": wid, "status": "abandoned", "worktree_removed": False}
-    await st.db.write(lambda c: store.abandon_work_item(c, wid))
+    # An already-abandoned item is a cancelled one (cancel stores `abandoned`
+    # and keeps everything) or a second call: either way it is reclaimed
+    # again, without a second `work_item_abandoned`. A second call finds
+    # nothing left and answers `worktree_removed: false`.
+    if row["status"] != "abandoned":
+        await st.db.write(lambda c: store.abandon_work_item(c, wid))
     worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
@@ -316,43 +423,62 @@ async def abandon_work_item(wid: str, request: Request):
     return {"id": wid, "status": "abandoned", "worktree_removed": removed}
 
 
-async def _archive_one(app, row, by: str) -> bool:
+async def _archive_one(app, row, by: str) -> dict:
     """Shared by the archive route and `archive.poller`: reclaim the
-    worktree the same way `abandon_work_item` does (UI v2 · 03: "Archive
-    reclaims the worktree the same way abandon tears it down today"), then
-    flip the row. Returns whether the worktree was actually removed (a
-    completed item usually still has one; an already-abandoned item does
-    not, and `_remove_worktree`'s git calls fail best-effort in that case,
-    same as a second `abandon` call today).
+    worktree the way `abandon_work_item` does, then flip the row. Returns
+    `worktree_removed` (a completed item usually still has one; an
+    already-abandoned item does not, and `_remove_worktree`'s git calls fail
+    best-effort in that case, same as a second `abandon` call today), plus
+    `kept_branch` and `unpushed_commits` when the branch stayed.
+
+    Unlike abandon, archive never deletes commits: a branch with commits
+    nothing else holds stays (`_branches_to_keep`), a detached HEAD's get a
+    branch of their own (`_rescue_detached_head`), and the attachment copies
+    stay too, which "Duplicate as new item" re-snapshots from. Uncommitted
+    changes in the worktree go with it.
     """
     st = app.state
     wid = row["id"]
-    await st.db.write(lambda c: store.archive_work_item(c, wid, by))
+    repo, branch = Path(row["repo"]), store.branch_for(row)
+    members = _connected_members(st, row)
     worktree = st.run_dirs.worktrees / wid
+    kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
+    extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
+    extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
+    await st.db.write(lambda c: store.archive_work_item(c, wid, by, **extra))
+    for where, count in kept.items():
+        logger.info(
+            "archive %s kept branch %s in %s: %d unpushed commit(s)", wid, branch, where, count
+        )
+    if "worktree_kept" in extra:
+        # The rescue failed, so the worktree (and a sandbox's ref store beside
+        # it) holds the only copy of those commits: archived, but left whole.
+        return {"worktree_removed": False, **extra}
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
     await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
     removed = await _remove_worktree(
-        Path(row["repo"]), worktree, store.branch_for(row), wid, _connected_members(st, row)
+        repo, worktree, branch, wid, members, keep_branch_in=frozenset(kept)
     )
-    shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
-    return removed
+    return {"worktree_removed": removed, **extra}
 
 
 # UI v2 · 03.
 @api_router.post("/work-items/{wid}/archive")
 async def archive_work_item(wid: str, request: Request):
     """Archive a completed/abandoned item: "Ended as" keeps
-    reading completed/abandoned -- only `archived_at`/`archived_by` change."""
+    reading completed/abandoned -- only `archived_at`/`archived_by` change.
+    The answer carries `kept_branch` and `unpushed_commits` when the branch
+    stayed because it holds commits nothing else does."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
     if row["status"] not in ("completed", "abandoned"):
         raise HTTPException(409, "only a completed or abandoned item can be archived")
     if row["archived_at"]:
         return {"id": wid, "archived_by": row["archived_by"], "worktree_removed": False}
-    removed = await _archive_one(request.app, row, "you")
-    return {"id": wid, "archived_by": "you", "worktree_removed": removed}
+    result = await _archive_one(request.app, row, "you")
+    return {"id": wid, "archived_by": "you", **result}
 
 
 # UI v2 · 03.

@@ -421,11 +421,14 @@ def test_version_flag_prints_a_version(capsys):
 
 
 def test_abandon_refuses_without_yes(monkeypatch):
-    """The worktree goes with the item, so the destructive verb asks first."""
+    """The worktree and branch go with the item, so the destructive verb asks
+    first, and says unpushed commits go too: archive keeps those, abandon
+    does not."""
     ns = cli.build_parser().parse_args(["item", "abandon", "w1"])
     assert ns.yes is False
-    with pytest.raises(ValueError, match="--yes"):
+    with pytest.raises(ValueError, match="--yes") as refused:
         ns.func(ns)
+    assert "commits you never pushed are lost" in str(refused.value)
 
 
 def _run_flooding(tmp_path, body: str) -> subprocess.Popen:
