@@ -7,7 +7,6 @@ import { rowAction } from "../../board/rowText";
 export type CardButton =
   | { kind: "approve"; label: string; gate: string; primary: true }
   | { kind: "reject"; label: string; gate: string }
-  | { kind: "raise"; label: string }
   | { kind: "answer"; label: string }
   | { kind: "open"; label: string }
   | { kind: "resume"; label: string };
