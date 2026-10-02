@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "./testkit";
@@ -39,6 +39,30 @@ describe("Brief", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings. Bounded." } }]);
+  });
+
+  it("saves on ⌘↵, a plain ↵ starting a new line", async () => {
+    const calls = stubFetch();
+    const onSaved = vi.fn();
+    render(<Brief id="w1" brief="Cache embeddings." onSaved={onSaved} />);
+    await userEvent.click(screen.getByRole("button", { name: "edit" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Brief" }), "{Enter}Bounded.");
+    expect(writes(calls)).toEqual([]);
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings.\nBounded." } }]);
+  });
+
+  it("saves once on a quick second ⌘↵ while the first save is in flight", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => { calls.push(init?.method ?? "GET"); return new Promise(() => {}); }));
+    render(<Brief id="w1" brief="Cache embeddings." onSaved={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "edit" }));
+    const box = screen.getByRole("textbox", { name: "Brief" });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    expect(calls.filter((m) => m === "PATCH")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("Esc leaves the brief as it was, without a write", async () => {

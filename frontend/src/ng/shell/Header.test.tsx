@@ -27,13 +27,15 @@ describe("Header", () => {
     expect(within(nav).getByText("Settings")).not.toHaveAttribute("aria-current");
   });
 
-  it("links Board back to the board from a work item and carries full text in titles", () => {
+  it("links Board back to the board, and the repo to the board filtered to it, from a work item, and carries full text in titles", () => {
     const it = item({ id: "w1", repo: "/r/very-long-repository-name", title: "A very long title", bead_id: "kraft-cb59" });
     useStore.setState({ workItems: { w1: it } });
     at("/work-items/w1");
     const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(nav).getByRole("link", { name: "Board" })).toHaveAttribute("href", "/");
-    expect(within(nav).getByText("very-long-repository-name")).toHaveAttribute("title", "/r/very-long-repository-name");
+    const repo = within(nav).getByRole("link", { name: "very-long-repository-name" });
+    expect(repo).toHaveAttribute("href", "/?repo=%2Fr%2Fvery-long-repository-name");
+    expect(repo.closest("li")).toHaveAttribute("title", "/r/very-long-repository-name");
     expect(within(nav).getByText("kraft-cb59")).toHaveAttribute("aria-current", "page");
   });
 
