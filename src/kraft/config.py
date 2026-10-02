@@ -979,14 +979,48 @@ _HOST_NAME = re.compile(
 )
 
 
+#: A label the WHATWG URL parser reads as a number: decimal, or `0x` hex.
+_NUMBER_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
+
+
+def _numeric_ipv4(name: str) -> str | None:
+    """`name` as the dotted quad a browser reads it as, when its last label
+    is a number: `127.1`, `0x7f.1` and `2130706433` are all 127.0.0.1 to the
+    WHATWG URL parser, and that is the Host it sends. None for any other
+    name; ValueError for one in that form that is no IPv4 address, which a
+    browser refuses to open."""
+    labels = name.split(".")
+    if not _NUMBER_LABEL.fullmatch(labels[-1]):
+        return None
+    if len(labels) > 4:
+        raise ValueError(name)
+    numbers = []
+    for label in labels:
+        if label.startswith("0x"):
+            numbers.append(int(label[2:] or "0", 16))
+        elif len(label) > 1 and label.startswith("0"):
+            numbers.append(int(label, 8))  # raises for `08`, as the parser fails it
+        elif label.isdigit() and len(label) <= 10:
+            numbers.append(int(label))
+        else:
+            raise ValueError(name)
+    *head, last = numbers
+    if any(n > 255 for n in head) or last >= 256 ** (4 - len(head)):
+        raise ValueError(name)
+    value = last + sum(n << (8 * (3 - i)) for i, n in enumerate(head))
+    return str(ipaddress.IPv4Address(value))
+
+
 def normalize_host(entry: str) -> str | None:
     """An `allowed_hosts` entry as someone typed it, in `host_name`'s form.
 
     A `Host` header carries the port, so `kraft.local:8765` is a natural thing
     to type, and so are `Kraft.Local` and `http://kraft.local/`. Kept as typed,
     none of them ever matched, and the browser got a 403 on its own board. The
-    scheme, path and port go; None for what is still not one host name or IP:
-    a wildcard, userinfo, a space, a port that is not a number."""
+    scheme, path and port go, and an IPv4 address written as one number or
+    fewer than four (`127.1`) becomes the dotted quad a browser sends. None
+    for what is still not one host name or IP: a wildcard, userinfo, a
+    space, a port that is not a number, a number that is no IPv4 address."""
     text = entry.strip()
     if "://" in text:
         text = text.split("://", 1)[1]
@@ -1008,6 +1042,11 @@ def normalize_host(entry: str) -> str | None:
         try:
             name = idna.encode(name, uts46=True).decode("ascii")
         except idna.IDNAError:
+            return None
+    if name:
+        try:
+            name = _numeric_ipv4(name) or name
+        except ValueError:
             return None
     return name if name and _HOST_NAME.fullmatch(name) else None
 
