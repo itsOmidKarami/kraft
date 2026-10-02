@@ -17,12 +17,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import shutil
 import socket
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -49,6 +51,8 @@ from kraft.worker.sandbox import (
     _pin,
     linked_gitdirs,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from kraft.worker.refstore import RefStore
@@ -162,6 +166,12 @@ class Runtime:
     #: The daemon (docker) or the CLI (podman) runs as the operator, so
     #: container uids map into the operator's subordinate range.
     rootless: bool = False
+    #: False when the runtime did not say whether it is rootless or labels
+    #: its containers (its `info` timed out or did not parse): `rootless` and
+    #: `selinux` are then guesses, and a container run as a guessed user
+    #: cannot write the worktree, so `refusal` refuses every launch and
+    #: `runtime()` asks again instead of keeping it.
+    identity_known: bool = True
     #: None unless SELinux enforces; then `sandbox.yaml`'s `relabel` or
     #: `disable`, or `refuse` when it says neither.
     selinux: str | None = None
@@ -266,6 +276,14 @@ class Runtime:
         return (self.engine or self.cli) == "podman"
 
     def refusal(self) -> str | None:
+        if not self.identity_known:
+            return (
+                f"could not tell whether {self.cli} runs rootless: `{self.cli} info` did not "
+                f"answer within {REASK_TIMEOUT_S:g} s (the runtime is missing, its daemon is "
+                "down, or it is busy), and a container run as the wrong user cannot write "
+                f"the worktree. See how long it takes with `time {self.cli} info`, or run "
+                "`kraft admin doctor`"
+            )
         if self.selinux != "refuse":
             return None
         return (
@@ -298,32 +316,56 @@ def _selinux_enforcing() -> bool:
         return False
 
 
-def _run(*argv: str) -> str | None:
+def _run(*argv: str, timeout: float = 10) -> str | None:
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout if done.returncode == 0 else None
 
 
-def _ask(cli: str) -> tuple[str, bool, bool]:
+def _ask(
+    cli: str, timeout: float = 10, engine: str | None = None
+) -> tuple[str, bool | None, bool | None]:
     """`(engine, rootless, labels)`, asked of the runtime itself: what it
     really is, whether it runs as the operator, and whether it applies
     SELinux labels to containers (docker does only when its daemon was
-    started with SELinux support). Anything inconclusive (no daemon, an old
-    CLI) reads as a rootful, unlabelled docker, which is what every launch
-    assumed before."""
-    engine = "podman" if "podman" in (_run(cli, "--version") or "").lower() else "docker"
+    started with SELinux support). A `--version` that does not say podman
+    reads as docker. An `info` that gives no answer (no daemon, or one
+    slower than `_run`'s timeout: a rootless podman's first `info` on a
+    busy host took over ten seconds) is `None` for both, never "rootful":
+    that guess ran a rootless podman's container without `keep-id`, as a
+    user who could not write the worktree. Docker's answer must be the JSON
+    list of options it always prints, podman's two booleans. An `engine`
+    already known is not asked again, so `timeout` bounds the whole ask."""
+    if engine is None:
+        version = _run(cli, "--version", timeout=timeout) or ""
+        engine = "podman" if "podman" in version.lower() else "docker"
     if engine == "docker":
-        options = _run(cli, "info", "--format", "{{json .SecurityOptions}}") or ""
-        return engine, "name=rootless" in options, "name=selinux" in options
+        try:
+            options = json.loads(
+                _run(cli, "info", "--format", "{{json .SecurityOptions}}", timeout=timeout) or ""
+            )
+        except ValueError:
+            options = None
+        if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
+            return engine, None, None
+        # Each is `name=<option>`, then its settings: `name=seccomp,profile=builtin`.
+        names = {o.split(",")[0] for o in options}
+        return engine, "name=rootless" in names, "name=selinux" in names
     security = (
         _run(
-            cli, "info", "--format", "{{.Host.Security.Rootless}} {{.Host.Security.SELinuxEnabled}}"
+            cli,
+            "info",
+            "--format",
+            "{{.Host.Security.Rootless}} {{.Host.Security.SELinuxEnabled}}",
+            timeout=timeout,
         )
         or ""
     ).split()
-    return engine, security[:1] == ["true"], security[1:2] == ["true"]
+    if len(security) != 2 or not set(security) <= {"true", "false"}:
+        return engine, None, None
+    return engine, security[0] == "true", security[1] == "true"
 
 
 def _ask_limits(cli: str, engine: str) -> frozenset[str] | None:
@@ -356,27 +398,40 @@ def _ask_limits(cli: str, engine: str) -> frozenset[str] | None:
     return frozenset(n for c in controllers if c in enforces for n in enforces[c])
 
 
-def detect_runtime() -> Runtime:
-    """Read `sandbox.yaml` and ask the runtime. Raises `ConfigError` for a
-    `sandbox.yaml` that does not parse."""
+def _sandbox_yaml():
+    """This machine's `sandbox.yaml`. Raises `ConfigError` for one that does
+    not parse."""
     from kraft import config
 
     templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    host = config.SandboxHost.load(templates / config.SandboxHost.FILE)
+    return config.SandboxHost.load(templates / config.SandboxHost.FILE)
+
+
+def _selinux(configured: str, labels: bool | None) -> str | None:
+    """`Runtime.selinux` for `sandbox.yaml`'s `selinux` and a runtime that
+    does, or does not, label its containers. Both: a permissive host denies
+    nothing, and a runtime that applies no labels leaves its containers
+    unconfined, so its mounts work as they are."""
+    if labels and _selinux_enforcing():
+        return "refuse" if configured == "auto" else configured
+    return None
+
+
+def detect_runtime() -> Runtime:
+    """Read `sandbox.yaml` and ask the runtime. Raises `ConfigError` for a
+    `sandbox.yaml` that does not parse."""
+    host = _sandbox_yaml()
     cli = host.cli or (
         "docker" if shutil.which("docker") else "podman" if shutil.which("podman") else "docker"
     )
     engine, rootless, labels = _ask(cli)
-    selinux = None
-    # Both: a permissive host denies nothing, and a runtime that applies no
-    # labels leaves its containers unconfined, so its mounts work as they are.
-    if labels and _selinux_enforcing():
-        selinux = "refuse" if host.selinux == "auto" else host.selinux
+    selinux = _selinux(host.selinux, labels)
     limits = _ask_limits(cli, engine)
     return Runtime(
         cli=cli,
         engine=engine,
-        rootless=rootless,
+        rootless=bool(rootless),
+        identity_known=rootless is not None,
         selinux=selinux,
         limits=limits if limits is not None else frozenset(),
         limits_known=limits is not None,
@@ -386,27 +441,178 @@ def detect_runtime() -> Runtime:
 _RUNTIME: Runtime | None = None
 #: Until when (`time.monotonic`) an inconclusive `_RUNTIME` is kept.
 _UNSURE_UNTIL = 0.0
-#: ponytail: fixed; a hung daemon costs one ~30s `info` per this many seconds
-#: instead of one per `docker_call`. Make it a sandbox.yaml knob if it bites.
+#: Set while a detection runs (`runtime`), and cleared when it publishes:
+#: one at a time, and a caller with nothing cached waits for it.
+_DETECTING: threading.Event | None = None
+#: The one ask again a launch makes about the `_RUNTIME` that did not say
+#: whether it is rootless (`_launch_runtime`): None until a launch starts
+#: it, set once it is answered or not. Each detection starts it afresh.
+_REASK: threading.Event | None = None
+#: Guards the globals above, and is never held across a subprocess: a
+#: cached read is lock-free, and the event loop calls `runtime()` directly
+#: (`docker_argv`, `oom_killed`, `launch_failed`) while a slow runtime is
+#: being asked in a `to_thread` worker.
+_LOCK = threading.Lock()
+#: How long the one launch that asks again gives `info`: the slow first
+#: answer that timed out at `_run`'s ten seconds came back in under five.
+REASK_TIMEOUT_S = 30.0
+#: ponytail: fixed; a hung daemon costs one ~30s detection per this many
+#: seconds, and one launch's `REASK_TIMEOUT_S` ask, instead of one per
+#: `docker_call`. Make it a sandbox.yaml knob if it bites.
 UNSURE_TTL = 30.0
+
+
+def _due(host: Runtime | None) -> bool:
+    """Whether `host` is to be detected again: nothing cached yet, or an
+    answer that did not say everything once `UNSURE_TTL` is up."""
+    return host is None or (
+        not (host.identity_known and host.limits_known) and time.monotonic() >= _UNSURE_UNTIL
+    )
 
 
 def runtime(*, refresh: bool = False) -> Runtime:
     """This machine's `Runtime`, detected on first use and kept for the
     process: `docker info` is a round trip every launch would otherwise pay.
     Doctor refreshes it, so a changed `sandbox.yaml` is picked up there. A
-    runtime that did not say what limits it enforces is kept only
-    `UNSURE_TTL` seconds: a launch after that asks again rather than refusing
-    every limit until a restart, and a hung daemon is not asked on every call."""
-    global _RUNTIME, _UNSURE_UNTIL
-    if (
-        refresh
-        or _RUNTIME is None
-        or (not _RUNTIME.limits_known and time.monotonic() >= _UNSURE_UNTIL)
-    ):
-        _RUNTIME = detect_runtime()
-        _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
-    return _RUNTIME
+    runtime that did not say whether it is rootless, or what limits it
+    enforces, is kept only `UNSURE_TTL` seconds: a call after that asks
+    again rather than refusing until a restart, and a hung daemon is not
+    asked on every call (`_launch_runtime` asks once more, once).
+
+    A cached answer is returned without waiting, even while another thread
+    detects: only a caller with nothing cached, or a refresh, waits for a
+    detection already running instead of starting its own. A detection that
+    gets no answer about rootless never replaces one that did for the same
+    CLI: a launch between its probe and its `docker run` keeps the identity
+    it was probed with."""
+    global _RUNTIME, _UNSURE_UNTIL, _DETECTING, _REASK
+    while True:
+        host = _RUNTIME
+        if not refresh and not _due(host):
+            return host
+        with _LOCK:
+            host = _RUNTIME
+            if not refresh and not _due(host):
+                return host  # a detection published since the read above
+            running = _DETECTING
+            if running is None:
+                running = _DETECTING = threading.Event()
+                mine = True
+            else:
+                mine = False
+        if not mine:
+            if not refresh and _RUNTIME is not None:
+                return _RUNTIME
+            running.wait()
+            if _RUNTIME is not None:
+                return _RUNTIME
+            refresh = False  # that detection raised: try one of our own
+            continue
+        try:
+            fresh = detect_runtime()
+        except BaseException:
+            with _LOCK:
+                # A cached runtime it failed to replace waits `UNSURE_TTL`
+                # too, or every `cached_runtime()` would detect again.
+                _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+                _DETECTING = None
+            running.set()
+            raise
+        with _LOCK:
+            known = _RUNTIME
+            if (
+                not fresh.identity_known
+                and known is not None
+                and known.identity_known
+                and known.cli == fresh.cli
+            ):
+                fresh = replace(
+                    fresh,
+                    engine=known.engine,
+                    rootless=known.rootless,
+                    selinux=known.selinux,
+                    identity_known=True,
+                )
+            # The deadline first: a lock-free reader that sees the new
+            # runtime sees its deadline too, and never starts another
+            # detection off an answer that has only just arrived.
+            _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+            _RUNTIME = fresh
+            _REASK = None
+            _DETECTING = None
+        running.set()
+        return fresh
+
+
+def cached_runtime() -> Runtime:
+    """`runtime()` for a caller on the event loop (`docker_argv`, the relay
+    argv, `launch_failed`): the cached answer, at once. One that is due to
+    be asked again is asked in a thread of its own, for the next caller;
+    only with nothing cached at all does this caller ask, which a launch's
+    probe, run in a worker thread, has always done first."""
+    host = _RUNTIME
+    if host is None:
+        return runtime()
+    if _due(host) and _DETECTING is None:
+        threading.Thread(target=_detect_aside, name="kraft-runtime", daemon=True).start()
+    return host
+
+
+def _detect_aside() -> None:
+    try:
+        runtime()
+    except Exception:  # noqa: BLE001 -- the next caller that waits on it says why
+        logger.debug("detecting the container runtime failed", exc_info=True)
+
+
+def _launch_runtime() -> Runtime:
+    """`runtime()` for a launch about to start, called from a `to_thread`
+    worker. One that did not say whether it is rootless is asked again by
+    the first launch that meets it, at once and with `REASK_TIMEOUT_S`,
+    since one slow answer is no reason to stop a task; a launch meanwhile
+    waits for that answer. Still none, and `Runtime.refusal` stops the
+    launch, and every launch until `UNSURE_TTL` is up again stops at once."""
+    global _RUNTIME, _UNSURE_UNTIL, _REASK
+    host = runtime()
+    if host.identity_known:
+        return host
+    with _LOCK:
+        if _RUNTIME is not host:
+            return _RUNTIME  # a detection published meanwhile
+        asking = _REASK
+        if asking is None:
+            asking = _REASK = threading.Event()
+            mine = True
+        else:
+            mine = False
+    if not mine:
+        asking.wait()
+        return _RUNTIME
+    try:
+        logger.warning(
+            "`%s info` gave no answer; asking once more, waiting up to %g s",
+            host.cli,
+            REASK_TIMEOUT_S,
+        )
+        engine, rootless, labels = _ask(host.cli, REASK_TIMEOUT_S, host.engine)
+        selinux = _selinux(_sandbox_yaml().selinux, labels) if rootless is not None else None
+        with _LOCK:
+            if _RUNTIME is host:
+                if rootless is None:
+                    # The TTL counts from this answer: a hung daemon is not
+                    # asked again on the next launch.
+                    _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+                else:
+                    _RUNTIME = replace(
+                        host,
+                        engine=engine,
+                        rootless=rootless,
+                        selinux=selinux,
+                        identity_known=True,
+                    )
+            return _RUNTIME
+    finally:
+        asking.set()
 
 
 def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
@@ -468,8 +674,10 @@ def socket_channel(relay_image: str) -> bool | None:
     host = runtime()
     if host.socket_channel is None:
         answer = _probe_socket_channel(host, relay_image)
-        if answer is not None and _RUNTIME is host:
-            _RUNTIME = replace(host, socket_channel=answer)
+        if answer is not None:
+            with _LOCK:
+                if _RUNTIME is host:
+                    _RUNTIME = replace(host, socket_channel=answer)
         return answer
     return host.socket_channel
 
@@ -518,7 +726,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
     locked down as a worker, read-only, small, labelled as a relay, and
     named (no `--rm`: `close_session` removes it; `sweep_orphans` whatever a
     crash left)."""
-    host = runtime()
+    host = cached_runtime()
     if problem := host.refusal():
         raise SandboxRefused(problem)
     limits = {n: v for n, v in _RELAY_LIMITS.items() if n in host.limits}
@@ -574,7 +782,7 @@ def relay_b_argv(session_id: str, relay_image: str, port: int, cert_dir: Path) -
     verifying the daemon's against the Kraft CA. It mounts that volume and
     `cert_dir` (the session's certificate, key and the CA's certificate,
     read-only), nothing else; the worker shares neither."""
-    gateway = _ca.GATEWAY_HOSTS[1 if runtime().podman else 0]
+    gateway = _ca.GATEWAY_HOSTS[1 if cached_runtime().podman else 0]
     certs = _RELAY_B_CERTS
     return _relay_argv(
         relay_b_name(session_id),
@@ -717,7 +925,7 @@ def docker_argv(
     API, and its permission hook's command.
     """
     try:
-        host = runtime()
+        host = cached_runtime()
     except ConfigError as exc:
         raise SandboxRefused(str(exc)) from exc
     if problem := host.refusal():
@@ -828,7 +1036,7 @@ def oneshot(sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
     """`Oneshot` for `sandbox`; `SandboxRefused` where the runtime cannot
     run one or enforce its limits."""
     try:
-        host = runtime()
+        host = _launch_runtime()
     except ConfigError as exc:
         raise SandboxRefused(str(exc)) from exc
     if problem := host.refusal():
@@ -1095,7 +1303,8 @@ async def oom_killed(session_id: str) -> OomKill | None:
             return None
         # Podman on cgroup v1 never sets the flag (4.9.3, conmon 2.1.10): its
         # conmon writes an `oom` file into the client's directory instead.
-        if killed == "true" or (runtime().podman and (client_dir(session_id) / "oom").exists()):
+        podman = (await asyncio.to_thread(runtime)).podman
+        if killed == "true" or (podman and (client_dir(session_id) / "oom").exists()):
             return OomKill(_size(int(memory)), True)
         if code != "137":
             return None
@@ -1339,7 +1548,7 @@ def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
     its own, before or instead of the command (probed with 4.9.3). A session
     no longer runs `--rm`, but the exit code stays the rule: it holds
     whichever way a container was run."""
-    if runtime().podman:
+    if cached_runtime().podman:
         return returncode == 125
     try:
         return not cidfile.read_text().strip()
@@ -1367,9 +1576,12 @@ class DockerBackend:
         members: Mapping[str, tuple[Path, Path] | None] = {},
     ) -> str | None:
         try:
-            host = await asyncio.to_thread(runtime)
+            host = await asyncio.to_thread(_launch_runtime)
         except ConfigError:
             return None  # `probe` says why
+        if not host.identity_known:
+            # Not "rootful": the owner check it would skip is the rootless one.
+            return host.refusal()
         if not host.rootless:
             return None
         dirs = linked_gitdirs(Path(cwd))
@@ -1380,7 +1592,7 @@ class DockerBackend:
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
-            host = await asyncio.to_thread(runtime)
+            host = await asyncio.to_thread(_launch_runtime)
         except ConfigError as exc:
             return str(exc)
         if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
@@ -1396,8 +1608,13 @@ class DockerBackend:
     async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """The image's combined CA bundle, built when there is an extra CA
         or a `kraft_ca` (`docker_forward.prepare`), for `wrap`'s
-        `ca_bundle`."""
+        `ca_bundle`. Every launch prepares, a setup command's too, so this is
+        where one that has not been probed still asks an unsure runtime again
+        (`_launch_runtime`) before `wrap` builds its argv."""
         try:
+            host = await asyncio.to_thread(_launch_runtime)
+            if problem := host.refusal():
+                raise SandboxNotReady(problem)
             return await _forward.prepare(sandbox["image"], kraft_ca=kraft_ca)
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
@@ -1588,16 +1805,24 @@ class DockerBackend:
         _refstore.discard_item(run_dirs.base, work_item_id)
         shutil.rmtree(sandbox_home(run_dirs, work_item_id), ignore_errors=True)
 
-    async def health(self, sandbox: dict) -> tuple[bool, str]:
+    async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
         """A sandboxed repository's work items stop for a human without a
         runtime to run them in, and its first launch pulls an image inside
         that session's time cap: both are better learned from doctor.
-        Re-detects, so an edited `sandbox.yaml` shows here first."""
+        Re-detects, so an edited `sandbox.yaml` shows here first; doctor
+        does that once per run, not once per sandboxed repository."""
         try:
-            host = await asyncio.to_thread(runtime, refresh=True)
+            if refresh:
+                await asyncio.to_thread(runtime, refresh=True)
+            # Asked again as a launch would, so doctor fails what a launch would.
+            host = await asyncio.to_thread(_launch_runtime)
         except ConfigError as exc:
             return False, str(exc)
-        if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
+        # A runtime that did not say whether it is rootless is named below,
+        # once a missing one, a daemon that is down or an image that is not
+        # pulled has had its say: each of those also leaves `info` silent.
+        refusal = host.refusal() if host.identity_known else None
+        if problem := refusal or host.limits_refusal(sandbox.get("resources")):
             return False, problem
         try:
             extra = await asyncio.to_thread(_forward.extra_ca)
@@ -1610,6 +1835,8 @@ class DockerBackend:
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+        if problem := host.refusal():
+            return False, problem
         egress = ""
         if sandbox.get("network"):
             # A launch never pulls it (`--pull=never` in the probe), and the
