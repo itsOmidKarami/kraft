@@ -22,6 +22,10 @@ const TAG: Record<ThreadLabel, string> = { must_fix: "MUST FIX", question: "QUES
 const CLAIM: Record<NonNullable<ReviewComment["claim"]>, string> = { fixed: "✓ claimed fixed", answered: "✓ answered", should_fix: "should fix" };
 const STATUS = (t: ReviewThread) => (t.draft ? "pending" : t.state);
 
+/** "Line 5", "Lines 5–7", "Old line 4": where a line comment sits, as its composer and its thread name it. */
+export const rangeName = (r: { side: "old" | "new"; start: number; end: number }) =>
+  `${r.side === "old" ? "Old line" : "Line"}${r.start === r.end ? ` ${r.start}` : `s ${r.start}–${r.end}`}`;
+
 /** What a refused write said, or null when it landed. */
 type Act = () => Promise<string | null>;
 const send = async (path: string, init: RequestInit): Promise<string | null> => {
@@ -75,6 +79,7 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
         <span className="rv-who">{first ? who(first) : "You"}</span>
         {thread.label && <span className={`rv-tag is-${thread.label}`}>{TAG[thread.label]}</span>}
         <span className="rv-status">{STATUS(thread)}</span>
+        {thread.start_line !== null && thread.side && <span className="rv-status">· {rangeName({ side: thread.side, start: thread.start_line, end: thread.end_line ?? thread.start_line })}</span>}
       </div>
       {first && <Body text={first.body} />}
       {first?.suggestion && <SuggestionBlock s={first.suggestion} old={oldLines(first.suggestion.start_line, first.suggestion.end_line)} />}

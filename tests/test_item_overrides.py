@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from support.api import _budget_stopped_item
 from support.harness import isolated_bd, v1_seeded_chain, write_harness_profiles
 
 from kraft import events, executor, policy, store
@@ -533,28 +534,6 @@ async def test_an_item_explicit_no_cap_overrides_a_capped_policy(
 # --- point 5: raise budget and continue, via the API ------------------------
 
 
-def _budget_stopped_item(client, repo, breach: dict) -> str:
-    """An item stopped at `implementation` by the spend cap `breach` names,
-    the way `executor.stops.stop_for_budget` records one."""
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "title": "t",
-            "repo": str(repo),
-            "chain_template": "quick-task",
-            "autostart": False,
-        },
-    ).json()["id"]
-    with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
-        conn.execute(
-            "UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,)
-        )
-        store.mark_needs_human(
-            conn, wid, "implementation", "budget cap reached", None, breach, kind="budget"
-        )
-    return wid
-
-
 def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, client, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
     wid = _budget_stopped_item(
@@ -574,17 +553,23 @@ def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, clie
     ("breach", "names"),
     [
         (
-            {"scope": "usd", "path": "", "spent_usd": 5.0, "cap_usd": 5.0, "unknown_launches": 0},
-            "budget_usd",
+            {
+                "scope": "usd",
+                "path": "build",
+                "spent_usd": 5.0,
+                "cap_usd": 5.0,
+                "unknown_launches": 0,
+            },
+            "budget_usd on a node",
         ),
         ({"scope": "tokens", "path": "", "spent_tokens": 9, "cap_tokens": 9}, "token_budget"),
         ({"scope": "daily", "spent_usd": 5.0, "cap_usd": 5.0}, "budget.daily_usd"),
     ],
-    ids=["budget_usd", "token_budget", "daily"],
+    ids=["node-budget_usd", "token_budget", "daily"],
 )
 def test_raise_budget_endpoint_409s_when_another_cap_stopped_the_item(client, repo, breach, names):
-    """Kraft-9efnk.28: raising the item's own cap cannot unstick a stop some
-    other cap made, so the route refuses it and writes nothing."""
+    """Kraft-9efnk.28: raising a dollar cap the route can write cannot
+    unstick a stop some other cap made, so it refuses it and writes nothing."""
     wid = _budget_stopped_item(client, repo, breach)
     r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 50.0})
     assert r.status_code == 409 and names in r.json()["detail"], r.text
@@ -600,15 +585,15 @@ def test_raise_budget_refusal_for_a_policy_cap_points_at_set_policy_not_a_frozen
     policy.yaml cannot raise its cap -- only `set-policy` on this item does.
     The daily cap is instance-wide, not frozen, so it alone still names
     policy.yaml."""
-    usd_wid = _budget_stopped_item(
-        client,
-        repo,
-        {"scope": "usd", "path": "", "spent_usd": 5.0, "cap_usd": 5.0, "unknown_launches": 0},
+    tokens_wid = _budget_stopped_item(
+        client, repo, {"scope": "tokens", "path": "", "spent_tokens": 9, "cap_tokens": 9}
     )
     detail = client.post(
-        f"/api/work-items/{usd_wid}/budget/raise", json={"budget_usd": 50.0}
+        f"/api/work-items/{tokens_wid}/budget/raise", json={"budget_usd": 50.0}
     ).json()["detail"]
     assert "set-policy" in detail
+    # It replaces the whole override, so the hint says to resend the rest.
+    assert "pass every field it already sets" in detail
     assert "policy.yaml only applies to items filed after" in detail
     assert "or in policy.yaml, then retry" not in detail
 
@@ -623,7 +608,8 @@ def test_raise_budget_refusal_for_a_policy_cap_points_at_set_policy_not_a_frozen
 
 def test_raise_budget_refusal_for_unknown_spend_points_at_clearing_the_cap(client, repo):
     """Kraft-tugdf.12: no higher `budget_usd` passes unknown spend, so the
-    refusal names the one door that does, not `budget_usd=N`."""
+    refusal names the one raise that does, no cap, and a door that keeps the
+    item's other policy fields."""
     wid = _budget_stopped_item(
         client,
         repo,
@@ -632,7 +618,7 @@ def test_raise_budget_refusal_for_unknown_spend_points_at_clearing_the_cap(clien
     detail = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 50.0}).json()[
         "detail"
     ]
-    assert "--policy budget_usd=none" in detail and "budget_usd=N" not in detail
+    assert "raise-budget ID --usd none" in detail and "set-policy" not in detail
 
 
 def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(client, repo):

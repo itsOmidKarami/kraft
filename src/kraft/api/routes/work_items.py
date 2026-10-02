@@ -272,11 +272,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
     # a list of error dicts, and `kraft item create` prints `detail` straight
     # through -- one sentence is the contract every other CLI error keeps.
-    if len(body.title) > beads_mod.MAX_TITLE:
-        raise HTTPException(
-            422,
-            f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
-        )
+    _check_title(body.title)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
@@ -592,6 +588,19 @@ async def duplicate_work_item(wid: str, request: Request):
     return {"id": new_id, "status": "paused", **extra}
 
 
+def _check_title(title: str) -> None:
+    """The title checks both intake doors make, each a one-sentence 422. A
+    blank title is refused the way a `PATCH` refuses one: the board would
+    show the item as a bare dash."""
+    if not title.strip():
+        raise HTTPException(422, "title cannot be empty")
+    if len(title) > beads_mod.MAX_TITLE:
+        raise HTTPException(
+            422,
+            f"title is {len(title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
+        )
+
+
 class TriggerBody(BaseModel):
     repo: str
     title: str
@@ -610,11 +619,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
-    if len(body.title) > beads_mod.MAX_TITLE:
-        raise HTTPException(
-            422,
-            f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
-        )
+    _check_title(body.title)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     policy = deps.item_policy_or_422(st, body.repo)

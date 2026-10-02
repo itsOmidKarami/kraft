@@ -80,3 +80,33 @@ async def test_tick_does_nothing_when_after_days_is_none_or_zero(
     app = stub_app(**_state(tmp_path, archive_after_days=after_days))
     await _seed_completed_item(app, repo, updated_days_ago=999)
     assert await archive.tick(app) == []
+
+
+async def test_tick_archives_an_item_whose_repository_is_gone(tmp_path, repo, stub_app):
+    app = stub_app(**_state(tmp_path, archive_after_days=30))
+    worktree = await _seed_completed_item(app, repo, updated_days_ago=31)
+    repo.rename(repo.with_name("moved"))
+
+    assert await archive.tick(app) == ["w1"]
+    assert not worktree.exists()
+
+
+async def test_one_failing_row_does_not_stop_the_tick(tmp_path, repo, stub_app, monkeypatch):
+    """Each row is archived on its own: a raise from the first due row must
+    not skip the rest until the next hour's tick, which would meet it first
+    again."""
+    from kraft.api.routes import lifecycle
+
+    app = stub_app(**_state(tmp_path, archive_after_days=30))
+    await _seed_completed_item(app, repo, updated_days_ago=31, wid="w1")
+    await _seed_completed_item(app, repo, updated_days_ago=31, wid="w2")
+    real = lifecycle._archive_one
+
+    async def first_one_fails(app, row, by):
+        if row["id"] == "w1":
+            raise FileNotFoundError("no such repository")
+        return await real(app, row, by)
+
+    monkeypatch.setattr(lifecycle, "_archive_one", first_one_fails)
+
+    assert await archive.tick(app) == ["w2"]

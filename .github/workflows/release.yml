@@ -59,10 +59,6 @@ jobs:
     # environment only deploys from main (repo settings), and PyPI's trusted
     # publisher is pinned to it, so a run from any other ref cannot publish.
     environment: release
-    env:
-      # Read by the publish step's `if:` -- a step's own `env` is not visible
-      # to its `if:`, a job's is. Empty until the maintainer adds the secret.
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -222,6 +218,12 @@ jobs:
           # a site-packages path that a python version bump would invalidate.
           /tmp/smoke/bin/python -c \
             "from kraft.paths import BUNDLED; import sys; sys.exit(0 if (BUNDLED / 'web' / 'index.html').is_file() else 1)"
+          # The web UI bundles react, lucide-react, the Inter font and more, and
+          # their licenses ask for their notices to go wherever their code does.
+          if ! unzip -l "$WHEEL" kraft/_bundled/web/THIRD_PARTY_LICENSES.txt >/dev/null; then
+            echo "::error::the wheel has no kraft/_bundled/web/THIRD_PARTY_LICENSES.txt"
+            exit 1
+          fi
           # And a description that still hot-links `main` would show main's UI
           # on this version's PyPI page for as long as the version exists.
           if unzip -p "$WHEEL" '*.dist-info/METADATA' \
@@ -240,7 +242,8 @@ jobs:
           # built, so nothing may dirty the checkout here.
           cd vscode
           npm ci
-          npm run build
+          # No `npm run build`: packing the .vsix below runs `vscode:prepublish`,
+          # which builds the extension itself, without a source map.
           # A pre-release is packed as semver, `1.5.0-rc.2`, so it sorts below
           # the release it leads up to and a side-loaded rc is updated by the
           # real 1.5.0. Packing it as its base version made the two equal.
@@ -259,6 +262,21 @@ jobs:
             --baseImagesUrl "https://github.com/$GITHUB_REPOSITORY/raw/$TAG/vscode/" \
             --out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
           git checkout -- CHANGELOG.md
+          # vsce points the Marketplace's Get Started link at the repository's
+          # clone URL, `.git` and all, and has no setting for it.
+          python3 "$RUNNER_TEMP/dev/release_artifacts.py" vsix-links "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
+          # The extension bundles `ws`, whose license asks for its notice to go
+          # wherever its code does.
+          if ! unzip -l "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/THIRD_PARTY_LICENSES.txt >/dev/null; then
+            echo "::error::the .vsix has no extension/dist/THIRD_PARTY_LICENSES.txt"
+            exit 1
+          fi
+          # `vsce package` builds with `--production`, which writes no source
+          # map; the .vsix leaves *.map out, so a link to one would dangle.
+          if unzip -p "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/extension.js | grep -q '^//# sourceMappingURL='; then
+            echo "::error::the .vsix's extension.js links a source map it does not ship"
+            exit 1
+          fi
 
       - name: push the tag and create the release
         if: steps.impact.outputs.tag != ''
@@ -377,6 +395,18 @@ jobs:
           echo "::error::kraft-sdlc ${TAG#v} is not on PyPI after 10 minutes"
           exit 1
 
+      - name: is there a Marketplace token
+        # Says whether VSCE_PAT is set, for the Marketplace steps' `if:`, which
+        # cannot see a step's own `env`. Only the publish step gets the token
+        # itself: as a job-level variable it sat in the environment of every
+        # step, `npm ci`'s install scripts and the build among them. Empty
+        # until the maintainer adds the secret.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
+        id: marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: echo "has_pat=${VSCE_PAT:+true}" >> "$GITHUB_OUTPUT"
+
       - name: publish the VS Code extension
         # Last, after Kraft itself is on PyPI, Homebrew and main. A failed step
         # stops every step after it, and VSCE_PAT is a token that expires: run
@@ -389,7 +419,9 @@ jobs:
         # Only once the maintainer has created the Marketplace publisher and
         # added VSCE_PAT; until then the .vsix is still attached to the
         # GitHub Release.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.marketplace.outputs.has_pat == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
           npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
@@ -404,7 +436,7 @@ jobs:
 
       - name: check the Marketplace lists this release
         # Warns only: the Marketplace can take a while to index a publish.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.marketplace.outputs.has_pat == 'true'
         env:
           TAG: ${{ steps.impact.outputs.tag }}
         run: |

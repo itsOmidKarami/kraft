@@ -21,6 +21,17 @@ const show = (t: ReviewThread) => {
 };
 
 describe("Thread", () => {
+  it("names the lines and the side it sits on; a file thread names none", () => {
+    show(thread({ side: "old", start_line: 4, end_line: 6 }));
+    expect(screen.getByText("· Old lines 4–6")).toBeInTheDocument();
+    cleanup();
+    show(thread());
+    expect(screen.getByText("· Line 5")).toBeInTheDocument();
+    cleanup();
+    show(thread({ side: null, start_line: null, end_line: null }));
+    expect(document.querySelector(".rv-thread-head")).not.toHaveTextContent(/line/i);
+  });
+
   it("draws the label, status and body, a suggestion, and an agent's reply with its attempt and claim", () => {
     show(thread({
       comments: [

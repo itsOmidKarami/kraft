@@ -74,6 +74,9 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
             "no chain 'nope'",
         ),
         ("triggers", {"title": "t", "repo": "/no/such/dir"}, "repo path does not exist"),
+        ("work-items", {"title": "", "repo": "REPO"}, "title cannot be empty"),
+        ("work-items", {"title": " \t ", "repo": "REPO"}, "title cannot be empty"),
+        ("triggers", {"title": "   ", "repo": "REPO"}, "title cannot be empty"),
     ],
     ids=[
         "an-unknown-template",
@@ -81,6 +84,9 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         "a-nonexistent-repo",
         "trigger-an-unknown-template",
         "trigger-a-nonexistent-repo",
+        "an-empty-title",
+        "a-whitespace-title",
+        "trigger-a-whitespace-title",
     ],
 )
 def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):

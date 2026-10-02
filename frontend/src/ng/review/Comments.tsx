@@ -19,7 +19,7 @@ const placeOf = (t: ReviewThread) => (t.start_line === null ? `${t.file_path}|to
 /** Threads and the composer, placed in the diff (W8 F). `after` and `top`
  *  feed DiffView's slots; `elsewhere` lists the threads with no place in what
  *  is drawn (another file, a line outside the hunks). */
-export function useComments({ itemId, compare, files, patch, threads, reload }: {
+export function useComments({ itemId, compare, files, patch, threads, reload, onClose }: {
   itemId: string;
   compare: Compare | null;
   /** The files drawn. */
@@ -27,6 +27,8 @@ export function useComments({ itemId, compare, files, patch, threads, reload }: 
   patch: Map<string, PatchFile>;
   threads: ReviewThread[];
   reload: () => void;
+  /** The composer closed, sent or cancelled: the page drops the pick it was opened on. */
+  onClose?: (t: Target) => void;
 }) {
   const drafts = useRef(new Map<string, Draft>()).current;
   const [open, setOpen] = useState<{ target: Target; editing: ReviewThread | null } | null>(null);
@@ -73,6 +75,7 @@ export function useComments({ itemId, compare, files, patch, threads, reload }: 
     }
     if (res.status < 200 || res.status >= 300) return detailOf(res.body);
     setOpen(null);
+    onClose?.(target);
     reload();
     return null;
   };
@@ -85,7 +88,10 @@ export function useComments({ itemId, compare, files, patch, threads, reload }: 
       drafts={drafts}
       editing={o.editing}
       onSubmit={(d) => submit(o.target, o.editing, d)}
-      onCancel={() => setOpen(null)}
+      onCancel={() => {
+        setOpen(null);
+        onClose?.(o.target);
+      }}
     />
   );
   const card = (t: ReviewThread) => (

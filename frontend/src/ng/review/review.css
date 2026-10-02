@@ -107,6 +107,13 @@
 .is-add .rv-word-change { background: color-mix(in oklab, var(--rv-add) 22%, transparent); border-radius: 2px; }
 .is-del .rv-word-change { background: color-mix(in oklab, var(--rv-del) 22%, transparent); border-radius: 2px; }
 :is(.rv-row, .rv-half).is-picked { box-shadow: inset 3px 0 0 var(--text-sub); background: color-mix(in oklab, var(--selection) 10%, transparent); }
+/* The + that comments on a line, in its own lane left of the numbers so it never covers one:
+   shown on hover, on the pick's last line, and on focus. Hidden, it takes no tap and leaves the a11y tree. */
+.rv-row:not(.is-split), .rv-half { position: relative; box-sizing: border-box; padding-left: 22px; }
+.rv-plus { position: absolute; top: 1px; left: 2px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-sub); cursor: pointer; visibility: hidden; }
+:is(.rv-row:not(.is-split), .rv-half):hover > .rv-plus, .rv-plus.is-head, .rv-plus:focus-visible { visibility: visible; }
+.rv-plus:hover { background: var(--line); color: var(--text); }
+.rv-plus:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: var(--font-sans); }
 
 /* Threads and the composer (prototype 433–486). */

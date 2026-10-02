@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST_SURFACE = ("install.sh", "src/kraft/update.py", "README.md")
 
@@ -85,3 +87,82 @@ def test_install_script_says_nothing_of_path_when_kraft_is_on_it(tmp_path):
     out, bin_dir = _run_installer(tmp_path, bin_on_path=True)
     assert f"kraft 9.9.9 installed in {bin_dir}." in out
     assert "not on your PATH" not in out
+
+
+def _run_installer_without_uv(tmp_path: Path, uv_installer: str | None, *, piped: bool = False):
+    """install.sh on a machine with no uv. `uv_installer` is the script the
+    stub `curl` serves for astral.sh's installer, or None for a failed
+    download. PATH holds only the stubs and the tools the script needs, so a
+    uv installed on the machine running the test is not found. `piped` feeds
+    the script to bash on stdin, as `curl ... | bash` does."""
+    import shutil
+    import subprocess
+
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    tools = ("sh", "grep", "head", "mktemp", "rm", "basename", "chmod", "mkdir", "printf", "cat")
+    for tool in tools:
+        if found := shutil.which(tool):
+            (stubs / tool).symlink_to(found)
+    (tmp_path / "uv-install.sh").write_text(uv_installer or "")
+    fetch = "exit 22" if uv_installer is None else f"cat {tmp_path}/uv-install.sh"
+    (stubs / "curl").write_text(
+        "#!/bin/sh\n"
+        f'case "$*" in *astral.sh*) {fetch};; '
+        """*api.github.com*) echo '"browser_download_url": "https://x/k-9.9.9.whl"';; """
+        "*) echo wheel;; esac\n"
+    )
+    (stubs / "curl").chmod(0o755)
+    script = ROOT / "install.sh"
+    return subprocess.run(
+        [shutil.which("bash")] if piped else ["sh", str(script)],
+        input=script.read_text() if piped else None,
+        capture_output=True,
+        text=True,
+        env={"PATH": str(stubs), "HOME": str(tmp_path)},
+    )
+
+
+# A uv installer that puts a working stub `uv` where the real one goes.
+_GOOD_UV_INSTALLER = (
+    'mkdir -p "$HOME/.local/bin"\n'
+    "printf '#!/bin/sh\\n"
+    'case "$1 $2" in "tool install") echo installed-kraft;; *) exit 2;; esac\\n\''
+    ' > "$HOME/.local/bin/uv"\n'
+    'chmod +x "$HOME/.local/bin/uv"\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("uv_installer", "says"),
+    [
+        (None, "could not download the uv installer from https://astral.sh/uv/install.sh"),
+        ("exit 3\n", "the uv installer failed; install uv yourself"),
+        ("true\n", "the uv installer ran, but uv is not in"),
+    ],
+    ids=["download-fails", "installer-fails", "uv-missing-after"],
+)
+def test_install_script_stops_when_it_cannot_install_uv(tmp_path, uv_installer, says):
+    """Piped into sh, a failed download was an empty script that sh ran
+    happily, and the installer went on to fail later with `uv: not found`."""
+    result = _run_installer_without_uv(tmp_path, uv_installer)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert says in result.stderr
+    assert "not found" not in result.stderr
+    assert "https://docs.astral.sh/uv/getting-started/installation/" in result.stderr
+
+
+def test_install_script_goes_on_with_the_uv_it_installed(tmp_path):
+    result = _run_installer_without_uv(tmp_path, _GOOD_UV_INSTALLER)
+    assert result.returncode == 0, result.stderr
+    assert "installed-kraft" in result.stdout
+
+
+def test_install_script_keeps_its_own_stdin_from_the_uv_installer(tmp_path):
+    """Under `curl ... | bash` the script's stdin is the rest of the script.
+    An installer that reads stdin swallowed it, and the install stopped after
+    uv without a word."""
+    reads_stdin = "cat >/dev/null\n" + _GOOD_UV_INSTALLER
+    result = _run_installer_without_uv(tmp_path, reads_stdin, piped=True)
+    assert result.returncode == 0, result.stderr
+    assert "installed-kraft" in result.stdout
