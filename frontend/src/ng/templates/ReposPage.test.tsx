@@ -157,6 +157,19 @@ describe("Repos page: connecting", () => {
     expect(found).toHaveTextContent("No tests found: connected disabled");
   });
 
+  it("says a repo with no tests connects disabled, as add_repo sends it, though the probe answers an empty scope list", async () => {
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ test_command: null, test_scopes: [] })) : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connected disabled until you set a test command.");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(d.postOps).toHaveBeenCalled());
+    expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });
+  });
+
   it("shows a probe's refusal inline and sends nothing", async () => {
     vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok({ detail: "/nowhere is not a git repository" }, 400) : ok([{ id: "default" }]))) as never);
     mount();
@@ -204,6 +217,33 @@ describe("Repos page: the Config rows", () => {
     expect(await screen.findByText(/Refused: 'allowed_tools' cannot widen the inherited safety ceiling/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "allowed tools" })).toBeInTheDocument();
     expect(vi.mocked(d.postOps).mock.calls.every((c) => c[3] === true)).toBe(true);
+  });
+
+  it("says a repo needs no setup with a checkbox, or a typed \"\", both the empty command, never two quote marks", async () => {
+    cleanPreview();
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    const none = screen.getByRole("checkbox", { name: "No setup needed" });
+    expect(none).not.toBeChecked();
+    await userEvent.click(none);
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: "" } }]);
+    await userEvent.click(screen.getByRole("button", { name: /^setup command, not set/ }));
+    await userEvent.type(screen.getByLabelText("setup command"), '""{Enter}');
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(4));
+    expect(vi.mocked(d.postOps).mock.calls[2][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: "" } }]);
+  });
+
+  it("ticks No setup needed for a repo whose setup command is empty, and unticking clears it", async () => {
+    cleanPreview();
+    const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, setup_command: "" } } : r));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    expect(screen.getByRole("button", { name: /^setup command, ""/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "No setup needed" }));
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: null } }]);
   });
 
   it("clears a value this repo sets with Reset, which sends null", async () => {

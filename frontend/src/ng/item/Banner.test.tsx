@@ -68,6 +68,18 @@ describe("Banner", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
+    it("keeps the item's other policy overrides: a PATCH policy replaces the whole override", async () => {
+      const calls = stubFetch({});
+      const policy_override = { budget_usd: 5, max_attempts: 4, paths: { verification: { timeout_minutes: 30 }, review: { max_attempts: 2 } } };
+      render(<Banner item={{ ...capped({ path: "verification", key: "max_attempts", value: 3, maximum: 5 }), policy_override }} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+      await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+      await userEvent.clear(screen.getByRole("spinbutton"));
+      await userEvent.type(screen.getByRole("spinbutton"), "5");
+      await userEvent.click(screen.getByRole("button", { name: "Save & retry" }));
+      await waitFor(() => expect(writes(calls)).toHaveLength(2));
+      expect(writes(calls)[0]).toMatchObject({ body: { policy: { budget_usd: 5, max_attempts: 4, paths: { verification: { timeout_minutes: 30, max_attempts: 5 }, review: { max_attempts: 2 } } } } });
+    });
+
     it("shows the current value and the maximum, and saves only a value above the current one", async () => {
       mount({ path: "verification", key: "max_attempts", value: 3, maximum: 5 });
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));

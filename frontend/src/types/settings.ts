@@ -16,6 +16,8 @@ export interface Repo {
   default_chain_template: string;
   test_command: string | null;
   test_scopes: TestScope[] | null;
+  /** How a fresh worktree is prepared; `""` for nothing to run, null for none declared. */
+  setup_command?: string | null;
   forge: string | null;
   project: string | null;
   enabled: boolean;

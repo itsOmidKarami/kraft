@@ -85,7 +85,7 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           <Kv k="setup" v={probe.setup_command ? withSource(probe.setup_command, chosenSource(probe.candidates, "setup")) : "none found"} mono muted={!probe.setup_command} />
           {others(probe.candidates) && <Kv k="also found" v={others(probe.candidates)!} mono muted />}
           {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={`${s.dir} is ${s.reason}`} muted />)}
-          {probe.missing_setup?.length ? <Kv k="no setup" v={`${probe.missing_setup.join(", ")}: tests and nothing to prepare them; the first work item stops until a setup command is set`} muted /> : null}
+          {probe.missing_setup?.length ? <Kv k="no setup" v={`${probe.missing_setup.join(", ")}: tests and nothing to prepare them; the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos`} muted /> : null}
           {readFrom(probe.read_from) && <Kv k="read from" v={readFrom(probe.read_from)!} muted />}
           <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
         </div>

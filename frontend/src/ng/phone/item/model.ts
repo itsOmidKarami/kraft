@@ -2,6 +2,7 @@ import { ago, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
 import { budgetRaise, headerState, archivable, NOT_RAISABLE } from "../../item/status";
 import { taskName } from "../../item/paths";
+import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
 
@@ -203,5 +204,5 @@ export const limitWords = (l: StopLimit) => LIMIT_WORDS[l.key];
 /** The `stop.limit` of a cap or budget stop, or null: without it a cap stop keeps Steer and Retry, and a budget stop raises the item's own cap if that is what stopped it (`item/status`'s `budgetRaise`). */
 export const stopLimitOf = (item: ItemDetail): StopLimit | null => (item.stop?.kind === "cap" || item.stop?.kind === "budget" ? (item.stop.limit ?? null) : null);
 
-/** The PATCH body that sets one limit: item-wide under `policy`, a node's under `policy.paths`. */
-export const limitPatch = (l: StopLimit, value: number) => ({ policy: l.path ? { paths: { [l.path]: { [l.key]: value } } } : { [l.key]: value } });
+/** The PATCH body that sets one limit, keeping the rest of the item's own override (`limitPolicy`). */
+export const limitPatch = (item: ItemDetail, l: StopLimit, value: number) => limitPolicy(item.policy_override, l, value);
