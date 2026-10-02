@@ -740,3 +740,20 @@ def _sandboxed_doctor_rows(app, tmp_path, prefix, **sandbox) -> list[dict]:
     repos_yaml.write_text(yaml.safe_dump(data))  # `network: None` is no network
 
     return [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith(prefix)]
+
+
+def test_doctor_asks_the_runtime_once_however_many_repos_are_sandboxed(app, tmp_path, monkeypatch):
+    """A runtime that does not answer costs doctor its wait once, not once
+    per sandboxed repository."""
+    ready = AsyncMock(return_value=(True, "ready"))
+    monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", ready)
+    for name in ("one", "two"):
+        asyncio.run(client.ensure_repo(str(make_repo(tmp_path, name))))
+    repos_yaml = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(repos_yaml.read_text())
+    for entry in data["repos"]:
+        entry["sandbox"] = {"kind": "docker", "image": "img"}
+    repos_yaml.write_text(yaml.safe_dump(data))
+
+    asyncio.run(doctor.run_checks())
+    assert [c.kwargs["refresh"] for c in ready.await_args_list] == [True, False]
