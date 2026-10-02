@@ -3,7 +3,9 @@
 A release is cut by hand (`just release`), not by a merge. Whatever merged
 since the previous tag goes out together, and the bump is the largest impact
 any of those pull requests declared: two minors and three patches is a minor.
-The notes are each pull request's `## Changelog` section, grouped by impact.
+The notes are each pull request's `## Changelog` section, grouped by impact,
+with any `notes::highlight` pull request lifted into a Highlights section above
+them all.
 
 Usage:
   python3 dev/plan_release.py plan <previous-tag-or-empty> <prs.json> <notes-out>
@@ -29,6 +31,11 @@ CHANGELOG = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
 #: Largest first. `IMPACTS` is already in this order; the index is the weight.
 GROUPS = {"major": "Breaking changes", "minor": "New", "patch": "Fixes"}
 
+#: The label that puts a pull request's entry first. Not a `release::` label on
+#: purpose: those declare the impact, exactly one per pull request, and this
+#: sits beside one without touching the bump.
+HIGHLIGHT = "notes::highlight"
+
 _SECTION = re.compile(r"^##\s+Changelog\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL)
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 #: The attribution line a PR body ends with; with no heading after `## Changelog`
@@ -43,10 +50,29 @@ def impact_of(pr: dict) -> str:
     still editable after merge, so an undeclared PR fails the release by
     number instead of shipping under a guessed weight.
     """
+    # GitHub labels are free text, so a mistyped highlight would otherwise be
+    # ignored and the release would ship without its headline.
+    for label in pr["labels"]:
+        if label.strip().lower().startswith("notes::") and label != HIGHLIGHT:
+            raise ValueError(
+                f"#{pr['number']} has the label {label!r}; the only notes:: label is "
+                f"{HIGHLIGHT}. Fix it and run the release again"
+            )
+    highlighted = HIGHLIGHT in pr["labels"]
     impact = impact_from_labels(",".join(pr["labels"]))
     if impact is None:
+        # Without this, `release::none` reads as the fix and fails the next run.
+        hint = f" (it has {HIGHLIGHT}, so one that ships, not {PREFIX}none)"
+        hint = hint if highlighted else ""
         raise ValueError(
-            f"#{pr['number']} has no {PREFIX} label; label it and run the release again"
+            f"#{pr['number']} has no {PREFIX} label{hint}; label it and run the release again"
+        )
+    # A `release::none` PR has no line in the notes, so a highlight on it would
+    # vanish without a word. One of the two labels is wrong; ask which.
+    if impact == "none" and highlighted:
+        raise ValueError(
+            f"#{pr['number']} has {HIGHLIGHT} but {PREFIX}none, so it has no entry to "
+            "highlight; fix one label and run the release again"
         )
     return impact
 
@@ -67,12 +93,26 @@ def changelog_entry(pr: dict) -> str:
 
 
 def release_notes(prs: list[dict]) -> str:
-    """Markdown for every PR that ships something, largest impact first."""
-    parts = []
-    for impact, heading in GROUPS.items():
-        entries = [changelog_entry(pr) for pr in prs if impact_of(pr) == impact]
-        if entries:
-            parts.append(f"### {heading}\n\n" + "\n\n".join(entries))
+    """Markdown for every PR that ships something: highlights, then largest impact first.
+
+    A highlighted minor or patch PR is listed once, under Highlights. A
+    highlighted major one stays under Breaking changes too, so a breaking
+    release never ships without that section.
+    Every section keeps the order `prs` came in, which release.yml's
+    `unique_by(.number)` makes PR-number order.
+    """
+    headings = {HIGHLIGHT: "Highlights", **GROUPS}
+    sections: dict[str, list[str]] = {key: [] for key in headings}
+    for pr in prs:
+        impact = impact_of(pr)
+        if impact not in GROUPS:
+            continue
+        highlighted = HIGHLIGHT in pr["labels"]
+        if highlighted:
+            sections[HIGHLIGHT].append(changelog_entry(pr))
+        if not highlighted or impact == "major":
+            sections[impact].append(changelog_entry(pr))
+    parts = [f"### {headings[key]}\n\n" + "\n\n".join(v) for key, v in sections.items() if v]
     return "\n\n".join(parts) + "\n" if parts else ""
 
 

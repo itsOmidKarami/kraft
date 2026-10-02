@@ -9,6 +9,7 @@
 ## Release impact
 
 Apply exactly one label: `release::major`, `release::minor`, `release::patch`, or `release::none`.
+Maintainers may also add `notes::highlight` to the release's headline change.
 `release::none` is a first-class answer for docs, comments, CI config, and test-only
 changes. See [CONTRIBUTING.md](https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md#pull-requests-and-release-labels).
 
