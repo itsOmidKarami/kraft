@@ -1,8 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 
 // jsdom has no matchMedia. Default every test to desktop width; tests that
-// need phone width stub this themselves (see setPhoneWidth() in the settings
-// test files) via vi.stubGlobal, which overrides this.
+// need phone width stub this themselves via vi.stubGlobal, which overrides
+// this (see width() in ng/phone/App.phone.test.tsx).
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   window.matchMedia = (query: string) => ({
     matches: false,
