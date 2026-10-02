@@ -120,6 +120,11 @@ def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
 
 def _say_connected(result: dict) -> None:
     print(f"connected: {result['path']}")
+    if result.get("read_from") == "refs/remotes/origin/HEAD":
+        # Work items start from origin, so a commit not pushed yet is not read.
+        print("  read from origin's default branch, where work items start")
+    elif result.get("read_from") is None and "read_from" in result:
+        print("  read from the working copy: the repo has no commit yet")
     by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
     chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
 

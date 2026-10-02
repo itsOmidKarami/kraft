@@ -39,6 +39,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -63,7 +64,7 @@ TEST_TIERS: tuple[Tier, ...] = ("runner", "ci", "toolchain")
 SETUP_TIERS: tuple[Tier, ...] = ("runner", "toolchain", "devenv")
 
 _ID = r"^[a-z][a-z0-9_-]*$"
-_TEXT_LIMIT = 1_000_000
+_TEXT_LIMIT = 4_000_000
 
 
 # ── the table ────────────────────────────────────────────────────────────────
@@ -195,30 +196,72 @@ def load(templates_dir: Path | None = None) -> Table:
 # ── the repository, as git lists it ─────────────────────────────────────────
 
 
+#: How long listing a repository may take before the probe gives up and says
+#: so, rather than reading a timeout as a repository with no files.
+_LIST_TIMEOUT_S = 120
+
+
+def source_ref(root: Path) -> str | None:
+    """The commit a work item's worktree would be cut from: origin's default
+    branch when the clone knows it (`builtins.upstream_head` forks from
+    origin, not from the checkout), else the checkout's HEAD. None for a
+    repository with no commit yet."""
+    for ref in ("refs/remotes/origin/HEAD", "HEAD"):
+        if git_read(
+            root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", expected_failure=True
+        ):
+            return ref
+    return None
+
+
+def _git(root: Path, *args: str) -> bytes:
+    try:
+        done = subprocess.run(
+            ["git", "--no-optional-locks", *args],
+            cwd=root,
+            capture_output=True,
+            timeout=_LIST_TIMEOUT_S,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ConfigError(
+            f"git {args[0]} in {root} took more than {_LIST_TIMEOUT_S}s; "
+            "connect it with --test-command and --setup-command instead"
+        ) from exc
+    return done.stdout if done.returncode == 0 else b""
+
+
 class _Index:
-    """Every file git would show for `root` (tracked, plus untracked that is
-    not ignored), by directory. A submodule is listed as one path and stays
-    opaque: it is a repository of its own."""
+    """Every file of the commit a work item's worktree is cut from
+    (`source_ref`), by directory: what the worktree will hold, never the
+    working copy's untracked files, uncommitted edits or symlinks. A
+    submodule (a gitlink) and a symlink are not files here. A repository
+    with no commit yet is read from its working copy instead: tracked plus
+    untracked files git does not ignore."""
 
     def __init__(self, root: Path):
         self.root = root
-        listed = git_read(
-            root,
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-            expected_failure=True,
-            strip=False,
-        )
-        paths = [p for p in (listed or "").split("\0") if p]
+        self.ref = source_ref(root)
+        self._blobs: dict[str, tuple[str, bool]] = {}
+        if self.ref is not None:
+            listed = _git(root, "ls-tree", "-r", "-z", "--full-tree", self.ref)
+            for entry in listed.decode("utf-8", "surrogateescape").split("\0"):
+                meta, _, rel = entry.partition("\t")
+                mode, kind, oid = (meta.split() + ["", "", ""])[:3]
+                if kind == "blob" and mode in ("100644", "100755"):
+                    self._blobs[rel] = (oid, mode == "100755")
+            paths = list(self._blobs)
+        else:
+            listed = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+            paths = [
+                p
+                for p in listed.decode("utf-8", "surrogateescape").split("\0")
+                if p and (root / p).is_file() and not (root / p).is_symlink()
+            ]
         self.files: set[str] = set()
         self.children: dict[str, set[str]] = {"": set()}
         self.subdirs: dict[str, set[str]] = {"": set()}
         for rel in paths:
-            if (root / rel).is_dir():
-                continue  # a submodule's gitlink
             self.files.add(rel)
             parent, _, name = rel.rpartition("/")
             self.children.setdefault(parent, set()).add(name)
@@ -227,7 +270,7 @@ class _Index:
                 self.subdirs.setdefault(up, set()).add(base)
                 self.children.setdefault(parent, set())
                 parent = up
-        self._text: dict[str, str | None] = {}
+        self._text: dict[str, str] = {}
 
     @property
     def dirs(self) -> set[str]:
@@ -248,16 +291,25 @@ class _Index:
         )
 
     def text(self, rel: str) -> str:
+        """`rel`'s content, at most `_TEXT_LIMIT` bytes of it, as text."""
         if rel not in self._text:
-            try:
-                with open(self.root / rel, encoding="utf-8", errors="replace") as f:
-                    self._text[rel] = f.read(_TEXT_LIMIT)
-            except OSError:
-                self._text[rel] = None
-        return self._text[rel] or ""
+            if rel in self._blobs:
+                raw = _git(self.root, "cat-file", "blob", self._blobs[rel][0])
+            elif rel in self.files:
+                try:
+                    with open(self.root / rel, "rb") as f:
+                        raw = f.read(_TEXT_LIMIT)
+                except OSError:
+                    raw = b""
+            else:
+                raw = b""
+            self._text[rel] = raw[:_TEXT_LIMIT].decode("utf-8", "replace")
+        return self._text[rel]
 
     def executable(self, rel: str) -> bool:
-        return os.access(self.root / rel, os.X_OK)
+        if rel in self._blobs:
+            return self._blobs[rel][1]
+        return rel in self.files and os.access(self.root / rel, os.X_OK)
 
 
 def _join(d: str, rel: str) -> str:
@@ -777,6 +829,8 @@ class Proposal:
     #: `combine` reads back when a person picks a different command.
     scopes: list[dict]
     candidates: list[dict]
+    #: The commit read (`source_ref`), or None for a repository with none.
+    ref: str | None = None
 
 
 def _depth(d: str) -> int:
@@ -974,4 +1028,5 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
         missing_setup=[s.dir or "." for s in tested if s.setup_command is None],
         scopes=shaped,
         candidates=[asdict(c) for cands in by_dir.values() for c in cands],
+        ref=index.ref,
     )

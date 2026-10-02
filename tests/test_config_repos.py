@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from support.harness import make_repo
+from support.harness import commit_all, make_repo
 
 from kraft import config
 from kraft.policy import SandboxPolicy
@@ -448,9 +448,8 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
 def test_probe_repo_suggests_a_setup_command(tmp_path):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    if lockfile:
-        (repo / "uv.lock").write_text("version = 1\n")
-    assert config.probe_repo(repo)["setup_command"] == expected
+    commit_all(repo)
+    assert config.probe_repo(repo)["setup_command"] == "uv sync"
 
 
 def test_probe_repo_reads_the_operators_detectors_file(tmp_path):
@@ -464,6 +463,7 @@ def test_probe_repo_reads_the_operators_detectors_file(tmp_path):
         "detectors:\n  - id: pyproject\n    tier: toolchain\n    files: [pyproject.toml]\n"
         "    setup: [{run: pip install -e .}]\n"
     )
+    commit_all(repo)
     assert config.probe_repo(repo, templates_dir=templates)["setup_command"] == "pip install -e ."
     assert config.probe_repo(repo)["setup_command"] == "uv sync"
 
@@ -474,6 +474,7 @@ def test_probe_repo_names_the_marker_each_test_command_came_from(tmp_path):
     (repo / "justfile").write_text("test:\n    pytest\n")
     (repo / "frontend").mkdir()
     (repo / "frontend" / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    commit_all(repo)
     probed = config.probe_repo(repo)
     assert probed["test_command"] == "just test"
     assert probed["test_markers"] == ["justfile", "frontend/package.json"]

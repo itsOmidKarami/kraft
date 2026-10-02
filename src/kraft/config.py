@@ -787,6 +787,7 @@ def probe_repo(
         "missing_setup": proposal.missing_setup,
         "scopes": proposal.scopes,
         "candidates": proposal.candidates,
+        "read_from": proposal.ref,
         "forge": forge,
         "project": project,
     }

@@ -292,7 +292,7 @@ async def add_repo(body: RepoBody, request: Request):
         logger.exception("index scan failed for newly connected repo %s", entry["path"])
     # Told, not stored: which marker files the proposed commands came from,
     # every command the evidence supported, and what is still undecided.
-    told = ("test_markers", "candidates", "scopes", "missing_setup")
+    told = ("test_markers", "candidates", "scopes", "missing_setup", "read_from")
     return {**entry, **{k: probed[k] for k in told}}
 
 

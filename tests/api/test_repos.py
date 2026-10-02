@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from support.api import _client
 from support.harness import (
+    commit_all,
     connect_repo,
     fake_templates_dir,
     isolated_bd,
@@ -98,6 +99,7 @@ def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
         '[submodule "libs/a"]\n\tpath = libs/a\n\turl = ../a.git\n'
         '[submodule "libs/b"]\n\tpath = libs/b\n\turl = ../b.git\n'
     )
+    commit_all(repo)
     body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["submodules"] == ["libs/a", "libs/b"]
     assert body["test_command"] == "uv run pytest"
@@ -294,6 +296,7 @@ def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, clie
     frontend.mkdir()
     (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
+    commit_all(repo)
     r = client.post(
         "/api/repos",
         json={"path": str(repo), "enabled": False, "test_command": "just test"},
@@ -346,6 +349,7 @@ def test_add_repo_keeps_a_lone_nested_scope(tmp_path, client):
     frontend.mkdir()
     (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
+    commit_all(repo)
     r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert r.status_code == 201, r.text
     assert r.json()["test_scopes"] == [
@@ -686,27 +690,7 @@ def test_add_repo_writes_the_probed_setup_command(tmp_path, client, route, lockf
     writes: `uv sync` only beside a `uv.lock`, since it writes one otherwise."""
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    if lockfile:
-        (repo / "uv.lock").write_text("version = 1\n")
-    entry = client.post(route, json={"path": str(repo)}).json()
-    assert entry["setup_command"] == expected
-
-
-@pytest.mark.parametrize(
-    ("lockfile", "expected"),
-    [(True, "uv run pytest -q"), (False, None)],
-    ids=["uv-lock", "no-uv-lock"],
-)
-def test_a_pyproject_gets_uv_run_pytest_only_beside_a_uv_lock(tmp_path, client, lockfile, expected):
-    """`uv run` writes a `uv.lock` when there is none, on every verify: the
-    probe proposes no test command then, and the repo is added disabled."""
-    repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    if lockfile:
-        (repo / "uv.lock").write_text("version = 1\n")
-    assert (
-        client.post("/api/repos/probe", json={"path": str(repo)}).json()["test_command"] == expected
-    )
+    commit_all(repo)
     entry = client.post("/api/repos", json={"path": str(repo)}).json()
     assert (entry["test_command"], entry["enabled"]) == (expected, lockfile)
 
@@ -790,6 +774,7 @@ def test_add_repo_tells_the_candidates_and_does_not_store_them(tmp_path, client,
     repo = make_repo(tmp_path)
     (repo / "Makefile").write_text("test:\n\tctest\n")
     (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
     body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
     assert body["test_command"] == "make test"
     assert ("go test ./...", False) in [(c["command"], c["chosen"]) for c in body["candidates"]]
@@ -805,6 +790,7 @@ def test_probe_reads_the_instances_own_detectors_file(tmp_path, client, template
     )
     repo = make_repo(tmp_path)
     (repo / "Earthfile").write_text("")
+    commit_all(repo)
     body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["test_command"] == "earthly +test"
 

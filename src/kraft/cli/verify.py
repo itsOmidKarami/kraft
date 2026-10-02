@@ -72,7 +72,14 @@ def _scopes(entry: config_mod.RepoEntry) -> list[tuple[str, str | None, str]]:
 def verify(stored: dict, *, say=print) -> bool:
     """Run `stored`'s (a repos.yaml entry, as the API returns it) setup and
     test commands in a fresh worktree; True when every one passed."""
-    told = {"already_connected", "test_markers", "candidates", "scopes", "missing_setup"}
+    told = {
+        "already_connected",
+        "test_markers",
+        "candidates",
+        "scopes",
+        "missing_setup",
+        "read_from",
+    }
     entry = config_mod.RepoEntry.model_validate(
         {k: v for k, v in stored.items() if k not in told},
         context={"unrecognised_keys_reported": True},

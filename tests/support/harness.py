@@ -116,6 +116,14 @@ def connected_repo(tmp_path: Path, name: str = "sample") -> Path:
     return connect_repo(make_repo(tmp_path, name))
 
 
+def commit_all(repo: Path, message: str = "files") -> None:
+    """Commit everything in `repo`'s working copy: what `kraft repo connect`
+    probes is the committed tree a work item's worktree is cut from, so a
+    file a test writes is invisible to it until committed."""
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", message)
+
+
 def make_repo_with_submodule(
     tmp_path: Path, *, submodule_path: str = "repos/pkg"
 ) -> tuple[Path, Path]:

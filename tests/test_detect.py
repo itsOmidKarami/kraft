@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
-from support.harness import make_repo
+from support.harness import commit_all, make_repo
 
 from kraft import config, detect
 
@@ -18,6 +20,7 @@ def _repo(tmp_path, files: dict[str, str], executable: tuple[str, ...] = ()):
         (repo / rel).write_text(text)
     for rel in executable:
         (repo / rel).chmod(0o755)
+    commit_all(repo)
     return repo
 
 
@@ -491,3 +494,44 @@ def test_disable_and_ignore_dirs_layer_onto_the_packaged_table(tmp_path):
 def test_a_broken_operators_file_is_refused_naming_it(tmp_path, text, match):
     with pytest.raises(config.ConfigError, match=match):
         detect.load(_own(tmp_path, text))
+
+
+# ── what is read ──
+
+
+def test_an_uncommitted_file_is_not_evidence(tmp_path):
+    """A work item's worktree holds the committed tree, so neither a file only
+    in the working copy nor an uncommitted edit changes the proposal."""
+    repo = _repo(tmp_path, {"package.json": JEST, "package-lock.json": ""})
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "package.json").write_text("{}")
+    p = _propose(repo)
+    assert (p.test_command, p.ref) == ("npm test", "HEAD")
+
+
+def test_origins_default_branch_is_read_before_a_local_commit(tmp_path):
+    origin = _repo(tmp_path, {"go.mod": "module x\n"})
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
+    (clone / "Makefile").write_text("test:\n\tgo vet\n")
+    commit_all(clone, "not pushed")
+    p = _propose(clone)
+    assert (p.test_command, p.ref) == ("go test ./...", "refs/remotes/origin/HEAD")
+
+
+def test_a_repo_with_no_commit_is_read_from_its_working_copy(tmp_path):
+    """Its own files only: nothing gitignored, and no symlink, which could
+    point anywhere on the machine."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "justfile").write_text("test:\n  rm -rf /\n")
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_text("ignored/\n")
+    (repo / "go.mod").write_text("module x\n")
+    (repo / "justfile").symlink_to(outside / "justfile")
+    (repo / "ignored").mkdir()
+    (repo / "ignored" / "Cargo.toml").write_text("[package]\n")
+    p = _propose(repo)
+    assert (p.test_command, p.ref, p.test_scopes[0]["paths"]) == ("go test ./...", None, ["**"])
