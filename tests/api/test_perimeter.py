@@ -207,6 +207,27 @@ def test_an_allowed_host_that_is_not_one_name_is_refused_by_name(client):
     assert client.get("/api/access").json()["allowed_hosts"] == []
 
 
+def _a_hand_edited_wildcard(templates_dir):
+    (templates_dir / "access.yaml").write_text("allowed_hosts: ['*.ts.net', kraft.local]\n")
+
+
+@pytest.mark.api_client(edit_templates=_a_hand_edited_wildcard)
+def test_a_bad_entry_already_stored_does_not_block_the_next_save(client):
+    """The Access screens send the whole list back on every add and remove.
+    `access.yaml` loads a hand-edited `*.ts.net` as written, so refusing
+    every entry again would make each later save of that list a 422. Only a
+    new entry is checked; the stored one stays for `config_check` to name."""
+    assert client.get("/api/access").json()["allowed_hosts"] == ["*.ts.net", "kraft.local"]
+    added = client.put(
+        "/api/access", json={"allowed_hosts": ["*.ts.net", "kraft.local", "Phone.Local:8765"]}
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["allowed_hosts"] == ["*.ts.net", "kraft.local", "phone.local"]
+    another = client.put("/api/access", json={"allowed_hosts": ["*.ts.net", "*.lan"]})
+    assert another.status_code == 422, another.text
+    assert "'*.lan' is not a host name" in another.json()["detail"]
+
+
 def test_a_rebound_host_is_refused_for_a_browser_request(client):
     """DNS rebinding: a page on evil.com whose name flips to 127.0.0.1 becomes
     same-origin with the local board and can read every response and drive every
@@ -248,12 +269,31 @@ def test_a_loopback_bind_refuses_a_foreign_host_with_no_fetch_metadata(client, m
 
 @pytest.mark.parametrize(
     "host",
-    ["127.0.0.1:8765", "localhost:8765", "[::1]:8765", "LOCALHOST", "127.0.0.1"],
-    ids=["v4-port", "localhost-port", "v6-port", "case", "no-port"],
+    [
+        "127.0.0.1:8765",
+        "localhost:8765",
+        "[::1]:8765",
+        "LOCALHOST",
+        "127.0.0.1",
+        "localhost.:8765",
+        "127.0.0.1.:8765",
+        "[0:0:0:0:0:0:0:1]:8765",
+    ],
+    ids=[
+        "v4-port",
+        "localhost-port",
+        "v6-port",
+        "case",
+        "no-port",
+        "localhost-trailing-dot",
+        "v4-trailing-dot",
+        "v6-uncompressed",
+    ],
 )
 def test_a_loopback_bind_answers_to_every_loopback_name(client, host):
     """The CLI, MCP, the VS Code extension and the dev proxy all dial one of
-    these, browser or not."""
+    these, browser or not. A trailing dot or an uncompressed ::1 is the same
+    name, and no one else can own it."""
     for headers in ({"host": host}, {"host": host, "sec-fetch-site": "same-origin"}):
         assert client.get("/api/work-items", headers=headers).status_code == 200
 

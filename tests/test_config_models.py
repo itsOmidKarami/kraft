@@ -70,6 +70,7 @@ def test_each_settings_file_loads_and_saves_through_its_own_model(tmp_path, name
         ("FD00::5", "[fd00::5]"),
         ("[fd00:0::5]:8765", "[fd00::5]"),
         ("café.local", "xn--caf-dma.local"),
+        ("faß.de", "xn--fa-hia.de"),
     ],
     ids=[
         "case",
@@ -80,6 +81,7 @@ def test_each_settings_file_loads_and_saves_through_its_own_model(tmp_path, name
         "bare-ipv6",
         "ipv6-port",
         "unicode",
+        "unicode-uts46",
     ],
 )
 def test_an_allowed_host_is_kept_as_a_host_header_compares_it(tmp_path, typed, kept):

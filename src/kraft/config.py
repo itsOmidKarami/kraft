@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
 from urllib.parse import urlsplit
 
+import idna
 import yaml
 from pydantic import (
     BaseModel,
@@ -1022,11 +1023,27 @@ def normalize_host(entry: str) -> str | None:
         return None
     name = host_name(text)
     if name and not name.isascii():
+        # UTS #46, as a browser maps a name before it sends it: Python's own
+        # "idna" codec is IDNA 2003, which turns `faß.de` into `fass.de`
+        # where the browser's Host says `xn--fa-hia.de`.
         try:
-            name = name.encode("idna").decode("ascii")
-        except UnicodeError:
+            name = idna.encode(name, uts46=True).decode("ascii")
+        except idna.IDNAError:
             return None
     return name if name and _HOST_NAME.fullmatch(name) else None
+
+
+def host_entry_problem(entry: str) -> str | None:
+    """Why `entry` can never be on `allowed_hosts`, naming it; None when
+    `normalize_host` makes a host of it. One message for the save that refuses
+    it and for the checks that find one already in `access.yaml`."""
+    if normalize_host(entry) is not None:
+        return None
+    return (
+        f"allowed_hosts: {entry!r} is not a host name or IP address, so no "
+        "browser's Host ever matches it. Enter one name, such as kraft.local, "
+        "192.168.1.5 or [fd00::5], with no wildcard or user@"
+    )
 
 
 class Access(_Model):

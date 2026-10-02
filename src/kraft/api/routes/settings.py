@@ -598,18 +598,20 @@ class AccessBody(BaseModel):
     allowed_hosts: list[str] | None = None
 
 
-def _checked_host(entry: str) -> str:
-    """`entry` as the perimeter compares it (`config.normalize_host`), or a 422
-    naming it. Wildcards are not supported, so `*.example.com` is refused
-    rather than saved as a name no browser sends."""
-    if name := config_mod.normalize_host(entry):
-        return name
-    raise HTTPException(
-        422,
-        f"allowed_hosts: {entry!r} is not a host name or IP address. "
-        "Enter one name, such as kraft.local, 192.168.1.5 or [fd00::5], "
-        "with no wildcard or user@",
-    )
+def _checked_hosts(entries: list[str], stored: list[str]) -> list[str]:
+    """`entries` as the perimeter compares them (`config.normalize_host`), or
+    a 422 naming the first that is not a host. Wildcards are not supported,
+    so `*.example.com` is refused rather than saved as a name no browser
+    sends. An entry already in `stored` passes as it is: the screens send
+    the whole list back on every add and remove, and a bad entry a hand edit
+    left there (`Access` keeps one on load) must not block every later save.
+    `config_check` reports that one instead."""
+    out = []
+    for entry in entries:
+        if entry not in stored and (why := config_mod.host_entry_problem(entry)):
+            raise HTTPException(422, why)
+        out.append(config_mod.normalize_host(entry) or entry)
+    return out
 
 
 @api_router.get("/access")
@@ -636,7 +638,7 @@ async def put_access(body: AccessBody, request: Request):
     if body.session_expiry_days is not None:
         access["session_expiry_days"] = body.session_expiry_days
     if body.allowed_hosts is not None:
-        access["allowed_hosts"] = [_checked_host(h) for h in body.allowed_hosts]
+        access["allowed_hosts"] = _checked_hosts(body.allowed_hosts, access["allowed_hosts"])
     if body.password:
         access["password_hash"] = auth_mod.hash_password(body.password)
     if why := config_check.access_problem(access):
