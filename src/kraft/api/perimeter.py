@@ -211,14 +211,17 @@ async def _perimeter(request: Request, call_next):
     #    localhost. Off loopback, auth is on, and a rebound page has no
     #    session cookie for its own name (and its login POST carries an
     #    Origin), so the allowlist is held to requests that look like a
-    #    browser's, and the CLI, MCP and curl need no entry in it.
+    #    browser's, and the CLI, MCP and curl need no entry in it. A loopback
+    #    name is always allowed there too: a browser sends one only when it is
+    #    on this machine, so the board still opens at 127.0.0.1 on a LAN bind
+    #    without listing it, and a rebound page carries its own name instead.
     hostname = _hostname(request.headers.get("host", ""))
     bound_host = getattr(st, "bound_host", "127.0.0.1")
     if bound_host in config_mod.LOOPBACK:
         refused = hostname not in _LOCAL_HOSTS
     else:
         allowed = set((getattr(st, "access", None) or {}).get("allowed_hosts") or [])
-        refused = _from_a_browser(request) and hostname not in allowed
+        refused = _from_a_browser(request) and hostname not in allowed | _LOCAL_HOSTS
     if refused:
         return JSONResponse(
             {"detail": f"unexpected Host for a server bound to {bound_host}"},

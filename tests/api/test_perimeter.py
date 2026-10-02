@@ -155,7 +155,8 @@ def test_a_non_loopback_bind_accepts_a_listed_host(client):
 
 @pytest.mark.api_client(host="0.0.0.0")
 def test_a_non_loopback_bind_with_no_allowlist_refuses_every_browser_host(client):
-    """Fails closed: no `allowed_hosts` configured is not an open gate."""
+    """Fails closed: no `allowed_hosts` configured is not an open gate. Only
+    this machine's own loopback names get through, as on any LAN bind."""
     saved = client.put("/api/access", json={"bind": "0.0.0.0", "password": "hunter2"})
     assert saved.status_code == 200, saved.text
     assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
@@ -262,6 +263,17 @@ def test_a_non_loopback_bind_checks_every_browser_shaped_request(lan_bind, shape
     r = lan_bind.get("/api/work-items", headers=unlisted)
     assert r.status_code == 403, r.text
     assert r.json()["detail"] == "unexpected Host for a server bound to 0.0.0.0"
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+@pytest.mark.parametrize("host", ["127.0.0.1:8765", "localhost:8765", "[::1]:8765"])
+def test_a_non_loopback_bind_always_answers_a_browser_on_this_machine(lan_bind, host):
+    """The board still opens at http://127.0.0.1:8765 on the machine itself
+    after a switch to a LAN bind, without listing the loopback names: a
+    browser only sends one when it really is on this machine."""
+    for shape in _BROWSER_SHAPED:
+        r = lan_bind.get("/api/work-items", headers=_browser(host, shape))
+        assert r.status_code == 200, r.text
 
 
 @pytest.mark.api_client(host="0.0.0.0")
