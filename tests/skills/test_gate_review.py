@@ -319,7 +319,7 @@ def _stub_review(monkeypatch, verdict, note="because the migration is missing"):
     async def fake_review(db, run_dirs, **kw):
         return verdict, note
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
 
 
 def _stub_walk(monkeypatch, calls, status="completed"):
@@ -392,7 +392,7 @@ async def test_no_review_unless_both_knobs_are_on(
         reviewed.append(kw["gate"])
         return "approve", ""
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
 
     chain = _chain2(run_dirs, auto_review=auto_escalate)
     status = await _review_from_gate(database, run_dirs, chain, auto_gate=auto_gate)
@@ -410,7 +410,7 @@ async def test_a_human_decision_taken_during_the_review_wins(monkeypatch, databa
         await db.write(lambda c: store.approve_gate(c, work_item_id, "human_review_approval"))
         return "reject", "send it back"
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
     _stub_walk(monkeypatch, calls)
 
     status = await _review_from_gate(database, run_dirs, auto_gate=True)
@@ -510,7 +510,7 @@ async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dir
         reviewed.append(kw["gate"])
         return "approve", ""
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
     monkeypatch.setattr(
         "kraft.executor.stops.budget_breach",
         lambda db, wid, budget, **_tokens: _caps.WorkItemBreach(

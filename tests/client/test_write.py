@@ -3,39 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
+from support.api import run_with_app
+from support.harness import connected_repo, make_repo
 
-from client.test_read import run_with_app
 from kraft import client
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
-
-
-@pytest.fixture
-def wired(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    import kraft.api as api
-
-    monkeypatch.setattr(
-        client.transport,
-        "http",
-        lambda: httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
-        ),
-    )
-    return api
 
 
 def test_create_work_item_never_starts_it(wired, tmp_path):
