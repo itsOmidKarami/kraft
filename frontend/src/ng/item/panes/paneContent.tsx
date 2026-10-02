@@ -219,7 +219,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const live = sessions.some((s) => ["running", "pending"].includes(s.status));
   return {
     ...head,
-    bar: switcher,
+    // One attempt has nothing to switch between: the subtitle already says how it went.
+    bar: sessions.length > 1 ? switcher : undefined,
     tabs,
     body: bodies[tab],
     footer: esc

@@ -55,7 +55,18 @@ describe("task pane", () => {
     const tabs = within(pane("escalation")).getAllByRole("tab").map((t) => t.textContent);
     expect(tabs).toEqual(["Thread", "Overview", "Input", "Output", "Log", "Config"]);
     expect(within(pane("escalation")).getByRole("tab", { name: "Thread" })).toHaveAttribute("aria-selected", "true");
-    expect(within(pane("escalation")).getByText("needs you", { selector: ".ip-attempt-state" })).toBeInTheDocument();
+    // One turn: no switcher, the subtitle says how it went.
+    expect(within(pane("escalation")).getByText("escalation · agent task · needs you")).toBeInTheDocument();
+    expect(within(pane("escalation")).queryByRole("button", { name: "Earlier attempt" })).toBeNull();
+  });
+
+  it("hands focus to the other arrow when one reaches the end", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    await userEvent.click(screen.getByRole("button", { name: "Earlier attempt" }));
+    expect(screen.getByRole("button", { name: "Earlier attempt" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Later attempt" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Later attempt" }));
+    expect(screen.getByRole("button", { name: "Earlier attempt" })).toHaveFocus();
   });
 
   it("names the harness the attempt ran on in Overview", () => {
@@ -78,6 +89,16 @@ describe("task pane", () => {
     expect(await screen.findByText("Try the other config.")).toBeInTheDocument();
     expect(screen.getByText("Why did lint fail?")).toBeInTheDocument();
     expect(screen.getByText("And the merge request?")).toBeInTheDocument();
+  });
+
+  it("cuts the thread at a turn whose message names no session by the turn's place among its node's", async () => {
+    const turns = detail({ worker_sessions: [sess("escalation", 1, { id: "e1", node_id: "verification" }), sess("escalation", 2, { id: "e2", node_id: "verification" })] });
+    const msg = (seq: number, turn: number, message: string, node_id = "verification") => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread: 1, turn, message }, node_id, created_at: "2026-09-13T09:00:00Z" });
+    const events = [msg(1, 1, "And the plan?", "plan"), msg(2, 2, "Why did lint fail?"), msg(3, 3, "Try the other config.")];
+    mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation&attempt=1", turns, events);
+    expect(await screen.findByText("Why did lint fail?")).toBeInTheDocument();
+    expect(screen.queryByText("Try the other config.")).toBeNull();
+    expect(screen.getByRole("region", { name: "Thread 1" })).toHaveTextContent("thread 1 · turn 2 of 3");
   });
 
   it("has no Thread tab on an ordinary task, and offers Retry once it stopped", () => {

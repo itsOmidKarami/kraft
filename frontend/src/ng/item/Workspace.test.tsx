@@ -107,6 +107,17 @@ describe("Workspace", () => {
     expect(where()).toBe("/work-items/w1");
   });
 
+  it("pushes one entry for a step picked on the chain, and replaces it for picks inside the node view", async () => {
+    const { act } = await import("@testing-library/react");
+    mount("/work-items/w1?sel=verification");
+    const pane = () => screen.getByRole("complementary", { name: /pane$/ });
+    await userEvent.click(within(pane()).getByRole("button", { name: /review/ }));
+    await userEvent.click(within(pane()).getByRole("button", { name: /code_review/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    act(() => nav(-1));
+    expect(where()).toBe("/work-items/w1?sel=verification");
+  });
+
   it("goes back to the chain's pane from a node's crumb", async () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));

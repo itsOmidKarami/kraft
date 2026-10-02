@@ -4,16 +4,10 @@ import { ago } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
+import { messagesThrough } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null; session: string | null };
-
-/** How many of `turns` the thread shows when `upTo` is the turn picked above
- *  the tabs: through that turn's own message, which names its session. */
-function shownThrough(turns: Turn[], upTo: WorkerSession | undefined): number {
-  const own = upTo ? turns.findIndex((t) => t.session === upTo.id) : -1;
-  return own >= 0 ? own + 1 : turns.length;
-}
 
 /** The escalation's thread (Decisions §6 Escalation, prototype lines 167–176):
  *  every message through the turn picked above the tabs, by thread and turn,
@@ -36,7 +30,7 @@ export function Thread({ item, node, upTo, reload, onNode }: { item: ItemDetail;
     node: e.node_id ?? null,
     session: typeof e.payload.session_id === "string" ? e.payload.session_id : null,
   }));
-  const turns = all.slice(0, shownThrough(all, upTo));
+  const turns = all.slice(0, messagesThrough(all, upTo, item));
   const threads = [...new Set(turns.map((t) => t.thread))];
   const send = async (fresh: boolean) => {
     setBusy(true);
@@ -52,9 +46,10 @@ export function Thread({ item, node, upTo, reload, onNode }: { item: ItemDetail;
       {events == null ? <p className="item-muted">Reading the thread…</p> : !turns.length && <p className="item-muted">No messages yet.</p>}
       {threads.map((th) => {
         const these = turns.filter((t) => t.thread === th);
+        const total = all.filter((t) => t.thread === th).length;
         return (
           <section key={th} className="ip-thread" aria-label={`Thread ${th}`}>
-            <p className="ip-thread-head">thread {th} · {these.length} {these.length === 1 ? "turn" : "turns"}</p>
+            <p className="ip-thread-head">thread {th} · {these.length < total ? `turn ${these.length} of ${total}` : `${total} ${total === 1 ? "turn" : "turns"}`}</p>
             {these.map((t, i) => (
               <article key={i} className={`ip-turn${t.node === node ? " is-here" : ""}`}>
                 <header className="ip-turn-head">
