@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import uvicorn
+from support.server import child_env
 
 from kraft import cli, paths
 
@@ -363,3 +365,34 @@ def test_abandon_refuses_without_yes(monkeypatch):
     assert ns.yes is False
     with pytest.raises(ValueError, match="--yes"):
         ns.func(ns)
+
+
+_FLOOD = """
+from kraft import cli
+from kraft.cli import view
+
+
+def flood(ns):
+    for _ in range(100_000):
+        print("x" * 80)
+
+
+view._cmd_events = flood
+cli.main(["view", "events", "w1", "--json"])
+"""
+
+
+def test_a_reader_that_closes_early_ends_the_command_quietly(tmp_path):
+    """`kraft view events ID --json | head` once ended in a BrokenPipeError
+    traceback. A real pipe, since only a closed reader raises it."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _FLOOD],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=child_env({"KRAFT_HOME": str(tmp_path / "home")}),
+    )
+    assert proc.stdout.readline() == b"x" * 80 + b"\n"
+    proc.stdout.close()  # what `head` does once it has its lines
+    stderr = proc.stderr.read().decode()
+    assert proc.wait(timeout=60) == 141, stderr
+    assert stderr == ""

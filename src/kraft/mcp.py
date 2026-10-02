@@ -10,18 +10,53 @@ something, so they are written for that reader, not for a maintainer.
 
 from __future__ import annotations
 
+import functools
 import os
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from kraft import client
 from kraft.update import installed
 
 
+def _refusals_reach_the_agent(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """`fn`, with Kraft's refusals raised as `ToolError`.
+
+    The MCP SDK treats any other exception as a crash: the agent reads only
+    "Error executing tool <name>" and the reason stays in the server log. The
+    client raises `ValueError` for every API refusal (a 404, a 409, no work
+    item to act on) and `PermissionError` for the worker self-action guard,
+    and an agent needs that sentence to recover. So both go out as the line
+    `kraft <verb>` prints. Anything else is still a crash, logged with its
+    traceback.
+    """
+
+    @functools.wraps(fn)
+    async def tool(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await fn(*args, **kwargs)
+        except (ValueError, PermissionError) as exc:
+            raise ToolError(client.refusal(exc)) from exc
+
+    return tool
+
+
+class _Server(MCPServer):
+    """`MCPServer`, with every tool it registers wrapped by
+    `_refusals_reach_the_agent`, so no tool can be added without it."""
+
+    def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
+        register = super().tool(*args, **kwargs)
+        return lambda fn: register(_refusals_reach_the_agent(fn))
+
+
 def build() -> MCPServer:
     """The server, tools registered. Split from `serve_stdio` so a test can list
     the tools without owning a transport."""
-    server = MCPServer("kraft", version=installed())
+    server = _Server("kraft", version=installed())
 
     @server.tool()
     async def list_work_items(status: str | None = None) -> list[dict]:

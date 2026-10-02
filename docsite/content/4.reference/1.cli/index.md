@@ -34,8 +34,9 @@ the same value `kraft admin mcp` hands an agent. These verbs do not:
 | `admin install-service`, `uninstall-service` | None. |
 | `admin mcp`, `admin permission-hook` | None; these speak a protocol on stdio. |
 
-`kraft view logs --json` prints NDJSON, one object per line, because a stream
-has no end on which to close an array.
+`kraft view logs --json` and `kraft view events -f --json` print NDJSON, one
+object per line, because a stream has no end on which to close an array.
+`kraft view events --json` without `-f` prints one JSON array.
 
 ## Shell completion
 

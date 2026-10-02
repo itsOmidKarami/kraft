@@ -7,10 +7,12 @@ checkout and an install can only ever differ in where their paths point.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import argcomplete
 
+from kraft import client
 from kraft.cli import admin, common, item, repo, view
 from kraft.cli.admin import *  # noqa: F403
 from kraft.cli.common import *  # noqa: F403
@@ -109,10 +111,19 @@ def main(argv: list[str] | None = None) -> None:
     ns = parser.parse_args(args)
     try:
         ns.func(ns)
+        # Inside the try, so a reader that closed early is caught below
+        # rather than at interpreter exit, where it can only be printed.
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # `kraft view events ID --json | head`: the reader has what it wanted.
+        # Point stdout at /dev/null so the exit's own flush cannot fail again,
+        # and leave the way a program SIGPIPE ended would.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        raise SystemExit(141) from None
     except (ValueError, PermissionError) as exc:
         # ValueError is what client.py raises for every API and context failure;
         # PermissionError is the worker self-action guard.
-        print(f"kraft: {exc}", file=sys.stderr)
+        print(client.refusal(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
         raise SystemExit(130) from None
