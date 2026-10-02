@@ -76,6 +76,7 @@ def test_an_unknown_impact_is_refused():
     [
         ("release::minor", "minor"),
         ("bug,release::patch,frontend", "patch"),
+        ("release::minor,notes::highlight", "minor"),
         ("release::none", "none"),
         ("bug,frontend", None),
         ("", None),

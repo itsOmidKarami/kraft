@@ -1,0 +1,82 @@
+[
+ {
+  "number": 342,
+  "title": "Kraft's plugin on Cursor and Antigravity; release stamp covers every manifest",
+  "body": "## What\n\n## Changelog\n\n- Kraft's plugin now installs on Cursor (`agent plugin marketplace add https://github.com/itsOmidKarami/kraft`, then `/plugins`) and on Antigravity (`agy plugin import` from a clone), with its skills and the `kraft` MCP server. Amp can add the skills with `amp skill add`.\n- The install page and the agent-integration guide gain an Antigravity tab, and say that Gemini CLI works only with an API key or Gemini Code Assist since 2026-06-18.\n\n## Release impact\n\nrelease::minor. This adds an install route for users. Existing Claude Code and Codex installs are unchanged, apart from the MCP server now coming from `plugins/kraft/.mcp.json` (same command, same `plugin:kraft:kraft` name). The Cursor manifests' `version` is stamped with the others from the next release.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n",
+  "labels": [
+   "release::minor"
+  ]
+ },
+ {
+  "number": 344,
+  "title": "Antigravity CLI (agy) harness",
+  "body": "## What\n\n## Changelog\n\n- New `antigravity` harness runs agent tasks on Google's Antigravity CLI (`agy`), the replacement for Gemini CLI on individual Google accounts. It reads tokens, the conversation id for resume, and quota stops from its stream-json log. `prices.json` now includes Google's Gemini models, so a session launched with a base model id and `effort` gets a dollar estimate.\n\n## Release impact\n\n`release::minor`. This adds a harness, and the price table gains Google models. No existing harness, reader or price changes.\n\n## Removed tests\n\n- tests/test_refresh_prices.py::test_build_prices_both_providers_deriving_cache_write_for_anthropic_only -- renamed to tests/test_refresh_prices.py::test_build_prices_every_provider_deriving_cache_write_for_anthropic_only (now also covers google)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n",
+  "labels": [
+   "release::minor"
+  ]
+ },
+ {
+  "number": 355,
+  "title": "Review submit takes a chain revision's digest",
+  "body": "`ReviewIn` carried no digest, so `_submit` approved with `approve_gate(..., None)` and every chain_revision gate answered 409. It now takes an optional `digest`, passed to the gate approval exactly as `POST /gates/{gate}/approve` takes it. A non-revision gate ignores it; a revision gate without one keeps its 409 and message.\n\n## Changelog\n\nApproving a chain-revision gate from a review now works: the review submit takes the revision's digest.\n\n## Release impact\n\n`release::patch`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::patch"
+  ]
+ },
+ {
+  "number": 358,
+  "title": "Sweep: a crashed spec fails the wave; tsc checks every sweep spec",
+  "body": "A sweep spec that failed to parse was skipped silently and the wave still passed (a bad merge once dropped a `] },` from `interactions.spec.ts`; every interaction flow went missing and the wave reported 1/1 pass).\n\n## Changelog\n\n## Release impact\n\n`release::none`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::none"
+  ]
+ },
+ {
+  "number": 361,
+  "title": "UX V2 W13 A: draft rebase and fragment routes",
+  "body": "W13 section A, split out of the W13 backend branch so W10 can build on it. `POST /api/drafts/{area}/{key}/rebase` takes the published files as a stale draft's new base without losing the draft's text (the 409 on publish no longer means a lost draft), and `GET /api/drafts/{area}/{key}/fragment` reads one component's YAML out of a draft. Bead Kraft-izpqt closes when this merges.\n\n## Changelog\n\nDraft areas can rebase a stale draft onto the published files and read a component's YAML from a draft.\n\n## Release impact\n\n`release::minor`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::minor"
+  ]
+ },
+ {
+  "number": 378,
+  "title": "DELETE /repos refuses with 409 while a live item uses the repo",
+  "body": "## What\n`DELETE /api/repos?path=` now answers 409 naming the count when a work item that has not ended (active, paused, needs_human) uses the repo. Before, it returned 204 and stranded the item: its worktree and merge steps could no longer resolve the repo. It reuses `open_counts_by_repo`, the count the repos draft's `remove_repo` already reports as a problem, so the two paths agree.\n\n## Changelog\nFix: disconnecting a repository that still has running work items is refused with a 409 instead of stranding them.\n\n## Release impact\n`release::patch`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::patch"
+  ]
+ },
+ {
+  "number": 400,
+  "title": "UX V2 W18 (PR 2): the cutover: the new UI at /, the shipped UI deleted, theme.yaml migrated",
+  "body": "UX V2 wave W18, PR 2 of 2: the cutover. The new web UI moves from `/ng` to `/`, the shipped UI and its tests go, and `theme.yaml` is migrated once at startup. PR 1 (#388) laid the groundwork: the migration function, the shipped-address aliases and the new e2e specs.\n\n## Changelog\n\n**Kraft 1.5.0: a new web interface.**\n\nKraft's web UI is redesigned, at the same address. The board groups what needs you, what is running, what hasn't started and what is done, with a docked peek and bulk actions. The item page draws the chain, and each node, step and task opens in a side pane with its log, documents and config. A review page holds diffs, threads and gate decisions. Templates (Chains, Library, Harnesses, Repos) and Policy edit a draft that you review and publish. Phones get their own layout. The old interface is removed.\n\n- **What moved.** Settings → Chains, Library, Harnesses and Repos are now under **Templates**. An item's Changes tab is its **Review** page. Documents open from the task that wrote them. The Timeline is the task log and the board's event list. Old addresses still work: `/settings/chains`, `/settings/notify`, `#node=` links and `/ng/...` bookmarks all redirect. Links from the CLI, notifications and the VS Code extension are unchanged.\n- **Your theme.** On its first start, 1.5.0 rewrites `theme.yaml`. Your `palette` becomes `surface`, `accent` and `colour_amount`, and `palette` is removed. Your colours, mode and density stay as they were, and the old file is kept as `theme.yaml.pre-ux2`. A `palette` key is still read in 1.5; the next release refuses it.\n- **Cancel keeps the branch.** Cancel stops an item and keeps its branch and worktree. To delete them too, use `kraft item abandon`.\n\n## Removed tests\n\n- frontend/e2e/v2/attachments.visual.spec.ts -- moved to frontend/e2e/attachments.visual.spec.ts (J)\n- frontend/e2e/v2/board-responsive.spec.ts -- moved to frontend/e2e/board-responsive.spec.ts (J)\n- frontend/e2e/v2/chain.spec.ts -- moved to frontend/e2e/chain.spec.ts (J)\n- frontend/e2e/v2/lifecycle.spec.ts -- moved to frontend/e2e/lifecycle.spec.ts (J)\n- frontend/e2e/v2/planning.spec.ts -- moved to frontend/e2e/planning.spec.ts (J)\n- frontend/e2e/v2/regression.spec.ts -- moved to frontend/e2e/regression.spec.ts (J)\n- frontend/e2e/v2/search.spec.ts -- moved to frontend/e2e/search.spec.ts (J)\n- frontend/src/App.test.tsx -- the shipped UI, deleted (H)\n- frontend/src/components/AppNav.test.tsx -- the shipped UI, deleted (H)\n- frontend/sweep/elements.spec.ts -- shot the shipped item page regions (K)\n- tests/api/test_settings.py::test_put_theme_shipped_full_object_keeps_the_v2_keys -- renamed tests/api/test_settings.py::test_put_theme_full_object_keeps_the_v2_keys (G)\n- tests/test_palette_contrast.py::test_danger_is_not_rotated_per_palette -- the shipped palettes are deleted; tests/test_theme_contrast.py covers the new tokens (H)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::minor"
+  ]
+ },
+ {
+  "number": 402,
+  "title": "Docs: the 1.5.0 interface",
+  "body": "## What / Evidence\n\n## Changelog\n\nnone (docs)\n\n## Release impact\n\n`release::none`: docs only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "labels": [
+   "release::none"
+  ]
+ },
+ {
+  "number": 409,
+  "title": "Pin httpx below 1.0, which the CLI's client does not support yet",
+  "body": "## What / Evidence\n\n## Changelog\n\nFix: Pin httpx below 1.0, which the CLI's client does not support yet.\n\n## Release impact\n\n`release::patch`: a dependency ceiling that fixes installs that resolve httpx 1.0 prereleases.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "labels": [
+   "release::patch"
+  ]
+ },
+ {
+  "number": 418,
+  "title": "Raise cap on a policy budget_usd stop: dollars, PATCH the policy, retry (desktop and phone)",
+  "body": "## What / Evidence\n\n## Changelog\n\nFixed: Raise cap on a budget stop that a policy `budget_usd` caused (desktop and the phone's Raise budget) now raises that policy in dollars and retries, instead of failing with a 409. A budget stop on the item's own cap still raises with Raise budget.\n\n## Removed tests\n\n- `frontend/src/ng/phone/item/Item.test.tsx::raising the cap that stopped the item (R73) > a stop.limit on a stop that is not a cap draws nothing` is replaced by `... a stop.limit on a stop that is neither a cap nor a budget draws nothing`, with the budget case now drawing the dollar sheet (see `raising a policy budget_usd that stopped the item`).\n\n## Release impact\n\n`release::patch`: a shipped behaviour fix, and `stop.limit` gains `key: budget_usd` on the detail (additive; documented in `7.http-api.md`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::patch"
+  ]
+ }
+]

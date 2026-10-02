@@ -36,6 +36,15 @@ are `release::none`, there is no version to bump and it releases nothing. The
 notes are those pull requests' `## Changelog` sections, grouped into breaking
 changes, new features and fixes.
 
+Put `notes::highlight` on the release's headline change, and rarely on more
+than one or two pull requests per release. That pull request's entry moves into
+a **Highlights** section at the top of the notes and is not repeated under its
+impact. Its `release::` label still counts toward the bump. Before you add it,
+make sure the `## Changelog` section reads as a headline, since it now opens the
+release notes. You can add the label after merge, then dry-run again to check.
+A `release::none` pull request has no entry to highlight, so the release stops
+and names it; remove one of the two labels.
+
 It refuses to run until `test` has passed on the commit being released. Then it
 builds the wheel, smoke-tests it (installed on the floor Python, 3.12, since the
 one wheel serves every supported version), pushes the tag, creates the GitHub Release

@@ -240,6 +240,14 @@ A pull request that ships something writes its user-facing line in the
 release writes it. A pull request that leaves the section empty is listed by
 its title.
 
+The release's headline change can also carry `notes::highlight`, next to its
+`release::` label. Its entry then opens the release notes under **Highlights**
+instead of sitting among the others, and its impact still counts toward the
+bump. Keep it for the change the release is about: rarely more than one or two
+per release. Write its `## Changelog` section as a headline. A `release::none`
+pull request with the label stops the release, since there is no entry to
+highlight. See [RELEASING.md](RELEASING.md#cut-a-release).
+
 **Pull requests from forks are not asked for a label** — only people with write
 access can apply one. A maintainer labels the pull request before merging. One
 merged without a label stops the next release, naming it; label it (labels
