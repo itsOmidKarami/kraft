@@ -92,6 +92,24 @@ describe("ChainConfig", () => {
     expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { policy: { budget_usd: 10 } } }, { method: "POST", path: "/work-items/w1/retry", body: {} }]);
   });
 
+  it("after a Raise cap, meters and lists the item's policy cap, and the pencil raises that cap keeping the rest of the override", async () => {
+    const calls = stubFetch();
+    const policy_override = { budget_usd: 1, paths: { verification: { max_attempts: 5 } } };
+    const { reload } = show({ budget_cap: { cap_usd: 1, source: "item", key: "policy.budget_usd", spent_usd: 0.07 }, policy_override }, true);
+    expect(screen.getByText("Budget").closest(".meter")).toHaveTextContent("$0.070 of $1.00");
+    expect(screen.queryByText(/Nothing changed/)).toBeNull();
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["budget_usd $1.00 · item policy", "verification max_attempts 5 · item policy"]);
+    expect(screen.queryByRole("button", { name: "No cap" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "+$5" }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { policy: { ...policy_override, budget_usd: 6 } } }]);
+  });
+
+  it("lists the item's own cap whenever it set one, beside a lower policy cap", () => {
+    show({ budget_set: 1, budget_usd: 20, budget_cap: { cap_usd: 5, source: "item", key: "policy.budget_usd", spent_usd: 1 }, policy_override: { budget_usd: 5, max_attempts: 4 } });
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["budget $20.00", "budget_usd $5.00 · item policy", "max_attempts 4 · item policy"]);
+  });
+
   it("says nothing changed without overrides, and resets a node override", async () => {
     const { unmount } = render(<ChainConfig item={detail({ node_overrides: {} })} policy={null} reload={() => {}} editBudget={false} onEditBudget={() => {}} />);
     expect(screen.getByText(/Nothing changed/)).toBeInTheDocument();

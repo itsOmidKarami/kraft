@@ -39,6 +39,20 @@ describe("ng Menu", () => {
     expect(focused()).toBe("Rename");
   });
 
+  it("moves focus in only once the list can take it: a browser refuses focus to a visibility:hidden element", () => {
+    // jsdom focuses a hidden element anyway, so read what a browser would see at the moment focus lands.
+    const seen: string[] = [];
+    const onFocus = (e: FocusEvent) => seen.push(getComputedStyle(e.target as Element).visibility);
+    document.addEventListener("focusin", onFocus);
+    try {
+      setup();
+    } finally {
+      document.removeEventListener("focusin", onFocus);
+    }
+    expect(focused()).toBe("Rename");
+    expect(seen).toEqual(["visible"]);
+  });
+
   it("Escape closes and gives focus back to the trigger", () => {
     const { trigger } = setup();
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
