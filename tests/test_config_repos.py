@@ -513,8 +513,12 @@ def test_the_test_probe_prefers_the_justfiles_test_recipe_over_pyproject(
 #: Files in a repo's root -> the (marker, test command) probed from them.
 _UV_TEST_PROBES = {
     "uv": (["pyproject.toml", "uv.lock"], ("uv.lock", "uv run pytest -q")),
-    "a-pyproject-with-no-uv-lock-gets-nothing": (["pyproject.toml"], None),
-    "a-pyproject-with-no-uv-lock-is-not-handed-npm": (["pyproject.toml", "package.json"], None),
+    "a-pyproject-with-no-uv-lock-stops": (["pyproject.toml"], ("pyproject.toml", None)),
+    "a-pyproject-with-no-uv-lock-is-not-handed-npm": (
+        ["pyproject.toml", "package.json"],
+        ("pyproject.toml", None),
+    ),
+    "an-unmarked-directory-gets-nothing": ([], None),
     "npm": (["package.json"], ("package.json", "npm test")),
     "cargo": (["Cargo.toml"], ("Cargo.toml", "cargo test")),
     "go": (["go.mod"], ("go.mod", "go test ./...")),

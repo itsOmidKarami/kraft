@@ -82,16 +82,15 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         # Undeclared stops the repo's first work item; "" is a declared none.
         print(
             "setup command: none found (it looks for an npm, yarn, pnpm or uv lockfile, "
-            "Cargo.toml or go.mod, and a pyproject.toml without uv.lock gets none); "
-            "set `setup_command` in its repos.yaml "
-            'entry, `""` if it needs no preparation'
+            "Cargo.toml or go.mod). A pyproject.toml without uv.lock gets none. Set "
+            '`setup_command` in its repos.yaml entry, `""` if it needs no preparation'
         )
     if result.get("enabled") is False:
         print(
             "saved disabled: no test command found (it looks for a justfile `test` recipe, "
-            "uv.lock, package.json, Cargo.toml or go.mod, and a pyproject.toml without "
-            "uv.lock gets none); set `test_command` in "
-            "its repos.yaml entry, then `enabled: true`"
+            "uv.lock, package.json, Cargo.toml or go.mod, at the root and one level down). "
+            "A pyproject.toml without uv.lock in either place gets none. Set `test_command` "
+            "in its repos.yaml entry, then `enabled: true`"
         )
 
 

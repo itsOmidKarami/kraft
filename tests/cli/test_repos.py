@@ -128,7 +128,8 @@ def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, ca
     assert "test command:" not in out
     assert "setup command: none found" in out
     assert "saved disabled: no test command found" in out
-    assert "a pyproject.toml without uv.lock gets none" in out
+    assert "A pyproject.toml without uv.lock gets none." in out
+    assert "A pyproject.toml without uv.lock in either place gets none." in out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
@@ -459,6 +460,45 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
     assert "frontend" not in root["paths"]
     assert "pyproject.toml" in root["paths"]
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        ["pyproject.toml", "frontend/package.json"],
+        ["backend/pyproject.toml", "frontend/package.json", "package-lock.json"],
+    ],
+    ids=["at-the-root", "one-level-down"],
+)
+def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(repo, layout):
+    """A `frontend/` scope alone is what a diff to the Python code fails open
+    to, so it would pass on `npm test` with the Python suite never run."""
+
+    from kraft import config
+
+    for path in layout:
+        (repo / path).parent.mkdir(exist_ok=True)
+        (repo / path).write_text("{}")
+    probed = config.probe_repo(repo)
+    assert (probed["test_command"], probed["test_scopes"]) == (None, [])
+    (repo / Path(layout[0]).parent / "uv.lock").write_text("version = 1\n")
+    assert config.probe_repo(repo)["test_command"] is not None
+
+
+def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(repo):
+    """With a command given, the stopped directory just gets no scope of its
+    own: the root scope, running that command, is what its changes match."""
+
+    from kraft import config
+
+    for path in ["backend/pyproject.toml", "frontend/package.json"]:
+        (repo / path).parent.mkdir()
+        (repo / path).write_text("{}")
+    probed = config.probe_repo(repo, test_command="make test")
+    assert probed["test_command"] == "make test"
+    root, nested = probed["test_scopes"]
+    assert ("backend/**" in root["paths"], root["command"]) == (True, "make test")
+    assert nested == {"paths": ["frontend/**"], "command": "npm test"}
 
 
 def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):

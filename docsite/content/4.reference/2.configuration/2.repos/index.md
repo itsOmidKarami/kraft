@@ -252,8 +252,10 @@ manifest) and prints the test command with the file it came from; check both
 before trusting them, and `kraft admin doctor` reports any connected repo still
 missing a `setup_command`.
 
-It proposes each command from the first of these files it finds in the
-repo's root:
+It proposes each command from the first of these files it finds. The setup
+command is read from the repo's root only. The test command is read from the
+root and from each directory one level down, and a match there becomes a test
+scope for that directory:
 
 | File | Proposed `setup_command` |
 |---|---|
@@ -275,11 +277,16 @@ repo's root:
 A `pyproject.toml` with no `uv.lock` beside it gets neither command. `uv sync`
 and `uv run` both write a `uv.lock` when there is none, and the worker would
 commit it on the item's branch. Kraft does not fall back to a `package.json`,
-`Cargo.toml` or `go.mod` beside it either, so a Python repo is never handed
-another language's commands. An npm, yarn or pnpm lockfile still wins the
-setup guess, and a justfile `test` recipe the test guess, since each comes
-first. A `package.json` with no lockfile gets no `setup_command` for the
+`Cargo.toml` or `go.mod` beside it either. An npm, yarn or pnpm lockfile still
+wins the setup guess, and a justfile `test` recipe the test guess, since each
+comes first. A `package.json` with no lockfile gets no `setup_command` for the
 same reason: `npm install` would write one.
+
+For tests, one such `pyproject.toml` anywhere Kraft looks means no test command
+for the whole repo. Say `backend/` has one and `frontend/` has a
+`package.json`. A change to `backend/` matches no scope, and a change that
+matches none runs every scope, so a `frontend/**` scope alone would pass it on
+`npm test` with the Python tests never run. Kraft proposes nothing instead.
 
 Connect says when it found no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` if the repo needs no
