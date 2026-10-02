@@ -14,6 +14,7 @@ import importlib.util
 import socket
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -117,9 +118,29 @@ def test_a_wildcard_listener_is_refused(serve, wildcard_taken_port):
 
 
 def test_default_port_is_ephemeral(serve, monkeypatch):
+    """Unpinned, the port is whatever the kernel hands a bind to port 0 --
+    not a default of serve.py's own, which two instances would share."""
     monkeypatch.delenv("KRAFT_PORT", raising=False)
-    port = serve.resolve_port()
-    assert 0 < int(port) < 65536
+    binds = []
+
+    class KernelPick:
+        """A socket whose kernel always picks 54321 for a port-0 bind."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def bind(self, addr):
+            binds.append(addr)
+
+        def getsockname(self):
+            return ("127.0.0.1", 54321 if binds[-1][1] == 0 else binds[-1][1])
+
+    monkeypatch.setattr(serve, "socket", SimpleNamespace(socket=KernelPick))
+    assert serve.resolve_port() == "54321"
+    assert binds == [("127.0.0.1", 0)]
 
 
 def test_default_path_never_probes(serve, monkeypatch):

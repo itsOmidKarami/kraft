@@ -19,7 +19,6 @@ from support.harness import entry_of
 from support.workspace import workspace_item
 
 from kraft import store
-from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, walk
 from kraft.executor.context import READ_ONLY_VIOLATED, LaunchContext
 from kraft.templates import models as tm
@@ -44,7 +43,6 @@ def _launches(monkeypatch, during=None) -> list:
         return "done"
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
-    monkeypatch.setattr(agent_mod._subprocess, "run_task", run_task)
     return launched
 
 

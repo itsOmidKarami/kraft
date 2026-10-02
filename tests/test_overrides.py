@@ -84,6 +84,7 @@ def test_a_null_unknown_field_is_still_named():
         "openrouter/x",
         "opus[1m]",
         "~anthropic/claude-latest",
+        pytest.param("x" * 128, id="128-characters"),
     ],
 )
 def test_a_model_id_is_accepted(model):

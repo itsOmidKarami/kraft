@@ -85,7 +85,7 @@ export function PhoneSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> })
         </div>
         {locked && <p className="ph-error" role="timer" aria-live="off">{`Too many failed attempts. Try again in ${clock(left)}.`}</p>}
         <Button type="submit" className="ph-btn ph-btn-primary" variant="primary" disabled={busy || locked}>{busy ? "Signing in…" : "Sign in"}</Button>
-        <p className="ph-note">Set or change the password in Settings → Access from the machine Kraft runs on. Sessions are listed there and can be revoked.</p>
+        <p className="ph-note">Set or change the password in Settings › Access from the machine Kraft runs on. Sessions are listed there and can be revoked.</p>
       </form>
     </main>
   );

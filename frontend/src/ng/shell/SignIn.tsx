@@ -124,7 +124,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
         )}
         <Button type="submit" variant="primary" disabled={busy || locked}>{busy ? "Signing in…" : "Sign in"}</Button>
         <p className="ng-signin-foot">
-          Set or change the password in Settings → Access from the machine Kraft runs on. Sessions are listed there and can be revoked.
+          Set or change the password in Settings › Access from the machine Kraft runs on. Sessions are listed there and can be revoked.
         </p>
       </form>
     </main>

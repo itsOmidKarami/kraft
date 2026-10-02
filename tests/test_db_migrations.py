@@ -260,17 +260,17 @@ def test_migrate_mid_step_failure_rolls_back_whole_run(monkeypatch, tmp_path):
 
     broken = dict(db._MIGRATIONS)
     broken[2] = ["INVALID SQL STATEMENT"]
-    monkeypatch.setattr(db, "_MIGRATIONS", broken)
-
-    with pytest.raises(sqlite3.OperationalError):
-        db.migrate(conn)
-
-    # step 1 (retry_counters) must not have survived the failure of step 2
-    assert "retry_counters" not in schema.tables(conn)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    # Scoped, not `monkeypatch.undo()`: that would also undo the autouse
+    # isolation fixtures' patches for the rest of the test.
+    with monkeypatch.context() as m:
+        m.setattr(db, "_MIGRATIONS", broken)
+        with pytest.raises(sqlite3.OperationalError):
+            db.migrate(conn)
+        # step 1 (retry_counters) must not have survived the failure of step 2
+        assert "retry_counters" not in schema.tables(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
 
     # and the database is still migratable once the broken step is gone
-    monkeypatch.undo()
     db.migrate(conn)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert "retry_counters" in schema.tables(conn)

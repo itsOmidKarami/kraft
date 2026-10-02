@@ -7,15 +7,19 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from support.harness import v1_chain, v1_item
 
-from kraft import auto_escalate_delay, policy, store
+from kraft import auto_escalate_delay, events, policy, store
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
 
-def _gate_chain(repo):
-    """`a` (exec) -> `g` (a gate that declares its own reviewer)."""
+def _gate_chain(repo, *, auto_review=True):
+    """`a` (exec) -> `g` (a gate that declares its own reviewer, unless
+    `auto_review` is False: a human-only gate)."""
+    reviewer = {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Review it."}
+    gate = {"id": "g", "kind": "gate", **({"auto_review": reviewer} if auto_review else {})}
     return v1_chain(
         [
             {
@@ -23,16 +27,7 @@ def _gate_chain(repo):
                 "kind": "exec",
                 "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
             },
-            {
-                "id": "g",
-                "kind": "gate",
-                "auto_review": {
-                    "id": "reviewer",
-                    "kind": "agent",
-                    "harness": "claude",
-                    "prompt": "Review it.",
-                },
-            },
+            gate,
         ],
         repo=repo,
     )
@@ -49,8 +44,9 @@ def _state(tmp_path, *, policy_obj=None) -> dict:
     }
 
 
-async def _seed_awaiting_gate(app, repo, *, wid="w1", auto_gate=True) -> None:
-    await v1_item(app.state.db, _gate_chain(repo), repo=repo, wid=wid, auto_gate=auto_gate)
+async def _seed_awaiting_gate(app, repo, *, wid="w1", auto_gate=True, auto_review=True) -> None:
+    chain = _gate_chain(repo, auto_review=auto_review)
+    await v1_item(app.state.db, chain, repo=repo, wid=wid, auto_gate=auto_gate)
     # A V1 gate is its own node, and the walk stands on it.
     await app.state.db.write(lambda c: store.enter_node(c, wid, "g"))
     await app.state.db.write(lambda c: store.request_gate(c, wid, "g", "g"))
@@ -99,6 +95,41 @@ async def test_tick_dispatches_an_awaiting_gate_item_once_its_delay_has_elapsed(
     await auto_escalate_delay.tick(app)
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("refusal", ["auto-gate-off", "human-only-gate", "review-attempts-spent"])
+async def test_tick_spends_no_slot_on_a_gate_no_agent_may_review(
+    tmp_path, monkeypatch, repo, stub_app, refusal
+):
+    """Past its delay, but a gate the poller's own pre-filter says nothing can
+    review: the item did not ask for auto-gate, the gate names no reviewer, or
+    this request already had its `auto_review_attempts`. Spawning a check for
+    it anyway would only hand the status back, holding a slot meanwhile."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    calls = []
+
+    async def fake_review(*a, **kw):
+        calls.append(1)
+        return "undecided", None
+
+    monkeypatch.setattr("kraft.executor.gates.gate_review.review", fake_review)
+    monkeypatch.setattr("kraft.executor.gates._seconds_since", lambda evts, pred: 10_000.0)
+    pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=600)
+
+    app = stub_app(**_state(tmp_path, policy_obj=pol))
+    await _seed_awaiting_gate(
+        app,
+        str(repo),
+        auto_gate=refusal != "auto-gate-off",
+        auto_review=refusal != "human-only-gate",
+    )
+    if refusal == "review-attempts-spent":
+        await app.state.db.write(
+            lambda c: events.append(c, "w1", "gate_auto_review_started", {"gate": "g"})
+        )
+    assert await auto_escalate_delay.tick(app) == []
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+    assert calls == []
 
 
 async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(
@@ -392,12 +423,30 @@ async def test_a_legacy_row_does_not_abort_the_tick_for_every_other_row(
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
 
     app = stub_app(**_state(tmp_path, policy_obj=pol))
-    # A legacy row: `chain_definition` only, and a per-node delay so it gets
-    # past `tick`'s own zero-delay filter and reaches `auto_check_due`.
-    await _seed_awaiting_gate(app, str(repo), wid="legacy")
+    # A legacy row: `chain_definition` only, no `materialized_chain`, armed for
+    # auto-gate and standing on a pending gate. The delay override sits on the
+    # node it stands on, so the row gets past `tick`'s own zero-delay filter and
+    # reaches `auto_check_due`, which is where `walk.chain_of` raises.
     await app.state.db.write(
-        lambda c: store.set_node_overrides(c, "legacy", {"a": {"auto_escalate_delay_s": 1}})
+        lambda c: store.create_work_item(
+            c,
+            id="legacy",
+            bead_id=None,
+            title="t",
+            repo=str(repo),
+            chain_template="t",
+            chain_definition='{"template_id": "t", "nodes": [{"id": "a"}, {"id": "g"}]}',
+            auto_gate=True,
+            node_overrides={"g": {"auto_escalate_delay_s": 1}},
+        )
     )
+    await app.state.db.write(lambda c: store.enter_node(c, "legacy", "g"))
+    await app.state.db.write(lambda c: store.request_gate(c, "legacy", "g", "g"))
+    legacy = app.state.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = 'legacy'").fetchone()
+    )
+    assert legacy["materialized_chain"] is None
+    assert store.effective_auto_escalate_delay_s(legacy, 0) == 1
     # A V1 row that is due: stopped, armed, past a delay of 1s.
     await app.state.db.write(
         lambda c: store.create_work_item(

@@ -182,7 +182,7 @@ def _config_checks() -> list[dict]:
                     "access.yaml",
                     True,
                     f"bound to {bind} with no allowed_hosts: a browser on another "
-                    "device is refused; add each name it uses on Settings > Access",
+                    "device is refused; add each name it uses on Settings › Access",
                     warn=True,
                 )
             )
