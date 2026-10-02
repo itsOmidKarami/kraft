@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -80,6 +81,16 @@ def refusal(exc: BaseException) -> str:
     it to the agent, so the two read the same. A message that already led with
     `kraft` would otherwise read `kraft: kraft 404: ...`."""
     return f"kraft: {_OWN_LEAD.sub('', str(exc), count=1)}"
+
+
+def segment(value: object) -> str:
+    """`value` as one URL path segment. Every id, thread id or doc id a
+    caller passes goes through here before it enters a path: unencoded, an
+    MCP `get_work_item("../../etc/passwd")` became `GET /etc/passwd`, and
+    `x/../<other>/pause` paused another item. `quote` leaves `.` alone, and a
+    bare `.` or `..` is a dot segment httpx would still resolve away."""
+    text = quote(str(value), safe="")
+    return text.replace(".", "%2E") if text in (".", "..") else text
 
 
 def _api(path: str) -> str:
