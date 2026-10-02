@@ -24,6 +24,19 @@ def test_raise_budget_help_says_which_cap_it_raises(capsys):
     ) in text
 
 
+def test_set_overrides_help_says_each_call_replaces_the_override(capsys):
+    """`set-node-override` merges and this one does not, and a person who ran
+    one then the other lost the model without being told."""
+    text = _help(capsys, "item", "set-overrides")
+    assert "Each call replaces the item-wide override" in text
+    assert "a flag you leave out goes back to the template's own binding" in text
+
+
+def test_set_node_override_help_says_it_merges(capsys):
+    text = _help(capsys, "item", "set-node-override")
+    assert "Each call changes only the flags you give" in text and "--clear resets the node" in text
+
+
 def test_create_gives_its_title_a_help_line(capsys):
     assert "title the item's title: one line, as the board shows it" in _help(
         capsys, "item", "create"
