@@ -44,7 +44,7 @@ repos:
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `npm --prefix frontend test`, not `npm test`. Not synthesized from `test_command` — the two stay independently editable. |
 | `intent_dir` | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Its check runs as one of the repo's `test_scopes`. |
-| `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing"; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
+| `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing", which is the **No setup needed** checkbox in Templates › Repos; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
 | `env` | `{}` | Literal environment variables every worker for this repo gets. A worker's environment is an allowlist, not the daemon's: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`, `TZ`, `TMPDIR`, `SSH_AUTH_SOCK`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case), the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`), Kraft's own `KRAFT_*` variables and the agent's credential variable. These values are layered on top of it. A sandboxed worker gets none of that allowlist, only what [Sandboxed workers](#sandboxed-workers) lists, which covers the daemon's proxy and an extra CA. |
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the worker allowlist under `env` doesn't cover. A sandbox gets each by name, so its value never appears on the `docker` command line. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. Only a file the worktree's `.gitignore` covers is copied; an entry that is not, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`). |
@@ -323,8 +323,8 @@ none runs every scope. A `frontend/**` scope alone would then pass it on
 `npm test`, again with the Python tests never run.
 
 Connect says when it proposed no command. With no `test_command` it saves the
-repo disabled. Set `setup_command` yourself, or `""` if the repo needs no
-preparation. Set `test_command`, then `enabled: true`.
+repo disabled. Set `setup_command` yourself, or `""` (the **No setup needed**
+checkbox in Templates › Repos) if the repo needs no preparation. Set `test_command`, then `enabled: true`.
 
 ## Repository steering
 

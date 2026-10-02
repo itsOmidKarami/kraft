@@ -974,7 +974,8 @@ async def _repo_checks() -> list[dict]:
                     f"setup {_label(repo)}",
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
-                    ' (use "" if this repo deliberately needs no preparation)',
+                    ' (use "" if this repo deliberately needs no preparation), or tick '
+                    "No setup needed under Templates › Repos",
                 )
             )
         unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
