@@ -94,6 +94,32 @@ def test_archive_rescues_commits_on_a_detached_head(client, repo):
     assert r.json().items() >= {"rescued_branch": rescued, "rescued_commits": 1}.items()
 
 
+def test_archive_keeps_the_worktree_when_the_rescue_fails(client, repo):
+    """When the rescue branch cannot be made, the worktree is the only copy
+    of the detached commits: archive still archives, but leaves it and says
+    why. A branch named `kraft/rescued` makes git refuse the ref under it."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    _git(repo, "tag", "so-far", branch)
+    _git(repo, "branch", "kraft/rescued", branch)
+    _git(worktree, "checkout", "-q", "--detach")
+    _git(worktree, "commit", "--allow-empty", "-m", "detached work")
+    client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
+
+    r = client.post(f"/api/work-items/{wid}/archive")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["worktree_removed"] is False
+    assert r.json()["worktree_kept"].startswith("rescue failed: ")
+    assert worktree.is_dir()
+    assert client.get(f"/api/work-items/{wid}").json()["archived_at"]
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    payload = next(e["payload"] for e in events if e["type"] == "work_item_archived")
+    assert payload["worktree_kept"] == r.json()["worktree_kept"]
+
+
 def test_archive_refuses_an_active_item(client, repo):
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")

@@ -249,7 +249,11 @@ def _rescue_detached_head(repo: Path, worktree: Path, wid: str) -> dict:
     when it is detached and holds commits on no branch, remote-tracking
     branch or tag and not in what Kraft pushed. Those are named
     `kraft/rescued/<wid>` in `repo` before the worktree goes, and returned
-    as `rescued_branch` and `rescued_commits`; nothing to rescue is {}."""
+    as `rescued_branch` and `rescued_commits`; nothing to rescue is {}.
+
+    A rescue git refuses (a sandboxed item's repository may not have the
+    commits at all) returns `worktree_kept` with the reason instead: the
+    worktree is then the only copy, and archive must leave it."""
     if not worktree.is_dir():
         return {}
     if git_read(worktree, "symbolic-ref", "-q", "HEAD", expected_failure=True):
@@ -278,8 +282,9 @@ def _rescue_detached_head(repo: Path, worktree: Path, wid: str) -> dict:
         text=True,
     )
     if done.returncode != 0:
-        logger.warning("archive %s: could not keep detached HEAD %s: %s", wid, head, done.stderr)
-        return {}
+        reason = done.stderr.strip() or f"git update-ref exited {done.returncode}"
+        logger.warning("archive %s: could not keep detached HEAD %s: %s", wid, head, reason)
+        return {"worktree_kept": f"rescue failed: {reason}"}
     return {
         "rescued_branch": name,
         "rescued_commits": int(count) if count and count.isdigit() else 1,
@@ -445,6 +450,10 @@ async def _archive_one(app, row, by: str) -> dict:
         logger.info(
             "archive %s kept branch %s in %s: %d unpushed commit(s)", wid, branch, where, count
         )
+    if "worktree_kept" in extra:
+        # The rescue failed, so the worktree (and a sandbox's ref store beside
+        # it) holds the only copy of those commits: archived, but left whole.
+        return {"worktree_removed": False, **extra}
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
