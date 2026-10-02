@@ -231,6 +231,19 @@ def test_an_api_refusal_reaches_the_agent_as_the_line_the_cli_prints(app, repo):
     assert again.endswith(": kraft: 409: work item is paused, not running"), again
 
 
+def test_an_agent_cannot_file_an_item_with_a_blank_title(app, repo):
+    """The board would show it as a bare dash. The CLI reaches the same
+    route, so `kraft item create "   "` is refused the same way."""
+
+    async def scenario():
+        async with Client(mcp.build()) as session:
+            await session.call_tool("ensure_repo", {"path": str(repo)})
+            return await _agent_reads(session, "create_work_item", {"title": "", "repo": str(repo)})
+
+    assert asyncio.run(scenario()).endswith(": kraft: 422: title cannot be empty")
+    assert asyncio.run(client.list_work_items()) == []
+
+
 #: A value of each JSON schema type, to fill a tool's required arguments.
 _SAMPLE = {"string": "x", "integer": 1, "number": 1.0, "boolean": False, "object": {}, "array": []}
 

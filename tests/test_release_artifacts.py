@@ -7,6 +7,7 @@ import csv
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -15,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 # `dev/` is not a package; release_artifacts imports next_tag as a sibling script.
 _ROOT = Path(__file__).resolve().parents[1]
@@ -253,6 +255,43 @@ def test_kraft_ships_everywhere_before_the_extension_is_published():
         assert names.index(kraft) < extension, kraft
 
 
+def _job() -> dict:
+    return yaml.safe_load(RELEASE_YML.read_text())["jobs"]["release"]
+
+
+def test_only_the_marketplace_steps_hold_the_marketplace_token():
+    """VSCE_PAT is a year-long token. As a job-level variable it sat in the
+    environment of every step, `npm ci`'s install scripts among them."""
+    job = _job()
+    assert "VSCE_PAT" not in (job.get("env") or {})
+    holders = [s.get("name") for s in job["steps"] if "secrets.VSCE_PAT" in str(s.get("env"))]
+    assert holders == ["is there a Marketplace token", "publish the VS Code extension"]
+    assert RELEASE_YML.read_text().count("secrets.VSCE_PAT") == 2
+    steps = job["steps"]
+    gated = {s["name"]: s["if"] for s in steps if re.search("VSCE_PAT|has_pat", s.get("if", ""))}
+    assert list(gated) == [
+        "publish the VS Code extension",
+        "check the Marketplace lists this release",
+    ]
+    for condition in gated.values():
+        assert condition.endswith("&& steps.marketplace.outputs.has_pat == 'true'"), condition
+
+
+@pytest.mark.parametrize(("pat", "has_pat"), [("a-token", "true"), ("", "")], ids=["set", "unset"])
+def test_the_marketplace_steps_run_only_when_the_token_is_set(tmp_path, pat, has_pat):
+    (probe,) = (s for s in _job()["steps"] if s.get("id") == "marketplace")
+    output = tmp_path / "output"
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", probe["run"]],
+        env={"PATH": os.environ["PATH"], "VSCE_PAT": pat, "GITHUB_OUTPUT": str(output)},
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 0, run.stderr
+    # The token itself never reaches the output, which later steps can read.
+    assert output.read_text() == f"has_pat={has_pat}\n"
+
+
 def _smoke_version_check() -> str:
     text = RELEASE_YML.read_text()
     step = text[text.index("- name: smoke test the wheel") : text.index("- name: build the VS")]
@@ -284,6 +323,65 @@ def test_the_smoke_test_wants_the_wheel_to_report_exactly_the_tag(tag, says, ok)
     assert (run.returncode == 0) is ok, run.stdout + run.stderr
 
 
+def _notice_check(step: str, artifact: str) -> str:
+    """The `if ! unzip -l ... fi` in `step` that checks `artifact` for its notices."""
+    text = RELEASE_YML.read_text()
+    start = text.index(f"- name: {step}")
+    body = text[start : text.index("\n      - ", start + 1)]
+    check = rf"^ *(if ! unzip -l \"{re.escape(artifact)}\" .*?^ *fi\n)"
+    match = re.search(check, body, re.M | re.S)
+    assert match, f"{step!r} no longer checks {artifact} for THIRD_PARTY_LICENSES.txt"
+    return match.group(1)
+
+
+def _zip(path: Path, names: list[str]) -> None:
+    with zipfile.ZipFile(path, "w") as z:
+        for name in names:
+            z.writestr(name, "x")
+
+
+@pytest.mark.parametrize(
+    ("step", "artifact", "notice", "other"),
+    [
+        (
+            "smoke test the wheel",
+            "$WHEEL",
+            "kraft/_bundled/web/THIRD_PARTY_LICENSES.txt",
+            "kraft/_bundled/web/index.html",
+        ),
+        (
+            "build the VS Code extension",
+            "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix",
+            "extension/dist/THIRD_PARTY_LICENSES.txt",
+            "extension/dist/extension.js",
+        ),
+    ],
+    ids=["wheel", "vsix"],
+)
+@pytest.mark.parametrize("shipped", [True, False], ids=["with-notices", "without"])
+def test_a_release_artifact_without_its_third_party_licenses_fails_the_run(
+    tmp_path, step, artifact, notice, other, shipped
+):
+    """The web UI and the extension bundle MIT, ISC and OFL code whose licenses
+    ask for their notices to go with every copy. The build writes them; this is
+    the check that a wheel or a .vsix that lost them is never published."""
+    (tmp_path / "vsix").mkdir()
+    env = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "TAG": "v1.5.0"}
+    env["WHEEL"] = str(tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl")
+    path = env["WHEEL"] if artifact == "$WHEEL" else str(tmp_path / "vsix" / "kraft-1.5.0.vsix")
+    _zip(Path(path), [other, notice] if shipped else [other])
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", _notice_check(step, artifact)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert (run.returncode == 0) is shipped, run.stdout + run.stderr
+    if not shipped:
+        kind = "wheel" if artifact == "$WHEEL" else ".vsix"
+        assert f"::error::the {kind} has no {notice}" in run.stdout
+
+
 def test_the_extension_is_packed_with_the_release_tags_version_images_and_changelog():
     text = RELEASE_YML.read_text()
     step = text[
@@ -301,6 +399,9 @@ def test_the_extension_is_packed_with_the_release_tags_version_images_and_change
         < step.index("vsce package")
         < step.index("git checkout -- CHANGELOG.md")
     )
+    # The Get Started link is fixed on the packed .vsix, the one released.
+    assert 'release_artifacts.py" vsix-links "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"' in step
+    assert step.index("--out ") < step.index("vsix-links")
 
 
 def test_the_command_line_defaults_to_this_repository(tmp_path, monkeypatch):
@@ -315,3 +416,97 @@ def test_the_command_line_defaults_to_this_repository(tmp_path, monkeypatch):
         assert f"/{release_artifacts.REPOSITORY}/v1.5.0/a.png".encode() in z.read(
             "kraft_sdlc-1.5.0.dist-info/METADATA"
         )
+
+
+def _vsix(path: Path, homepage: str = "https://example.com/guide?a=1&b=2") -> dict[str, bytes]:
+    repo = "https://github.com/o/r.git"
+    links = "".join(
+        f'<Property Id="Microsoft.VisualStudio.Services.Links.{kind}" Value="{repo}" />\n'
+        for kind in ("Source", "Getstarted", "GitHub")
+    )
+    files = {
+        "extension.vsixmanifest": f"<Properties>\n{links}</Properties>\n".encode(),
+        "[Content_Types].xml": b"<Types />\n",
+        "extension/package.json": json.dumps({"name": "kraft", "homepage": homepage}).encode(),
+        "extension/dist/extension.js": b"module.exports = 1;\n",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(zipfile.ZipInfo(name, date_time=(2026, 10, 1, 12, 0, 0)), data)
+    return files
+
+
+def test_the_vsix_get_started_link_goes_to_the_extensions_guide(tmp_path):
+    """vsce sets Get Started to the clone URL, `.git` and all, and has no
+    setting for it. The other repository links are right as they are."""
+    vsix = tmp_path / "kraft-1.5.0.vsix"
+    before = _vsix(vsix)
+    release_artifacts.vsix_links(vsix)
+    with zipfile.ZipFile(vsix) as z:
+        assert z.testzip() is None
+        assert [i.filename for i in z.infolist()] == list(before)
+        after = {i.filename: z.read(i) for i in z.infolist()}
+    manifest = after["extension.vsixmanifest"].decode()
+    assert (
+        '<Property Id="Microsoft.VisualStudio.Services.Links.Getstarted" '
+        'Value="https://example.com/guide?a=1&amp;b=2" />'
+    ) in manifest
+    assert manifest.count('Value="https://github.com/o/r.git"') == 2
+    for name in before:
+        if name != "extension.vsixmanifest":
+            assert after[name] == before[name]
+
+
+def test_a_vsix_whose_get_started_link_moved_stops_the_release(tmp_path):
+    vsix = tmp_path / "kraft-1.5.0.vsix"
+    _vsix(vsix)
+    with zipfile.ZipFile(vsix) as z:
+        contents = {i.filename: z.read(i) for i in z.infolist()}
+    contents["extension.vsixmanifest"] = b"<Properties />\n"
+    with zipfile.ZipFile(vsix, "w") as z:
+        for name, data in contents.items():
+            z.writestr(name, data)
+    with pytest.raises(ValueError, match="0 Get Started links"):
+        release_artifacts.vsix_links(vsix)
+
+
+def test_the_extension_declares_kraft_s_own_license():
+    """Not `SEE LICENSE IN LICENSE`: the Marketplace and npm read an SPDX id."""
+    package = json.loads((_ROOT / "vscode" / "package.json").read_text())
+    pyproject = (_ROOT / "pyproject.toml").read_text()
+    assert f'license = "{package["license"]}"' in pyproject
+
+
+def test_the_packed_extension_is_built_without_a_source_map():
+    """`.vscodeignore` keeps *.map out of the .vsix, so the build `vsce
+    package` runs must not link one."""
+    package = json.loads((_ROOT / "vscode" / "package.json").read_text())
+    assert package["scripts"]["vscode:prepublish"] == "node esbuild.mjs --production"
+    assert "**/*.map" in (_ROOT / "vscode" / ".vscodeignore").read_text().splitlines()
+
+
+def _source_map_check() -> str:
+    text = RELEASE_YML.read_text()
+    start = text.index("- name: build the VS Code extension")
+    step = text[start : text.index("- name: push the tag")]
+    match = re.search(r"^ *(if unzip -p [^\n]*sourceMappingURL.*?^ *fi\n)", step, re.M | re.S)
+    assert match, "the extension's build no longer checks extension.js for a source map link"
+    return match.group(1)
+
+
+@pytest.mark.parametrize(
+    ("tail", "ok"),
+    [("", True), ("//# sourceMappingURL=extension.js.map\n", False)],
+    ids=["no-link", "dangling-link"],
+)
+def test_a_vsix_that_links_a_missing_source_map_fails_the_run(tmp_path, tail, ok):
+    (tmp_path / "vsix").mkdir()
+    with zipfile.ZipFile(tmp_path / "vsix" / "kraft-1.5.0.vsix", "w") as z:
+        z.writestr("extension/dist/extension.js", "x".join(["module.exports = 1;\n"] * 9000) + tail)
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", _source_map_check()],
+        env={"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "TAG": "v1.5.0"},
+        capture_output=True,
+        text=True,
+    )
+    assert (run.returncode == 0) is ok, run.stdout + run.stderr

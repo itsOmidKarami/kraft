@@ -9,11 +9,12 @@ and `_frame_guard` after it so a refusal carries its headers too)."""
 from __future__ import annotations
 
 import hmac
+import html
 import ipaddress
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -182,9 +183,77 @@ async def _perimeter(request: Request, call_next):
     before the SPA-shell branch, or a refused request gets answered by them.
     """
     refused = _refusal(request, check_origin=request.method not in ("GET", "HEAD"))
-    if refused is not None:
-        return JSONResponse({"detail": refused}, status_code=403)
-    return await call_next(request)
+    if refused is None:
+        return await call_next(request)
+    bound_host = getattr(request.app.state, "bound_host", "127.0.0.1")
+    if refused == _unexpected_host(bound_host) and _is_page_navigation(request):
+        return HTMLResponse(_unexpected_host_page(request, bound_host), status_code=403)
+    return JSONResponse({"detail": refused}, status_code=403)
+
+
+def _unexpected_host(bound_host: str) -> str:
+    return f"unexpected Host for a server bound to {bound_host}"
+
+
+def _is_page_navigation(request: Request) -> bool:
+    """A person opening a page in a browser, not a script or the SPA's own
+    calls: those get the JSON refusal every API client reads."""
+    return (
+        request.method in ("GET", "HEAD")
+        and not _is_api_path(request.url.path)
+        and "text/html" in request.headers.get("accept", "")
+    )
+
+
+def _raw_host(request: Request) -> str:
+    """The `Host` header as the browser sent it, UTF-8 with replacement."""
+    for key, value in request.scope.get("headers", []):
+        if key == b"host":
+            return value.decode("utf-8", "replace")
+    return ""
+
+
+def _unexpected_host_page(request: Request, bound_host: str) -> str:
+    """What a browser shows for a name this server does not answer to: the
+    name it got and how to allow it, not a bare JSON line. A 1.4 server never
+    checked the Host of a plain-http browser, so after an upgrade this is the
+    first a LAN user hears of `allowed_hosts`. The Host is the requester's
+    own text, so it is escaped, after decoding it as UTF-8: Starlette's
+    latin-1 turns a non-ASCII name into mojibake.
+
+    The link back is the bound address, or 127.0.0.1 for a wildcard bind,
+    which listens there too."""
+    raw = _raw_host(request)
+    name = html.escape(config_mod.host_name(raw) or raw or "(none)")
+    port = getattr(request.app.state, "bound_port", None) or request.url.port or 8765
+    here = "127.0.0.1" if bound_host in ("0.0.0.0", "::") else bound_host
+    local = html.escape(f"http://{config_mod.url_host(here)}:{port}/")
+    if bound_host in config_mod.LOOPBACK:
+        how = (
+            f"<p>It is bound to {html.escape(bound_host)}, so it answers only at "
+            f"<code>localhost</code> or <code>127.0.0.1</code>. On this machine, open "
+            f'<a href="{local}">{local}</a>. To reach it from another device, bind it to '
+            "the network on Settings &gt; Access first.</p>"
+        )
+    else:
+        how = (
+            "<p>On a network bind, Kraft answers a browser only at a name listed in "
+            "<code>allowed_hosts</code>. To allow this one, open Kraft on the machine it "
+            f'runs on, at <a href="{local}">{local}</a>, and add <code>{name}</code> on '
+            "Settings &gt; Access, where it applies at once. Or add it to "
+            "<code>allowed_hosts</code> in <code>access.yaml</code> and restart Kraft. "
+            "Enter the exact name: a wildcard is refused.</p>"
+        )
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        "<title>Kraft: address not allowed</title>"
+        "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:3rem auto;"
+        "padding:0 16px;color:#1d1d1f;background:#fff}"
+        "@media (prefers-color-scheme:dark){body{color:#e8e8ea;background:#161618}"
+        "a{color:#8ab4ff}}code{font-size:.95em}</style></head><body>"
+        f"<h1>Kraft does not answer to <code>{name}</code></h1>{how}</body></html>"
+    )
 
 
 #: No other site may put Kraft in a frame. A loopback board has no login, so
@@ -258,7 +327,7 @@ def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
         allowed = set((getattr(st, "access", None) or {}).get("allowed_hosts") or [])
         refused = _from_a_browser(request) and hostname not in allowed | _LOCAL_HOSTS
     if refused:
-        return f"unexpected Host for a server bound to {bound_host}"
+        return _unexpected_host(bound_host)
 
     # 3. Cross-site write. `_origin_ok` plus one clause, so that a LAN instance
     #    serving its own SPA (Origin and Host both 192.168.1.5:8765) is not

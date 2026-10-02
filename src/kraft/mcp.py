@@ -261,11 +261,12 @@ def build() -> MCPServer:
 
     @server.tool()
     async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
-        """Raise a stopped Kraft work item's own dollar cap and retry it, the
-        board's Raise budget button. `budget_usd` is the new cap in dollars,
-        or null for no cap. Only for an item its own cap stopped: a stop on
-        the policy's per-scope `budget_usd` or `token_budget` (which
-        set_work_item_policy sets) or on `budget.daily_usd` is refused.
+        """Raise the dollar cap that stopped a Kraft work item and retry it,
+        the board's Raise budget button. `budget_usd` is the new cap in
+        dollars, or null for no cap. Takes a stop on the item's own cap or on
+        the item-wide `budget_usd` of its policy (merged into the item's
+        policy override, its other fields kept). A stop on a node's
+        `budget_usd`, a `token_budget` or `budget.daily_usd` is refused.
         Only a human should decide this — ask first."""
         return await client.raise_budget(budget_usd, work_item_id)
 
@@ -407,7 +408,9 @@ def build() -> MCPServer:
         {"total_time_cap_minutes": 60}}}`. It replaces the whole stored
         override; `clear` removes it. Refused, naming the field, past an
         administrator maximum. The item's own dollar cap, which stands in for
-        `budget.work_item_usd`, is `raise_budget`'s, not this. On a running or
+        `budget.work_item_usd`, is `raise_budget`'s, not this; to raise the
+        item-wide `budget_usd` that stopped an item, `raise_budget` keeps the
+        override's other fields, where this drops any you leave out. On a running or
         waiting item it binds from the next node entered and the next
         observation of a wait."""
         return await client.set_work_item_policy(policy, clear=clear, work_item_id=work_item_id)

@@ -98,5 +98,5 @@ async def test_a_member_repository_gone_before_abandon_leaves_the_rest_of_the_te
         repo, worktree, "kraft/w1", "w1", [tmp_path / "gone"]
     )
 
-    assert removed and not worktree.exists()
+    assert removed["worktree_removed"] and not worktree.exists()
     assert dropped == ["w1"]
