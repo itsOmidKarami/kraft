@@ -63,7 +63,19 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const threadList = threads.state === "ready" ? threads.data : [];
   // With no file chosen, the tree's first: what one-file mode shows.
   const current = place.file && files.some((f) => f.path === place.file) ? place.file : folders(files)[0]?.files[0]?.path ?? null;
-  const comments = useComments({ itemId: item.id, compare: compare.state === "ready" ? compare.data : null, files, patch, threads: threadList, reload: threads.reload });
+  const comments = useComments({
+    itemId: item.id,
+    compare: compare.state === "ready" ? compare.data : null,
+    files,
+    patch,
+    threads: threadList,
+    reload: threads.reload,
+    // Sent or cancelled, the pick goes with it, and the focus goes back to the file's lines.
+    onClose: (t) => {
+      setPicked(null);
+      [...document.querySelectorAll<HTMLElement>(".rv-file")].find((f) => f.dataset.file === t.path)?.querySelector<HTMLElement>(".rv-lines")?.focus({ preventScroll: true });
+    },
+  });
   const artifact = useArtifact(item);
   const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null);
   // Finish your review: closed, or open on an outcome (the bar's Request changes opens it there).

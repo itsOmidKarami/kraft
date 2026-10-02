@@ -31,6 +31,13 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenCalledWith({ body: "Cap it lower", label: "must_fix", suggest: "x" });
   });
 
+  it("offers no suggested change on a range across a gap in the diff, and says why", () => {
+    // Lines 5–9 picked, but the diff shows only two of them.
+    compose({ path: "search/cache.py", range: { side: "new", start: 5, end: 9 } });
+    expect(screen.getByRole("button", { name: "± Suggest change" })).toBeDisabled();
+    expect(screen.getByText("No suggestion across lines the diff doesn't show")).toBeInTheDocument();
+  });
+
   it("offers no suggested change on the old side, nor on a whole file", () => {
     const { unmount } = compose({ path: "a.py", range: { side: "old", start: 4, end: 4 } });
     expect(screen.getByRole("group", { name: "Comment: Old line 4" })).toBeInTheDocument();

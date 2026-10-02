@@ -50,6 +50,8 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
   };
   const r = target.range;
   const where = r ? rangeName(r) : "Comment on this file";
+  // A range picked across a gap between hunks holds lines the diff doesn't show, so there is nothing to edit them from.
+  const gap = !!r && lines.length < r.end - r.start + 1;
   const cancel = () => {
     drafts.delete(key);
     onCancel();
@@ -73,7 +75,6 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
         // ⌘↵ or Ctrl+↵ sends it from either box, as the new work item composer does.
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
-          e.stopPropagation();
           return void submit();
         }
         if (e.key !== "Escape") return;
@@ -117,8 +118,9 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
         <div className="rv-row-actions">
           <span className="rv-muted">{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ⌘↵ ${editing ? "save" : "add to review"}`}</span>
           <span className="rv-spacer" />
+          {r?.side === "new" && gap && <span className="rv-muted">No suggestion across lines the diff doesn't show</span>}
           {r?.side === "new" && (
-            <Button aria-pressed={d.suggest !== null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null })}>± Suggest change</Button>
+            <Button aria-pressed={d.suggest !== null} disabled={gap && d.suggest === null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null })}>± Suggest change</Button>
           )}
           <Button onClick={() => (dirty ? setAsking(true) : cancel())}>Cancel</Button>
           <Button variant="primary" disabled={!ready} title={d.body.trim() ? undefined : "A comment needs some text"} onClick={submit}>
