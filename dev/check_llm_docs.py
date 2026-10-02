@@ -22,16 +22,23 @@ import sys
 from pathlib import Path
 
 ORIGIN = "https://itsomidkarami.github.io"
-# A markdown link, or the href/src/to of raw HTML, to a path from the domain
-# root. `//` is a protocol-relative URL, which is another site's.
-ROOT_RELATIVE = re.compile(r"\]\((/(?!/)[^)\s]*)|\s(?:href|src|to)=\"(/(?!/)[^\"]*)")
-LINK = re.compile(r"\]\(([^)\s]+)\)")
+# A path from the domain root, written as a markdown link, as the href/src/to
+# of raw HTML, as a key of a component's JSON prop (raw/index.md's hero) or of
+# its YAML (the same prop in llms-full.txt). `//` is another site's.
+ROOT_RELATIVE = re.compile(
+    r"\]\((/(?!/)[^)\s]*)"
+    r"|\s(?:href|src|to)=\"(/(?!/)[^\"]*)"
+    r"|\"(?:href|src|to)\":\"(/(?!/)[^\"]*)"
+    r"|^\s*(?:href|src|to): *\"?(/(?!/)[^\"\s]*)"
+)
+# A link target, in markdown or in raw HTML.
+LINK = re.compile(r"\]\(([^)\s]+)\)|\shref=\"([^\"]+)\"")
 
 
 def root_relative_links(text: str) -> list[tuple[int, str]]:
     """Each link in a raw page that is relative to the domain root."""
     return [
-        (number, found.group(1) or found.group(2))
+        (number, next(group for group in found.groups() if group))
         for number, line in enumerate(text.splitlines(), 1)
         for found in ROOT_RELATIVE.finditer(line)
     ]
@@ -48,7 +55,7 @@ def landing_anchors(text: str, base: str, allowed: set[str]) -> list[str]:
         {
             link
             for line in text.splitlines()
-            for link in LINK.findall(line)
+            for link in (a or b for a, b in LINK.findall(line))
             if link.startswith(prefix) and link[len(prefix) - 1 :] not in allowed
         }
     )
@@ -61,14 +68,14 @@ def check_channel(root: Path, base: str) -> list[str]:
     pages = sorted(raw.rglob("*.md")) if raw.is_dir() else []
     if not pages:
         return [f"{raw}: no raw/*.md pages, so the build is not what this check expects"]
-    for page in pages:
+    full = root / "llms-full.txt"
+    if not full.is_file():
+        return [f"{full}: missing"]
+    for page in [*pages, full]:
         for number, link in root_relative_links(page.read_text(encoding="utf-8")):
             problems.append(
                 f"{page}:{number}: root-relative link {link} (resolves outside {base}/)"
             )
-    full = root / "llms-full.txt"
-    if not full.is_file():
-        return [*problems, f"{full}: missing"]
     landing = raw / "index.md"
     allowed = (
         set(re.findall(r"\]\((#[^)\s]+)\)", landing.read_text(encoding="utf-8")))

@@ -8,29 +8,50 @@
 //   links all landed on the landing page.
 // dev/check_llm_docs.py fails the docs build when either comes back.
 
-// `](/path` and the `href="/path"` of the raw HTML some components leave
-// (also `src` and `to`) to `<base>/path`. Fenced code is not spared: the
-// stringifier can glue a fence to the line before it ("a CI secret.```bash"),
-// so no line-based reading of fences is reliable, and no page has a
-// root-relative link in a code block to protect. `//` is a protocol-relative
-// URL, not ours.
+// `](/path`, the `href="/path"` of the raw HTML some components leave (also
+// `src` and `to`) and the `"to":"/path"` inside a component's JSON prop (the
+// landing hero's links) to `<base>/path`. `//` is a protocol-relative URL, not
+// ours.
+//
+// Fenced code is not spared: the stringifier can glue a fence to the line
+// before it ("a CI secret.```bash"), so no line-based reading of fences is
+// reliable. Do not write a root-relative link (`](/x)`) in a code sample, or it
+// is rewritten there too; no page does today.
+//
+// A page's own `](#frag)` links stay bare here: the raw page holds the
+// heading they name, so they resolve where it is read. (llms-full.txt joins
+// every page into one file, which is why it needs them resolved below.)
+const JSON_LINK = /("(?:href|src|to)":")\/(?!\/)/g
+
 function absolutizeLinks(markdown: string, base: string): string {
   return markdown
     .replace(/\]\(\/(?!\/)/g, `](${base}/`)
     .replace(/(\s(?:href|src|to)=")\/(?!\/)/g, `$1${base}/`)
+    .replace(JSON_LINK, `$1${base}/`)
 }
 
-type Node = [string, Record<string, unknown>, ...unknown[]]
+const LINK_KEYS = new Set(['href', 'src', 'to'])
 
-// Point each `#frag` href in a minimark body at `pageUrl`.
-function anchorsToPage(children: unknown[], pageUrl: string): void {
-  for (const child of children) {
-    if (!Array.isArray(child)) continue
-    const [, props, ...rest] = child as Node
-    if (props && typeof props.href === 'string' && props.href.startsWith('#')) {
-      props.href = `${pageUrl}${props.href}`
+// In a minimark body (nodes are [tag, props, ...children]; a prop can hold
+// objects, like the hero's links), point each `#frag` at `pageUrl` and each
+// root-relative path at `base`. @nuxt/content prefixes only the domain onto a
+// node's own href, which leaves the hero's `:links` (a JSON string) as it was.
+function absolutizeProps(value: unknown, base: string, pageUrl: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) absolutizeProps(item, base, pageUrl)
+  } else if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    for (const [key, item] of Object.entries(record)) {
+      if (LINK_KEYS.has(key) && typeof item === 'string') {
+        if (item.startsWith('#')) record[key] = `${pageUrl}${item}`
+        else if (item.startsWith('/') && !item.startsWith('//')) record[key] = `${base}${item}`
+      } else if (typeof item === 'string') {
+        // A `:links="[{...}]"` prop is a JSON string until it is stringified.
+        record[key] = item.replace(JSON_LINK, `$1${base}/`)
+      } else {
+        absolutizeProps(item, base, pageUrl)
+      }
     }
-    anchorsToPage(rest, pageUrl)
   }
 }
 
@@ -47,6 +68,6 @@ export default defineNitroPlugin((nitroApp) => {
   // llms-full.txt, which prefixes only the domain onto a link's href.
   nitroApp.hooks.hook('content:llms:generate:document', (_event, doc) => {
     const { body, path } = doc as { body?: { value?: unknown[] }; path?: string }
-    if (body?.value && path) anchorsToPage(body.value, `${base}${path}`)
+    if (body?.value && path) absolutizeProps(body.value, base, `${base}${path}`)
   })
 })

@@ -40,6 +40,14 @@ def test_root_relative_finds_markdown_links_images_and_html_attributes(cl):
     ]
 
 
+def test_root_relative_finds_a_json_prop_and_a_yaml_key(cl):
+    # The landing hero's link: a JSON prop in raw/index.md, YAML in llms-full.txt.
+    json_prop = '<u-page-hero :links="[{"label":"Get started","to":"/get-started"}]">'
+    yaml_key = "links:\n  - label: Get started\n    to: /get-started\n    href: '/x'"
+    assert [link for _, link in cl.root_relative_links(json_prop)] == ["/get-started"]
+    assert cl.root_relative_links(yaml_key) == [(3, "/get-started")]
+
+
 def test_root_relative_ignores_absolute_anchor_protocol_relative_and_relative(cl):
     ok = f"[ok]({BASE}/reference/x) [anchor](#here) [cdn](//cdn.example/x.js) [rel](../x)"
     page = f"{ok}\n[bad](/after)"
@@ -57,6 +65,11 @@ def test_root_relative_reads_past_a_fence_the_stringifier_glued_to_a_paragraph(c
 def test_landing_anchors_flags_a_fragment_the_landing_page_lacks(cl):
     full = f"[a]({BASE}/#credentials) [b]({BASE}/reference/x#credentials) [c]({BASE}/#hero)"
     assert cl.landing_anchors(full, BASE, {"#hero"}) == [f"{BASE}/#credentials"]
+
+
+def test_landing_anchors_flags_an_html_href_too(cl):
+    full = f'<a href="{BASE}/#credentials">x</a> <a href="{BASE}/reference/x#y">y</a>'
+    assert cl.landing_anchors(full, BASE, set()) == [f"{BASE}/#credentials"]
 
 
 def _site(tmp_path: Path, raw: str, full: str, landing: str = "# Kraft\n") -> Path:
@@ -78,6 +91,11 @@ def test_check_channel_reports_each_kind_of_dead_link(cl, tmp_path):
     assert len(problems) == 2
     assert "raw/page.md:1: root-relative link /reference/x" in problems[0]
     assert f"{BASE}/#there" in problems[1]
+
+
+def test_check_channel_reads_llms_full_for_root_relative_links_too(cl, tmp_path):
+    site = _site(tmp_path, "", "links:\n  to: /get-started")
+    assert "llms-full.txt:2: root-relative link /get-started" in cl.check_channel(site, BASE)[0]
 
 
 def test_check_channel_refuses_a_build_with_no_raw_pages(cl, tmp_path):
