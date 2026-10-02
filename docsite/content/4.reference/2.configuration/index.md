@@ -56,7 +56,7 @@ them by hand, but nothing else in this section depends on them.
 
 ## theme.yaml
 
-Settings, Appearance writes this file. A save changes only the keys it sends,
+Settings › Appearance writes this file. A save changes only the keys it sends,
 and a key the file leaves out takes its default.
 
 | Key | Values | Default |
