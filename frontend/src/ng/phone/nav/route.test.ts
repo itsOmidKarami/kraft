@@ -30,6 +30,12 @@ describe("parentOf", () => {
     expect(parentOf("/settings/policy/loops")).toBe("/more");
     expect(parentOf("/settings/about")).toBe("/more");
   });
+
+  it("puts the archived list under More, where its row is", () => {
+    expect(parentOf("/archived")).toBe("/more");
+    expect(parentOf("/archived?x=1")).toBe("/more");
+    expect(backLabel("/archived")).toBe("More");
+  });
 });
 
 describe("backLabel", () => {
@@ -50,6 +56,7 @@ describe("tabOf", () => {
     expect(tabOf("/search")).toBe("search");
     expect(tabOf("/templates/repos/kraft")).toBe("more");
     expect(tabOf("/settings/access")).toBe("more");
+    expect(tabOf("/archived")).toBe("more");
     for (const r of ["/work-items/a", "/work-items/a/nodes/n", "/work-items/a/review", "/work-items/new"]) expect(tabOf(r)).toBeNull();
   });
 });

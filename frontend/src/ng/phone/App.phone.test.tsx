@@ -1,6 +1,8 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { ROUTES } from "../shell/routes";
+import { stubFetch } from "../item/testkit";
 
 vi.mock("../session", () => ({ resumeSession: vi.fn(async () => {}), startEvents: vi.fn() }));
 
@@ -13,7 +15,11 @@ function width(phone: boolean) {
     listeners.forEach((l) => l());
   };
 }
-afterEach(() => window.history.pushState({}, "", "/"));
+afterEach(() => {
+  window.history.pushState({}, "", "/");
+  vi.unstubAllGlobals();
+});
+const notFound = () => screen.queryAllByRole("heading", { name: "Not found" });
 
 describe("the shipped addresses that moved, at phone width", () => {
   it("lands an old address on the screen that replaced it", async () => {
@@ -73,5 +79,68 @@ describe("ng App at phone width (A.1)", () => {
     render(<App initiallyLocked />);
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
+  });
+});
+
+// The two shapes share one address space: a desktop page's address opens a
+// phone screen, and a phone screen's lands on a desktop page when the window
+// widens past 767px. Neither side ever shows Not found (R3-04).
+describe("one address space across a resize", () => {
+  it.each([...ROUTES.map((r) => r.path), "/settings/intake", "/templates/repos/kraft", "/templates/library/implementation", "/settings/policy/loops"])("the desktop's %s opens a phone screen", (path) => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", path);
+    render(<App />);
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    expect(notFound()).toEqual([]);
+  });
+
+  it("opens the archived list at phone width", async () => {
+    width(true);
+    stubFetch({ "GET /work-items": [200, { items: [{ id: "w1", title: "Cache embeddings", repo: "/code/kraft", archived_at: "2026-09-30T08:00:00Z" }], cursor: 0 }] });
+    window.history.pushState({}, "", "/archived");
+    render(<App />);
+    expect(screen.getByRole("heading", { level: 1, name: "Archived" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Cache embeddings/ })).toHaveAttribute("href", "/work-items/w1");
+  });
+
+  it("lands the desktop's /settings/intake on Auto-intake", async () => {
+    width(true);
+    stubFetch();
+    window.history.pushState({}, "", "/settings/intake?x=1");
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/settings/auto-intake?x=1"));
+  });
+
+  it.each([
+    ["/more", "/"],
+    ["/templates/harnesses/claude", "/templates/harnesses?harness=claude"],
+    ["/templates/harnesses/profiles/deep", "/templates/harnesses?profile=deep"],
+    ["/settings/notifications/webhook", "/settings/notifications"],
+    ["/settings/auto-intake/schedules/0", "/settings/auto-intake"],
+    ["/archived", "/archived"],
+  ])("widening on %s lands on the desktop's %s", async (from, lands) => {
+    const set = width(true);
+    window.history.pushState({}, "", from);
+    render(<App />);
+    expect(notFound()).toEqual([]);
+    act(() => set(false));
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe(lands));
+    expect(screen.getByRole("link", { name: "Skip to content" })).toBeInTheDocument();
+    expect(notFound()).toEqual([]);
+  });
+
+  it.each([
+    ["/templates/harnesses?harness=claude", "/templates/harnesses/claude"],
+    ["/templates/harnesses?profile=deep", "/templates/harnesses/profiles/deep"],
+    ["/templates/harnesses?harness=claude&lane=y", "/templates/harnesses/claude?lane=y"],
+    ["/templates/harnesses?yaml=1&profile=deep", "/templates/harnesses/profiles/deep?yaml=1"],
+  ])("narrowing on %s opens the phone's %s", async (from, lands) => {
+    const set = width(false);
+    window.history.pushState({}, "", from);
+    render(<App />);
+    act(() => set(true));
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe(lands));
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ describe("More (K.1)", () => {
     const s = screen.getByRole("region", { name: "Settings" });
     expect(within(s).getAllByRole("link").map((l) => l.textContent)).toEqual(["Policy", "Auto-intake", "Notifications", "Access", "Appearance", "About"]);
     expect(within(s).getByRole("link", { name: "About" })).toHaveAttribute("href", "/settings/about");
+    expect(screen.getByRole("link", { name: "Archived" })).toHaveAttribute("href", "/archived");
   });
 
   it("marks an area with an open draft, or its problems, from GET /drafts", async () => {

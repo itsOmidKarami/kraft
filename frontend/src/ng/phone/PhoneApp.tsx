@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Archived } from "./board/Archived";
 import { Board } from "./board/Board";
 import { Analytics } from "./analytics/Analytics";
 import { Item } from "./item/Item";
@@ -48,6 +49,7 @@ export function PhoneApp() {
           <Route path="/search" element={<Search />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/more" element={<More />} />
+          <Route path="/archived" element={<Archived />} />
           <Route path="/work-items/new" element={<NewItem />} />
           <Route path="/work-items/:id" element={<Item />} />
           <Route path="/work-items/:id/nodes/:node" element={<NodeRoute />} />
