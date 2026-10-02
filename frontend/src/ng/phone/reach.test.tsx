@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../item/testkit";
 import { parentOf } from "./nav/route";
 import { PhoneApp } from "./PhoneApp";
-import { SCREENS, type Tap } from "./screens";
+import { SCREENS, type PhoneScreen, type Tap } from "./screens";
 
 /** What the screens read before any item exists: each route's own empty shape. */
 const EMPTY: Record<string, [number, unknown]> = {
-  "GET /work-items": [200, []],
+  "GET /work-items": [200, { items: [], cursor: 0 }],
   "GET /repos": [200, { repos: [{ path: "/code/kraft", name: "kraft" }] }],
   "GET /apply": [200, { restart: [], reload: [], managed: false }],
   "GET /drafts": [200, []],
@@ -27,31 +27,41 @@ const tap = async (t: Tap) => {
   await userEvent.click(await screen.findByRole(t.role, { name: new RegExp(t.name, "i") }));
 };
 
+/** Opens the app on a board that loaded (empty, and not offline), then taps to the screen. */
+async function walkTo(s: PhoneScreen) {
+  stubFetch(EMPTY);
+  window.history.pushState({}, "", "/");
+  render(<PhoneApp />);
+  await screen.findByRole("heading", { level: 1, name: "Board" });
+  await screen.findByText("Nothing here. Tap + to file one.");
+  expect(screen.queryByText("offline")).toBeNull();
+  for (const t of s.taps) await tap(t);
+}
+
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("every screen is reachable by tapping from the board (P.1)", () => {
   // A screen whose taps need a seeded item or row is walked by the sweep's flow-ng-phone-reach, against the full mock API.
   it.each(SCREENS.filter((s) => !s.data))("$id: $taps.length taps from the board land on $route", async (s) => {
-    stubFetch(EMPTY);
-    window.history.pushState({}, "", "/");
-    render(<PhoneApp />);
-    await screen.findByRole("heading", { level: 1, name: "Board" });
-    for (const t of s.taps) await tap(t);
+    await walkTo(s);
     await waitFor(() => expect(window.location.pathname).toMatch(pattern(s.route)));
     expect(await screen.findByRole("heading", { level: 1, name: s.heading })).toBeInTheDocument();
   });
 
-  it.each(SCREENS.filter((s) => !s.data && s.taps.length > 0))("$id: Back goes to its parent and stays in the app", async (s) => {
-    stubFetch(EMPTY);
-    window.history.pushState({}, "", "/");
-    render(<PhoneApp />);
-    await screen.findByRole("heading", { level: 1, name: "Board" });
-    for (const t of s.taps) await tap(t);
+  const walked = SCREENS.filter((s) => !s.data && s.taps.length > 0);
+  it.each(walked.filter((s) => parentOf(s.route) !== null))("$id: Back goes to its parent and stays in the app", async (s) => {
+    await walkTo(s);
     await screen.findByRole("heading", { level: 1, name: s.heading });
     const back = document.querySelector<HTMLElement>(".ph-back");
-    if (!back) return; // a root: the tab bar is its way out
+    expect(back, "a screen with a parent shows Back").not.toBeNull();
     const parent = parentOf(window.location.pathname + window.location.search);
-    await userEvent.click(back);
+    await userEvent.click(back!);
     await waitFor(() => expect(window.location.pathname).toBe(parent));
+  });
+
+  it.each(walked.filter((s) => parentOf(s.route) === null))("$id: a root shows no Back, the tab bar being its way out", async (s) => {
+    await walkTo(s);
+    await screen.findByRole("heading", { level: 1, name: s.heading });
+    expect(document.querySelector(".ph-back")).toBeNull();
   });
 });

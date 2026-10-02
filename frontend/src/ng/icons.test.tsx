@@ -9,9 +9,11 @@ vi.mock("./iconSetData", () => ({ ICONS: { rocket: Rocket } }));
 const svg = (el: React.ReactElement) => render(el).container.querySelector("svg")!;
 
 describe("NodeIcon", () => {
-  // First: the set is cached for the page once any test loads it.
   it("draws the kind's icon until the lazy set brings a name outside the static map", async () => {
-    const { container } = render(<NodeIcon name="rocket" kind="agent" />);
+    // The set stays cached once any case has loaded it, so this one takes fresh modules.
+    vi.resetModules();
+    const { NodeIcon: Uncached } = await import("./icons");
+    const { container } = render(<Uncached name="rocket" kind="agent" />);
     expect(container.querySelector("svg")).toHaveClass("lucide-sparkles");
     await waitFor(() => expect(container.querySelector("svg")).toHaveClass("lucide-rocket"));
   });

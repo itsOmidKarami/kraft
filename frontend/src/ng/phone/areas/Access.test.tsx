@@ -23,8 +23,17 @@ function setup(access: Partial<Access> = {}, running: { bind?: string; port?: nu
   mountAt(<AccessScreen />, "/settings/access", "/settings/access");
   return put;
 }
-beforeEach(() => useApply.setState({ restart: [], reload: [], managed: true, loaded: true, phase: "idle", confirming: false, error: null }));
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+// A case may swap a store action for a stub; each case gets the store, actions included, back as it found it.
+let saved: ReturnType<typeof useApply.getState>;
+beforeEach(() => {
+  saved = useApply.getState();
+  useApply.setState({ restart: [], reload: [], managed: true, loaded: true, phase: "idle", confirming: false, error: null });
+});
+afterEach(() => {
+  useApply.setState(saved, true);
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("portProblem", () => {
   it.each([["8765", null], ["1024", null], ["65535", null], ["80", "Use a port from 1024 to 65535."], ["65536", "Use a port from 1024 to 65535."], ["88a", "Digits only."], ["", "Digits only."]])("%s -> %s", (t, p) => expect(portProblem(t)).toBe(p));
