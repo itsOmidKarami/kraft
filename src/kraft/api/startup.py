@@ -157,8 +157,15 @@ async def lifespan(app: FastAPI):
 
     # Before reattach, so a cursor session adopted across an upgrade runs the
     # permission hook as this Kraft writes it, not as an earlier one did.
-    for path in await asyncio.to_thread(hook_install.refresh_cursor_hooks, run_dirs.worktrees):
-        logger.info("%s: Kraft's permission hook now runs with -P", path)
+    # A thread: it reads a file in every worktree. Never a refused boot: a
+    # worker wrote each of those files.
+    try:
+        refreshed = await asyncio.to_thread(hook_install.refresh_cursor_hooks, run_dirs.worktrees)
+    except Exception:  # noqa: BLE001
+        logger.exception("cursor permission hook refresh failed; worktrees left as they were")
+        refreshed = []
+    for path in refreshed:
+        logger.info("%s: Kraft's permission hook now runs with -I", path)
 
     summary, adopted = await reattach.reattach(
         database,

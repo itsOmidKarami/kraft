@@ -36,6 +36,9 @@ _EXCLUDE_NOTE = "# kraft: cursor permission hook"
 #: The note as Kraft 1.1 through the 1.5.0 release candidates wrote it, with a
 #: tracker id after it; rewritten to `_EXCLUDE_NOTE` on the next install.
 _LEGACY_NOTE = re.compile(rf"{re.escape(_EXCLUDE_NOTE)} \(Kraft-[0-9a-z.]+\)")
+#: The largest `hooks.json` Kraft reads. A worker writes the file; the server
+#: reads every worktree's at start, and must not read a sparse gigabyte.
+_MAX_HOOKS_BYTES = 1 << 20
 #: What marks an entry as Kraft's, whatever interpreter path or flag it carries.
 _OURS = "kraft admin permission-hook"
 
@@ -61,13 +64,16 @@ def hook_argv(harness_id: str, sandbox: dict | None = None) -> list[str]:
     its fixed container path, answered by the daemon through the session's
     channel: never the host's interpreter, which the container has not got.
 
-    On the host, `-P`: the CLI runs the hook from the worktree, which the
+    On the host, `-I`: the CLI runs the hook from the worktree, which the
     worker writes, and plain `-m` puts that directory first on `sys.path`. An
     `argcomplete.py` (or any module Kraft imports) planted there would run in
-    place of Kraft's and answer the gate itself."""
+    place of Kraft's and answer the gate itself. `-P` alone drops the cwd but
+    still honours `PYTHONPATH`, which reaches the hook through the worker's
+    env (a repo's `env:` may set it, relative to the worktree); `-I` ignores
+    every `PYTHON*` variable and the user site as well."""
     if sandbox and sandbox.get("network"):
         return [f"{_shim.CONTAINER_DIR}/kraft", "admin", "permission-hook", harness_id]
-    return [sys.executable, "-P", "-m", "kraft", "admin", "permission-hook", harness_id]
+    return [sys.executable, "-I", "-m", "kraft", "admin", "permission-hook", harness_id]
 
 
 def command_of(argv: list[str]) -> str:
@@ -93,13 +99,17 @@ def _read_hooks(dfd: int, path: Path) -> dict:
             f"{path} is not a file Kraft can read (a symlink, or {exc.strerror}); remove it"
         ) from exc
     with os.fdopen(fd, "rb") as f:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
             raise HookFileError(f"{path} is not a regular file; remove it")
+        if st.st_size > _MAX_HOOKS_BYTES:
+            raise HookFileError(f"{path} is over {_MAX_HOOKS_BYTES} bytes; remove it")
         os.set_blocking(fd, True)
-        text = f.read().decode(errors="replace")
+        text = f.read(_MAX_HOOKS_BYTES + 1).decode(errors="replace")
     try:
         return json.loads(text)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: JSON nested deeper than the parser's stack.
         raise _unusable(path, exc) from exc
 
 
@@ -189,9 +199,9 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
 
 
 def _with_safe_path(command: str) -> str | None:
-    """`command` with `-P` put in, if it is Kraft's entry as an earlier Kraft
-    wrote it: the host interpreter run with `-m` and no `-P` before it. None
-    for anything else, the sandbox shim's entry included."""
+    """`command` with `-I` put in, if it is Kraft's entry as an earlier Kraft
+    wrote it: the host interpreter run with `-m` and neither `-I` nor `-P`
+    before it. None for anything else, the sandbox shim's entry included."""
     try:
         argv = shlex.split(command)
     except ValueError:
@@ -199,20 +209,24 @@ def _with_safe_path(command: str) -> str | None:
     if _OURS not in " ".join(argv) or "-m" not in argv:
         return None
     at = argv.index("-m")
-    if "-P" in argv[:at]:
+    if {"-I", "-P"} & set(argv[:at]):
         return None
-    return command_of([*argv[:at], "-P", *argv[at:]])
+    return command_of([*argv[:at], "-I", *argv[at:]])
 
 
 def refresh_cursor_hooks(worktrees: Path) -> list[Path]:
-    """Put `-P` into Kraft's entry in every worktree under `worktrees` that
-    an earlier Kraft wrote it into without one. Returns the files rewritten.
+    """Put `-I` into Kraft's entry in every worktree under `worktrees` that
+    an earlier Kraft wrote it into without it. Returns the files rewritten.
 
     Run at server start, so an upgrade reaches worktrees that already exist:
     the entry is otherwise rewritten only by the next cursor launch there that
     has policy to enforce, and a session adopted across the restart, or a
     launch with nothing to enforce, would keep running the old command. The
-    rest of each entry, interpreter and flags, is kept as it was."""
+    rest of each entry, interpreter and flags, is kept as it was.
+
+    Every file read here is one a worker wrote. Whatever one holds, it is
+    logged and skipped: it must never stop the server starting, nor the next
+    worktree's entry being fixed."""
     fixed: list[Path] = []
     try:
         dirs = sorted(d for d in worktrees.iterdir() if d.is_dir())
@@ -237,9 +251,9 @@ def refresh_cursor_hooks(worktrees: Path) -> list[Path]:
             if changed:
                 _replace_hooks(dfd, path, data)
                 fixed.append(path)
-        except (HookFileError, AttributeError, TypeError) as exc:
+        except Exception as exc:  # noqa: BLE001 -- see the docstring
             # The next launch with policy refuses on the same file, by name.
-            logger.warning("left %s as it was: %s", path, exc)
+            logger.warning("left %s as it was: %r", path, exc)
         finally:
             os.close(dfd)
     return fixed
