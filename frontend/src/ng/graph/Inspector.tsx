@@ -18,6 +18,8 @@ type Props = {
   title: string;
   sub?: string;
   prob?: { msg: string; fix?: string };
+  /** A control above the tabs that every tab reads, such as the item page's attempt switcher. */
+  bar?: ReactNode;
   tabs?: { value: string; label: string }[];
   tab?: string;
   onTab?: (t: string) => void;
@@ -35,7 +37,7 @@ type Props = {
 
 /** The side pane over a canvas (Inspector.dc.html): crumb, icon and title,
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
-export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, onIcon, footer, children }: Props) {
+export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, bar, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
@@ -95,6 +97,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
           <span><span className="pane-prob-msg">{prob.msg}</span>{prob.fix && <span className="pane-prob-fix">{prob.fix}</span>}</span>
         </div>
       )}
+      {bar && <div className="pane-bar">{bar}</div>}
       {tabs && tab && onTab && <div className="pane-tabs"><Tabs id={id} label={`${title} sections`} tabs={tabs} value={tab} onChange={onTab} /></div>}
       <div className="pane-body" {...(tabs && tab ? { role: "tabpanel", id: `${id}-panel`, "aria-labelledby": `${id}-tab-${tab}` } : {})}>{children}</div>
       {footer && <div className="pane-footer">{footer}</div>}

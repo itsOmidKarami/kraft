@@ -36,6 +36,14 @@ describe("task pane", () => {
     expect(within(pane("code_review")).getByText(/attempt 1 of 2/)).toBeInTheDocument();
   });
 
+  it("puts the attempt switcher above the tabs, outside every tab's panel", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&tab=input");
+    const switcher = within(pane("code_review")).getByText(/attempt 2 of 2/);
+    const tablist = within(pane("code_review")).getByRole("tablist");
+    expect(switcher.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(screen.getByRole("tabpanel")).queryByText(/attempt/)).toBeNull();
+  });
+
   it("lists only this attempt's documents under the result", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
     expect(await within(pane("code_review")).findByRole("button", { name: /Review notes/ })).toBeInTheDocument();

@@ -54,6 +54,8 @@ export type PaneContent = {
   gate?: boolean;
   title: string;
   sub?: string;
+  /** Above the tabs: the attempt every tab shows. */
+  bar?: ReactNode;
   tabs?: { value: string; label: string }[];
   body: ReactNode;
   footer?: ReactNode;
@@ -180,8 +182,9 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
 
 const TASK_TABS = [{ value: "overview", label: "Overview" }, { value: "input", label: "Input" }, { value: "output", label: "Output" }, { value: "log", label: "Log" }, { value: "config", label: "Config" }];
 
-/** A task's pane (Decisions §5 Pane tabs): the attempt switcher over Overview,
- *  Input, Output, Log and Config, with Thread first on the escalation task. */
+/** A task's pane (Decisions §5 Pane tabs): the attempt switcher above the tabs,
+ *  so one attempt drives Overview, Input, Output, Log and Config, with Thread
+ *  first on the escalation task. */
 function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId: string, task: string, crumbs: Crumbs): PaneContent {
   const { item } = a;
   const esc = stepId === ESCALATION;
@@ -216,8 +219,9 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const live = sessions.some((s) => ["running", "pending"].includes(s.status));
   return {
     ...head,
+    bar: switcher,
     tabs,
-    body: <>{switcher}{bodies[tab]}</>,
+    body: bodies[tab],
     footer: esc
       // The escalation's footer: stop it while it runs (GAP §2 #13); retry the node with a steer once it answered (#12).
       ? <PathFooter item={item} path={node.id} what="node" state={live ? null : footerState(item, item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)))} reload={a.reload}

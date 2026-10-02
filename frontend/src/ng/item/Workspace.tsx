@@ -175,6 +175,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
           gate={pane.gate}
           title={pane.title}
           sub={pane.sub}
+          bar={pane.bar}
           tabs={pane.tabs}
           // The pane's first tab when the URL names none (Thread, on an escalation).
           tab={pane.tabs?.some((t) => t.value === tab) ? tab : pane.tabs?.[0]?.value}
