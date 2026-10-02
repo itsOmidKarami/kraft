@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../types";
 import { useResizable } from "../graph/useResizable";
 import { detail, stubFetch } from "../item/testkit";
+import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
 import { Peek, type PeekTab } from "./Peek";
 
@@ -40,10 +41,13 @@ afterEach(() => {
 
 describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
+    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open gate" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
+    // The item page's pane, collapsed there before, opens on the gate.
+    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
   });
 
   it.each([

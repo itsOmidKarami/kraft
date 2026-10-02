@@ -12,6 +12,7 @@ import { age, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
 import { EscalateDialog, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
+import { useSelect } from "../item/draft/select";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { PausedCard, StateCard } from "../item/StateCard";
@@ -86,10 +87,11 @@ function Overview({ item, reload, onRaise }: { item: ItemDetail; reload: () => v
   const duplicate = useDuplicate(item.id, setError);
   const events = useEvents(item.id, item.updated_at);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
+  const openGate = useSelect(item.id);
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
-        <Banner item={item} onOpenGate={openNode} onRaise={onRaise} reload={reload} />
+        <Banner item={item} onOpenGate={openGate} onRaise={onRaise} reload={reload} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />

@@ -5,6 +5,7 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
+import { openPane } from "../item/Workspace";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { FirstRun } from "../shell/FirstRun";
 import { Menu } from "../ui/Menu";
@@ -117,7 +118,10 @@ export function BoardPage() {
     return n;
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
-    if (a.kind === "gate") return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
+    if (a.kind === "gate") {
+      openPane();
+      return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
+    }
     if (a.kind === "peek") return peek(item.id, a.tab);
     const r = await act.resume(item.id);
     setRowErrors((e) => {

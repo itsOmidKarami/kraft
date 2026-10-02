@@ -6,6 +6,7 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
+import { usePaneMemory } from "../item/Workspace";
 import { Shell } from "../shell/Shell";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
@@ -162,8 +163,10 @@ describe("BoardPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
+    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
     expect(where()).toBe("/work-items/g1?sel=plan_approval");
+    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
   });
 
   it("opens the composer instead of first-run when asked (FirstRun's last step)", async () => {
