@@ -5,6 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
+import { chosenSource, otherCount, withSource } from "../templates/repos/evidence";
 import "./first-run.css";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
@@ -43,9 +44,10 @@ function probeRows(p: RepoProbe): [string, string][] {
   return [
     [".gitmodules", p.submodules.length ? `${p.submodules.length} submodule${p.submodules.length === 1 ? "" : "s"}` : "none"],
     [".beads/", p.has_beads ? "found" : "not found"],
-    ["Test command", p.test_command ?? "not detected"],
-    ["Setup command", p.setup_command ?? "none found"],
+    ["Test command", p.test_command ? withSource(p.test_command, chosenSource(p.candidates, "test")) : "not detected"],
+    ["Setup command", p.setup_command ? withSource(p.setup_command, chosenSource(p.candidates, "setup")) : "none found"],
     ["Forge remote", p.forge ? `${p.forge}${p.project ? ` · ${p.project}` : ""}` : "none"],
+    ...(otherCount(p.candidates) ? [["Also found", `${otherCount(p.candidates)} other command(s)`] as [string, string]] : []),
   ];
 }
 

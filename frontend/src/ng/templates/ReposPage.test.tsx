@@ -104,12 +104,34 @@ describe("Repos page: connecting", () => {
     await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
     expect(http.request).toHaveBeenCalledWith("/repos/probe", expect.objectContaining({ method: "POST" }));
-    expect(await screen.findByLabelText("What was found")).toHaveTextContent("pytest");
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent("pytest");
+    expect(found).toHaveTextContent("setupuv sync");
     expect(d.postOps).not.toHaveBeenCalled();
     await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalled());
     const [, , ops] = vi.mocked(d.postOps).mock.calls[0];
     expect(ops[0]).toMatchObject({ op: "add_repo", path: "/src/new", fields: { name: "new", test_command: "pytest", forge: "gitlab", enabled: true } });
+  });
+
+  it("says where the probe's commands came from and that it found others", async () => {
+    const cand = { dir: "", tier: "toolchain", marker: "uv.lock", detector: "uv", family: "python", corroborated: false } as const;
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe"
+      ? ok(probe({ candidates: [
+        { ...cand, role: "test", command: "pytest", source: "uv.lock", chosen: true },
+        { ...cand, role: "setup", command: "uv sync", source: "uv.lock", chosen: true },
+        { ...cand, role: "test", command: "make test", source: "Makefile target `test`", tier: "runner", chosen: false },
+      ] }))
+      : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent("pytest — from uv.lock");
+    expect(found).toHaveTextContent("uv sync — from uv.lock");
+    expect(found).toHaveTextContent("1 other command(s)");
   });
 
   it("shows a probe's refusal inline and sends nothing", async () => {

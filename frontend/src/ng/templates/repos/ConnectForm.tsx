@@ -3,6 +3,8 @@ import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { Kv } from "../panes/controls";
+import type { ProbeCandidate } from "../../../types/settings";
+import { chosenSource, otherCount, withSource } from "./evidence";
 
 /** `POST /repos/probe`'s answer, the fields Connect reads. */
 export interface Probe {
@@ -14,6 +16,7 @@ export interface Probe {
   test_scopes: { paths: string[]; command: string }[] | null;
   forge: string | null;
   project: string | null;
+  candidates?: ProbeCandidate[];
 }
 
 /** The `fields` of `add_repo` from a probe: what `POST /repos` writes (Decided 9). A
@@ -74,8 +77,10 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           <Kv k="name" v={probe.name} />
           <Kv k="branch" v={probe.branch ?? "—"} mono />
           <Kv k="forge" v={probe.forge ? `${probe.forge}${probe.project ? ` · ${probe.project}` : ""}` : "no forge remote"} muted={!probe.forge} />
-          <Kv k="tests" v={probe.test_command ?? "none found"} mono muted={!probe.test_command} />
+          <Kv k="tests" v={probe.test_command ? withSource(probe.test_command, chosenSource(probe.candidates, "test")) : "none found"} mono muted={!probe.test_command} />
           <Kv k="test scopes" v={probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes} />
+          <Kv k="setup" v={probe.setup_command ? withSource(probe.setup_command, chosenSource(probe.candidates, "setup")) : "none found"} mono muted={!probe.setup_command} />
+          {otherCount(probe.candidates) > 0 && <Kv k="also found" v={`${otherCount(probe.candidates)} other command(s): kraft repo connect lists them`} muted />}
           <p className="rp-connect-note">{probe.test_command || probe.test_scopes ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
         </div>
       )}

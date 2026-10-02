@@ -70,6 +70,28 @@ describe("FirstRun", () => {
     expect(await screen.findByText("Added acme")).toBeInTheDocument();
   });
 
+  it("says where each proposed command came from and how many others it found", async () => {
+    const cand = { dir: "", tier: "runner", marker: "justfile", detector: "just", family: null, corroborated: false } as const;
+    vi.spyOn(api, "probeRepo").mockResolvedValue({
+      ...PROBE,
+      test_command: "just test",
+      setup_command: "just setup",
+      candidates: [
+        { ...cand, role: "test", command: "just test", source: "justfile recipe `test`", chosen: true },
+        { ...cand, role: "setup", command: "just setup", source: "justfile recipe `setup`", chosen: true },
+        { ...cand, role: "test", command: "uv run pytest", source: "uv.lock", tier: "toolchain", chosen: false },
+      ],
+    });
+    const user = userEvent.setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 4000 });
+    expect(screen.getByText("just test — from justfile recipe `test`")).toBeInTheDocument();
+    expect(screen.getByText("just setup — from justfile recipe `setup`")).toBeInTheDocument();
+    expect(screen.getByText("1 other command(s)")).toBeInTheDocument();
+  });
+
   it("sends no root scope for a single-stack repo: it would shadow later test command edits", async () => {
     const user = userEvent.setup();
     mount();

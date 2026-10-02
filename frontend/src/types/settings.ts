@@ -41,6 +41,23 @@ export interface Workspace {
   members: Record<string, { repository: string; path: string }>;
 }
 
+/** One command the probe's evidence supports (`kraft.detect.Candidate`). */
+export interface ProbeCandidate {
+  /** Relative to the repo root; `""` is the root. */
+  dir: string;
+  role: "test" | "setup";
+  command: string;
+  tier: "runner" | "ci" | "toolchain" | "devenv";
+  /** What it was read from, for a person: "justfile recipe `test`". */
+  source: string;
+  marker: string;
+  detector: string;
+  family: string | null;
+  corroborated: boolean;
+  /** Part of the proposal, rather than an alternative. */
+  chosen: boolean;
+}
+
 export interface RepoProbe {
   path: string;
   name: string;
@@ -56,6 +73,8 @@ export interface RepoProbe {
   setup_command: string | null;
   forge: string | null;
   project: string | null;
+  /** Every command the evidence supports, chosen or not. Told, never stored. */
+  candidates?: ProbeCandidate[];
 }
 
 /** One saved chain as `GET /templates/chains` lists it: its resolved nodes in the
