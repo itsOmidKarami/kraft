@@ -85,12 +85,24 @@ detectors:
 
   - id: scripts-to-rule-them-all
     tier: runner
-    files: [script/test, scripts/test, script/test.sh, scripts/test.sh, bin/test, script/bootstrap, script/setup, scripts/setup, scripts/bootstrap]
+    files: [script/test, scripts/test, script/test.sh, scripts/test.sh, script/bootstrap, script/setup, scripts/setup, scripts/bootstrap]
     tasks: script
     test:
-      - {tasks: [script/test, scripts/test, script/test.sh, scripts/test.sh, bin/test], run: "./{task}"}
+      - {tasks: [script/test, scripts/test, script/test.sh, scripts/test.sh], run: "./{task}"}
     setup:
-      - {tasks: [script/bootstrap, script/setup, scripts/bootstrap, scripts/setup, bin/setup], run: "./{task}"}
+      - {tasks: [script/bootstrap, script/setup, scripts/bootstrap, scripts/setup], run: "./{task}"}
+
+  - id: bin-scripts
+    tier: runner
+    files: [bin/test, bin/setup]
+    # A Rails app's bin/setup ends by starting the server: the rails detector
+    # below runs it with --skip-server.
+    unless: [bin/rails]
+    tasks: script
+    test:
+      - {tasks: [bin/test], run: "./{task}"}
+    setup:
+      - {tasks: [bin/setup], run: "./{task}"}
 
   # ── JavaScript and TypeScript ───────────────────────────────────────────────
   - id: bun
@@ -104,6 +116,8 @@ detectors:
       - contains: {package.json: '"workspaces"\s*:'}
     test:
       - {tasks: [test], run: "bun run test"}
+      - {when: [{files: [nx.json]}], run: "bunx nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "bunx turbo run test"}
     setup:
       - run: "bun install --frozen-lockfile"
 
@@ -116,6 +130,8 @@ detectors:
     workspace: *js-workspace
     test:
       - {tasks: [test], run: "pnpm test"}
+      - {when: [{files: [nx.json]}], run: "pnpm exec nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "pnpm exec turbo run test"}
       - {when: [{files: [pnpm-workspace.yaml]}], run: "pnpm -r --if-present test"}
     setup:
       - run: "pnpm install --frozen-lockfile"
@@ -130,6 +146,8 @@ detectors:
     workspace: *js-workspace
     test:
       - {tasks: [test], run: "yarn test"}
+      - {when: [{files: [nx.json]}], run: "yarn nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "yarn turbo run test"}
       - {when: [{contains: {package.json: '"workspaces"\s*:'}}], run: "yarn workspaces foreach -A run test"}
     setup:
       - run: "yarn install --immutable"
@@ -143,6 +161,8 @@ detectors:
     workspace: *js-workspace
     test:
       - {tasks: [test], run: "yarn test"}
+      - {when: [{files: [nx.json]}], run: "yarn nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "yarn turbo run test"}
       - {when: [{contains: {package.json: '"workspaces"\s*:'}}], run: "yarn workspaces run test"}
     setup:
       - run: "yarn install --frozen-lockfile"
@@ -156,6 +176,8 @@ detectors:
     workspace: *js-workspace
     test:
       - {tasks: [test], run: "npm test"}
+      - {when: [{files: [nx.json]}], run: "npx nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "npx turbo run test"}
       - {when: [{contains: {package.json: '"workspaces"\s*:'}}], run: "npm test --workspaces --if-present"}
     setup:
       - run: "npm ci"
@@ -205,8 +227,10 @@ detectors:
           - contains: {tox.ini: '\[pytest\]'}
           - contains: {'requirements*.txt': '(?mi)^pytest\b'}
         run: "uv run pytest"
+      - {when: [{files: [manage.py]}], run: "uv run python manage.py test"}
     setup:
       - {when: [{contains: {pyproject.toml: '(?m)^\[tool\.uv\.workspace\]'}}], run: "uv sync --all-packages"}
+      - {when: &pytest-in-extras [{contains: {pyproject.toml: '(?s)\[project\.optional-dependencies\].*(?<![\w-])pytest\b'}}], run: "uv sync --all-extras"}
       - run: "uv sync"
 
   - id: poetry
@@ -218,6 +242,7 @@ detectors:
     test:
       - {tasks: [test], run: "poetry run poe {task}"}
       - {when: *pytest, run: "poetry run pytest"}
+      - {when: [{files: [manage.py]}], run: "poetry run python manage.py test"}
     setup:
       - run: "poetry install"
 
@@ -230,6 +255,7 @@ detectors:
     test:
       - {tasks: [test], run: "pdm run {task}"}
       - {when: *pytest, run: "pdm run pytest"}
+      - {when: [{files: [manage.py]}], run: "pdm run python manage.py test"}
     setup:
       - run: "pdm install"
 
@@ -266,7 +292,9 @@ detectors:
     test:
       - {tasks: [test], run: "uv run poe {task}"}
       - {when: *pytest, run: "uv run pytest"}
+      - {when: [{files: [manage.py]}], run: "uv run python manage.py test"}
     setup:
+      - {when: *pytest-in-extras, run: "uv sync --all-extras"}
       - run: "uv sync"
 
   - id: requirements
@@ -276,6 +304,7 @@ detectors:
     unless: [pyproject.toml, Pipfile, setup.py]
     test:
       - {when: *pytest, run: ".venv/bin/python -m pytest"}
+      - {when: [{files: [manage.py]}], run: ".venv/bin/python manage.py test"}
     setup:
       - {when: [{files: [requirements-dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"}
       - {when: [{files: [requirements_dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements_dev.txt"}
@@ -300,6 +329,7 @@ detectors:
     workspace:
       - contains: {Cargo.toml: '(?m)^\[workspace\]'}
     test:
+      - {when: [{contains: {Cargo.toml: '(?m)^\[workspace\]'}}], run: "cargo test --workspace"}
       - run: "cargo test"
     setup:
       - run: "cargo fetch"
@@ -322,6 +352,10 @@ detectors:
     test:
       - run: "./gradlew --no-daemon test"
     setup:
+      # An Android build has no testClasses task; `help` still downloads
+      # Gradle and resolves the build's plugins. It needs the SDK: pass
+      # ANDROID_HOME through with the repo's env_passthrough.
+      - {when: &android [{contains: {'build.gradle*': 'com\.android'}}, {contains: {'*/build.gradle*': 'com\.android'}}], run: "./gradlew --no-daemon help"}
       - run: "./gradlew --no-daemon testClasses"
 
   - id: gradle
@@ -333,6 +367,7 @@ detectors:
     test:
       - run: "gradle --no-daemon test"
     setup:
+      - {when: *android, run: "gradle --no-daemon help"}
       - run: "gradle --no-daemon testClasses"
 
   - id: maven-wrapper
@@ -377,6 +412,19 @@ detectors:
     setup:
       - run: "dotnet restore"
 
+  - id: rails
+    tier: toolchain
+    family: ruby
+    files: [bin/rails]
+    test:
+      - {when: [{files: [.rspec]}, {contains: {Gemfile.lock: '\brspec-core\b'}}], run: "bundle exec rspec"}
+      - run: "bin/rails test"
+    setup:
+      # Rails' bin/setup prepares the database too, so the database must be
+      # reachable; --skip-server stops it from starting the app at the end.
+      - {when: [{files: [bin/setup]}], run: "bin/setup --skip-server"}
+      - run: "bundle install"
+
   - id: ruby
     tier: toolchain
     family: ruby
@@ -404,6 +452,8 @@ detectors:
     tier: toolchain
     family: elixir
     files: [mix.exs]
+    workspace:
+      - contains: {mix.exs: '\bapps_path:'}
     test:
       - run: "mix test"
     setup:

@@ -32,110 +32,241 @@ def _chosen(p: detect.Proposal, role: str, d: str = "") -> dict:
     return next(c for c in p.candidates if c["chosen"] and c["role"] == role and c["dir"] == d)
 
 
-@pytest.mark.parametrize(
-    ("files", "test", "setup"),
-    [
-        ({"justfile": "setup:\n  uv sync\ntest:\n  pytest\n"}, "just test", "just setup"),
-        ({"Makefile": "deps:\n\tnpm ci\ntest: deps\n\tnpm test\n"}, "make test", "make deps"),
-        ({"Makefile": ".PHONY: check\ncheck:\n\t./run\n"}, "make check", None),
-        ({"Taskfile.yml": "version: '3'\ntasks:\n  test: {cmds: [go test]}\n"}, "task test", None),
-        ({"mise.toml": '[tasks.test]\nrun = "pytest"\n'}, "mise run test", None),
-        (
-            {"pnpm-lock.yaml": "", "package.json": JEST},
-            "pnpm test",
-            "pnpm install --frozen-lockfile",
-        ),
-        (
-            {"yarn.lock": "", ".yarnrc.yml": "nodeLinker: pnp\n", "package.json": JEST},
-            "yarn test",
-            "yarn install --immutable",
-        ),  # noqa: E501
-        ({"yarn.lock": "", "package.json": JEST}, "yarn test", "yarn install --frozen-lockfile"),
-        ({"bun.lock": "", "package.json": JEST}, "bun run test", "bun install --frozen-lockfile"),
-        ({"package-lock.json": "", "package.json": JEST}, "npm test", "npm ci"),
-        ({"package.json": JEST}, "npm test", "npm install --no-package-lock"),
-        ({"pyproject.toml": PYTEST, "uv.lock": ""}, "uv run pytest", "uv sync"),
-        ({"pyproject.toml": PYTEST, "poetry.lock": ""}, "poetry run pytest", "poetry install"),
-        ({"pyproject.toml": PYTEST, "pdm.lock": ""}, "pdm run pytest", "pdm install"),
-        ({"pyproject.toml": PYTEST}, "uv run pytest", "uv sync"),
-        (
-            {"pyproject.toml": "[project]\nname='x'\n[tool.poe.tasks]\ntest = 'pytest -x'\n"},
-            "uv run poe test",
-            "uv sync",
-        ),
-        (
-            {"requirements.txt": "pytest\n"},
-            ".venv/bin/python -m pytest",
-            "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
-        ),
-        ({"Cargo.toml": "[package]\n"}, "cargo test", "cargo fetch"),
-        ({"go.mod": "module x\n"}, "go test ./...", "go mod download"),
-        (
-            {"gradlew": "", "build.gradle.kts": ""},
-            "./gradlew --no-daemon test",
-            "./gradlew --no-daemon testClasses",
-        ),  # noqa: E501
-        ({"pom.xml": "<project/>"}, "mvn -B test", "mvn -B test-compile"),
-        ({"App.sln": "", "src/App/App.csproj": ""}, "dotnet test", "dotnet restore"),
-        ({"Gemfile": "", ".rspec": ""}, "bundle exec rspec", "bundle install"),
-        (
-            {"Gemfile": "", "Rakefile": "Rake::TestTask.new\n"},
-            "bundle exec rake test",
-            "bundle install",
-        ),
-        (
-            {"composer.json": '{"scripts": {"test": "phpunit"}}'},
-            "composer test",
-            "composer install",
-        ),
-        ({"mix.exs": ""}, "mix test", "mix deps.get"),
-        ({"Package.swift": ""}, "swift test", "swift package resolve"),
-        (
-            {"deno.jsonc": '{\n  // tasks\n  "tasks": {"test": "deno test -A",},\n}'},
-            "deno task test",
-            "deno install",
-        ),  # noqa: E501
-        (
-            {"CMakeLists.txt": ""},
-            "sh -c 'cmake --build build && ctest --test-dir build --output-on-failure'",
-            "cmake -S . -B build",
-        ),  # noqa: E501
-    ],
-    ids=[
-        "just",
-        "make",
-        "make-check",
+DJANGO = "[project]\nname = 'x'\n"
+EXTRAS = "[project]\nname = 'x'\n[project.optional-dependencies]\ntest = ['pytest']\n"
+ANDROID = "plugins { id 'com.android.application' }\n"
+WS = '{"private": true, "workspaces": ["packages/*"]}'
+
+#: (case, files, the proposed test command, the proposed setup command): at
+#: least one case per packaged detector, `test_every_packaged_detector_has_a_case`
+#: checks.
+KINDS = [
+    ("just", {"justfile": "setup:\n  uv sync\ntest:\n  pytest\n"}, "just test", "just setup"),
+    ("make", {"Makefile": "deps:\n\tnpm ci\ntest: deps\n\tnpm test\n"}, "make test", "make deps"),
+    ("make-check", {"Makefile": ".PHONY: check\ncheck:\n\t./run\n"}, "make check", None),
+    (
         "taskfile",
-        "mise",
+        {"Taskfile.yml": "version: '3'\ntasks:\n  test: {cmds: [go test]}\n"},
+        "task test",
+        None,
+    ),  # noqa: E501
+    ("mise", {"mise.toml": '[tasks.test]\nrun = "pytest"\n'}, "mise run test", None),
+    (
         "pnpm",
+        {"pnpm-lock.yaml": "", "package.json": JEST},
+        "pnpm test",
+        "pnpm install --frozen-lockfile",
+    ),  # noqa: E501
+    (
+        "pnpm-workspace",
+        {"pnpm-lock.yaml": "", "pnpm-workspace.yaml": "", "package.json": "{}"},
+        "pnpm -r --if-present test",
+        "pnpm install --frozen-lockfile",
+    ),  # noqa: E501
+    (
+        "pnpm-nx",
+        {"pnpm-lock.yaml": "", "nx.json": "{}", "package.json": "{}"},
+        "pnpm exec nx run-many -t test",
+        "pnpm install --frozen-lockfile",
+    ),  # noqa: E501
+    (
+        "npm-turbo",
+        {"package-lock.json": "", "turbo.json": "{}", "package.json": "{}"},
+        "npx turbo run test",
+        "npm ci",
+    ),  # noqa: E501
+    (
         "yarn-berry",
+        {"yarn.lock": "", ".yarnrc.yml": "nodeLinker: pnp\n", "package.json": JEST},
+        "yarn test",
+        "yarn install --immutable",
+    ),  # noqa: E501
+    (
+        "yarn-berry-workspaces",
+        {"yarn.lock": "", ".yarnrc.yml": "x: 1\n", "package.json": WS},
+        "yarn workspaces foreach -A run test",
+        "yarn install --immutable",
+    ),  # noqa: E501
+    (
         "yarn-classic",
+        {"yarn.lock": "", "package.json": JEST},
+        "yarn test",
+        "yarn install --frozen-lockfile",
+    ),  # noqa: E501
+    (
         "bun",
-        "npm",
-        "npm-without-a-lockfile",
-        "uv",
-        "poetry",
-        "pdm",
-        "pyproject-alone",
-        "poe-task",
-        "requirements-txt",
-        "cargo",
-        "go",
-        "gradle-wrapper",
-        "maven",
-        "dotnet-by-glob",
-        "rspec",
-        "rake",
-        "composer",
-        "mix",
-        "swift",
+        {"bun.lock": "", "package.json": JEST},
+        "bun run test",
+        "bun install --frozen-lockfile",
+    ),  # noqa: E501
+    ("npm", {"package-lock.json": "", "package.json": JEST}, "npm test", "npm ci"),
+    (
+        "npm-workspaces",
+        {"package-lock.json": "", "package.json": WS},
+        "npm test --workspaces --if-present",
+        "npm ci",
+    ),  # noqa: E501
+    ("npm-without-a-lockfile", {"package.json": JEST}, "npm test", "npm install --no-package-lock"),  # noqa: E501
+    (
         "deno-jsonc",
+        {"deno.jsonc": '{\n  // tasks\n  "tasks": {"test": "deno test -A",},\n}'},
+        "deno task test",
+        "deno install",
+    ),  # noqa: E501
+    ("uv", {"pyproject.toml": PYTEST, "uv.lock": ""}, "uv run pytest", "uv sync"),
+    (
+        "uv-pytest-in-an-extra",
+        {"pyproject.toml": EXTRAS, "uv.lock": ""},
+        "uv run pytest",
+        "uv sync --all-extras",
+    ),  # noqa: E501
+    (
+        "uv-django",
+        {"pyproject.toml": DJANGO, "uv.lock": "", "manage.py": ""},
+        "uv run python manage.py test",
+        "uv sync",
+    ),  # noqa: E501
+    (
+        "poetry",
+        {"pyproject.toml": PYTEST, "poetry.lock": ""},
+        "poetry run pytest",
+        "poetry install",
+    ),  # noqa: E501
+    ("pdm", {"pyproject.toml": PYTEST, "pdm.lock": ""}, "pdm run pytest", "pdm install"),
+    (
+        "pipenv",
+        {"Pipfile": "", "Pipfile.lock": "", "pytest.ini": ""},
+        "pipenv run pytest",
+        "pipenv sync --dev",
+    ),  # noqa: E501
+    (
+        "hatch",
+        {"pyproject.toml": "[project]\nname='x'\n[tool.hatch.envs.default]\n"},
+        "hatch test",
+        "hatch env create",
+    ),  # noqa: E501
+    ("pyproject-alone", {"pyproject.toml": PYTEST}, "uv run pytest", "uv sync"),
+    (
+        "poe-task",
+        {"pyproject.toml": "[project]\nname='x'\n[tool.poe.tasks]\ntest = 'pytest -x'\n"},
+        "uv run poe test",
+        "uv sync",
+    ),  # noqa: E501
+    (
+        "requirements-txt",
+        {"requirements.txt": "pytest\n"},
+        ".venv/bin/python -m pytest",
+        "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
+    ),  # noqa: E501
+    ("tox", {"tox.ini": "[tox]\n"}, "tox", "tox --notest"),
+    ("cargo", {"Cargo.toml": "[package]\n"}, "cargo test", "cargo fetch"),
+    (
+        "cargo-workspace",
+        {"Cargo.toml": "[workspace]\nmembers = ['a']\n"},
+        "cargo test --workspace",
+        "cargo fetch",
+    ),  # noqa: E501
+    ("go", {"go.mod": "module x\n"}, "go test ./...", "go mod download"),
+    (
+        "gradle-wrapper",
+        {"gradlew": "", "build.gradle.kts": ""},
+        "./gradlew --no-daemon test",
+        "./gradlew --no-daemon testClasses",
+    ),  # noqa: E501
+    (
+        "android",
+        {"gradlew": "", "settings.gradle": "include ':app'\n", "app/build.gradle": ANDROID},
+        "./gradlew --no-daemon test",
+        "./gradlew --no-daemon help",
+    ),  # noqa: E501
+    ("gradle", {"build.gradle": ""}, "gradle --no-daemon test", "gradle --no-daemon testClasses"),  # noqa: E501
+    (
+        "android-without-a-wrapper",
+        {"settings.gradle": "include ':app'\n", "app/build.gradle": ANDROID},
+        "gradle --no-daemon test",
+        "gradle --no-daemon help",
+    ),
+    (
+        "maven-wrapper",
+        {"mvnw": "", "pom.xml": "<project/>"},
+        "./mvnw -B test",
+        "./mvnw -B test-compile",
+    ),  # noqa: E501
+    ("maven", {"pom.xml": "<project/>"}, "mvn -B test", "mvn -B test-compile"),
+    ("sbt", {"build.sbt": ""}, "sbt test", "sbt update"),
+    ("dotnet-by-glob", {"App.sln": "", "src/App/App.csproj": ""}, "dotnet test", "dotnet restore"),  # noqa: E501
+    (
+        "rails",
+        {"bin/rails": "", "bin/setup": "", "Gemfile": ""},
+        "bin/rails test",
+        "bin/setup --skip-server",
+    ),  # noqa: E501
+    ("rspec", {"Gemfile": "", ".rspec": ""}, "bundle exec rspec", "bundle install"),
+    (
+        "rake",
+        {"Gemfile": "", "Rakefile": "Rake::TestTask.new\n"},
+        "bundle exec rake test",
+        "bundle install",
+    ),  # noqa: E501
+    (
+        "composer",
+        {"composer.json": '{"scripts": {"test": "phpunit"}}'},
+        "composer test",
+        "composer install",
+    ),  # noqa: E501
+    ("mix", {"mix.exs": ""}, "mix test", "mix deps.get"),
+    ("swift", {"Package.swift": ""}, "swift test", "swift package resolve"),
+    (
+        "flutter",
+        {"pubspec.yaml": "dependencies:\n  flutter:\n    sdk: flutter\n"},
+        "flutter test",
+        "flutter pub get",
+    ),  # noqa: E501
+    ("dart", {"pubspec.yaml": "name: x\n"}, "dart test", "dart pub get"),
+    ("zig", {"build.zig": ""}, "zig build test", "zig build --fetch"),
+    ("stack", {"stack.yaml": ""}, "stack test", "stack build --only-dependencies --test"),
+    (
+        "cabal",
+        {"x.cabal": ""},
+        "cabal test",
+        "cabal update && cabal build --only-dependencies --enable-tests",
+    ),  # noqa: E501
+    (
+        "julia",
+        {"Project.toml": 'name = "X"\nuuid = "1"\n'},
+        "julia --project -e 'using Pkg; Pkg.test()'",
+        "julia --project -e 'using Pkg; Pkg.instantiate()'",
+    ),  # noqa: E501
+    ("bazel", {"MODULE.bazel": ""}, "bazel test //...", "bazel fetch //..."),
+    (
         "cmake",
-    ],
+        {"CMakeLists.txt": ""},
+        "sh -c 'cmake --build build && ctest --test-dir build --output-on-failure'",
+        "cmake -S . -B build",
+    ),  # noqa: E501
+    ("meson", {"meson.build": ""}, "meson test -C builddir", "meson setup builddir"),
+]
+
+
+@pytest.mark.parametrize(
+    ("files", "test", "setup"), [k[1:] for k in KINDS], ids=[k[0] for k in KINDS]
 )
 def test_each_kind_of_repo_gets_its_own_commands(tmp_path, files, test, setup):
     p = _propose(_repo(tmp_path, files))
     assert (p.test_command, p.setup_command) == (test, setup)
+
+
+def test_every_packaged_detector_has_a_case(tmp_path):
+    """A detector added to the table without a case above is a proposal
+    nothing has ever checked."""
+    proposed = set()
+    for n, (_, files, *_) in enumerate(KINDS):
+        p = _propose(_repo(tmp_path / str(n), files))
+        proposed |= {c["detector"] for c in p.candidates if c["chosen"]}
+    for script in ("script/test", "bin/test"):  # runner scripts count only when executable
+        p = _propose(_repo(tmp_path / script, {script: ""}, executable=(script,)))
+        proposed |= {c["detector"] for c in p.candidates if c["chosen"]}
+    assert {d.id for d in detect.load(None).detectors} - proposed == set()
 
 
 def test_a_script_to_rule_them_all_counts_only_when_executable(tmp_path):
@@ -681,3 +812,10 @@ def test_a_file_is_read_up_to_the_cap(tmp_path, monkeypatch):
     pad = "x" * 100
     repo = _repo(tmp_path, {"Makefile": f"# {pad}\ntest:\n\tgo test\n", "go.mod": "module x\n"})
     assert _propose(repo).test_command == "go test ./...", "the target past the cap is not read"
+
+
+def test_a_rails_apps_bin_setup_is_run_without_starting_the_server(tmp_path):
+    """Rails 7.1+'s bin/setup ends with `exec bin/dev`, which never exits."""
+    files = {"bin/rails": "", "bin/setup": "", "Gemfile": ""}
+    p = _propose(_repo(tmp_path, files, executable=("bin/rails", "bin/setup")))
+    assert p.setup_command == "bin/setup --skip-server"
