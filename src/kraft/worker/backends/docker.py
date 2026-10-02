@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import shutil
 import socket
@@ -50,6 +51,8 @@ from kraft.worker.sandbox import (
     _pin,
     linked_gitdirs,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from kraft.worker.refstore import RefStore
@@ -321,7 +324,9 @@ def _run(*argv: str, timeout: float = 10) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def _ask(cli: str, timeout: float = 10) -> tuple[str, bool | None, bool | None]:
+def _ask(
+    cli: str, timeout: float = 10, engine: str | None = None
+) -> tuple[str, bool | None, bool | None]:
     """`(engine, rootless, labels)`, asked of the runtime itself: what it
     really is, whether it runs as the operator, and whether it applies
     SELinux labels to containers (docker does only when its daemon was
@@ -331,9 +336,11 @@ def _ask(cli: str, timeout: float = 10) -> tuple[str, bool | None, bool | None]:
     busy host took over ten seconds) is `None` for both, never "rootful":
     that guess ran a rootless podman's container without `keep-id`, as a
     user who could not write the worktree. Docker's answer must be the JSON
-    list of options it always prints, podman's two booleans."""
-    version = _run(cli, "--version", timeout=timeout) or ""
-    engine = "podman" if "podman" in version.lower() else "docker"
+    list of options it always prints, podman's two booleans. An `engine`
+    already known is not asked again, so `timeout` bounds the whole ask."""
+    if engine is None:
+        version = _run(cli, "--version", timeout=timeout) or ""
+        engine = "podman" if "podman" in version.lower() else "docker"
     if engine == "docker":
         try:
             options = json.loads(
@@ -434,13 +441,18 @@ def detect_runtime() -> Runtime:
 _RUNTIME: Runtime | None = None
 #: Until when (`time.monotonic`) an inconclusive `_RUNTIME` is kept.
 _UNSURE_UNTIL = 0.0
-#: Whether a launch has already asked again about the `_RUNTIME` that did
-#: not say whether it is rootless (`_launch_runtime`): once per detection.
-_REASKED = False
-#: `runtime()` and `_launch_runtime` run in `asyncio.to_thread` workers, a
-#: launch's and doctor's at once: one detection at a time, and each sees the
-#: last one's answer instead of racing it.
-_LOCK = threading.RLock()
+#: Set while a detection runs (`runtime`), and cleared when it publishes:
+#: one at a time, and a caller with nothing cached waits for it.
+_DETECTING: threading.Event | None = None
+#: The one ask again a launch makes about the `_RUNTIME` that did not say
+#: whether it is rootless (`_launch_runtime`): None until a launch starts
+#: it, set once it is answered or not. Each detection starts it afresh.
+_REASK: threading.Event | None = None
+#: Guards the globals above, and is never held across a subprocess: a
+#: cached read is lock-free, and the event loop calls `runtime()` directly
+#: (`docker_argv`, `oom_killed`, `launch_failed`) while a slow runtime is
+#: being asked in a `to_thread` worker.
+_LOCK = threading.Lock()
 #: How long the one launch that asks again gives `info`: the slow first
 #: answer that timed out at `_run`'s ten seconds came back in under five.
 REASK_TIMEOUT_S = 30.0
@@ -450,6 +462,14 @@ REASK_TIMEOUT_S = 30.0
 UNSURE_TTL = 30.0
 
 
+def _due(host: Runtime | None) -> bool:
+    """Whether `host` is to be detected again: nothing cached yet, or an
+    answer that did not say everything once `UNSURE_TTL` is up."""
+    return host is None or (
+        not (host.identity_known and host.limits_known) and time.monotonic() >= _UNSURE_UNTIL
+    )
+
+
 def runtime(*, refresh: bool = False) -> Runtime:
     """This machine's `Runtime`, detected on first use and kept for the
     process: `docker info` is a round trip every launch would otherwise pay.
@@ -457,62 +477,112 @@ def runtime(*, refresh: bool = False) -> Runtime:
     runtime that did not say whether it is rootless, or what limits it
     enforces, is kept only `UNSURE_TTL` seconds: a call after that asks
     again rather than refusing until a restart, and a hung daemon is not
-    asked on every call (`_launch_runtime` asks once more, once). A
-    detection that gets no answer about rootless never replaces one that
-    did for the same CLI: a launch between its probe and its `docker run`
-    keeps the identity it was probed with."""
-    global _RUNTIME, _UNSURE_UNTIL, _REASKED
-    with _LOCK:
-        if (
-            refresh
-            or _RUNTIME is None
-            or (
-                not (_RUNTIME.identity_known and _RUNTIME.limits_known)
-                and time.monotonic() >= _UNSURE_UNTIL
-            )
-        ):
-            known, _RUNTIME = _RUNTIME, detect_runtime()
+    asked on every call (`_launch_runtime` asks once more, once).
+
+    A cached answer is returned without waiting, even while another thread
+    detects: only a caller with nothing cached, or a refresh, waits for a
+    detection already running instead of starting its own. A detection that
+    gets no answer about rootless never replaces one that did for the same
+    CLI: a launch between its probe and its `docker run` keeps the identity
+    it was probed with."""
+    global _RUNTIME, _UNSURE_UNTIL, _DETECTING, _REASK
+    while True:
+        host = _RUNTIME
+        if not refresh and not _due(host):
+            return host
+        with _LOCK:
+            running = _DETECTING
+            if running is None:
+                running = _DETECTING = threading.Event()
+                mine = True
+            else:
+                mine = False
+        if not mine:
+            if not refresh and _RUNTIME is not None:
+                return _RUNTIME
+            running.wait()
+            if _RUNTIME is not None:
+                return _RUNTIME
+            refresh = False  # that detection raised: try one of our own
+            continue
+        try:
+            fresh = detect_runtime()
+        except BaseException:
+            with _LOCK:
+                _DETECTING = None
+            running.set()
+            raise
+        with _LOCK:
+            known = _RUNTIME
             if (
-                not _RUNTIME.identity_known
+                not fresh.identity_known
                 and known is not None
                 and known.identity_known
-                and known.cli == _RUNTIME.cli
+                and known.cli == fresh.cli
             ):
-                _RUNTIME = replace(
-                    _RUNTIME,
+                fresh = replace(
+                    fresh,
                     engine=known.engine,
                     rootless=known.rootless,
                     selinux=known.selinux,
                     identity_known=True,
                 )
+            _RUNTIME = fresh
             _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
-            _REASKED = False
-        return _RUNTIME
+            _REASK = None
+            _DETECTING = None
+        running.set()
+        return fresh
 
 
 def _launch_runtime() -> Runtime:
-    """`runtime()` for a launch about to start. One that did not say whether
-    it is rootless is asked again by the first launch that meets it, at
-    once and with `REASK_TIMEOUT_S`, since one slow answer is no reason to
-    stop a task; later launches wait out `UNSURE_TTL` like every other call.
-    Still no answer, and `Runtime.refusal` stops the launch."""
-    global _RUNTIME, _REASKED
+    """`runtime()` for a launch about to start, called from a `to_thread`
+    worker. One that did not say whether it is rootless is asked again by
+    the first launch that meets it, at once and with `REASK_TIMEOUT_S`,
+    since one slow answer is no reason to stop a task; a launch meanwhile
+    waits for that answer. Still none, and `Runtime.refusal` stops the
+    launch, and every launch until `UNSURE_TTL` is up again stops at once."""
+    global _RUNTIME, _UNSURE_UNTIL, _REASK
+    host = runtime()
+    if host.identity_known:
+        return host
     with _LOCK:
-        host = runtime()
-        if host.identity_known or _REASKED:
-            return host
-        _REASKED = True
-        engine, rootless, labels = _ask(host.cli, REASK_TIMEOUT_S)
-        if rootless is None:
-            return host
-        _RUNTIME = replace(
-            host,
-            engine=engine,
-            rootless=rootless,
-            selinux=_selinux(_sandbox_yaml().selinux, labels),
-            identity_known=True,
-        )
+        if _RUNTIME is not host:
+            return _RUNTIME  # a detection published meanwhile
+        asking = _REASK
+        if asking is None:
+            asking = _REASK = threading.Event()
+            mine = True
+        else:
+            mine = False
+    if not mine:
+        asking.wait()
         return _RUNTIME
+    try:
+        logger.warning(
+            "`%s info` did not answer within 10 s; asking once more, waiting up to %g s",
+            host.cli,
+            REASK_TIMEOUT_S,
+        )
+        engine, rootless, labels = _ask(host.cli, REASK_TIMEOUT_S, host.engine)
+        selinux = _selinux(_sandbox_yaml().selinux, labels) if rootless is not None else None
+        with _LOCK:
+            if _RUNTIME is host:
+                if rootless is None:
+                    # The TTL counts from this answer: a hung daemon is not
+                    # asked again on the next launch.
+                    _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+                else:
+                    _RUNTIME = replace(
+                        host,
+                        engine=engine,
+                        rootless=rootless,
+                        selinux=selinux,
+                        identity_known=True,
+                    )
+            return _RUNTIME
+    finally:
+        asking.set()
 
 
 def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:

@@ -2,6 +2,7 @@
 does not answer in time."""
 
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -73,14 +74,16 @@ def slow_podman(tmp_path, monkeypatch):
     monkeypatch.setattr(docker, "_RUNTIME", None)
     # Recorded first, so the value `runtime()` writes is undone too.
     monkeypatch.setattr(docker, "_UNSURE_UNTIL", docker._UNSURE_UNTIL)
-    monkeypatch.setattr(docker, "_REASKED", docker._REASKED)
+    monkeypatch.setattr(docker, "_REASK", docker._REASK)
 
-    def go(*answers):
+    def go(*answers, during=lambda: None):
         left = iter(answers)
         timeouts = []
 
-        def ask(cli, timeout=10):
+        def ask(cli, timeout=10, engine=None):
             timeouts.append(timeout)
+            if len(timeouts) > 1:
+                during()
             return "podman", next(left), False
 
         monkeypatch.setattr(docker, "_ask", ask)
@@ -179,7 +182,7 @@ async def test_doctor_names_a_daemon_that_is_down_before_a_runtime_that_did_not_
     assert not ok and said in detail
 
 
-async def test_doctor_asks_again_as_a_launch_would(slow_podman, monkeypatch):
+async def test_doctor_asks_again_as_a_launch_would(slow_podman, monkeypatch, caplog):
     """Doctor's own refresh times out, its second ask answers: it passes
     the row a launch would start under."""
     slow_podman(None, None, True)
@@ -190,3 +193,58 @@ async def test_doctor_asks_again_as_a_launch_would(slow_podman, monkeypatch):
     monkeypatch.setattr(docker, "docker_call", call)
     ok, detail = await docker.DockerBackend().health(_SANDBOX)
     assert ok, detail
+    # Doctor is otherwise silent for the up to 30 s the second ask may take.
+    assert "asking once more, waiting up to 30 s" in caplog.text
+
+
+def test_a_cached_runtime_is_read_while_a_launch_asks_again(slow_podman):
+    """The event loop reads the cached runtime (`docker_argv`, `oom_killed`,
+    `launch_failed`) while a launch's thread waits on a slow `info`: the
+    read must not wait with it, or the whole daemon stalls."""
+    asking, answer = threading.Event(), threading.Event()
+
+    def held():
+        asking.set()
+        answer.wait()
+
+    unsure, _ = slow_podman(None, True, during=held)
+    launch = threading.Thread(target=docker._launch_runtime)
+    launch.start()
+    assert asking.wait(5)
+    read = []
+    reader = threading.Thread(target=lambda: read.append(docker.runtime()))
+    reader.start()
+    reader.join(2)
+    answered = not reader.is_alive()
+    answer.set()
+    launch.join(5)
+    reader.join(5)
+    assert answered and read == [unsure]
+    assert docker.runtime().rootless is True
+
+
+def test_a_second_ask_that_goes_unanswered_restarts_the_wait(slow_podman, monkeypatch):
+    """A second ask can outlast `UNSURE_TTL` itself; counted from the
+    detection, the next launch would detect and ask again at once."""
+
+    def outlasts():
+        monkeypatch.setattr(docker, "_UNSURE_UNTIL", 0.0)
+
+    _, timeouts = slow_podman(None, None, True, during=outlasts)
+    assert docker._launch_runtime().identity_known is False
+    assert docker._launch_runtime().identity_known is False
+    assert len(timeouts) == 2
+
+
+def test_the_second_ask_does_not_ask_the_version_again(monkeypatch):
+    """The engine is known from the first ask: the second's one `info` is
+    all `REASK_TIMEOUT_S` has to cover."""
+    ran = []
+
+    def run(*argv, timeout=10):
+        ran.append(argv[1])
+        return "true false\n"
+
+    monkeypatch.setattr(docker, "_run", run)
+    assert docker._ask("podman", docker.REASK_TIMEOUT_S, "podman") == ("podman", True, False)
+    assert ran == ["info"]
