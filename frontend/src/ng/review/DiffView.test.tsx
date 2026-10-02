@@ -345,8 +345,15 @@ describe("the + lane", () => {
   // jsdom lays nothing out, so this reads the rule: the + sits in padding of its own, left of the numbers,
   // and hidden it is invisible to a tap and to the a11y tree, not only transparent.
   const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "review.css"), "utf-8");
-  const rule = (sel: string) => new RegExp(`(^|\\n)${sel.replace(/[.()*+?:[\]]/g, "\\$&")}\\s*{([^}]*)}`).exec(css)?.[2] ?? "";
-  const px = (body: string, prop: string) => Number(new RegExp(`(?:^|[;\\s])${prop}:\\s*(-?\\d+)px`).exec(body)?.[1]);
+  // A rule's body by its exact selector at the start of a line, read with plain string search.
+  const rule = (sel: string) => {
+    const at = css.indexOf(`\n${sel} {`);
+    return at < 0 ? "" : css.slice(css.indexOf("{", at) + 1, css.indexOf("}", at));
+  };
+  const px = (body: string, prop: string) => {
+    const decl = body.split(";").map((d) => d.split(":").map((x) => x.trim())).find(([k]) => k === prop);
+    return decl ? parseFloat(decl[1]) : NaN;
+  };
   it("puts the + in its own lane, clear of the line numbers", () => {
     const lane = rule(".rv-row:not(.is-split), .rv-half");
     const plus = rule(".rv-plus");
