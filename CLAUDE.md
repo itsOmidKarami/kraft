@@ -161,12 +161,12 @@ layout drifted the first time. A module with no package mirrors nothing and
 stays at `tests/test_<mod>.py`.
 
 **Every `tests/` subdirectory needs an empty `__init__.py`.** This is
-load-bearing, not tidiness. The mirrored tree has duplicate basenames (19 at
-the last count: `test_gates.py` exists under `api/`, `executor/` and the root,
+load-bearing, not tidiness. The mirrored tree has duplicate basenames (about
+twenty: `test_gates.py` exists under `api/`, `executor/` and the root,
 and so on for `test_db`, `test_auth`, `test_review`, `test_run` and more),
 which pytest's default prepend import mode rejects as a hard collection error.
 Packages fix it with no config change, and they keep `tests/` on `sys.path` —
-which the ~150 files doing `from support.harness import ...` depend on. Do not
+which the many files doing `from support.harness import ...` depend on. Do not
 "simplify" this by switching to `--import-mode=importlib`; that drops `tests/`
 off `sys.path` and breaks every one of them.
 

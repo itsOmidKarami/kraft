@@ -309,7 +309,7 @@ Page rules:
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/4.reference/1.cli/` |
 | A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/4.reference/2.configuration/` |
 | A chain template's node fields | `docsite/content/4.reference/3.chain-nodes/index.md` |
-| How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `findings.py`, `usage.py`) | `docsite/content/4.reference/3.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
+| How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `src/kraft/findings.py`, `src/kraft/usage.py`) | `docsite/content/4.reference/3.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
 | The fix loop or its judge (`src/kraft/executor/walk.py`, `dispatch.py`) | `docsite/content/4.reference/3.chain-nodes/3.fix-loop.md` |
 | A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/1.vocabulary.md` |
 | Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/4.reference/6.triggers.md` |
