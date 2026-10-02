@@ -4,7 +4,7 @@ import { Button } from "../../ui/Button";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { Kv } from "../panes/controls";
 import type { MissingTool, ProbeCandidate, ProbeStop } from "../../../types/settings";
-import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "./evidence";
+import { missingLine, others, readFrom, setupLine, stopLine, testsLine } from "./evidence";
 
 /** `POST /repos/probe`'s answer, the fields Connect reads. */
 export interface Probe {
@@ -115,8 +115,8 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
           <Kv k="name" v={probe.name} />
           <Kv k="branch" v={probe.branch ?? "—"} mono />
           <Kv k="forge" v={probe.forge ? `${probe.forge}${probe.project ? ` · ${probe.project}` : ""}` : "no forge remote"} muted={!probe.forge} />
-          <Kv k="tests" v={probe.test_command ? withSource(probe.test_command, chosenSource(probe.candidates, "test")) : stopped ? "stopped" : "none found"} mono muted={!probe.test_command} />
-          <Kv k="test scopes" v={stopped ? "stopped" : probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes?.length} />
+          <Kv k="tests" v={testsLine(probe)} mono muted={!probe.test_command} />
+          <Kv k="test scopes" v={stopped && !probe.test_scopes?.length ? "none proposed" : probe.test_scopes?.length ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes?.length} />
           {/* Every command Connect saves is shown: a nested scope's is not the test command above. */}
           {(probe.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => (
             <Kv key={s.paths[0]} k={s.paths[0]} v={s.command} mono />
@@ -129,7 +129,7 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
           {alsoTest && <p className="rp-connect-note">Also found for tests: {alsoTest}</p>}
           {alsoSetup && <p className="rp-connect-note">Also found for setup: {alsoSetup}</p>}
           {gains && <p className="rp-connect-note">{Object.keys(gains).length ? `Already connected: Update saves ${gainedLine(gains)}.` : "Already connected, and nothing it leaves undecided was found."}</p>}
-          {!gains && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : stopped ? "Tests stopped: connected disabled until you set a test command." : "No tests found: connected disabled until you set a test command."}</p>}
+          {!gains && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connects enabled." : `${stopped ? "No test command proposed" : "No tests found"}: connects disabled until you set a test command in Templates › Repos.`}</p>}
         </div>
       )}
     </form>

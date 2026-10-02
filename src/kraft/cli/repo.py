@@ -76,12 +76,15 @@ def _print(line: str) -> None:
     print("".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in line))
 
 
-def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None:
+def _pick(
+    role: str, candidates: list[dict], proposed: str | None, nested: list[str] = ()
+) -> str | None:
     """Ask which of the root's `role` candidates to use, when there is a
     choice to make. Enter keeps the proposal; a number picks one; `-` says
     there is none; `y` keeps the proposal and `n` asks again, since a yes or
     no is an answer to the prompt, never a command; anything else is the
-    command itself."""
+    command itself. `nested`: directories below the root with their own
+    `role` command, which a root with no test needs no question about."""
     options: list[dict] = []
     for c in candidates:
         if (
@@ -99,15 +102,27 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
         options.insert(0, {"command": proposed, "source": joined or "the proposal"})
     if len(options) < 2 and proposed is not None:
         return proposed
-    _print(f"{role} command for the repo root:")
-    default = next((i for i, o in enumerate(options, 1) if o["command"] == proposed), None)
-    for i, o in enumerate(options, 1):
-        mark = "  [proposed]" if i == default else ""
-        _print(f"  {i}) {o['command']}    from {o['source']}{mark}")
-    keep = f"Enter keeps {default}, " if default else ""
+    if not options and role == "test" and nested:
+        return proposed  # its scopes are the repo's tests
+    where = "the root"
+    if nested:
+        own = "have their own" if len(nested) > 1 else "has its own"
+        where += f" ({', '.join(f'{d}/' for d in nested)} {own})"
     none = "- for no tests" if role == "test" else "- for none"
+    if options:
+        _print(f"{role} command for {where}:")
+        default = next((i for i, o in enumerate(options, 1) if o["command"] == proposed), None)
+        for i, o in enumerate(options, 1):
+            mark = "  [proposed]" if i == default else ""
+            _print(f"  {i}) {o['command']}    from {o['source']}{mark}")
+        keep = f"Enter keeps {default}, " if default else ""
+        prompt = f"  {keep}a number, {none}, or type a command: "
+    else:
+        _print(f"no {role} command found for {where}")
+        unset = "Enter leaves it unset" + (" (saved disabled)" if role == "test" else "")
+        prompt = f"  type one, {none}, or {unset}: "
     while True:
-        answer = input(f"  {keep}a number, {none}, or type a command: ").strip()
+        answer = input(prompt).strip()
         if not answer:
             return proposed
         if answer == "-" and role == "test":
@@ -125,7 +140,8 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
         if answer.lower() in ("y", "yes") and proposed is not None:
             return proposed
         if answer.lower() in ("y", "yes", "n", "no"):
-            _print("  pick one by its number, - for none, or type the command to use")
+            pick = "pick one by its number, " if options else ""
+            _print(f"  {pick}{none}, or type the command to use")
             continue
         if not answer.isdigit():
             return answer
@@ -146,8 +162,13 @@ def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
         return None, None  # no commit: connect refuses it, so there is nothing to choose
     root = next((s for s in probed.get("scopes") or () if s["dir"] == ""), None)
     cands = probed.get("candidates") or []
-    test = _pick("test", cands, root["test"] if root else None)
-    setup = _pick("setup", cands, root["setup"] if root else None)
+    below = [s for s in probed.get("scopes") or () if s["dir"]]
+    test = _pick(
+        "test", cands, root["test"] if root else None, [s["dir"] for s in below if s["test"]]
+    )
+    setup = _pick(
+        "setup", cands, root["setup"] if root else None, [s["dir"] for s in below if s["setup"]]
+    )
     test_command = None if root and test == root["test"] else test
     setup_command = None
     if not root or setup != root["setup"]:
@@ -185,27 +206,39 @@ def _say_connected(result: dict) -> None:
 
 
 def _source(result: dict, d: str, role: str, command: str | None) -> str:
-    chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
-    hit = next(
-        (c for c in chosen if (c["dir"], c["role"], c["command"]) == (d, role, command)), None
-    )
-    return f" (from {hit['source']})" if hit else ""
+    """ " (from …)" for `command`, directory `d`'s `role` command: the
+    candidate it is (one picked at the prompt included), else the chosen
+    ones it combines (a test run per family)."""
+    here = [c for c in result.get("candidates") or () if (c["dir"], c["role"]) == (d, role)]
+    hit = next((c for c in here if c.get("chosen") and c["command"] == command), None)
+    hit = hit or next((c for c in here if c["command"] == command), None)
+    if hit:
+        return f" (from {hit['source']})"
+    parts = [c["source"] for c in here if c.get("chosen")]
+    return f" (from {' + '.join(parts)})" if parts else ""
 
 
 def _say_tests(result: dict) -> None:
+    """The test command, or, with directories below the root tested on their
+    own, every scope: a monorepo's first scope is not the repo's command."""
     by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
     root = by_dir.get("", {})
-    if result.get("test_command") == "":
+    nested = [(d, s["test"]) for d, s in by_dir.items() if d and s.get("test")]
+    test = result.get("test_command")
+    if nested:
+        _print("test scopes:")
+        if root.get("test"):
+            _print(f"  the root: {root['test']}{_source(result, '', 'test', root['test'])}")
+        elif test == "":
+            _print('  the root: "" (no tests)')
+    elif test == "":
         _print('test command: "" (no tests)')
-        if result.get("enabled"):
-            _print("  saved enabled: its work items pass verification without running a test")
-    elif root.get("test") and root["test"] == result.get("test_command"):
-        _print(f"test command: {root['test']}{_source(result, '', 'test', root['test'])}")
-    elif result.get("test_command"):
-        _print(f"test command: {result['test_command']}")
-    for d, s in by_dir.items():
-        if d and s.get("test"):
-            _print(f"  {d}/: {s['test']}{_source(result, d, 'test', s['test'])}")
+    elif test:
+        _print(f"test command: {test}{_source(result, '', 'test', test)}")
+    for d, command in nested:
+        _print(f"  {d}/: {command}{_source(result, d, 'test', command)}")
+    if test == "" and result.get("enabled"):
+        _print("  saved enabled: its work items pass verification without running a test")
 
 
 def _say_setup(result: dict) -> None:
@@ -222,7 +255,11 @@ def _say_setup(result: dict) -> None:
         _print('setup command: "" (nothing to prepare)')
     else:
         missing = [d if d != "." else "the root" for d in result.get("missing_setup") or ()]
-        found = [c["command"] for c in chosen if c["role"] == "setup"]
+        found = [
+            detect.in_dir(c["dir"], c["command"], shell=True)
+            for c in chosen
+            if c["role"] == "setup"
+        ]
         # Undeclared stops the repo's first work item; "" is a declared none.
         why = (
             f"{' && '.join(found)} found, but {', '.join(missing)} "

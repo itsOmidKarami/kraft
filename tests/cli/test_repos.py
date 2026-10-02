@@ -359,6 +359,98 @@ def test_a_proposed_combination_is_offered_whole(capsys, monkeypatch):
     assert "1) npm ci && mix deps.get    from package-lock.json + mix.exs  [proposed]" in out
 
 
+def test_the_prompt_says_when_there_is_nothing_to_pick(capsys, monkeypatch):
+    """It offered "a number" with none listed, and asked about the root's
+    tests on a monorepo whose scopes already have theirs."""
+    from kraft.cli import repo as repo_cli
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("asked"))
+    assert repo_cli._pick("test", [], None, ["api", "web"]) is None
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "")
+    assert repo_cli._pick("setup", [], None, ["web"]) is None
+    assert "no setup command found for the root (web/ has its own)" in capsys.readouterr().out
+    assert asked == ["  type one, - for none, or Enter leaves it unset: "]
+
+
+def _cand(d, role, command, source, chosen=True):
+    c = {"dir": d, "role": role, "command": command, "source": source, "chosen": chosen}
+    return {**c, "tier": "toolchain"}
+
+
+def test_connect_heads_a_monorepos_tests_as_scopes_each_with_its_source(capsys):
+    """The first scope's `sh -c 'cd backend && …'` was headed "test command",
+    as if it were the repo's."""
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected(
+        {
+            "path": "/r",
+            "test_command": "sh -c 'cd backend && uv run pytest'",
+            "scopes": [
+                {"dir": "backend", "test": "uv run pytest", "setup": "uv sync"},
+                {"dir": "web", "test": "npm test", "setup": "npm ci"},
+            ],
+            "candidates": [
+                _cand("backend", "test", "uv run pytest", "backend/uv.lock"),
+                _cand("web", "test", "npm test", "web/package.json script `test`"),
+            ],
+        }
+    )
+    out = capsys.readouterr().out
+    assert "test command:" not in out
+    assert "test scopes:\n  backend/: uv run pytest (from backend/uv.lock)\n  web/: npm test" in out
+
+
+@pytest.mark.parametrize(
+    ("command", "candidates", "source"),
+    [
+        (
+            "sh -c 'pnpm test && cargo test'",
+            [
+                _cand("", "test", "pnpm test", "pnpm-lock.yaml"),
+                _cand("", "test", "cargo test", "Cargo.toml"),
+            ],
+            "(from pnpm-lock.yaml + Cargo.toml)",
+        ),
+        (
+            "go test ./...",
+            [
+                _cand("", "test", "make test", "Makefile target `test`", chosen=False),
+                _cand("", "test", "go test ./...", "go.mod", chosen=False),
+            ],
+            "(from go.mod)",
+        ),
+    ],
+    ids=["combined", "picked-at-the-prompt"],
+)
+def test_connect_names_the_source_of_a_combined_or_picked_test(capsys, command, candidates, source):
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected({"path": "/r", "test_command": command, "candidates": candidates})
+    assert f"test command: {command} {source}" in capsys.readouterr().out
+
+
+def test_a_setup_found_names_each_directory_it_runs_in(capsys):
+    """`npm ci && npm ci found` lost the directories, and read like a
+    command to copy that fails at the root."""
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected(
+        {
+            "path": "/r",
+            "setup_command": None,
+            "missing_setup": ["."],
+            "candidates": [
+                _cand("web", "setup", "npm ci", "web/package-lock.json"),
+                _cand("docs", "setup", "npm ci", "docs/package-lock.json"),
+            ],
+        }
+    )
+    out = capsys.readouterr().out
+    assert "setup command: (cd web && npm ci) && (cd docs && npm ci) found, but the root" in out
+
+
 def test_connect_names_a_program_this_machine_lacks(capsys):
     from kraft.cli import repo as repo_cli
 

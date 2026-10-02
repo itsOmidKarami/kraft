@@ -169,8 +169,9 @@ describe("Repos page: connecting", () => {
     expect(found).toHaveTextContent("the root is a project (Gemfile) with no test command found");
     expect(found).toHaveTextContent("uv sync found, but web/ has nothing to prepare it");
     expect(found).toHaveTextContent("origin/main, where work items start");
-    // Stopped, not missing: the form says which.
-    expect(found).toHaveTextContent("Tests stopped: connected disabled");
+    // None proposed, not none found: the form says which, without the detector's word "stopped".
+    expect(found).toHaveTextContent("No test command proposed: connects disabled until you set a test command in Templates › Repos.");
+    expect(found).not.toHaveTextContent(/stopped/i);
   });
 
   it("says a repo with no tests connects disabled, as add_repo sends it, though the probe answers an empty scope list", async () => {
@@ -180,7 +181,7 @@ describe("Repos page: connecting", () => {
     await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
     await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
-    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connected disabled until you set a test command.");
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connects disabled until you set a test command in Templates › Repos.");
     await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalled());
     expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });

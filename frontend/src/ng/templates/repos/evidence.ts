@@ -38,13 +38,24 @@ export function others(
 export function setupLine(p: { setup_command?: string | null; candidates?: ProbeCandidate[]; missing_setup?: string[] }): string {
   if (p.setup_command) return withSource(p.setup_command, chosenSource(p.candidates, "setup"));
   if (p.setup_command === "") return "none needed";
-  const found = (p.candidates ?? []).filter((c) => c.chosen && c.role === "setup").map((c) => c.command);
+  // Each from its own directory: `npm ci && npm ci found` read like a command that fails at the root.
+  const found = (p.candidates ?? []).filter((c) => c.chosen && c.role === "setup").map((c) => (c.dir ? `(cd ${c.dir} && ${c.command})` : c.command));
   const missing = (p.missing_setup ?? []).map((d) => (d === "." ? "the root" : `${d}/`));
   if (found.length && missing.length) {
     const has = missing.length > 1 ? "have nothing to prepare them" : "has nothing to prepare it";
     return `${found.join(" && ")} found, but ${missing.join(", ")} ${has}`;
   }
   return "none found";
+}
+
+/** The tests row: the root's test command with where it came from, or why there is
+ *  none. A monorepo with no tests at the root is said so, rather than headed by its
+ *  first scope's `sh -c 'cd backend && …'` as if that were the repo's command. */
+export function testsLine(p: { test_command: string | null; test_scopes?: { paths: string[] }[] | null; candidates?: ProbeCandidate[]; stopped?: ProbeStop[] }): string {
+  const source = chosenSource(p.candidates, "test");
+  if (!source && (p.test_scopes ?? []).some((s) => s.paths.join() !== "**")) return "none at the root: each scope below has its own";
+  if (p.test_command) return withSource(p.test_command, source);
+  return p.stopped?.length ? "none proposed" : "none found";
 }
 
 /** Why a directory proposes no test command: "the root is a pyproject.toml…". */
