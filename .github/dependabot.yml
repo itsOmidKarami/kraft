@@ -11,12 +11,33 @@ updates:
     labels:
       - release::patch
 
+  # A major bump (React, zustand, vite) is a migration, not a weekly PR: it
+  # needs someone to port the code, so Dependabot leaves those to a person.
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
     labels:
       - release::patch
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # The extension's dependencies ship in the .vsix on the Marketplace.
+  - package-ecosystem: npm
+    directory: /vscode
+    schedule:
+      interval: weekly
+    labels:
+      - release::patch
+
+  # The docs site is built and deployed by CI, never shipped in a release.
+  - package-ecosystem: npm
+    directory: /docsite
+    schedule:
+      interval: weekly
+    labels:
+      - release::none
 
   # Keeps the SHA-pinned actions in .github/workflows/*.yml current -- those
   # pins have no other update path. Always CI-only, never shipped.

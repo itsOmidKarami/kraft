@@ -254,6 +254,7 @@ schemas:
 
 # Regenerate src/kraft/templates/lucide_icons.txt from the installed lucide-react
 # (the icon names a template's `icon:` is linted against). Run after every bump.
+[doc("Regenerate the lucide icon list after a lucide-react bump")]
 icons:
     uv run python dev/gen_icon_names.py
 
@@ -310,6 +311,7 @@ ci-test:
 
 # Render docsite/diagrams/*.mmd to the SVGs the pages show. Docus does not
 # render Mermaid, so the SVGs are committed; run this after editing a diagram.
+[doc("Render the Mermaid diagrams to the committed SVGs")]
 docs-diagrams:
     cd docsite/diagrams && for f in *.mmd; do npx -y @mermaid-js/mermaid-cli@11 -c mermaid.json -b white -i "$f" -o "../public/diagrams/${f%.mmd}.svg"; done
 
@@ -320,6 +322,7 @@ docs:
 
 # Build the published site (latest release at /kraft/, main at /kraft/next/)
 # and serve it at http://localhost:8000/kraft/
+[doc("Build both docs versions and serve them at http://localhost:8000/kraft/")]
 docs-site:
     cd docsite && [ -d node_modules ] || npm ci
     rm -rf docsite/dist-site
