@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CompareFile, WorkItem } from "../../types";
 import { NO_ATTEMPTS } from "./model";
@@ -101,5 +101,34 @@ describe("diff settings", () => {
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Wrap long lines/ }));
     expect(set.mock.calls).toEqual([[{ layout: "split" }], [{ show_whitespace: false }], [{ wrap_lines: true }]]);
     expect(screen.getByRole("menuitemradio", { name: /Inline/ })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("is a menu the keyboard reaches: Enter opens it on its first item, ↓ moves, Escape comes back", async () => {
+    render(<DiffSettings prefs={DEFAULT_PREFS} set={() => {}} />);
+    const button = screen.getByRole("button", { name: "Diff settings" });
+    expect(button).toHaveAttribute("aria-haspopup", "menu");
+    button.focus();
+    fireEvent.click(button);
+    expect(screen.getByRole("menu", { name: "Diff settings" })).toBeInTheDocument();
+    const first = screen.getByRole("menuitemradio", { name: /Side-by-side/ });
+    await waitFor(() => expect(first).toHaveFocus());
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitemradio", { name: /Inline/ })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(button).toHaveFocus();
+  });
+});
+
+describe("nodes filter from the keyboard", () => {
+  it("opens on its first box, and ↓ reaches the nodes", async () => {
+    render(<NodesFilter files={FILES} chainOrder={["implementation", "local_review", "verification"]} nodes={null} onChange={() => {}} />);
+    const button = screen.getByRole("button", { name: /^Nodes:/ });
+    button.focus();
+    fireEvent.click(button);
+    const all = screen.getByRole("menuitemcheckbox", { name: /All nodes/ });
+    await waitFor(() => expect(all).toHaveFocus());
+    fireEvent.keyDown(all, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitemcheckbox", { name: /^implementation/ })).toHaveFocus();
   });
 });

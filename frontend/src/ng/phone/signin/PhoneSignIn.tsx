@@ -72,7 +72,7 @@ export function PhoneSignIn({ onSignedIn }: { onSignedIn: () => Promise<void> })
       <form className="ph-signin-card" onSubmit={submit}>
         <div className="ph-signin-brand"><span>Kraft</span>{where && <span className="ph-signin-where">{where}</span>}</div>
         <h1 className="ph-title">Sign in</h1>
-        <p className="ph-help">This instance asks for a password off localhost.</p>
+        <p className="ph-help">Kraft listens on the network, so every browser signs in, this machine's too.</p>
         <label className="ph-field">
           <span>Password</span>
           <input ref={input} className="ph-input" type="password" autoComplete="current-password" autoFocus value={password} disabled={locked} aria-invalid={!locked && error === "Wrong password."} onChange={(e) => { setPassword(e.target.value); setError(null); }} />

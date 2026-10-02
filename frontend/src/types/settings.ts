@@ -331,6 +331,8 @@ export interface Access {
   password_set: boolean;
   auth_required: boolean;
   allowed_hosts: string[];
+  /** This machine's LAN address and host name, offered for `allowed_hosts` when switching to a network bind. */
+  lan_hosts?: string[];
 }
 
 /** `GET /notify`. The webhook URL is deliberately absent — the server never

@@ -4,10 +4,11 @@ import * as api from "../../api";
 import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
-import { SELF_RESTART, bindHost, useApply } from "../apply/store";
+import { SELF_RESTART, afterRestart, bindHost, useApply } from "../apply/store";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
+import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "./accessWords";
 import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
@@ -37,6 +38,8 @@ export function AccessPage() {
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [editing, setEditing] = useState<"port" | "password" | "host" | "lan" | null>(null);
   const [draft, setDraft] = useState("");
+  /** Local network's second field: the name the phone will use, saved to Allowed hosts with the bind. */
+  const [lanHost, setLanHost] = useState("");
   const [revoking, setRevoking] = useState<AuthSession | null>(null);
   const { restart, managed, loaded } = useApply();
   const askRestart = useApply((s) => s.askRestart);
@@ -78,7 +81,10 @@ export function AccessPage() {
   const items = restart.filter((i) => i.id.startsWith("access."));
   // The server drops its restart item when KRAFT_HOST / KRAFT_PORT wins over the file.
   const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
-  const address = `${location.protocol}//${bindHost(access.bind)}:${access.port}`;
+  // Where a restart brings Kraft back: KRAFT_HOST / KRAFT_PORT win over the file.
+  const back = afterRestart(access, health, items);
+  const address = `${location.protocol}//${bindHost(back.bind)}:${back.port}`;
+  const suggested = hostSuggestion(access);
   // Local network's password prompt reports under the Reach cards, as the bind it saves with.
   const errKey = (what: "port" | "password" | "host" | "lan") => (what === "lan" ? "bind" : what);
   const closeEdit = () => {
@@ -101,12 +107,20 @@ export function AccessPage() {
     if (!draft) return closeEdit();
     if (await put("password", { password: draft })) closeEdit();
   };
-  // The server refuses a bind off loopback with no password, so Local network
-  // asks for one first and sends both in one save.
-  const pickBind = (bind: string) => (bind !== LOOPBACK && !access.password_set ? edit("lan") : void put("bind", { bind }));
+  // The server refuses a bind off loopback with no password, and refuses
+  // every other device's browser until its Host is on the list. So Local
+  // network asks for what is missing of the two first, the host pre-filled
+  // with this machine's LAN address, and sends them with the bind in one save.
+  const pickBind = (bind: string) => {
+    if (bind === LOOPBACK || (access.password_set && access.allowed_hosts.length)) return void put("bind", { bind });
+    setLanHost(suggested ?? "");
+    edit("lan");
+  };
   const saveLan = async () => {
-    if (!draft) return err("bind", "enter a password");
-    if (await put("bind", { bind: "0.0.0.0", password: draft })) closeEdit();
+    if (!access.password_set && !draft) return err("bind", "enter a password");
+    const host = lanHost.trim().replace(/,$/, "");
+    const hosts = host && !access.allowed_hosts.includes(host) ? { allowed_hosts: [...access.allowed_hosts, host] } : {};
+    if (await put("bind", { bind: "0.0.0.0", ...(draft && { password: draft }), ...hosts })) closeEdit();
   };
   const addHost = async () => {
     const h = draft.trim().replace(/,$/, "");
@@ -157,7 +171,7 @@ export function AccessPage() {
     <>
     <YamlFrame pageKey="access" file="access.yaml" title="access" icon="shield" status={items.length ? "restart to apply" : "saved on change"} yaml={yaml} yamlNote="The password is stored hashed and never shown. Bind and port are read at startup, so an edit here waits for a restart.">
       <div className="set-page is-cards">
-        <div className="set-title"><h1>Access</h1><p className="lede">Auth is off on localhost and on for anything else.</p></div>
+        <div className="set-title"><h1>Access</h1><p className="lede">{ACCESS_LEDE}</p></div>
 
         {items.length > 0 && (
           <div className="set-pending" role="status">
@@ -186,7 +200,7 @@ export function AccessPage() {
                 <span className="set-mode-icon" aria-hidden>{m.icon}</span>
                 <span className="set-mode-text">
                   <span className="set-mode-title">{m.title}</span>
-                  <span className="set-mode-addr">{m.bind}:{access.port}</span>
+                  <span className="set-mode-addr">{m.bind}:{back.port}</span>
                   <span className="set-hint">{m.note}</span>
                 </span>
                 <span className="set-mode-dot" aria-hidden />
@@ -194,13 +208,20 @@ export function AccessPage() {
             ))}
           </div>
           {editing === "lan" && (
-            <SetRow label="password" hint="Off this machine, Kraft asks for a password. Set one to switch to the local network.">
-              <span className="set-inline">
-                <input ref={field} className="set-input" type="password" aria-label="Password for the local network" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void saveLan())} />
-                <button type="button" className="set-btn is-primary" onClick={() => void saveLan()}>Set and switch</button>
-                <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
-              </span>
-            </SetRow>
+            <>
+              {!access.password_set && (
+                <SetRow label="password" hint="On the network, Kraft asks every browser for a password, this machine's too. Set one to switch.">
+                  <input ref={field} className="set-input" type="password" aria-label="Password for the local network" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void saveLan())} />
+                </SetRow>
+              )}
+              <SetRow label="phone's host" hint={`The name or address your phone will type: it goes on Allowed hosts, and any other is refused (403).${access.lan_hosts?.length ? ` This machine is ${access.lan_hosts.join(" or ")} on the network.` : ""} Leave it empty to add one later.`}>
+                <span className="set-inline">
+                  <input ref={access.password_set ? field : undefined} className="set-input" aria-label="Host or IP the phone will use" placeholder="host or IP" value={lanHost} onChange={(e) => setLanHost(e.target.value)} onKeyDown={keys(() => void saveLan())} />
+                  <button type="button" className="set-btn is-primary" onClick={() => void saveLan()}>{access.password_set ? "Switch" : "Set and switch"}</button>
+                  <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+                </span>
+              </SetRow>
+            </>
           )}
           {errors.bind && <span className="set-error" role="alert">{errors.bind}</span>}
           {overridden("bind") && <span className="set-hint">Running on {health?.bind}: the KRAFT_HOST environment setting wins over this.</span>}
@@ -221,7 +242,7 @@ export function AccessPage() {
         {lan ? (
           <>
             <Block id="set-hosts" title="Allowed hosts" aside="saved on change" card>
-              <SetRow label="hosts" error={errors.host} hint="Off loopback, a browser request is refused (403) unless its Host is on this list: the DNS-rebinding guard. On 127.0.0.1 the list is ignored.">
+              <SetRow label="hosts" error={errors.host} hint="Off loopback, another device's browser is refused (403) unless the Host it sends is on this list: the DNS-rebinding guard. A browser on this machine is let in at 127.0.0.1, localhost or [::1]. On 127.0.0.1 the list is ignored.">
                 <ul className="set-chips">
                   {access.allowed_hosts.map((h) => (
                     <li key={h}><button type="button" className="set-chip" aria-label={`Remove ${h}`} title={h === location.hostname ? "You are connected as this host" : `Remove ${h}`} onClick={() => removeHost(h)}>{h} <span aria-hidden>×</span></button></li>
@@ -235,7 +256,12 @@ export function AccessPage() {
                   </li>
                 </ul>
               </SetRow>
-              {access.allowed_hosts.length === 0 && <span className="set-hint is-warn">An empty list on a LAN bind refuses every browser.</span>}
+              {access.allowed_hosts.length === 0 && (
+                <span className="set-hint is-warn">
+                  {EMPTY_HOSTS}
+                  {suggested && <> <button type="button" className="set-chip is-add" onClick={() => void put("host", { allowed_hosts: [suggested] })}><Plus size={11} aria-hidden /> add {suggested}</button></>}
+                </span>
+              )}
               {notifyHost && <span className="set-hint">The notification link-back ({notifyHost}) is {access.allowed_hosts.includes(notifyHost) ? "on the list." : "not on the list: that link will be refused."}</span>}
             </Block>
 

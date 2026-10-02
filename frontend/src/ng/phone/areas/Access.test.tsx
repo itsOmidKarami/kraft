@@ -67,6 +67,24 @@ describe("Access (O.3)", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0" }));
   });
 
+  it("on loopback with a password set and no hosts, Local network asks for the phone's host first, pre-filled with this machine's address", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: true, auth_required: false, allowed_hosts: [], lan_hosts: ["192.168.1.20", "mybox.local"] });
+    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    expect(put).not.toHaveBeenCalled();
+    const box = screen.getByLabelText("Phone's host", { selector: "input" });
+    expect(box).toHaveValue("192.168.1.20");
+    await userEvent.type(box, "{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", allowed_hosts: ["192.168.1.20"] }));
+  });
+
+  it("on loopback with no password and no hosts, saves this machine's address with the password and the bind", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: false, auth_required: false, allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
+    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    expect(screen.getByText(/192\.168\.1\.20, this machine's address, goes on Allowed hosts/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Set a password", { selector: "input" }), "hunter2{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", password: "hunter2", allowed_hosts: ["192.168.1.20"] }));
+  });
+
   it("on loopback says the hosts, password and sessions are not used", async () => {
     setup({ bind: "127.0.0.1", auth_required: false });
     expect(await screen.findByRole("region", { name: "Not used on 127.0.0.1" })).toBeInTheDocument();
@@ -166,6 +184,17 @@ describe("Access (O.3)", () => {
     await userEvent.click(screen.getByRole("button", { name: /Add a host/ }));
     await userEvent.type(screen.getByLabelText("Add a host", { selector: "input" }), "nas.lan{Enter}");
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ allowed_hosts: ["localhost", "nas.lan"] }));
+  });
+
+  it("with no hosts, says only other devices are refused and pre-fills Add a host with this machine's address", async () => {
+    const put = setup({ allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
+    expect(await screen.findByText(/An empty list refuses every other device \(403\)\. This machine still gets in at 127\.0\.0\.1\. Add 192\.168\.1\.20/)).toBeInTheDocument();
+    expect(screen.getByText("Auth is off on a 127.0.0.1 bind. Once Kraft listens on the network, every browser signs in, this machine's too.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^hosts/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Add a host/ }));
+    expect(screen.getByLabelText("Add a host", { selector: "input" })).toHaveValue("192.168.1.20");
+    await userEvent.type(screen.getByLabelText("Add a host", { selector: "input" }), "{Enter}");
+    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ allowed_hosts: ["192.168.1.20"] }));
   });
 
   it("the password is typed into a masked field, saved by the sheet, and warns that sessions end", async () => {

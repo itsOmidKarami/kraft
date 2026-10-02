@@ -175,6 +175,14 @@ describe("PausedCard", () => {
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null, steers: { "verification.review.automated_review": "only you" } } }]));
   });
 
+  it("for a never-started item is the Not started card, with no steer and no Resume", () => {
+    render(<PausedCard item={detail({ display_status: "paused", current_node_id: null, worker_sessions: [] })} reload={() => {}} />);
+    expect(screen.getByRole("region", { name: "Not started" })).toHaveTextContent("Nothing has run, and nothing spends tokens until you start it. Start runs it from");
+    expect(screen.queryByRole("region", { name: "Paused" })).toBeNull();
+    expect(screen.queryByLabelText("Steer")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();
+  });
+
   it("is only for a paused item", () => {
     const { container } = render(<PausedCard item={detail({ display_status: "running" })} reload={() => {}} />);
     expect(container).toBeEmptyDOMElement();

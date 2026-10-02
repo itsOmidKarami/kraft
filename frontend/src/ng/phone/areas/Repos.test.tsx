@@ -14,11 +14,11 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Repos list (M.2)", () => {
   const list = (a = ans(), path = "/templates/repos") => mountAt(<ReposList />, path, "/templates/repos", a);
 
-  it("lists the connected repos with their state, running count and chain, and the detected ones", async () => {
+  it("lists the connected repos with their state, open count and chain, and the detected ones", async () => {
     list();
     const connected = await screen.findByRole("region", { name: "Connected" });
     expect(within(connected).getByRole("link", { name: /^product_root/ })).toHaveTextContent("on");
-    expect(within(connected).getByRole("link", { name: /^platform/ })).toHaveTextContent("1 running");
+    expect(within(connected).getByRole("link", { name: /^platform/ })).toHaveTextContent("1 open");
     expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("off");
     expect(within(connected).getByRole("link", { name: /^docs-site/ })).toHaveTextContent("chain docs_only");
     expect(within(screen.getByRole("region", { name: "Detected" })).getByText("/src/plugins")).toBeInTheDocument();
@@ -68,7 +68,7 @@ describe("a repo (M.2)", () => {
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("60");
     expect(screen.getByRole("button", { name: /^tasks running cap/ })).toHaveTextContent("this repo");
     expect(screen.getByRole("button", { name: /^deny tools/ })).toHaveTextContent("default");
-    expect(screen.getByText("running items")).toBeInTheDocument();
+    expect(screen.getByText("open items")).toBeInTheDocument();
   });
 
   it("an edit sends the desktop's set_repo patch, checked first with a preview", async () => {
@@ -120,7 +120,7 @@ describe("a repo (M.2)", () => {
     const { calls } = open("platform");
     await userEvent.click(await screen.findByRole("button", { name: "Disconnect repo" }));
     const sheet = screen.getByRole("dialog", { name: "Disconnect platform?" });
-    expect(sheet).toHaveTextContent("platform has 1 running item. Disconnect is refused until it finishes.");
+    expect(sheet).toHaveTextContent("platform has 1 open item; finish or cancel it first. Disconnect is refused until then.");
     expect(within(sheet).getByRole("button", { name: "Disconnect" })).toBeDisabled();
     expect(posts(calls)).toEqual([]);
   });

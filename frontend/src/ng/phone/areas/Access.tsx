@@ -3,7 +3,8 @@ import * as api from "../../../api";
 import { ago, until } from "../../../format";
 import type { Access, AuthSession, Health } from "../../../types";
 import { parseUserAgent } from "../../../ua";
-import { SELF_RESTART, bindHost, restartNote, useApply } from "../../apply/store";
+import { SELF_RESTART, afterRestart, bindHost, restartNote, useApply } from "../../apply/store";
+import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "../../settings/accessWords";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
@@ -58,7 +59,10 @@ export function AccessScreen() {
   // The server drops its restart item when KRAFT_HOST / KRAFT_PORT wins over the file.
   const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
   const envNote = (key: "bind" | "port") => (overridden(key) ? `Set by the environment: running on ${health?.[key]}, which wins over this.` : undefined);
-  const address = `${location.protocol}//${bindHost(access.bind)}:${access.port}`;
+  // Where a restart brings Kraft back: KRAFT_HOST / KRAFT_PORT win over the file.
+  const back = afterRestart(access, health, items);
+  const address = `${location.protocol}//${bindHost(back.bind)}:${back.port}`;
+  const suggested = hostSuggestion(access);
   const undo = () => (health ? put("bind", { bind: health.bind ?? access.bind, port: health.port ?? access.port }) : Promise.resolve(null));
 
   const hosts = () =>
@@ -68,7 +72,7 @@ export function AccessScreen() {
       help: "Tap a host to remove it.",
       options: [{ value: "+", label: "Add a host…" }, ...access.allowed_hosts.map((h) => ({ value: `rm:${h}`, label: `Remove ${h}`, danger: true }))],
       pick: (v) => {
-        if (v === "+") return { kind: "text", title: "Add a host", help: "A host name or IP a browser may reach Kraft as.", value: "", placeholder: "host or IP", set: async (t) => { const h = t.trim().replace(/,$/, ""); return !h || access.allowed_hosts.includes(h) ? null : put("host", { allowed_hosts: [...access.allowed_hosts, h] }); } };
+        if (v === "+") return { kind: "text", title: "Add a host", help: `A host name or IP another device's browser may reach Kraft as.${access.lan_hosts?.length ? ` This machine is ${access.lan_hosts.join(" or ")} on the network.` : ""}`, value: suggested ?? "", placeholder: "host or IP", set: async (t) => { const h = t.trim().replace(/,$/, ""); return !h || access.allowed_hosts.includes(h) ? null : put("host", { allowed_hosts: [...access.allowed_hosts, h] }); } };
         const h = v.slice(3);
         // The host this browser is on: removing it would refuse the very next request.
         if (h === location.hostname) return Promise.resolve("Can't remove the host you're connected as.");
@@ -77,10 +81,21 @@ export function AccessScreen() {
     });
 
   // The server refuses a bind off loopback with no password, so Local network asks for one first and sends both in one save.
+  // And, as the desktop's Set and switch does, the host the phone will use
+  // when the list is empty: asked for with a password already set, and with
+  // none, this machine's LAN address saved with the password (one field per
+  // sheet), named in the sheet and changed under Allowed hosts.
+  const noHosts = access.allowed_hosts.length === 0;
+  const withHost = (h: string | null) => {
+    const host = h?.trim().replace(/,$/, "");
+    return noHosts && host ? { allowed_hosts: [host] } : {};
+  };
   const toLan = () =>
     access.password_set
-      ? void put("bind", { bind: "0.0.0.0" })
-      : edit({ kind: "text", title: "Set a password", help: "Off this machine, Kraft asks for a password. Saving it switches to the local network.", value: "", secret: true, set: async (v) => (v ? put("bind", { bind: "0.0.0.0", password: v }) : "Enter a password.") });
+      ? noHosts
+        ? edit({ kind: "text", title: "Phone's host", help: `The name or address your phone will type: it goes on Allowed hosts, and any other is refused (403).${access.lan_hosts?.length ? ` This machine is ${access.lan_hosts.join(" or ")} on the network.` : ""} Leave it empty to add one later.`, value: suggested ?? "", placeholder: "host or IP", submit: "Switch", set: async (v) => put("bind", { bind: "0.0.0.0", ...withHost(v) }) })
+        : void put("bind", { bind: "0.0.0.0" })
+      : edit({ kind: "text", title: "Set a password", help: `On the network, Kraft asks every browser for a password, this machine's too. Saving it switches to the local network.${noHosts && suggested ? ` ${suggested}, this machine's address, goes on Allowed hosts for the phone; change it there.` : ""}`, value: "", secret: true, set: async (v) => (v ? put("bind", { bind: "0.0.0.0", password: v, ...withHost(suggested) }) : "Enter a password.") });
 
   const revoke = async (s: AuthSession) => {
     const err = await run("sessions", async () => {
@@ -92,7 +107,7 @@ export function AccessScreen() {
   };
 
   return (
-    <AreaScreen title="Access" sub="Auth is off on localhost and on for anything else." status={items.length ? { label: "restart to apply", tone: "warn" } : { label: "saved on change" }} yaml={false}>
+    <AreaScreen title="Access" sub={ACCESS_LEDE} status={items.length ? { label: "restart to apply", tone: "warn" } : { label: "saved on change" }} yaml={false}>
       {items.length > 0 && (
         <Group
           title="Restart needed"
@@ -110,8 +125,8 @@ export function AccessScreen() {
         title="Reach"
         foot="Takes effect on restart. 0.0.0.0 listens on every network this machine is on. To reach Kraft from your phone, prefer a Tailscale address: see Remote access in the docs."
         rows={[
-          { key: "loopback", label: "This machine only", sub: `${LOOPBACK}:${access.port} · no password`, sw: !lan, onSwitch: () => !(!lan) && void put("bind", { bind: LOOPBACK }), ...mark("bind") },
-          { key: "lan", label: "Local network", sub: `0.0.0.0:${access.port} · password required. For the phone view.`, sw: lan, onSwitch: () => lan || toLan() },
+          { key: "loopback", label: "This machine only", sub: `${LOOPBACK}:${back.port} · no password`, sw: !lan, onSwitch: () => !(!lan) && void put("bind", { bind: LOOPBACK }), ...mark("bind") },
+          { key: "lan", label: "Local network", sub: `0.0.0.0:${back.port} · password required. For the phone view.`, sw: lan, onSwitch: () => lan || toLan() },
         ]}
       />
       {envNote("bind") && <p className="ph-note">{envNote("bind")}</p>}
@@ -124,8 +139,8 @@ export function AccessScreen() {
         <>
           <Group
             title="Allowed hosts"
-            note="Off loopback, a browser request is refused (403) unless its Host is on this list: the DNS-rebinding guard."
-            foot={access.allowed_hosts.length === 0 ? "An empty list on a LAN bind refuses every browser." : undefined}
+            note="Off loopback, another device's browser is refused (403) unless the Host it sends is on this list: the DNS-rebinding guard."
+            foot={access.allowed_hosts.length === 0 ? `${EMPTY_HOSTS}${suggested ? ` Add ${suggested}, this machine's address, for the phone.` : ""}` : undefined}
             rows={[{ label: "hosts", value: access.allowed_hosts.length ? access.allowed_hosts.join(", ") : "none", mono: true, ...mark("host"), onEdit: hosts }]}
           />
           <Group

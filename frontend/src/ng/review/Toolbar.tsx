@@ -61,6 +61,9 @@ function TargetPicker({ heading, value, options, item, onPick }: { heading: stri
 /** A box in a checklist: ticked, unticked, or mixed (All with some nodes off). */
 const Box = ({ on }: { on: boolean | "mixed" }) => <span className={`rv-box${on ? " is-on" : ""}`} aria-hidden="true">{on === "mixed" ? "−" : on ? "✓" : ""}</span>;
 
+/** A button that opens a checklist: a menu of checkbox and radio items that
+ *  stays open while you tick them. Popover moves focus to the first item and
+ *  gives ↑/↓; Escape closes it back to the button. */
 function Pop({ label, trigger, triggerClass, children }: { label: string; trigger: ReactNode; triggerClass: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
@@ -70,10 +73,10 @@ function Pop({ label, trigger, triggerClass, children }: { label: string; trigge
   };
   return (
     <>
-      <button ref={anchor} type="button" className={triggerClass} aria-label={label} title={label} aria-haspopup="true" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={anchor} type="button" className={triggerClass} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
-      <Popover anchor={anchor} open={open} onClose={close} role="group" label={label}>
+      <Popover anchor={anchor} open={open} onClose={close} role="menu" label={label}>
         <div className="rv-checklist">{children}</div>
       </Popover>
     </>
@@ -94,14 +97,14 @@ export function NodesFilter({ files, chainOrder, nodes, onChange }: { files: Com
   };
   return (
     <Pop label={`Nodes: ${label}`} triggerClass="rv-pill" trigger={<>{label}<ChevronDown size={12} aria-hidden /></>}>
-      <button type="button" role="menuitemcheckbox" aria-checked={all} className="rv-check" onClick={() => onChange(all === true ? [] : null)}>
+      <button type="button" role="menuitemcheckbox" aria-checked={all} tabIndex={-1} className="rv-check" onClick={() => onChange(all === true ? [] : null)}>
         <Box on={all} />
         <span className="rv-check-label">All nodes</span>
         <span className="rv-check-count">{kept} of {files.length} files</span>
       </button>
       <span className="rv-check-rule" role="separator" />
       {rows.map((r) => (
-        <button key={r.id} type="button" role="menuitemcheckbox" aria-checked={on(r.id)} className="rv-check" onClick={() => toggle(r.id)}>
+        <button key={r.id} type="button" role="menuitemcheckbox" aria-checked={on(r.id)} tabIndex={-1} className="rv-check" onClick={() => toggle(r.id)}>
           <Box on={on(r.id)} />
           <span className="rv-check-label rv-mono">{r.id}</span>
           <span className="rv-check-count">{r.files} {r.files === 1 ? "file" : "files"}</span>
@@ -123,14 +126,14 @@ export function DiffSettings({ prefs, set }: { prefs: DiffPrefs; set: (patch: Pa
     <Pop label="Diff settings" triggerClass="icon-btn rv-settings" trigger={<><List size={16} aria-hidden /><ChevronDown size={12} aria-hidden /></>}>
       <span className="menu-heading" aria-hidden="true">Compare changes</span>
       {(["split", "unified"] as const).map((l) => (
-        <button key={l} type="button" role="menuitemradio" aria-checked={prefs.layout === l} className="rv-check" onClick={() => set({ layout: l })}>
+        <button key={l} type="button" role="menuitemradio" aria-checked={prefs.layout === l} tabIndex={-1} className="rv-check" onClick={() => set({ layout: l })}>
           <span className="rv-tick" aria-hidden="true">{prefs.layout === l ? "✓" : ""}</span>
           <span className="rv-check-label">{l === "split" ? "Side-by-side" : "Inline"}</span>
         </button>
       ))}
       <span className="rv-check-rule" role="separator" />
       {toggles.map(([k, text]) => (
-        <button key={k} type="button" role="menuitemcheckbox" aria-checked={!!prefs[k]} className="rv-check" onClick={() => set({ [k]: !prefs[k] })}>
+        <button key={k} type="button" role="menuitemcheckbox" aria-checked={!!prefs[k]} tabIndex={-1} className="rv-check" onClick={() => set({ [k]: !prefs[k] })}>
           <Box on={!!prefs[k]} />
           <span className="rv-check-label">{text}</span>
         </button>

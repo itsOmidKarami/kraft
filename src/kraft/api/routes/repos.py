@@ -490,7 +490,7 @@ async def remove_repo(request: Request, path: str):
     if live := st.db.read(open_counts_by_repo).get(entry["path"]):
         raise HTTPException(
             409,
-            f"{entry['path']} has {live} running item(s); finish or abandon them first",
+            f"{entry['path']} has {live} open item(s); finish or cancel them first",
         )
     kept = [r for r in repos if r["path"] != entry["path"]]
     # A workspace still naming it would no longer load; refused, not dropped.

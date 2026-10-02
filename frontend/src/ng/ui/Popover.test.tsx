@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { useRef } from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Popover } from "./Popover";
 
@@ -52,5 +52,76 @@ describe("ng Popover", () => {
     Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
     expect(place(100)).toBe("124px");
     expect(place(760)).toBe("556px");
+  });
+
+  describe("from the keyboard", () => {
+    /** A trigger that opens a menu of three items, the middle one disabled, as Toolbar's Pop and Composer's split do. */
+    function Opener({ focusIn }: { focusIn?: boolean }) {
+      const anchor = useRef<HTMLButtonElement>(null);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button ref={anchor} onClick={() => setOpen(true)}>trigger</button>
+          <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} role="menu" label="Things" focusIn={focusIn}>
+            <span className="menu-heading">Things</span>
+            <button role="menuitemradio" aria-checked>one</button>
+            <button role="menuitemcheckbox" aria-checked={false} disabled>two</button>
+            <button role="menuitemcheckbox" aria-checked={false}>three</button>
+          </Popover>
+        </>
+      );
+    }
+    const openIt = (focusIn?: boolean) => {
+      render(<Opener focusIn={focusIn} />);
+      const trigger = screen.getByRole("button", { name: "trigger" });
+      trigger.focus();
+      fireEvent.click(trigger);
+      return trigger;
+    };
+
+    it("moves focus to the first live item once it is placed", async () => {
+      openIt();
+      await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "one" })).toHaveFocus());
+    });
+
+    it("moves between the live items with the arrows, Home and End, skipping a disabled one", async () => {
+      openIt();
+      const one = screen.getByRole("menuitemradio", { name: "one" });
+      const three = screen.getByRole("menuitemcheckbox", { name: "three" });
+      await waitFor(() => expect(one).toHaveFocus());
+      fireEvent.keyDown(one, { key: "ArrowDown" });
+      expect(three).toHaveFocus();
+      fireEvent.keyDown(three, { key: "ArrowDown" });
+      expect(one).toHaveFocus();
+      fireEvent.keyDown(one, { key: "ArrowUp" });
+      expect(three).toHaveFocus();
+      fireEvent.keyDown(three, { key: "Home" });
+      expect(one).toHaveFocus();
+      fireEvent.keyDown(one, { key: "End" });
+      expect(three).toHaveFocus();
+    });
+
+    it("hands focus back to what opened it on Escape", async () => {
+      const trigger = openIt();
+      await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "one" })).toHaveFocus());
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(trigger).toHaveFocus();
+    });
+
+    it("closes a menu on Tab and hands focus back, rather than leaving it open with focus at the top of the page", async () => {
+      const trigger = openIt();
+      await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "one" })).toHaveFocus());
+      fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(trigger).toHaveFocus();
+    });
+
+    it("leaves focus where it is with focusIn off (a toggle that opens on hover or focus)", async () => {
+      const trigger = openIt(false);
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
   });
 });

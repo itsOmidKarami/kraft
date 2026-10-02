@@ -66,6 +66,17 @@ describe("apply store", () => {
     expect(calls).toHaveLength(4);
   });
 
+  it("asks to restart toward the port Kraft will run on: the saved one when it changes, the environment's when that wins", async () => {
+    useApply.setState({ managed: true, restart: [{ id: "access.bind", file: "access.yaml", text: "bind changes from 127.0.0.1 to 0.0.0.0" }] });
+    routes["GET /access"] = () => reply(200, { bind: "0.0.0.0", port: 8765 });
+    routes["GET /health"] = () => reply(200, { bind: "127.0.0.1", port: 8771 });
+    await useApply.getState().askRestart();
+    expect(useApply.getState().address).toBe(`${location.protocol}//${location.hostname}:8771`);
+    useApply.setState({ restart: [{ id: "access.port", file: "access.yaml", text: "port changes from 8771 to 8765" }] });
+    await useApply.getState().askRestart();
+    expect(useApply.getState().address).toBe(`${location.protocol}//${location.hostname}:8765`);
+  });
+
   it("never posts a restart for a server that is not managed", async () => {
     await useApply.getState().askRestart();
     await useApply.getState().runRestart();

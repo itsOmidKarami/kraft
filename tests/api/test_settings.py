@@ -161,6 +161,21 @@ def test_localhost_needs_no_password_and_says_so(client):
     assert client.get("/api/work-items").status_code == 200
 
 
+def test_access_suggests_this_machines_lan_names_for_allowed_hosts(client, monkeypatch):
+    from kraft.api.routes import settings as settings_routes
+
+    monkeypatch.setattr(settings_routes, "_outbound_address", lambda: "192.0.2.7")
+    monkeypatch.setattr(settings_routes.socket, "gethostname", lambda: "MyBox.")
+    # A bare host name is offered as its mDNS form, which a phone can resolve.
+    assert client.get("/api/access").json()["lan_hosts"] == ["192.0.2.7", "mybox.local"]
+    monkeypatch.setattr(settings_routes.socket, "gethostname", lambda: "mybox.example.com")
+    assert client.get("/api/access").json()["lan_hosts"] == ["192.0.2.7", "mybox.example.com"]
+    # Off the network, or named localhost: nothing a phone could use is offered.
+    monkeypatch.setattr(settings_routes, "_outbound_address", lambda: "127.0.0.1")
+    monkeypatch.setattr(settings_routes.socket, "gethostname", lambda: "localhost")
+    assert client.get("/api/access").json()["lan_hosts"] == []
+
+
 def test_binding_off_localhost_without_a_password_is_refused(client):
     r = client.put("/api/access", json={"bind": "0.0.0.0"})
     assert r.status_code == 422

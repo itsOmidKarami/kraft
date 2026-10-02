@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItemStop } from "../../types";
-import { archivable, budgetRaise, headerState } from "./status";
+import { archivable, budgetRaise, headerState, MAIN_LABEL } from "./status";
 
 type Scope = WorkItemStop["scope"];
 /** A budget stop is on the item's own cap unless a row says otherwise: the one `/budget/raise` takes. */
 const at = (display_status: DisplayStatus, kind?: StopKind, scope: Scope = "work_item") =>
-  headerState({ display_status, stop: kind ? { kind, node: "n", resume_at: null, reason: null, ...(kind === "budget" && { scope }) } : null });
+  headerState({ display_status, current_node_id: "n", stop: kind ? { kind, node: "n", resume_at: null, reason: null, ...(kind === "budget" && { scope }) } : null });
 const FULL = ["escalate", "complete", "archive", "cancel"];
 
 describe("headerState: every display status, from the server's fields only", () => {
@@ -27,6 +27,11 @@ describe("headerState: every display status, from the server's fields only", () 
     ["archived", undefined, "ARCHIVED", "muted", "restore", []],
   ] as const)("%s (%s) → %s, %s, %s", (status, kind, badge, tone, main, panel, scope?: Scope) => {
     expect(at(status, kind, scope)).toEqual({ badge, tone, main, panel });
+  });
+
+  it("a paused item that never started is NOT STARTED with Start, not PAUSED with Resume", () => {
+    expect(headerState({ display_status: "paused", current_node_id: null, stop: null })).toEqual({ badge: "NOT STARTED", tone: "muted", main: "start", panel: ["cancel"] });
+    expect(MAIN_LABEL.start).toBe("Start");
   });
 
   it("Archive in the panel is live only for done and cancelled", () => {

@@ -9,7 +9,7 @@ import { openPane } from "../item/Workspace";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Menu } from "../ui/Menu";
-import { chainOf, groupOf, groupsOf, type GroupBy, type SortBy } from "./model";
+import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
 import { Row } from "./Row";
 import type { RowAction } from "./rowText";
@@ -20,6 +20,7 @@ import { Peek, type PeekTab } from "./Peek";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
 import "./board.css";
+import { countIn } from "./counts";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -108,7 +109,7 @@ export function BoardPage() {
       }),
     [items, query.q, query.repo, query.chain, query.group, query.sort, allDone, prefs?.show_done],
   );
-  const needsN = items.filter((i) => groupOf(i) === "needs").length;
+  const needsN = countIn(items, "needs");
 
   const open = useCallback((id: string, search = "") => navigate(`/work-items/${encodeURIComponent(id)}${search}`), [navigate]);
   const peek = useCallback((id: string, tab: PeekTab = "overview", budget = false) => {

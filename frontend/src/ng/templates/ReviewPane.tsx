@@ -220,11 +220,11 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
             <>
               <Kv k="chains" v={r.impact.chains?.length ? r.impact.chains.map((c) => `${c}${reach.get(c) ? ` · ${plural(reach.get(c)!, "change")}` : ""}`).join(", ") : "none"} mono={!!r.impact.chains?.length} muted={!r.impact.chains?.length} />
               <Kv k="repos" v={r.impact.repos?.length ? `${r.impact.repos.join(", ")} name a changed profile` : "none name a changed profile"} mono={!!r.impact.repos?.length} muted={!r.impact.repos?.length} />
-              <Kv k="running" v="items keep the version they started on" />
+              <Kv k="open" v="items keep the version they were filed with" />
             </>
           ) : (
             <>
-              <Kv k="running" v={`${plural(r.impact.running ?? 0, "item")} keep the version they started on`} />
+              <Kv k="open" v={`${plural(r.impact.running ?? 0, "item")} keep the version they were filed with`} />
               <Kv k="repos" v={r.impact.repos?.length ? `${r.impact.repos.join(", ")} default to it` : "none default to it"} mono={!!r.impact.repos?.length} />
             </>
           )}

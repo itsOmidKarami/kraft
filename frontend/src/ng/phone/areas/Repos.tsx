@@ -42,7 +42,7 @@ export function ReposList() {
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
             sub: `${r.path} · chain ${String(r.entry.default_chain_template ?? "default")}${r.entry.test_command ? ` · ${String(r.entry.test_command)}` : ""}`,
-            chips: [{ label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} running` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
+            chips: [{ label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />
       )}
@@ -105,7 +105,7 @@ export function RepoView() {
           <Group
             rows={[
               { label: "enabled", sw: repo.entry.enabled !== false, changed: changed("enabled"), onSwitch: (on) => void setRepo(draft, repo, { enabled: on }).then((e) => e && showToast(e)) },
-              ...(running ? [{ label: "running items", value: String(running) } as RowSpec] : []),
+              ...(running ? [{ label: "open items", value: String(running) } as RowSpec] : []),
               ...FIELDS.map(rowOf),
             ]}
           />
@@ -116,7 +116,7 @@ export function RepoView() {
       {sheet.is("disconnect") && repo && (
         <ConfirmSheet
           title={`Disconnect ${repoName(repo)}?`}
-          text={running > 0 ? `${repoName(repo)} has ${running} running ${running === 1 ? "item" : "items"}. Disconnect is refused until ${running === 1 ? "it finishes" : "they finish"}.` : "Kraft stops working in it once you publish. Its items and branches are left as they are."}
+          text={running > 0 ? `${repoName(repo)} has ${running} open ${running === 1 ? "item" : "items"}; finish or cancel ${running === 1 ? "it" : "them"} first. Disconnect is refused until then.` : "Kraft stops working in it once you publish. Its items and branches are left as they are."}
           error={error}
           confirm={{ label: "Disconnect", danger: true, disabled: running > 0, run: () => void disconnect() }}
           onClose={sheet.close}

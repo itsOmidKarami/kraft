@@ -51,11 +51,13 @@ beforeEach(() => {
 const row = (name: string) => screen.getByRole("option", { name: new RegExp(`^${name},`) });
 
 describe("Repos page: the table", () => {
-  it("lists the repos with chain, steering, tests and state, the running count and the detected ones", async () => {
+  it("lists the repos with chain, steering, tests and state, the open count and the detected ones", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/platform", kind: "change", summary: "policy", fields: ["policy"] }, { path: "/src/docs-site", kind: "add", summary: "" }] }, true)));
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
-    expect(row("platform")).toHaveTextContent("enabled · 1 running");
+    // Open, not running: the server counts every item not ended, and the board's Running group is only some of them.
+    expect(row("platform")).toHaveTextContent("enabled · 1 open");
+    expect(row("platform")).not.toHaveTextContent("running");
     expect(row("docs-site")).toHaveTextContent("disabled");
     expect(row("docs-site")).toHaveTextContent("docs_only");
     expect(row("platform").querySelector(".rp-mark.is-change")).not.toBeNull();
@@ -287,11 +289,11 @@ describe("Repos page: the Config rows", () => {
 });
 
 describe("Repos page: disconnecting and enabling", () => {
-  it("refuses to disconnect a repo with a running item, and says why, without sending anything", async () => {
+  it("refuses to disconnect a repo with an open item, and says why, without sending anything", async () => {
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("platform has 1 running item. Disconnect is refused until it finishes.");
+    expect(screen.getByRole("alert")).toHaveTextContent("platform has 1 open item; finish or cancel it first. Disconnect is refused until then.");
     expect(d.postOps).not.toHaveBeenCalled();
   });
 

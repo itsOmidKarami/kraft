@@ -62,7 +62,7 @@ function ChainOverview({ ctx }: { ctx: PaneCtx }) {
       <PauseText label="description" long rows={2} value={str(authoredAt(r, scope, "")?.description)} placeholder="What this chain is for" onText={(t) => draft.field("", "description", t, true)} onBlur={draft.flush} />
       <Kv k="size" v={`${plural(nodes.length - gates, "exec node")} · ${plural(gates, "gate")}`} />
       <Kv k="default for" v={repos.length ? repos.join(", ") : "no repos"} mono muted={!repos.length} />
-      <Kv k="running" v={`${plural(running, "item")} · keep their version`} muted={!running} />
+      <Kv k="open" v={`${plural(running, "item")} · keep their version`} muted={!running} />
       <Kv k="library" v={libs.length ? libs.join(", ") : "none"} mono muted={!libs.length} />
     </>
   );

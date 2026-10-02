@@ -8,8 +8,9 @@ import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
 import { groupOf, groupsOf, type GroupKey } from "../../board/model";
+import { gateWords, nodeWords } from "../../board/rowText";
 import { useBoardPrefs } from "../../board/prefs";
-import { ChoiceSheet, useSheet } from "../nav/Sheet";
+import { ChoiceSheet, ConfirmSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
 import { itemPath, needsDocument, reviewPath, type CardButton } from "./actions";
 import { Card } from "./Card";
@@ -42,6 +43,8 @@ export function Board() {
   const [noRepos, setNoRepos] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** The card whose Approve is being confirmed: a gate passed is not taken back, so one tap only asks. */
+  const [approving, setApproving] = useState<{ item: WorkItem; gate: string } | null>(null);
 
   useEffect(() => {
     api.getRepos().then((r) => setNoRepos(r.repos.length === 0)).catch(() => {});
@@ -75,17 +78,38 @@ export function Board() {
     if (b.kind === "reject") return navigate(itemPath(item.id, "?compose=reject"));
     if (b.kind === "answer") return navigate(itemPath(item.id, "?compose=answer"));
     if (b.kind === "open") return navigate(itemPath(item.id));
-    setBusy(item.id);
     fail(item.id, null);
-    const r = b.kind === "approve" ? await act.approve(item.id, b.gate) : await act.resume(item.id);
-    setBusy(null);
-    if (r.ok) return void showToast(b.kind === "approve" ? `Approved ${b.gate}.` : "Resumed.");
-    if (b.kind === "approve" && needsDocument(r.error)) {
-      showToast(r.error);
-      return navigate(reviewPath(item.id, b.gate));
+    if (b.kind === "approve") {
+      setApproving({ item, gate: b.gate });
+      return sheet.open("approve");
     }
+    setBusy(item.id);
+    const r = await act.resume(item.id);
+    setBusy(null);
+    if (r.ok) return void showToast("Resumed.");
     fail(item.id, r.error);
   }
+
+  // Confirmed: approve, and on a refusal leave the sheet for the card's own line, or for the review when the document must be read first.
+  async function approve({ item, gate }: { item: WorkItem; gate: string }) {
+    setBusy(item.id);
+    const r = await act.approve(item.id, gate);
+    setBusy(null);
+    if (r.ok) {
+      sheet.close();
+      return void showToast(`Approved ${gateWords(gate)}.`);
+    }
+    if (needsDocument(r.error)) {
+      showToast(r.error);
+      return sheet.closeThen(() => navigate(reviewPath(item.id, gate)));
+    }
+    sheet.close();
+    fail(item.id, r.error);
+  }
+  const nextAfter = (item: WorkItem, gate: string) => {
+    const nodes = item.chain_definition?.nodes ?? [];
+    return nodes[nodes.findIndex((n) => n.id === gate) + 1]?.id ?? null;
+  };
 
   const empty = items.length === 0;
   return (
@@ -126,6 +150,18 @@ export function Board() {
           </section>
         ))}
       </div>
+      {sheet.is("approve") && approving && (
+        <ConfirmSheet
+          // The card's own words: its tail reads "approve spec" for spec_approval.
+          title={`Approve ${gateWords(approving.gate)}?`}
+          text={`${approving.item.title} ${nextAfter(approving.item, approving.gate) ? `moves on to ${nodeWords(nextAfter(approving.item, approving.gate)!)}` : "moves on"} at once. An approval is not taken back; to read first, open the review.`}
+          busy={busy === approving.item.id}
+          confirm={{ label: "Approve", run: () => void approve(approving) }}
+          onClose={sheet.close}
+        >
+          <button type="button" className="ph-linkbtn" onClick={() => sheet.goTo(reviewPath(approving.item.id, approving.gate))}>Open the review</button>
+        </ConfirmSheet>
+      )}
       {sheet.is("repo") && (
         <ChoiceSheet
           title="Repo"

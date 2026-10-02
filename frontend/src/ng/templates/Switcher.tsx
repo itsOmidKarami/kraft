@@ -6,13 +6,13 @@ import { Popover } from "../ui/Popover";
 import { listDrafts } from "./draft/draftApi";
 import { focusSoon } from "./menus/focus";
 import { IdRow } from "./menus/IdRow";
+import { isOpen } from "../board/counts";
 
-type Row = { id: string; nodes: number; running: number; draft: boolean };
+type Row = { id: string; nodes: number; open: number; draft: boolean };
 export type SwitchTo = { kind: "switch"; id: string } | { kind: "new"; id: string } | { kind: "dup"; id: string };
-const ENDED = new Set(["completed", "abandoned"]);
 
 /** The chain crumb, and the switcher it opens (Decisions §9 Chain switcher):
- *  search, every chain with its size and running items, ✓ on the current one,
+ *  search, every chain with its size and open items, ✓ on the current one,
  *  an amber dot on one with a draft; then New chain and Duplicate, which turn
  *  the menu into the id step. No Delete here. */
 export function Switcher({ chain, onGo, startDup }: { chain: string; onGo: (to: SwitchTo) => void; startDup?: number }) {
@@ -41,7 +41,7 @@ export function Switcher({ chain, onGo, startDup }: { chain: string; onGo: (to: 
       setRows(ids.map((id) => ({
         id,
         nodes: chains.find((c) => c.id === id)?.nodes.length ?? 0,
-        running: all.filter((w) => w.chain_template === id && !ENDED.has(w.status)).length,
+        open: all.filter((w) => w.chain_template === id && isOpen(w)).length,
         draft: drafted.has(id),
       })));
     }).catch(() => setRows([]));
@@ -81,7 +81,7 @@ export function Switcher({ chain, onGo, startDup }: { chain: string; onGo: (to: 
               {shown.map((r, k) => (
                 <button key={r.id} ref={(el) => void (refs.current[k] = el)} type="button" role="option" aria-selected={r.id === chain} className="menu-item sw-row" onKeyDown={(e) => move(e, k)} onClick={() => go({ kind: "switch", id: r.id })}>
                   <span className="sw-check" aria-hidden="true">{r.id === chain && <Check size={12} />}</span>
-                  <span className="sw-main"><span className="picklist-name">{r.id}</span><span className="picklist-sub">{r.nodes} nodes · {r.running} running</span></span>
+                  <span className="sw-main"><span className="picklist-name">{r.id}</span><span className="picklist-sub">{r.nodes} nodes · {r.open} open</span></span>
                   {r.draft && <span className="sw-dot" aria-label="unpublished draft" />}
                 </button>
               ))}

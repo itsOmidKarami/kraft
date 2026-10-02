@@ -48,10 +48,24 @@ async function answers(base: string): Promise<boolean> {
   }
 }
 
-/** The address a restart brings Kraft back at: the saved port, on the host this page was opened on. */
-async function restartAddress(): Promise<string> {
-  const a = await request<{ port?: number }>("/access");
-  const port = a.status === 200 && a.body.port ? a.body.port : Number(location.port) || undefined;
+/** The bind and port Kraft runs on after a restart. A saved value the
+ *  server lists as a restart item (`access.bind`, `access.port`) takes
+ *  effect; otherwise the running one stays, either because it is the saved
+ *  one or because KRAFT_HOST / KRAFT_PORT wins over the file, and the server
+ *  then raises no item for it. */
+export function afterRestart(saved: { bind: string; port: number }, running: { bind?: string | null; port?: number | null } | null, items: Pick<ApplyItem, "id">[]): { bind: string; port: number } {
+  const pending = (key: "bind" | "port") => items.some((i) => i.id === `access.${key}`);
+  return {
+    bind: pending("bind") ? saved.bind : (running?.bind ?? saved.bind),
+    port: pending("port") ? saved.port : (running?.port ?? saved.port),
+  };
+}
+
+/** The address a restart brings Kraft back at: the port it will run on (`afterRestart`), on the host this page was opened on. */
+async function restartAddress(items: ApplyItem[]): Promise<string> {
+  const [a, h] = await Promise.all([request<{ bind: string; port?: number }>("/access"), request<{ bind?: string | null; port?: number | null }>("/health")]);
+  const saved = a.status === 200 && a.body.port ? a.body.port : Number(location.port) || undefined;
+  const port = saved && afterRestart({ bind: a.body.bind, port: saved }, h.status === 200 ? h.body : null, items).port;
   return `${location.protocol}//${location.hostname}${port ? `:${port}` : ""}`;
 }
 
@@ -113,7 +127,7 @@ export const useApply = create<ApplyState>((set, get) => ({
   askRestart: async () => {
     if (!get().managed) return;
     set({ active: null });
-    const [address, active] = await Promise.all([restartAddress(), activeItems()]);
+    const [address, active] = await Promise.all([restartAddress(get().restart), activeItems()]);
     set({ address, active, confirming: true });
   },
   cancelRestart: () => set({ confirming: false }),

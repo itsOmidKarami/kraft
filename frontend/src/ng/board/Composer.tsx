@@ -24,6 +24,18 @@ export function createBody(d: Draft, autostart: boolean) {
   return { title: d.title.trim(), description: d.brief.trim(), repo: d.repo, chain_template: d.chain, attachments, autostart };
 }
 
+/** What `POST /work-items` answers. `slots` comes with an autostart the server filed paused because every slot was busy. */
+export type Created = { id: string; status?: string; duplicate_warning?: string; slots?: { busy: number; limit: number } };
+
+/** Create and start that the server filed paused (every slot busy) says so,
+ *  rather than leaving a "Not started" row to explain itself. Nothing starts
+ *  it later on its own: its Start is on the board. */
+export function sayIfFiledPaused(autostart: boolean, body: Created): void {
+  if (!autostart || body.status !== "paused") return;
+  const s = body.slots;
+  showToast(`Filed paused: ${s ? `${s.busy} of ${s.limit} slots are` : "every slot is"} busy. Start it when one frees.`, 8000);
+}
+
 const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
@@ -91,10 +103,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     if (!d.title.trim() || !d.repo || busy || (preview && "error" in preview)) return;
     setBusy(true);
     setError(null);
-    const r = await request<{ id: string; duplicate_warning?: string }>("/work-items", jsonBody("POST", createBody(d, autostart)));
+    const r = await request<Created>("/work-items", jsonBody("POST", createBody(d, autostart)));
     setBusy(false);
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
     if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
+    sayIfFiledPaused(autostart, r.body);
     await useStore.getState().bootstrap().catch(() => {});
     onCreated(r.body.id);
   };
@@ -167,11 +180,26 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
 }
 
 /** Create paused ▾, whose panel holds Create and start (Decisions §7b Create).
- *  The toggle opens on focus, click, Enter, Space or ↓ (rule 3). */
+ *  The toggle opens on focus or click, and focus stays on it; Enter, Space or
+ *  ↓ there opens it with focus on Create and start, as the item page's main
+ *  button does. Escape hands focus back to the toggle without reopening it. */
 export function CreateSplit({ disabled, onCreate }: { disabled: boolean; onCreate: (start: boolean) => void }) {
   const group = useRef<HTMLSpanElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  // Opened from a key: the popover moves focus in.
+  const [keyed, setKeyed] = useState(false);
+  // Focus handed back to the toggle must not reopen the panel.
+  const quiet = useRef(false);
+  const close = () => {
+    setOpen(false);
+    setKeyed(false);
+    if (list.current?.contains(document.activeElement)) {
+      quiet.current = true;
+      toggle.current?.focus();
+    }
+  };
   return (
     <span ref={group} className="composer-split">
       <button type="button" className="btn btn-secondary composer-create" disabled={disabled} onClick={() => onCreate(false)}>Create paused</button>
@@ -183,15 +211,20 @@ export function CreateSplit({ disabled, onCreate }: { disabled: boolean; onCreat
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
-        onFocus={() => setOpen(true)}
+        onFocus={() => (quiet.current ? (quiet.current = false) : setOpen(true))}
         onClick={() => setOpen(true)}
-        onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); } }}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowDown" && e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          setKeyed(true);
+          setOpen(true);
+        }}
       >
         ▾
       </button>
-      <Popover anchor={group} open={open && !disabled} onClose={() => setOpen(false)} role="menu" label="More ways to create">
-        <div className="menu">
-          <button type="button" role="menuitem" className="menu-item" onClick={() => { setOpen(false); onCreate(true); }}>Create and start</button>
+      <Popover anchor={group} open={open && !disabled} onClose={close} role="menu" label="More ways to create" focusIn={keyed}>
+        <div ref={list} className="menu">
+          <button type="button" role="menuitem" tabIndex={-1} className="menu-item" onClick={() => { close(); onCreate(true); }}>Create and start</button>
         </div>
       </Popover>
     </span>

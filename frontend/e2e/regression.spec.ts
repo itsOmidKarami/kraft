@@ -63,7 +63,10 @@ test("harnesses: a harness lists the tasks it runs, and links to them", async ({
 });
 
 test("policy: a cap edited and published", async ({ page }) => {
-  const usd = 50 + (Date.now() % 40);
+  // Always a change: the packaged cap is 50, and a value equal to the
+  // current one leaves the draft clean and Review & publish disabled.
+  const before = (await (await page.request.get("/api/policy")).json()).budget.daily_usd;
+  const usd = before === 61 ? 62 : 61;
   await page.goto("/settings/policy");
   await editCell(page, /^per day, .+\. Edit$/, String(usd));
   await publish(page);

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { elapsedBetween } from "../../../format";
-import { useStore } from "../../../store";
+import { useGroupCount } from "../../board/counts";
 import { Clock, EllipsisVertical } from "../../icons";
 import { HeaderActions } from "../../shell/HeaderActions";
 import { Menu, type MenuItem } from "../../ui/Menu";
@@ -48,7 +48,8 @@ type Props = {
 export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
   const group = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const others = useStore((s) => Object.values(s.workItems).filter((w) => w.display_status === "needs_you" && w.id !== item.id).length);
+  // The board's Needs you count, this item left out.
+  const others = useGroupCount("needs", item.id);
   const hs = headerState(item);
   const [pausing, setPausing] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -77,7 +78,8 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onSettings();
-    if (hs.main === "resume") return void run(act.resume(item.id));
+    // Start is a resume from node zero: a never-started item has no current node.
+    if (hs.main === "resume" || hs.main === "start") return void run(act.resume(item.id));
     if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));
