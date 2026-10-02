@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
+from kraft import update as update_mod
 from kraft.api import apidocs
 
 
@@ -59,11 +60,44 @@ async def _spa_navigation(request: Request, call_next):
         # The browser caches by URL, so without no-store a refresh could answer
         # from a stale cached shell. `vary` says the same thing to caches that
         # honour it.
-        return FileResponse(
-            dist / "index.html",
-            headers={"cache-control": "no-store", "vary": "sec-fetch-dest"},
-        )
+        return spa_shell(request, dist, {"vary": "sec-fetch-dest"})
     return await call_next(request)
+
+
+def spa_shell(request: Request, dist, headers: dict[str, str] | None = None):
+    """The SPA's `index.html`, or a page saying to restart when the bundle on
+    disk is no longer this server's.
+
+    `kraft admin update` replaces the installed package, `_bundled/web`
+    included, under a server that keeps running until it is restarted. The new
+    interface against the old API misreads it (a 1.4 server's board, drawn by
+    1.5's interface, put every item under RUNNING), so the shell is refused. A
+    hashed asset is still served as is: its name is its content, and a tab
+    already open on this server's own interface keeps working."""
+    headers = {"cache-control": "no-store", **(headers or {})}
+    running = getattr(request.app.state, "version", None)
+    installed = update_mod.installed()
+    if running and installed != running:
+        return HTMLResponse(_restart_page(running, installed), status_code=503, headers=headers)
+    return FileResponse(dist / "index.html", headers=headers)
+
+
+def _restart_page(running: str, installed: str) -> str:
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        "<title>Kraft: restart to finish the update</title>"
+        "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:3rem auto;"
+        "padding:0 16px;color:#1d1d1f;background:#fff}"
+        "@media (prefers-color-scheme:dark){body{color:#e8e8ea;background:#161618}}"
+        "code{font-size:.95em}</style></head><body>"
+        "<h1>Restart Kraft to finish the update</h1>"
+        f"<p>Kraft {html.escape(installed)} is installed, but this server is still running "
+        f"{html.escape(running)}. Its web interface is the new one, which does not match the "
+        "running server, so it is not shown.</p>"
+        "<p>Restart the server, then reload this page:</p>"
+        "<pre><code>kraft admin restart</code></pre></body></html>"
+    )
 
 
 #: Paths that must work before a session exists.

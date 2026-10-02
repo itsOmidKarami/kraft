@@ -45,6 +45,12 @@ describe("ng AboutPage", () => {
     expect(screen.getByText("ok · all chains and policy valid")).toBeInTheDocument();
   });
 
+  it("says to restart when an update was installed under this running server", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.4.0", installed: "1.5.0" });
+    render(<AboutPage />);
+    expect(await screen.findByText(/This server is still running 1\.4\.0, and 1\.5\.0 is installed/)).toHaveTextContent("kraft admin restart");
+  });
+
   it("reads an unreachable feed as unknown", async () => {
     served = () => reply(200, { ...UPDATE, latest: null, behind: null, checked_at: null });
     render(<AboutPage />);

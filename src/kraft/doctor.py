@@ -85,6 +85,8 @@ async def run_checks() -> list[dict]:
         if health is not None
         else [_check("health", True, "skipped: no server", skipped=True)]
     )
+    if health is not None:
+        checks.append(_restart_check(health))
     checks.extend(_config_checks())
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
@@ -138,6 +140,40 @@ def _health_checks(payload: dict) -> list[dict]:
         status = str(payload.get("status", "?"))
         return [_check("health", payload.get("status") == "ok", status), extra]
     return [*(_check("health", False, reason) for reason in reasons), extra]
+
+
+def _restart_check(payload: dict) -> dict:
+    """Is the server running the version installed on disk?
+
+    `kraft admin update` without `--restart` replaces the package under a
+    server that keeps running the old code, and the old server's interface is
+    replaced with it. A warning, not a failure: nothing is broken, but nothing
+    the board shows can be trusted until the restart. A server that does not
+    report `installed` predates this check, so it is older than this install.
+    """
+    from kraft import update
+
+    here = update.installed()
+    running = payload.get("version")
+    pid = payload.get("pid")
+    who = f"the server (pid {pid})" if pid is not None else "the server"
+    if "installed" not in payload:
+        return _check(
+            "restart",
+            True,
+            f"{who} runs a release older than the installed {here}: restart it to finish "
+            "the update - kraft admin restart",
+            warn=True,
+        )
+    if running != here:
+        return _check(
+            "restart",
+            True,
+            f"{who} runs {running}, but {here} is installed: restart it to finish the "
+            "update - kraft admin restart",
+            warn=True,
+        )
+    return _check("restart", True, f"{who} runs the installed version ({here})")
 
 
 def _config_checks() -> list[dict]:

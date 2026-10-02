@@ -25,6 +25,7 @@ from kraft import intake as intake_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import triggers as triggers_mod
+from kraft import update as update_mod
 from kraft.adapters import hook_install
 from kraft.adapters.forge import git as forge_git
 from kraft.api import deps
@@ -226,6 +227,10 @@ async def lifespan(app: FastAPI):
     app.state.invalid_policy = invalid_policy
     app.state.reattach_summary = summary
     app.state.started_at = time.monotonic()
+    # The version this process loaded, read once. `kraft admin update` replaces
+    # the package under a running server, and the metadata read at call time
+    # then names the new release while this one's code is still answering.
+    app.state.version = update_mod.installed()
 
     dist = Path(os.environ.get("KRAFT_FRONTEND_DIST") or DEFAULT_FRONTEND_DIST)
     app.state.frontend_dist = dist if dist.is_dir() else None

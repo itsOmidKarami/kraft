@@ -238,6 +238,14 @@ describe("ng Sidebar", () => {
     mount("/templates/chains");
     expect(await screen.findByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toHaveAttribute("href", "/settings/about");
     expect(screen.queryByRole("link", { name: /Current UI/ })).toBeNull();
+    expect(screen.queryByText(/restart to finish the update/)).toBeNull();
+  });
+
+  it("says to restart when the version on disk is not the one this server runs", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, installed: "0.9.5" } as never);
+    mount("/templates/chains");
+    expect(await screen.findByRole("link", { name: "v0.9.5 installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
+    expect(screen.getByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toBeInTheDocument();
   });
 });
 
