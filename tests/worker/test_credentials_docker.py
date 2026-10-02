@@ -172,9 +172,10 @@ def _cli_image(cli: str, harness_id: str) -> str:
     return tag
 
 
-@pytest.mark.parametrize(
-    "harness_id", [pytest.param(h, marks=pytest.mark.e2e(h)) for h in _CLI_PACKAGES]
-)
+# The CLI runs inside the image, not from this machine's PATH, and every request
+# it makes goes to the fake API or is refused: no host CLI and no tokens, so
+# `probed`'s `e2e("docker")`/`e2e("podman")` is all it needs.
+@pytest.mark.parametrize("harness_id", list(_CLI_PACKAGES))
 # An image not built yet is built here, once, well past the default timeout.
 @pytest.mark.timeout(1800)
 async def test_the_real_cli_sends_the_sentinel_and_trusts_the_bundle(

@@ -69,10 +69,14 @@ def test_make_repo_disables_git_auto_maintenance(tmp_path):
         assert out == want
 
 
-def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, monkeypatch):
+def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(
+    tmp_path, monkeypatch, real_binary_guard
+):
     """Kraft-vrcw3: the beads fake cannot reach a `python -m kraft` child, so a
     unit test's child must resolve `bd` to the stub that refuses loudly, never
-    the real binary; an `e2e("bd")` test's child keeps the real one."""
+    the real binary; an `e2e("bd")` test's child keeps the real one. A call
+    outside `running_server` lands in the real-binary guard's log, which
+    fails the test at teardown; this one is read and forgotten here."""
     from support import server
 
     env = server.child_env()
@@ -81,23 +85,44 @@ def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, mon
     refused = subprocess.run([stub, "create"], capture_output=True, text=True, env=env)
     assert refused.returncode == 127
     assert server.BD_STUB_MESSAGE in refused.stderr
+    assert [c.split("\t")[::2] for c in real_binary_guard.take()] == [["bd", "create"]]
 
     monkeypatch.setattr(harness, "REAL_BD", True)
     real_env = server.child_env()
     assert str(server._bd_stub_dir()) not in real_env["PATH"].split(os.pathsep)
 
 
+def test_a_child_with_no_bd_finds_none(tmp_path, monkeypatch):
+    """`child_env(bd=False)`: no stub, no `KRAFT_BD_CWD`, and no `PATH`
+    directory holding a real `bd`, so intake takes the "bd is not installed"
+    path instead of making a call the stub refuses."""
+    from support import server
+
+    real = tmp_path / "bin"
+    real.mkdir()
+    (real / "bd").write_text("#!/bin/sh\nexit 0\n")
+    (real / "bd").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{real}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("KRAFT_BD_CWD", str(tmp_path))
+
+    env = server.child_env(bd=False)
+
+    assert shutil.which("bd", path=env["PATH"]) is None
+    assert "KRAFT_BD_CWD" not in env
+    assert shutil.which("git", path=env["PATH"])
+
+
 @pytest.mark.slow
 def test_a_bd_call_from_a_server_child_shows_in_the_test_result(tmp_path):
-    """Kraft-vrcw3's stub refuses loudly in the child's log; Kraft degrades on
-    the refusal and the test passes. `running_server` also reports each call
-    as a `BdStubRefused` warning, so it is on the test's own result."""
+    """Kraft-vrcw3's stub refuses loudly in the child's log, and Kraft degrades
+    on the refusal, so the test would pass. `running_server` raises
+    `BdStubRefused` with each call instead, failing the test."""
     from support.server import BdStubRefused, running_server
 
     repo = make_repo(tmp_path)
     templates = harness.fake_templates_dir(tmp_path, "true")
     harness.connect_repo(repo, templates)
-    with pytest.warns(BdStubRefused, match="create --json --title filed from a child"):
+    with pytest.raises(BdStubRefused, match="create --json --title filed from a child"):
         with running_server(
             run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=isolated_bd(tmp_path)
         ) as srv:
