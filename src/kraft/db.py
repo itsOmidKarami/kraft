@@ -1121,6 +1121,50 @@ def _connect(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _backup_before_migrating(conn: sqlite3.Connection, version: int) -> None:
+    """Copy the database to `<name>.pre-v<SCHEMA_VERSION>` before a migration
+    raises its schema, so going back to the release that wrote it needs no
+    backup of the operator's own: a migration is one way, and the older code
+    refuses the result ("newer than code").
+
+    `VACUUM INTO` writes a consistent snapshot through this connection,
+    whatever the WAL holds, and the copy is a single file with nothing to
+    checkpoint. It goes to a temporary name first, so a crash part way never
+    leaves a half-written file under the real one. An existing copy is kept,
+    never overwritten: it is the oldest state, from the first start on this
+    schema. A failed copy stops the migration, which leaves the database as
+    it was."""
+    path = conn.execute("PRAGMA database_list").fetchone()["file"]
+    if not path:
+        return  # an in-memory database has nothing to copy
+    path = Path(path)
+    backup = path.with_name(f"{path.name}.pre-v{SCHEMA_VERSION}")
+    if backup.exists():
+        logger.warning(
+            "database schema v%d -> v%d: kept the existing backup %s, not overwritten",
+            version,
+            SCHEMA_VERSION,
+            backup,
+        )
+        return
+    partial = backup.with_name(backup.name + ".partial")
+    partial.unlink(missing_ok=True)
+    # 0600 like the database itself; VACUUM INTO accepts an empty file.
+    partial.touch(mode=0o600)
+    try:
+        conn.execute("VACUUM INTO ?", (str(partial),))
+        partial.replace(backup)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    logger.warning(
+        "database schema v%d -> v%d: backed up the old database to %s",
+        version,
+        SCHEMA_VERSION,
+        backup,
+    )
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     (version,) = conn.execute("PRAGMA user_version").fetchone()
     if version == SCHEMA_VERSION:
@@ -1128,6 +1172,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     if version > SCHEMA_VERSION:
         raise RuntimeError(f"database schema v{version} is newer than code v{SCHEMA_VERSION}")
     if version != 0:
+        _backup_before_migrating(conn, version)
         # Forward-only migration: apply each version step's statements, bump
         # user_version after each, all-or-nothing.
         #
