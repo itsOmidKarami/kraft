@@ -11,6 +11,7 @@ load.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
@@ -22,7 +23,9 @@ from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
+from urllib.parse import urlsplit
 
+import idna
 import yaml
 from pydantic import (
     BaseModel,
@@ -842,6 +845,87 @@ class _Model(BaseModel):
         write_yaml(path, self.model_dump())
 
 
+def host_name(host: str) -> str | None:
+    """The name in an HTTP `Host` header, in the one form `allowed_hosts` is
+    kept in: lowercased, without its port or a trailing dot, an IPv6 literal
+    in brackets. None for one that does not parse (an unclosed IPv6 bracket)
+    or carries userinfo (`evil@127.0.0.1`, which `urlsplit` would read as
+    127.0.0.1), which no list holds."""
+    if "@" in host:
+        return None
+    try:
+        name = urlsplit(f"//{host}").hostname
+    except ValueError:
+        return None
+    name = (name or "").removesuffix(".")
+    if not name:
+        return None
+    try:
+        ip = ipaddress.ip_address(name)
+    except ValueError:
+        return name
+    return f"[{ip.compressed}]" if ip.version == 6 else ip.compressed
+
+
+def url_host(host: str) -> str:
+    """`host` as it goes into a URL: an IPv6 literal in brackets, since in
+    `http://::1:8765` the port cannot be told from the address. Anything else
+    as it is."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+#: A host name or a bracketed IPv6 literal, once `host_name` has lowercased it.
+_HOST_NAME = re.compile(
+    r"\[[0-9a-f:.%]+\]|[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*"
+)
+
+
+def normalize_host(entry: str) -> str | None:
+    """An `allowed_hosts` entry as someone typed it, in `host_name`'s form.
+
+    A `Host` header carries the port, so `kraft.local:8765` is a natural thing
+    to type, and so are `Kraft.Local` and `http://kraft.local/`. Kept as typed,
+    none of them ever matched, and the browser got a 403 on its own board. The
+    scheme, path and port go; None for what is still not one host name or IP:
+    a wildcard, userinfo, a space, a port that is not a number."""
+    text = entry.strip()
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    text = re.split(r"[/?#]", text, maxsplit=1)[0]
+    try:
+        # A bare IPv6 literal: its colons are not a port.
+        text = f"[{ipaddress.IPv6Address(text)}]"
+    except ValueError:
+        pass
+    try:
+        _ = urlsplit(f"//{text}").port  # raises for a port that is not a number
+    except ValueError:
+        return None
+    name = host_name(text)
+    if name and not name.isascii():
+        # UTS #46, as a browser maps a name before it sends it: Python's own
+        # "idna" codec is IDNA 2003, which turns `faß.de` into `fass.de`
+        # where the browser's Host says `xn--fa-hia.de`.
+        try:
+            name = idna.encode(name, uts46=True).decode("ascii")
+        except idna.IDNAError:
+            return None
+    return name if name and _HOST_NAME.fullmatch(name) else None
+
+
+def host_entry_problem(entry: str) -> str | None:
+    """Why `entry` can never be on `allowed_hosts`, naming it; None when
+    `normalize_host` makes a host of it. One message for the save that refuses
+    it and for the checks that find one already in `access.yaml`."""
+    if normalize_host(entry) is not None:
+        return None
+    return (
+        f"allowed_hosts: {entry!r} is not a host name or IP address, so no "
+        "browser's Host ever matches it. Enter one name, such as kraft.local, "
+        "192.168.1.5 or [fd00::5], with no wildcard or user@"
+    )
+
+
 class Access(_Model):
     FILE = "access.yaml"
 
@@ -850,6 +934,15 @@ class Access(_Model):
     password_hash: str | None = None
     session_expiry_days: int = 7
     allowed_hosts: list[str] = []
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _normalized_hosts(cls, value: list[str]) -> list[str]:
+        """Each entry in the form the perimeter compares a `Host` in, once. An
+        entry that is not a host at all is kept as written, not refused:
+        `PUT /access` refuses one, but a file saved before that check must
+        still load, and such an entry never matched anything anyway."""
+        return list(dict.fromkeys(normalize_host(h) or h for h in value))
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}

@@ -107,6 +107,15 @@ describe("ng AccessPage", () => {
     expect(askRestart).toHaveBeenCalled();
   });
 
+  it.each([
+    ["::1", "[::1]"],
+    ["192.168.1.5", "192.168.1.5"],
+  ])("says where a restart brings Kraft back, an IPv6 bind (%s) in brackets", async (bind, host) => {
+    useApply.setState({ restart: [{ id: "access.bind", file: "access.yaml", text: `bind changes from 127.0.0.1 to ${bind}` }] });
+    setup({ bind, port: 9000 }, { bind: "127.0.0.1" });
+    expect(await screen.findByText(new RegExp(`^Kraft comes back at`))).toHaveTextContent(`Kraft comes back at ${location.protocol}//${host}:9000 and`);
+  });
+
   it("offers no Restart for a server started from a terminal", async () => {
     useApply.setState({ restart: [PORT_ITEM], managed: false });
     setup({ port: 9000 }, { port: 8765 });

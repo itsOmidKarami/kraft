@@ -162,8 +162,10 @@ def _config_checks() -> list[dict]:
         ]
     checks = [_check("templates", True, str(templates))]
     try:
-        config.Access.load(templates / "access.yaml")
-        checks.append(_check("access.yaml", True, "parses"))
+        access = config.Access.load(templates / "access.yaml")
+        # Loaded as written, so this is the only place a bad one shows.
+        bad = [why for h in access.allowed_hosts if (why := config.host_entry_problem(h))]
+        checks.append(_check("access.yaml", not bad, "; ".join(bad) or "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_detectors_check(templates))
