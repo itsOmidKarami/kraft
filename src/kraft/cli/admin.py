@@ -1069,7 +1069,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     hook = subs.add_parser(
         "permission-hook",
-        help="answer a harness's pre-tool hook from Kraft's permission gate (run by the CLI)",
+        help=(
+            "answer a harness's pre-tool hook from Kraft's permission gate "
+            "(run by the agent's CLI, not by hand)"
+        ),
     )
     hook.add_argument("harness", choices=sorted(permission_hooks.TRANSLATORS))
     hook.add_argument(

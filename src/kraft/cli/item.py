@@ -303,7 +303,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     create = subs.add_parser(
         "create", parents=[common], help="file a work item (paused unless --autostart)"
     )
-    create.add_argument("title")
+    create.add_argument("title", help="the item's title: one line, as the board shows it")
     create.add_argument(
         "--description",
         help="the brief: what the work actually is, which the spec is written from",
@@ -418,7 +418,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     raise_budget = subs.add_parser(
         "raise-budget",
         parents=[common],
-        help="raise the dollar cap that stopped an item, its own, and retry it (Raise budget)",
+        help="raise an item's own dollar cap (create --budget) once that cap stopped it, "
+        "and retry it",
     )
     raise_budget.add_argument("id", nargs="?")
     raise_budget.add_argument(
