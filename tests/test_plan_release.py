@@ -151,3 +151,38 @@ def test_changelog_goes_above_the_newest_section(tmp_path):
     )
     with pytest.raises(ValueError, match="already has"):
         plan_release.write_changelog("1.1.0", "- again\n", path)
+
+
+def test_a_changelog_with_no_section_yet_gets_its_first(tmp_path):
+    path = tmp_path / "CHANGELOG.md"
+    path.write_text("# Changelog\n\nPreamble.\n")
+    plan_release.write_changelog("1.1.0", "- new (#4)\n", path)
+    assert path.read_text() == "# Changelog\n\nPreamble.\n\n## 1.1.0\n\n- new (#4)\n"
+    plan_release.write_changelog("1.2.0", "- newer (#5)\n", path)
+    assert path.read_text() == (
+        "# Changelog\n\nPreamble.\n\n## 1.2.0\n\n- newer (#5)\n\n## 1.1.0\n\n- new (#4)\n"
+    )
+
+
+def test_the_changelog_command_writes_the_file_it_is_given(tmp_path):
+    notes, extension = tmp_path / "notes.md", tmp_path / "vscode-CHANGELOG.md"
+    notes.write_text("### Fixes\n\n- fixed (#9)\n")
+    extension.write_text("# Changelog\n\nPreamble.\n")
+    repository = plan_release.CHANGELOG.read_text()
+    plan_release.main(["changelog", "9.9.9", str(notes), str(extension)])
+    assert (
+        extension.read_text()
+        == "# Changelog\n\nPreamble.\n\n## 9.9.9\n\n### Fixes\n\n- fixed (#9)\n"
+    )
+    assert plan_release.CHANGELOG.read_text() == repository
+
+
+def test_the_extension_changelog_takes_the_release_notes_the_way_the_root_one_does(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    path = tmp_path / "CHANGELOG.md"
+    path.write_text((root / "vscode" / "CHANGELOG.md").read_text())
+    plan_release.write_changelog("1.5.0", "### New\n\n- new (#4)\n", path)
+    text = path.read_text()
+    assert text.startswith("# Changelog\n\nNotable changes to the Kraft VS Code extension")
+    assert text.endswith("\n\n## 1.5.0\n\n### New\n\n- new (#4)\n")
+    assert "do not\nedit this file by hand" in text
