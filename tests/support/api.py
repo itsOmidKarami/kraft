@@ -324,6 +324,23 @@ def _budget_stopped_item(client, repo, breach: dict, **fields) -> str:
     return wid
 
 
+async def await_gate(wid: str, timeout: float = 30) -> str:
+    """Wait for the server to report a gate waiting on a person for `wid`, and
+    name it: `_await_gate` for a scenario running inside `run_with_app`, over
+    `kraft.client` rather than a `TestClient`."""
+    from kraft import client as kraft_client
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    item: dict = {}
+    while loop.time() < deadline:
+        item = await kraft_client.get_work_item(wid)
+        if item.get("pending_gate"):
+            return item["pending_gate"]
+        await asyncio.sleep(_POLL)
+    raise AssertionError(f"no gate became pending; item={item.get('status')!r}")
+
+
 def run_with_app(api, scenario):
     """Run the coroutine `scenario()` with `api.app`'s lifespan entered, in one
     event loop: the Database the lifespan opens is bound to the loop that
