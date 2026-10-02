@@ -13,6 +13,8 @@ describe("eventLine", () => {
     [ev("fix_cycle_started", { cycle: 1 }, "verification"), "verification · fix loop round 2"],
     [ev("work_item_needs_human", { reason: "needs_context: Allow it?" }, "verification"), "stopped at verification: Allow it?"],
     [ev("mr_closed", { ref: 142, by: "mara" }), "MR !142 closed by mara"],
+    [ev("work_item_archived", { by: "auto" }), "archived"],
+    [ev("work_item_archived", { by: "auto", kept_branch: "kraft/x", unpushed_commits: 3 }), "archived · kept kraft/x: 3 unpushed commits"],
   ])("%o → %s", (e, line) => expect(eventLine(e)).toBe(line));
 
   it("leaves bookkeeping out and names a type it does not know", () => {

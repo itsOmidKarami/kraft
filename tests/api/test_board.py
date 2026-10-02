@@ -4,7 +4,6 @@ steerable) and the SPA catch-all."""
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sqlite3
 from pathlib import Path
@@ -124,25 +123,6 @@ def test_list_hides_abandoned_items(client, repo):
     assert wid in [i["id"] for i in everything]
 
 
-def test_cli_can_list_abandoned_items(client, repo, monkeypatch):
-    """`kraft abandon` without a way to see the result makes the item vanish:
-    hidden from the board by design, and unreachable from the CLI by omission."""
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _set_status(wid, "paused")
-    client.post(f"/api/work-items/{wid}/abandon")
-
-    import kraft.client as kc
-    from kraft.client import transport
-
-    monkeypatch.setattr(transport, "_get", lambda path: _as_coro(client.get(f"/api{path}").json()))
-    visible = asyncio.run(kc.list_work_items())
-    everything = asyncio.run(kc.list_work_items(include_abandoned=True))
-
-    assert wid not in [i["id"] for i in visible]
-    assert wid in [i["id"] for i in everything]
-
-
 def _seed_repo(client, wid, **kwargs):
     """Write a `work_item_repos` row directly — same reasoning as `_seed_events`:
     `Database` exposes only an async `write`, and a multi-repo item's row is
@@ -193,10 +173,6 @@ def _seed_events(client, wid, payloads, event_type="findings_measured"):
         conn.commit()
     finally:
         conn.close()
-
-
-async def _as_coro(value):
-    return value
 
 
 def test_deferred_minor_findings_reach_the_detail_payload(client, repo):

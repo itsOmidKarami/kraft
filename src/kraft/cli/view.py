@@ -167,7 +167,13 @@ def _cmd_events(ns: argparse.Namespace) -> None:
         wid = await client.resolve_work_item(ns.id)
         rows = await client.events(wid, ns.after)
         shown = [row for row in rows if row.get("type") == ns.type] if ns.type else rows
-        common.emit(shown, render.event_line, ns.json)
+        if ns.follow and ns.json:
+            # One stream, one shape: the stream below is NDJSON, so the backlog
+            # is too. An indented array first made the whole output neither.
+            for row in shown:
+                _print_event(row, True)
+        else:
+            common.emit(shown, render.event_line, ns.json)
         if not ns.follow:
             return
         # An item that has already ended carries its terminal event in the

@@ -188,7 +188,7 @@ describe("the other composers (C.7)", () => {
     const calls = mount(item("running"), "/work-items/w1?compose=cancel", {
       "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "kraft/x", worktree: "/w", findings: 2, threads: 1 }, mr: { ref: 142, url: "u", state: "open" }, spend: { spent_usd: 3.72, cap_usd: 10 } }],
     });
-    expect(await screen.findByText(/branch kraft\/x, the worktree, 2 findings, 1 threads/)).toBeInTheDocument();
+    expect(await screen.findByText(/branch kraft\/x, the worktree until it is archived, 2 findings, 1 threads/)).toBeInTheDocument();
     await userEvent.click(await screen.findByRole("switch", { name: "Also close !142 on the forge" }));
     expect(screen.getByRole("button", { name: "Cancel item" })).toBeDisabled();
     await userEvent.type(screen.getByRole("textbox", { name: "Reason" }), "wrong repo");

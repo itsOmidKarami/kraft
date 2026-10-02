@@ -226,13 +226,18 @@ async def list_work_items(request: Request):
             (include_abandoned, archived),
         ).fetchall()
         cursor = c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
-        # The latest gate_* event per item, in one pass — the board renders a gate
-        # prompt per row and must not offer Approve on a rejected gate.
+        # The latest gate request or gate closer per item, in one pass — the
+        # board renders a gate prompt per row and must not offer Approve on a
+        # rejected gate. The closers are `executor.pending_gate`'s, so a gate
+        # `kraft item skip` passed, or one left by an item that ended, reads
+        # as closed here too, as it does on the item's own page.
+        gate_types = ("gate_requested", *executor.GATE_CLOSED)
         gates = c.execute(
             "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
             "  SELECT MAX(seq) FROM events"
-            "  WHERE type IN ('gate_requested', 'gate_approved', 'gate_rejected')"
-            "  GROUP BY work_item_id)"
+            f"  WHERE type IN ({','.join('?' * len(gate_types))})"
+            "  GROUP BY work_item_id)",
+            gate_types,
         ).fetchall()
         # The latest fallback switch and session start per item: the card
         # marks an item whose last launch ran on a fallback (Kraft-0a3h8).

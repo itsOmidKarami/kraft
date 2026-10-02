@@ -7,10 +7,13 @@ checkout and an install can only ever differ in where their paths point.
 from __future__ import annotations
 
 import argparse
+import os
+import select
 import sys
 
 import argcomplete
 
+from kraft import client
 from kraft.cli import admin, common, item, repo, view
 from kraft.cli.admin import *  # noqa: F403
 from kraft.cli.common import *  # noqa: F403
@@ -84,6 +87,20 @@ MOVED = {
 }
 
 
+def _stdout_reader_gone() -> bool:
+    """Whether stdout is a pipe whose reader has closed, which is the one
+    broken pipe `main` treats as the reader being done rather than a failure.
+    A broken pipe's write end polls as an error (POLLERR on Linux, POLLHUP on
+    macOS); a healthy pipe, terminal or file polls as writable only."""
+    try:
+        fd = sys.stdout.fileno()
+    except (AttributeError, OSError, ValueError):
+        return False
+    poller = select.poll()
+    poller.register(fd, select.POLLOUT)
+    return any(mask & (select.POLLERR | select.POLLHUP) for _, mask in poller.poll(0))
+
+
 def main(argv: list[str] | None = None) -> None:
     """Bare `kraft` serves, as it always has. Subcommands are the two front doors.
 
@@ -109,10 +126,23 @@ def main(argv: list[str] | None = None) -> None:
     ns = parser.parse_args(args)
     try:
         ns.func(ns)
+        # Inside the try, so a reader that closed early is caught below
+        # rather than at interpreter exit, where it can only be printed.
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # Some other pipe (a child's stdin, say) is a real failure: say so.
+        if not _stdout_reader_gone():
+            raise
+        # `kraft view events ID --json | head`: the reader has what it wanted.
+        # Point stdout at /dev/null so the exit's own flush cannot fail again
+        # on anything written after the failure (a `finally` that prints), and
+        # leave the way a program SIGPIPE ended would.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        raise SystemExit(141) from None
     except (ValueError, PermissionError) as exc:
         # ValueError is what client.py raises for every API and context failure;
         # PermissionError is the worker self-action guard.
-        print(f"kraft: {exc}", file=sys.stderr)
+        print(client.refusal(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
         raise SystemExit(130) from None

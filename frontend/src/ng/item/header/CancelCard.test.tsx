@@ -33,6 +33,12 @@ describe("CancelCard", () => {
     expect(writes).toEqual([{ method: "POST", path: "/work-items/w1/cancel", body: { reason: "superseded", close_mr: close } }]);
   });
 
+  it("says the worktree goes at archive, and an unpushed branch does not", async () => {
+    open({ "GET /work-items/w1/cancel-preview": [200, preview(null)] });
+    expect(await screen.findByText(/branch kraft\/cb59, the worktree until it is archived/)).toBeInTheDocument();
+    expect(screen.getByText(/Archiving keeps the branch if it has commits that were never pushed/)).toBeInTheDocument();
+  });
+
   it("offers closing the MR only while it is open", async () => {
     open({ "GET /work-items/w1/cancel-preview": [200, preview("merged")] });
     await screen.findByText(/code_review, attempt 2/);

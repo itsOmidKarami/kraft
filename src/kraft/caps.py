@@ -557,7 +557,7 @@ def time_capped_sessions(conn, work_item_ids) -> set[str]:
     return {r["sid"] for r in rows if r["sid"]}
 
 
-#: What closes a pending gate (`executor.gates._GATE_CLOSED`), and a cap's own
+#: What closes a pending gate (`executor.gates.GATE_CLOSED`), and a cap's own
 #: stop: an item at a gate is measured only while its newest such event is the
 #: request.
 _GATE_SETTLED = (
