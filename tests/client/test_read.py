@@ -58,6 +58,18 @@ def test_base_url_prefers_loopback_over_a_wildcard_bind(monkeypatch, tmp_path):
     assert client.base_url() == "http://127.0.0.1:9999"
 
 
+def test_base_url_brackets_an_ipv6_bind(monkeypatch, tmp_path):
+    """`http://::1:8765` is not a URL: httpx reads the colons as a port."""
+    access = tmp_path / "templates"
+    access.mkdir()
+    (access / "access.yaml").write_text("bind: '::1'\nport: 9999\n")
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(access))
+    monkeypatch.delenv("KRAFT_HOST", raising=False)
+    monkeypatch.delenv("KRAFT_PORT", raising=False)
+    assert client.base_url() == "http://[::1]:9999"
+    assert httpx.URL(client.base_url()).port == 9999
+
+
 def run_with_app(api, scenario):
     """Run one coroutine with the app's lifespan active."""
 

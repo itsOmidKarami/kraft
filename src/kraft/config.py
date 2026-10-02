@@ -962,6 +962,13 @@ def host_name(host: str) -> str | None:
     return f"[{ip.compressed}]" if ip.version == 6 else ip.compressed
 
 
+def url_host(host: str) -> str:
+    """`host` as it goes into a URL: an IPv6 literal in brackets, since in
+    `http://::1:8765` the port cannot be told from the address. Anything else
+    as it is."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
 #: A host name or a bracketed IPv6 literal, once `host_name` has lowercased it.
 _HOST_NAME = re.compile(
     r"\[[0-9a-f:.%]+\]|[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*"

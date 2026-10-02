@@ -233,6 +233,29 @@ def test_serve_host_flag_says_how_other_commands_reach_it(
     assert ("still dial host 127.0.0.1; reach this instance with KRAFT_HOST=" in out) is hint
 
 
+def test_serve_on_ipv6_loopback_with_a_port_flag_starts_and_says_where(
+    monkeypatch, tmp_path, capsys
+):
+    """`--port` asks the client which port it dials, after `--host` has set
+    KRAFT_HOST. With `::1` that URL was `http://::1:8765`, where the port
+    cannot be told from the address, and httpx refused it: start crashed
+    before it bound anything."""
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    seen = {}
+
+    class FakeConfig:
+        def __init__(self, app, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
+    cli.main(["admin", "start", "--host", "::1", "--port", "9004"])
+    assert (seen["host"], seen["port"]) == ("::1", 9004)
+    out = capsys.readouterr().out
+    assert "still dial port 8765; reach this instance with KRAFT_PORT=9004" in out
+    assert "kraft: http://[::1]:9004\n" in out
+
+
 def test_serve_flag_beats_env(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     monkeypatch.setenv("KRAFT_PORT", "9002")
