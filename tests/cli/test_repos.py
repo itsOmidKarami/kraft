@@ -403,6 +403,18 @@ def test_connect_verify_exits_by_whether_the_commands_passed(
     assert said in capsys.readouterr().out
 
 
+def test_connect_verify_json_says_why_it_failed(app, capsys, repo):
+    """`--verify --json` exited 1 with nothing on stdout or stderr saying why."""
+    argv = ["repo", "connect", str(repo), "--test-command", "false", "--setup-command", ""]
+    with pytest.raises(SystemExit) as caught:
+        cli.main([*argv, "--verify", "--json"])
+    assert caught.value.code == 1
+    verified = json.loads(capsys.readouterr().out)["verify"]
+    assert verified["passed"] is False
+    assert "  test [**]: false ..." in verified["output"]
+    assert verified["output"][-1].startswith("verify: failed")
+
+
 def test_reconnecting_survives_a_broken_detectors_file(app, capsys, repo, tmp_path):
     cli.main(["repo", "connect", str(repo)])
     templates = Path(os.environ["KRAFT_TEMPLATES_DIR"])

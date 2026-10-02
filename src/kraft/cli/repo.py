@@ -375,17 +375,22 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         )
     elif not ns.json:
         _say_connected(result)
+    passed = True
+    if ns.verify:
+        # Imported here, not at the top: it reaches `kraft.builtins`, and every
+        # `kraft` invocation imports this module -- the permission hook a worker
+        # runs before each tool call included, which must not load the server.
+        from kraft.cli import verify as verify_mod
+
+        said: list[str] = []
+        say = said.append if ns.json else print
+        passed = verify_mod.verify(result, say=say, timeout_minutes=ns.timeout, on_host=ns.on_host)
+        if ns.json:
+            # What the plain output prints, so a failure says why here too.
+            result = {**result, "verify": {"passed": passed, "output": said}}
     if ns.json:
         common.emit(result, str, True)
-    if not ns.verify:
-        return
-    # Imported here, not at the top: it reaches `kraft.builtins`, and every
-    # `kraft` invocation imports this module -- the permission hook a worker
-    # runs before each tool call included, which must not load the server.
-    from kraft.cli import verify as verify_mod
-
-    say = (lambda _line: None) if ns.json else print
-    if not verify_mod.verify(result, say=say, timeout_minutes=ns.timeout, on_host=ns.on_host):
+    if not passed:
         raise SystemExit(1)
 
 
