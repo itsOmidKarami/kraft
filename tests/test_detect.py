@@ -3,6 +3,7 @@ CI and devcontainer files are `test_detect_ci.py`'s."""
 
 from __future__ import annotations
 
+import fnmatch
 import subprocess
 
 import pytest
@@ -343,70 +344,78 @@ def test_a_pyproject_with_no_lockfile_stops(tmp_path, files, test, setup):
     assert bool(p.stopped) == (test is None)
 
 
-@pytest.mark.parametrize(
-    "layout",
-    [["pyproject.toml", "web/package.json"], ["backend/pyproject.toml", "web/package.json"]],
-    ids=["at-the-root", "one-level-down"],
-)
-def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(tmp_path, layout):
-    """A `web/` scope alone is what a diff to the Python code fails open to,
-    so it would pass on `npm test` with the Python suite never run (#442)."""
-    files = {layout[0]: PYTEST, layout[1]: JEST, "web/package-lock.json": ""}
-    p = _propose(_repo(tmp_path, files))
+#: Layouts whose lockless pyproject.toml no root command can run (#442, #446):
+#: a lone `web/` scope is what a change to the Python code would fail open to,
+#: and a root `go test` or `npm test` is what it would select. Either passes
+#: with the Python suite never run, so nothing is proposed.
+_NOT_COVERED = {
+    "at-the-root": {"pyproject.toml": PYTEST, "web/package.json": JEST},
+    "one-level-down": {"backend/pyproject.toml": PYTEST, "web/package.json": JEST},
+    "under-a-go-root": {"backend/pyproject.toml": PYTEST, "go.mod": "module x\n"},
+    "under-an-npm-root": {"backend/pyproject.toml": PYTEST, "package.json": JEST},
+}
+
+
+@pytest.mark.parametrize("files", _NOT_COVERED.values(), ids=_NOT_COVERED)
+def test_a_lockless_pyproject_no_root_command_can_cover_proposes_no_test_scope(tmp_path, files):
+    p = _propose(_repo(tmp_path, {**files, "web/package-lock.json": ""}))
     assert (p.test_command, p.test_scopes) == (None, [])
-    assert p.stopped[0]["dir"] == (layout[0].rpartition("/")[0] or ".")
+    stopped = next(path for path in files if path.endswith("pyproject.toml"))
+    assert p.stopped[0]["dir"] == (stopped.rpartition("/")[0] or ".")
 
 
-_UV_WORKSPACE = PYTEST + "[tool.uv.workspace]\nmembers = ['pkgs/*']\n"
+#: Layout -> (the proposed test command, each scope's command, the directory
+#: whose change must select the root scope by its paths rather than fail open).
+_COVERED_BY_THE_ROOT = {
+    "a-uv-workspace-member": (
+        {"pyproject.toml": PYTEST, "uv.lock": "", "foo/pyproject.toml": PYTEST},
+        ("uv run pytest", ["uv run pytest"], "foo"),
+    ),
+    "a-justfile-test-recipe-and-a-lockless-backend": (
+        {"justfile": "test:\n    pytest\n", "backend/pyproject.toml": PYTEST},
+        ("just test", ["just test"], "backend"),
+    ),
+    "a-justfile-test-recipe-a-lockless-backend-and-a-frontend": (
+        {
+            "justfile": "test:\n    pytest\n",
+            "backend/pyproject.toml": PYTEST,
+            "frontend/package.json": JEST,
+        },
+        ("just test", ["just test", "sh -c 'cd frontend && npm test'"], "backend"),
+    ),
+    "a-uv-lock-and-a-frontend": (
+        {"pyproject.toml": PYTEST, "uv.lock": "", "src/app.py": "", "frontend/package.json": JEST},
+        ("uv run pytest", ["uv run pytest", "sh -c 'cd frontend && npm test'"], "src"),
+    ),
+}
 
 
 @pytest.mark.parametrize(
-    ("files", "test", "scopes"),
-    [
-        (
-            {"pyproject.toml": _UV_WORKSPACE, "uv.lock": "", "pkgs/a/pyproject.toml": PYTEST},
-            "uv run pytest",
-            [["**"]],
-        ),
-        (
-            {"justfile": "test:\n  pytest\n", "backend/pyproject.toml": PYTEST},
-            "just test",
-            [["**"]],
-        ),
-        (
-            {"pyproject.toml": PYTEST, "uv.lock": "", "backend/pyproject.toml": PYTEST},
-            "uv run pytest",
-            [["**"]],
-        ),
-        (
-            {"package.json": JEST, "package-lock.json": "", "backend/pyproject.toml": PYTEST},
-            None,
-            [],
-        ),
-        (
-            {"justfile": "test:\n  pytest\n", "pyproject.toml": PYTEST, "x/go.mod": "m"},
-            "just test",
-            None,
-        ),
-    ],
-    ids=[
-        "a-uv-workspaces-root-lock-covers-its-members",
-        "a-root-justfile-recipe-covers-it",
-        "a-root-uv-lock-covers-it",
-        "a-root-npm-test-does-not",
-        "a-root-stop-beside-a-runner-recipe-is-no-stop",
-    ],
+    ("files", "expected"), _COVERED_BY_THE_ROOT.values(), ids=_COVERED_BY_THE_ROOT
 )
-def test_a_stopped_subdirectory_is_covered_by_a_root_command_that_runs_it(
-    tmp_path, files, test, scopes
+def test_a_lockless_pyproject_one_level_down_is_covered_by_the_root_command(
+    tmp_path, files, expected
 ):
-    """#446: a lockless pyproject.toml one level down stops the proposal only
-    when nothing at the root would run its tests. Covered, it gets no scope of
-    its own, and the root scope is what its changes match."""
+    """A uv workspace member never has a lock of its own, and `uv run` there
+    writes none: the root's covers it. Any other lockless subdirectory is the
+    root command's to test as well, when that command can run it (#446)."""
+    from kraft.executor import dispatch
+
+    command, scope_commands, covered = expected
     p = _propose(_repo(tmp_path, files))
-    assert p.test_command == test
-    if scopes is not None:
-        assert [s["paths"] for s in p.test_scopes] == scopes
+    assert p.test_command == command
+    assert [s["command"] for s in p.test_scopes] == scope_commands
+    root_scope = p.test_scopes[0]
+    assert any(fnmatch.fnmatchcase(f"{covered}/x.py", g) for g in root_scope["paths"])
+    assert dispatch._matched_scopes(p.test_scopes, [f"{covered}/x.py"]) == [root_scope]
+
+
+def test_a_runners_test_recipe_beside_a_root_pyproject_is_no_stop(tmp_path):
+    """The stop is for a directory Kraft has no command for; a task runner's
+    `test` recipe in that same directory is one."""
+    files = {"justfile": "test:\n  pytest\n", "pyproject.toml": PYTEST, "x/go.mod": "module x\n"}
+    p = _propose(_repo(tmp_path, files))
+    assert (p.test_command, p.stopped) == ("just test", [])
 
 
 def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(tmp_path):
