@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../../ui/Button";
+import { Combobox, type Choice } from "../../ui/Combobox";
 
 /** The phone's one overlay (W17 brief A.5). It has exactly three shapes, so a
  *  sheet carries at most one primary action: a confirm (Cancel and one primary),
@@ -124,13 +125,18 @@ export function ChoiceSheet<T extends string>({ title, text, options, value, onP
   );
 }
 
-export function EditSheet({ title, text, initial = "", placeholder, secret, multiline, submitLabel = "Set", error, busy, onSubmit, onClose }: { title: string; text?: string; initial?: string; placeholder?: string; secret?: boolean; multiline?: boolean; submitLabel?: string; error?: string | null; busy?: boolean; onSubmit: (value: string) => void; onClose: () => void }) {
+/** The values a text edit takes (or, `multiple`, its comma-separated values), listed as you type. A `closed` set sets nothing else. */
+export type Listed = { choices: Choice[]; closed?: boolean; multiple?: boolean; noun: string };
+
+export function EditSheet({ title, text, initial = "", placeholder, secret, multiline, listed, submitLabel = "Set", error, busy, onSubmit, onClose }: { title: string; text?: string; initial?: string; placeholder?: string; secret?: boolean; multiline?: boolean; listed?: Listed; submitLabel?: string; error?: string | null; busy?: boolean; onSubmit: (value: string) => void; onClose: () => void }) {
   const [value, setValue] = useState(initial);
   return (
     <Frame title={title} text={text} onClose={onClose}>
       <form className="ph-sheet-edit" onSubmit={(e) => { e.preventDefault(); onSubmit(value); }}>
         {multiline ? (
           <textarea className="ph-input ph-input-area" aria-label={title} value={value} placeholder={placeholder} onChange={(e) => setValue(e.target.value)} />
+        ) : listed ? (
+          <Combobox className="ph-input" aria-label={title} value={value} placeholder={placeholder} choices={listed.choices} closed={listed.closed} multiple={listed.multiple} noun={listed.noun} listLabel={title} invalid={!!error} inline onChange={setValue} />
         ) : (
           <input className="ph-input" aria-label={title} type={secret ? "password" : "text"} value={value} placeholder={placeholder} autoComplete="off" onChange={(e) => setValue(e.target.value)} />
         )}

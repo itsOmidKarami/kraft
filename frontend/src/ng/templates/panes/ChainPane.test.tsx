@@ -200,3 +200,91 @@ describe("pane head", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("at model, line 12");
   });
 });
+
+describe("closed-set fields", () => {
+  const TASK = "verification.tests.test_changed_scopes";
+  /** The fixture's subprocess task, read as a builtin one: `sources` is what the pane reads first. */
+  const builtin = (result: Partial<Result> = {}) => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources[TASK] = { ...sources[TASK], kind: { value: "builtin", source: "chain" }, ref: { value: "kraft.mr_rebase", source: "chain" } };
+    return mount(TASK, { sources, ...result });
+  };
+  const action = () => screen.getByRole("combobox", { name: "action" });
+  const sentRefs = (draft: ConfigDraft) => vi.mocked(draft.field).mock.calls.filter(([, f]) => f === "ref").map(([, , v]) => v);
+
+  it("lists a builtin task's actions as the draft's choices give them, summaries included", async () => {
+    const choices = structuredClone(DEFAULT_VIEW.result.choices!);
+    choices.ref.push({ value: "kraft.from_the_server", summary: "Only the server knows this one" });
+    builtin({ choices });
+    await userEvent.click(action());
+    const list = screen.getByRole("listbox", { name: "Actions" });
+    expect(within(list).getAllByRole("option").map((o) => o.querySelector(".cbx-value")!.textContent)).toEqual(["kraft.verify_changed_test_scopes", "kraft.mr_rebase", "kraft.from_the_server"]);
+    expect(within(list).getByText("Only the server knows this one")).toBeInTheDocument();
+  });
+
+  it("never sends an action that is not listed: it is flagged in place, and a pick from the list goes at once", async () => {
+    const { draft } = builtin();
+    await userEvent.clear(action());
+    await userEvent.type(action(), "sds");
+    expect(action()).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("No action matches “sds”.");
+    await userEvent.tab();
+    expect(screen.getByText("“sds” is not an action. Pick one from the list.")).toHaveClass("is-bad");
+    expect(sentRefs(draft)).toEqual([null]);
+    vi.mocked(draft.flush).mockClear();
+    await userEvent.clear(action());
+    await userEvent.type(action(), "verify");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(sentRefs(draft)).toEqual([null, null, "kraft.verify_changed_test_scopes"]);
+    expect(draft.flush).toHaveBeenCalled();
+    expect(screen.queryByText(/is not an action/)).toBeNull();
+  });
+
+  it("asks a forge wait for its polling when the draft's choices say its target waits", () => {
+    mount("merge_request_feedback.ci.await_ci");
+    expect(screen.getByRole("combobox", { name: "target" })).toHaveValue("mr.ci");
+    expect(screen.getByRole("textbox", { name: "check every" })).toBeInTheDocument();
+  });
+
+  it("asks a forge task for no polling when its target does not wait", () => {
+    const choices = structuredClone(DEFAULT_VIEW.result.choices!);
+    choices.target.find((t) => t.value === "mr.ci")!.waits = false;
+    mount("merge_request_feedback.ci.await_ci", { choices });
+    expect(screen.queryByRole("textbox", { name: "check every" })).toBeNull();
+  });
+
+  it("refuses an unlisted action on the Config tab, and saves a listed one", async () => {
+    const { draft } = builtin();
+    await configTab();
+    await userEvent.click(within(rowOf("action")).getByRole("button", { name: "Edit action" }));
+    const input = within(rowOf("action")).getByRole("combobox", { name: "action" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("action: “sds” is not an action. Pick one from the list.");
+    expect(draft.field).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "verify");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(draft.field).toHaveBeenCalledWith(TASK, "ref", "kraft.verify_changed_test_scopes");
+  });
+
+  it("completes an agent task's inputs on the Config tab, and refuses one Kraft does not deliver", async () => {
+    const { draft } = mount("verification.review.code_review");
+    await configTab();
+    await userEvent.click(within(rowOf("inputs")).getByRole("button", { name: "Edit inputs" }));
+    const input = within(rowOf("inputs")).getByRole("combobox", { name: "inputs" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "review_package, ");
+    expect(within(screen.getByRole("listbox", { name: "inputs" })).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "carried_findingsThe findings the node's last measurement reported",
+      "previous_reviewThis task's previous result and summary",
+    ]);
+    await userEvent.type(input, "sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("inputs: “sds” is not an input.");
+    expect(draft.field).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "review_package, prev");
+    await userEvent.keyboard("{ArrowDown}{Enter}{Enter}");
+    expect(draft.field).toHaveBeenCalledWith("verification.review.code_review", "inputs", ["review_package", "previous_review"]);
+  });
+});

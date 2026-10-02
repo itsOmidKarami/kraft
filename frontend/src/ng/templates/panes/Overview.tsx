@@ -4,6 +4,7 @@ import type { Result, Scope } from "../draft/types";
 import { authoredAt, authoredNodes, kindOf, normalise, resolvedAt, valueAt, type NodeA, type Step, type Task } from "../draft/view";
 import { Head, Kv, Note, PauseText, SelectRow, type Option } from "./controls";
 import type { PaneKind } from "./describe";
+import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 
 export type PaneCtx = {
@@ -14,9 +15,6 @@ export type PaneCtx = {
   /** Select a canonical path (and open its pane). */
   goTo: (path: string) => void;
 };
-
-/** Forge targets that wait on something outside Kraft (the prototype's WAITS). */
-const WAITS = ["mr.ci", "mr.automated_review", "mr.external_approval", "mr.merge", "mr.post_merge_ci"];
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const list = (v: unknown) => (Array.isArray(v) ? v.map(str).join(", ") : "");
@@ -195,6 +193,11 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
   const profiles: Option[] = [{ value: "", label: "harness default" }, ...(loading ? (profile ? [{ value: profile, label: profile }] : []) : opts.harnesses.agent_profiles.map((p) => ({ value: p.id, label: p.id })))];
   const efforts = effortsFor(opts, harness);
   const target = str(v("target"));
+  // The closed sets come with the draft (`result.choices`), never typed in here.
+  const choices = r.choices;
+  const listed = useProviders();
+  const provider = loading ? harness : opts.harnesses.profiles.find((p) => p.id === harness)?.provider ?? harness;
+  const models = listed.find((p) => p.id === provider)?.models ?? [];
   return (
     <>
       {kind === "judge" && <Note>Runs before the repair from attempt 2, and decides continue, accept or stop.</Note>}
@@ -219,7 +222,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
             <SelectRow label="profile" value={profile} options={profiles} onPick={set("profile")} />
           ) : (
             <>
-              <PauseText label="model" mono value={str(v("model"))} onText={(t) => set("model", true)(t.trim())} onBlur={draft.flush} />
+              <PauseText label="model" mono value={str(v("model"))} choices={models.map((m) => ({ value: m }))} listLabel="Models" onText={(t) => set("model", true)(t.trim())} onBlur={draft.flush} />
               {efforts.length ? (
                 <SelectRow label="effort" value={str(v("effort"))} options={[{ value: "", label: "default" }, ...efforts.map((e) => ({ value: e, label: e }))]} onPick={set("effort")} />
               ) : (
@@ -236,7 +239,7 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
       )}
       {taskKind === "builtin" && (
         <>
-          <PauseText label="action" mono value={str(v("ref"))} required bad={!v("ref")} sub={!v("ref") ? "Required." : undefined} onText={(t) => set("ref", true)(t.trim())} onBlur={draft.flush} />
+          <PauseText label="action" mono value={str(v("ref"))} required bad={!v("ref")} sub={!v("ref") ? "Required." : undefined} choices={choices?.ref} closed={!!choices} listLabel="Actions" onText={(t) => set("ref", true)(t.trim())} onBlur={draft.flush} />
           <SelectRow label="runs" value={scope} options={[{ value: "once", label: "once" }, { value: "each_repository", label: "each repository" }]} onPick={set("scope")} />
           {scope === "each_repository" && <SelectRow label="order" value={str(v("execution")) || "sequential"} options={[{ value: "sequential", label: "sequential" }, { value: "parallel", label: "parallel" }]} onPick={set("execution")} />}
         </>
@@ -246,9 +249,9 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
       )}
       {taskKind === "forge" && (
         <>
-          <PauseText label="target" mono value={target} required bad={!target} sub={!target ? "Required." : undefined} onText={(t) => set("target", true)(t.trim())} onBlur={draft.flush} />
+          <PauseText label="target" mono value={target} required bad={!target} sub={!target ? "Required." : undefined} choices={choices?.target} closed={!!choices} listLabel="Targets" onText={(t) => set("target", true)(t.trim())} onBlur={draft.flush} />
           <SelectRow label="runs" value={scope} options={[{ value: "once", label: "once" }, { value: "each_repository", label: "each repository" }]} onPick={set("scope")} />
-          {WAITS.includes(target) && (
+          {choices?.target.some((t) => t.value === target && t.waits) && (
             <>
               <PauseText label="check every" mono value={str(v("wait.polling.initial_interval"))} placeholder="30s" onText={(t) => set("wait.polling.initial_interval", true)(t.trim())} onBlur={draft.flush} />
               <PauseText label="gives up after" mono value={str(v("policy.total_time_cap_minutes"))} placeholder="90 (minutes)" sub="Minutes. The wait stops for you after this." onText={(t) => set("policy.total_time_cap_minutes", true)(t.trim() ? Number(t) || t.trim() : null)} onBlur={draft.flush} />

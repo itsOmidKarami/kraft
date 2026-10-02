@@ -63,9 +63,13 @@ export function view(r: Resolved, opts: { problems?: Problem[]; changes?: { path
     result: {
       model: {}, resolved: r as never, problems: opts.problems ?? [], sources: {}, changes: opts.changes ?? [], impact: {}, warnings: [],
       policy_values: { auto_escalate_delay_s: 0, auto_review_attempts: 0 },
+      choices: { ref: [], target: [], inputs: [], grants: GRANTS },
     },
   };
 }
+
+/** The grants the server lists in a draft's `choices`. */
+export const GRANTS = [{ value: "git-commit", summary: "A plain git commit" }, { value: "git-rebase", summary: "A plain git rebase" }, { value: "git-push", summary: "A plain git push to the item's own branch" }];
 
 export const STATUS = [
   { id: "claude", executable: "claude", executable_found: true, efforts: ["low", "medium", "high", "xhigh", "max"], models: ["sonnet", "opus", "haiku"], capabilities: { effort: { cli: ["--effort", "{value}"], values: [] }, permission_mode: { cli: ["--permission-mode", "{value}"], values: ["default", "acceptEdits", "plan"] } } },
