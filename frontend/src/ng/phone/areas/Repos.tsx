@@ -116,7 +116,7 @@ export function RepoView() {
       {sheet.is("disconnect") && repo && (
         <ConfirmSheet
           title={`Disconnect ${repoName(repo)}?`}
-          text={running > 0 ? `${repoName(repo)} has ${running} open ${running === 1 ? "item" : "items"}. Disconnect is refused until ${running === 1 ? "it finishes or is cancelled" : "they finish or are cancelled"}.` : "Kraft stops working in it once you publish. Its items and branches are left as they are."}
+          text={running > 0 ? `${repoName(repo)} has ${running} open ${running === 1 ? "item" : "items"}; finish or cancel ${running === 1 ? "it" : "them"} first. Disconnect is refused until then.` : "Kraft stops working in it once you publish. Its items and branches are left as they are."}
           error={error}
           confirm={{ label: "Disconnect", danger: true, disabled: running > 0, run: () => void disconnect() }}
           onClose={sheet.close}

@@ -234,7 +234,7 @@ describe("Repos page: disconnecting and enabling", () => {
     mount();
     await screen.findByRole("listbox", { name: "Repos" });
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("platform has 1 open item. Disconnect is refused until it finishes or is cancelled.");
+    expect(screen.getByRole("alert")).toHaveTextContent("platform has 1 open item; finish or cancel it first. Disconnect is refused until then.");
     expect(d.postOps).not.toHaveBeenCalled();
   });
 

@@ -222,7 +222,8 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
 
   const toggle = () => void draft.ops([{ op: "set_repo", path: repo.path, patch: { enabled: !enabled } }]);
   const disconnect = () => {
-    if (running > 0) return setNote(`${name} has ${running} open ${running === 1 ? "item" : "items"}. Disconnect is refused until ${running === 1 ? "it finishes or is cancelled" : "they finish or are cancelled"}.`);
+    // The server's refusal in the same words (`DELETE /repos`, the repos draft).
+    if (running > 0) return setNote(`${name} has ${running} open ${running === 1 ? "item" : "items"}; finish or cancel ${running === 1 ? "it" : "them"} first. Disconnect is refused until then.`);
     setNote(null);
     void draft.ops([{ op: "remove_repo", path: repo.path }]).then((a) => { if (a.status === 200) onGone(neighbour ? neighbour.name ?? neighbour.path : undefined); });
   };

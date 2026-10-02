@@ -120,7 +120,7 @@ describe("a repo (M.2)", () => {
     const { calls } = open("platform");
     await userEvent.click(await screen.findByRole("button", { name: "Disconnect repo" }));
     const sheet = screen.getByRole("dialog", { name: "Disconnect platform?" });
-    expect(sheet).toHaveTextContent("platform has 1 open item. Disconnect is refused until it finishes or is cancelled.");
+    expect(sheet).toHaveTextContent("platform has 1 open item; finish or cancel it first. Disconnect is refused until then.");
     expect(within(sheet).getByRole("button", { name: "Disconnect" })).toBeDisabled();
     expect(posts(calls)).toEqual([]);
   });
