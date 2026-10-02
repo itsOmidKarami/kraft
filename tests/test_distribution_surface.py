@@ -31,11 +31,12 @@ def test_install_script_is_valid_shell():
     assert result.returncode == 0, result.stderr
 
 
-def _run_installer(tmp_path: Path, *, bin_on_path: bool, old_uv: bool = False):
+def _run_installer(tmp_path: Path, *, bin_on_path: bool, old_uv: bool = False, index: int = 0):
     """install.sh against a stub `curl` and `uv`: the release feed names one
     wheel, and `uv tool install` puts a `kraft` into a bin directory that is
     on the caller's PATH or, as after a first uv install, not. An `old_uv`
-    has no `tool dir --bin` to say where that directory is."""
+    has no `tool dir --bin` to say where that directory is. `index` is the
+    exit code of an install from PyPI; every `uv` call is in `uv.log`."""
     import subprocess
 
     stubs, bin_dir = tmp_path / "stubs", tmp_path / "uv-bin"
@@ -50,6 +51,8 @@ def _run_installer(tmp_path: Path, *, bin_on_path: bool, old_uv: bool = False):
     tool_dir = "exit 2" if old_uv else f'echo "{bin_dir}"'
     (stubs / "uv").write_text(
         "#!/bin/sh\n"
+        f'echo "$*" >> {tmp_path}/uv.log\n'
+        f'case "$*" in *==9.9.9) [ {index} = 0 ] || exit {index};; esac\n'
         f'case "$1 $2" in "tool dir") {tool_dir};;\n'
         f"\"tool install\") printf '#!/bin/sh\\necho kraft 9.9.9\\n' > {bin_dir}/kraft; "
         f"chmod +x {bin_dir}/kraft;; esac\n"
@@ -81,6 +84,29 @@ def test_install_script_names_no_path_it_cannot_find(tmp_path):
     out, _ = _run_installer(tmp_path, bin_on_path=False, old_uv=True)
     assert "kraft installed. If `kraft` is not found, run  uv tool update-shell" in out
     assert ".local/bin" not in out
+
+
+@pytest.mark.parametrize(
+    ("index", "installs"),
+    [
+        (0, ["tool install --force kraft-sdlc==9.9.9"]),
+        (
+            1,
+            [
+                "tool install --force kraft-sdlc==9.9.9",
+                "tool install --force kraft-sdlc @ https://x/kraft_sdlc-9.9.9-py3-none-any.whl",
+            ],
+        ),
+    ],
+    ids=["from-pypi", "wheel-url-before-pypi-has-it"],
+)
+def test_install_script_installs_the_release_by_version(tmp_path, index, installs):
+    """A wheel from a temporary directory left uv a record of a file that was
+    gone, so `uv tool upgrade` failed. The release's version from PyPI, or
+    its wheel by URL in the minutes before PyPI has it."""
+    _run_installer(tmp_path, bin_on_path=True, index=index)
+    calls = (tmp_path / "uv.log").read_text().splitlines()
+    assert [call for call in calls if call.startswith("tool install")] == installs
 
 
 def test_install_script_says_nothing_of_path_when_kraft_is_on_it(tmp_path):

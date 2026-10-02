@@ -5,9 +5,9 @@
 #
 # This is a piped-shell install, with the objections that implies. What reduces
 # them: this script is short, committed, and reviewable at the URL above before
-# you run it, and the wheel it fetches is an asset of a tagged release rather
-# than something from a mutable location. What does not reduce them is arguing
-# the pattern is fine.
+# you run it, and what it installs is a tagged release, by its exact version
+# from PyPI or as the wheel attached to it, rather than something from a
+# mutable location. What does not reduce them is arguing the pattern is fine.
 #
 # `uv tool install kraft-sdlc` from PyPI is the other supported door, and needs
 # none of this.
@@ -57,12 +57,22 @@ if [ -z "$wheel" ]; then
     exit 1
 fi
 
-# uv can fetch $wheel itself, but pulling it here keeps one download path and
-# one error message for both this script and `kraft admin update`.
-wheel_file="$tmpdir/$(basename "$wheel")"
-curl -fsSL "$wheel" > "$wheel_file"
+# The release's version, from its wheel's name (kraft_sdlc-1.5.0-py3-none-any.whl).
+wheel_name=${wheel##*/}
+case "$wheel_name" in
+    kraft_sdlc-*) version=${wheel_name#kraft_sdlc-}; version=${version%%-*} ;;
+    *) version="" ;;
+esac
 
-uv tool install --force --from "$wheel_file" kraft-sdlc
+# From PyPI by version, as `kraft admin update` does: uv records the request,
+# so a later `uv tool upgrade` can read it back. A wheel in a temporary
+# directory left a record naming a file that was gone. The GitHub release is
+# created a few minutes before PyPI has it, so in that window, or for a wheel
+# whose name says no version, install the wheel by its URL instead.
+if [ -z "$version" ] || ! uv tool install --force "kraft-sdlc==$version"; then
+    echo "installing the release's wheel: $wheel"
+    uv tool install --force "kraft-sdlc @ $wheel"
+fi
 
 # Where uv put the command, which a first uv install has not added to the
 # caller's PATH yet: run it from there rather than trust `kraft` to resolve.

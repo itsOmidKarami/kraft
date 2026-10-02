@@ -35,10 +35,6 @@ CACHE_TTL = 86_400
 #: with no route out is not something anybody times.
 TIMEOUT = 2.0
 
-#: The wheel download in `perform`. Someone asked for it and is watching, and
-#: a multi-megabyte wheel through `glab api` does not fit in `TIMEOUT`.
-DOWNLOAD_TIMEOUT = 120.0
-
 
 #: Pre-release marks in ascending order; a final release outranks all of them.
 _MARKS = ("a", "b", "rc")
@@ -100,7 +96,7 @@ def _cache_path():
 
 
 def _request(url: str, timeout: float) -> bytes:
-    """One plain GET, shared by the releases list and the wheel download.
+    """One plain GET, for the releases list.
 
     The project is public, so no authentication needed.
     """
@@ -258,6 +254,61 @@ def _stale_kraft_tool(run) -> bool:
     return listing.returncode == 0 and re.search(r"^kraft v", out, re.MULTILINE) is not None
 
 
+#: The package this project publishes, on PyPI and in its release wheels.
+PACKAGE = "kraft-sdlc"
+
+
+def _receipt() -> dict:
+    """uv's record of how this tool was installed, or {} when it is not a uv tool."""
+    import tomllib
+    from pathlib import Path
+
+    try:
+        return tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text()).get("tool") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def installed_extras() -> list[str]:
+    """The extras this install was made with, so an update keeps them.
+
+    uv's receipt names them for a uv tool. `vector` is also read off the
+    import it brings, which covers an install uv no longer records the
+    request for: every 1.4 `kraft admin update` left a receipt naming only a
+    temporary wheel."""
+    import importlib.util
+
+    found = set()
+    for requirement in _receipt().get("requirements") or []:
+        if isinstance(requirement, dict) and requirement.get("name") == PACKAGE:
+            found.update(str(extra) for extra in requirement.get("extras") or [])
+    if importlib.util.find_spec("fastembed") is not None:
+        found.add("vector")
+    return sorted(found)
+
+
+def _python() -> str:
+    """The interpreter an update installs on: the one the user chose, if uv
+    recorded it, else the one running now. Never the tool venv's own
+    `bin/python`, which the reinstall replaces."""
+    chosen = _receipt().get("python")
+    if isinstance(chosen, str) and chosen:
+        # A version ("3.12") as is. A path's directory, not the path: the
+        # venv's `python` is a link out of it.
+        where = os.path.realpath(os.path.dirname(chosen)) + os.sep
+        if os.sep not in chosen or not where.startswith(os.path.realpath(sys.prefix) + os.sep):
+            return chosen
+    return os.path.realpath(sys.executable)
+
+
+def requirement(release: Release) -> str:
+    """`kraft-sdlc[extras]==X.Y.Z` for `release`, the same shape the install
+    docs give for pinning a version."""
+    extras = installed_extras()
+    named = f"[{','.join(extras)}]" if extras else ""
+    return f"{PACKAGE}{named}=={release.tag.removeprefix('v')}"
+
+
 def perform(release: Release, *, run=None) -> int:
     """Replace this install with `release`. Returns the installer's exit code.
 
@@ -269,12 +320,15 @@ def perform(release: Release, *, run=None) -> int:
     -- that's a dev-only edge of `kraft admin update --force`, and `brew
     upgrade` no-opping on an up-to-date formula is a fine ceiling for it.
 
-    Otherwise, `uv tool install --force` is the same command `just install`
-    ends with, so an updated Kraft is byte-identical to a freshly installed
-    one rather than something only this path can produce.
-
-    `release.wheel_url` is a plain public URL now, but it is still fetched here
-    rather than handed to `uv`, so that one code path downloads every wheel.
+    Otherwise, `uv tool install --force` of `kraft-sdlc[extras]==X` from the
+    package index, on the same Python: the extras and the interpreter the
+    user installed with survive the update, and uv's record of the tool is
+    one `uv tool upgrade` can read. The release workflow creates the GitHub
+    release before it publishes to PyPI, so in that window the index has no
+    such version, and the release's wheel is installed by its URL instead.
+    uv records that URL, which stays valid, where the temporary file this
+    used to download the wheel to did not. Nothing checks the wheel that
+    the index install does not, so it is the fallback, not the default.
     """
     run = run or subprocess.run
     if _is_homebrew_install():
@@ -299,17 +353,22 @@ def perform(release: Release, *, run=None) -> int:
             "  uv tool install --force --reinstall kraft-sdlc"
         )
 
-    import tempfile
-    from pathlib import Path
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        wheel_path = Path(tmpdir) / release.wheel_url.rsplit("/", 1)[-1]
-        wheel_path.write_bytes(_request(release.wheel_url, DOWNLOAD_TIMEOUT))
-        command = ["uv", "tool", "install", "--force", "--from", str(wheel_path), "kraft-sdlc"]
-        try:
-            return run(command).returncode
-        except FileNotFoundError:
-            raise SystemExit(
-                "kraft admin update: `uv` is not on PATH. Install it, or run this yourself:\n"
-                f"  {' '.join(command)}"
-            ) from None
+    wanted = requirement(release)
+    base = ["uv", "tool", "install", "--force", "--python", _python()]
+    command = [*base, wanted]
+    try:
+        code = run(command).returncode
+    except FileNotFoundError:
+        raise SystemExit(
+            "kraft admin update: `uv` is not on PATH. Install it, or run this yourself:\n"
+            f"  {' '.join(command)}"
+        ) from None
+    if code == 0:
+        return 0
+    print(
+        f"kraft admin update: could not install {wanted} from the package index; "
+        f"installing the release's wheel instead: {release.wheel_url}",
+        file=sys.stderr,
+    )
+    extras = wanted[len(PACKAGE) :].split("==", 1)[0]
+    return run([*base, f"{PACKAGE}{extras} @ {release.wheel_url}"]).returncode

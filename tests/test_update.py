@@ -158,43 +158,114 @@ def test_is_behind_of_nothing_is_false():
     assert update.is_behind(None) is False
 
 
-def test_perform_downloads_the_wheel_and_installs_the_local_copy(monkeypatch):
-    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"WHEEL BYTES")
-    seen = {}
+@pytest.fixture
+def uv_tool(tmp_path, monkeypatch):
+    """`uv_tool(receipt)`: this process as a uv tool install whose
+    `uv-receipt.toml` says `receipt` (PREFIX in it reads as the tool's own
+    directory), with no `fastembed` to import."""
+    import importlib.util
 
-    def run(command, **kwargs):
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a: None if name == "fastembed" else real_find_spec(name, *a),
+    )
+
+    def make(receipt: str) -> pathlib.Path:
+        prefix = tmp_path / "tools" / "kraft-sdlc"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "uv-receipt.toml").write_text(receipt.replace("PREFIX", str(prefix)))
+        monkeypatch.setattr(update.sys, "prefix", str(prefix))
+        monkeypatch.setattr(update.sys, "executable", str(prefix / "bin" / "python"))
+        return prefix
+
+    return make
+
+
+def _installs(results=(0,)):
+    """A `run` for `perform`: answers `uv tool list` with no tools, and each
+    install with the next of `results`. `.commands` holds the installs."""
+    answers = iter(results)
+
+    def run(command, **_kwargs):
         if command[:3] == ["uv", "tool", "list"]:
             return type("R", (), {"returncode": 0, "stdout": ""})()
-        seen["command"] = command
-        wheel_path = pathlib.Path(command[5])
-        seen["wheel_bytes"] = wheel_path.read_bytes()
-        return type("R", (), {"returncode": 0})()
+        run.commands.append(command)
+        return type("R", (), {"returncode": next(answers)})()
+
+    run.commands = []
+    return run
+
+
+def test_perform_installs_the_release_from_the_index_keeping_extras_and_python(uv_tool):
+    """`uv tool install --force --from <temp wheel> kraft-sdlc` dropped the
+    `vector` extra and the chosen Python, and left uv a record naming a
+    deleted file, so `uv tool upgrade` failed from then on."""
+    uv_tool(
+        '[tool]\nrequirements = [{ name = "kraft-sdlc", extras = ["vector"], '
+        'specifier = "==0.3.0" }]\npython = "3.12"\n'
+    )
+    run = _installs()
+
+    code = update.perform(update.Release(tag="v0.4.0rc2", wheel_url="https://x/w.whl"), run=run)
+
+    assert code == 0
+    assert run.commands == [
+        ["uv", "tool", "install", "--force", "--python", "3.12", "kraft-sdlc[vector]==0.4.0rc2"]
+    ]
+
+
+@pytest.mark.parametrize(
+    "python", ["", 'python = "PREFIX/bin/python"\n'], ids=["no-python", "the-tool-venvs-own"]
+)
+def test_perform_keeps_vector_when_uv_recorded_only_a_temporary_wheel(uv_tool, monkeypatch, python):
+    """What every earlier `kraft admin update` left: a receipt with no extras
+    and no Python. `vector` is read off its import, and the Python is the
+    interpreter running now, never the tool venv's own link to it, which
+    the reinstall replaces."""
+    import importlib.util
+
+    running = update.os.path.realpath(update.sys.executable)
+    prefix = uv_tool(
+        '[tool]\nrequirements = [{ name = "kraft-sdlc", path = "/tmp/x/k.whl" }]\n' + python
+    )
+    (prefix / "bin" / "python").symlink_to(running)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: object())
+    run = _installs()
+
+    update.perform(update.Release(tag="v0.4.0", wheel_url="https://x/w.whl"), run=run)
+
+    (command,) = run.commands
+    assert command[-1] == "kraft-sdlc[vector]==0.4.0"
+    assert command[command.index("--python") + 1] == running
+
+
+def test_perform_falls_back_to_the_wheel_url_while_the_index_lacks_the_release(uv_tool, capsys):
+    """The release workflow creates the GitHub release before it publishes to PyPI."""
+    uv_tool('[tool]\nrequirements = [{ name = "kraft-sdlc", extras = ["vector"] }]\n')
+    run = _installs(results=(1, 0))
 
     code = update.perform(update.Release(tag="v0.4.0", wheel_url="https://x/w.whl"), run=run)
+
     assert code == 0
-    command = seen["command"]
-    assert command[:5] == ["uv", "tool", "install", "--force", "--from"]
-    assert command[6] == "kraft-sdlc"
-    assert pathlib.Path(command[5]).name == "w.whl"
-    assert seen["wheel_bytes"] == b"WHEEL BYTES"
+    assert run.commands[1][-1] == "kraft-sdlc[vector] @ https://x/w.whl"
+    assert run.commands[1][:6] == run.commands[0][:6]
+    assert "https://x/w.whl" in capsys.readouterr().err
 
 
-def test_perform_installs_under_the_pyproject_package_name(monkeypatch):
+def test_perform_installs_under_the_pyproject_package_name(uv_tool):
     """A future PyPI rename that misses this call site should fail loudly, not silently."""
     import tomllib
 
-    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
-    seen = {}
-
-    def run(command, **_kwargs):
-        seen["command"] = command
-        return type("R", (), {"returncode": 0})()
+    uv_tool("[tool]\n")
+    run = _installs()
 
     update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
 
     repo_root = pathlib.Path(__file__).parent.parent
     package_name = tomllib.loads((repo_root / "pyproject.toml").read_text())["project"]["name"]
-    assert seen["command"][-1] == package_name
+    assert run.commands[0][-1] == f"{package_name}==0.4.0"
 
 
 def test_just_install_uses_the_pyproject_package_name():
@@ -205,19 +276,6 @@ def test_just_install_uses_the_pyproject_package_name():
     lines = (repo_root / "justfile").read_text().splitlines()
     install_line = next(line for line in lines if "uv tool install" in line)
     assert package_name in install_line.split()
-
-
-def test_perform_downloads_with_the_long_timeout_not_the_check_timeout(monkeypatch):
-    seen = {}
-
-    def request(_url, timeout):
-        seen["timeout"] = timeout
-        return b""
-
-    monkeypatch.setattr(update, "_request", request)
-    run = lambda _command, **_kwargs: type("R", (), {"returncode": 0})()  # noqa: E731
-    update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
-    assert seen["timeout"] == update.DOWNLOAD_TIMEOUT > update.TIMEOUT
 
 
 def test_perform_reports_a_failing_installer(monkeypatch):
