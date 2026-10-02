@@ -369,9 +369,14 @@ def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) 
     def put(model, path: str) -> None:
         layers = _layers(chain, library, path)
         dumped = model.model_dump(mode="json")
+        # A task kind's unread fields (`TaskBase.UNREAD`) are left out unless set.
+        unread = getattr(model, "UNREAD", frozenset())
+        own = model.policy if "policy" in type(model).model_fields else None
         fields = {}
         for name in type(model).model_fields:
             if name in _NESTED or name == "policy":
+                continue
+            if name in unread and name not in model.model_fields_set:
                 continue
             value = dumped[name]
             if name == "on_base_changed" and isinstance(value, dict):
@@ -379,7 +384,6 @@ def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) 
             source = _setter(layers, name) if name in model.model_fields_set else "default"
             fields[name] = {"value": value, "source": source}
         if "policy" in type(model).model_fields:
-            own = model.policy
             scope = scopes.get(path)
             effective = _scoped(scope, policy) if scope is not None else None
             caps = TemplatePolicyOverride if isinstance(model, ExecNode) else TaskPolicyOverride
@@ -387,6 +391,8 @@ def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) 
                 key = f"policy{PATH_SEPARATOR}{cap}"
                 if own is not None and cap in own.model_fields_set:
                     fields[key] = {"value": dumped["policy"][cap], "source": _setter(layers, key)}
+                    continue
+                if key in unread:
                     continue
                 value = to_jsonable_python(getattr(effective, cap, None))
                 source = "default" if value in (None, []) else "policy"

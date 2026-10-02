@@ -395,6 +395,24 @@ class TaskBase(BaseModel):
     skippable: StrictBool = True
     icon: Icon | None = None
 
+    #: What this kind accepts but never reads, as `sources` names it (a policy
+    #: cap as `policy.<cap>`). Steering is text for an agent's prompt, and the
+    #: harness allowlist, the spend caps, the tool lists and the grants bound
+    #: an agent launch: a subprocess, builtin or forge task runs none
+    #: (`executor.dispatch`). The chain editor's Config tab lists only the
+    #: rest, plus any of these a file sets anyway.
+    UNREAD: ClassVar[frozenset[str]] = frozenset(
+        {
+            "steering",
+            "policy.allowed_harnesses",
+            "policy.token_budget",
+            "policy.budget_usd",
+            "policy.allowed_tools",
+            "policy.deny_tools",
+            "policy.grants",
+        }
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _read_only_is_not_a_task_field(cls, data: object) -> object:
@@ -414,6 +432,8 @@ class BuiltinTask(TaskBase):
 
 
 class AgentTask(TaskBase):
+    UNREAD: ClassVar[frozenset[str]] = frozenset()
+
     kind: Literal[TaskKind.AGENT]
     harness: Identifier
     prompt: StrictStr = Field(min_length=1)
