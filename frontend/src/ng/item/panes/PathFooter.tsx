@@ -3,6 +3,7 @@ import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { sendOnModEnter } from "../../keys";
 
 /** A node's, step's or task's footer (Decisions §5 Pause on a path, §6 Skip):
  *  Pause, Skip and Retry in that order, by state. Skip and Retry confirm in
@@ -22,6 +23,7 @@ export function PathFooter({ item, path, what, state, reload, extra }: { item: I
     setSteer("");
     reload();
   };
+  const retry = () => run(act.retry(item.id, { path, ...(steer.trim() ? { steer: steer.trim() } : {}) }));
   if (!state && !extra) return null;
   if (confirm === "skip")
     return (
@@ -39,10 +41,10 @@ export function PathFooter({ item, path, what, state, reload, extra }: { item: I
     return (
       <div className="ip-confirm" role="group" aria-label={`Retry ${path}`}>
         <p className="ip-confirm-q">Retry <code>{path}</code></p>
-        {item.steerable !== false && <textarea aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} />}
+        {item.steerable !== false && <textarea aria-label="Steer for the retry" className="item-input" rows={2} placeholder="Steer the next attempt (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(retry, !busy)} />}
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
-          <Button variant="primary" disabled={busy} onClick={() => run(act.retry(item.id, { path, ...(steer.trim() ? { steer: steer.trim() } : {}) }))}>Retry</Button>
+          <Button variant="primary" disabled={busy} onClick={retry}>Retry</Button>
           <Button onClick={() => setConfirm(null)}>Cancel</Button>
         </div>
       </div>

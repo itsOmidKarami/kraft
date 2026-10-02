@@ -74,6 +74,18 @@ describe("FinishDialog", () => {
     expect(where).toBe("/work-items/w1?sel=implementation");
   });
 
+  it("submits on ⌘↵ from the overall note, and not with nothing to send", async () => {
+    const request = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { status: "active" } });
+    routed(<Finish threads={[]} />);
+    const note = screen.getByRole("textbox", { name: "Overall note" });
+    await act(async () => fireEvent.keyDown(note, { key: "Enter", metaKey: true }));
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.change(note, { target: { value: "Bound it." } });
+    await act(async () => fireEvent.keyDown(note, { key: "Enter", metaKey: true }));
+    expect(vi.mocked(http.request).mock.calls.at(-1)![0]).toBe("/work-items/w1/gates/final_review/review");
+    expect(body()).toEqual({ outcome: "request_changes", summary: "Bound it." });
+  });
+
   it("gateless: asks /fix-target, posts the item review, and goes to the node the server chose", async () => {
     vi.spyOn(http, "request").mockImplementation(async (p) =>
       String(p).endsWith("/fix-target")

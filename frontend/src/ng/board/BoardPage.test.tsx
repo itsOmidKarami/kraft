@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
+import { usePaneMemory } from "../item/Workspace";
 import { Shell } from "../shell/Shell";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
@@ -184,8 +185,10 @@ describe("BoardPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
+    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
     expect(where()).toBe("/work-items/g1?sel=plan_approval");
+    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
   });
 
   it("opens the composer instead of first-run when asked (FirstRun's last step)", async () => {
@@ -260,18 +263,112 @@ describe("BoardPage", () => {
     expect(screen.getByRole("checkbox", { name: "Select Item d1" })).not.toBeChecked();
   });
 
-  it("docks the peek for a selected row and remembers its width under kraft.ng.pane.board", async () => {
+  it("lays the peek over the list, which keeps its width and its rows' tick strips, and remembers the peek's width under kraft.ng.pane.board", async () => {
     put(item("r1", "running"));
     stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
     localStorage.removeItem("kraft.ng.pane.board");
-    board("/?sel=r1");
+    board();
+    await screen.findByRole("button", { name: /Item r1/ });
+    const list = document.querySelector<HTMLElement>(".board-list")!;
+    const before = list.getAttribute("style");
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
     const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
-    // Beside the open peek the rows drop their tick strip first.
-    expect(document.querySelectorAll(".board-row .ticks")).toHaveLength(0);
+    expect(list.getAttribute("style")).toBe(before);
+    expect(document.querySelectorAll(".board-row .ticks")).toHaveLength(1);
     const handle = within(pane).getByRole("separator", { name: "Resize pane" });
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
     // jsdom has no layout, so the width sits at the 300px floor; the key is what this pins.
     expect(localStorage.getItem("kraft.ng.pane.board")).toBe(handle.getAttribute("aria-valuenow"));
+  });
+
+  it("closes the peek on a press anywhere outside it, the header and sidebar included, and not on a press inside it or on a row", async () => {
+    put(item("r1", "running"), item("r2", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r2": [200, item("r2", "running")], "GET /work-items/r1/events": [200, []], "GET /work-items/r2/events": [200, []] });
+    board("/?sel=r1");
+    const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    fireEvent.pointerDown(within(pane).getByRole("tab", { name: "Activity" }));
+    expect(where()).toBe("/?sel=r1");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Item r2" }));
+    expect(where()).toBe("/?sel=r1");
+    await userEvent.click(screen.getByRole("button", { name: /Item r2/ }));
+    expect(where()).toBe("/?sel=r2");
+    fireEvent.pointerDown(document.querySelector(".ng-header")!);
+    expect(where()).toBe("/");
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
+    expect(where()).toBe("/?sel=r1");
+    fireEvent.pointerDown(screen.getByRole("complementary", { name: "Sidebar" }));
+    expect(where()).toBe("/");
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
+    fireEvent.pointerDown(document.querySelector(".board-list")!);
+    expect(where()).toBe("/");
+  });
+
+  it("keeps the peek on a right-click outside it, and on a press in a popover, dialog or toast, or on the list's scrollbar", async () => {
+    put(item("r1", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
+    board("/?sel=r1");
+    await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    fireEvent.pointerDown(document.querySelector(".ng-header")!, { button: 2 });
+    expect(where()).toBe("/?sel=r1");
+    // What a popover, dialog or toast portals into the body, as ui/ renders them.
+    for (const cls of ["popover", "dialog-backdrop", "toasts"]) {
+      const layer = document.body.appendChild(document.createElement("div"));
+      layer.className = cls;
+      const inside = layer.appendChild(document.createElement("button"));
+      fireEvent.pointerDown(inside);
+      layer.remove();
+      expect(where()).toBe("/?sel=r1");
+    }
+    const list = document.querySelector<HTMLElement>(".board-list")!;
+    Object.defineProperty(list, "clientWidth", { value: 600, configurable: true });
+    const onBar = new MouseEvent("pointerdown", { bubbles: true, button: 0 });
+    Object.defineProperty(onBar, "offsetX", { value: 605 });
+    act(() => void list.dispatchEvent(onBar));
+    expect(where()).toBe("/?sel=r1");
+    fireEvent.pointerDown(list);
+    expect(where()).toBe("/");
+  });
+
+  it("leaves Escape in a dialog opened from the peek to the dialog, the peek and what was typed staying", async () => {
+    const failed = item("f1", "failed", { status: "needs_human", stop: { kind: "failed", node: "verification", task: null, reason: "The forge refused.", resume_at: null } as WorkItem["stop"] });
+    put(failed);
+    stubFetch({ "GET /work-items/f1": [200, { ...failed, worker_sessions: [] }], "GET /work-items/f1/events": [200, []] });
+    board("/?sel=f1");
+    const pane = await screen.findByRole("complementary", { name: "kraft-f1 pane" });
+    await userEvent.click(await within(pane).findByRole("button", { name: "Escalate…" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Look at the lint step");
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toBe("/?sel=f1");
+    expect(screen.getByRole("complementary", { name: "kraft-f1 pane" })).toBeInTheDocument();
+  });
+
+  it("hands focus back to the row when Escape closes the peek with focus on the page", async () => {
+    put(item("r1", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
+    board("/?sel=r1");
+    await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    screen.getByRole("main").focus();
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toBe("/");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Item r1/ })).toHaveFocus());
+  });
+
+  it("closes the peek completely from its collapse button and from Escape inside it, leaving no rail, focus back on the row", async () => {
+    put(item("r1", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
+    board("/?sel=r1");
+    const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    await userEvent.click(within(pane).getByRole("button", { name: "Collapse pane" }));
+    expect(where()).toBe("/");
+    expect(screen.queryByRole("complementary", { name: /pane/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Item r1/ })).toHaveFocus());
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
+    const again = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    within(again).getByRole("tab", { name: "Overview" }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toBe("/");
+    expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
   });
 
   it("opens a budget stop's peek on Overview, whose Raise cap opens Config with the budget editor", async () => {

@@ -5,6 +5,7 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
+import { openPane } from "../item/Workspace";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Menu } from "../ui/Menu";
@@ -75,7 +76,6 @@ export function BoardPage() {
   const filterRef = useRef<HTMLInputElement>(null);
   const [peekTab, setPeekTab] = useState<PeekTab>("overview");
   const [budgetEdit, setBudgetEdit] = useState(false);
-  const [paneOpen, setPaneOpen] = useState(true);
   const [body, bodyW] = useWidth();
   const size = useResizable("board", bodyW);
   const itemsById = useStore((s) => s.workItems);
@@ -115,7 +115,6 @@ export function BoardPage() {
     setQuery({ sel: id, new: false });
     setPeekTab(tab);
     setBudgetEdit(budget);
-    setPaneOpen(true);
   }, [setQuery]);
   const select = useCallback((id: string) => (prefs?.open_in === "full" ? open(id) : peek(id)), [prefs?.open_in, open, peek]);
   const toggle = useCallback((id: string) => setChecked((c) => {
@@ -125,7 +124,10 @@ export function BoardPage() {
     return n;
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
-    if (a.kind === "gate") return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
+    if (a.kind === "gate") {
+      openPane();
+      return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
+    }
     if (a.kind === "peek") return peek(item.id, a.tab);
     const r = await act.resume(item.id);
     setRowErrors((e) => {
@@ -134,6 +136,17 @@ export function BoardPage() {
     });
   }, [open, peek]);
 
+  // Escape and the peek's own collapse button close it as an outside press
+  // does, leaving no rail. Focus the peek held, or left on the
+  // page itself, goes back to the item's row; focus in the filter stays there.
+  const closePeek = useCallback(() => {
+    const id = query.sel;
+    const at = document.activeElement;
+    const lost = !at || at === document.body || at.id === "ng-main" || !!at.closest(".pane");
+    setQuery({ sel: "" });
+    if (lost) requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id)?.querySelector<HTMLElement>(".board-row-main")?.focus());
+  }, [query.sel, setQuery]);
+
   // "/" focuses the filter; Escape clears the selection once menus have had it.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -141,10 +154,27 @@ export function BoardPage() {
       if (e.key === "/" && !isTextField(e.target)) {
         e.preventDefault();
         filterRef.current?.focus();
-      } else if (e.key === "Escape" && query.sel) setQuery({ sel: "" });
+      } else if (e.key === "Escape" && query.sel) closePeek();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [query.sel, closePeek]);
+
+  // A press anywhere outside the peek closes it: the list, the header, the
+  // sidebar. A row picks its own item, and a menu, popover, dialog or toast
+  // belongs to whatever opened it. A press on a scrollbar is not a click, and
+  // a right or middle press is not one either.
+  useEffect(() => {
+    if (!query.sel) return;
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const t = e.target;
+      if (!(t instanceof Element) || t.closest(".pane, .board-row, .popover, .dialog-backdrop, .toasts")) return;
+      if (t instanceof HTMLElement && t.clientWidth > 0 && (e.offsetX > t.clientWidth || e.offsetY > t.clientHeight)) return;
+      setQuery({ sel: "" });
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
   }, [query.sel, setQuery]);
 
   // ↑/↓ move between rows, across groups.
@@ -225,12 +255,8 @@ export function BoardPage() {
       </div>
 
       <div className="board-body" ref={body}>
-        <div
-          className="board-list"
-          style={{ right: query.sel && !size.overlay ? (paneOpen ? size.width : 40) : 0 }}
-          onKeyDown={onListKey}
-          onClick={(e) => { if (query.sel && !(e.target as Element).closest(".board-row, .board-group-head, button, a, input")) setQuery({ sel: "" }); }}
-        >
+        {/* The peek overlays the list: the list keeps its width with it open. */}
+        <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
             {load.state === "loading" && items.length === 0 ? <Skeleton /> : groups.map((g) => (
@@ -259,7 +285,6 @@ export function BoardPage() {
                     checked={checked.has(i.id)}
                     offline={offline}
                     error={rowErrors[i.id]}
-                    compact={!!query.sel && paneOpen && !size.overlay}
                     onSelect={select}
                     onOpen={open}
                     onCheck={toggle}
@@ -282,8 +307,8 @@ export function BoardPage() {
             budget={budgetEdit}
             onBudget={setBudgetEdit}
             offline={offline}
-            size={{ ...size, open: paneOpen, onOpen: setPaneOpen }}
-            onClose={() => setQuery({ sel: "" })}
+            size={size}
+            onClose={closePeek}
             onRepo={(repo) => setQuery({ repo })}
           />
         )}

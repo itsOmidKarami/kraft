@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { describe, expect, it, vi } from "vitest";
 import { Inspector } from "./Inspector";
 
@@ -24,6 +25,22 @@ describe("Inspector", () => {
     expect(screen.getByRole("button", { name: "default" })).toBeInTheDocument();
     expect(screen.getByText("kraft-cb59").tagName).toBe("SPAN");
     expect(screen.queryByRole("button", { name: "kraft-cb59" })).toBeNull();
+  });
+
+  it("leaves Escape in a dialog portaled out of the pane to that dialog", async () => {
+    const onCollapse = vi.fn();
+    render(
+      <Inspector id="p" open size={docked} title="verification" crumbs={[]} onCollapse={onCollapse} onExpand={() => {}}>
+        <button type="button">in the pane</button>
+        {createPortal(<textarea aria-label="Message" />, document.body)}
+      </Inspector>,
+    );
+    screen.getByRole("textbox", { name: "Message" }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(onCollapse).not.toHaveBeenCalled();
+    screen.getByRole("button", { name: "in the pane" }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(onCollapse).toHaveBeenCalledTimes(1);
   });
 
   it("collapses to the rail and expands from it", async () => {

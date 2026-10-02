@@ -6,6 +6,7 @@ import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import { messagesThrough } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { sendOnModEnter } from "../../keys";
 
 type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null; session: string | null };
 
@@ -65,7 +66,7 @@ export function Thread({ item, node, upTo, reload, onNode }: { item: ItemDetail;
         );
       })}
       {turns.length < all.length && <p className="item-muted">{all.length - turns.length} later {all.length - turns.length === 1 ? "message" : "messages"} after this turn.</p>}
-      <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} />
+      <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={sendOnModEnter(() => send(false), !busy && !!text.trim())} />
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
         <Button variant="primary" disabled={busy || !text.trim()} onClick={() => send(false)}>Send</Button>

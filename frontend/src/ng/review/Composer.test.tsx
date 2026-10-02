@@ -31,6 +31,19 @@ describe("Composer", () => {
     expect(onSubmit).toHaveBeenCalledWith({ body: "Cap it lower", label: "must_fix", suggest: "x" });
   });
 
+  it("adds to the review on ⌘↵ from the comment or the suggested change, once there is a comment", async () => {
+    const { onSubmit } = compose(NEW);
+    const box = screen.getByRole("textbox", { name: "Comment" });
+    await act(async () => fireEvent.keyDown(box, { key: "Enter", metaKey: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: "Cap it lower" } });
+    await act(async () => fireEvent.keyDown(box, { key: "Enter", ctrlKey: true }));
+    expect(onSubmit).toHaveBeenCalledWith({ body: "Cap it lower", label: null, suggest: null });
+    fireEvent.click(screen.getByRole("button", { name: "± Suggest change" }));
+    await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Suggested change" }), { key: "Enter", metaKey: true }));
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+
   it("offers no suggested change on the old side, nor on a whole file", () => {
     const { unmount } = compose({ path: "a.py", range: { side: "old", start: 4, end: 4 } });
     expect(screen.getByRole("group", { name: "Comment: Line 4" })).toBeInTheDocument();

@@ -23,4 +23,15 @@ describe("Thread", () => {
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/escalate", body: { message: "Accept it.", new_thread: true } }]);
   });
+
+  it("sends a reply in the thread on ⌘↵, a plain ↵ starting a new line", async () => {
+    const calls = stubFetch({ "GET /work-items/w1/events": [200, [msg(1, 1, 1, "Allow the change?", "verification")]] });
+    const reload = vi.fn();
+    render(<Thread item={detail()} node="verification" reload={reload} onNode={() => {}} />);
+    await userEvent.type(await screen.findByLabelText("Reply to the escalation"), "Accept it.{Enter}Then go on.");
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/escalate", body: { message: "Accept it.\nThen go on.", new_thread: false } }]);
+  });
 });
