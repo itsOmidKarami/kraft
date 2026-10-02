@@ -23,9 +23,12 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # The extension's dependencies ship in the .vsix on the Marketplace.
-  # @types/vscode stays at engines.vscode's floor (`vsce package` refuses a
-  # newer one), and @types/node at the major VS Code's runtime ships.
+  # The extension's dependencies ship in the .vsix on the Marketplace. A major
+  # bump (typescript, vsce, mocha, vitest) is a migration, as for /frontend, so
+  # Dependabot leaves those to a person. @types/vscode stays at
+  # engines.vscode's floor (`vsce package` refuses a newer one), and
+  # @types/node at the major VS Code's runtime ships. The "*" rule covers
+  # @types/node too; its own entry keeps that reason written down.
   - package-ecosystem: npm
     directory: /vscode
     schedule:
@@ -36,14 +39,23 @@ updates:
       - dependency-name: "@types/vscode"
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # The docs site is built and deployed by CI, never shipped in a release.
+  # Majors are left to a person, as for /frontend: a better-sqlite3 or Nuxt
+  # major needs the build checked by hand. docus is pinned exactly in
+  # package.json because files under app/ are copies of its own components;
+  # a docus bump has to copy them again from the new version.
   - package-ecosystem: npm
     directory: /docsite
     schedule:
       interval: weekly
     labels:
       - release::none
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Keeps the SHA-pinned actions in .github/workflows/*.yml current -- those
   # pins have no other update path. Always CI-only, never shipped.
