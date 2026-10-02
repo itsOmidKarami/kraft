@@ -34,15 +34,15 @@ repos:
 | `path` | *(required)* | Absolute path to the repo. |
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `id` | — | The repository id a workspace names this entry by (`[a-z][a-z0-9_-]*`, unique). Only a workspace's root and members need one; connecting a repo with submodules writes it for them. |
-| `enabled` | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. It governs auto-intake only: you can still file and run items on a disabled repo (from the CLI or an agent; the web composer lists only enabled repos), and running items keep going. `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it stops at `verify` until it has a `test_command` or `test_scopes`. An absent key counts as enabled. Kraft refuses an edit that would leave an enabled repo with neither a `test_command` nor `test_scopes`. |
+| `enabled` | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. It governs auto-intake only: you can still file and run items on a disabled repo (from the CLI or an agent; the web composer lists only enabled repos), and running items keep going. `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it stops at `verify` until it has a `test_command` or `test_scopes`. An absent key counts as enabled. Kraft refuses an edit that would leave an enabled repo with neither a `test_command` (`""` counts) nor `test_scopes`. |
 | `managed` | `true` | Keeps a human-connected repo out of Templates › Repos' "Detected · not connected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly, however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake. Unset, it is `default`. |
-| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the repo's remote. |
+| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the host of the repo's remote: `github.com`, `gitlab.com`, or a self-hosted host that names one (`gitlab.example.com`). |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. A legacy `gitlab_project` key still reads. |
 | `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` or agent `profile:` and the work item's override. Keyed by profile because one model name means nothing to another provider. The retired `default_model` key is dropped with a warning. |
-| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
+| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. It runs from the worktree root without a shell. `""` declares a repo with no tests (docs, infrastructure): verification passes and its session says so. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
-| `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `npm --prefix frontend test`, not `npm test`. Not synthesized from `test_command` — the two stay independently editable. |
+| `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `sh -c 'cd frontend && npm test'` (what connect proposes) or `npm --prefix frontend test`, not `npm test`. Not synthesized from `test_command` — the two stay independently editable. |
 | `intent_dir` | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Its check runs as one of the repo's `test_scopes`. |
 | `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing", which is the **No setup needed** checkbox in Templates › Repos; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
 | `env` | `{}` | Literal environment variables every worker for this repo gets. A worker's environment is an allowlist, not the daemon's: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`, `TZ`, `TMPDIR`, `SSH_AUTH_SOCK`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case), the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`), eight `KRAFT_*` variables that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`, `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`, `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`), the ones Kraft sets for the session itself ([Passed to workers](/reference/configuration/environment-variables#passed-to-workers)) and the agent's credential variable. Any other `KRAFT_*` variable the daemon has stays behind: set it in `env`, or name it in `env_passthrough`. These values are layered on top of it. A sandboxed worker gets none of that allowlist, only what [Sandboxed workers](#sandboxed-workers) lists, which covers the daemon's proxy and an extra CA. |
@@ -246,83 +246,39 @@ Kraft reads only the first page of 100 of each list it asks for: the pull reques
 
 ## Connecting a repo
 
-`kraft repo connect` probes a `setup_command` and a test command from the repo's
-markers (a justfile with a `test` recipe proposes `just test` ahead of any
-manifest) and prints the test command with the file it came from; check both
-before trusting them, and `kraft admin doctor` reports any connected repo still
-missing a `setup_command`.
+`kraft repo connect` proposes a `setup_command`, a `test_command` and, for a
+repo with more than one project in it, `test_scopes`. It reads them from the
+repo's own task runner (a justfile, Makefile, Taskfile or mise task,
+`script/test`), from its CI, and from its toolchain's lockfile, in that order.
+It prints each command with the file it came from and lists what else it found.
+See [Detectors](/reference/configuration/repos/detectors) for the ranking, and
+for how `detectors.yaml` teaches Kraft your own conventions.
 
-It proposes each command from the first of these files it finds. The setup
-command is read from the repo's root only. The test command is read from the
-root and from each directory one level down, and a match there becomes a test
-scope for that directory:
+Check the proposal before you trust it. `--verify` runs it once in a throwaway
+worktree; `--test-command`, `--setup-command` and `--no-tests` replace it; in a
+terminal, connect asks which candidate to use. `kraft admin doctor` reports any
+connected repo still missing a `setup_command`.
 
-| File | Proposed `setup_command` |
-|---|---|
-| `package-lock.json` | `npm ci` |
-| `yarn.lock` | `yarn install --frozen-lockfile` |
-| `pnpm-lock.yaml` | `pnpm install --frozen-lockfile` |
-| `uv.lock` | `uv sync` |
-| `Cargo.toml` | `cargo fetch` |
-| `go.mod` | `go mod download` |
+Some repos get no proposal, on purpose. A `pyproject.toml` declaring a project,
+with no lockfile beside it (`uv.lock`, `poetry.lock`, `pdm.lock`, a Pipfile),
+gets neither command. `uv sync` and `uv run` both write a `uv.lock` when there
+is none, and the worker would commit it on the item's branch. Kraft does not
+fall back to a `go.mod` or `package.json` beside it either. A lockfile-based
+install still stands (`npm ci` beside a `package-lock.json`), and so does a
+task runner's `test` recipe in that directory, which comes first.
 
-| File | Proposed `test_command` |
-|---|---|
-| A `justfile` with a `test` recipe | `just test` |
-| `uv.lock` | `uv run pytest -q` |
-| `package.json` | `npm test` |
-| `Cargo.toml` | `cargo test` |
-| `go.mod` | `go test ./...` |
+For tests, such a directory at the root means no test command for the whole
+repo. One below the root means the same, unless the root's command runs its
+tests anyway. Say `backend/` has one and `frontend/` has a `package.json`. A
+change to `backend/` matches no scope, and a change that matches none runs
+every scope, so a `frontend/**` scope alone would pass it on `npm test` with the
+Python tests never run. Kraft proposes nothing instead, and connect says which
+directory stopped it. The root covers the directory when its command is one you
+give with `--test-command`, its task runner's `test` recipe, or a root
+`uv.lock`'s (a uv workspace): the stopped directory then gets no scope of its
+own, and the root scope, running that command, covers it.
 
-A test scope for a directory one level down runs from the repository root,
-like every scope, so its command points the tool at that directory. For a
-`frontend/` or `backend/` directory, connect proposes:
-
-| File | Proposed scope `command` |
-|---|---|
-| A `justfile` with a `test` recipe | `just --justfile frontend/justfile test` |
-| `uv.lock` | `uv run --directory backend pytest -q` |
-| `package.json` | `npm --prefix frontend test` |
-| `Cargo.toml` | `cargo test --manifest-path backend/Cargo.toml` |
-| `go.mod` | `go -C backend test ./...` (Go 1.20 or later) |
-
-The setup command is not read below the root, so a monorepo with nothing at
-its root connects with none. Write one that installs each directory.
-`setup_command` runs in a shell, so `cd` works:
-
-```yaml
-setup_command: (cd backend && uv sync) && (cd frontend && npm ci)
-```
-
-A `pyproject.toml` with no `uv.lock` beside it gets neither command. `uv sync`
-and `uv run` both write a `uv.lock` when there is none, and the worker would
-commit it on the item's branch. Kraft does not fall back to a `package.json`,
-`Cargo.toml` or `go.mod` beside it either. An npm, yarn or pnpm lockfile still
-wins the setup guess, and a justfile `test` recipe the test guess, since each
-comes first. A `package.json` with no lockfile gets no `setup_command` for the
-same reason: `npm install` would write one.
-
-One level down, such a `pyproject.toml` gets no test scope of its own. When
-the root's test command can run Python tests, the root scope covers that
-directory. That means a justfile `test` recipe, a root `uv.lock`, or a
-`test_command` you gave:
-
-- In a uv workspace, the root has the `uv.lock` and the members have none.
-  `uv run` in a member uses the root's lockfile and writes no new one. The root
-  proposes `uv run pytest -q`, and it covers each member.
-- With a justfile `test` recipe at the root and a `backend/pyproject.toml`
-  with no lockfile, `just test` covers `backend/`.
-
-Otherwise Kraft proposes no test command for the whole repo. That covers a
-root with no test command, and one whose command comes from `package.json`,
-`Cargo.toml` or `go.mod`. A root `go test` would run for a change to that
-directory and never run its Python tests. Say `backend/` has such a
-`pyproject.toml` and `frontend/` has a `package.json`, with nothing at the
-root. A change to `backend/` would match no scope, and a change that matches
-none runs every scope. A `frontend/**` scope alone would then pass it on
-`npm test`, again with the Python tests never run.
-
-Connect says when it proposed no command. With no `test_command` it saves the
+Connect says when it found no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` (the **No setup needed**
 checkbox in Templates › Repos) if the repo needs no preparation. Set `test_command`, then `enabled: true`.
 
@@ -362,4 +318,5 @@ the same refusal a run gives. Each field's source (`repo`, `library` or
 
 ## In this section
 
+- [Detectors](/reference/configuration/repos/detectors): how `kraft repo connect` proposes setup and test commands, and `detectors.yaml`.
 - [Workspaces](/reference/configuration/repos/workspaces): a root repository with other repositories mounted as submodules.

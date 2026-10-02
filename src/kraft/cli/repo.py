@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
-from kraft import client, render
+from kraft import client, detect, render
 from kraft.cli import common
 
 _REPO_COLUMNS = [
@@ -63,37 +64,229 @@ def _cmd_repos(ns: argparse.Namespace) -> None:
         print(f"\n{hidden} more detected, not managed — kraft repo list --all")
 
 
-def _cmd_connect(ns: argparse.Namespace) -> None:
-    result = asyncio.run(client.ensure_repo(ns.path))
-    if ns.json:
-        common.emit(result, str, True)
-        return
-    verb = "already connected" if result.get("already_connected") else "connected"
-    print(f"{verb}: {result['path']}")
-    if result.get("already_connected"):
-        return
-    if result.get("test_command"):
-        markers = result.get("test_markers")
-        source = f" (from {', '.join(markers)})" if markers else ""
-        print(f"test command: {result['test_command']}{source}")
-    if result.get("setup_command"):
-        print(f"setup command: {result['setup_command']}")
-    elif result.get("setup_command") is None:
-        # Undeclared stops the repo's first work item; "" is a declared none.
-        print(
-            "setup command: none found (it looks for an npm, yarn, pnpm or uv lockfile, "
-            "Cargo.toml or go.mod). A pyproject.toml without uv.lock gets none. Set "
-            '`setup_command` in its repos.yaml entry, `""` if it needs no preparation, '
-            "or tick No setup needed under Templates › Repos"
+#: How many of the commands not proposed `connect` lists, per role.
+_ALSO_SHOWN = 4
+
+
+def _print(line: str) -> None:
+    """`print`, with every character a terminal would act on written out as
+    its escape: a command or a path read from a repository is shown as it
+    is, never obeyed (an ANSI sequence in a CI line could otherwise show
+    one command while another is saved)."""
+    print("".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in line))
+
+
+def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None:
+    """Ask which of the root's `role` candidates to use, when there is a
+    choice to make. Enter keeps the proposal; a number picks one; `-` says
+    there is none; `y` keeps the proposal and `n` asks again, since a yes or
+    no is an answer to the prompt, never a command; anything else is the
+    command itself."""
+    options: list[dict] = []
+    for c in candidates:
+        if (
+            c["dir"] == ""
+            and c["role"] == role
+            and c["command"] not in [o["command"] for o in options]
+        ):
+            options.append(c)
+    if proposed and proposed not in [o["command"] for o in options]:
+        # Several candidates at once (`npm ci && mix deps.get`, a test run
+        # per family): offered whole, so picking one does not drop the rest.
+        joined = " + ".join(
+            c["source"] for c in candidates if c["chosen"] and c["role"] == role and c["dir"] == ""
         )
+        options.insert(0, {"command": proposed, "source": joined or "the proposal"})
+    if len(options) < 2 and proposed is not None:
+        return proposed
+    _print(f"{role} command for the repo root:")
+    default = next((i for i, o in enumerate(options, 1) if o["command"] == proposed), None)
+    for i, o in enumerate(options, 1):
+        mark = "  [proposed]" if i == default else ""
+        _print(f"  {i}) {o['command']}    from {o['source']}{mark}")
+    keep = f"Enter keeps {default}, " if default else ""
+    none = "- for no tests" if role == "test" else "- for none"
+    while True:
+        answer = input(f"  {keep}a number, {none}, or type a command: ").strip()
+        if not answer:
+            return proposed
+        if answer == "-" and role == "test":
+            # Saved enabled, and every work item passes its test step: a
+            # decision, not a way to put the question off.
+            sure = input(
+                "  no tests: the repo is enabled and its work items pass verification "
+                "without running any. Save it that way? [y/N] "
+            )
+            if sure.strip().lower() in ("y", "yes"):
+                return ""
+            continue
+        if answer == "-":
+            return ""
+        if answer.lower() in ("y", "yes") and proposed is not None:
+            return proposed
+        if answer.lower() in ("y", "yes", "n", "no"):
+            _print("  pick one by its number, - for none, or type the command to use")
+            continue
+        if not answer.isdigit():
+            return answer
+        if 1 <= int(answer) <= len(options):
+            return options[int(answer) - 1]["command"]
+        # A number with no option is a typo, never a command called "7".
+        _print(f"  {answer} is not one of the {len(options)} listed")
+
+
+def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
+    """(test_command, setup_command) a person picked from the probe's
+    candidates for the repo root; None for a role the proposal stands for."""
+    resolved = asyncio.run(client.probe_repo(path, detect=False))["path"]
+    if resolved in {r["path"] for r in asyncio.run(client.repos())}:
+        return None, None  # connect says so; there is nothing to choose
+    probed = asyncio.run(client.probe_repo(path))
+    root = next((s for s in probed.get("scopes") or () if s["dir"] == ""), None)
+    cands = probed.get("candidates") or []
+    test = _pick("test", cands, root["test"] if root else None)
+    setup = _pick("setup", cands, root["setup"] if root else None)
+    test_command = None if root and test == root["test"] else test
+    setup_command = None
+    if not root or setup != root["setup"]:
+        scopes = [s for s in probed.get("scopes") or () if s["dir"]]
+        setup_command = detect.combine_setup([{"dir": "", "setup": setup, "test": test}, *scopes])
+    return test_command, setup_command
+
+
+def _runs(saved: str, c: dict) -> bool:
+    """Whether `saved`, a command as saved, already runs candidate `c`:
+    such a candidate is no alternative to list."""
+    if c["dir"]:
+        return f"cd {c['dir']} && {c['command']}" in saved
+    command = c["command"]
+    return saved == command or saved.startswith(f"{command} && ") or f" && {command}" in saved
+
+
+def _say_connected(result: dict) -> None:
+    _print(f"connected: {result['path']}")
+    ref = result.get("read_from")
+    if ref and ref.startswith("refs/remotes/origin/"):
+        # Work items start from origin, so a commit not pushed yet is not read.
+        _print(f"  read from {ref.removeprefix('refs/remotes/')}, where work items start")
+    elif ref:
+        _print(f"  read from {ref}")
+    elif "read_from" in result:
+        _print("  read from the working copy: the repo has no commit yet")
+    by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
+    chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
+
+    def source(d: str, role: str, command: str | None) -> str:
+        hit = next(
+            (c for c in chosen if (c["dir"], c["role"], c["command"]) == (d, role, command)), None
+        )
+        return f" (from {hit['source']})" if hit else ""
+
+    root = by_dir.get("", {})
+    if result.get("test_command") == "":
+        _print('test command: "" (no tests)')
+    elif root.get("test") and root["test"] == result.get("test_command"):
+        _print(f"test command: {root['test']}{source('', 'test', root['test'])}")
+    elif result.get("test_command"):
+        _print(f"test command: {result['test_command']}")
+    for d, s in by_dir.items():
+        if d and s.get("test"):
+            _print(f"  {d}/: {s['test']}{source(d, 'test', s['test'])}")
+    setup = result.get("setup_command")
+    if setup:
+        sources = [
+            f"{c['dir'] + '/: ' if c['dir'] else ''}{c['source']}"
+            for c in chosen
+            if c["role"] == "setup"
+        ]
+        _print(f"setup command: {setup}" + (f" (from {' + '.join(sources)})" if sources else ""))
+    elif setup == "":
+        _print('setup command: "" (nothing to prepare)')
+    else:
+        missing = [d if d != "." else "the root" for d in result.get("missing_setup") or ()]
+        found = [c["command"] for c in chosen if c["role"] == "setup"]
+        # Undeclared stops the repo's first work item; "" is a declared none.
+        why = (
+            f"{' && '.join(found)} found, but {', '.join(missing)} "
+            + ("have nothing to prepare them" if len(missing) > 1 else "has nothing to prepare it")
+            if found and missing
+            else f"none found for {', '.join(missing) or 'the repo'}"
+        )
+        _print(
+            f"setup command: {why}; pass --setup-command or set `setup_command` in its "
+            'repos.yaml entry, `""` if it needs no preparation, or tick No setup needed '
+            "under Templates › Repos"
+        )
+    saved = [result.get("test_command") or "", setup or ""]
+    saved += [s["command"] for s in result.get("test_scopes") or ()]
+    others = [
+        c
+        for tier_ci in (False, True)
+        for c in result.get("candidates") or ()
+        if not c.get("chosen")
+        and (c["tier"] == "ci") == tier_ci
+        and not any(_runs(command, c) for command in saved if command)
+    ]
+    for role in ("test", "setup"):
+        rest = [c for c in others if c["role"] == role]
+        if rest:
+            shown = ", ".join(
+                f"{c['dir'] + '/: ' if c['dir'] else ''}{c['command']} ({c['source']})"
+                for c in rest[:_ALSO_SHOWN]
+            )
+            more = (
+                f" and {len(rest) - _ALSO_SHOWN} more (--json)" if len(rest) > _ALSO_SHOWN else ""
+            )
+            _print(f"  also found for {role}: {shown}{more}")
+    for missing in result.get("missing_tools") or ():
+        where = "the root" if missing["dir"] == "." else f"{missing['dir']}/"
+        _print(
+            f"  not installed here: {missing['tool']}, which {where}'s commands run; "
+            "install it, or a work item fails on it (--verify shows how)"
+        )
+    if result.get("probe_failed"):
+        _print(f"  saved with the commands given; the probe failed: {result['probe_failed']}")
+    for stop in result.get("stopped") or ():
+        where = "the root" if stop["dir"] == "." else f"{stop['dir']}/"
+        _print(f"  no test command proposed: {where} is {stop['reason']}")
     if result.get("enabled") is False:
-        print(
-            "saved disabled: no test command proposed. It reads a justfile `test` recipe, "
-            "uv.lock, package.json, Cargo.toml or go.mod at the root and one level down, "
-            "and proposes none for a pyproject.toml without uv.lock at the root, or one "
-            "level down unless the root has a justfile `test` recipe or a uv.lock. Set "
+        _print(
+            "saved disabled: no test command found in its task runners, toolchain files or CI; "
+            "pass --test-command (--no-tests for a repo with none) or set "
             "`test_command` in its repos.yaml entry, then `enabled: true`"
         )
+
+
+def _cmd_connect(ns: argparse.Namespace) -> None:
+    test_command = "" if ns.no_tests else ns.test_command
+    setup_command = ns.setup_command
+    interactive = not (ns.json or ns.yes) and sys.stdin.isatty() and sys.stdout.isatty()
+    if interactive and test_command is None and setup_command is None:
+        test_command, setup_command = _choose_interactively(ns.path)
+    result = asyncio.run(
+        client.ensure_repo(ns.path, test_command=test_command, setup_command=setup_command)
+    )
+    if ns.json:
+        common.emit(result, str, True)
+    elif result.get("already_connected"):
+        print(f"already connected: {result['path']}")
+        if test_command is not None or setup_command is not None:
+            print(
+                "  its commands are unchanged: edit its repos.yaml entry "
+                "(Templates › Repos) to change them"
+            )
+    else:
+        _say_connected(result)
+    if not ns.verify:
+        return
+    # Imported here, not at the top: it reaches `kraft.builtins`, and every
+    # `kraft` invocation imports this module -- the permission hook a worker
+    # runs before each tool call included, which must not load the server.
+    from kraft.cli import verify as verify_mod
+
+    say = (lambda _line: None) if ns.json else print
+    if not verify_mod.verify(result, say=say, timeout_minutes=ns.timeout, on_host=ns.on_host):
+        raise SystemExit(1)
 
 
 def _cmd_disconnect(ns: argparse.Namespace) -> None:
@@ -129,6 +322,43 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
 
     connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")
     connect.add_argument("path", nargs="?", help="default: the current directory")
+    connect.add_argument(
+        "--test-command", metavar="CMD", help="the repo's test command, instead of the proposal"
+    )
+    connect.add_argument(
+        "--setup-command",
+        metavar="CMD",
+        help='the command that prepares a fresh checkout, instead of the proposal ("" for none)',
+    )
+    connect.add_argument(
+        "--no-tests",
+        action="store_true",
+        help='the repo has no tests to run (saves test_command: "")',
+    )
+    connect.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="take the proposal without asking, even in a terminal",
+    )
+    connect.add_argument(
+        "--verify",
+        action="store_true",
+        help="then run its setup and test commands once in a throwaway worktree; "
+        "exit 1 on a failure",
+    )
+    connect.add_argument(
+        "--timeout",
+        type=float,
+        default=30,
+        metavar="MIN",
+        help="--verify: minutes each command may take (default 30)",
+    )
+    connect.add_argument(
+        "--on-host",
+        action="store_true",
+        help="--verify: run a sandboxed repo's commands on this machine anyway",
+    )
     connect.set_defaults(func=_cmd_connect)
 
     disconnect = subs.add_parser(

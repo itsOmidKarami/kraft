@@ -104,12 +104,71 @@ describe("Repos page: connecting", () => {
     await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
     expect(http.request).toHaveBeenCalledWith("/repos/probe", expect.objectContaining({ method: "POST" }));
-    expect(await screen.findByLabelText("What was found")).toHaveTextContent("pytest");
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent("pytest");
+    expect(found).toHaveTextContent("setupuv sync");
     expect(d.postOps).not.toHaveBeenCalled();
     await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalled());
     const [, , ops] = vi.mocked(d.postOps).mock.calls[0];
     expect(ops[0]).toMatchObject({ op: "add_repo", path: "/src/new", fields: { name: "new", test_command: "pytest", forge: "gitlab", enabled: true } });
+  });
+
+  it("says where the probe's commands came from and that it found others", async () => {
+    const cand = { dir: "", tier: "toolchain", marker: "uv.lock", detector: "uv", family: "python", corroborated: false } as const;
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe"
+      ? ok(probe({ candidates: [
+        { ...cand, role: "test", command: "pytest", source: "uv.lock", chosen: true },
+        { ...cand, role: "setup", command: "uv sync", source: "uv.lock", chosen: true },
+        { ...cand, role: "test", command: "make test", source: "Makefile target `test`", tier: "runner", chosen: false },
+      ] }))
+      : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent("pytest — from uv.lock");
+    expect(found).toHaveTextContent("uv sync — from uv.lock");
+    expect(found).toHaveTextContent("make test (Makefile target `test`)");
+  });
+
+  it("shows each nested scope's command it will save", async () => {
+    const scopes = [{ paths: ["README.md", "src/**"], command: "pytest" }, { paths: ["web/**"], command: "sh -c 'cd web && npm test'" }];
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ test_scopes: scopes })) : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent("web/**sh -c 'cd web && npm test'");
+  });
+
+  it("says why it proposes no tests, what it cannot prepare, and which commit it read", async () => {
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe"
+      ? ok(probe({
+        test_command: null,
+        test_scopes: [],
+        read_from: "refs/remotes/origin/main",
+        setup_command: null,
+        missing_setup: ["web"],
+        candidates: [{ dir: "", role: "setup", command: "uv sync", tier: "toolchain", source: "uv.lock", marker: "uv.lock", detector: "uv", family: "python", corroborated: false, chosen: true }],
+        stopped: [{ dir: ".", reason: "a project (Gemfile) with no test command found", detector: "ruby" }],
+      }))
+      : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent("the root is a project (Gemfile) with no test command found");
+    expect(found).toHaveTextContent("uv sync found, but web/ has nothing to prepare it");
+    expect(found).toHaveTextContent("origin/main, where work items start");
+    // Stopped, not missing: the form says which.
+    expect(found).toHaveTextContent("Tests stopped: connected disabled");
   });
 
   it("says a repo with no tests connects disabled, as add_repo sends it, though the probe answers an empty scope list", async () => {

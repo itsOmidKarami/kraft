@@ -115,14 +115,52 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     )
 
 
-async def ensure_repo(path: str | None = None) -> dict:
+#: How long a connect may take: the probe's two minutes, its submodules' two
+#: more, and room to save. The server finishes a connect the client gave up
+#: on, so a shorter wait reports a failure for a repo that was connected.
+CONNECT_TIMEOUT_S = 300.0
+
+
+async def probe_repo(path: str | None = None, *, detect: bool = True) -> dict:
+    """What connecting `path` would propose, changing nothing: its setup and
+    test commands, and every candidate the evidence supports. `detect=False`:
+    only the resolved path and the facts that need no detector table."""
+    path = context.absolute_path(path or os.getcwd())
+    status, body = await transport._post(
+        "/repos/probe", {"path": path, "detect": detect}, timeout=CONNECT_TIMEOUT_S
+    )
+    if status >= 400:
+        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+    return body
+
+
+async def ensure_repo(
+    path: str | None = None,
+    *,
+    test_command: str | None = None,
+    setup_command: str | None = None,
+    enabled: bool | None = None,
+) -> dict:
     """Register a repo with Kraft if it is not already connected.
 
     Idempotent by construction: `POST /repos` 409s on a path it already holds,
-    and "already connected" is the goal state, not a failure.
+    and "already connected" is the goal state, not a failure. `test_command`
+    and `setup_command` replace what the probe would propose (`""` for none);
+    an already-connected repo keeps what it has -- edit repos.yaml to change it.
+    `enabled` None lets the server decide (enabled when it has a test).
     """
     path = context.absolute_path(path or os.getcwd())
-    status, body = await transport._post("/repos", {"path": path})
+    fields = {"test_command": test_command, "setup_command": setup_command, "enabled": enabled}
+    payload = {"path": path, **{k: v for k, v in fields.items() if v is not None}}
+    try:
+        status, body = await transport._post("/repos", payload, timeout=CONNECT_TIMEOUT_S)
+    except ValueError as exc:
+        if "in time" not in str(exc):
+            raise
+        raise ValueError(
+            f"connecting {path} is taking longer than {CONNECT_TIMEOUT_S}s; the server may "
+            "still save it, so check `kraft repo list` before connecting again"
+        ) from exc
     if status == 409:
         # The probe still runs, and still first: it is what resolves the given
         # path to the connected one, which is how `kraft repo list` marks the
@@ -131,7 +169,9 @@ async def ensure_repo(path: str | None = None) -> dict:
         # handing that back for an already-connected repo gives the caller
         # authoritative-looking `test_command`/`test_scopes`/`setup_command`
         # values the repo does not run (Kraft-djk08).
-        probe_status, probed = await transport._post("/repos/probe", {"path": path})
+        probe_status, probed = await transport._post(
+            "/repos/probe", {"path": path, "detect": False}
+        )
         if probe_status >= 400:
             raise ValueError(f"kraft {probe_status}: {probed.get('detail', probed)}")
         listing = await transport._get("/repos")
@@ -166,7 +206,7 @@ async def disconnect_repo(path: str | None = None) -> dict:
     """
     path = context.absolute_path(path or os.getcwd())
     if path not in {entry["path"] for entry in await reads.repos()}:
-        status, probed = await transport._post("/repos/probe", {"path": path})
+        status, probed = await transport._post("/repos/probe", {"path": path, "detect": False})
         if status < 400:
             path = probed["path"]
     await transport._delete("/repos", path=path)

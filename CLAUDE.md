@@ -80,7 +80,8 @@ kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked alwa
 kraft view docs [ID] / kraft view doc DOC_ID [--open [EDITOR]]
 kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in
-kraft repo connect [PATH] / kraft repo disconnect [PATH]
+kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [-y] [--verify [--timeout MIN] [--on-host]]
+kraft repo disconnect [PATH]
 kraft repo path [ID] (alias cd) / kraft repo open [ID]
 kraft admin start [--host H] [--port P]      # same as bare `kraft`
 kraft admin stop                             # SIGTERM to run/kraft.pid

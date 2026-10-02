@@ -1,0 +1,599 @@
+# How `kraft repo connect` proposes a repository's setup and test commands.
+#
+# Packaged with Kraft and read on every probe. To teach Kraft your own
+# conventions, write $KRAFT_HOME/templates/detectors.yaml in this same shape:
+# its new detectors are tried before these, one with the same `id` replaces
+# the packaged one where it stands, `disable: [id, ...]` drops packaged ones,
+# and its `ignore_dirs` add to the list below. Nothing here runs anything: a proposal is written into
+# repos.yaml for a person to check (`kraft repo connect --verify` runs it).
+#
+# A detector applies to a directory when any of its `files` globs matches
+# there, none of its `unless` globs does, and every `contains` regex matches
+# some file its glob names. Its `test` and `setup` are lists of commands,
+# tried in order; the first one whose `tasks` and `when` hold is proposed:
+#
+#   tasks   names to look for among the tasks the detector's `tasks` reader
+#           finds (just, make, taskfile, mise, npm, composer, deno, rake, pdm,
+#           poe, script); the first present is `{task}` in `run`.
+#   when    a list of conditions, any one of which must hold; each is
+#           `files` (any glob matches), `contains` (every glob: regex) and/or
+#           `toml` ({glob: {dotted.key: regex}}, on that key's value as JSON).
+#
+# A regex here runs over files anyone can commit: keep it to one line
+# (`[ \t]`, never `\s`, after a `^`), with no quantifier it can backtrack.
+#
+# Tiers decide precedence across detectors: a `runner` (a task runner the repo
+# wrote itself) beats a `toolchain` default, and both beat a line CI runs,
+# which is proposed only where neither has a test command. Within a tier the
+# table's order decides, so Python comes before JavaScript: a Python project
+# with a package.json for its tooling is tested with its Python suite.
+# `family` and `workspace` say when a directory covers the ones under it: a
+# workspace root of a family is tested as one, so its members are not scopes
+# of their own. A directory's setup is its test command's family's.
+
+max_depth: 2
+
+ignore_dirs:
+  - node_modules
+  - vendor
+  - third_party
+  - third-party
+  - external
+  - deps
+  - examples
+  - example
+  - docs
+  - doc
+  - benchmarks
+  - benchmark
+  - bench
+  - support
+  - samples
+  - fixtures
+  - testdata
+  - test
+  - tests
+  - __tests__
+  - spec
+  - dist
+  - build
+  - target
+  - out
+
+detectors:
+  # ── task runners the repo wrote itself ──────────────────────────────────────
+  - id: just
+    tier: runner
+    files: [justfile, Justfile, .justfile]
+    tasks: just
+    test:
+      - {tasks: [test, tests, check], run: "just {task}"}
+    setup:
+      - {tasks: [setup, bootstrap, deps], run: "just {task}"}
+
+  - id: make
+    tier: runner
+    files: [GNUmakefile, makefile, Makefile]
+    tasks: make
+    test:
+      - {tasks: [test, tests, check], run: "make {task}"}
+    setup:
+      - {tasks: [setup, bootstrap, deps], run: "make {task}"}
+
+  - id: taskfile
+    tier: runner
+    files: [Taskfile.yml, Taskfile.yaml, taskfile.yml, taskfile.yaml, Taskfile.dist.yml, Taskfile.dist.yaml]
+    tasks: taskfile
+    test:
+      - {tasks: [test, tests, check], run: "task {task}"}
+    setup:
+      - {tasks: [setup, bootstrap, deps], run: "task {task}"}
+
+  - id: mise
+    tier: runner
+    files: [mise.toml, .mise.toml, mise/config.toml, .config/mise.toml]
+    tasks: mise
+    test:
+      - {tasks: [test, tests, check], run: "mise run {task}"}
+    setup:
+      - {tasks: [setup, bootstrap, deps], run: "mise run {task}"}
+
+  - id: scripts-to-rule-them-all
+    tier: runner
+    files: [script/test, scripts/test, script/test.sh, scripts/test.sh, script/bootstrap, script/setup, scripts/setup, scripts/bootstrap]
+    tasks: script
+    test:
+      - {tasks: [script/test, scripts/test, script/test.sh, scripts/test.sh], run: "./{task}"}
+    setup:
+      - {tasks: [script/bootstrap, script/setup, scripts/bootstrap, scripts/setup], run: "./{task}"}
+
+  - id: bin-scripts
+    tier: runner
+    files: [bin/test, bin/setup]
+    # A Rails app's bin/setup ends by starting the server: the rails detector
+    # below runs it with --skip-server.
+    unless: [bin/rails]
+    tasks: script
+    test:
+      - {tasks: [bin/test], run: "./{task}"}
+    setup:
+      - {tasks: [bin/setup], run: "./{task}"}
+
+  # ── Python ──────────────────────────────────────────────────────────────────
+  - id: uv
+    tier: toolchain
+    lockfile: true
+    family: python
+    wrap: "uv run {command}"
+    files: [uv.lock]
+    tasks: poe
+    workspace:
+      - contains: {pyproject.toml: '(?m)^\[tool\.uv\.workspace\]'}
+    test:
+      - {tasks: [test], run: "uv run poe {task}"}
+      - when: &pytest
+          - files: [pytest.ini, conftest.py, tests/conftest.py, test/conftest.py]
+          - contains: {pyproject.toml: '(?<![\w-])pytest\b'}
+          - contains: {uv.lock: '(?m)^name = "pytest"$'}
+          - contains: {poetry.lock: '(?m)^name = "pytest"$'}
+          - contains: {pdm.lock: '(?m)^name = "pytest"$'}
+          - contains: {setup.cfg: '\[tool:pytest\]'}
+          - contains: {tox.ini: '\[pytest\]'}
+          - contains: {'requirements*.txt': '(?mi)^pytest\b'}
+        run: "uv run pytest"
+      - {when: [{files: [manage.py]}], run: "uv run python manage.py test"}
+    setup:
+      - {when: [{contains: {pyproject.toml: '(?m)^\[tool\.uv\.workspace\]'}}], run: "uv sync --all-packages"}
+      - {when: &pytest-in-extras [{toml: {pyproject.toml: {project.optional-dependencies: '(?<![\w-])pytest\b'}}}], run: "uv sync --all-extras"}
+      - run: "uv sync"
+
+  - id: poetry
+    tier: toolchain
+    lockfile: true
+    family: python
+    wrap: "poetry run {command}"
+    files: [poetry.lock]
+    tasks: poe
+    test:
+      - {tasks: [test], run: "poetry run poe {task}"}
+      - {when: *pytest, run: "poetry run pytest"}
+      - {when: [{files: [manage.py]}], run: "poetry run python manage.py test"}
+    setup:
+      - run: "poetry install"
+
+  - id: pdm
+    tier: toolchain
+    lockfile: true
+    family: python
+    wrap: "pdm run {command}"
+    files: [pdm.lock]
+    tasks: pdm
+    test:
+      - {tasks: [test], run: "pdm run {task}"}
+      - {when: *pytest, run: "pdm run pytest"}
+      - {when: [{files: [manage.py]}], run: "pdm run python manage.py test"}
+    setup:
+      - run: "pdm install"
+
+  - id: pipenv
+    tier: toolchain
+    family: python
+    wrap: "pipenv run {command}"
+    files: [Pipfile.lock, Pipfile]
+    test:
+      - {when: *pytest, run: "pipenv run pytest"}
+    setup:
+      - {when: [{files: [Pipfile.lock]}], run: "pipenv sync --dev"}
+      - run: "pipenv install --dev"
+
+  - id: hatch
+    tier: toolchain
+    family: python
+    files: [pyproject.toml]
+    contains: {pyproject.toml: '(?m)^\[tool\.hatch\.envs'}
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    wrap: "hatch run {command}"
+    test:
+      - run: "hatch test"
+    setup:
+      - run: "hatch env create"
+
+  - id: hatch-toml
+    tier: toolchain
+    family: python
+    # Hatch's settings in a file of their own (pypa/hatch).
+    files: [hatch.toml]
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    wrap: "hatch run {command}"
+    test:
+      - run: "hatch test"
+    setup:
+      - run: "hatch env create"
+
+  - id: pyproject
+    tier: toolchain
+    family: python
+    # A `[project]` table: a pyproject.toml holding only tool settings (ruff,
+    # black) is no evidence this is a Python project. With no lockfile there
+    # is no safe guess: `uv sync` and `uv run` both write a uv.lock into the
+    # worktree, which the worker then commits. So it stops: no test command
+    # for the repo unless one is given, and no fallback to a go.mod beside it.
+    files: [pyproject.toml]
+    contains: {pyproject.toml: '(?m)^\[(project|tool\.poetry|build-system)\]'}
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    stop: true
+    reason: "a pyproject.toml with no lockfile: uv sync and uv run would write a uv.lock into every work item's worktree. Commit one (uv lock) and connect again, or pass --test-command"
+
+  - id: tox
+    tier: toolchain
+    family: python
+    files: [tox.ini]
+    # Beside a lockless pyproject.toml or a setup.py too: tox makes its own
+    # environments and writes no lockfile into the worktree.
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    # `py`: the interpreter tox runs on. A bare `tox` runs every env in its
+    # envlist, linters and every Python version, each needing its own.
+    test:
+      - run: "tox -e py"
+    setup:
+      - run: "tox -e py --notest"
+
+  - id: requirements
+    tier: toolchain
+    family: python
+    files: [requirements.txt, requirements-dev.txt, requirements_dev.txt, dev-requirements.txt]
+    unless: [pyproject.toml, Pipfile, setup.py]
+    test:
+      - {when: *pytest, run: ".venv/bin/python -m pytest"}
+      - {when: [{files: [manage.py]}], run: ".venv/bin/python manage.py test"}
+    setup:
+      - {when: [{files: [requirements-dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"}
+      - {when: [{files: [requirements_dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements_dev.txt"}
+      - {when: [{files: [dev-requirements.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r dev-requirements.txt"}
+      - run: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+
+  # ── JavaScript and TypeScript ───────────────────────────────────────────────
+  - id: bun
+    tier: toolchain
+    lockfile: true
+    family: js
+    files: [bun.lock, bun.lockb]
+    tasks: npm
+    workspace: &js-workspace
+      - files: [pnpm-workspace.yaml, lerna.json, nx.json, turbo.json, rush.json]
+      - contains: {package.json: '"workspaces"\s*:'}
+    test:
+      - {tasks: [test], run: "bun run test"}
+      - {when: [{files: [nx.json]}], run: "bunx nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "bunx turbo run test"}
+    setup:
+      - run: "bun install --frozen-lockfile"
+
+  - id: pnpm
+    tier: toolchain
+    lockfile: true
+    family: js
+    files: [pnpm-lock.yaml]
+    tasks: npm
+    workspace: *js-workspace
+    test:
+      - {tasks: [test], run: "pnpm test"}
+      - {when: [{files: [nx.json]}], run: "pnpm exec nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "pnpm exec turbo run test"}
+      - {when: [{files: [pnpm-workspace.yaml]}], run: "pnpm -r --if-present test"}
+    setup:
+      - run: "pnpm install --frozen-lockfile"
+
+  - id: yarn-berry
+    tier: toolchain
+    lockfile: true
+    family: js
+    files: [yarn.lock]
+    contains: {.yarnrc.yml: '.'}
+    tasks: npm
+    workspace: *js-workspace
+    test:
+      - {tasks: [test], run: "yarn test"}
+      - {when: [{files: [nx.json]}], run: "yarn nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "yarn turbo run test"}
+      - {when: [{contains: {package.json: '"workspaces"\s*:'}}], run: "yarn workspaces foreach -A run test"}
+    setup:
+      - run: "yarn install --immutable"
+
+  - id: yarn
+    tier: toolchain
+    lockfile: true
+    family: js
+    files: [yarn.lock]
+    tasks: npm
+    workspace: *js-workspace
+    test:
+      - {tasks: [test], run: "yarn test"}
+      - {when: [{files: [nx.json]}], run: "yarn nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "yarn turbo run test"}
+      - {when: [{contains: {package.json: '"workspaces"\s*:'}}], run: "yarn workspaces run test"}
+    setup:
+      - run: "yarn install --frozen-lockfile"
+
+  - id: npm
+    tier: toolchain
+    lockfile: true
+    family: js
+    files: [package-lock.json, npm-shrinkwrap.json]
+    tasks: npm
+    workspace: *js-workspace
+    test:
+      - {tasks: [test], run: "npm test"}
+      - {when: [{files: [nx.json]}], run: "npx nx run-many -t test"}
+      - {when: [{files: [turbo.json]}], run: "npx turbo run test"}
+      - {when: [{contains: {package.json: '"workspaces"\s*:'}}], run: "npm test --workspaces --if-present"}
+    setup:
+      - run: "npm ci"
+
+  - id: npm-unlocked
+    tier: toolchain
+    family: js
+    files: [package.json]
+    unless: [bun.lock, bun.lockb, pnpm-lock.yaml, yarn.lock, package-lock.json, npm-shrinkwrap.json]
+    tasks: npm
+    workspace: *js-workspace
+    test:
+      - {tasks: [test], run: "npm test"}
+    setup:
+      # No lockfile to install from, and none written into the worktree either.
+      - run: "npm install --no-package-lock"
+
+  - id: deno
+    tier: toolchain
+    family: deno
+    files: [deno.json, deno.jsonc]
+    tasks: deno
+    workspace:
+      - contains: {'deno.json*': '"workspace"\s*:'}
+    test:
+      - {tasks: [test], run: "deno task test"}
+      - run: "deno test"
+    setup:
+      - run: "deno install"
+
+  # ── Other toolchains ────────────────────────────────────────────────────────
+  - id: cargo
+    tier: toolchain
+    family: rust
+    files: [Cargo.toml]
+    workspace:
+      - contains: {Cargo.toml: '(?m)^\[workspace\]'}
+    test:
+      - {when: [{contains: {Cargo.toml: '(?m)^\[workspace\]'}}], run: "cargo test --workspace"}
+      - run: "cargo test"
+    setup:
+      - run: "cargo fetch"
+
+  - id: go
+    tier: toolchain
+    family: go
+    files: [go.mod]
+    test:
+      - run: "go test ./..."
+    setup:
+      - run: "go mod download"
+
+  - id: gradle-wrapper
+    tier: toolchain
+    family: jvm
+    files: [gradlew]
+    workspace: &gradle-workspace
+      - contains: {'settings.gradle*': '\binclude\b'}
+    test:
+      - run: "./gradlew --no-daemon test"
+    setup:
+      # An Android build has no testClasses task; `help` still downloads
+      # Gradle and resolves the build's plugins. It needs the SDK: pass
+      # ANDROID_HOME through with the repo's env_passthrough.
+      - {when: &android [{contains: {'build.gradle*': 'com\.android'}}, {contains: {'*/build.gradle*': 'com\.android'}}], run: "./gradlew --no-daemon help"}
+      - run: "./gradlew --no-daemon testClasses"
+
+  - id: gradle
+    tier: toolchain
+    family: jvm
+    files: [build.gradle, build.gradle.kts, settings.gradle, settings.gradle.kts]
+    unless: [gradlew]
+    workspace: *gradle-workspace
+    test:
+      - run: "gradle --no-daemon test"
+    setup:
+      - {when: *android, run: "gradle --no-daemon help"}
+      - run: "gradle --no-daemon testClasses"
+
+  - id: maven-wrapper
+    tier: toolchain
+    family: jvm
+    files: [mvnw]
+    workspace: &maven-workspace
+      - contains: {pom.xml: '<modules>'}
+    test:
+      - run: "./mvnw -B test"
+    setup:
+      # A reactor's modules depend on each other's jars, which test-compile
+      # does not build (gson's test-jpms module): install them, untested.
+      - {when: *maven-workspace, run: "./mvnw -B -DskipTests install"}
+      - run: "./mvnw -B test-compile"
+
+  - id: maven
+    tier: toolchain
+    family: jvm
+    files: [pom.xml]
+    unless: [mvnw]
+    workspace: *maven-workspace
+    test:
+      - run: "mvn -B test"
+    setup:
+      - {when: *maven-workspace, run: "mvn -B -DskipTests install"}
+      - run: "mvn -B test-compile"
+
+  - id: sbt
+    tier: toolchain
+    family: jvm
+    files: [build.sbt]
+    test:
+      - run: "sbt test"
+    setup:
+      - run: "sbt update"
+
+  - id: dotnet
+    tier: toolchain
+    family: dotnet
+    files: ['*.sln', '*.slnx', '*.csproj', '*.fsproj', '*.vbproj']
+    workspace:
+      - files: ['*.sln', '*.slnx']
+    test:
+      - run: "dotnet test"
+    setup:
+      - run: "dotnet restore"
+
+  - id: rails
+    tier: toolchain
+    family: ruby
+    files: [bin/rails]
+    test:
+      - {when: [{files: [.rspec]}, {contains: {Gemfile.lock: '\brspec-core\b'}}], run: "bundle exec rspec"}
+      - run: "bin/rails test"
+    setup:
+      # Rails' bin/setup prepares the database too, so the database must be
+      # reachable; --skip-server stops it from starting the app at the end.
+      - {when: [{files: [bin/setup]}], run: "bin/setup --skip-server"}
+      - run: "bundle install"
+
+  - id: ruby
+    tier: toolchain
+    family: ruby
+    files: [Gemfile]
+    tasks: rake
+    test:
+      - {when: [{files: [.rspec]}, {contains: {Gemfile.lock: '\brspec-core\b'}}], run: "bundle exec rspec"}
+      - {tasks: [test, spec], run: "bundle exec rake {task}"}
+    setup:
+      - run: "bundle install"
+
+  - id: composer
+    tier: toolchain
+    family: php
+    files: [composer.json]
+    tasks: composer
+    test:
+      - {tasks: [test], run: "composer test"}
+      - {when: [{files: [phpunit.xml, phpunit.xml.dist]}], run: "vendor/bin/phpunit"}
+      - {when: [{files: [vendor/bin/pest]}, {contains: {composer.json: '"pestphp/pest"'}}], run: "vendor/bin/pest"}
+    setup:
+      # With no composer.lock, `composer install` resolves and writes one into
+      # every work item's worktree: no setup is proposed, for a person to
+      # decide (commit a lockfile, or declare one).
+      - {when: [{files: [composer.lock]}], run: "composer install"}
+
+  - id: mix
+    tier: toolchain
+    family: elixir
+    files: [mix.exs]
+    workspace:
+      - contains: {mix.exs: '\bapps_path:'}
+    test:
+      - run: "mix test"
+    setup:
+      - run: "mix deps.get"
+
+  - id: swift
+    tier: toolchain
+    family: swift
+    files: [Package.swift]
+    test:
+      - run: "swift test"
+    setup:
+      - run: "swift package resolve"
+
+  - id: flutter
+    tier: toolchain
+    family: dart
+    files: [pubspec.yaml]
+    contains: {pubspec.yaml: '(?m)^[ \t]+sdk:[ \t]*flutter'}
+    test:
+      - run: "flutter test"
+    setup:
+      - run: "flutter pub get"
+
+  - id: dart
+    tier: toolchain
+    family: dart
+    files: [pubspec.yaml]
+    test:
+      - run: "dart test"
+    setup:
+      - run: "dart pub get"
+
+  - id: zig
+    tier: toolchain
+    family: zig
+    files: [build.zig]
+    test:
+      - run: "zig build test"
+    setup:
+      - run: "zig build --fetch"
+
+  - id: stack
+    tier: toolchain
+    family: haskell
+    files: [stack.yaml]
+    test:
+      - run: "stack test"
+    setup:
+      - run: "stack build --only-dependencies --test"
+
+  - id: cabal
+    tier: toolchain
+    family: haskell
+    files: ['*.cabal', cabal.project]
+    unless: [stack.yaml]
+    test:
+      - run: "cabal test"
+    setup:
+      - run: "cabal update && cabal build --only-dependencies --enable-tests"
+
+  - id: julia
+    tier: toolchain
+    family: julia
+    files: [Project.toml]
+    contains: {Project.toml: '(?m)^uuid[ \t]*='}
+    test:
+      - run: "julia --project -e 'using Pkg; Pkg.test()'"
+    setup:
+      - run: "julia --project -e 'using Pkg; Pkg.instantiate()'"
+
+  - id: bazel
+    tier: toolchain
+    family: bazel
+    files: [MODULE.bazel, WORKSPACE, WORKSPACE.bazel]
+    test:
+      - run: "bazel test //..."
+    setup:
+      - run: "bazel fetch //..."
+
+  - id: cmake
+    tier: toolchain
+    family: c
+    files: [CMakeLists.txt]
+    # A project of its own, not a CMakeLists.txt a parent adds as a
+    # subdirectory (swift-argument-parser's Sources/, Tests/).
+    contains: {CMakeLists.txt: '(?mi)^[ \t]*+project[ \t]*+\('}
+    test:
+      # A test command is run without a shell, so the build and the run are one `sh -c`.
+      - run: "sh -c 'cmake --build build && ctest --test-dir build --output-on-failure'"
+    setup:
+      - run: "cmake -S . -B build"
+
+  - id: meson
+    tier: toolchain
+    family: c
+    files: [meson.build]
+    test:
+      - run: "meson test -C builddir"
+    setup:
+      - run: "meson setup builddir"

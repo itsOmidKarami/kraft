@@ -34,9 +34,10 @@ carry the drift this skill exists to narrate:
   do not, and overwriting destroys them.
 - `setup <repo>` (doctor) - a connected repo with no `setup_command` in
   `repos.yaml`. There is no default, so this repo's next work item stops when
-  its worktree is built. The row carries a suggestion probed from the repo's
-  own markers; check it against what the repo actually needs before writing it
-  in, the same way step 1 of `kraft:onboard` checks a probed `test_command`.
+  its worktree is built. The row carries the setup command `kraft repo connect`
+  would propose today (from the repo's task runner, CI and lockfiles); check it
+  against what the repo's own docs say before writing it in, the same way step
+  1 of `kraft:onboard` checks a proposed `test_command`.
 
 Translate each row's compact detail (`c1, c2 missing` style) into one line per
 chain or node, grouped under its own heading, so a human reads "these three

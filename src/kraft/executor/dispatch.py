@@ -505,6 +505,20 @@ async def _run_changed_test_scopes(
     to_run = _select_scopes(
         db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
     )
+    if not to_run and repo_entry is not None and repo_entry.test_command == "":
+        # Declared, not missing: `test_command: ""` is a repository that has
+        # no tests to run (a docs or infrastructure repo), as `setup_command:
+        # ""` is one with nothing to prepare. Nothing runs, and the session
+        # says so rather than passing silently.
+        _, log_path, result_path = await _builtins.start_session(db, run_dirs, **common)
+        return await _builtins.finish_session(
+            db,
+            log_path,
+            result_path,
+            session_id=common["session_id"],
+            status="done",
+            log=f'{work_item_row["repo"]} declares test_command: "" (no tests) — nothing to run\n',
+        )
     if not to_run:
         return await config_error_session(
             db,
@@ -512,7 +526,8 @@ async def _run_changed_test_scopes(
             common,
             f"{task.path} verifies changed test scopes, but {work_item_row['repo']} declares "
             "neither test_scopes nor test_command in repos.yaml — there is nothing to run "
-            "and Kraft will not guess a command\n",
+            'and Kraft will not guess a command (test_command: "" declares a repo with no '
+            "tests)\n",
         )
 
     async def _run(cmd: list[str]) -> str:

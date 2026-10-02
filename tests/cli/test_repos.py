@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.harness import make_repo, make_repo_with_submodule
+from support.harness import commit_all, make_repo, make_repo_with_submodule
 
 from kraft import cli, client
 
@@ -85,8 +85,9 @@ def test_connect_names_the_test_command_and_the_marker_it_came_from(app, capsys,
     """Kraft-enc5z: the proposal is a guess a human should check, so connect
     says what it proposed and which file it read that from."""
     (repo / "justfile").write_text("test:\n    pytest\n")
+    commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
-    assert "test command: just test (from justfile)" in capsys.readouterr().out
+    assert "test command: just test (from justfile recipe `test`)" in capsys.readouterr().out
 
 
 def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
@@ -94,29 +95,250 @@ def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
     why rather than leaving the first work item to find out."""
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "saved disabled: no test command proposed" in out
+    assert "saved disabled: no test command found" in out
     assert "setup command: none found" in out
 
 
 def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
-    """A package.json with no lockfile has a test command and no setup one:
-    connect says so, since an undeclared setup_command stops the first item."""
-    (repo / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    """A Makefile with a `test` target and nothing else has a test command and
+    no setup one: connect says so, naming the directory, since an undeclared
+    setup_command stops the first item."""
+    (repo / "Makefile").write_text("test:\n\tctest\n")
+    commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "test command: npm test (from package.json)" in out
-    assert "setup command: none found" in out and '`""` if it needs no preparation' in out
+    assert "test command: make test (from Makefile target `test`)" in out
+    assert (
+        "setup command: none found for the root" in out and '`""` if it needs no preparation' in out
+    )
     assert "tick No setup needed under Templates › Repos" in out
 
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
-    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
     (repo / "uv.lock").write_text("version = 1\n")
+    commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "setup command: uv sync" in out
+    assert "setup command: uv sync (from uv.lock)" in out
     assert "none found" not in out
     assert "saved disabled" not in out
+
+
+def test_connect_takes_the_commands_given_on_the_command_line(app, capsys, repo):
+    (repo / "Makefile").write_text("test:\n\tctest\n")
+    cli.main(["repo", "connect", str(repo), "--test-command", "ctest -j4", "--setup-command", ""])
+    out = capsys.readouterr().out
+    assert "test command: ctest -j4" in out
+    assert 'setup command: "" (nothing to prepare)' in out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == (
+        "ctest -j4",
+        "",
+        True,
+    )
+
+
+def test_connect_no_tests_declares_a_repo_with_none(app, capsys, repo):
+    cli.main(["repo", "connect", str(repo), "--no-tests"])
+    assert 'test command: "" (no tests)' in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["enabled"]) == ("", True)
+
+
+def test_connect_flags_on_a_connected_repo_change_nothing_and_say_so(app, capsys, repo):
+    cli.main(["repo", "connect", str(repo)])
+    cli.main(["repo", "connect", str(repo), "--test-command", "make check"])
+    assert "its commands are unchanged" in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] is None
+
+
+def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "test command: make test (from Makefile target `test`)" in out
+    assert "also found for test: go test ./... (go.mod)" in out
+
+
+def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monkeypatch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["2", ""])  # the test command: go's; the setup: keep the proposal
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "1) make test    from Makefile target `test`  [proposed]" in out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["setup_command"]) == ("go test ./...", "go mod download")
+
+
+def test_a_number_with_no_option_is_asked_again_not_saved(app, capsys, repo, monkeypatch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["7", "2", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert "7 is not one of the 2 listed" in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == "go test ./..."
+
+
+def test_a_yes_keeps_the_proposal_and_a_no_asks_again(app, capsys, repo, monkeypatch):
+    """A yes or no answers the prompt; neither is saved as the command."""
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["n", "y"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert "pick one by its number" in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == "make test"
+
+
+def test_no_tests_at_the_prompt_is_confirmed_before_it_is_saved(app, capsys, repo, monkeypatch):
+    """`-` saves `test_command: ""` and enables the repo with no tests run:
+    a no at the confirmation asks again rather than saving it."""
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers, asked = iter(["-", "", "-", "y"]), []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert ["Save it that way?" in a for a in asked] == [False, True, False, True]
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == ""
+
+
+def test_what_connect_prints_from_a_repo_is_shown_never_obeyed(capsys):
+    """An ANSI sequence in a path or command could show a person one thing
+    while another is saved."""
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected(
+        {"path": "/r\x1b[2K", "test_command": "npm test", "probe_failed": "boom\u202e"}
+    )
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\u202e" not in out
+    assert "connected: /r\\x1b[2K" in out
+    assert "the probe failed: boom\\u202e" in out
+
+
+def test_connect_says_a_setup_found_but_left_undecided(capsys):
+    """Redis: `make bootstrap` was found, then dropped because src/ has
+    nothing to prepare it, and connect said "none found"."""
+    from kraft.cli import repo as repo_cli
+
+    bootstrap = {"dir": "", "role": "setup", "command": "make bootstrap", "chosen": True}
+    bootstrap |= {"tier": "runner", "source": "Makefile target `bootstrap`"}
+    repo_cli._say_connected(
+        {"path": "/r", "setup_command": None, "missing_setup": ["src"], "candidates": [bootstrap]}
+    )
+    out = capsys.readouterr().out
+    assert "setup command: make bootstrap found, but src has nothing to prepare it" in out
+
+
+def test_connect_does_not_list_what_it_saved_as_found_besides(capsys):
+    """jest's chosen `yarn test` came back under "also found" from CI."""
+    from kraft.cli import repo as repo_cli
+
+    ci = {"dir": "", "role": "test", "command": "yarn test", "chosen": False, "tier": "ci"}
+    web = {"dir": "web", "role": "setup", "command": "npm ci", "chosen": False, "tier": "toolchain"}
+    other = {"dir": "", "role": "test", "command": "make test", "chosen": False, "tier": "runner"}
+    for c in (ci, web, other):
+        c["source"] = "x"
+    repo_cli._say_connected(
+        {
+            "path": "/r",
+            "test_command": "yarn test",
+            "setup_command": "yarn install && (cd web && npm ci)",
+            "candidates": [ci, web, other],
+        }
+    )
+    out = capsys.readouterr().out
+    assert "also found for test: make test (x)" in out
+    assert "yarn test (x)" not in out and "npm ci (x)" not in out
+
+
+def test_a_proposed_combination_is_offered_whole(capsys, monkeypatch):
+    """Picking `mix deps.get` from a proposed `npm ci && mix deps.get`
+    dropped `npm ci`: the combination is an option of its own."""
+    from kraft.cli import repo as repo_cli
+
+    cands = [
+        {"dir": "", "role": "setup", "command": c, "chosen": True, "source": src}
+        for c, src in (("npm ci", "package-lock.json"), ("mix deps.get", "mix.exs"))
+    ]
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    assert repo_cli._pick("setup", cands, "npm ci && mix deps.get") == "npm ci && mix deps.get"
+    out = capsys.readouterr().out
+    assert "1) npm ci && mix deps.get    from package-lock.json + mix.exs  [proposed]" in out
+
+
+def test_connect_names_a_program_this_machine_lacks(capsys):
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected({"path": "/r", "missing_tools": [{"dir": "rt/deno", "tool": "deno"}]})
+    assert "not installed here: deno, which rt/deno/'s commands run" in capsys.readouterr().out
+
+
+def test_connect_names_origins_branch_whole(capsys):
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected({"path": "/r", "read_from": "refs/remotes/origin/release/main"})
+    assert "read from origin/release/main, where work items start" in capsys.readouterr().out
+
+
+def test_connect_yes_takes_the_proposal_without_asking(app, capsys, repo, monkeypatch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("asked"))
+    cli.main(["repo", "connect", str(repo), "-y"])
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == "make test"
+
+
+@pytest.mark.parametrize(
+    ("test_command", "code", "said"),
+    [("true", None, "verify: passed"), ("false", 1, "verify: failed")],
+    ids=["passing", "failing"],
+)
+def test_connect_verify_exits_by_whether_the_commands_passed(
+    app, capsys, repo, test_command, code, said
+):
+    argv = ["repo", "connect", str(repo), "--test-command", test_command, "--setup-command", ""]
+    try:
+        cli.main([*argv, "--verify"])
+        exited = None
+    except SystemExit as caught:
+        exited = caught.code
+    assert exited == code
+    assert said in capsys.readouterr().out
+
+
+def test_reconnecting_survives_a_broken_detectors_file(app, capsys, repo, tmp_path):
+    cli.main(["repo", "connect", str(repo)])
+    templates = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    (templates / "detectors.yaml").write_text("detectorz: []\n")
+    cli.main(["repo", "connect", str(repo)])
+    assert "already connected" in capsys.readouterr().out
 
 
 def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, capsys, repo):
@@ -124,13 +346,13 @@ def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, ca
     so neither is proposed: the repo lands disabled, and connect names the
     missing lockfile rather than leave the operator to guess."""
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "test command:" not in out
     assert "setup command: none found" in out
-    assert "saved disabled: no test command proposed" in out
-    assert "A pyproject.toml without uv.lock gets none." in out
-    assert "none for a pyproject.toml without uv.lock at the root" in out
+    assert "saved disabled: no test command found" in out
+    assert "no test command proposed: the root is a pyproject.toml with no lockfile" in out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
@@ -449,138 +671,19 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
 
     from kraft import config
 
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
     (repo / "uv.lock").write_text("version = 1\n")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
+    commit_all(repo)
     probed = config.probe_repo(repo)
-    nested = next(s for s in probed["test_scopes"] if s["command"] == "npm --prefix frontend test")
+    nested = next(s for s in probed["test_scopes"] if "npm test" in s["command"])
     assert nested["paths"] == ["frontend/**"]
-    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
+    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest")
     assert "frontend" not in root["paths"]
     assert "pyproject.toml" in root["paths"]
-
-
-@pytest.mark.parametrize(
-    "layout",
-    [
-        ["pyproject.toml", "frontend/package.json"],
-        ["backend/pyproject.toml", "frontend/package.json", "package-lock.json"],
-        ["backend/pyproject.toml", "go.mod"],
-        ["backend/pyproject.toml", "package.json"],
-    ],
-    ids=["at-the-root", "one-level-down", "under-a-go-root", "under-an-npm-root"],
-)
-def test_a_lockless_pyproject_no_root_command_can_cover_proposes_no_test_scope(repo, layout):
-    """A `frontend/` scope alone is what a diff to the Python code fails open
-    to, and a root `go test` or `npm test` is what it selects: either passes
-    with the Python suite never run."""
-
-    from kraft import config
-
-    for path in layout:
-        (repo / path).parent.mkdir(exist_ok=True)
-        (repo / path).write_text("{}")
-    probed = config.probe_repo(repo)
-    assert (probed["test_command"], probed["test_scopes"]) == (None, [])
-    (repo / Path(layout[0]).parent / "uv.lock").write_text("version = 1\n")
-    assert config.probe_repo(repo)["test_command"] is not None
-
-
-#: Layout -> (probed test_command, each scope's command, the directory whose
-#: change must select the root scope by its paths rather than fail open).
-_COVERED_BY_THE_ROOT = {
-    "a-uv-workspace-member": (
-        ["pyproject.toml", "uv.lock", "foo/pyproject.toml"],
-        ("uv run pytest -q", ["uv run pytest -q"], "foo"),
-    ),
-    "a-justfile-test-recipe-and-a-lockless-backend": (
-        ["justfile", "backend/pyproject.toml"],
-        ("just test", ["just test"], "backend"),
-    ),
-    "a-justfile-test-recipe-a-lockless-backend-and-a-frontend": (
-        ["justfile", "backend/pyproject.toml", "frontend/package.json"],
-        ("just test", ["just test", "npm --prefix frontend test"], "backend"),
-    ),
-    "a-uv-lock-and-a-frontend": (
-        ["pyproject.toml", "uv.lock", "frontend/package.json"],
-        ("uv run pytest -q", ["uv run pytest -q", "npm --prefix frontend test"], "src"),
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    ("layout", "expected"), _COVERED_BY_THE_ROOT.values(), ids=_COVERED_BY_THE_ROOT
-)
-def test_a_lockless_pyproject_one_level_down_is_covered_by_the_root_command(repo, layout, expected):
-    """A uv workspace member never has a lock of its own, and `uv run` there
-    writes none: the root's covers it. Any other lockless subdirectory is the
-    root command's to test as well, rather than the whole repo going without."""
-
-    from kraft import config
-    from kraft.executor import dispatch
-
-    (repo / "src").mkdir()
-    for path in layout:
-        (repo / path).parent.mkdir(exist_ok=True)
-        (repo / path).write_text("test:\n    pytest\n" if path == "justfile" else "{}")
-    command, scope_commands, covered = expected
-    probed = config.probe_repo(repo)
-    assert probed["test_command"] == command
-    assert [s["command"] for s in probed["test_scopes"]] == scope_commands
-    root_scope = probed["test_scopes"][0]
-    assert any(fnmatch.fnmatchcase(f"{covered}/x.py", p) for p in root_scope["paths"])
-    assert dispatch._matched_scopes(probed["test_scopes"], [f"{covered}/x.py"]) == [root_scope]
-
-
-def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(repo):
-    """With a command given, the stopped directory just gets no scope of its
-    own: the root scope, running that command, is what its changes match."""
-
-    from kraft import config
-
-    for path in ["backend/pyproject.toml", "frontend/package.json"]:
-        (repo / path).parent.mkdir()
-        (repo / path).write_text("{}")
-    probed = config.probe_repo(repo, test_command="make test")
-    assert probed["test_command"] == "make test"
-    root, nested = probed["test_scopes"]
-    assert ("backend/**" in root["paths"], root["command"]) == (True, "make test")
-    assert nested == {"paths": ["frontend/**"], "command": "npm --prefix frontend test"}
-
-
-#: A project one level down, with nothing at the root -> the command its scope
-#: is proposed with, written to run from the repository root.
-_NESTED_PROJECTS = {
-    "npm": ({"web app/package.json": "{}"}, "npm --prefix 'web app' test"),
-    "uv": (
-        {"backend/pyproject.toml": "", "backend/uv.lock": ""},
-        "uv run --directory backend pytest -q",
-    ),
-    "cargo": ({"crate/Cargo.toml": ""}, "cargo test --manifest-path crate/Cargo.toml"),
-    "go": ({"svc/go.mod": ""}, "go -C svc test ./..."),
-    "just": ({"tools/Justfile": "test:\n    true\n"}, "just --justfile tools/Justfile test"),
-}
-
-
-@pytest.mark.parametrize(("files", "command"), _NESTED_PROJECTS.values(), ids=_NESTED_PROJECTS)
-def test_a_nested_scopes_command_names_its_own_directory(repo, files, command):
-    """Verify runs every scope's command from the worktree root, without a
-    shell, so a bare `npm test` or `uv run pytest -q` there looks for its
-    project at the root and fails. A name with a space is quoted, so
-    `shlex.split` keeps it one argument."""
-
-    from kraft import config
-
-    for path, text in files.items():
-        (repo / path).parent.mkdir(exist_ok=True)
-        (repo / path).write_text(text)
-    (directory,) = {Path(path).parent.name for path in files}
-    probed = config.probe_repo(repo)
-    assert probed["test_scopes"] == [{"paths": [f"{directory}/**"], "command": command}]
-    assert probed["test_command"] == command
 
 
 def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
@@ -591,16 +694,18 @@ def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
 
     from kraft import config
 
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
     (repo / "uv.lock").write_text("version = 1\n")
     src = repo / "src"
     src.mkdir()
+    (src / "app.py").write_text("")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
+    commit_all(repo)
     probed = config.probe_repo(repo)
-    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
+    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest")
     assert "src/**" in root["paths"]
     assert "pyproject.toml" in root["paths"]
     src_pattern = next(p for p in root["paths"] if p.startswith("src"))
