@@ -18,13 +18,15 @@ _EFFORT_LEVELS = set(get_args(Effort))
 
 
 #: What a model id looks like (`claude-sonnet-4-5`, `gpt-5.6-sol`,
-#: `us.anthropic.claude-opus:0`, `openrouter/x`, `opus[1m]`): a harness's own
+#: `us.anthropic.claude-opus:0`, `openrouter/x`, `opus[1m]`, OpenRouter's
+#: `~vendor/model-latest` aliases): a harness's own
 #: list may be empty, which accepts any value, so this is the floor every
 #: override is held to. It keeps text that is no model -- a space, a `;` --
 #: from reaching an agent's command line.
-_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,127}")
+_MODEL_ID = re.compile(r"~?[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,127}")
 MODEL_ID_RULE = (
-    "letters, digits and . _ : / @ + [ ] -, starting with a letter or digit, at most 128 characters"
+    "letters, digits and . _ : / @ + [ ] -, starting with a letter or digit (or a ~ "
+    "before one, as in ~vendor/model-latest), at most 128 characters"
 )
 
 

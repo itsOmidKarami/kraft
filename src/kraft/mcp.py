@@ -329,7 +329,8 @@ def build() -> MCPServer:
         """Set or clear a Kraft work item's own model/effort override, applied
         to every agent node in its chain without changing the chain itself.
         `clear` resets every field back to the template's own binding; naming
-        a field sets it and keeps the fields it does not name."""
+        a field replaces the whole stored override rather than merging with
+        it."""
         return await client.set_agent_overrides(
             model, escalate_model, effort, clear=clear, work_item_id=work_item_id
         )

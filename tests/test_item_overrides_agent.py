@@ -87,3 +87,20 @@ def test_a_null_node_field_drops_only_that_field(client, repo):
     assert client.get(f"/api/work-items/{wid}").json()["node_overrides"] == {
         "plan": {"effort": "high"}
     }
+
+
+def test_the_patch_echoes_the_overrides_as_stored_after_the_merge(client, repo):
+    """A field the request left out is still stored, so the echo says so."""
+    wid = _paused_item(client, repo)
+    client.patch(
+        f"/api/work-items/{wid}",
+        json={"agent_overrides": {"model": "opus"}, "node_overrides": {"plan": {"model": "opus"}}},
+    )
+    r = client.patch(
+        f"/api/work-items/{wid}",
+        json={"agent_overrides": {"effort": "low"}, "node_overrides": {"plan": {"effort": "high"}}},
+    )
+    assert r.json()["agent_overrides"] == {"model": "opus", "effort": "low"}
+    assert r.json()["node_overrides"] == {"plan": {"model": "opus", "effort": "high"}}
+    cleared = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
+    assert cleared.json()["agent_overrides"] is None

@@ -968,14 +968,19 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         if body.chain_template is not None:
             store.set_chain_template(c, wid, body.chain_template, new_materialized)
         if body.agent_overrides is not None:
-            store.merge_agent_overrides(c, wid, body.agent_overrides)
+            written["agent_overrides"] = (
+                store.merge_agent_overrides(c, wid, body.agent_overrides) or None
+            )
         if body.node_overrides is not None:
-            store.set_node_overrides(c, wid, body.node_overrides)
+            written["node_overrides"] = store.set_node_overrides(c, wid, body.node_overrides)
         if "budget_usd" in fields_set:
             store.set_budget(c, wid, body.budget_usd)
         if body.policy is not None:
             store.set_policy_override(c, wid, item_policy)
 
+    # The overrides as stored after the merge, which the echo reports in
+    # place of what was sent: a field the request left out is still there.
+    written: dict = {}
     filed = stored = entry.attachments_of(row)
     won = False
     try:
@@ -1003,5 +1008,6 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             entry.discard_attachments(st.run_dirs, wid, drop, keep)
     # `model_dump(exclude_none=True)` would drop an explicit `budget_usd:
     # null` along with every untouched field, so build the echo from
-    # `fields_set` (what the caller actually sent) instead.
-    return {"id": wid, **{f: getattr(body, f) for f in fields_set}}
+    # `fields_set` (what the caller actually sent) instead. The overrides
+    # merge, so for them the echo is what is now stored, as the detail shows it.
+    return {"id": wid, **{f: getattr(body, f) for f in fields_set}, **written}

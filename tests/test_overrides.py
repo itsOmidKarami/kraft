@@ -83,6 +83,7 @@ def test_a_null_unknown_field_is_still_named():
         "us.anthropic.claude-opus:0",
         "openrouter/x",
         "opus[1m]",
+        "~anthropic/claude-latest",
     ],
 )
 def test_a_model_id_is_accepted(model):
@@ -90,7 +91,9 @@ def test_a_model_id_is_accepted(model):
     assert overrides.validate_node_override_fields({"escalate_model": model}) == []
 
 
-@pytest.mark.parametrize("model", ["not a model; rm -rf", "", "-opus", "x" * 129, "opus\n"])
+@pytest.mark.parametrize(
+    "model", ["not a model; rm -rf", "", "-opus", "x" * 129, "opus\n", "~", "~~opus", "op~us"]
+)
 def test_text_that_is_no_model_id_is_refused_naming_the_rule(model):
     errs = overrides.validate_agent_overrides({"model": model})
     assert len(errs) == 1 and "is not a model id" in errs[0] and "at most 128 characters" in errs[0]

@@ -148,3 +148,18 @@ def test_a_relative_path_reaches_the_server_absolute(call, tmp_path, monkeypatch
     asyncio.run(call())
     assert sent
     assert set(sent) == {str(Path.cwd() / "sub")}
+
+
+def test_set_agent_overrides_replaces_the_whole_override_as_in_1_4(wired, tmp_path):
+    """The PATCH route merges field by field for the item page; the CLI's
+    `set-overrides` and the MCP tool still replace, by sending `null` for every
+    field they don't name. The echo is what is stored."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("dial it", repo=str(repo))
+        await client.set_agent_overrides(effort="high", work_item_id=created["id"])
+        return await client.set_agent_overrides(model="gpt-big", work_item_id=created["id"])
+
+    # The PATCH echoes the override as stored (`update_work_item`).
+    assert run_with_app(wired, scenario)["agent_overrides"] == {"model": "gpt-big"}
