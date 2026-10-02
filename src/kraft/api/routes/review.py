@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from kraft import config as config_mod
 from kraft import executor, review_reply, store
@@ -25,6 +25,10 @@ class Suggestion(BaseModel):
     replacement: str
 
 
+#: A quote is the lines a comment's range covered; the review page sends at most 200.
+QUOTE_MAX_CHARS = 64_000
+
+
 class ThreadIn(BaseModel):
     body: str
     node_id: str | None = None
@@ -32,6 +36,11 @@ class ThreadIn(BaseModel):
     side: Literal["old", "new"] | None = None
     start_line: int | None = None
     end_line: int | None = None
+    # `start_line`'s side when it differs from `side` (`end_line`'s): a range
+    # across sides, such as a removed line through its replacement. Omitted, `side`.
+    start_side: Literal["old", "new"] | None = None
+    # The range's lines as the diff showed them, each led by its diff mark.
+    quote: str | None = Field(default=None, max_length=QUOTE_MAX_CHARS)
     label: Literal["must_fix", "question", "nit"] | None = None
     suggestion: Suggestion | None = None
     anchor_sha: str | None = None
@@ -41,24 +50,51 @@ class ThreadIn(BaseModel):
         lines = (self.side, self.start_line, self.end_line)
         if any(v is not None for v in lines) and not all(v is not None for v in lines):
             raise ValueError("side, start_line and end_line are all set or all omitted")
+        if self.start_line is None and (self.start_side is not None or self.quote is not None):
+            raise ValueError("start_side and quote need a line range")
         if self.start_line is not None:
             if self.file_path is None:
                 raise ValueError("a line range needs a file_path")
-            if not 1 <= self.start_line <= self.end_line:
+            # Across sides the two numbers count different files, so only each is checked.
+            if _across(self.side, self.start_side):
+                if self.start_line < 1 or self.end_line < 1:
+                    raise ValueError("start_line and end_line must be >= 1")
+            elif not 1 <= self.start_line <= self.end_line:
                 raise ValueError("start_line must be >= 1 and <= end_line")
-        _check_suggestion(self.suggestion, self.start_line, self.end_line)
+        _check_suggestion(
+            self.suggestion, self.start_line, self.end_line, _across(self.side, self.start_side)
+        )
         if not self.body.strip():
             raise ValueError("body is empty")
         return self
 
 
-def _check_suggestion(s: Suggestion | None, start: int | None, end: int | None) -> None:
+def _across(side: str | None, start_side: str | None) -> bool:
+    return start_side is not None and start_side != side
+
+
+def _check_suggestion(
+    s: Suggestion | None, start: int | None, end: int | None, across: bool = False
+) -> None:
     if s is None:
         return
     if start is None:
         raise ValueError("a suggestion needs a thread with a line range")
+    # A suggestion replaces new-side lines; a range across sides is not one run of them.
+    if across:
+        raise ValueError("a suggestion needs a range on one side")
     if not (start <= s.start_line <= s.end_line <= end):
         raise ValueError(f"the suggestion's lines must sit inside {start}-{end}")
+
+
+def _check_row_suggestion(s: Suggestion | None, row) -> None:
+    """`_check_suggestion` against a stored thread's range, as a 422."""
+    try:
+        _check_suggestion(
+            s, row["start_line"], row["end_line"], _across(row["side"], row["start_side"])
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 class ThreadPatch(BaseModel):
@@ -118,6 +154,8 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
             side=body.side,
             start_line=body.start_line,
             end_line=body.end_line,
+            start_side=body.start_side,
+            quote=body.quote,
             label=body.label,
             suggestion=body.suggestion.model_dump() if body.suggestion else None,
         )
@@ -139,10 +177,7 @@ async def patch_thread(tid: str, body: ThreadPatch, request: Request):
     row = _draft_thread_or_409(st, tid)
     fields = body.model_fields_set
     if "suggestion" in fields:
-        try:
-            _check_suggestion(body.suggestion, row["start_line"], row["end_line"])
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        _check_row_suggestion(body.suggestion, row)
     kw = {}
     if "label" in fields:
         kw["label"] = body.label
@@ -166,10 +201,7 @@ async def add_comment(tid: str, body: CommentIn, request: Request):
     st = request.app.state
     row = _thread_or_404(st, tid)
     deps._live_work_item_row(st, row["work_item_id"])
-    try:
-        _check_suggestion(body.suggestion, row["start_line"], row["end_line"])
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    _check_row_suggestion(body.suggestion, row)
     cid = await st.db.write(
         lambda c: store.add_draft_reply(
             c,
@@ -196,10 +228,7 @@ async def patch_comment(cid: str, body: CommentIn, request: Request):
     st = request.app.state
     row = _draft_comment_or_409(st, cid)
     t = _thread_or_404(st, row["thread_id"])
-    try:
-        _check_suggestion(body.suggestion, t["start_line"], t["end_line"])
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    _check_row_suggestion(body.suggestion, t)
     await st.db.write(
         lambda c: store.update_draft_comment(
             c,

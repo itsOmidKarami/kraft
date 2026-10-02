@@ -156,13 +156,33 @@ def create_thread(
     end_line=None,
     label=None,
     suggestion=None,
+    start_side=None,
+    quote=None,
 ) -> str:
+    """`start_side` puts `start_line` on the other side from `side` (a range
+    across sides); it is stored only then, so a range on one side reads the
+    same as one written before the column."""
     tid = _id()
     now = _now()
     conn.execute(
         "INSERT INTO review_threads (id, work_item_id, gate, node_id, file_path, side, "
-        "start_line, end_line, anchor_sha, label, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (tid, wid, gate, node_id, file_path, side, start_line, end_line, anchor_sha, label, now),
+        "start_side, start_line, end_line, quote, anchor_sha, label, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            tid,
+            wid,
+            gate,
+            node_id,
+            file_path,
+            side,
+            start_side if start_side != side else None,
+            start_line,
+            end_line,
+            quote,
+            anchor_sha,
+            label,
+            now,
+        ),
     )
     conn.execute(
         "INSERT INTO review_comments (id, thread_id, author, body, suggestion, created_at) "
@@ -291,6 +311,8 @@ def threads_for(conn, wid, gate=None) -> list[dict]:
             ).fetchall()
         ]
         d = {k: t[k] for k in t.keys()}
+        # NULL is `side`'s: every range written before ranges could cross sides.
+        d["start_side"] = t["start_side"] or t["side"]
         d["comments"] = comments
         d["draft"] = bool(comments) and comments[0]["draft"]
         out.append(d)
@@ -415,19 +437,33 @@ _NOTE_HEAD = (
 )
 
 
+def thread_where(t: dict) -> str:
+    """`path:5-7`, or `path:-2 to +2` for a range across sides (old line 2
+    through new line 2, as the diff marks them); a file alone, or the whole
+    change."""
+    if not t["file_path"]:
+        return "(whole change)"
+    if t["start_line"] is None:
+        return t["file_path"]
+    side = t.get("side")
+    start_side = t.get("start_side") or side
+    if start_side == side:
+        return f"{t['file_path']}:{t['start_line']}-{t['end_line']}"
+    mark = {"old": "-", "new": "+"}
+    return f"{t['file_path']}:{mark[start_side]}{t['start_line']} to {mark[side]}{t['end_line']}"
+
+
 def render_threads(threads: list[dict]) -> str:
     blocks = []
     for t in threads:
         if t["state"] == "resolved":
             continue
-        where = "(whole change)"
-        if t["file_path"]:
-            where = t["file_path"]
-            if t["start_line"] is not None:
-                where += f":{t['start_line']}-{t['end_line']}"
-        head = f"[{t['id']}] {where}" + (f" ({t['label']})" if t["label"] else "")
+        head = f"[{t['id']}] {thread_where(t)}" + (f" ({t['label']})" if t["label"] else "")
         first, *replies = t["comments"]
-        lines = [head, first["body"]]
+        lines = [head]
+        # The lines as the reviewer saw them, before what they said about them.
+        lines += ["    | " + ln for ln in (t.get("quote") or "").splitlines()]
+        lines.append(first["body"])
         s = first.get("suggestion")
         if s:
             lines.append(f"Suggested replacement for lines {s['start_line']}-{s['end_line']}:")
