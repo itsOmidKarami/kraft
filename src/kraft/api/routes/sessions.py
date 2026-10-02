@@ -17,6 +17,7 @@ from kraft import escalate, events, permission_hooks, store
 from kraft import harness as harness_mod
 from kraft import logs as logs_mod
 from kraft.adapters import agent as _agent
+from kraft.adapters import hook_install
 from kraft.api import api_router, deps, perimeter
 from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
 from kraft.grants import matching
@@ -228,7 +229,9 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
             ).fetchone()
         )
         grant = matching(grants, body.tool_name, body.input, store.branch_for(item))
-        if hit := next((n for n in names if n in denied), None):
+        if body.harness == "cursor" and hook_install.touches_hook_file(names, body.input):
+            decision, reason = "deny", hook_install.HOOK_FILE_REASON
+        elif hit := next((n for n in names if n in denied), None):
             decision, reason = "deny", f"{hit} is in {task}'s deny_tools"
         elif grant is not None:
             decision, reason = "allow", f"{task} holds the {grant} grant"

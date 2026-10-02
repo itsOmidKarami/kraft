@@ -43,6 +43,39 @@ _MAX_HOOKS_BYTES = 1 << 20
 _OURS = "kraft admin permission-hook"
 
 
+#: Kraft tool names that write or remove a file, and where a hook call's
+#: input names it.
+_WRITES = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Delete"})
+_PATH_KEYS = ("path", "file_path", "target_file", "filePath")
+#: Why the gate denies a call that `touches_hook_file`.
+HOOK_FILE_REASON = f"{_REL} holds Kraft's permission hook, which a worker may not change"
+
+
+def touches_hook_file(names: tuple[str, ...], input: dict) -> bool:
+    """Whether a Cursor worker's call would change or remove `.cursor/
+    hooks.json`, where Kraft's entry sits beside the repository's own: a
+    write, edit or delete of that file or of its `.cursor` directory, or a
+    shell command naming either. Cursor would run the rest of the session
+    without the gate.
+
+    Text only. A shell reaches the file in ways no reading of its command
+    sees (a script, `git clean -x`), so this stops the plain attempt, and
+    the next launch with policy writes the entry back. A policy that must
+    hold denies `Shell`, or leaves it off an allowlist."""
+    if "Bash" in names:
+        command = input.get("command")
+        return isinstance(command, str) and (".cursor" in command or "hooks.json" in command)
+    if not _WRITES.intersection(names):
+        return False
+    for key in _PATH_KEYS:
+        path = input.get(key)
+        if isinstance(path, str):
+            parts = Path(os.path.normpath(path.replace("\\", "/"))).parts
+            if parts[-1:] == (".cursor",) or parts[-2:] == (".cursor", "hooks.json"):
+                return True
+    return False
+
+
 class HookFileError(ValueError):
     """The worktree's hooks file is not one Kraft can add its entry to."""
 
