@@ -15,6 +15,36 @@ const STEPS = ["Connect a repo", "Chain and policy", "First work item"] as const
  *  plugin, which registers the MCP server every Claude worker needs. */
 const PLUGIN_COMMANDS = "claude plugin marketplace add itsOmidKarami/kraft\nclaude plugin install kraft@kraft";
 
+/** Where the wizard got to once a repo is added, kept until its last step is
+ *  done or skipped: with a repo connected the board no longer shows it on its
+ *  own, and step 3 is the one that says Claude workers need Kraft registered.
+ *  So a reload, or a visit to Templates › Repos from step 1, comes back to it. */
+const SAVED = "kraft.firstRun";
+type Saved = { step: number; reached: number; path: string; name: string; disabled: boolean };
+
+export function savedFirstRun(): Saved | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(SAVED) ?? "null");
+    return v && typeof v.step === "number" ? v : null;
+  } catch {
+    return null;
+  }
+}
+export function clearFirstRun() {
+  try {
+    localStorage.removeItem(SAVED);
+  } catch {
+    /* storage blocked: nothing was kept */
+  }
+}
+function keep(s: Saved) {
+  try {
+    localStorage.setItem(SAVED, JSON.stringify(s));
+  } catch {
+    /* storage blocked: the wizard lasts until the next reload */
+  }
+}
+
 type Load<T> = { state: "loading" } | { state: "error" } | { state: "ready"; value: T };
 
 function useLoad<T>(fetcher: () => Promise<T>): Load<T> {
@@ -49,26 +79,36 @@ function probeRows(p: RepoProbe): [string, string][] {
   ];
 }
 
-/** Design 08 / Decisions §10: what the board shows before the first repo is connected. */
-export function FirstRun() {
+/** Design 08 / Decisions §10: what the board shows before the first repo is
+ *  connected, and after, until its last step is done or skipped (`onDone`). */
+export function FirstRun({ onDone }: { onDone?: () => void }) {
   const [address, setAddress] = useState<string | null>(null);
   useEffect(() => {
     api.getHealth().then((h) => h.bind && h.port != null && setAddress(`${h.bind}:${h.port}`)).catch(() => {});
   }, []);
 
-  const [step, setStep] = useState(1);
-  const [reached, setReached] = useState(1);
+  const [saved] = useState(savedFirstRun);
+  const [step, setStep] = useState(saved?.step ?? 1);
+  const [reached, setReached] = useState(saved?.reached ?? 1);
   const go = (n: number) => { setStep(n); setReached((r) => Math.max(r, n)); };
 
-  const [path, setPath] = useState("");
+  const [path, setPath] = useState(saved?.path ?? "");
   const [probing, setProbing] = useState(false);
   const [probe, setProbe] = useState<RepoProbe | null>(null);
   const [shown, setShown] = useState(0);
   const [adding, setAdding] = useState(false);
-  const [added, setAdded] = useState(false);
+  /** The added repo's name, once it is added. */
+  const [added, setAdded] = useState(saved?.name ?? "");
   /** The server saved the repo disabled: no test command, so the composer will not list it. */
-  const [disabled, setDisabled] = useState(false);
+  const [disabled, setDisabled] = useState(saved?.disabled ?? false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (added) keep({ step, reached, path, name: added, disabled });
+  }, [added, step, reached, path, disabled]);
+  const finish = () => {
+    clearFirstRun();
+    onDone?.();
+  };
 
   useEffect(() => {
     if (!probe || shown >= probeRows(probe).length) return;
@@ -109,7 +149,7 @@ export function FirstRun() {
         project: probe.project,
       });
       setDisabled(repo.enabled === false);
-      setAdded(true);
+      setAdded(probe.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -156,7 +196,7 @@ export function FirstRun() {
             <>
               <h2>Connect a repo</h2>
               <Field label="Path to a local git checkout" error={error}>
-                <input value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={added}
+                <input value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={!!added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
                   onKeyDown={(e) => e.key === "Enter" && (probe ? probed && !added && doAdd() : doProbe())} />
               </Field>
@@ -175,7 +215,7 @@ export function FirstRun() {
                 ) : (
                   <Button variant="primary" disabled={!path.trim() || probing} onClick={doProbe}>{probing ? "Probing…" : "+ Add repo"}</Button>
                 )}
-                {added && probe && <span className="fr-ok">Added {probe.name}</span>}
+                {added && <span className="fr-ok">Added {added}</span>}
               </div>
               {added && disabled && <p>No tests found: connected disabled until you set a test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>}
             </>
@@ -199,9 +239,10 @@ export function FirstRun() {
             <>
               <h2>First work item</h2>
               <p>It is created paused, so nothing runs until you start it.</p>
-              {disabled && probe && <p>{probe.name} is disabled, so New work item cannot file to it yet. Set its test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link> first.</p>}
+              {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link> first.</p>}
               <div className="fr-actions">
-                <Link className="btn btn-primary" to="/?new=1">+ New work item</Link>
+                <Link className="btn btn-primary" to="/?new=1" onClick={finish}>+ New work item</Link>
+                <Button onClick={finish}>Go to the board</Button>
               </div>
               <h3>Before you start it: register Kraft with Claude Code</h3>
               <p>Claude workers need Kraft's MCP server, or Kraft refuses to launch them. Install the Kraft plugin, which also adds the /kraft:* skills:</p>

@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
-import { FirstRun, PROBE_STEP_MS } from "./FirstRun";
+import { FirstRun, PROBE_STEP_MS, savedFirstRun } from "./FirstRun";
 
 const PROBE: RepoProbe = {
   path: "/code/acme", name: "acme", branch: "main", submodules: ["vendor/a", "vendor/b"], has_beads: true,
@@ -26,9 +26,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  localStorage.clear();
 });
 
-const mount = () => render(<MemoryRouter><FirstRun /></MemoryRouter>);
+const mount = (onDone?: () => void) => render(<MemoryRouter><FirstRun onDone={onDone} /></MemoryRouter>);
 const stepButton = (n: number) => screen.queryByRole("button", { name: new RegExp(`^Step ${n}:`) });
 
 async function probeAndAdd(user: ReturnType<typeof userEvent.setup>) {
@@ -177,6 +178,43 @@ describe("FirstRun", () => {
     expect(await navigator.clipboard.readText()).toBe(
       "claude plugin marketplace add itsOmidKarami/kraft\nclaude plugin install kraft@kraft",
     );
+  });
+
+  it("comes back at the step it reached, with the repo it added, until its last step is done or skipped", async () => {
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: false } as never);
+    const user = userEvent.setup();
+    const first = mount();
+    expect(savedFirstRun()).toBeNull();
+    await probeAndAdd(user);
+    first.unmount();
+    // A reload, or a visit to Templates › Repos from step 1, mounts it again.
+    const second = mount();
+    expect(screen.getByRole("heading", { name: "Chain and policy" })).toBeInTheDocument();
+    await user.click(stepButton(1)!);
+    expect(screen.getByText("Added acme")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveValue("/code/acme");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    second.unmount();
+    const onDone = vi.fn();
+    mount(onDone);
+    expect(screen.getByRole("heading", { name: /register Kraft with Claude Code/ })).toBeInTheDocument();
+    expect(screen.getByText(/acme is disabled, so New work item cannot file to it yet/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Go to the board" }));
+    expect(onDone).toHaveBeenCalled();
+    expect(savedFirstRun()).toBeNull();
+  });
+
+  it("is done once its last step opens the composer", async () => {
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    mount(onDone);
+    await probeAndAdd(user);
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(savedFirstRun()).toMatchObject({ step: 3, name: "acme" });
+    await user.click(screen.getByRole("link", { name: /New work item/ }));
+    expect(onDone).toHaveBeenCalled();
+    expect(savedFirstRun()).toBeNull();
   });
 
   it("makes only reached steps focusable", async () => {

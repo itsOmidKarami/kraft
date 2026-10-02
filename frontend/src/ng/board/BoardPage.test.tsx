@@ -51,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe("BoardPage", () => {
@@ -58,6 +59,18 @@ describe("BoardPage", () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     board();
     expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+  });
+
+  it("brings back a first-run left part-way while its repo is connected, and starts over once no repo is", async () => {
+    localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/r", name: "r", disabled: false }));
+    vi.spyOn(api, "getTemplates").mockResolvedValue([]);
+    const { unmount } = board();
+    expect(await screen.findByRole("heading", { name: /register Kraft with Claude Code/ })).toBeInTheDocument();
+    unmount();
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    board();
+    expect(await screen.findByRole("heading", { name: "Connect a repo" })).toBeInTheDocument();
+    expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
   it("keeps the board while the repo list is unknown or non-empty", async () => {
