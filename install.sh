@@ -35,7 +35,9 @@ if ! command -v uv >/dev/null 2>&1; then
         echo "$uv_help" >&2
         exit 1
     fi
-    if ! sh "$tmpdir/uv-install.sh"; then
+    # Not on this script's stdin: under `curl ... | sh` that is the rest of
+    # this script, and an installer that reads stdin would swallow it.
+    if ! sh "$tmpdir/uv-install.sh" </dev/null; then
         echo "the uv installer failed; $uv_help" >&2
         exit 1
     fi

@@ -1,7 +1,9 @@
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
 import react from "@vitejs/plugin-react";
 import type { Plugin, ProxyOptions } from "vite";
 import { defineConfig } from "vitest/config";
-import { thirdPartyLicenses } from "../dev/third_party_licenses.mjs";
+import { packageNotice, thirdPartyLicenses } from "../dev/third_party_licenses.mjs";
 
 // Kraft-y0g2: the fallback is the *dev* instance's port (justfile's `dev_port`),
 // not 8765. `just ui` and `just dev` both export KRAFT_PORT, so this only applies
@@ -31,15 +33,25 @@ const execArgv = process.allowedNodeEnvironmentFlags.has("--experimental-webstor
 // past their license comments. Their notices ship beside it instead, in
 // THIRD_PARTY_LICENSES.txt, which `just bundle` copies into the wheel with the
 // rest of dist/. Every module in the graph counts, so a package that is only a
-// re-export (react-router-dom) is listed with the one it re-exports.
+// re-export (react-router-dom) is listed with the one it re-exports. Vite's own
+// runtime helpers (the modulepreload polyfill, the preload helper) are virtual
+// modules, `\0vite/...`, which name no package, so vite is added by hand.
 const licenses: Plugin = {
   name: "kraft:third-party-licenses",
   apply: "build",
   generateBundle() {
+    const ids = [...this.getModuleIds()];
+    const vite = ids.some((id) => id.startsWith("\0vite/"))
+      ? [
+          packageNotice(dirname(createRequire(import.meta.url).resolve("vite/package.json")), {
+            before: "# Licenses of bundled dependencies",
+          }),
+        ]
+      : [];
     this.emitFile({
       type: "asset",
       fileName: "THIRD_PARTY_LICENSES.txt",
-      source: thirdPartyLicenses(this.getModuleIds(), "Kraft's web UI"),
+      source: thirdPartyLicenses(ids, "Kraft's web UI", vite),
     });
   },
 };

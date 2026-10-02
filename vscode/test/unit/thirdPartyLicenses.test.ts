@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 // Shared with the web UI's build (frontend/vite.config.ts); tested here because
 // this suite runs under Node.
-import { packageDir, thirdPartyLicenses } from "../../../dev/third_party_licenses.mjs";
+import { packageDir, packageNotice, thirdPartyLicenses } from "../../../dev/third_party_licenses.mjs";
 
 describe("packageDir", () => {
   it("finds the package a module came from", () => {
@@ -44,6 +44,21 @@ describe("thirdPartyLicenses", () => {
     expect(text).toContain("Copyright (c) Zeta\n\nMIT text\n");
     expect(text.split("zeta 2.0.0").length).toBe(2);
     expect(text.indexOf("@scope/alpha")).toBeLessThan(text.indexOf("zeta 2.0.0"));
+  });
+
+  it("adds entries for code no module path names, in the same order", () => {
+    const root = mkdtempSync(join(tmpdir(), "licenses-"));
+    const zeta = fakePackage(root, "zeta", "2.0.0", "Copyright (c) Zeta\n");
+    const tool = join(root, "node_modules", "tool");
+    fakePackage(root, "tool", "8.0.0", "Copyright (c) Tool\n\n# Licenses of bundled dependencies\n\nhuge\n");
+    const extra = [packageNotice(tool, { before: "# Licenses of bundled dependencies" })];
+    const text = thirdPartyLicenses([zeta, "\0tool/helper.js"], "a test bundle", extra);
+    expect(text).toContain("tool 8.0.0 (MIT)");
+    expect(text).toContain("Copyright (c) Tool");
+    // The tool's own notice, not those of what it bundles into itself.
+    expect(text).not.toContain("huge");
+    expect(text.indexOf("tool 8.0.0")).toBeLessThan(text.indexOf("zeta 2.0.0"));
+    expect(() => packageNotice(tool, { before: "# Not there" })).toThrow('no longer has a "# Not there" line');
   });
 
   it("stops the build when a bundled package has no license file to copy", () => {

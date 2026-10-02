@@ -25,7 +25,13 @@ export function packageDir(id) {
   return `${path.slice(0, at)}/node_modules/${name}`;
 }
 
-function describe(dir) {
+/**
+ * One package's entry: its name, version, license and the text of its
+ * LICENSE file. With `before`, only the text above that line: vite's
+ * LICENSE.md is its own MIT notice followed by 100 KB of the notices of the
+ * packages vite bundles into itself, which never reach the browser.
+ */
+export function packageNotice(dir, { before } = {}) {
   const meta = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   const file = readdirSync(dir)
     .filter((name) => LICENSE_FILE.test(name))
@@ -36,28 +42,36 @@ function describe(dir) {
     throw new Error(`${meta.name} ${meta.version} is bundled but has no LICENSE file to copy`);
   }
   const license = typeof meta.license === "string" ? meta.license : (meta.license?.type ?? "see below");
-  return { name: meta.name, version: meta.version, license, text: readFileSync(join(dir, file), "utf8").trim() };
+  let text = readFileSync(join(dir, file), "utf8");
+  if (before) {
+    const at = text.indexOf(before);
+    if (at < 0) throw new Error(`${meta.name}'s ${file} no longer has a "${before}" line to stop at`);
+    text = text.slice(0, at);
+  }
+  return { name: meta.name, version: meta.version, license, text: text.trim() };
 }
 
 /**
  * THIRD_PARTY_LICENSES.txt for a bundle of `product` built from `moduleIds`
- * (absolute paths, as the bundler reports them). Sorted, so the same
+ * (absolute paths, as the bundler reports them), plus `extra` entries from
+ * `packageNotice` for code no module path names. Sorted, so the same
  * dependencies always give the same file.
  */
-export function thirdPartyLicenses(moduleIds, product) {
+export function thirdPartyLicenses(moduleIds, product, extra = []) {
   const dirs = new Set();
   for (const id of moduleIds) {
     const dir = packageDir(id);
     if (dir) dirs.add(dir);
   }
-  const packages = [...dirs].map(describe);
+  const packages = [...[...dirs].map((dir) => packageNotice(dir)), ...extra];
   const key = (p) => `${p.name}\0${p.version}`;
   packages.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
   const head = [
     `Third-party software in ${product}`,
     "",
-    "Kraft is licensed under the Apache License 2.0 (see LICENSE). This bundle",
-    "also contains the open-source packages below, each under its own license.",
+    "Kraft is licensed under the Apache License 2.0, whose text ships with it.",
+    "This bundle also contains the open-source packages below, each under its",
+    "own license.",
   ];
   const body = packages.flatMap((p) => ["", RULE, `${p.name} ${p.version} (${p.license})`, RULE, "", p.text]);
   return [...head, ...body, ""].join("\n");

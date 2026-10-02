@@ -89,11 +89,12 @@ def test_install_script_says_nothing_of_path_when_kraft_is_on_it(tmp_path):
     assert "not on your PATH" not in out
 
 
-def _run_installer_without_uv(tmp_path: Path, uv_installer: str | None):
+def _run_installer_without_uv(tmp_path: Path, uv_installer: str | None, *, piped: bool = False):
     """install.sh on a machine with no uv. `uv_installer` is the script the
     stub `curl` serves for astral.sh's installer, or None for a failed
     download. PATH holds only the stubs and the tools the script needs, so a
-    uv installed on the machine running the test is not found."""
+    uv installed on the machine running the test is not found. `piped` feeds
+    the script to bash on stdin, as `curl ... | bash` does."""
     import shutil
     import subprocess
 
@@ -112,8 +113,10 @@ def _run_installer_without_uv(tmp_path: Path, uv_installer: str | None):
         "*) echo wheel;; esac\n"
     )
     (stubs / "curl").chmod(0o755)
+    script = ROOT / "install.sh"
     return subprocess.run(
-        ["sh", str(ROOT / "install.sh")],
+        [shutil.which("bash")] if piped else ["sh", str(script)],
+        input=script.read_text() if piped else None,
         capture_output=True,
         text=True,
         env={"PATH": str(stubs), "HOME": str(tmp_path)},
@@ -151,5 +154,15 @@ def test_install_script_stops_when_it_cannot_install_uv(tmp_path, uv_installer, 
 
 def test_install_script_goes_on_with_the_uv_it_installed(tmp_path):
     result = _run_installer_without_uv(tmp_path, _GOOD_UV_INSTALLER)
+    assert result.returncode == 0, result.stderr
+    assert "installed-kraft" in result.stdout
+
+
+def test_install_script_keeps_its_own_stdin_from_the_uv_installer(tmp_path):
+    """Under `curl ... | bash` the script's stdin is the rest of the script.
+    An installer that reads stdin swallowed it, and the install stopped after
+    uv without a word."""
+    reads_stdin = "cat >/dev/null\n" + _GOOD_UV_INSTALLER
+    result = _run_installer_without_uv(tmp_path, reads_stdin, piped=True)
     assert result.returncode == 0, result.stderr
     assert "installed-kraft" in result.stdout

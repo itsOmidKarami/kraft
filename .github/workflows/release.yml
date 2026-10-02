@@ -242,7 +242,8 @@ jobs:
           # built, so nothing may dirty the checkout here.
           cd vscode
           npm ci
-          npm run build
+          # No `npm run build`: packing the .vsix below runs `vscode:prepublish`,
+          # which builds the extension itself, without a source map.
           # A pre-release is packed as semver, `1.5.0-rc.2`, so it sorts below
           # the release it leads up to and a side-loaded rc is updated by the
           # real 1.5.0. Packing it as its base version made the two equal.
@@ -272,7 +273,7 @@ jobs:
           fi
           # `vsce package` builds with `--production`, which writes no source
           # map; the .vsix leaves *.map out, so a link to one would dangle.
-          if unzip -p "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/extension.js | grep -c '^//# sourceMappingURL=' >/dev/null; then
+          if unzip -p "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/extension.js | grep -q '^//# sourceMappingURL='; then
             echo "::error::the .vsix's extension.js links a source map it does not ship"
             exit 1
           fi
