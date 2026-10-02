@@ -113,19 +113,24 @@ def pause_mid_flight(client: httpx.Client, wid: str, timeout: float = 30.0) -> s
     enough for this to be a wait rather than a race.
     """
     deadline = time.monotonic() + timeout
+    item: dict = {"worker_sessions": []}
     while time.monotonic() < deadline:
         item = client.get(f"/work-items/{wid}").raise_for_status().json()
         if any(s["status"] == "running" for s in item["worker_sessions"]):
             client.post(f"/work-items/{wid}/pause").raise_for_status()
             return settle(client, wid, "paused", timeout=15)
         time.sleep(0.3)
-    return state(client, wid)
+    # Filed paused at capacity, it never ran: its row says "paused" too, but it
+    # is a not-started item, not the mid-flight pause this was asked for.
+    return state(client, wid) if item["worker_sessions"] else "never started"
 
 
 def settle_order(created: list) -> list:
     """Paused items first: one can only be paused while its KRAFT_SLOW agent is
     still asleep, and `pause_mid_flight` waits on that running session itself.
-    Settled after the others, it waited behind their settle timeouts instead."""
+    Settled after the others, it waited behind their settle timeouts instead.
+    `main` files them in this order too: filed last, a paused item lost the
+    capacity race (`max_concurrent`) and was filed paused without ever running."""
     return sorted(created, key=lambda item: item[2] != "paused")
 
 
@@ -168,7 +173,10 @@ def main() -> int:
             print("seed: the dev repo predates forge: fake -- run `just dev-reset` first")
 
     created = []
-    for title, template, want in ITEMS:
+    rows, ok = [], True
+    # A paused item is filed and paused before the rest are filed, so its slot
+    # is free again by the time they take theirs.
+    for title, template, want in settle_order(ITEMS):
         wid = (
             client.post(
                 "/work-items",
@@ -182,11 +190,15 @@ def main() -> int:
             .raise_for_status()
             .json()["id"]
         )
-        created.append((wid, title, want))
+        if want == "paused":
+            got = pause_mid_flight(client, wid)
+            ok &= got == want
+            rows.append((wid[:8], title, want, got))
+        else:
+            created.append((wid, title, want))
 
-    rows, ok = [], True
-    for wid, title, want in settle_order(created):
-        got = pause_mid_flight(client, wid) if want == "paused" else settle(client, wid, want)
+    for wid, title, want in created:
+        got = settle(client, wid, want)
         ok &= got == want
         rows.append((wid[:8], title, want, got))
 

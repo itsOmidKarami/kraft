@@ -399,8 +399,13 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     if row["status"] != "active":
         # Lost the capacity race inside `intake`'s own INSERT (Kraft-m43g,
         # Kraft-nxht): landed "paused" same as an explicit `not autostart`,
-        # not rejected -- there is no walk to spawn.
-        return {"id": wid, "status": row["status"], **extra}
+        # not rejected -- there is no walk to spawn. `slots` says why, so a
+        # caller that asked to start it can say so rather than file it silently.
+        slots = {
+            "busy": st.db.read(store.active_count),
+            "limit": st.policy.max_concurrent if st.policy else 1,
+        }
+        return {"id": wid, "status": row["status"], "slots": slots, **extra}
 
     deps.spawn(
         request.app,

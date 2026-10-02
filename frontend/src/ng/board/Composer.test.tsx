@@ -69,6 +69,23 @@ describe("Composer", () => {
     expect((creates(calls).at(-1)?.body as { autostart: boolean }).autostart).toBe(false);
   });
 
+  it("says so when Create and start is filed paused because every slot is busy, and not when it starts or was meant paused", async () => {
+    const toasts: string[] = [];
+    const hear = (e: Event) => toasts.push((e as CustomEvent<{ message: string }>).detail.message);
+    window.addEventListener("kraft:toast", hear);
+    stubFetch(undefined, [200, { id: "new2", status: "paused", slots: { busy: 3, limit: 3 } }]);
+    render(<MemoryRouter><Composer repoFilter="" onClose={() => {}} onCreated={() => {}} /></MemoryRouter>);
+    await settle();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Fifth" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create paused" }));
+    await settle();
+    expect(toasts).toEqual([]);
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(toasts).toEqual(["Filed paused: 3 of 3 slots are busy. Start it when one frees."]);
+    window.removeEventListener("kraft:toast", hear);
+  });
+
   it("with no enabled repo, says where to get one and creates nothing, rather than sending an empty repo", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/notests", default_chain_template: "default", enabled: false }] as never });
     const { calls } = mount();

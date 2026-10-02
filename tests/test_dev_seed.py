@@ -30,3 +30,36 @@ def test_a_paused_item_is_settled_before_anything_it_would_otherwise_wait_behind
     order = [wid for wid, _title, _want in _seed().settle_order(created)]
     assert order[0] == "c"
     assert order[1:] == ["a", "b", "d"]
+
+
+class _Answer:
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        return self
+
+    def json(self):
+        return self.body
+
+
+class _NeverRan:
+    """A server whose item was filed paused at capacity: no session, ever."""
+
+    def __init__(self):
+        self.posts = []
+
+    def get(self, path):
+        if path.endswith("/events"):
+            return _Answer([])
+        return _Answer({"status": "paused", "worker_sessions": []})
+
+    def post(self, path):
+        self.posts.append(path)
+        return _Answer({})
+
+
+def test_a_paused_item_that_never_ran_is_reported_as_never_started_not_as_paused():
+    client = _NeverRan()
+    assert _seed().pause_mid_flight(client, "w1", timeout=0.5) == "never started"
+    assert client.posts == []

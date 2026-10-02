@@ -53,6 +53,8 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
 
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "paused"
+    # Why it did not start, for the composer's "filed paused" toast.
+    assert r.json()["slots"] == {"busy": 1, "limit": 1}
     wid = r.json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
     assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"

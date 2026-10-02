@@ -24,6 +24,18 @@ export function createBody(d: Draft, autostart: boolean) {
   return { title: d.title.trim(), description: d.brief.trim(), repo: d.repo, chain_template: d.chain, attachments, autostart };
 }
 
+/** What `POST /work-items` answers. `slots` comes with an autostart the server filed paused because every slot was busy. */
+export type Created = { id: string; status?: string; duplicate_warning?: string; slots?: { busy: number; limit: number } };
+
+/** Create and start that the server filed paused (every slot busy) says so,
+ *  rather than leaving a "Not started" row to explain itself. Nothing starts
+ *  it later on its own: its Start is on the board. */
+export function sayIfFiledPaused(autostart: boolean, body: Created): void {
+  if (!autostart || body.status !== "paused") return;
+  const s = body.slots;
+  showToast(`Filed paused: ${s ? `${s.busy} of ${s.limit} slots are` : "every slot is"} busy. Start it when one frees.`, 8000);
+}
+
 const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
@@ -91,10 +103,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     if (!d.title.trim() || !d.repo || busy || (preview && "error" in preview)) return;
     setBusy(true);
     setError(null);
-    const r = await request<{ id: string; duplicate_warning?: string }>("/work-items", jsonBody("POST", createBody(d, autostart)));
+    const r = await request<Created>("/work-items", jsonBody("POST", createBody(d, autostart)));
     setBusy(false);
     if (r.status !== 201 && r.status !== 200) return setError(detailOf(r.body));
     if (r.body.duplicate_warning) showToast(r.body.duplicate_warning, 6000);
+    sayIfFiledPaused(autostart, r.body);
     await useStore.getState().bootstrap().catch(() => {});
     onCreated(r.body.id);
   };
