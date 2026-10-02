@@ -28,3 +28,15 @@ def test_every_cdn_asset_is_pinned_and_checked_by_hash(client, path):
     assert "fonts.googleapis.com" not in r.text
     assert "fastapi.tiangolo.com" not in r.text
     assert '<link rel="shortcut icon" href="/icon.svg">' in r.text
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc"])
+def test_no_image_comes_from_another_site(client, path):
+    """ReDoc's bundle shows a logo from `cdn.redoc.ly`, past every integrity
+    check: an image is no script, but the request names this server to a
+    third party. The policy stops it, and keeps the perimeter's own rule that
+    no other site may frame the page."""
+    r = client.get(path)
+    assert r.status_code == 200, r.text
+    directives = [d.strip() for d in r.headers["content-security-policy"].split(";")]
+    assert directives == ["img-src 'self' data:", "frame-ancestors 'self'"]

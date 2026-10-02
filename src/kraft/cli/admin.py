@@ -685,7 +685,9 @@ def _start_detached() -> None:
         # Where this start's output begins: anything before it is an earlier run's.
         start_offset = log_file.tell()
         proc = subprocess.Popen(
-            [sys.executable, "-m", "kraft", "admin", "start"],
+            # `-P`: plain `-m` puts this shell's cwd first on `sys.path`, and a
+            # file there named like a module Kraft imports would run instead.
+            [sys.executable, "-P", "-m", "kraft", "admin", "start"],
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=log_file,
@@ -959,7 +961,7 @@ def _cmd_mcp(ns: argparse.Namespace) -> None:
 
 
 def _cmd_permission_hook(ns: argparse.Namespace) -> None:
-    """What a harness's pre-tool hook runs, as `sys.executable -m kraft` so it
+    """What a harness's pre-tool hook runs, as `sys.executable -P -m kraft` so it
     is the daemon's own install. Client side only: no server import, since
     the CLI waits on this for every tool call (Kraft-4in7z). Always answers:
     any failure is the translator's deny when fail-closed, no opinion else."""
