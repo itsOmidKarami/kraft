@@ -59,6 +59,17 @@ describe("Harnesses list (M.1)", () => {
     await waitFor(() => expect(posts(calls)).toHaveLength(3));
     expect(posts(calls)[2].body).toEqual({ ops: [{ op: "set_escalation", harness: "claude", grants: ["git-commit"] }] });
   });
+
+  it("lists the grants the draft names, and refuses one it does not in the sheet, sending nothing", async () => {
+    const { calls } = list();
+    await userEvent.click(await screen.findByRole("button", { name: /escalation grants/ }));
+    const g = screen.getByRole("combobox", { name: "Escalation grants" });
+    await userEvent.clear(g);
+    expect(within(screen.getByRole("listbox", { name: "Escalation grants" })).getAllByRole("option").map((o) => o.querySelector(".cbx-value")!.textContent)).toEqual(["git-commit", "git-rebase", "git-push"]);
+    await userEvent.type(g, "git-commit, sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("“sds” is not a grant. Pick one from the list.");
+    expect(posts(calls)).toHaveLength(0);
+  });
 });
 
 describe("a harness (M.1, R65)", () => {

@@ -1,6 +1,6 @@
-"""`kraft item`'s own help: what `kraft item --help` and `kraft item create
---help` say, where a reviewer could not tell what a verb or argument was; and
-what `kraft item create` prints."""
+"""`kraft item`'s own parser: what `kraft item --help` and `kraft item create
+--help` say, where a reviewer could not tell what a verb or argument was, what
+`create`'s flags default to, and what `kraft item create` prints."""
 
 from __future__ import annotations
 
@@ -25,6 +25,19 @@ def test_raise_budget_help_says_which_cap_it_raises(capsys):
         "raise-budget raise the dollar cap that stopped an item, its own (create --budget) "
         "or its policy's item-wide budget_usd, and retry it"
     ) in text
+
+
+def test_set_overrides_help_says_each_call_replaces_the_override(capsys):
+    """`set-node-override` merges and this one does not, and a person who ran
+    one then the other lost the model without being told."""
+    text = _help(capsys, "item", "set-overrides")
+    assert "Each call replaces the item-wide override" in text
+    assert "a flag you leave out goes back to the template's own binding" in text
+
+
+def test_set_node_override_help_says_it_merges(capsys):
+    text = _help(capsys, "item", "set-node-override")
+    assert "Each call changes only the flags you give" in text and "--clear resets the node" in text
 
 
 def test_create_gives_its_title_a_help_line(capsys):
@@ -88,3 +101,20 @@ def test_create_autostart_at_the_slot_limit_says_why_it_was_filed_paused(
     )
     cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart", "--json"])
     assert json.loads(capsys.readouterr().out)["slots"] == {"busy": 3, "limit": 3}
+
+
+@pytest.mark.parametrize(
+    ("flag", "auto_gate"),
+    [([], True), (["--auto-gate"], True), (["--no-auto-gate"], False)],
+    ids=["on-by-default", "on", "off"],
+)
+def test_item_create_passes_auto_gate(monkeypatch, flag, auto_gate):
+    seen = {}
+
+    async def fake_create(title, repo, chain, description, attachments, *, auto_gate, **_rest):
+        seen["auto_gate"] = auto_gate
+        return {"id": "w1"}
+
+    monkeypatch.setattr("kraft.client.create_work_item", fake_create)
+    cli.main(["item", "create", "t", "--repo", "/r", *flag])
+    assert seen["auto_gate"] is auto_gate

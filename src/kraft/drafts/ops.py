@@ -686,6 +686,9 @@ def new_chain(d: Draft, **source: str) -> None:
     if origin is None:
         d._chain = {"id": d.key, "description": "", "nodes": []}
     else:
+        # A chain id, never a path: `../../x` read any YAML file Kraft could.
+        if not isinstance(origin, str) or not store.AREAS["chains"].valid(origin):
+            raise OpError(f"there is no chain {origin!r} to copy")
         name = f"chains/{origin}.yaml"
         draft = d.st.db.read(lambda c: store.get(c, "chains", origin))
         if draft is not None and name in draft["files"]:

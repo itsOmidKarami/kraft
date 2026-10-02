@@ -1,6 +1,7 @@
 import { Pencil, RotateCcw } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { parse, show, type FieldKind } from "../../templates/fields";
+import { Combobox } from "../../ui/Combobox";
 import { IconButton } from "../../ui/IconButton";
 import type { Given } from "../chainValues";
 
@@ -91,7 +92,6 @@ export function OverrideRow({ label, hint, kind, own: set, given, options, sugge
  *  the editor loses focus, so stepping through a list with the arrows saves nothing. */
 function Editor({ label, kind, options, suggest, placeholder, onSave, onCancel }: { label: string; kind: FieldKind; options?: string[] | null; suggest?: string[]; placeholder?: string; onSave: (t: string, keys: boolean) => void; onCancel: (keys: boolean) => void }) {
   const [text, setText] = useState("");
-  const list = useId();
   // Enter and Escape already closed it: the blur that follows is not a second save.
   const done = useRef(false);
   const keys = (e: React.KeyboardEvent) => {
@@ -107,10 +107,21 @@ function Editor({ label, kind, options, suggest, placeholder, onSave, onCancel }
       </select>
     );
   if (kind === "long") return <textarea autoFocus aria-label={label} className="cfg-edit is-long" rows={4} placeholder={placeholder} value={text} onKeyDown={keys} onBlur={blur} onChange={(e) => setText(e.target.value)} />;
-  return (
-    <>
-      <input autoFocus aria-label={label} className="cfg-edit" value={text} spellCheck={false} list={suggest?.length ? list : undefined} placeholder={kind === "minutes" ? "minutes" : undefined} onKeyDown={keys} onBlur={blur} onChange={(e) => setText(e.target.value)} />
-      {!!suggest?.length && <datalist id={list}>{suggest.map((s) => <option key={s} value={s} />)}</datalist>}
-    </>
-  );
+  if (suggest?.length)
+    return (
+      <Combobox
+        autoFocus
+        aria-label={label}
+        className="cfg-edit"
+        value={text}
+        choices={suggest.map((value) => ({ value }))}
+        listLabel={`Known ${label}s`}
+        onChange={setText}
+        // A pick is kept as Enter keeps a typed value.
+        onPick={(t) => { done.current = true; onSave(t, true); }}
+        onKeyDown={keys}
+        onBlur={blur}
+      />
+    );
+  return <input autoFocus aria-label={label} className="cfg-edit" value={text} spellCheck={false} placeholder={kind === "minutes" ? "minutes" : undefined} onKeyDown={keys} onBlur={blur} onChange={(e) => setText(e.target.value)} />;
 }

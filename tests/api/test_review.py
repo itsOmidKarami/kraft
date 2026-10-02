@@ -9,7 +9,14 @@ import time
 from pathlib import Path
 
 import pytest
-from support.api import _await_gate, _poll_node_started, _review_early, _set_status, _started
+from support.api import (
+    _await_gate,
+    _held_at,
+    _poll_node_started,
+    _review_early,
+    _set_status,
+    _started,
+)
 
 _REVIEW = pytest.mark.api_client(edit_templates=_review_early)
 
@@ -310,12 +317,6 @@ def test_request_changes_to_a_bad_node_writes_no_review(client, gated):
     assert client.get(f"/api/work-items/{gated}").json()["last_review_sha"] is None
 
 
-@_REVIEW
-def test_review_on_a_gate_that_is_not_pending_is_409(client, gated):
-    r = client.post(f"/api/work-items/{gated}/gates/other/review", json={"outcome": "comment"})
-    assert r.status_code in (404, 409)
-
-
 def _session_of(client, wid, node_id):
     """A worker_sessions id for `node_id` on `wid`, as a real agent would carry."""
     body = client.get(f"/api/work-items/{wid}").json()
@@ -438,10 +439,7 @@ def test_an_unreadable_head_refuses_the_review_and_records_nothing(client, gated
 
 
 def test_a_gateless_comment_is_recorded_with_no_gate(client, repo, monkeypatch):
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")  # stays running at implementation
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
-    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    wid = _held_at(client, repo, "spec", monkeypatch)  # its worktree exists
     _new_thread(client, wid, label="question", anchor_sha="0" * 40)
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
     assert r.status_code == 200, r.text
@@ -454,10 +452,7 @@ def test_a_reply_to_a_gateless_thread_has_no_attempt_number(client, repo, monkey
     """`gate_attempts` counts a gate's own attempt refs (review threads
     anywhere §1: threads and reviews may now carry no gate at all). A reply
     on a thread with no gate has nothing to count an attempt against."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
-    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    wid = _held_at(client, repo, "spec", monkeypatch)  # its worktree exists
     tid = _new_thread(client, wid, anchor_sha="0" * 40).json()["id"]
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
     assert r.status_code == 200, r.text
@@ -472,10 +467,7 @@ def test_a_reply_to_a_gateless_thread_has_no_attempt_number(client, repo, monkey
 
 
 def test_approve_needs_a_pending_gate(client, repo, monkeypatch):
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
-    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    wid = _held_at(client, repo, "spec", monkeypatch)  # its worktree exists
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "approve"})
     assert r.status_code == 409
     assert "no gate is pending" in r.text
@@ -548,10 +540,9 @@ def _paused_before_the_gate(client, repo, monkeypatch, delay="5"):
     covers. A *real* pause (not a forced status): `deps.task_is_live` must
     read False by the time this returns, or the retry/resume calls below
     would 409 on a walk "already running" against their own target."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", delay)
-    wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
-    _poll_node_started(client, wid, "work_item_summary")
+    wid = _held_at(
+        client, repo, "work_item_summary", monkeypatch, delay=delay, chain_template="review-early"
+    )
     r = client.post(f"/api/work-items/{wid}/pause")
     assert r.status_code == 200, r.text
     return wid

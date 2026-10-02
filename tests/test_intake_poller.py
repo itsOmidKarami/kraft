@@ -281,13 +281,16 @@ async def test_skips_a_bead_above_the_priority_ceiling(tmp_path, monkeypatch, st
     assert [r["bead_id"] for r in _work_items(app)] == ["B-BACKLOG"]
 
 
-async def test_does_not_run_while_the_daily_budget_is_breached(tmp_path, monkeypatch, stub_app):
+@pytest.mark.parametrize("spent", [5.0, 1.0], ids=["over-the-cap", "exactly-the-cap"])
+async def test_does_not_run_while_the_daily_budget_is_breached(
+    tmp_path, monkeypatch, stub_app, spent
+):
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
     app = stub_app(**_state(tmp_path, budget=policy.Budget(daily_usd=1.0)))
-    await _spend(app, 5.0)
+    await _spend(app, spent)
     assert await intake_mod.tick(app) == []
     assert [r["bead_id"] for r in _work_items(app)] == ["SPENT-1"]
 

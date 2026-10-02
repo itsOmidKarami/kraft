@@ -52,3 +52,31 @@ describe("ValueCell", () => {
     expect(screen.getByRole("button", { name: "next" })).toHaveFocus();
   });
 });
+
+describe("ValueCell with a closed set", () => {
+  const PROFILES = [{ value: "careful", summary: "Read twice" }, { value: "terse" }];
+  const steering = (onCommit = vi.fn(() => null)) =>
+    render(<ValueCell label="steering" value="careful" display="careful" choices={PROFILES} closed multiple noun="steering profile" onCommit={onCommit} />);
+
+  it("lists the values it takes as you type, and leaves out the ones the list holds", async () => {
+    steering();
+    await userEvent.click(screen.getByRole("button", { name: "steering, careful. Edit" }));
+    await userEvent.type(screen.getByRole("combobox", { name: "steering" }), ", ");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["terse"]);
+  });
+
+  it("refuses an unlisted value in place and sends nothing, then commits a listed one", async () => {
+    const onCommit = vi.fn(() => null);
+    steering(onCommit);
+    await userEvent.click(screen.getByRole("button", { name: /steering/ }));
+    const input = screen.getByRole("combobox", { name: "steering" });
+    await userEvent.type(input, ", sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("“sds” is not a steering profile. Pick one from the list.");
+    expect(input).toHaveFocus();
+    expect(onCommit).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "careful, ter");
+    await userEvent.keyboard("{ArrowDown}{Enter}{Enter}");
+    expect(onCommit).toHaveBeenCalledWith("careful, terse");
+  });
+});

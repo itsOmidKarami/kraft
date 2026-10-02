@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
@@ -19,6 +22,24 @@ def _set_password(client, monkeypatch):
 
 
 _LAN = pytest.mark.api_client(peer=("10.0.0.5", 54321))
+
+
+def _first_frame_of_type(ws, frame_type: str, timeout: float = 10.0) -> dict:
+    """The first `frame_type` frame on `ws`, skipping any other a poller sent
+    first, and failing after `timeout` instead of hanging until pytest-timeout
+    ends the process. Starlette's test session has no receive timeout, so each
+    read runs on a worker thread and the wait for it is bounded; a read still
+    blocked at the timeout ends when the websocket closes."""
+    deadline = time.monotonic() + timeout
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        while True:
+            wait = max(deadline - time.monotonic(), 0)
+            frame = pool.submit(ws.receive_json).result(timeout=wait)
+            if frame["type"] == frame_type:
+                return frame
+    finally:
+        pool.shutdown(wait=False)
 
 
 def test_client_is_local_reads_the_peer_address():
@@ -361,7 +382,7 @@ def test_a_browser_opening_an_unlisted_name_gets_a_page_saying_how_to_allow_it(l
     assert page.status_code == 403
     assert page.headers["content-type"].startswith("text/html")
     assert "<code>mybox.lan</code>" in page.text
-    assert "Settings &gt; Access" in page.text and "allowed_hosts" in page.text
+    assert "Settings &rsaquo; Access" in page.text and "allowed_hosts" in page.text
     assert page.headers["x-frame-options"] == "SAMEORIGIN"
 
     hostile = lan_bind.get("/", headers={"host": "<b>x</b>", **_NAVIGATION})
@@ -428,7 +449,7 @@ def test_a_non_loopback_bind_streams_events_to_a_board_on_an_allowed_host(lan_bi
         lan_bind.post(
             "/api/work-items", json={"autostart": False, "title": "hi", "repo": str(tmp_path)}
         )
-        assert ws.receive_json()["type"] == "work_item_created"
+        assert _first_frame_of_type(ws, "work_item_created")
 
 
 @pytest.mark.api_client(host="0.0.0.0")
@@ -490,7 +511,17 @@ def test_the_perimeter_runs_before_the_spa_shell_middleware(client, dist):
     (tests/conftest.py), so declaration order no longer decides whether this
     test exercises anything. Do not use this as a template — list `dist`
     before `client` as usual; this ordering only proves the fixture no longer
-    depends on it."""
+    depends on it.
+
+    The loopback navigation first is what proves the pull: without it the
+    lifespan starts with no SPA build, the rebound request below gets the
+    403 whatever the middleware order, and this test would pass on neither."""
+    shell = client.get(
+        "/work-items", headers={"sec-fetch-site": "same-origin", "sec-fetch-dest": "document"}
+    )
+    assert shell.status_code == 200, shell.text
+    assert shell.text.startswith("<!doctype html>")
+
     r = client.get(
         "/work-items",
         headers={
@@ -563,7 +594,7 @@ def test_the_event_stream_needs_a_session_too(client, tmp_path):
         client.post(
             "/api/work-items", json={"autostart": True, "title": "hello", "repo": str(tmp_path)}
         )
-        assert ws.receive_json()["type"] == "work_item_created"
+        assert _first_frame_of_type(ws, "work_item_created")
 
 
 @pytest.mark.api_client(host="0.0.0.0")

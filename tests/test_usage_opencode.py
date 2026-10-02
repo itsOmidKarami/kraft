@@ -315,3 +315,22 @@ def test_opencode_export_reads_info_as_a_step_and_refuses_what_is_not_one(monkey
     for stdout, rc in (("not json", 0), (json.dumps({"info": _EXPORT_INFO}), 1), ("{}", 0)):
         monkeypatch.setattr(subprocess, "run", fake(stdout, rc))
         assert REAL_EXPORT(_SID) is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        FileNotFoundError(2, "No such file or directory", "opencode"),
+        subprocess.TimeoutExpired(["opencode"], 30),
+    ],
+    ids=["no-binary", "timed-out"],
+)
+def test_opencode_export_answers_none_when_it_cannot_run(monkeypatch, failure):
+    """No `opencode` on PATH, or an export that hangs: the log's own sum
+    stands in, rather than the read failing."""
+
+    def run(argv, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert REAL_EXPORT(_SID) is None

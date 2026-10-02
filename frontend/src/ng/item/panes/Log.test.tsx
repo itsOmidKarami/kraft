@@ -33,4 +33,15 @@ describe("Log", () => {
     await act(async () => void (await vi.advanceTimersByTimeAsync(POLL_MS * 3)));
     expect(calls.length).toBe(4);
   });
+
+  it("clears the no-log note once a pending attempt starts writing one", async () => {
+    const answers: Record<string, [number, unknown]> = { "GET /worker-sessions/s1/log": [404, { detail: "no log" }] };
+    stubFetch(answers);
+    const { rerender } = render(<Log sessionId="s1" running={false} title="t" />);
+    expect(await screen.findByText("No log for this attempt yet.")).toBeInTheDocument();
+    answers["GET /worker-sessions/s1/log"] = answer["GET /worker-sessions/s1/log"] as never;
+    rerender(<Log sessionId="s1" running title="t" />);
+    expect(await screen.findByText(/reading cache\.py/)).toBeInTheDocument();
+    expect(screen.queryByText("No log for this attempt yet.")).toBeNull();
+  });
 });

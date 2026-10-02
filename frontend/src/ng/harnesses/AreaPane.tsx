@@ -102,6 +102,8 @@ export function AreaPane({ draft, r, problems, published, tab, onTab, open, size
             values={r.escalation.grants ?? []}
             added={published ? (r.escalation.grants ?? []).filter((g) => !(published.grants ?? []).includes(g)) : []}
             empty="Escalation turns get only their node's own grants."
+            choices={draft.view?.result.choices?.grants}
+            noun="grant"
             onChange={(grants) => send({ grants })}
           />
           <Note>What every escalation turn may do on top of its node's own grants.</Note>

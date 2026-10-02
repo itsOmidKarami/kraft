@@ -78,14 +78,26 @@ def _head(repo) -> str:
 # --- the pipeline ----------------------------------------------------------------
 
 
+def _routes(ci_list: str) -> dict:
+    """`glab` answering each call `ci_status` makes with that call's own shape,
+    and `ci_list` for the pipeline list."""
+    return {
+        "mr view": GLAB_MR_VIEW,
+        "ci list": ci_list,
+        "ci get": GLAB_CI_GET_FAILED,
+        "ci trace": GLAB_CI_TRACE,
+    }
+
+
 async def test_glab_ci_status_maps_a_failed_pipeline(cli, tmp_path):
-    cli.stub("glab", GLAB_CI_FAILED)
+    cli.stub("glab", routes=_routes(GLAB_CI_FAILED), default=FAIL)
 
     status = await forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(1, "http://x/1"))
 
     assert status.state == "failed"
     assert status.url.endswith("/pipelines/2826926700")
     assert status.jobs, "the review brief needs something to show"
+    assert status.failed_jobs == (forge.FailedJob("release-impact", "failed", None),)
 
 
 @pytest.mark.parametrize(
@@ -98,7 +110,7 @@ async def test_glab_ci_status_maps_a_failed_pipeline(cli, tmp_path):
     ids=["running", "no-pipeline-yet"],
 )
 async def test_glab_ci_status_is_pending_until_a_pipeline_settles(cli, tmp_path, ci_list):
-    cli.stub("glab", ci_list)
+    cli.stub("glab", routes=_routes(ci_list), default=FAIL)
 
     status = await forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(1, "http://x/1"))
 
@@ -120,7 +132,7 @@ async def test_glab_raises_forge_error_when_the_cli_fails(cli, tmp_path):
 async def test_glab_ci_status_asks_for_this_branch_only(cli, tmp_path):
     """Without --ref, `glab ci list` returns the newest pipeline in the whole
     project. A green pipeline on main would pass the gate for a red branch."""
-    cli.stub("glab", GLAB_CI_SUCCESS)
+    cli.stub("glab", routes=_routes(GLAB_CI_SUCCESS), default=FAIL)
 
     await forge.GlabCli().ci_status(repo=tmp_path, mr=NO_MR, branch="kraft/abc")
 
@@ -311,8 +323,29 @@ async def test_glab_ci_status_does_not_chase_a_green_pipeline(cli, tmp_path):
         # The detail fetch itself failed: a genuine code failure must never
         # read as infra just because its own detail could not be read.
         (FAIL, forge.glab._UNREADABLE_JOBS, False),
+        # Only the first two failed jobs get a trace, but every failed job is
+        # classified: a code failure third in line keeps the pipeline code-red.
+        (
+            '{"id":2826926700,"status":"failed","jobs":['
+            '{"id":1,"name":"a","status":"failed","failure_reason":"runner_system_failure"},'
+            '{"id":2,"name":"b","status":"success"},'
+            '{"id":3,"name":"c","status":"failed","failure_reason":"stuck_or_timeout_failure"},'
+            '{"id":4,"name":"d","status":"failed","failure_reason":"script_failure"}]}',
+            (
+                forge.FailedJob("a", "failed", "runner_system_failure"),
+                forge.FailedJob("c", "failed", "stuck_or_timeout_failure"),
+                forge.FailedJob("d", "failed", "script_failure"),
+            ),
+            False,
+        ),
     ],
-    ids=["job-with-reason", "zero-jobs-yaml-errors", "zero-jobs-confirmed", "detail-unreadable"],
+    ids=[
+        "job-with-reason",
+        "zero-jobs-yaml-errors",
+        "zero-jobs-confirmed",
+        "detail-unreadable",
+        "a-third-failed-job-counts",
+    ],
 )
 async def test_glab_ci_status_reads_the_failed_jobs(cli, tmp_path, ci_get, failed_jobs, infra):
     cli.stub(

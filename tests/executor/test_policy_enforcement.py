@@ -116,7 +116,6 @@ async def test_a_policy_sandbox_wraps_the_task_and_the_repository_cannot_turn_it
         return "done"
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
-    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", run_task)
     it = await item_on(_node(task, policy={"sandbox": _SANDBOX}))
     entry = entry_of(
         {"setup_command": "", "test_command": "true"}
@@ -625,7 +624,6 @@ async def test_a_sandbox_on_one_task_wraps_every_launch_of_the_item(
         return "done"
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
-    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", run_task)
     it = await item_on(_sandboxed_elsewhere(sandbox))
     launch = TESTED
 

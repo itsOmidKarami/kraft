@@ -57,7 +57,14 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from kraft.config import ConfigError, bounded_yaml, first_error, git_read, read_yaml
+from kraft.config import (
+    GIT_READ_ENV,
+    ConfigError,
+    bounded_yaml,
+    first_error,
+    git_read,
+    read_yaml,
+)
 
 #: The packaged table. An operator's file of the same name under the
 #: templates directory layers on top of it, never replaces it wholesale, so a
@@ -289,11 +296,6 @@ def no_commit(path: str | Path) -> str:
     )
 
 
-#: A partial clone's missing blob is fetched on demand; a probe must not
-#: reach the network, let alone prompt for credentials.
-_GIT_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
-
-
 def _git(root: Path, *args: str) -> bytes:
     """A read the probe cannot do without: a failure is an error naming git's
     reason, never an empty answer that reads as an empty repository."""
@@ -304,7 +306,7 @@ def _git(root: Path, *args: str) -> bytes:
             capture_output=True,
             timeout=_LIST_TIMEOUT_S,
             check=False,
-            env={**os.environ, **_GIT_ENV},
+            env={**os.environ, **GIT_READ_ENV},
         )
     except subprocess.TimeoutExpired as exc:
         raise ConfigError(
@@ -344,7 +346,7 @@ class _Blobs:
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, **_GIT_ENV},
+                    env={**os.environ, **GIT_READ_ENV},
                 )
             stdin, stdout = self._proc.stdin, self._proc.stdout
             assert stdin is not None and stdout is not None
@@ -748,6 +750,9 @@ class Candidate:
     #: A CI line whose program is a bare tool rather than a runner, a
     #: toolchain's wrapper or a script of the repo's own.
     bare: bool = False
+    #: A CI line that hands a shell a script (`bash -c "…"`, or shell syntax
+    #: in quotes): shown, and never chosen.
+    script: bool = False
     #: The runner task it runs (`setup`), when it runs one.
     task: str | None = None
     chosen: bool = False
@@ -1010,6 +1015,36 @@ def _shell_syntax(command: str) -> bool:
     return bool(re.search(r"[|;&<>(){}\\]", bare))
 
 
+#: A shell that runs the script it is given after `-c`.
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+_SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
+#: The flag an interpreter takes a script after: `python -c`, `python -Ic`,
+#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`.
+_SCRIPT_FLAGS = re.compile(r"-[a-zA-Z]*[ceEp][a-zA-Z]*|--(?:eval|print|command)=?")
+
+
+def _a_script(command: str) -> bool:
+    """A line `_shell_syntax` passes only because its script is in quotes:
+    `bash -c "curl … | sh; pytest"`, `python -c "import os; …"`. Shown for a
+    person to read, never chosen. Quoted syntax anywhere else is an argument
+    a test runner reads, run as argv with no shell: `pytest -k "not (a or
+    b)"`, `go test -run 'Test(Foo|Bar)'`."""
+    words = command.split()
+    # A shell anywhere in the line, not only first: `env bash -lc "…"`,
+    # `xvfb-run bash -ec "…"` hand it the script all the same.
+    for i, word in enumerate(words):
+        if posixpath.basename(word) in _SHELLS and any(
+            _SHELL_FLAGS.fullmatch(w) for w in words[i + 1 :]
+        ):
+            return True
+    for quoted in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
+        before = command[: quoted.start()].split()
+        flag = before[-1] if before else ""
+        if _SCRIPT_FLAGS.fullmatch(flag) and re.search(r"[|;&<>(){}\\]", quoted[0]):
+            return True
+    return False
+
+
 def _strip_env(command: str) -> str:
     """`CI=true npm test` -> `npm test`: a test command runs without a shell,
     where a leading assignment is a program name."""
@@ -1081,7 +1116,10 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
             bare = role == "test" and not (
                 head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
             )
-            found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
+            script = _a_script(command)
+            found.append(
+                Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare, script=script)
+            )
     return found
 
 
@@ -1182,7 +1220,9 @@ def _ancestors(d: str) -> list[str]:
 def _first_by_tier(cands: list[Candidate], tiers: tuple[Tier, ...]) -> Candidate | None:
     """The first candidate by tier, and within a tier one CI also runs. A CI
     line running a bare tool (`pytest`, `jest`) comes last of all: CI
-    installed that tool on its own PATH, which a worktree's is not."""
+    installed that tool on its own PATH, which a worktree's is not. A CI
+    line that is a shell script is never one."""
+    cands = [c for c in cands if not c.script]
     for tier in tiers:
         pool = [c for c in cands if c.tier == tier and not c.bare]
         hit = next((c for c in pool if c.corroborated), pool[0] if pool else None)

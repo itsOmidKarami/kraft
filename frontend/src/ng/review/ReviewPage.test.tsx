@@ -78,11 +78,11 @@ describe("commenting on lines", () => {
   const PATCH = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,4 +1,5 @@\n x = 1\n-y = 2\n+y = 3\n+z = 4\n w = 5\n v = 6\n";
   const posts = () =>
     vi.mocked(http.request).mock.calls.filter(([p, i]) => i?.method === "POST" && String(p).endsWith("/threads")).map(([, i]) => JSON.parse(i!.body as string));
-  const open = async () => {
+  const open = async (threads: unknown[] = []) => {
     vi.spyOn(http, "request").mockImplementation(async (p, init) =>
       String(p).includes("/compare")
         ? { status: 200, body: { from: { target: "base", sha: "b" }, to: { target: "latest", sha: null }, rebased: false, files: [{ path: "a.py", insertions: 2, deletions: 1, touched_by: [], viewed: false }], groups: [], diff: PATCH, untracked: [], truncated: false, ignore_whitespace: false, diff_max_bytes: 1000 } }
-        : init?.method === "POST" ? { status: 201, body: {} } : { status: 200, body: [] },
+        : init?.method === "POST" ? { status: 201, body: {} } : { status: 200, body: String(p).endsWith("/threads") ? threads : [] },
     );
     render(
       <MemoryRouter initialEntries={["/work-items/w1/review"]}>
@@ -96,53 +96,83 @@ describe("commenting on lines", () => {
 
   it("comments on one line from its +, and Ctrl+Enter adds it to the review", async () => {
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
-    expect(screen.getByRole("group", { name: "Comment: Line 3" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line +3" }));
+    expect(screen.getByRole("group", { name: "Comment: Line +3" })).toBeInTheDocument();
     type("why z?");
     await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Enter", ctrlKey: true }));
-    expect(posts()).toEqual([{ body: "why z?", file_path: "a.py", label: null, side: "new", start_line: 3, end_line: 3 }]);
+    expect(posts()).toEqual([{ body: "why z?", file_path: "a.py", label: null, side: "new", start_line: 3, end_line: 3, quote: "+z = 4" }]);
     expect(screen.queryByRole("group", { name: /^Comment: / })).toBeNull();
   });
 
   it("drops the pick once its comment is added: + on a line of it comments on that line alone", async () => {
     await open();
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on line 2" }));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on line +2" }));
     fireEvent.mouseOver(row("w = 5"));
     fireEvent.mouseUp(window);
     type("three lines");
     await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Enter", metaKey: true }));
     expect(document.querySelector(".is-picked")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
-    expect(screen.getByRole("group", { name: "Comment: Line 3" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line +3" }));
+    expect(screen.getByRole("group", { name: "Comment: Line +3" })).toBeInTheDocument();
   });
 
   it("comments on a range dragged from +", async () => {
     await open();
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on line 2" }));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on line +2" }));
     fireEvent.mouseOver(row("w = 5"));
     fireEvent.mouseUp(window);
-    expect(screen.getByRole("group", { name: "Comment: Lines 2–4" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines +2 to +4" })).toBeInTheDocument();
     type("one change, three lines");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
-    expect(posts()).toEqual([{ body: "one change, three lines", file_path: "a.py", label: null, side: "new", start_line: 2, end_line: 4 }]);
+    expect(posts()).toEqual([{ body: "one change, three lines", file_path: "a.py", label: null, side: "new", start_line: 2, end_line: 4, quote: "+y = 3\n+z = 4\n w = 5" }]);
   });
 
   it("comments on the old side: a removed line, or a context line's old number", async () => {
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "Comment on old line 2" }));
-    expect(screen.getByRole("group", { name: "Comment: Old line 2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line −2" }));
+    expect(screen.getByRole("group", { name: "Comment: Line −2" })).toBeInTheDocument();
     type("was 2 on purpose?");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
     fireEvent.click(screen.getByRole("button", { name: "Pick old line 3" }));
-    fireEvent.click(screen.getByRole("button", { name: "Comment on old line 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line −3" }));
     type("and w before");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
     expect(posts().map((b) => [b.side, b.start_line, b.end_line])).toEqual([["old", 2, 2], ["old", 3, 3]]);
   });
 
+  it("comments on a removed line and the line that replaced it as one range, dragged from the −'s +", async () => {
+    await open();
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on line −2" }));
+    fireEvent.mouseOver(row("y = 3"));
+    fireEvent.mouseUp(window);
+    expect(screen.getByRole("group", { name: "Comment: Lines −2 to +2" })).toBeInTheDocument();
+    expect(row("y = 2")).toHaveClass("is-picked");
+    expect(row("y = 3")).toHaveClass("is-picked");
+    type("3, not 2");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
+    expect(posts()).toEqual([{ body: "3, not 2", file_path: "a.py", label: null, side: "new", start_line: 2, end_line: 2, start_side: "old", quote: "-y = 2\n+y = 3" }]);
+  });
+
+  it("the pencil moves the start line, and the shaded pick moves with it", async () => {
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line +2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change the start line" }));
+    act(() => fireEvent.click(screen.getByRole("menuitemradio", { name: /^−2/ })));
+    expect(screen.getByRole("group", { name: "Comment: Lines −2 to +2" })).toBeInTheDocument();
+    expect([...document.querySelectorAll(".rv-row.is-picked .rv-code")].map((c) => c.textContent)).toEqual(["y = 2", "y = 3"]);
+  });
+
+  it("shades a saved range across sides and quotes its lines when the page loads", async () => {
+    const thread = { id: "t1", work_item_id: "w1", gate: null, node_id: null, file_path: "a.py", side: "new", start_side: "old", start_line: 2, end_line: 2, quote: "-y = 2\n+y = 3", anchor_sha: "h", label: null, state: "open", resolved_at: null, created_at: "t", draft: true, comments: [{ id: "c1", thread_id: "t1", review_id: null, author: "you", attempt: null, body: "3, not 2", suggestion: null, claim: null, created_at: "t", draft: true }] };
+    await open([thread]);
+    await screen.findByText("3, not 2");
+    expect([...document.querySelectorAll(".rv-row.is-commented .rv-code")].map((c) => c.textContent)).toEqual(["y = 2", "y = 3"]);
+    expect(screen.getByRole("group", { name: "Lines commented on" })).toHaveTextContent("−y = 2+y = 3");
+  });
+
   it("Esc on an empty composer drops the pick and hands the focus back to the lines", async () => {
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line +3" }));
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Escape" });
     expect(screen.queryByRole("group", { name: /^Comment: / })).toBeNull();
@@ -152,7 +182,7 @@ describe("commenting on lines", () => {
 
   it("drops a cancelled draft: nothing is sent, and the line's composer opens empty again", async () => {
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line +3" }));
     type("half a thought");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
@@ -160,7 +190,7 @@ describe("commenting on lines", () => {
     // The pick goes with it, and the focus goes back to the file's lines.
     expect(document.querySelector(".is-picked")).toBeNull();
     expect(screen.getByRole("group", { name: /^Lines of a.py/ })).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment on line +3" }));
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("");
     expect(posts()).toEqual([]);
   });

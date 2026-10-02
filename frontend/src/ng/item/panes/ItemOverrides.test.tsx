@@ -7,11 +7,14 @@ import { resetProviders } from "../../harnesses/useProviders";
 import { resetHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { API_ITEM } from "../fixture.api";
 import { resetRepoEntries } from "../useRepoEntry";
-import { detail, fresh, FROZEN, stubFetch, V1, type Call } from "../testkit";
+import { acceptWrites, detail, fresh, FROZEN, stubFetch, V1, type Call } from "../testkit";
 import type { ItemDetail } from "../useItem";
 import { usePaneMemory, Workspace } from "../Workspace";
 import { ChainConfig } from "./ChainPane";
 import { ItemAgentRows, NodeOverrideRows } from "./ItemOverrides";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("PATCH /work-items/w1");
 
 const answers = {
   "GET /harnesses/profiles": [200, { profiles: [{ id: "claude", provider: "claude", defaults: { model: "sonnet" } }], agent_profiles: [{ id: "strong", effort: "high", model: { claude: "opus-4" } }] }],
@@ -26,7 +29,7 @@ beforeEach(() => {
   resetHarnessOptions();
   resetProviders();
   resetRepoEntries();
-  calls = stubFetch(answers);
+  calls = stubFetch({ ...WRITES, ...answers });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -116,7 +119,7 @@ describe("NodeOverrideRows", () => {
     usePaneMemory.setState({ pane: { open: true, userCollapsed: false } });
     const mount = (item: ItemDetail) => render(
       <MemoryRouter initialEntries={["/work-items/w1?sel=verification&tab=config"]}>
-        <Routes><Route path="/work-items/:id" element={<Workspace item={item} reload={() => {}} />} /></Routes>
+        <Routes><Route path="/work-items/:id" element={<Workspace item={item} version="1" reload={() => {}} />} /></Routes>
       </MemoryRouter>,
     );
     const first = mount(fresh());

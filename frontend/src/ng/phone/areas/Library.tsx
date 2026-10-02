@@ -86,8 +86,11 @@ export function LibraryComponentView() {
   const settings: RowSpec[] = ownRows(own).map(({ field, value }): RowSpec => {
     const base: RowSpec = { key: field, label: field, mono: true, changed: changed(field) };
     if (typeof value === "boolean") return { ...base, sw: value, onSwitch: (on) => void setField(field, on) };
+    // An action or a target is one of the values the draft lists, not free text.
+    const choices = field === "ref" || field === "target" ? draft.view?.result.choices?.[field] ?? [] : [];
+    const listed = choices.length ? { choices, closed: true, noun: field === "ref" ? "action" : "target" } : undefined;
     if (typeof value === "string" || typeof value === "number")
-      return { ...base, value: show(value), onEdit: () => edit({ kind: "text", title: field, value: String(value), set: (v) => (typeof value === "number" ? (v.trim() && Number.isFinite(Number(v)) ? setField(field, Number(v)) : Promise.resolve("Enter a number.")) : setField(field, v)) }) };
+      return { ...base, value: show(value), onEdit: () => edit({ kind: "text", title: field, value: String(value), listed, set: (v) => (typeof value === "number" ? (v.trim() && Number.isFinite(Number(v)) ? setField(field, Number(v)) : Promise.resolve("Enter a number.")) : setField(field, v)) }) };
     return { ...base, value: show(value) };
   });
   const instructions = typeof own?.instructions === "string" ? own.instructions : null;

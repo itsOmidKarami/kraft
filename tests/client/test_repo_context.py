@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
-from pathlib import Path
 from urllib.parse import quote
 
 import httpx
 import pytest
-from support.harness import fake_templates_dir, isolated_bd, make_repo, make_repo_with_submodule
+from support.api import run_with_app
+from support.harness import make_repo, make_repo_with_submodule
 
 from kraft import client
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
 def test_a_dead_server_is_a_sentence_not_a_traceback(monkeypatch, tmp_path):
@@ -36,36 +32,6 @@ def test_a_dead_server_is_a_sentence_not_a_traceback(monkeypatch, tmp_path):
     # the address is in the message: KRAFT_PORT means it is not always 8765
     assert "no Kraft server at http://127.0.0.1:8765" in str(caught.value)
     assert "start one with `kraft`" in str(caught.value)
-
-
-@pytest.fixture
-def wired(tmp_path, monkeypatch):
-    """The app, with client.transport.http() pointed at it in-process (as test_client_read)."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    import kraft.api as api
-
-    monkeypatch.setattr(
-        client.transport,
-        "http",
-        lambda: httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
-        ),
-    )
-    return api
-
-
-def run_with_app(api, scenario):
-    async def wrapper():
-        async with api.app.router.lifespan_context(api.app):
-            return await scenario()
-
-    return asyncio.run(wrapper())
 
 
 def test_resolve_repo_finds_the_connected_repo_containing_the_cwd(wired, tmp_path):

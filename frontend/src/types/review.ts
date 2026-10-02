@@ -64,9 +64,14 @@ export interface ReviewThread {
   gate: string | null;
   node_id: string | null;
   file_path: string | null;
+  /** The side of `end_line`. */
   side: "old" | "new" | null;
+  /** The side of `start_line`: `side`, unless the range runs across sides. */
+  start_side?: "old" | "new" | null;
   start_line: number | null;
   end_line: number | null;
+  /** The range's lines when it was commented on, each led by its diff mark. */
+  quote?: string | null;
   anchor_sha: string;
   label: ThreadLabel | null;
   state: ThreadState;

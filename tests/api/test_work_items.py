@@ -13,20 +13,18 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.api import _await_gate, _poll_events, _post_default, _set_status, _started
+from support.api import (
+    _await_gate,
+    _paused,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _started,
+)
 from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
 from kraft.api.routes.work_items import NewWorkItem
-
-
-def _paused(client, repo, **body):
-    """File a not-yet-started item (`autostart: False`); return its id."""
-    r = client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False, **body}
-    )
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
 
 
 @pytest.mark.parametrize("policy", ["nope", "skip"], ids=["unknown", "a-retired-v0-value"])
@@ -439,32 +437,26 @@ def test_patch_accepts_agent_overrides_on_a_started_or_paused_item(client, repo)
     assert r.status_code == 200, r.text
 
 
-def test_get_work_item_reports_the_worktree_head(client, repo, monkeypatch):
-    """Kraft-lu2: the gate compares a measurement's sha against this. Without it
-    the frontend has nothing to compare to."""
-    from kraft import executor
+def test_get_work_item_reports_the_worktree_head(client, repo):
+    """Kraft-lu2: the gate compares a measurement's sha against this, so it is
+    the commit the item's own worktree is on. An item that has not started
+    has no worktree yet: `git_read` returns None rather than raising, and the
+    field carries that through instead of 500ing."""
+    paused = _paused(client, repo)
+    assert client.get(f"/api/work-items/{paused}").json()["head_sha"] is None
 
-    async def noop(*a, **kw):
-        return "completed"
-
-    monkeypatch.setattr(executor, "run", noop)
-    wid = _started(client, {"title": "x", "repo": str(repo)})
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
     body = client.get(f"/api/work-items/{wid}").json()
-    assert "head_sha" in body
-
-
-def test_get_work_item_head_sha_is_none_before_the_worktree_exists(client, repo, monkeypatch):
-    """A paused item has no worktree yet; `git_read` returns None rather than
-    raising, and the field must carry that through instead of 500ing."""
-    from kraft import executor
-
-    async def noop(*a, **kw):
-        return "completed"
-
-    monkeypatch.setattr(executor, "run", noop)
-    wid = _started(client, {"title": "x", "repo": str(repo)})
-    body = client.get(f"/api/work-items/{wid}").json()
-    assert body["head_sha"] is None
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=body["worktree_path"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert len(head) == 40
+    assert body["head_sha"] == head
 
 
 def _invalid_policy(tdir):

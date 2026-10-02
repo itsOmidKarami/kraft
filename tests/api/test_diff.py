@@ -9,10 +9,10 @@ from __future__ import annotations
 import shutil
 import sqlite3
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
+from support.api import _completed_item
 from support.harness import connected_repo, make_repo, v1_chain, v1_item
 
 from kraft import store
@@ -26,16 +26,6 @@ def _write(path, text):
     path.write_text(text)
 
 
-def _wait_for_completion(client, wid, timeout=120):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        evs = client.get(f"/api/work-items/{wid}/events").json()
-        if any(e["type"] == "work_item_completed" for e in evs):
-            return
-        time.sleep(0.2)
-    raise AssertionError("work item never completed")
-
-
 @pytest.fixture
 def seeded_item(client, tmp_path):
     """A completed quick-task work item with a real worktree and a stamped base_ref.
@@ -46,17 +36,7 @@ def seeded_item(client, tmp_path):
     §6). The cache dir is pure noise, so it is swept here; the session summary
     is left in place, for the endpoint to leave out (Kraft-tugdf.22).
     """
-    repo = connected_repo(tmp_path)
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "autostart": True,
-            "repo": str(repo),
-            "title": "make it pass",
-            "chain_template": "quick-task",
-        },
-    ).json()["id"]
-    _wait_for_completion(client, wid)
+    wid = _completed_item(client, connected_repo(tmp_path))
     worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])
     shutil.rmtree(worktree / ".pytest_cache", ignore_errors=True)
     return wid
@@ -273,11 +253,10 @@ def test_gate_artifact_is_none_without_a_pending_gate(client, seeded_item):
 # -- Kraft-69rwp (a) at the endpoint: no host git while a sandboxed session runs --
 
 
-@pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
-def test_diff_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
-    """A sandboxed item with a session still running answers 409 naming the
-    wait, and never reads the worktree; unsandboxed, the same item's diff is
-    read. Kraft-pa1i8: `stops.refuse_live_sandboxed_session` at its call site."""
+def _item_with_a_live_session(client, tmp_path, sandboxed: bool) -> str:
+    """`w-live`: a paused item whose `implementation` session is still
+    running, its worktree holding one edit past its base commit, in a docker
+    sandbox when `sandboxed`."""
     wid = "w-live"
     st = client.app.state
     worktree = make_repo(st.run_dirs.worktrees, name=wid)
@@ -308,6 +287,15 @@ def test_diff_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
         await st.db.write(lambda c: store.session_running(c, "live", 1, 0.0))
 
     client.portal.call(seed)
+    return wid
+
+
+@pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
+def test_diff_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
+    """A sandboxed item with a session still running answers 409 naming the
+    wait, and never reads the worktree; unsandboxed, the same item's diff is
+    read. Kraft-pa1i8: `stops.refuse_live_sandboxed_session` at its call site."""
+    wid = _item_with_a_live_session(client, tmp_path, sandboxed)
 
     r = client.get(f"/api/work-items/{wid}/diff")
 
@@ -317,6 +305,22 @@ def test_diff_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
     else:
         assert r.status_code == 200, r.text
         assert "calc.py" in r.json()["files"][0]["path"]
+
+
+@pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
+def test_compare_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
+    """The review compare reads the same worktree with host git, so it waits
+    the same way the diff does."""
+    wid = _item_with_a_live_session(client, tmp_path, sandboxed)
+
+    r = client.get(f"/api/work-items/{wid}/compare", params={"from": "base", "to": "latest"})
+
+    if sandboxed:
+        assert r.status_code == 409
+        assert "the diff is available once work item w-live" in r.json()["detail"]
+    else:
+        assert r.status_code == 200, r.text
+        assert [f["path"] for f in r.json()["files"]] == ["calc.py"]
 
 
 def test_diff_ignore_whitespace_drops_whitespace_only_files(client, seeded_item, worktree):

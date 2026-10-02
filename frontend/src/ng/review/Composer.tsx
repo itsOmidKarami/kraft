@@ -1,17 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReviewThread, ThreadLabel } from "../../types";
+import { Pencil } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
-import type { Side } from "./rows";
-import { LABELS, codeBlock, rangeName } from "./Thread";
+import { Menu } from "../ui/Menu";
+import { isMixed, isOneLine, startSideOf, type LineRange } from "./range";
+import type { Anchor, Side } from "./rows";
+import { LABELS, codeBlock, lineRef, rangeName } from "./Thread";
 import { sendOnModEnter } from "../keys";
 
-/** Where a comment goes: a line range on one side of a file, or the whole file. */
+/** Where a comment goes: a range of a file's lines, or the whole file. */
 export interface Target {
   path: string;
-  range: { side: Side; start: number; end: number } | null;
+  range: LineRange | null;
 }
-export const targetKey = (t: Target) => (t.range ? `${t.path}|${t.range.side}|${t.range.start}-${t.range.end}` : `${t.path}|file`);
+export const targetKey = (t: Target) => (t.range ? `${t.path}|${startSideOf(t.range)}${t.range.start}|${t.range.side}${t.range.end}` : `${t.path}|file`);
+
+/** A line the range could start on instead, with its text. */
+export interface StartOption {
+  at: Anchor;
+  text: string;
+}
 
 /** The composer's text until Add to review (spec §6.4: local until then). */
 export interface Draft {
@@ -24,10 +33,13 @@ export const EMPTY: Draft = { body: "", label: null, suggest: null };
 
 /** The comment composer (prototype 467–486). The text lives in `drafts`,
  *  keyed by target, so moving around the page does not lose it. */
-export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }: {
+export function Composer({ target, lines, starts, onStart, drafts, editing, onSubmit, onCancel }: {
   target: Target;
   /** The new-side text of the range, for a suggested change. */
   lines: string[];
+  /** The lines above the range's end it could start on instead (the header's pencil); none hides it. */
+  starts?: StartOption[];
+  onStart?: (a: Anchor) => void;
   drafts: Map<string, Draft>;
   /** A draft thread being edited: its values start the composer. */
   editing?: ReviewThread | null;
@@ -53,6 +65,8 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
   const where = r ? rangeName(r) : "Comment on this file";
   // A range picked across a gap between hunks holds lines the diff doesn't show, so there is nothing to edit them from.
   const gap = !!r && lines.length < r.end - r.start + 1;
+  // A suggestion replaces new-side lines, so a range across sides takes none.
+  const suggests = r?.side === "new" && !isMixed(r);
   const cancel = () => {
     drafts.delete(key);
     onCancel();
@@ -85,7 +99,28 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
       }}
     >
       <div className="rv-composer-head">
-        <span className="rv-muted">{where} ·</span>
+        {r ? (
+          <span className="rv-muted rv-range-name">
+            Comment on {isOneLine(r) ? "line" : "lines"} <LineChip side={startSideOf(r)} line={r.start} />
+            {!isOneLine(r) && <> to <LineChip side={r.side} line={r.end} /></>}
+          </span>
+        ) : (
+          <span className="rv-muted">{where}</span>
+        )}
+        {r && !editing && onStart && starts && starts.length > 1 && (
+          <Menu
+            label="Change the start line"
+            heading="Start line"
+            trigger={<Pencil size={12} aria-hidden />}
+            items={starts.map((o) => ({
+              label: lineRef(o.at.side, o.at.line),
+              hint: o.text.trim().slice(0, 48) || " ",
+              checked: o.at.side === startSideOf(r) && o.at.line === r.start,
+              onSelect: () => onStart(o.at),
+            }))}
+          />
+        )}
+        <span className="rv-muted" aria-hidden="true">·</span>
         <span role="radiogroup" aria-label="Label" className="rv-chips">
           {LABELS.map(([k, text]) => (
             <button key={text} type="button" role="radio" aria-checked={d.label === k} className={`rv-chip${d.label === k ? " is-on" : ""}`} onClick={() => set({ label: k })}>
@@ -101,7 +136,7 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
       ) : (
         <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
       )}
-      {d.suggest !== null && r?.side === "new" && (
+      {d.suggest !== null && suggests && (
         <div className="rv-suggest">
           <div className="rv-suggest-head">Suggested change · {where.toLowerCase()}</div>
           {lines.map((l, i) => <div key={i} className="rv-suggest-line is-del"><span aria-hidden="true">−</span>{l}</div>)}
@@ -117,10 +152,14 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
         </div>
       ) : (
         <div className="rv-row-actions">
-          <span className="rv-muted">{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ⌘↵ ${editing ? "save" : "add to review"}`}</span>
+          <span className="rv-muted rv-notes">
+            <span>{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ⌘↵ ${editing ? "save" : "add to review"}`}</span>
+            {/* Ranges have no button of their own: say how to make one where one line was picked. */}
+            {r && isOneLine(r) && !editing && !preview && <span>Drag the + or Shift-click to comment on several lines</span>}
+          </span>
           <span className="rv-spacer" />
-          {r?.side === "new" && gap && <span className="rv-muted">No suggestion across lines the diff doesn't show</span>}
-          {r?.side === "new" && (
+          {suggests && gap && <span className="rv-muted">No suggestion across lines the diff doesn't show</span>}
+          {suggests && (
             <Button aria-pressed={d.suggest !== null} disabled={gap && d.suggest === null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null })}>± Suggest change</Button>
           )}
           <Button onClick={() => (dirty ? setAsking(true) : cancel())}>Cancel</Button>
@@ -133,3 +172,6 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
     </div>
   );
 }
+
+/** A line number in the composer's header, coloured by its side. */
+const LineChip = ({ side, line }: { side: Side; line: number }) => <span className={`rv-line-chip is-${side}`}>{lineRef(side, line)}</span>;

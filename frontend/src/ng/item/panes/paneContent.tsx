@@ -25,6 +25,8 @@ import { NodeOverrideRows } from "./ItemOverrides";
 
 export type PaneArgs = {
   item: ItemDetail;
+  /** Moves on every read of the item (useItem): what a pane reads beside the item is keyed on it. */
+  version: string;
   events: KraftEvent[];
   now: number;
   policy: Policy | null;
@@ -39,7 +41,8 @@ export type PaneArgs = {
   editBudget: boolean;
   setEditBudget: (on: boolean) => void;
   attempt?: number;
-  setAttempt: (attempt: number) => void;
+  /** Pin the tabs to one attempt; undefined follows the newest. */
+  setAttempt: (attempt: number | undefined) => void;
   docs: WorkItemDocument[];
   onDoc: (d: WorkItemDocument) => void;
   /** Open the pending gate's document (GET /artifact). */
@@ -96,7 +99,7 @@ export function paneContent(a: PaneArgs): PaneContent {
       gate: true,
       title: node.id,
       sub: `gate node · ${pending ? "waiting for you" : stateWord(a.graph.find((g) => g.id === node.id)?.state)}`,
-      body: <GateBody item={item} gate={node} events={a.events} />,
+      body: <GateBody item={item} version={a.version} gate={node} events={a.events} />,
       footer: pending ? <GateFooter item={item} gate={node} reload={a.reload} onRead={a.onArtifact} /> : undefined,
     };
   }
@@ -211,9 +214,11 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     };
   }
   const current = item.current_node_id === node.id;
-  const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={a.setAttempt} now={a.now} />;
+  // Stepping onto the newest attempt drops the pin, so the pane follows the next one that starts;
+  // an older attempt stays put while newer ones arrive, and the switcher's count shows them.
+  const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} />;
   const bodies: Record<string, ReactNode> = {
-    thread: <Thread item={item} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
+    thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} />,
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,

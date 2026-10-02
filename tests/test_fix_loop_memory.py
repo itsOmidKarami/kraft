@@ -591,15 +591,28 @@ def test_a_finding_that_burned_a_cycle_is_not_deferred(tmp_path, monkeypatch):
     assert "a real defect" not in prompt
 
 
-def test_the_board_and_the_brief_read_one_function(monkeypatch):
+async def test_the_board_and_the_brief_read_one_function(database):
     """One implementation, one severity set: a brief listing a different set
-    from the card above it would be worse than one listing nothing."""
-    assert dispatch.deferred_findings is not None
-    import inspect
+    from the card above it would be worse than one listing nothing. The set is
+    the configured `loop_severities`, not the default, on both sides."""
+    from types import SimpleNamespace
 
     from kraft.api.routes import board
 
-    assert "executor.deferred_findings" in inspect.getsource(board._deferred_findings)
+    await mk_item(database)
+    findings = [_minor(), _minor("a real defect", "important"), _minor("a crash", "critical")]
+    await database.write(
+        lambda c: events.append(
+            c, "w1", "findings_measured", {"node_id": "verify", "findings": findings}
+        )
+    )
+    # Only `critical` enters the loop here, so the `important` finding is
+    # deferred too -- one the default set would have kept in the loop.
+    configured = frozenset({"critical"})
+    brief = dispatch.deferred_findings(database, "w1", configured)
+    assert [f["message"] for f in brief] == ["naming nit", "a real defect"]
+    st = SimpleNamespace(db=database, policy=SimpleNamespace(loop_severities=configured))
+    assert board._deferred_findings(st, "w1") == brief
 
 
 def test_previous_review_note_points_at_the_reviewers_own_last_session():

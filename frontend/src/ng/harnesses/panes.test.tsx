@@ -57,6 +57,26 @@ describe("harness pane", () => {
     ]);
   });
 
+  it("lists the provider's models under the default model: a pick commits it, and a model it does not list still does", async () => {
+    const server = serve(view(resolved()));
+    renderPage("?harness=claude");
+    const p = await pane("claude");
+    await within(p).findByText("models: sonnet, opus, haiku");
+    const model = within(p).getByRole("combobox", { name: "default model" });
+    await userEvent.clear(model);
+    expect(within(screen.getByRole("listbox", { name: "Known models" })).getAllByRole("option").map((o) => o.textContent)).toEqual(["sonnet", "opus", "haiku"]);
+    await userEvent.type(model, "hai");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    await waitFor(() => expect(server.ops).toHaveLength(1));
+    await userEvent.clear(model);
+    await userEvent.type(model, "claude-next{Enter}");
+    await waitFor(() => expect(server.ops).toHaveLength(2));
+    expect(server.ops.flat()).toEqual([
+      { op: "set_harness", id: "claude", patch: { defaults: { model: "haiku" } } },
+      { op: "set_harness", id: "claude", patch: { defaults: { model: "claude-next" } } },
+    ]);
+  });
+
   it("clearing a default sends null, and not set is its own choice", async () => {
     const server = serve(view(resolved()));
     renderPage("?harness=claude");

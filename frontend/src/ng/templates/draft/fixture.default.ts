@@ -2485,6 +2485,88 @@ export const DEFAULT_VIEW = {
    "auto_escalate_delay_s": 0,
    "auto_review_attempts": 1
   },
+  "choices": {
+   "ref": [
+    {
+     "value": "kraft.verify_changed_test_scopes",
+     "summary": "Run the repo's test scopes the change touches"
+    },
+    {
+     "value": "kraft.mr_rebase",
+     "summary": "Rebase the worktree onto the item's base branch"
+    }
+   ],
+   "target": [
+    {
+     "value": "mr.open_draft",
+     "summary": "Open the item's merge request as a draft",
+     "waits": false
+    },
+    {
+     "value": "mr.sync",
+     "summary": "Push the branch and rewrite the merge request's description",
+     "waits": false
+    },
+    {
+     "value": "mr.ci",
+     "summary": "Wait for the merge request's CI to pass",
+     "waits": true
+    },
+    {
+     "value": "mr.automated_review",
+     "summary": "Wait for the repo's automated reviewer",
+     "waits": true
+    },
+    {
+     "value": "mr.mark_ready",
+     "summary": "Mark the draft merge request ready for review",
+     "waits": false
+    },
+    {
+     "value": "mr.external_approval",
+     "summary": "Wait for a person to approve the merge request",
+     "waits": true
+    },
+    {
+     "value": "mr.merge",
+     "summary": "Merge, then wait until the merge lands",
+     "waits": true
+    },
+    {
+     "value": "mr.post_merge_ci",
+     "summary": "Wait for CI on the base branch after the merge",
+     "waits": true
+    }
+   ],
+   "inputs": [
+    {
+     "value": "review_package",
+     "summary": "The change under review, written to a file"
+    },
+    {
+     "value": "carried_findings",
+     "summary": "The findings the node's last measurement reported"
+    },
+    {
+     "value": "previous_review",
+     "summary": "This task's previous result and summary"
+    }
+   ],
+   "grants": [
+    {
+     "value": "git-commit",
+     "summary": "A plain git commit"
+    },
+    {
+     "value": "git-rebase",
+     "summary": "A plain git rebase"
+    },
+    {
+     "value": "git-push",
+     "summary": "A plain git push to the item's own branch"
+    }
+   ]
+  },
   "warnings": []
  }
 } as unknown as DraftView;

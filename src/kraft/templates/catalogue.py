@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import re
 
+from kraft.policy import GRANT_SUMMARIES, GRANTS
 from kraft.templates.library import Namespace, TemplateIssue, TemplateLibrary
+from kraft.templates.models import AgentInput, BuiltinAction, ForgeAction
 
 
 def component_id(namespace: Namespace, name: str) -> str:
@@ -78,3 +80,17 @@ def find(listed: list[dict], ref: str) -> dict | None:
     if len(by_name) > 1:
         raise AmbiguousName(ref, [c["id"] for c in by_name])
     return by_name[0] if by_name else None
+
+
+def choices() -> dict[str, list[dict]]:
+    """The closed sets a template field takes its values from, by field: a
+    builtin task's `ref`, a forge task's `target` (and whether it `waits`), an
+    agent task's `inputs`, and the `grants` a policy layer names. Each value
+    carries a one-line `summary`. The editors offer these instead of a free
+    text field, so the vocabulary has one owner: the schema here."""
+    return {
+        "ref": [{"value": a.value, "summary": a.summary} for a in BuiltinAction],
+        "target": [{"value": t.value, "summary": t.summary, "waits": t.waits} for t in ForgeAction],
+        "inputs": [{"value": i.value, "summary": i.summary} for i in AgentInput],
+        "grants": [{"value": g, "summary": GRANT_SUMMARIES[g]} for g in GRANTS],
+    }

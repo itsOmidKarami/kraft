@@ -76,6 +76,22 @@ def test_seed_home_installs_the_v1_library_and_its_chains(monkeypatch, tmp_path)
     assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
 
 
+def test_a_seeded_home_is_the_operators_alone(monkeypatch, tmp_path):
+    """As `access.yaml` and `repos.yaml` are, and as a template is once
+    Settings saves it: 0644 copies of the package's files flipped to 0600 one
+    save at a time."""
+    bundled = _bundle(monkeypatch, tmp_path)
+    for path in [bundled, *bundled.rglob("*")]:
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    home = tmp_path / "home" / "templates"
+
+    assert cli.seed_home(home) is True
+    modes = {p.relative_to(home).as_posix(): p.stat().st_mode & 0o777 for p in home.rglob("*")}
+    assert modes.pop("chains") == 0o700
+    assert set(modes.values()) == {0o600}, modes
+    assert home.stat().st_mode & 0o777 == 0o700
+
+
 def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):
     _bundle(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
@@ -278,7 +294,11 @@ def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path)
     """The security regression test for this sub-project. A flag must not be a
     way around a check an env var respects."""
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: pytest.fail("must not bind"))
+    # The seam `_serve` binds through: a regressed check fails here at once
+    # rather than starting a real server on 0.0.0.0.
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: pytest.fail("must not bind")
+    )
     with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
         cli.main(["admin", "start", "--host", "0.0.0.0"])
 

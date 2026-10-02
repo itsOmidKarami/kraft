@@ -12,7 +12,7 @@ export function Item() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
   const loaded = useItem(id);
-  const version = loaded.state === "ready" ? loaded.item.updated_at : "";
+  const version = loaded.state === "ready" ? loaded.version : "";
   const events = useEvents(id, version);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

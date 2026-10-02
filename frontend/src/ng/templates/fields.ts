@@ -1,9 +1,15 @@
+import { entryText, type Entry } from "./panes/Fallback";
+
 /** How the Config tab edits each field (W10 brief Decided 11). Rows and values
  *  come from the server's `sources`; this says only the label and the editor.
  *  Labels are the Templates prototype's (`kraft-templates-model.js` FIELDS). */
 export type FieldKind = "bool" | "enum" | "int" | "minutes" | "number" | "duration" | "list" | "long" | "text";
 /** `restart`: this and the earlier exec nodes, for `on_base_changed.restart_from` (Decisions §9 Node settings). */
-export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart" };
+export type FieldMeta = { label: string; kind: FieldKind; options?: string[] | "harness" | "effort" | "profile" | "restart"; choices?: ChoiceSource; suggest?: "model"; elsewhere?: string };
+/** Where a typed field's closed set comes from: the draft's `choices` (`ref`,
+ *  `target`, `inputs`, `grants`), the library's steering profiles, the
+ *  harnesses, the documents a gate can ask about, or the nodes before it. */
+export type ChoiceSource = "ref" | "target" | "inputs" | "grants" | "steering" | "harnesses" | "documents" | "earlier";
 
 const META: Record<string, FieldMeta> = {
   harness: { label: "harness", kind: "enum", options: "harness" },
@@ -11,22 +17,23 @@ const META: Record<string, FieldMeta> = {
   skill: { label: "skill", kind: "text" },
   produces: { label: "produces", kind: "text" },
   profile: { label: "profile", kind: "enum", options: "profile" },
-  model: { label: "model", kind: "text" },
+  model: { label: "model", kind: "text", suggest: "model" },
   effort: { label: "effort", kind: "enum", options: "effort" },
-  inputs: { label: "inputs", kind: "list" },
-  fallback: { label: "fallback", kind: "list" },
-  steering: { label: "steering", kind: "list" },
+  inputs: { label: "inputs", kind: "list", choices: "inputs" },
+  // A list of entry mappings, not of names: its own rows on the Overview edit it.
+  fallback: { label: "fallback", kind: "list", elsewhere: "Edit the fallback list on the Overview tab, or a model or effort in it in YAML" },
+  steering: { label: "steering", kind: "list", choices: "steering" },
   scope: { label: "runs", kind: "enum", options: ["once", "each_repository"] },
   execution: { label: "order", kind: "enum", options: ["sequential", "parallel"] },
   skippable: { label: "skippable", kind: "bool" },
   read_only: { label: "read only", kind: "bool" },
-  ref: { label: "action", kind: "text" },
+  ref: { label: "action", kind: "text", choices: "ref" },
   command: { label: "command", kind: "text" },
-  target: { label: "target", kind: "text" },
+  target: { label: "target", kind: "text", choices: "target" },
   message: { label: "message", kind: "long" },
-  artifact: { label: "document", kind: "text" },
+  artifact: { label: "document", kind: "text", choices: "documents" },
   artifact_required: { label: "document required", kind: "bool" },
-  reject_to: { label: "reject to", kind: "text" },
+  reject_to: { label: "reject to", kind: "text", choices: "earlier" },
   timeout: { label: "timeout", kind: "duration" },
   chain_finalized: { label: "final review", kind: "bool" },
   max_attempts: { label: "attempts", kind: "int" },
@@ -39,10 +46,10 @@ const META: Record<string, FieldMeta> = {
   "policy.max_attempts": { label: "attempts", kind: "int" },
   "policy.token_budget": { label: "token budget", kind: "int" },
   "policy.budget_usd": { label: "budget ($)", kind: "number" },
-  "policy.allowed_harnesses": { label: "allowed harnesses", kind: "list" },
+  "policy.allowed_harnesses": { label: "allowed harnesses", kind: "list", choices: "harnesses" },
   "policy.allowed_tools": { label: "allowed tools", kind: "list" },
   "policy.deny_tools": { label: "denied tools", kind: "list" },
-  "policy.grants": { label: "grants", kind: "list" },
+  "policy.grants": { label: "grants", kind: "list", choices: "grants" },
 };
 
 /** An unlisted field edits as text under its own name (`policy.sandbox` → "sandbox"). */
@@ -52,7 +59,7 @@ export const fieldMeta = (field: string): FieldMeta => META[field] ?? { label: f
 export function show(value: unknown, kind: FieldKind): string {
   if (value === null || value === undefined || value === "") return "not set";
   if (typeof value === "boolean") return value ? "yes" : "no";
-  if (Array.isArray(value)) return value.length ? value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(", ") : "none";
+  if (Array.isArray(value)) return value.length ? value.map((v) => (typeof v === "string" ? v : v && typeof v === "object" && !Array.isArray(v) ? entryText(v as Entry) : JSON.stringify(v))).join(", ") : "none";
   if (typeof value === "object") {
     const from = (value as { restart_from?: unknown }).restart_from;
     return typeof from === "string" ? `restart from ${from}` : JSON.stringify(value);
