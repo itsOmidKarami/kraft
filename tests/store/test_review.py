@@ -97,8 +97,12 @@ async def test_a_new_thread_is_a_draft_until_submitted(database):
 
 
 def _comment(database, cid):
+    """`(body, suggestion)` of comment `cid`, the suggestion decoded; None
+    once the comment is gone."""
     row = database.read(lambda c: store.comment_row(c, cid))
-    return None if row is None else (row["body"], row["suggestion"])
+    if row is None:
+        return None
+    return row["body"], None if row["suggestion"] is None else json.loads(row["suggestion"])
 
 
 async def test_editing_a_draft_reply_rewrites_its_body_and_suggestion(database):
@@ -115,7 +119,7 @@ async def test_editing_a_draft_reply_rewrites_its_body_and_suggestion(database):
     await database.write(
         lambda c: store.update_draft_comment(c, cid, body="second try", suggestion=edited)
     )
-    assert _comment(database, cid) == ("second try", json.dumps(edited))
+    assert _comment(database, cid) == ("second try", edited)
 
     await database.write(lambda c: store.update_draft_comment(c, cid, body="plain", suggestion={}))
     assert _comment(database, cid) == ("plain", None)

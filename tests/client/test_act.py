@@ -13,22 +13,30 @@ from support.harness import connected_repo, make_repo
 from kraft import client
 
 
-def test_resume_starts_a_paused_item(wired, tmp_path):
-    """A created-paused item is the phase 2 output; resume is how it begins."""
+def test_resume_starts_a_paused_item(wired, tmp_path, monkeypatch):
+    """A created-paused item is the phase 2 output; resume is how it begins:
+    the item is claimed `active` and a walk starts carrying the steer. The walk
+    is recorded rather than run, so the status read back is the resume's own,
+    not wherever a walk got to."""
+    import kraft.executor
+
+    walks = []
+
+    async def walk(_db, _run_dirs, **kwargs):
+        walks.append(kwargs)
+
+    monkeypatch.setattr(kraft.executor, "run", walk)
     repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("drive me", repo=str(repo))
         resumed = await client.resume(" go left ", work_item_id=created["id"])
-        evts = await client.events(created["id"])
-        return created, resumed, evts, await client.get_work_item(created["id"])
+        return created, resumed, await client.get_work_item(created["id"])
 
-    created, resumed, evts, item = run_with_app(wired, scenario)
-    assert resumed["id"] == created["id"]
-    assert [e["payload"] for e in evts if e["type"] == "work_item_resumed"] == [
-        {"steer": "go left"}
-    ]
-    assert item["status"] != "paused"
+    created, resumed, item = run_with_app(wired, scenario)
+    assert (resumed["id"], resumed["steer"]) == (created["id"], "go left")
+    assert item["status"] == "active"
+    assert [(w["work_item_id"], w["steer"]) for w in walks] == [(created["id"], "go left")]
 
 
 def test_pause_refuses_an_item_that_is_not_running(wired, tmp_path):
@@ -99,21 +107,32 @@ def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
 )
 def test_a_gate_decision_with_no_gate_named_decides_the_pending_one(wired, tmp_path, call, decided):
     """`kraft item approve` with no `--gate`, the common case: the item says
-    which gate it waits on, and that is the one decided."""
-    from kraft import store
-
+    which gate it waits on, and that is the one decided. The item walks to
+    its first gate for real; nothing names the gate but the item."""
     repo = connected_repo(tmp_path)
 
     async def scenario():
         wid = (await client.create_work_item("at a gate", repo=str(repo)))["id"]
-        db = wired.app.state.db
-        await db.write(lambda c: store.load_chain(c, wid, "spec_approval"))
-        await db.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
+        await client.resume(work_item_id=wid)
+        gate = await _pending_gate(wid)
         await call(wid)
-        return await client.events(wid)
+        return gate, await client.events(wid)
 
-    evts = run_with_app(wired, scenario)
-    assert [e["payload"]["gate"] for e in evts if e["type"] == decided] == ["spec_approval"]
+    gate, evts = run_with_app(wired, scenario)
+    assert gate == "spec_approval"
+    assert [e["payload"]["gate"] for e in evts if e["type"] == decided] == [gate]
+
+
+async def _pending_gate(wid: str, timeout: float = 30) -> str:
+    """Wait for the walk to stop `wid` at a gate, and name it."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        item = await client.get_work_item(wid)
+        if item.get("pending_gate"):
+            return item["pending_gate"]
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"no gate became pending; item={item!r}")
 
 
 @pytest.mark.parametrize(
