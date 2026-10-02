@@ -13,7 +13,7 @@ import { Brief, DiffLine, Title } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
 import { Workspace } from "./Workspace";
-import { useItem, type ItemDetail } from "./useItem";
+import { runVersion, useItem, type ItemDetail } from "./useItem";
 import "./item.css";
 
 /** `/work-items/:id[/nodes/:node]`: one item, its chain and the pane (W5). */
@@ -61,7 +61,7 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
-        <DiffLine id={item.id} version={version} />
+        <DiffLine id={item.id} version={runVersion(item)} />
       </div>
       <Banner item={item} onOpenGate={openGate} onRaise={settings} reload={reload} />
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />

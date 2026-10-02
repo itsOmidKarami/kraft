@@ -24,7 +24,7 @@ import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
-import type { ItemDetail } from "./useItem";
+import { runVersion, type ItemDetail } from "./useItem";
 import { chainName } from "./chainName";
 
 const PAGE = "item";
@@ -56,7 +56,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
   const events = useEvents(item.id, version);
-  const docs = useDocuments(item.id, version);
+  const docs = useDocuments(item.id, runVersion(raw));
   const [artifact, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);

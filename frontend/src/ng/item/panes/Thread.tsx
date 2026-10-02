@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import * as api from "../../../api";
+import { useState } from "react";
 import { ago } from "../../../format";
-import type { KraftEvent, WorkerSession } from "../../../types";
+import type { WorkerSession } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import { messagesThrough } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { useEventLog } from "../useEvents";
 import { sendOnModEnter } from "../../keys";
 
 type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null; session: string | null };
@@ -15,16 +15,10 @@ type Turn = { thread: number; turn: number; who: string; text: string; at: strin
  *  with the node it was about; a reply goes on in the same thread or starts a
  *  new one (GAP §2 #14). */
 export function Thread({ item, version, node, upTo, reload, onNode }: { item: ItemDetail; version: string; node: string; upTo?: WorkerSession; reload: () => void; onNode: (node: string) => void }) {
-  const [events, setEvents] = useState<KraftEvent[] | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    // Each read of the item reads the thread again: an older read that answers late must not win.
-    let live = true;
-    api.getEvents(item.id).then((e) => live && setEvents(e), () => live && setEvents([]));
-    return () => { live = false; };
-  }, [item.id, version]);
+  const events = useEventLog(item.id, version);
   const all: Turn[] = (events ?? []).filter((e) => e.type === "escalation_message").map((e) => ({
     thread: Number(e.payload.thread ?? 1),
     turn: Number(e.payload.turn ?? 1),

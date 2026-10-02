@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import * as api from "../../../api";
 import { ago, elapsed, tokens, usd } from "../../../format";
-import type { KraftEvent, WorkerSession } from "../../../types";
+import type { WorkerSession } from "../../../types";
 import { escalationsOf, ESCALATION, lookWord, messagesThrough, sessionLook, sessionsOf } from "../../item/nodeGraph";
 import { stepsOf } from "../../item/paths";
 import { selPath, type Place } from "../../item/url";
+import { useEventLog } from "../../item/useEvents";
 import { LogLines } from "../log/LogLines";
 import { useLog } from "../log/useLog";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -133,12 +133,7 @@ function TaskLog({ session }: { session?: WorkerSession }) {
 
 /** The node's escalation thread: every message through the picked thread's last turn, by thread and turn. */
 function Thread({ item, version, node, upTo }: { item: PlaceProps["item"]; version: string; node: string; upTo?: WorkerSession }) {
-  const [events, setEvents] = useState<KraftEvent[] | null>(null);
-  useEffect(() => {
-    let live = true;
-    api.getEvents(item.id).then((e) => live && setEvents(e), () => live && setEvents([]));
-    return () => { live = false; };
-  }, [item.id, version]);
+  const events = useEventLog(item.id, version);
   const all = (events ?? []).filter((e) => e.type === "escalation_message" && (e.node_id ?? node) === node).map((e) => ({ thread: Number(e.payload.thread ?? 1), turn: Number(e.payload.turn ?? 1), who: e.payload.auto ? "kraft" : "you", text: String(e.payload.message ?? ""), at: e.created_at, node, session: typeof e.payload.session_id === "string" ? e.payload.session_id : null }));
   const turns = all.slice(0, messagesThrough(all, upTo, item));
   if (events == null) return <p className="ph-note">Reading the thread…</p>;
