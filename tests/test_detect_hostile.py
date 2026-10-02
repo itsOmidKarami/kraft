@@ -80,7 +80,7 @@ _BACKTRACKING = {
 def test_a_file_built_to_backtrack_is_read_in_bounded_time(tmp_path, files):
     """A regex that backtracks holds the GIL: the whole server, not only the
     probe's thread, froze for as long as it ran (38 s on a 110 KB Makefile)."""
-    _, took = _timed(_repo(tmp_path, {**files, "go.mod": "module x\n"}))
+    _, took = _timed(_repo(tmp_path, {**files, "go.mod": "module x\n", "x_test.go": ""}))
     assert took < _BOUND_S
 
 
@@ -147,7 +147,7 @@ def test_a_file_nested_past_its_parser_is_no_evidence_not_a_crash(tmp_path, file
     """A RecursionError nothing caught was a bare 500 from connect, failed a
     parent's connect from inside one submodule, and crashed `kraft admin
     doctor`."""
-    p = _propose(_repo(tmp_path, {**files, "go.mod": "module x\n"}))
+    p = _propose(_repo(tmp_path, {**files, "go.mod": "module x\n", "x_test.go": ""}))
     assert p.test_command == expected
 
 
@@ -180,7 +180,12 @@ def test_a_probe_that_fails_says_why(tmp_path):
 
 def test_a_probe_answers_as_it_did_in_process(tmp_path):
     repo = _repo(
-        tmp_path, {"go.mod": "module x\n", "web/package.json": '{"scripts": {"test": "jest"}}'}
+        tmp_path,
+        {
+            "go.mod": "module x\n",
+            "x_test.go": "",
+            "web/package.json": '{"scripts": {"test": "jest"}}',
+        },
     )
     assert detect.probe(repo) == _propose(repo)
 
@@ -199,7 +204,9 @@ def test_a_yaml_merge_bomb_is_refused_before_it_is_built(tmp_path, where):
     top = (
         "jobs: {t: {steps: [{run: make test}]}}\n" if where == _WORKFLOW else "tasks: {test: {}}\n"
     )
-    p, took = _timed(_repo(tmp_path, {where: _merge_bomb(9, top), "go.mod": "module x\n"}))
+    p, took = _timed(
+        _repo(tmp_path, {where: _merge_bomb(9, top), "go.mod": "module x\n", "x_test.go": ""})
+    )
     assert took < _BOUND_S
     assert p.test_command == "go test ./..."
 
@@ -271,7 +278,7 @@ def test_the_probes_process_gets_no_secret_and_no_import_from_where_the_server_r
         return real(argv, **kw)
 
     monkeypatch.setattr(detect.subprocess, "run", spy)
-    repo = _repo(tmp_path, {"go.mod": "module x\n"})
+    repo = _repo(tmp_path, {"go.mod": "module x\n", "x_test.go": ""})
     assert detect.probe(repo).test_command == "go test ./..."
     assert not marker.exists(), "a module from the server's working directory ran"
     assert "ANTHROPIC_API_KEY" not in seen["env"]
@@ -280,7 +287,7 @@ def test_the_probes_process_gets_no_secret_and_no_import_from_where_the_server_r
 def test_a_probe_that_answers_too_much_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(detect, "_PROBE_OUTPUT", 16)
     with pytest.raises(config.ConfigError, match="answered more than 16 bytes"):
-        detect.probe(_repo(tmp_path, {"go.mod": "module x\n"}))
+        detect.probe(_repo(tmp_path, {"go.mod": "module x\n", "x_test.go": ""}))
 
 
 def test_a_repos_own_fsmonitor_never_runs(tmp_path):
@@ -297,5 +304,6 @@ def test_a_repos_own_fsmonitor_never_runs(tmp_path):
     hook.chmod(0o755)
     subprocess.run(["git", "-C", str(repo), "config", "core.fsmonitor", str(hook)], check=True)
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     assert _propose(repo).test_command == "go test ./..."
     assert not marker.exists()

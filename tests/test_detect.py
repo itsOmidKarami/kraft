@@ -163,7 +163,13 @@ KINDS = [
         "cargo test --workspace",
         "cargo fetch",
     ),  # noqa: E501
-    ("go", {"go.mod": "module x\n"}, "go test ./...", "go mod download"),
+    ("go", {"go.mod": "module x\n", "x_test.go": ""}, "go test ./...", "go mod download"),
+    (
+        "go-tested-below-the-root",
+        {"go.mod": "module x\n", "main.go": "", "internal/calc/calc_test.go": ""},
+        "go test ./...",
+        "go mod download",
+    ),
     (
         "gradle-wrapper",
         {"gradlew": "", "build.gradle.kts": ""},
@@ -270,6 +276,15 @@ KINDS = [
 def test_each_kind_of_repo_gets_its_own_commands(tmp_path, files, test, setup):
     p = _propose(_repo(tmp_path, files))
     assert (p.test_command, p.setup_command) == (test, setup)
+
+
+def test_a_go_module_with_no_test_file_proposes_no_test_command(tmp_path):
+    """`go test ./...` with no _test.go says "no test files" and passes: it
+    only compiles, so the repo was enabled with a build for its tests. An npm
+    project with no test script proposes none either."""
+    p = _propose(_repo(tmp_path, {"go.mod": "module x\n", "main.go": "package main\n"}))
+    assert p.test_command is None
+    assert not any(c["role"] == "test" for c in p.candidates)
 
 
 def test_every_packaged_detector_has_a_case(tmp_path):
@@ -441,7 +456,7 @@ def test_a_runners_task_running_python_bare_runs_through_the_lockfile(tmp_path, 
 _STOPS = {
     "a-pyproject-with-no-lockfile-gets-nothing": ({}, None, None),
     "a-lockfile-install-beside-it-still-stands": ({"package-lock.json": ""}, None, "npm ci"),
-    "it-is-not-handed-go": ({"go.mod": "module x\n"}, None, None),
+    "it-is-not-handed-go": ({"go.mod": "module x\n", "x_test.go": ""}, None, None),
     "it-is-not-handed-npm": ({"package.json": JEST}, None, None),
     "a-runners-test-task-beside-it-is-kept": ({"Makefile": "test:\n\tpytest\n"}, "make test", None),
     "a-uv-lock-is-what-it-needs": ({"uv.lock": ""}, "uv run pytest", "uv sync"),
@@ -481,7 +496,7 @@ def test_a_lockless_pyproject_is_told_to_commit_its_own_tools_lock(tmp_path, pyp
 _NOT_COVERED = {
     "at-the-root": {"pyproject.toml": PYTEST, "web/package.json": JEST},
     "one-level-down": {"backend/pyproject.toml": PYTEST, "web/package.json": JEST},
-    "under-a-go-root": {"backend/pyproject.toml": PYTEST, "go.mod": "module x\n"},
+    "under-a-go-root": {"backend/pyproject.toml": PYTEST, "go.mod": "module x\n", "x_test.go": ""},
     "under-an-npm-root": {"backend/pyproject.toml": PYTEST, "package.json": JEST},
 }
 
@@ -547,7 +562,12 @@ def test_a_lockless_pyproject_one_level_down_is_covered_by_the_root_command(
 def test_a_runners_test_recipe_beside_a_root_pyproject_is_no_stop(tmp_path):
     """The stop is for a directory Kraft has no command for; a task runner's
     `test` recipe in that same directory is one."""
-    files = {"justfile": "test:\n  pytest\n", "pyproject.toml": PYTEST, "x/go.mod": "module x\n"}
+    files = {
+        "justfile": "test:\n  pytest\n",
+        "pyproject.toml": PYTEST,
+        "x/go.mod": "module x\n",
+        "x/x_test.go": "",
+    }
     p = _propose(_repo(tmp_path, files))
     assert (p.test_command, p.stopped) == ("just test", [])
 
@@ -587,14 +607,16 @@ def test_an_operators_detector_replaces_the_packaged_one_of_the_same_id(tmp_path
         "detectors:\n  - id: go\n    tier: toolchain\n    files: [go.mod]\n"
         "    test: [{run: gotestsum ./...}]\n",
     )
-    repo = _repo(tmp_path, {"go.mod": "module x\n"})
+    repo = _repo(tmp_path, {"go.mod": "module x\n", "x_test.go": ""})
     p = _propose(repo, own)
     assert (p.test_command, p.setup_command) == ("gotestsum ./...", None)
 
 
 def test_disable_and_ignore_dirs_layer_onto_the_packaged_table(tmp_path):
     own = _own(tmp_path, "disable: [make]\nignore_dirs: [tools]\n")
-    repo = _repo(tmp_path, {"Makefile": "test:\n", "tools/go.mod": "module t\n"})
+    repo = _repo(
+        tmp_path, {"Makefile": "test:\n", "tools/go.mod": "module t\n", "tools/t_test.go": ""}
+    )
     p = _propose(repo, own)
     assert (p.test_command, p.test_scopes) == (None, [])
 
@@ -647,7 +669,7 @@ def test_an_uncommitted_file_is_not_evidence(tmp_path):
 
 
 def test_origins_default_branch_is_read_before_a_local_commit(tmp_path):
-    origin = _repo(tmp_path, {"go.mod": "module x\n"})
+    origin = _repo(tmp_path, {"go.mod": "module x\n", "x_test.go": ""})
     clone = tmp_path / "clone"
     subprocess.run(["git", "clone", "-q", str(origin), str(clone)], check=True)
     (clone / "Makefile").write_text("test:\n\tgo vet\n")
@@ -669,6 +691,7 @@ def test_a_repo_with_no_commit_is_read_from_its_working_copy(tmp_path):
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     (repo / ".gitignore").write_text("ignored/\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     (repo / "justfile").symlink_to(outside / "justfile")
     (repo / "ignored").mkdir()
     (repo / "ignored" / "Cargo.toml").write_text("[package]\n")
@@ -679,7 +702,7 @@ def test_a_repo_with_no_commit_is_read_from_its_working_copy(tmp_path):
 def test_a_listing_git_refuses_fails_the_probe_rather_than_reading_as_empty(tmp_path):
     """An empty proposal would save the repo disabled for "no test command
     found", which is not why."""
-    repo = _repo(tmp_path, {"go.mod": "module x\n"})
+    repo = _repo(tmp_path, {"go.mod": "module x\n", "x_test.go": ""})
     tree = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], capture_output=True, text=True
     ).stdout.strip()
@@ -689,7 +712,7 @@ def test_a_listing_git_refuses_fails_the_probe_rather_than_reading_as_empty(tmp_
 
 
 def test_a_listing_that_takes_too_long_fails_the_probe(tmp_path, monkeypatch):
-    repo = _repo(tmp_path, {"go.mod": "module x\n"})
+    repo = _repo(tmp_path, {"go.mod": "module x\n", "x_test.go": ""})
     monkeypatch.setattr(detect, "_LIST_TIMEOUT_S", 1e-6)
     with pytest.raises(config.ConfigError, match="took more than"):
         _propose(repo)
@@ -698,7 +721,10 @@ def test_a_listing_that_takes_too_long_fails_the_probe(tmp_path, monkeypatch):
 def test_a_file_is_read_up_to_the_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(detect, "_TEXT_LIMIT", 64)
     pad = "x" * 100
-    repo = _repo(tmp_path, {"Makefile": f"# {pad}\ntest:\n\tgo test\n", "go.mod": "module x\n"})
+    repo = _repo(
+        tmp_path,
+        {"Makefile": f"# {pad}\ntest:\n\tgo test\n", "go.mod": "module x\n", "x_test.go": ""},
+    )
     assert _propose(repo).test_command == "go test ./...", "the target past the cap is not read"
 
 

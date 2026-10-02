@@ -227,6 +227,7 @@ def test_no_tests_with_a_test_command_is_refused(app, capsys, repo):
 def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
@@ -237,6 +238,7 @@ def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):
 def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -252,6 +254,7 @@ def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monk
 def test_a_number_with_no_option_is_asked_again_not_saved(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -267,6 +270,7 @@ def test_a_yes_keeps_the_proposal_and_a_no_asks_again(app, capsys, repo, monkeyp
     """A yes or no answers the prompt; neither is saved as the command."""
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -283,6 +287,7 @@ def test_no_tests_at_the_prompt_is_confirmed_before_it_is_saved(app, capsys, rep
     a no at the confirmation asks again rather than saving it."""
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -468,6 +473,7 @@ def test_connect_names_origins_branch_whole(capsys):
 def test_connect_yes_takes_the_proposal_without_asking(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)

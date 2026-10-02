@@ -404,7 +404,10 @@ detectors:
     family: go
     files: [go.mod]
     test:
-      - run: "go test ./..."
+      # With no _test.go anywhere, `go test ./...` compiles every package,
+      # says "no test files" and passes: a build, not a test run. Like an
+      # npm project with no test script, it has no test command to propose.
+      - {when: [{files: ['*_test.go', '**/*_test.go']}], run: "go test ./..."}
     setup:
       - run: "go mod download"
 
