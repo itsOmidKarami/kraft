@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
+import stat
 import struct
 import subprocess
 import uuid
@@ -115,7 +117,40 @@ def links_from_front_matter(fm: dict) -> list[LinkRow]:
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    # `core.fsmonitor` names a program `ls-files` runs, and the repo's own
+    # config can set it. The server pins it off for every git it runs; this
+    # holds for a caller outside the server too.
+    return subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _read_listed(repo: Path, rel: str) -> str | None:
+    """A listed document's text, or None for anything but a regular file at
+    that very path inside the repo.
+
+    Untrusted input: git checks a committed symlink out as a symlink, so
+    `.engineering/specs/x.md -> ~/.aws/credentials` would put that file in the
+    index, and search would serve it. Every symlink is skipped, one pointing
+    inside the repo too: it can name an untracked, ignored file such as
+    `.env`. A symlinked directory on the way is the same thing one level up.
+    A FIFO would hold the scan forever and a device is no document."""
+    path = repo / rel
+    try:
+        if os.path.realpath(path) != os.path.join(os.path.realpath(repo), rel):
+            return None
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    with os.fdopen(fd) as f:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        try:
+            return f.read()
+        except OSError:
+            return None
 
 
 def _timestamps(repo: Path, rel: str) -> tuple[str | None, str | None]:
@@ -137,9 +172,8 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
     rels = [r for r in listed.stdout.split("\0") if r.endswith(".md")]
     docs: list[ScannedDoc] = []
     for rel in rels:
-        try:
-            text = (repo / rel).read_text()
-        except OSError:
+        text = _read_listed(repo, rel)
+        if text is None:
             continue
         fm, body = split_front_matter(text)
         created, updated = _timestamps(repo, rel)
