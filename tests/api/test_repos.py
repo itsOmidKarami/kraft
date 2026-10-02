@@ -660,11 +660,19 @@ def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(cli
     assert client.get("/api/repos").json()["repos"][0]["steering"] == []
 
 
-def test_add_repo_writes_the_probed_setup_command(tmp_path, client):
+@pytest.mark.parametrize(
+    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
+)
+@pytest.mark.parametrize("route", ["/api/repos/probe", "/api/repos"], ids=["probe", "add"])
+def test_add_repo_writes_the_probed_setup_command(tmp_path, client, route, lockfile, expected):
+    """The first-run and Templates › Repos probe proposes what connecting
+    writes: `uv sync` only beside a `uv.lock`, since it writes one otherwise."""
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    entry = client.post("/api/repos", json={"path": str(repo)}).json()
-    assert entry["setup_command"] == "uv sync"
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    entry = client.post(route, json={"path": str(repo)}).json()
+    assert entry["setup_command"] == expected
 
 
 def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, client):

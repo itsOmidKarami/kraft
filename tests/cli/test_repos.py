@@ -110,6 +110,7 @@ def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "setup command: uv sync" in out

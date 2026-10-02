@@ -81,8 +81,8 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
     elif result.get("setup_command") is None:
         # Undeclared stops the repo's first work item; "" is a declared none.
         print(
-            "setup command: none found (it looks for an npm, yarn or pnpm lockfile, "
-            "pyproject.toml, Cargo.toml or go.mod); set `setup_command` in its repos.yaml "
+            "setup command: none found (it looks for an npm, yarn, pnpm or uv lockfile, "
+            "Cargo.toml or go.mod); set `setup_command` in its repos.yaml "
             'entry, `""` if it needs no preparation'
         )
     if result.get("enabled") is False:

@@ -438,28 +438,47 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("marker", "expected"),
+    ("markers", "expected"),
     [
-        ("pyproject.toml", "uv sync"),
-        ("package-lock.json", "npm ci"),
-        ("yarn.lock", "yarn install --frozen-lockfile"),
-        ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
-        ("Cargo.toml", "cargo fetch"),
-        ("go.mod", "go mod download"),
-        (None, None),
+        (["pyproject.toml", "uv.lock"], "uv sync"),
+        (["pyproject.toml"], None),
+        (["package-lock.json"], "npm ci"),
+        (["yarn.lock"], "yarn install --frozen-lockfile"),
+        (["pnpm-lock.yaml"], "pnpm install --frozen-lockfile"),
+        (["Cargo.toml"], "cargo fetch"),
+        (["go.mod"], "go mod download"),
+        (["pyproject.toml", "go.mod"], "go mod download"),
+        ([], None),
     ],
-    ids=["uv", "npm", "yarn", "pnpm", "cargo", "go", "an-unmarked-repo-gets-nothing"],
+    ids=[
+        "uv",
+        "a-pyproject-with-no-uv-lock-gets-nothing",
+        "npm",
+        "yarn",
+        "pnpm",
+        "cargo",
+        "go",
+        "a-pyproject-with-no-uv-lock-falls-through-to-the-next-marker",
+        "an-unmarked-repo-gets-nothing",
+    ],
 )
-def test_the_setup_probe_suggests_per_marker(tmp_path, marker, expected):
-    if marker:
+def test_the_setup_probe_suggests_per_marker(tmp_path, markers, expected):
+    """`uv sync` with no `uv.lock` writes one, which the worker then commits
+    onto the item's branch: a `pyproject.toml` alone is no reason to guess it."""
+    for marker in markers:
         (tmp_path / marker).write_text("")
     assert config._first_setup_command(tmp_path) == expected
 
 
-def test_probe_repo_suggests_a_setup_command(tmp_path):
+@pytest.mark.parametrize(
+    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
+)
+def test_probe_repo_suggests_a_setup_command(tmp_path, lockfile, expected):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    assert config.probe_repo(repo)["setup_command"] == expected
 
 
 @pytest.mark.parametrize("name", ["Justfile", "justfile"], ids=["capitalized", "lowercase"])

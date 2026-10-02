@@ -252,6 +252,23 @@ manifest) and prints the test command with the file it came from; check both
 before trusting them, and `kraft admin doctor` reports any connected repo still
 missing a `setup_command`.
 
+It proposes a `setup_command` from the first of these files it finds in the
+repo's root:
+
+| File | Proposed `setup_command` |
+|---|---|
+| `package-lock.json` | `npm ci` |
+| `yarn.lock` | `yarn install --frozen-lockfile` |
+| `pnpm-lock.yaml` | `pnpm install --frozen-lockfile` |
+| `uv.lock` | `uv sync` |
+| `Cargo.toml` | `cargo fetch` |
+| `go.mod` | `go mod download` |
+
+A `package.json` or `pyproject.toml` with no lockfile beside it gets no
+proposal: `npm install` or `uv sync` would write the lockfile, and the worker
+would commit it on the item's branch. Connect then says it found none. Set
+`setup_command` yourself, or `""` if the repo needs no preparation.
+
 ## Repository steering
 
 `repos.yaml`'s `steering: [name, ...]` names steering profiles in

@@ -723,11 +723,16 @@ def _first_test_marker(directory: Path) -> tuple[str, str] | None:
 #: *suggestion* written into repos.yaml at connect time for a human to check,
 #: never consulted at run time: the runtime runs what is declared and infers
 #: nothing. Ordered so a lockfile beats the manifest beside it.
+#:
+#: `uv sync` is keyed on `uv.lock`, the way `npm ci` is on its lockfile: on a
+#: `pyproject.toml` alone it creates `uv.lock` in the worktree, and the worker
+#: commits it onto the item's branch. Such a repo gets no guess, so connect and
+#: doctor say none was found rather than propose a command that edits the repo.
 _SETUP_COMMANDS = [
     ("package-lock.json", "npm ci"),
     ("yarn.lock", "yarn install --frozen-lockfile"),
     ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
-    ("pyproject.toml", "uv sync"),
+    ("uv.lock", "uv sync"),
     ("Cargo.toml", "cargo fetch"),
     ("go.mod", "go mod download"),
 ]
