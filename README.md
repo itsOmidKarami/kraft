@@ -138,8 +138,8 @@ To clear gates and review diffs from VS Code, install the
 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft),
 or from [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft) in VSCodium
 and Cursor (publisher `kraft-sdlc` on both). You can also download
-`kraft-<version>.vsix` from a
-[GitHub release](https://github.com/itsOmidKarami/kraft/releases) and run
+`kraft-<version>.vsix` from the latest
+[GitHub release](https://github.com/itsOmidKarami/kraft/releases/latest) and run
 `code --install-extension kraft-<version>.vsix`.
 
 Every install path, connecting your agent, and updating with
