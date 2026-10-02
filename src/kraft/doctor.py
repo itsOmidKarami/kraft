@@ -942,7 +942,7 @@ def _suggested_setup(path: Path, templates_dir: Path) -> str | None:
     if not path.is_dir():
         return None
     try:
-        return detect.propose(path, detect.load(templates_dir)).setup_command
+        return detect.probe(path, templates_dir).setup_command
     except config.ConfigError:
         return None
 

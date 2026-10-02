@@ -16,7 +16,11 @@
 #           finds (just, make, taskfile, mise, npm, composer, deno, rake, pdm,
 #           poe, script); the first present is `{task}` in `run`.
 #   when    a list of conditions, any one of which must hold; each is
-#           `files` (any glob matches) and/or `contains` (every glob: regex).
+#           `files` (any glob matches), `contains` (every glob: regex) and/or
+#           `toml` ({glob: {dotted.key: regex}}, on that key's value as JSON).
+#
+# A regex here runs over files anyone can commit: keep it to one line
+# (`[ \t]`, never `\s`, after a `^`), with no quantifier it can backtrack.
 #
 # Tiers decide precedence across detectors: a `runner` (a task runner the repo
 # wrote itself) beats a `toolchain` default, and both beat a line CI runs,
@@ -134,7 +138,7 @@ detectors:
       - {when: [{files: [manage.py]}], run: "uv run python manage.py test"}
     setup:
       - {when: [{contains: {pyproject.toml: '(?m)^\[tool\.uv\.workspace\]'}}], run: "uv sync --all-packages"}
-      - {when: &pytest-in-extras [{contains: {pyproject.toml: '(?s)\[project\.optional-dependencies\].*(?<![\w-])pytest\b'}}], run: "uv sync --all-extras"}
+      - {when: &pytest-in-extras [{toml: {pyproject.toml: {project.optional-dependencies: '(?<![\w-])pytest\b'}}}], run: "uv sync --all-extras"}
       - run: "uv sync"
 
   - id: poetry
@@ -483,7 +487,7 @@ detectors:
     tier: toolchain
     family: dart
     files: [pubspec.yaml]
-    contains: {pubspec.yaml: '(?m)^\s+sdk:\s*flutter'}
+    contains: {pubspec.yaml: '(?m)^[ \t]+sdk:[ \t]*flutter'}
     test:
       - run: "flutter test"
     setup:
@@ -530,7 +534,7 @@ detectors:
     tier: toolchain
     family: julia
     files: [Project.toml]
-    contains: {Project.toml: '(?m)^uuid\s*='}
+    contains: {Project.toml: '(?m)^uuid[ \t]*='}
     test:
       - run: "julia --project -e 'using Pkg; Pkg.test()'"
     setup:

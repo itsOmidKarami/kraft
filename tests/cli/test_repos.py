@@ -205,6 +205,22 @@ def test_a_yes_keeps_the_proposal_and_a_no_asks_again(app, capsys, repo, monkeyp
     assert entry["test_command"] == "make test"
 
 
+def test_no_tests_at_the_prompt_is_confirmed_before_it_is_saved(app, capsys, repo, monkeypatch):
+    """`-` saves `test_command: ""` and enables the repo with no tests run:
+    a no at the confirmation asks again rather than saving it."""
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers, asked = iter(["-", "", "-", "y"]), []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert ["Save it that way?" in a for a in asked] == [False, True, False, True]
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == ""
+
+
 def test_connect_names_origins_branch_whole(capsys):
     from kraft.cli import repo as repo_cli
 

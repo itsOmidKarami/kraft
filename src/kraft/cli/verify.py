@@ -181,6 +181,7 @@ def verify(stored: dict, *, say=print, timeout_minutes: float = 30, on_host: boo
     )
     if added.returncode != 0:
         shutil.rmtree(worktree.parent, ignore_errors=True)
+        shutil.rmtree(logs, ignore_errors=True)
         say(f"verify: could not cut a worktree of {ref}: {added.stderr.strip()}")
         return False
     say(f"verify: a fresh worktree of {ref} at {worktree}")
@@ -193,6 +194,8 @@ def verify(stored: dict, *, say=print, timeout_minutes: float = 30, on_host: boo
             check=False,
         )
         shutil.rmtree(worktree.parent, ignore_errors=True)
+    if ok:  # a failure's output is named above, for the person to read
+        shutil.rmtree(logs, ignore_errors=True)
     say("verify: passed" if ok else "verify: failed -- fix the entry in repos.yaml and run again")
     return ok
 

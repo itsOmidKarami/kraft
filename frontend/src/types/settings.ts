@@ -75,6 +75,19 @@ export interface RepoProbe {
   project: string | null;
   /** Every command the evidence supports, chosen or not. Told, never stored. */
   candidates?: ProbeCandidate[];
+  /** The commit the proposal was read from (`refs/remotes/origin/main`). */
+  read_from?: string | null;
+  /** Directories with tests and nothing to prepare them: `setup_command` is left undecided. */
+  missing_setup?: string[];
+  /** Why no test command was proposed, by directory. */
+  stopped?: ProbeStop[];
+}
+
+/** A directory the probe proposes no test command for, and why. */
+export interface ProbeStop {
+  dir: string;
+  reason: string;
+  detector: string;
 }
 
 /** One saved chain as `GET /templates/chains` lists it: its resolved nodes in the

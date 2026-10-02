@@ -278,6 +278,15 @@ def test_ensure_repo_through_the_mcp_tool_takes_the_repos_own_commands(app, tmp_
     assert (out["test_command"], out["setup_command"]) == ("make check", "./configure")
 
 
+def test_ensure_repo_with_no_tests_through_the_mcp_tool_is_saved_disabled(app, tmp_path):
+    """No tests means every work item passes verification untested: a person
+    enables that, not an agent's `test_command=""`."""
+    repo = make_repo(tmp_path)
+    args = {"path": str(repo), "test_command": ""}
+    out = json.loads(asyncio.run(mcp.build().call_tool("ensure_repo", args)).content[0].text)
+    assert (out["test_command"], out["enabled"]) == ("", False)
+
+
 def test_approve_gate_forwards_the_digest_the_artifact_carried(monkeypatch):
     """Kraft-ec66w: a chain revision's approval is refused without it."""
     seen = {}

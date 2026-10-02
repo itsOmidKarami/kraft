@@ -44,6 +44,7 @@ import posixpath
 import re
 import shlex
 import subprocess
+import sys
 import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -86,18 +87,30 @@ def _check_patterns(v: dict[str, str]) -> dict[str, str]:
 
 
 class Condition(BaseModel):
-    """Holds when any `files` glob matches (or none is given) and every
-    `contains` glob names some file its regex matches."""
+    """Holds when any `files` glob matches (or none is given), every
+    `contains` glob names some file its regex matches, and every `toml` glob
+    names some TOML file with, at each dotted key given, a value whose JSON
+    its regex matches: `{pyproject.toml: {project.optional-dependencies:
+    pytest}}`. A key reads one table, where a regex over the text would run
+    from that table's header to the end of the file."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     files: list[str] = []
     contains: dict[str, str] = {}
+    toml: dict[str, dict[str, str]] = {}
 
     @field_validator("contains")
     @classmethod
     def _patterns(cls, v: dict[str, str]) -> dict[str, str]:
         return _check_patterns(v)
+
+    @field_validator("toml")
+    @classmethod
+    def _toml_patterns(cls, v: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+        for keys in v.values():
+            _check_patterns(keys)
+        return v
 
 
 class Command(BaseModel):
@@ -368,6 +381,7 @@ class _Index:
                 self.children.setdefault(parent, set())
                 parent = up
         self._text: dict[str, str] = {}
+        self.tomls: dict[str, dict] = {}
 
     @property
     def dirs(self) -> set[str]:
@@ -419,7 +433,27 @@ def _join(d: str, rel: str) -> str:
 def _holds(index: _Index, d: str, cond: Condition) -> bool:
     if cond.files and not any(index.matching(d, g) for g in cond.files):
         return False
-    return all(_contains(index, d, g, rx) for g, rx in cond.contains.items())
+    if not all(_contains(index, d, g, rx) for g, rx in cond.contains.items()):
+        return False
+    return all(_toml_has(index, d, g, keys) for g, keys in cond.toml.items())
+
+
+def _toml_has(index: _Index, d: str, glob: str, keys: dict[str, str]) -> bool:
+    for rel in index.matching(d, glob):
+        data = _toml(index, _join(d, rel))
+        values = [_dig(data, key.split(".")) for key in keys]
+        if all(
+            v is not None and re.search(rx, json.dumps(v))
+            for v, rx in zip(values, keys.values(), strict=True)
+        ):
+            return True
+    return False
+
+
+def _dig(value: object, path: list[str]) -> object:
+    for key in path:
+        value = value.get(key) if isinstance(value, dict) else None
+    return value
 
 
 def _contains(index: _Index, d: str, glob: str, pattern: str) -> bool:
@@ -429,8 +463,12 @@ def _contains(index: _Index, d: str, glob: str, pattern: str) -> bool:
 
 # ── task readers ─────────────────────────────────────────────────────────────
 
-_JUST_RECIPE = re.compile(r"^@?([A-Za-z_][\w-]*)(?:\s[^:\n]*)?:(?!=)", re.MULTILINE)
-_MAKE_RULE = re.compile(r"^([^\s:#=][^:#=]*?)\s*::?(?!=)", re.MULTILINE)
+# No pattern here may span lines or nest a quantifier: a committed file is
+# attacker-sized (up to `_TEXT_LIMIT`), and a regex that backtracks over it
+# holds the GIL, freezing the whole server, not just the probe's thread.
+_JUST_RECIPE = re.compile(r"^@?([A-Za-z_][\w-]*)(?:[ \t][^:\n]*)?:(?!=)", re.MULTILINE)
+#: The rule's names, and trailing blanks the reader splits off.
+_MAKE_RULE = re.compile(r"^([^\s:#=][^:#=\n]*)::?(?!=)", re.MULTILINE)
 _RAKE_TASK = re.compile(r"""\btask\s*\(?\s*:?["']?([\w:]+)""")
 #: `npm init`'s placeholder: a `test` script that only ever fails.
 _NPM_STUB = re.compile(r"no test specified", re.IGNORECASE)
@@ -438,6 +476,12 @@ _NPM_STUB = re.compile(r"no test specified", re.IGNORECASE)
 
 def _first(index: _Index, d: str, names: Iterable[str]) -> str | None:
     return next((n for n in names if index.matching(d, n)), None)
+
+
+#: What reading a committed file can raise: it is malformed, or nested deeper
+#: than a parser's recursion goes (`[[[[...` in a package.json). Either way
+#: that file is no evidence; the probe goes on without it.
+_UNREADABLE = (ValueError, yaml.YAMLError, RecursionError)
 
 
 def _jsonc(text: str) -> object:
@@ -496,16 +540,18 @@ def _read_taskfile(index: _Index, d: str) -> tuple[str, set[str], str] | None:
         return None
     try:
         data = yaml.safe_load(index.text(_join(d, name))) or {}
-    except yaml.YAMLError:
+    except _UNREADABLE:
         return None
     return name, _keys(data.get("tasks") if isinstance(data, dict) else None), "task"
 
 
 def _toml(index: _Index, rel: str) -> dict:
-    try:
-        return tomllib.loads(index.text(rel))
-    except tomllib.TOMLDecodeError:
-        return {}
+    if rel not in index.tomls:
+        try:
+            index.tomls[rel] = tomllib.loads(index.text(rel))
+        except _UNREADABLE:
+            index.tomls[rel] = {}
+    return index.tomls[rel]
 
 
 def _read_mise(index: _Index, d: str) -> tuple[str, set[str], str] | None:
@@ -522,7 +568,7 @@ def _json_section(index: _Index, d: str, names: tuple[str, ...], key: str):
     text = index.text(_join(d, name))
     try:
         data = _jsonc(text) if name.endswith("c") else json.loads(text)
-    except ValueError:
+    except _UNREADABLE:
         return name, None
     return name, (data.get(key) if isinstance(data, dict) else None)
 
@@ -761,20 +807,44 @@ _CI_GLOBAL_INSTALL = re.compile(
 )
 
 
-def _ci_lines(value: object) -> list[str]:
+#: How many nodes and script lines one CI file may hold. YAML aliases are
+#: shared when loaded but walked once per use, so a few hundred bytes of
+#: nested aliases would otherwise walk billions of nodes.
+_CI_BUDGET = 50_000
+
+
+class _Overrun(Exception):
+    """A CI file past `_CI_BUDGET`: it is skipped, not read in part."""
+
+
+def _spend(budget: list[int], n: int = 1) -> None:
+    budget[0] -= n
+    if budget[0] < 0:
+        raise _Overrun
+
+
+def _ci_lines(value: object, budget: list[int]) -> list[str]:
     if isinstance(value, str):
-        return [line for line in value.replace("\\\n", " ").splitlines()]
+        # A long script costs by its length, however often an alias repeats it.
+        _spend(budget, 1 + len(value) // 64)
+        lines = value.replace("\\\n", " ").splitlines()
+        _spend(budget, len(lines))
+        return lines
+    _spend(budget)
     if isinstance(value, list):
-        return [line for v in value for line in _ci_lines(v)]
+        return [line for v in value for line in _ci_lines(v, budget)]
     return []
 
 
-def _ci_walk(node: object, wd: str, out: list[tuple[str, str, list[str]]]) -> None:
+def _ci_walk(
+    node: object, wd: str, out: list[tuple[str, str, list[str]]], budget: list[int]
+) -> None:
     """(working directory, key, lines) for every script under `node`: one
     entry per script, since its lines run in one shell, one after another."""
+    _spend(budget)
     if isinstance(node, list):
         for v in node:
-            _ci_walk(v, wd, out)
+            _ci_walk(v, wd, out, budget)
         return
     if not isinstance(node, dict):
         return
@@ -787,11 +857,11 @@ def _ci_walk(node: object, wd: str, out: list[tuple[str, str, list[str]]]) -> No
         if key in _CI_SKIP_KEYS:
             continue
         if key in _CI_COMMAND_KEYS and isinstance(value, dict):
-            _ci_walk(value, wd, out)  # CircleCI's long form: `run: {command: ...}`
+            _ci_walk(value, wd, out, budget)  # CircleCI's long form: `run: {command: ...}`
         elif key in _CI_COMMAND_KEYS or key in _CI_SETUP_KEYS:
-            out.append((wd, str(key), _ci_lines(value)))
+            out.append((wd, str(key), _ci_lines(value, budget)))
         else:
-            _ci_walk(value, wd, out)
+            _ci_walk(value, wd, out, budget)
 
 
 def _relative_dir(base: str, step: str) -> str | None:
@@ -885,12 +955,11 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
     files = [rel for glob in _CI_FILES for rel in index.matching("", glob)]
     files.sort(key=lambda rel: bool(_CI_LATE.search(posixpath.basename(rel))))
     for rel in files:
-        try:
-            data = yaml.safe_load(index.text(rel))
-        except yaml.YAMLError:
-            continue
         scripts: list[tuple[str, str, list[str]]] = []
-        _ci_walk(data, "", scripts)
+        try:
+            _ci_walk(yaml.safe_load(index.text(rel)), "", scripts, [_CI_BUDGET])
+        except (*_UNREADABLE, _Overrun):
+            continue
         lines = []
         for wd, key, block in scripts:
             here = _relative_dir("", wd) if wd else ""
@@ -952,12 +1021,12 @@ def _devcontainer_candidate(index: _Index) -> Candidate | None:
         return None
     try:
         data = _jsonc(index.text(rel))
-    except ValueError:
+        if not isinstance(data, dict):
+            return None
+        keys = [k for k in _DEVCONTAINER_KEYS if k in data]
+        parts = [c for k in keys for c in _devcontainer_command(data[k])]
+    except _UNREADABLE:
         return None
-    if not isinstance(data, dict):
-        return None
-    keys = [k for k in _DEVCONTAINER_KEYS if k in data]
-    parts = [c for k in keys for c in _devcontainer_command(data[k])]
     # A container's own provisioning is no worktree's to run.
     if not parts or any(re.search(r"\b(sudo|apt-get|apt|apk|yum|dnf)\b", p) for p in parts):
         return None
@@ -1147,7 +1216,7 @@ def _names_dir(text: str, d: str) -> bool:
 #: `pytest -x`, `python -m coverage`, Taskfile's `- pytest`, mise's `run = "pytest"`.
 _BARE_PYTHON = re.compile(
     r"""(?:^|&&|;|\|\|)[ \t]*(?:cmd:[ \t]*|run[ \t]*=[ \t]*)?["']?[@-]*[ \t]*"""
-    r"(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:python3?|pytest|py\.test|coverage)(?![\w.-])",
+    r"(?:[A-Za-z_]\w*=[^\s;&|]*[ \t]+)*(?:python3?|pytest|py\.test|coverage)(?![\w.-])",
     re.MULTILINE,
 )
 
@@ -1258,6 +1327,69 @@ def _corroborate(by_dir: dict[str, list[Candidate]], ci: list[Candidate]) -> Non
                 same.source += f"; CI runs it too ({c.marker})"
         else:
             by_dir.setdefault(c.dir, []).append(c)
+
+
+#: How long one probe may take, start to end, in its own process.
+_PROBE_TIMEOUT_S = 120
+#: The most memory that process may take.
+_PROBE_MEMORY = 2 << 30
+
+
+def probe(
+    root: Path, templates_dir: Path | None = None, *, test_command: str | None = None
+) -> Proposal:
+    """`propose`, in a child process with a wall-clock limit. What it reads
+    is the repository's, whoever committed it: a file that sends a regex or
+    a parser into the weeds holds the GIL, which no thread can time out, and
+    would freeze the whole server and every connect queued behind it. A
+    child that runs too long is killed, and one that fails for any reason
+    is a `ConfigError` naming why, which every caller already answers."""
+    request = {"root": str(root), "templates_dir": templates_dir, "test_command": test_command}
+    here = str(Path(__file__).resolve().parents[1])
+    path = os.pathsep.join(p for p in (here, os.environ.get("PYTHONPATH")) if p)
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", "from kraft.detect import _child; _child()"],
+            input=json.dumps(request, default=str),
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_S,
+            env={**os.environ, "PYTHONPATH": path},
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ConfigError(
+            f"probing {root} took more than {_PROBE_TIMEOUT_S}s; "
+            "connect it with --test-command and --setup-command instead"
+        ) from exc
+    if done.returncode != 0:
+        lines = done.stderr.strip().splitlines()
+        why = lines[-1] if lines else f"exit {done.returncode}"
+        raise ConfigError(why if done.returncode == 2 else f"probing {root} failed: {why}")
+    return Proposal(**json.loads(done.stdout))
+
+
+def _child() -> None:
+    """`probe`'s other end: a request on stdin, the proposal on stdout, a
+    `ConfigError` as exit 2 with its message on stderr."""
+    try:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_AS, (_PROBE_MEMORY, _PROBE_MEMORY))
+    except (ImportError, ValueError, OSError):
+        pass  # no such limit here (Windows; macOS refuses RLIMIT_AS)
+    request = json.loads(sys.stdin.read())
+    templates = request["templates_dir"]
+    try:
+        proposal = propose(
+            Path(request["root"]),
+            load(Path(templates) if templates else None),
+            test_command=request["test_command"],
+        )
+    except ConfigError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(2)
+    json.dump(asdict(proposal), sys.stdout)
 
 
 def propose(root: Path, table: Table, *, test_command: str | None = None) -> Proposal:

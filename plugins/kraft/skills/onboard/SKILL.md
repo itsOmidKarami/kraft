@@ -32,13 +32,20 @@ zero exit code says the command ran, not that what it did was right.
    wrapper the probe cannot know, such as `./ci/run-tests`), connect with the
    repo's own commands rather than correcting afterwards:
    `ensure_repo(test_command=..., setup_command=...)`, or
-   `kraft repo connect --test-command ... --setup-command ...`. Say which you
-   chose and why.
+   `kraft repo connect --test-command ... --setup-command ...`.
+
+   `ensure_repo` saves as soon as it is called, so the person sees the
+   commands only through you. Show them what was saved, each command with
+   its source, and the candidates it passed over, then ask them to confirm
+   or correct it before the first work item. Say which you chose and why.
 
    A repo with nothing to prepare declares `setup_command: ""`, and a repo
    with no tests declares `test_command: ""` (`--no-tests`). Both mean
    "deliberately nothing", not an oversight. Without a `setup_command`, the
-   repo's next work item stops rather than guessing.
+   repo's next work item stops rather than guessing. Declare no tests only
+   when the person says the repo has none: every work item on it passes
+   verification without running a test. `ensure_repo(test_command="")`
+   saves the repo disabled for that reason, and the person enables it.
 
    The setup command prepares every worktree for this repo, so check it as
    hard as the test command. A repo with more than one project in it gets a

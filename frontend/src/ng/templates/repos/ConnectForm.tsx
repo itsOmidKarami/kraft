@@ -3,8 +3,8 @@ import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { Kv } from "../panes/controls";
-import type { ProbeCandidate } from "../../../types/settings";
-import { chosenSource, otherCount, withSource } from "./evidence";
+import type { ProbeCandidate, ProbeStop } from "../../../types/settings";
+import { chosenSource, others, readFrom, withSource } from "./evidence";
 
 /** `POST /repos/probe`'s answer, the fields Connect reads. */
 export interface Probe {
@@ -17,6 +17,9 @@ export interface Probe {
   forge: string | null;
   project: string | null;
   candidates?: ProbeCandidate[];
+  read_from?: string | null;
+  missing_setup?: string[];
+  stopped?: ProbeStop[];
 }
 
 /** The `fields` of `add_repo` from a probe: what `POST /repos` writes (Decided 9). A
@@ -80,8 +83,11 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           <Kv k="tests" v={probe.test_command ? withSource(probe.test_command, chosenSource(probe.candidates, "test")) : "none found"} mono muted={!probe.test_command} />
           <Kv k="test scopes" v={probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes} />
           <Kv k="setup" v={probe.setup_command ? withSource(probe.setup_command, chosenSource(probe.candidates, "setup")) : "none found"} mono muted={!probe.setup_command} />
-          {otherCount(probe.candidates) > 0 && <Kv k="also found" v={`${otherCount(probe.candidates)} other command(s): kraft repo connect lists them`} muted />}
-          <p className="rp-connect-note">{probe.test_command || probe.test_scopes ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
+          {others(probe.candidates) && <Kv k="also found" v={others(probe.candidates)!} mono muted />}
+          {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={`${s.dir} is ${s.reason}`} muted />)}
+          {probe.missing_setup?.length ? <Kv k="no setup" v={`${probe.missing_setup.join(", ")}: tests and nothing to prepare them; the first work item stops until a setup command is set`} muted /> : null}
+          {readFrom(probe.read_from) && <Kv k="read from" v={readFrom(probe.read_from)!} muted />}
+          <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
         </div>
       )}
     </form>

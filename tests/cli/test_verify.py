@@ -80,6 +80,18 @@ def test_a_failing_test_fails_verify_showing_its_output(tmp_path):
     assert _worktrees(repo) == 1
 
 
+def test_a_pass_leaves_no_logs_behind_and_a_failure_keeps_the_one_it_names(tmp_path, monkeypatch):
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(verify.tempfile, "tempdir", str(scratch))
+    repo = _repo(tmp_path)
+    ok, _ = _verify(_entry(repo, test_command="true"))
+    assert ok and list(scratch.glob("kraft-verify-*")) == []
+    ok, said = _verify(_entry(repo, test_command="false"))
+    named = said.split("full output: ")[1].splitlines()[0]
+    assert not ok and Path(named).is_file()
+
+
 def test_a_failed_setup_runs_no_tests(tmp_path):
     repo = _repo(tmp_path)
     ok, said = _verify(_entry(repo, setup_command="exit 1", test_command="true"))

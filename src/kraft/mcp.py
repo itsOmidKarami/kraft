@@ -128,9 +128,17 @@ def build() -> MCPServer:
         and a setup command from the repo's own files (task runners, CI,
         lockfiles) and returns every candidate it saw; pass `test_command` or
         `setup_command` to use the repo's own documented commands instead
-        (`""` declares none). An already-connected repo is left as it is."""
+        (`""` declares none). Show the person what it proposes before relying
+        on it. `test_command=""` (no tests) saves the repo disabled: work items
+        on it would pass verification without running a test, which is the
+        person's to decide, by enabling it. An already-connected repo is left
+        as it is."""
         return await client.ensure_repo(
-            path, test_command=test_command, setup_command=setup_command
+            path,
+            test_command=test_command,
+            setup_command=setup_command,
+            # Never enabled with no tests on an agent's say-so.
+            enabled=False if test_command == "" else None,
         )
 
     @server.tool()

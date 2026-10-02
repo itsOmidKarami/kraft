@@ -132,6 +132,7 @@ async def ensure_repo(
     *,
     test_command: str | None = None,
     setup_command: str | None = None,
+    enabled: bool | None = None,
 ) -> dict:
     """Register a repo with Kraft if it is not already connected.
 
@@ -139,9 +140,10 @@ async def ensure_repo(
     and "already connected" is the goal state, not a failure. `test_command`
     and `setup_command` replace what the probe would propose (`""` for none);
     an already-connected repo keeps what it has -- edit repos.yaml to change it.
+    `enabled` None lets the server decide (enabled when it has a test).
     """
     path = context.absolute_path(path or os.getcwd())
-    fields = {"test_command": test_command, "setup_command": setup_command}
+    fields = {"test_command": test_command, "setup_command": setup_command, "enabled": enabled}
     payload = {"path": path, **{k: v for k, v in fields.items() if v is not None}}
     status, body = await transport._post("/repos", payload)
     if status == 409:

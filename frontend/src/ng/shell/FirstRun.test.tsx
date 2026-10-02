@@ -89,7 +89,7 @@ describe("FirstRun", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 4000 });
     expect(screen.getByText("just test — from justfile recipe `test`")).toBeInTheDocument();
     expect(screen.getByText("just setup — from justfile recipe `setup`")).toBeInTheDocument();
-    expect(screen.getByText("1 other command(s)")).toBeInTheDocument();
+    expect(screen.getByText("uv run pytest (uv.lock)")).toBeInTheDocument();
   });
 
   it("sends no root scope for a single-stack repo: it would shadow later test command edits", async () => {

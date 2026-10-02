@@ -34,7 +34,7 @@
     },
     "Condition": {
       "additionalProperties": false,
-      "description": "Holds when any `files` glob matches (or none is given) and every\n`contains` glob names some file its regex matches.",
+      "description": "Holds when any `files` glob matches (or none is given), every\n`contains` glob names some file its regex matches, and every `toml` glob\nnames some TOML file with, at each dotted key given, a value whose JSON\nits regex matches: `{pyproject.toml: {project.optional-dependencies:\npytest}}`. A key reads one table, where a regex over the text would run\nfrom that table's header to the end of the file.",
       "properties": {
         "contains": {
           "additionalProperties": {
@@ -51,6 +51,17 @@
           },
           "title": "Files",
           "type": "array"
+        },
+        "toml": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "title": "Toml",
+          "type": "object"
         }
       },
       "title": "Condition",

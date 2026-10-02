@@ -5,7 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
-import { chosenSource, otherCount, withSource } from "../templates/repos/evidence";
+import { chosenSource, others, readFrom, withSource } from "../templates/repos/evidence";
 import "./first-run.css";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
@@ -47,7 +47,12 @@ function probeRows(p: RepoProbe): [string, string][] {
     ["Test command", p.test_command ? withSource(p.test_command, chosenSource(p.candidates, "test")) : "not detected"],
     ["Setup command", p.setup_command ? withSource(p.setup_command, chosenSource(p.candidates, "setup")) : "none found"],
     ["Forge remote", p.forge ? `${p.forge}${p.project ? ` · ${p.project}` : ""}` : "none"],
-    ...(otherCount(p.candidates) ? [["Also found", `${otherCount(p.candidates)} other command(s)`] as [string, string]] : []),
+    ...(others(p.candidates) ? [["Also found", others(p.candidates)!] as [string, string]] : []),
+    ...(p.stopped ?? []).map((s) => ["No tests", `${s.dir} is ${s.reason}`] as [string, string]),
+    ...(p.missing_setup?.length
+      ? [["No setup", `${p.missing_setup.join(", ")}: the first work item stops until a setup command is set`] as [string, string]]
+      : []),
+    ...(readFrom(p.read_from) ? [["Read from", readFrom(p.read_from)!] as [string, string]] : []),
   ];
 }
 

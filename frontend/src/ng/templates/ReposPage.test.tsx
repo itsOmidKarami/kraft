@@ -131,7 +131,30 @@ describe("Repos page: connecting", () => {
     const found = await screen.findByLabelText("What was found");
     expect(found).toHaveTextContent("pytest — from uv.lock");
     expect(found).toHaveTextContent("uv sync — from uv.lock");
-    expect(found).toHaveTextContent("1 other command(s)");
+    expect(found).toHaveTextContent("make test (Makefile target `test`)");
+  });
+
+  it("says why it proposes no tests, what it cannot prepare, and which commit it read", async () => {
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe"
+      ? ok(probe({
+        test_command: null,
+        test_scopes: [],
+        read_from: "refs/remotes/origin/main",
+        missing_setup: ["web"],
+        stopped: [{ dir: ".", reason: "a project (Gemfile) with no test command found", detector: "ruby" }],
+      }))
+      : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    const found = await screen.findByLabelText("What was found");
+    expect(found).toHaveTextContent(". is a project (Gemfile) with no test command found");
+    expect(found).toHaveTextContent("web: tests and nothing to prepare them");
+    expect(found).toHaveTextContent("origin/main, where work items start");
+    // `test_scopes: []` is no test: the repo connects disabled, and says so.
+    expect(found).toHaveTextContent("No tests found: connected disabled");
   });
 
   it("shows a probe's refusal inline and sends nothing", async () => {

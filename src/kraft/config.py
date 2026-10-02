@@ -795,7 +795,7 @@ def probe_repo(
     }
     if not detect:
         return facts
-    proposal = detect_mod.propose(root, detect_mod.load(templates_dir), test_command=test_command)
+    proposal = detect_mod.probe(root, templates_dir, test_command=test_command)
     return {
         **facts,
         "test_command": proposal.test_command,

@@ -90,10 +90,21 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
         mark = "  [proposed]" if i == default else ""
         print(f"  {i}) {o['command']}    from {o['source']}{mark}")
     keep = f"Enter keeps {default}, " if default else ""
+    none = "- for no tests" if role == "test" else "- for none"
     while True:
-        answer = input(f"  {keep}a number, - for none, or type a command: ").strip()
+        answer = input(f"  {keep}a number, {none}, or type a command: ").strip()
         if not answer:
             return proposed
+        if answer == "-" and role == "test":
+            # Saved enabled, and every work item passes its test step: a
+            # decision, not a way to put the question off.
+            sure = input(
+                "  no tests: the repo is enabled and its work items pass verification "
+                "without running any. Save it that way? [y/N] "
+            )
+            if sure.strip().lower() in ("y", "yes"):
+                return ""
+            continue
         if answer == "-":
             return ""
         if answer.lower() in ("y", "yes") and proposed is not None:
