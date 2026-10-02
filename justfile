@@ -327,4 +327,5 @@ docs-site:
     cd docsite && [ -d node_modules ] || npm ci
     rm -rf docsite/dist-site
     dev/build_docs_site.sh docsite/dist-site/kraft
+    python3 dev/check_llm_docs.py docsite/dist-site/kraft
     python3 -m http.server 8000 -d docsite/dist-site

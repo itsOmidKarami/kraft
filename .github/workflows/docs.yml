@@ -19,6 +19,7 @@ on:
       - ".github/assets/**"
       - "frontend/public/icon.svg"
       - "dev/build_docs_site.sh"
+      - "dev/check_llm_docs.py"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -51,6 +52,13 @@ jobs:
         run: |
           npm ci --prefix docsite
           dev/build_docs_site.sh "$RUNNER_TEMP/site"
+
+      # The copies written for LLMs (raw/*.md, which llms.txt, "Copy page" and
+      # "Open in Claude/ChatGPT" serve, and llms-full.txt) are not HTML, so the
+      # lychee step below never reads them. Every push too, not only PRs:
+      # this one needs no network, and a regression must not reach Pages.
+      - name: check the LLM copies of the docs
+        run: python3 dev/check_llm_docs.py "$RUNNER_TEMP/site"
 
       # Every link on main's pages (/kraft/next/), internal and external,
       # anchors included. PRs only: a link that rots between PRs must not

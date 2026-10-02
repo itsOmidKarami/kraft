@@ -203,7 +203,7 @@ CI's order, on the full suite.
 | `playwright` *(code)* | the browser e2e suite against a fixture server | `just e2e-ci` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
-| `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code | `just docs-site` |
+| `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
 | `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
 | `codeql` | GitHub's static analysis | nothing to run |
 
