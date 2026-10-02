@@ -5,12 +5,14 @@ code (an infra failure, an external wait)."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
 from kraft import events, store
 from kraft.executor import stops, walk
+from kraft.templates.models import DEFAULT_WAIT
 
 _CHAIN = """
 - id: implementation
@@ -259,7 +261,8 @@ async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_in
     with a time to look again, the default initial interval from now, rather
     than leaving it where no scheduler wakes it."""
     it = await item_on(_CHAIN, "implementation", repo="/r")
-    monkeypatch.setattr(stops, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(stops, "_now", now.isoformat)
     waiting = [SimpleNamespace(path="implementation.main.build")]
 
     status = await stops.stop_for_waiting(
@@ -267,4 +270,5 @@ async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_in
     )
 
     assert status == "waiting"
-    assert (it.status(), it.row()["retry_at"]) == ("waiting", "2026-01-01T00:00:30+00:00")
+    due = (now + DEFAULT_WAIT.initial_interval).isoformat()
+    assert (it.status(), it.row()["retry_at"]) == ("waiting", due)

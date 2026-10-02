@@ -449,14 +449,13 @@ def test_a_worker_cannot_set_its_own_policy_through_the_cli(
 
 
 def test_resume_starts_a_paused_item(app, capsys, make_item, repo):
+    """The verb's own contract: the id and `--steer` reach the route, and
+    `--json` prints its answer. What resume does to the item is the client
+    tier's (tests/client/test_act.py)."""
     wid = make_item(repo, "start me")
     cli.main(["item", "resume", wid, "--steer", "go left", "--json"])
-    assert json.loads(capsys.readouterr().out)["steer"] == "go left"
-    evts = asyncio.run(client.events(wid))
-    assert [e["payload"] for e in evts if e["type"] == "work_item_resumed"] == [
-        {"steer": "go left"}
-    ]
-    assert asyncio.run(client.get_work_item(wid))["status"] != "paused"
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["id"], printed["steer"]) == (wid, "go left")
 
 
 def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, repo):

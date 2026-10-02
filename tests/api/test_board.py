@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from support.api import (
+    WALK_TIMEOUT,
     _force_node,
     _poll_events,
     _post_default,
@@ -498,7 +499,7 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(client, repo
             "chain_template": "quick-task",
         },
     ).json()["id"]
-    _poll_events(client, wid, "work_item_completed", timeout=120)
+    _poll_events(client, wid, "work_item_completed", timeout=WALK_TIMEOUT)
 
     usage = client.get(f"/api/work-items/{wid}").json()["usage"]
     impl = next(n for n in usage["by_node"] if n["node"] == "implementation")

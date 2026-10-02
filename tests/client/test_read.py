@@ -1,12 +1,14 @@
 """client.py against the real app, over ASGI — no server, no MCP client.
 
-Async tests follow the suite's existing shape: a sync test function wrapping an
-inner coroutine with `asyncio.run` (see tests/test_adapters_subprocess.py).
-
-`httpx.ASGITransport` does not run the app's lifespan the way `TestClient` does,
-so `support.api.run_with_app` enters it explicitly. Everything a test does
-lives in one coroutine, and therefore one event loop, because the Database
-opened by the lifespan is bound to the loop that opened it.
+A test that needs the app takes the `wired` fixture (`tests/client/conftest.py`)
+and hands its whole scenario, one `async def`, to `support.api.run_with_app`.
+`httpx.ASGITransport` does not run the app's lifespan the way `TestClient`
+does, so `run_with_app` enters it, and runs the scenario in the same event
+loop, because the Database the lifespan opens is bound to the loop that opened
+it. The tests here are sync functions for that reason, each handing one
+coroutine to `run_with_app`; the few with no app to reach (`base_url`, a
+`health` answer) call the client directly, or through `asyncio.run` for the
+one coroutine among them.
 """
 
 from __future__ import annotations

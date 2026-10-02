@@ -83,8 +83,10 @@ def bd_answers(monkeypatch):
     def answer(stdout: str, returncode: int = 0, stderr: str = "") -> list:
         calls: list = []
 
-        def run(argv, *_a, cwd=None, **_k):
+        def run(argv, *_a, cwd=None, check=False, **_k):
             calls.append((list(argv), cwd))
+            if check and returncode:
+                raise subprocess.CalledProcessError(returncode, argv, stdout, stderr)
             return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
         monkeypatch.setattr(beads.subprocess, "run", run)
@@ -134,6 +136,16 @@ async def test_intake_reads_the_id_past_an_advisory_line(bd_answers):
         "Created by the Kraft orchestrator.",
     ]
     assert calls == [([*argv, "--type", "task"], "/r")]
+
+
+@pytest.mark.beads_adapter
+async def test_complete_raises_when_bd_cannot_close_the_bead(bd_answers):
+    """Unlike the best-effort reads, a close that bd refused is an error the
+    caller hears: the item's bead would otherwise stay open unnoticed."""
+    calls = bd_answers("", returncode=1, stderr="Error: no issue X-1")
+    with pytest.raises(subprocess.CalledProcessError):
+        await beads.complete("X-1", cwd="/r")
+    assert calls == [(["bd", "close", "X-1"], "/r")]
 
 
 @pytest.mark.beads_adapter

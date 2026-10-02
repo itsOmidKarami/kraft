@@ -205,7 +205,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
         return await asyncio.open_connection(address, port_)
 
     registry = channel.ChannelRegistry(
-        short_run, database, EgressProxy(getaddrinfo=resolve, connect=connect)
+        short_run, database, EgressProxy(getaddrinfo=resolve, connect=connect, environ={})
     )
     channel.install(registry)
     # Forced on a Linux host, whose containers reach the host at the

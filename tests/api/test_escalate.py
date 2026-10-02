@@ -12,7 +12,14 @@ import time
 from pathlib import Path
 
 import pytest
-from support.api import _force_node, _poll_events, _post_default, _set_status, _wait_for_status
+from support.api import (
+    WALK_TIMEOUT,
+    _force_node,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _wait_for_status,
+)
 
 
 def _post(client, repo, title="fine so far", **body):
@@ -39,7 +46,7 @@ def _needs_human_item(client, repo, title="KRAFT_FAIL once"):
     wid = _post(
         client, repo, title, node_overrides={"implementation": {"auto_escalate_stuck": False}}
     )
-    _wait_for_status(client, wid, "needs_human", timeout=120)
+    _wait_for_status(client, wid, "needs_human", timeout=WALK_TIMEOUT)
     return wid
 
 

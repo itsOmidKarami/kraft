@@ -25,6 +25,12 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: test_gates.py's wall time spent waiting on work already done (Kraft-qmhfc).
 _POLL = 0.02
 
+#: How long a test waits for a whole chain to walk on the fake agent (a few
+#: seconds when healthy). Well under pyproject's 120s per-test timeout, which
+#: also covers the client's lifespan and the rest of the test: a wait at the
+#: ceiling can never fail with its own message, only as a killed worker.
+WALK_TIMEOUT = 90
+
 
 class _LoopbackClient(TestClient):
     """A websocket on the same loopback Host as every HTTP call. Starlette
@@ -238,7 +244,7 @@ def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
     return wid
 
 
-def _completed_item(client, repo, *, timeout=120) -> str:
+def _completed_item(client, repo, *, timeout=WALK_TIMEOUT) -> str:
     """A `quick-task` item (no gate on any node) started and walked to
     `work_item_completed`; its id. Quick-task rather than the default chain:
     a `gate_requested` left open by force-writing status past it reads to
@@ -316,6 +322,23 @@ def _budget_stopped_item(client, repo, breach: dict, **fields) -> str:
             conn, wid, "implementation", "budget cap reached", None, breach, kind="budget"
         )
     return wid
+
+
+async def await_gate(wid: str, timeout: float = 30) -> str:
+    """Wait for the server to report a gate waiting on a person for `wid`, and
+    name it: `_await_gate` for a scenario running inside `run_with_app`, over
+    `kraft.client` rather than a `TestClient`."""
+    from kraft import client as kraft_client
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    item: dict = {}
+    while loop.time() < deadline:
+        item = await kraft_client.get_work_item(wid)
+        if item.get("pending_gate"):
+            return item["pending_gate"]
+        await asyncio.sleep(_POLL)
+    raise AssertionError(f"no gate became pending; item={item.get('status')!r}")
 
 
 def run_with_app(api, scenario):

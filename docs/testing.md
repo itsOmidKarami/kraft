@@ -247,7 +247,10 @@ parametrizing a pinned test means repointing it in the same change. Run
   hung, and the `Timeout` stack dump above says where. Its teardown never
   runs, so what it started outside the process stays. The sandbox e2e
   fixture (`tests/worker/test_egress_docker.py`) removes the relays, volume
-  and worker a killed run left at the next run.
+  and worker a killed run left at the next run. So a test's own wait must
+  end well inside that timeout, or the test must raise its own with
+  `@pytest.mark.timeout(N)`: a wait the timeout cuts short never gets to
+  fail with its own message.
 
 ## Enforced mechanically
 

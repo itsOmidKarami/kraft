@@ -242,25 +242,49 @@ def test_remove_profile_refuses_a_used_one_and_removes_a_free_one(client):
     assert "spare" not in written(client, "harnesses.yaml")["profiles"]
 
 
-def test_rename_profile_retargets_fallbacks_and_reports_the_tasks_it_broke(client):
+#: A chain of its own whose one agent task selects the profile `scratch`.
+_SCRATCH_CHAIN = {
+    "id": "scratch",
+    "nodes": [
+        {
+            "id": "only",
+            "kind": "exec",
+            "tasks": [
+                {
+                    "id": "solo",
+                    "kind": "agent",
+                    "harness": "claude",
+                    "profile": "scratch",
+                    "prompt": "Do it.",
+                }
+            ],
+        }
+    ],
+}
+
+
+def test_rename_profile_retargets_fallbacks_and_reports_the_tasks_it_broke(client, templates_dir):
+    """A task that names the old profile is left dangling and reported; a
+    profile's `fallback:` naming it is retargeted."""
+    path = templates_dir / "harnesses.yaml"
+    harnesses = yaml.safe_load(path.read_text())
+    harnesses["profiles"]["scratch"] = dict(harnesses["profiles"]["fast"])
+    path.write_text(yaml.safe_dump(harnesses, sort_keys=False))
+    (templates_dir / "chains" / "scratch.yaml").write_text(yaml.safe_dump(_SCRATCH_CHAIN))
+    assert client.post("/api/templates/reload").status_code == 200
     ops(
         client,
-        {"op": "set_profile", "name": "fast", "patch": {"fallback": [{"profile": "strong"}]}},
+        {"op": "set_profile", "name": "fast", "patch": {"fallback": [{"profile": "scratch"}]}},
     )
-    r = ops(client, {"op": "rename_profile", "name": "strong", "to": "heavy"})
+
+    r = ops(client, {"op": "rename_profile", "name": "scratch", "to": "renamed"})
+
     assert r.status_code == 200, r.text
     profiles = written(client, "harnesses.yaml")["profiles"]
-    assert "strong" not in profiles and "heavy" in profiles
-    assert profiles["fast"]["fallback"] == [{"profile": "heavy"}]
+    assert "scratch" not in profiles and "renamed" in profiles
+    assert profiles["fast"]["fallback"] == [{"profile": "renamed"}]
     [result] = [o for o in r.json()["ops"] if o["op"] == "rename_profile"]
-    broken = {(u["chain"], u["path"]) for u in result["result"]["broken"]}
-    # The shipped implementer selects `strong`, in both chains that run it; the
-    # spec author selects no profile, so the rename leaves it alone.
-    assert {
-        ("default", "implementation.main.implement"),
-        ("quick-task", "implementation.main.implement"),
-    } <= broken
-    assert ("default", "spec.main.author") not in broken
+    assert result["result"]["broken"] == [{"chain": "scratch", "path": "only.main.solo"}]
 
 
 # ── what the lanes need (W14 A) ──
