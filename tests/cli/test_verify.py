@@ -159,6 +159,20 @@ def test_a_step_that_leaves_files_a_commit_would_take_fails(tmp_path):
     assert "left files every work item would commit: calc.py." in said
 
 
+def test_an_unignored_install_is_not_a_file_a_commit_would_take(tmp_path):
+    """A work item's commits leave an untracked virtualenv or `node_modules`
+    out (`forge.git.work_product_pathspec`), so verify does not count one
+    either; a file written beside it still fails."""
+    repo = _repo(tmp_path)
+    setup = "mkdir -p .venv/lib node_modules/x && touch .venv/pyvenv.cfg node_modules/x/i.js"
+    ok, said = _verify(_entry(repo, setup_command=setup, test_command="true"))
+    assert ok, said
+    stray = f"{setup} && touch stray.txt"
+    ok, said = _verify(_entry(repo, setup_command=stray, test_command="true"))
+    assert not ok
+    assert "left files every work item would commit: stray.txt." in said
+
+
 def test_a_step_that_does_not_finish_is_killed_with_its_children(tmp_path):
     repo = _repo(tmp_path)
     pidfile = tmp_path / "child.pid"

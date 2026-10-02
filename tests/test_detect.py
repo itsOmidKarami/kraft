@@ -141,8 +141,9 @@ KINDS = [
         "requirements-txt",
         {"requirements.txt": "pytest\n"},
         ".venv/bin/python -m pytest",
-        "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
-    ),  # noqa: E501
+        "python3 -m venv .venv && echo '*' > .venv/.gitignore"
+        " && .venv/bin/pip install -r requirements.txt",
+    ),
     ("tox", {"tox.ini": "[tox]\n"}, "tox -e py", "tox -e py --notest"),
     (
         "tox-beside-a-lockless-pyproject",  # django, boto3
@@ -697,3 +698,30 @@ def test_one_reader_serves_every_file_in_turn_past_a_capped_one(tmp_path, monkey
         assert [index.text("big"), index.text("small")] == ["b" * 8, "s\n"]
     finally:
         index.close()
+
+
+#: `python3 -m venv DIR` as Python 3.12 and older make one: no
+#: `DIR/.gitignore`, which 3.13's `venv` writes and they do not.
+_PY312_VENV = """#!/bin/sh
+[ "$1 $2" = "-m venv" ] || exit 2
+mkdir -p "$3/bin" && echo "home = /usr/bin" > "$3/pyvenv.cfg"
+printf '#!/bin/sh\\nexit 0\\n' > "$3/bin/pip" && chmod +x "$3/bin/pip"
+"""
+
+
+@pytest.mark.parametrize("dev", ["requirements.txt", "requirements-dev.txt"])
+def test_the_pip_setup_leaves_nothing_for_a_work_item_to_commit(tmp_path, dev):
+    """The straggler sweep commits whatever git does not ignore: a `.venv/`
+    the repo never ignored, made by a Python whose `venv` writes no
+    `.gitignore`, rode into the merge request whole (1,023 files)."""
+    repo = _repo(tmp_path, {dev: "pytest\n"})
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "python3").write_text(_PY312_VENV)
+    (stub / "python3").chmod(0o755)
+    setup = _propose(repo).setup_command
+    env = {"PATH": f"{stub}:/usr/bin:/bin"}
+    subprocess.run(["sh", "-c", setup], cwd=repo, env=env, check=True)
+    assert (repo / ".venv" / "pyvenv.cfg").is_file()
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True)
+    assert status.stdout.decode() == ""

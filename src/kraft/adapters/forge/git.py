@@ -148,6 +148,29 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
 
+def is_environment(path: Path) -> bool:
+    """Whether `path` is a directory a setup installs into: a virtualenv
+    (it holds `pyvenv.cfg`) or a `node_modules`."""
+    return path.name == "node_modules" or (path / "pyvenv.cfg").is_file()
+
+
+async def _environment_dirs(repo: Path, base: str) -> list[str]:
+    """Untracked directories that are an install, not work (`is_environment`):
+    a setup's `.venv/` in a repo that never ignored it is a thousand files,
+    and no merge request wants them. Only a directory git lists as untracked
+    whole: one the repo tracks is the repo's own, edits and all."""
+    with base_ignore_args(repo, base) as ignore_args:
+        raw = await run_git(
+            repo,
+            ["git", *ignore_args, "status", "--porcelain", "-z", sandbox.SUBMODULES_UNENTERED],
+        )
+    return [
+        entry[3:].rstrip("/")
+        for entry in raw.split("\0")
+        if entry.startswith("?? ") and entry.endswith("/") and is_environment(repo / entry[3:])
+    ]
+
+
 async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     """`.`, plus an exclusion for every path Kraft itself wrote into
     `KRAFT_ROOTS` -- session summaries, spec/plan/chain_review/review_brief,
@@ -169,8 +192,16 @@ async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     same argument that carved out session summaries applies to
     spec/plan/chain_review/review_brief once none of them are committed
     either) — without also assuming every path under a Kraft root is ours.
+
+    An untracked virtualenv or `node_modules` (`_environment_dirs`) is left
+    out too: what a setup installed is never work product, whether or not
+    the repo thought to ignore it.
     """
-    return [".", *(f":(exclude){p}" for p in await _kraft_written_paths(repo, base))]
+    return [
+        ".",
+        *(f":(exclude){p}" for p in await _kraft_written_paths(repo, base)),
+        *(f":(exclude,literal){p}" for p in await _environment_dirs(repo, base)),
+    ]
 
 
 async def assert_clean(repo: Path, base: str) -> None:

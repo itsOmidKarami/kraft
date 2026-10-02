@@ -97,8 +97,11 @@ def _tail(log: Path) -> str:
 
 def _changed(worktree: Path) -> set[str]:
     """What `git add -A` would stage: untracked files git does not ignore,
-    and tracked files changed. Kraft's own roots are left out, as the
-    worker's commits leave them out."""
+    and tracked files changed. Kraft's own roots, and an untracked
+    virtualenv or `node_modules`, are left out, as the worker's commits
+    leave them out (`forge.git.work_product_pathspec`)."""
+    from kraft.adapters.forge.git import is_environment
+
     out = subprocess.run(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
         cwd=worktree,
@@ -106,9 +109,18 @@ def _changed(worktree: Path) -> set[str]:
         text=True,
         check=False,
     ).stdout
-    paths = {entry[3:] for entry in out.split("\0") if len(entry) > 3}
+    entries = [(entry[:2], entry[3:]) for entry in out.split("\0") if len(entry) > 3]
     kraft_roots = tuple(f"{r}/" for r in config_mod.KRAFT_ROOTS)
-    return {p for p in paths if not p.startswith(kraft_roots)}
+
+    def installed(path: str) -> bool:
+        parts = path.split("/")[:-1]
+        return any(is_environment(worktree.joinpath(*parts[:n])) for n in range(1, len(parts) + 1))
+
+    return {
+        p
+        for code, p in entries
+        if not p.startswith(kraft_roots) and not (code == "??" and installed(p))
+    }
 
 
 def _scopes(entry: config_mod.RepoEntry) -> list[tuple[str, str | None, str]]:

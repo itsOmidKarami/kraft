@@ -247,10 +247,13 @@ detectors:
       - {when: *pytest, run: ".venv/bin/python -m pytest"}
       - {when: [{files: [manage.py]}], run: ".venv/bin/python manage.py test"}
     setup:
-      - {when: [{files: [requirements-dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"}
-      - {when: [{files: [requirements_dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements_dev.txt"}
-      - {when: [{files: [dev-requirements.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r dev-requirements.txt"}
-      - run: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+      # The venv ignores itself, as Python 3.13's `venv` does on its own: on
+      # 3.12 and older nothing does, and a repo that never ignored `.venv/`
+      # would have every work item commit it.
+      - {when: [{files: [requirements-dev.txt]}], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements-dev.txt"}
+      - {when: [{files: [requirements_dev.txt]}], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements_dev.txt"}
+      - {when: [{files: [dev-requirements.txt]}], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r dev-requirements.txt"}
+      - run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements.txt"
 
   # ── JavaScript and TypeScript ───────────────────────────────────────────────
   - id: bun
