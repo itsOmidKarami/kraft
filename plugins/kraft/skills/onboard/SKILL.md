@@ -19,7 +19,8 @@ zero exit code says the command ran, not that what it did was right.
    run, and any rule that the raw runner must not be called directly.
 
    Then `ensure_repo()` (or `kraft repo connect [PATH]` from a terminal). It
-   proposes a test and a setup command from the repo's own files, best
+   proposes a test and a setup command from the repo's own committed files
+   (origin's default branch, so a change not pushed yet is not read), best
    evidence first:
    - a task runner's `test`/`setup` task (justfile, Makefile, Taskfile, mise,
      `script/test`)
@@ -70,12 +71,17 @@ zero exit code says the command ran, not that what it did was right.
    comes with it. Find out now, while you can still ask, rather than on the
    repo's first work item.
 
-   `kraft repo connect --verify` cuts a throwaway worktree, runs the declared
+   `kraft repo connect --verify` cuts a throwaway worktree of the commit a
+   work item starts from (origin's default branch), runs the declared
    `setup_command` the way every work item does, then each test scope's
    command, and removes the worktree. It prints each command's result and
-   time, and the tail of the output of any that failed. The test suite can
-   take minutes, not seconds, so say what you are about to run and let the
-   person decide whether to wait for it now.
+   time, and the tail of the output of any that failed. It also fails on a
+   command that runs past `--timeout` minutes (a test runner in watch mode),
+   and on one that leaves files every work item would commit. These are
+   the repo's own commands running on this machine, and the test suite can
+   take minutes, not seconds: say what you are about to run and let the
+   person decide whether to run it now. A sandboxed repo is refused unless
+   the person asks for `--on-host`.
 
    A failure is the finding, not an error to route around. Run
    `git -C <repo> ls-files --others --directory`: a root-level file it lists
