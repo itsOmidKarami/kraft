@@ -34,7 +34,10 @@ def test_create_gives_its_title_a_help_line(capsys):
     ("status", "advice"),
     [
         ("active", "To keep them, cancel the item instead."),
-        ("abandoned", "This item is already cancelled, which keeps them until you archive it"),
+        (
+            "abandoned",
+            "This item is already cancelled; abandoning it only reclaims its worktree and branch.",
+        ),
     ],
     ids=["open", "cancelled"],
 )

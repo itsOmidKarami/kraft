@@ -111,7 +111,8 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
 
 
 def _is_cancelled(item_id: str | None) -> bool:
-    """Whether the item is already cancelled. A server that does not answer,
+    """Whether the item is already cancelled or abandoned: both store
+    `abandoned`, and the server cannot tell them apart. A server that does not answer,
     or an id that is not an item, only costs the refusal its detail."""
     try:
         return asyncio.run(client.get_work_item(item_id)).get("status") == "abandoned"
@@ -121,12 +122,11 @@ def _is_cancelled(item_id: str | None) -> bool:
 
 def _cmd_abandon(ns: argparse.Namespace) -> None:
     if not ns.yes:
-        # A cancelled item still has its worktree and branch (cancel keeps them
-        # until you archive), so "cancel it instead" would be advice to do what
-        # is already done.
+        # Cancel is already done for an item in `abandoned`, so "cancel it
+        # instead" would be advice to do what is done; abandoning it can only
+        # reclaim what cancel left (or nothing, after an earlier abandon).
         keep = (
-            "This item is already cancelled, which keeps them until you archive it: "
-            "leave it as it is."
+            "This item is already cancelled; abandoning it only reclaims its worktree and branch."
             if _is_cancelled(ns.id)
             else "To keep them, cancel the item instead."
         )

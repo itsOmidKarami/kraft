@@ -100,7 +100,7 @@ export function AccessScreen() {
           rows={[
             ...items.map((i): RowSpec => ({ key: i.id, label: i.text, chips: [{ label: "pending", tone: "warn" }] })),
             { label: "Undo", sub: "Save the running values back.", onClick: () => void undo() },
-            ...(managed ? [{ label: "Restart Kraft", disabled: phase === "restarting", onClick: () => { void askRestart(); sheet.open("restart"); } } as RowSpec] : []),
+            ...(managed ? [{ label: "Restart Kraft", disabled: phase === "restarting", onClick: async () => { await askRestart(); sheet.open("restart"); } } as RowSpec] : []),
           ]}
         />
       )}

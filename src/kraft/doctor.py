@@ -280,7 +280,7 @@ def _chain_templates_check() -> dict:
         "chain_templates",
         True,
         f"{'; '.join(parts)} in {live_dir}, but shipped in this version's defaults — "
-        "Templates → Chains, or edit those files",
+        "Templates › Chains, or edit those files",
     )
 
 

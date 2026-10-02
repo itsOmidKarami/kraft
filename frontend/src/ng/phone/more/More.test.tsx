@@ -75,6 +75,17 @@ describe("More (K.1)", () => {
     expect(sheet).not.toHaveTextContent("picked up again");
   });
 
+  it("opens the Restart sheet only once the active count is in, so it never shows the wrong text first", async () => {
+    open({ "GET /apply": [200, { restart: [{ id: "access.bind", file: "access.yaml", text: "bind changed" }], reload: [], managed: true }] });
+    let counted!: () => void;
+    await screen.findByRole("button", { name: "Restart Kraft" });
+    useApply.setState({ askRestart: () => new Promise<void>((r) => { counted = () => { useApply.setState({ active: 2 }); r(); }; }) });
+    await userEvent.click(screen.getByRole("button", { name: "Restart Kraft" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    counted();
+    expect(await screen.findByRole("dialog", { name: "Restart Kraft?" })).toHaveTextContent("2 items are active.");
+  });
+
   it("does not offer Restart when Kraft was started from a terminal, and says so", async () => {
     open({ "GET /apply": [200, { restart: [{ id: "access.bind", file: "access.yaml", text: "bind changed" }], reload: [], managed: false }] });
     expect(await screen.findByText(/cannot restart itself\. Run kraft admin restart; .*Ctrl-C and start it again the same way/)).toBeInTheDocument();

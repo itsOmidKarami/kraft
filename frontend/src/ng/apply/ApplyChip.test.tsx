@@ -74,6 +74,7 @@ describe("ApplyChip", () => {
 
   it.each([
     [[], /No item is active, so no agent is stopped\./],
+    [[{ status: "active" }, { status: "paused" }], /1 item is active\. Restarting stops its agent; it stops as failed and needs Retry afterwards\./],
     [[{ status: "active" }, { status: "paused" }, { status: "active" }], /2 items are active\. Restarting stops their agents; each stops as failed and needs Retry afterwards\./],
   ])("the dialog says what a restart does to the running work (%j)", async (items, said) => {
     board = items;

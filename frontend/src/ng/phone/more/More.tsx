@@ -53,7 +53,7 @@ export function More() {
             {apply.error && <p className="ph-error" role="alert">{apply.error}</p>}
             <div className="ph-actions-row">
               {apply.reload.length > 0 && <Button className="ph-btn" disabled={apply.phase !== "idle"} onClick={() => void apply.runReload()}>Reload</Button>}
-              {apply.restart.length > 0 && apply.managed && <Button className="ph-btn" disabled={apply.phase !== "idle"} onClick={() => { void apply.askRestart(); sheet.open("restart"); }}>Restart Kraft</Button>}
+              {apply.restart.length > 0 && apply.managed && <Button className="ph-btn" disabled={apply.phase !== "idle"} onClick={async () => { await apply.askRestart(); sheet.open("restart"); }}>Restart Kraft</Button>}
               {apply.restart.length > 0 && !apply.managed && <p className="ph-note">{SELF_RESTART}</p>}
             </div>
           </Group>

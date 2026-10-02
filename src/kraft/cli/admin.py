@@ -355,7 +355,7 @@ def _warn_if_pre_v1(templates_dir: Path) -> None:
 
 def _bind(templates_dir: Path) -> tuple[str, int]:
     """Bind address from access.yaml — this is the "takes effect on restart" in
-    Settings → Access (design 5e). Env still wins, for a one-off run."""
+    Settings › Access (design 5e). Env still wins, for a one-off run."""
     access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
     port = int(os.environ.get("KRAFT_PORT") or access.port)
@@ -364,7 +364,7 @@ def _bind(templates_dir: Path) -> tuple[str, int]:
         # it when Local network is picked, and PUT /api/access takes it alone.
         raise SystemExit(
             f"refusing to bind {host}: no password is set. Start Kraft on loopback with "
-            "`kraft admin start --host 127.0.0.1`, then set one in Settings → Access "
+            "`kraft admin start --host 127.0.0.1`, then set one in Settings › Access "
             "(picking Local network asks for it), or with "
             f"`curl -X PUT http://127.0.0.1:{port}/api/access "
             "-H 'Content-Type: application/json' -d '{\"password\": \"...\"}'`. "
@@ -1070,9 +1070,10 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
     here = update.installed()
     if not update.is_behind(release) and not ns.force:
-        newest = "the newest release" + (
-            "" if channel == "stable" else f" on the {channel} channel"
-        )
+        # Name the channel unless it is the stable one an install on a final
+        # release follows anyway, so a different channel never reads as the default.
+        named = channel != "stable" or channel != update.channel_of(here)
+        newest = "the newest release" + (f" on the {channel} channel" if named else "")
         print(f"kraft {here} is up to date ({release.tag} is {newest})")
         return
     if ns.restart:

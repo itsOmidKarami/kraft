@@ -159,7 +159,12 @@ def test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses(
             "rc",
             "kraft 1.5.0rc12 is up to date (v1.5.0rc12 is the newest release on the rc channel)",
         ),
-        ("1.5.0rc12", ["--channel", "stable"], "stable", "(v1.4.0 is the newest release)"),
+        (
+            "1.5.0rc12",
+            ["--channel", "stable"],
+            "stable",
+            "(v1.4.0 is the newest release on the stable channel)",
+        ),
     ],
     ids=["stable-install", "rc-install", "rc-install-asks-stable"],
 )

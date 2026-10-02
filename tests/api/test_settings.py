@@ -243,7 +243,7 @@ def test_an_unprotected_lan_bind_refuses_to_start(tmp_path, monkeypatch, templat
     # It names the command that starts Kraft on loopback, then the two ways to
     # set a password there: the Access screen, and the API.
     why = str(refused.value)
-    assert "`kraft admin start --host 127.0.0.1`, then set one in Settings → Access" in why
+    assert "`kraft admin start --host 127.0.0.1`, then set one in Settings › Access" in why
     assert "curl -X PUT http://127.0.0.1:8765/api/access" in why
 
 
