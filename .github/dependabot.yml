@@ -24,12 +24,18 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # The extension's dependencies ship in the .vsix on the Marketplace.
+  # @types/vscode stays at engines.vscode's floor (`vsce package` refuses a
+  # newer one), and @types/node at the major VS Code's runtime ships.
   - package-ecosystem: npm
     directory: /vscode
     schedule:
       interval: weekly
     labels:
       - release::patch
+    ignore:
+      - dependency-name: "@types/vscode"
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # The docs site is built and deployed by CI, never shipped in a release.
   - package-ecosystem: npm
