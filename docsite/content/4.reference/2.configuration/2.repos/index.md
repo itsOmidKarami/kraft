@@ -282,13 +282,27 @@ wins the setup guess, and a justfile `test` recipe the test guess, since each
 comes first. A `package.json` with no lockfile gets no `setup_command` for the
 same reason: `npm install` would write one.
 
-For tests, one such `pyproject.toml` anywhere Kraft looks means no test command
-for the whole repo. Say `backend/` has one and `frontend/` has a
-`package.json`. A change to `backend/` matches no scope, and a change that
-matches none runs every scope, so a `frontend/**` scope alone would pass it on
-`npm test` with the Python tests never run. Kraft proposes nothing instead.
+One level down, such a `pyproject.toml` gets no test scope of its own. When
+the root's test command can run Python tests, the root scope covers that
+directory. That means a justfile `test` recipe, a root `uv.lock`, or a
+`test_command` you gave:
 
-Connect says when it found no command. With no `test_command` it saves the
+- In a uv workspace, the root has the `uv.lock` and the members have none.
+  `uv run` in a member uses the root's lockfile and writes no new one. The root
+  proposes `uv run pytest -q`, and it covers each member.
+- With a justfile `test` recipe at the root and a `backend/pyproject.toml`
+  with no lockfile, `just test` covers `backend/`.
+
+Otherwise Kraft proposes no test command for the whole repo. That covers a
+root with no test command, and one whose command comes from `package.json`,
+`Cargo.toml` or `go.mod`. A root `go test` would run for a change to that
+directory and never run its Python tests. Say `backend/` has such a
+`pyproject.toml` and `frontend/` has a `package.json`, with nothing at the
+root. A change to `backend/` would match no scope, and a change that matches
+none runs every scope. A `frontend/**` scope alone would then pass it on
+`npm test`, again with the Python tests never run.
+
+Connect says when it proposed no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` if the repo needs no
 preparation. Set `test_command`, then `enabled: true`.
 
