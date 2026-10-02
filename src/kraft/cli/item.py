@@ -110,12 +110,29 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.pause(ns.id)), common._render_action, ns.json)
 
 
+def _is_cancelled(item_id: str | None) -> bool:
+    """Whether the item is already cancelled or abandoned: both store
+    `abandoned`, and the server cannot tell them apart. A server that does not answer,
+    or an id that is not an item, only costs the refusal its detail."""
+    try:
+        return asyncio.run(client.get_work_item(item_id)).get("status") == "abandoned"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _cmd_abandon(ns: argparse.Namespace) -> None:
     if not ns.yes:
+        # Cancel is already done for an item in `abandoned`, so "cancel it
+        # instead" would be advice to do what is done; abandoning it can only
+        # reclaim what cancel left (or nothing, after an earlier abandon).
+        keep = (
+            "This item is already cancelled; abandoning it only reclaims its worktree and branch."
+            if _is_cancelled(ns.id)
+            else "To keep them, cancel the item instead."
+        )
         raise ValueError(
             "abandon deletes the worktree and the item's branch: uncommitted work and "
-            "commits you never pushed are lost. To keep them, cancel the item instead. "
-            "To go ahead, pass --yes"
+            f"commits you never pushed are lost. {keep} To go ahead, pass --yes"
         )
     common.emit(asyncio.run(client.abandon(ns.id)), common._render_action, ns.json)
 

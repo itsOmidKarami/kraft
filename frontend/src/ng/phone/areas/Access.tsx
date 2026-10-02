@@ -3,7 +3,7 @@ import * as api from "../../../api";
 import { ago, until } from "../../../format";
 import type { Access, AuthSession, Health } from "../../../types";
 import { parseUserAgent } from "../../../ua";
-import { SELF_RESTART, bindHost, useApply } from "../../apply/store";
+import { SELF_RESTART, bindHost, restartNote, useApply } from "../../apply/store";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
@@ -30,7 +30,7 @@ export function AccessScreen() {
   const { run, mark } = useSaves();
   const { edit, node } = useEditor();
   const sheet = useSheet();
-  const { restart, managed, loaded } = useApply();
+  const { restart, managed, loaded, active } = useApply();
   const askRestart = useApply((s) => s.askRestart);
   const runRestart = useApply((s) => s.runRestart);
   const phase = useApply((s) => s.phase);
@@ -100,7 +100,7 @@ export function AccessScreen() {
           rows={[
             ...items.map((i): RowSpec => ({ key: i.id, label: i.text, chips: [{ label: "pending", tone: "warn" }] })),
             { label: "Undo", sub: "Save the running values back.", onClick: () => void undo() },
-            ...(managed ? [{ label: "Restart Kraft", disabled: phase === "restarting", onClick: () => { void askRestart(); sheet.open("restart"); } } as RowSpec] : []),
+            ...(managed ? [{ label: "Restart Kraft", disabled: phase === "restarting", onClick: async () => { await askRestart(); sheet.open("restart"); } } as RowSpec] : []),
           ]}
         />
       )}
@@ -150,7 +150,7 @@ export function AccessScreen() {
       )}
       {node}
       {sheet.is("restart") && (
-        <ConfirmSheet title="Restart Kraft?" text={`Running work is interrupted while the server restarts. It comes back at ${address} and this screen follows.`} confirm={{ label: "Restart Kraft", danger: true, run: () => { sheet.close(); void runRestart(); } }} onClose={sheet.close} />
+        <ConfirmSheet title="Restart Kraft?" text={`${restartNote(active)} It comes back at ${address} and this screen follows.`} confirm={{ label: "Restart Kraft", danger: true, run: () => { sheet.close(); void runRestart(); } }} onClose={sheet.close} />
       )}
       {sheet.is("revoke") && revoking && (
         <ConfirmSheet

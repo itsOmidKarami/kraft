@@ -83,7 +83,8 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         print(
             "setup command: none found (it looks for an npm, yarn, pnpm or uv lockfile, "
             "Cargo.toml or go.mod). A pyproject.toml without uv.lock gets none. Set "
-            '`setup_command` in its repos.yaml entry, `""` if it needs no preparation'
+            '`setup_command` in its repos.yaml entry, `""` if it needs no preparation, '
+            "or tick No setup needed under Templates › Repos"
         )
     if result.get("enabled") is False:
         print(

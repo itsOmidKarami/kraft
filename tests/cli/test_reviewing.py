@@ -285,12 +285,13 @@ def test_view_diff_prints_landed_and_in_flight_sections(app, monkeypatch, capsys
     cli.main(["view", "diff", wid, "--stat"])
     out = capsys.readouterr().out
     assert "doc.md" in out and "flight.py" in out
-    assert "1 commit already on this branch" in out
-    assert "in flight" in out
+    assert "the change under review — 1 commit on this branch since the base" in out
+    assert "uncommitted — changes in the worktree, not committed yet" in out
+    assert out.index("the change under review") < out.index("uncommitted")
 
     cli.main(["view", "diff", wid])
     body = capsys.readouterr().out
-    assert body.index("+landed") < body.index("+in flight"), "landed must lead"
+    assert body.index("+landed") < body.index("+in flight"), "the committed change must lead"
 
     cli.main(["view", "diff", wid, "--name-only"])
     assert capsys.readouterr().out.split() == ["flight.py", "doc.md"]

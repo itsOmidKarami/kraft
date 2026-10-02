@@ -35,13 +35,13 @@ export interface DiffFile {
 export interface WorkItemDiff {
   work_item_id: string;
   base_ref: string | null;
-  /** In-flight: `HEAD`..working tree, the change under review. */
+  /** Uncommitted: `HEAD`..working tree. Usually empty at a review gate. */
   files: DiffFile[];
   diff: string;
   untracked: string[];
   truncated: boolean;
-  /** `base_ref..HEAD` — what earlier nodes committed. Optional: an older
-   *  server, and every fixture written before Kraft-nceo, has no such key. */
+  /** `base_ref..HEAD` — what the nodes committed, the change under review
+   *  among it. Optional: an older server, and every fixture written before Kraft-nceo, has no such key. */
   landed?: {
     commits: string[];
     files: DiffFile[];

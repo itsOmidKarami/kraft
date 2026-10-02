@@ -53,11 +53,12 @@ def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
 async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool = False):
     """The changes an agent made, for a reviewer with no filesystem access.
 
-    Two ranges, kept apart. `landed` is `base_ref..HEAD` -- what
-    earlier nodes committed, the chain's own spec and plan documents among it.
-    The top level is `HEAD`..working tree, the change actually under review:
-    one combined range spent the viewer's open-line budget on paperwork before
-    the code was reached.
+    Two ranges, kept apart. `landed` is `base_ref..HEAD` -- what the chain's
+    nodes committed, the chain's own spec and plan documents among it, and by a
+    review gate the code under review too, since Kraft commits after every
+    task. The top level is `HEAD`..working tree, the uncommitted part: usually
+    empty at a gate. One combined range spent the viewer's open-line budget on
+    paperwork before the code was reached.
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
