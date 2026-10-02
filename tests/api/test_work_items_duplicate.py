@@ -66,10 +66,21 @@ def test_duplicate_works_from_a_cancelled_source(client, repo):
     assert dr.json()["status"] == "paused"
 
 
-def test_duplicate_works_from_an_archived_source(client, repo):
-    src_id = _post_default(client, repo)
-    _poll_events(client, src_id, "gate_requested")
-    _set_status(src_id, "active")
+def test_duplicate_works_from_an_archived_source(client, tmp_path):
+    """Archive keeps the attachment copies, so an archived item with a plan
+    duplicates, plan and all."""
+    repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
+    r = client.post(
+        "/api/work-items",
+        json={
+            "title": "t",
+            "repo": str(repo),
+            "autostart": False,
+            "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    src_id = r.json()["id"]
     client.post(f"/api/work-items/{src_id}/cancel", json={"reason": "no longer needed"})
     ar = client.post(f"/api/work-items/{src_id}/archive")
     assert ar.status_code == 200, ar.text
@@ -78,6 +89,8 @@ def test_duplicate_works_from_an_archived_source(client, repo):
 
     assert dr.status_code == 201, dr.text
     assert dr.json()["status"] == "paused"
+    dup = client.get(f"/api/work-items/{dr.json()['id']}").json()
+    assert Path(dup["attachments"][0]["source"]).read_text() == "# plan\n"
 
 
 def test_duplicate_with_a_missing_stored_attachment_answers_409(client, tmp_path):
@@ -99,4 +112,6 @@ def test_duplicate_with_a_missing_stored_attachment_answers_409(client, tmp_path
     dr = client.post(f"/api/work-items/{src_id}/duplicate")
 
     assert dr.status_code == 409, dr.text
-    assert "plan" in dr.json()["detail"]
+    detail = dr.json()["detail"]
+    assert "no longer has this item's plan" in detail
+    assert "attach the plan again" in detail

@@ -53,6 +53,36 @@ def test_abandon_prunes_each_members_worktree_and_branch(client, tmp_path):
         )
 
 
+def test_archive_keeps_a_members_branch_only_it_holds_commits_on(client, tmp_path):
+    """Archive's keep rule is per repository: a member branch with a commit
+    nothing else holds stays in the member repository, while the root's
+    branch, all of it on a remote-tracking ref, goes."""
+    root = make_repo_with_submodule(tmp_path, submodule_path="libs/a")[0].resolve()
+    member_repo = root / "libs" / "a"
+    r = client.post("/api/repos", json={"path": str(root), "setup_command": ""})
+    assert r.status_code == 201, r.text
+    item = {"title": "t", "repo": str(root), "workspace": "ws", "members": ["a"]}
+    wid = client.post(
+        "/api/work-items", json=item | {"chain_template": "default", "autostart": True}
+    ).json()["id"]
+    _poll_events(client, wid, "gate_requested")
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    tracking = f"refs/remotes/origin/{branch}"
+    for repo in (root, member_repo):
+        _git(repo, "update-ref", tracking, f"refs/heads/{branch}")
+    _git(worktree / "libs" / "a", "commit", "--allow-empty", "-m", "member work")
+    client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
+
+    r = client.post(f"/api/work-items/{wid}/archive")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["unpushed_commits"] == 1
+    assert not worktree.exists()
+    assert not git_read(root, "branch", "--list", branch)
+    assert git_read(member_repo, "branch", "--list", branch)
+
+
 async def test_a_member_repository_gone_before_abandon_leaves_the_rest_of_the_teardown(
     tmp_path, monkeypatch
 ):

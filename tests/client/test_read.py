@@ -108,6 +108,37 @@ def test_list_work_items_filters_by_status(wired, tmp_path):
     assert run_with_app(wired, scenario) == []
 
 
+def test_cancelled_and_archived_items_are_reachable_on_request(wired, tmp_path):
+    """Cancel stores `abandoned`, which the board leaves off. The flag (or
+    asking for that status, as the MCP tool does) brings it back, and
+    `work_item_ids` -- doctor's list of every row -- has archived items too.
+    Through the real transport: the flag once rode in the path, and httpx
+    dropped it for the empty `params` beside it."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        open_id, cancelled, archived = [await _create(repo, title=t) for t in "abc"]
+        async with client.transport.http() as http:
+            for wid in (cancelled, archived):
+                r = await http.post(f"/api/work-items/{wid}/cancel", json={"reason": "r"})
+                assert r.status_code == 200, r.text
+            r = await http.post(f"/api/work-items/{archived}/archive")
+            assert r.status_code == 200, r.text
+        lists = [
+            await client.list_work_items(),
+            await client.list_work_items(include_abandoned=True),
+            await client.list_work_items(status="abandoned"),
+        ]
+        return (open_id, cancelled, archived), lists, await client.work_item_ids()
+
+    (open_id, cancelled, archived), lists, ids = run_with_app(wired, scenario)
+    board, with_abandoned, only_abandoned = ([i["id"] for i in items] for items in lists)
+    assert board == [open_id]
+    assert with_abandoned == [open_id, cancelled]
+    assert only_abandoned == [cancelled]
+    assert ids == {open_id, cancelled, archived}
+
+
 def test_get_work_item_defaults_to_the_resolved_context(wired, tmp_path, monkeypatch):
     repo = connected_repo(tmp_path)
 

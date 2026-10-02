@@ -172,7 +172,7 @@ function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview
       tone: "muted", glyph: <Pause size={14} aria-hidden />, title: "Cancelled", where: at ? `at ${at}` : undefined, node: at,
       text: "The run stopped. Everything it produced is kept. A cancelled item stays cancelled; duplicating it starts a new one with the same title, brief and chain.",
       facts: [
-        ["kept", "the branch, the worktree, findings and threads"],
+        ["kept", "the branch, the worktree until it is archived, findings and threads"],
         ...(spent ? [["spent", usd(item.budget_cap!.spent_usd)] as [string, ReactNode]] : []),
         ["reason", str(ev?.payload.reason) || "no reason given"],
       ],

@@ -493,15 +493,19 @@ def _duplicate_attachments(row) -> list[dict]:
     `run/attachments/<source id>/...` so `executor.intake`'s own
     `_store_attachments` copies *that*, under the new item's id, rather than
     re-reading `path` relative to the repo (which is the worktree
-    destination, not where Kraft keeps its copy). A copy that has since gone
-    missing answers 409 naming it, ahead of `executor.intake` -- which would
-    otherwise fold the same `OSError` into its own blanket 502."""
+    destination, not where Kraft keeps its copy). Archive keeps the copies;
+    abandon deletes them. A copy that has gone missing answers 409 naming it,
+    ahead of `executor.intake` -- which would otherwise fold the same
+    `OSError` into its own blanket 502."""
     out = []
     for a in entry.attachments_of(row):
         src = a.get("source")
         if not src or not Path(src).is_file():
             raise HTTPException(
-                409, f"{a['kind']} attachment is missing its stored copy: {src or a['path']}"
+                409,
+                f"cannot duplicate: Kraft no longer has this item's {a['kind']} "
+                f"({src or a['path']}). Abandoning an item deletes its attachments. "
+                f"File a new item and attach the {a['kind']} again.",
             )
         out.append({"kind": a["kind"], "path": a["path"], "source": src})
     return out

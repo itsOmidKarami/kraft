@@ -6,7 +6,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from support.api import _poll_events, _post_default, _set_status
+from support.harness import _git
+
+from kraft.config import git_read
 
 
 def test_archive_reclaims_the_worktree_and_keeps_status(client, repo):
@@ -24,6 +28,42 @@ def test_archive_reclaims_the_worktree_and_keeps_status(client, repo):
     detail = client.get(f"/api/work-items/{wid}").json()
     assert detail["status"] == "completed"
     assert detail["archived_at"]
+
+
+@pytest.mark.parametrize("pushed", [False, True], ids=["unpushed", "pushed"])
+def test_archive_keeps_a_branch_only_it_holds_commits_on(client, repo, pushed):
+    """A cancelled item keeps its branch, and the item may never have pushed
+    it. Archive (and the auto-archive poller, through the same function) then
+    removes the worktree but leaves a branch with commits nothing else
+    holds, and says so. A branch whose commits are all on a remote-tracking
+    ref goes, as before."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    tracking = f"refs/remotes/origin/{branch}"
+    # Everything so far is on the "remote"; one more commit is not, unless pushed.
+    _git(repo, "update-ref", tracking, f"refs/heads/{branch}")
+    _git(worktree, "commit", "--allow-empty", "-m", "work nobody pushed")
+    if pushed:
+        _git(repo, "update-ref", tracking, f"refs/heads/{branch}")
+    client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
+
+    r = client.post(f"/api/work-items/{wid}/archive")
+
+    assert r.status_code == 200, r.text
+    assert not worktree.exists()
+    still_there = bool(git_read(repo, "branch", "--list", branch))
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    payload = next(e["payload"] for e in events if e["type"] == "work_item_archived")
+    if pushed:
+        assert not still_there
+        assert "kept_branch" not in r.json() and "kept_branch" not in payload
+    else:
+        assert still_there
+        kept = {"kept_branch": branch, "unpushed_commits": 1}
+        assert r.json().items() >= kept.items()
+        assert payload == {"by": "you", **kept}
 
 
 def test_archive_refuses_an_active_item(client, repo):
