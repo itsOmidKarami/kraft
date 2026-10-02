@@ -454,6 +454,8 @@ def archive_work_item(
     *,
     kept_branch: str | None = None,
     unpushed_commits: int | None = None,
+    rescued_branch: str | None = None,
+    rescued_commits: int | None = None,
 ) -> None:
     """Marks a completed/abandoned item archived without touching `status`
     (UI v2 · 03): "Ended as" keeps reading completed/abandoned, and every
@@ -464,7 +466,8 @@ def archive_work_item(
     the Archived view's ARCHIVED column ("today · by you" / "2 days ago ·
     auto"). `kept_branch` and `unpushed_commits` go on the event when the
     archive left the item's branch in place because nothing else held its
-    commits.
+    commits; `rescued_branch` and `rescued_commits` when it named a detached
+    HEAD's commits.
     """
     now = _now()
     conn.execute(
@@ -474,6 +477,8 @@ def archive_work_item(
     payload: dict = {"by": by}
     if kept_branch is not None:
         payload |= {"kept_branch": kept_branch, "unpushed_commits": unpushed_commits}
+    if rescued_branch is not None:
+        payload |= {"rescued_branch": rescued_branch, "rescued_commits": rescued_commits}
     events.append(conn, work_item_id, "work_item_archived", payload)
 
 

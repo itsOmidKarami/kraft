@@ -244,6 +244,48 @@ def _branches_to_keep(repo: Path, branch: str, members: list[Path]) -> dict[str,
     return kept
 
 
+def _rescue_detached_head(repo: Path, worktree: Path, wid: str) -> dict:
+    """Archive's guard for the commits no branch has: the worktree's HEAD,
+    when it is detached and holds commits on no branch, remote-tracking
+    branch or tag and not in what Kraft pushed. Those are named
+    `kraft/rescued/<wid>` in `repo` before the worktree goes, and returned
+    as `rescued_branch` and `rescued_commits`; nothing to rescue is {}."""
+    if not worktree.is_dir():
+        return {}
+    if git_read(worktree, "symbolic-ref", "-q", "HEAD", expected_failure=True):
+        return {}
+    head = git_read(worktree, "rev-parse", "--verify", "--quiet", "HEAD", expected_failure=True)
+    if not head:
+        return {}
+    count = git_read(
+        repo,
+        "rev-list",
+        "--count",
+        head,
+        "--not",
+        "--branches",
+        "--remotes",
+        "--tags",
+        f"--glob={PUSHED_REFS}/*",
+    )
+    if count == "0":
+        return {}
+    name = f"kraft/rescued/{wid}"
+    done = subprocess.run(
+        ["git", "update-ref", f"refs/heads/{name}", head],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        logger.warning("archive %s: could not keep detached HEAD %s: %s", wid, head, done.stderr)
+        return {}
+    return {
+        "rescued_branch": name,
+        "rescued_commits": int(count) if count and count.isdigit() else 1,
+    }
+
+
 async def _remove_worktree(
     repo: Path,
     worktree: Path,
@@ -341,7 +383,8 @@ def _connected_members(st, row) -> list[Path]:
 # Kraft-x85; reaping what else ran in the worktree: Kraft-ugm6.
 @api_router.post("/work-items/{wid}/abandon")
 async def abandon_work_item(wid: str, request: Request):
-    """Terminal state plus worktree and branch reclaim.
+    """Terminal state plus worktree and branch reclaim, a cancelled item's
+    included.
 
     Refuses while the item is active rather than killing its sessions itself:
     `pause` already owns stopping an attempt, and doing both here would leave
@@ -354,9 +397,12 @@ async def abandon_work_item(wid: str, request: Request):
     row = deps._work_item_row(st, wid)
     if row["status"] == "active":
         raise HTTPException(409, "work item is active; pause it before abandoning")
-    if row["status"] == "abandoned":
-        return {"id": wid, "status": "abandoned", "worktree_removed": False}
-    await st.db.write(lambda c: store.abandon_work_item(c, wid))
+    # An already-abandoned item is a cancelled one (cancel stores `abandoned`
+    # and keeps everything) or a second call: either way it is reclaimed
+    # again, without a second `work_item_abandoned`. A second call finds
+    # nothing left and answers `worktree_removed: false`.
+    if row["status"] != "abandoned":
+        await st.db.write(lambda c: store.abandon_work_item(c, wid))
     worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
@@ -380,22 +426,25 @@ async def _archive_one(app, row, by: str) -> dict:
     best-effort in that case, same as a second `abandon` call today), plus
     `kept_branch` and `unpushed_commits` when the branch stayed.
 
-    Unlike abandon, archive never deletes work: a branch with commits nothing
-    else holds stays (`_branches_to_keep`), and so do the attachment copies,
-    which "Duplicate as new item" re-snapshots from.
+    Unlike abandon, archive never deletes commits: a branch with commits
+    nothing else holds stays (`_branches_to_keep`), a detached HEAD's get a
+    branch of their own (`_rescue_detached_head`), and the attachment copies
+    stay too, which "Duplicate as new item" re-snapshots from. Uncommitted
+    changes in the worktree go with it.
     """
     st = app.state
     wid = row["id"]
     repo, branch = Path(row["repo"]), store.branch_for(row)
     members = _connected_members(st, row)
+    worktree = st.run_dirs.worktrees / wid
     kept = await asyncio.to_thread(_branches_to_keep, repo, branch, members)
     extra = {"kept_branch": branch, "unpushed_commits": sum(kept.values())} if kept else {}
+    extra |= await asyncio.to_thread(_rescue_detached_head, repo, worktree, wid)
     await st.db.write(lambda c: store.archive_work_item(c, wid, by, **extra))
     for where, count in kept.items():
         logger.info(
             "archive %s kept branch %s in %s: %d unpushed commit(s)", wid, branch, where, count
         )
-    worktree = st.run_dirs.worktrees / wid
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
