@@ -455,7 +455,7 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     (frontend / "package.json").write_text("{}")
 
     probed = config.probe_repo(repo)
-    nested = next(s for s in probed["test_scopes"] if s["command"] == "npm test")
+    nested = next(s for s in probed["test_scopes"] if s["command"] == "npm --prefix frontend test")
     assert nested["paths"] == ["frontend/**"]
     root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
     assert "frontend" not in root["paths"]
@@ -501,11 +501,11 @@ _COVERED_BY_THE_ROOT = {
     ),
     "a-justfile-test-recipe-a-lockless-backend-and-a-frontend": (
         ["justfile", "backend/pyproject.toml", "frontend/package.json"],
-        ("just test", ["just test", "npm test"], "backend"),
+        ("just test", ["just test", "npm --prefix frontend test"], "backend"),
     ),
     "a-uv-lock-and-a-frontend": (
         ["pyproject.toml", "uv.lock", "frontend/package.json"],
-        ("uv run pytest -q", ["uv run pytest -q", "npm test"], "src"),
+        ("uv run pytest -q", ["uv run pytest -q", "npm --prefix frontend test"], "src"),
     ),
 }
 
@@ -547,7 +547,39 @@ def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(repo):
     assert probed["test_command"] == "make test"
     root, nested = probed["test_scopes"]
     assert ("backend/**" in root["paths"], root["command"]) == (True, "make test")
-    assert nested == {"paths": ["frontend/**"], "command": "npm test"}
+    assert nested == {"paths": ["frontend/**"], "command": "npm --prefix frontend test"}
+
+
+#: A project one level down, with nothing at the root -> the command its scope
+#: is proposed with, written to run from the repository root.
+_NESTED_PROJECTS = {
+    "npm": ({"web app/package.json": "{}"}, "npm --prefix 'web app' test"),
+    "uv": (
+        {"backend/pyproject.toml": "", "backend/uv.lock": ""},
+        "uv run --directory backend pytest -q",
+    ),
+    "cargo": ({"crate/Cargo.toml": ""}, "cargo test --manifest-path crate/Cargo.toml"),
+    "go": ({"svc/go.mod": ""}, "go -C svc test ./..."),
+    "just": ({"tools/Justfile": "test:\n    true\n"}, "just --justfile tools/Justfile test"),
+}
+
+
+@pytest.mark.parametrize(("files", "command"), _NESTED_PROJECTS.values(), ids=_NESTED_PROJECTS)
+def test_a_nested_scopes_command_names_its_own_directory(repo, files, command):
+    """Verify runs every scope's command from the worktree root, without a
+    shell, so a bare `npm test` or `uv run pytest -q` there looks for its
+    project at the root and fails. A name with a space is quoted, so
+    `shlex.split` keeps it one argument."""
+
+    from kraft import config
+
+    for path, text in files.items():
+        (repo / path).parent.mkdir(exist_ok=True)
+        (repo / path).write_text(text)
+    (directory,) = {Path(path).parent.name for path in files}
+    probed = config.probe_repo(repo)
+    assert probed["test_scopes"] == [{"paths": [f"{directory}/**"], "command": command}]
+    assert probed["test_command"] == command
 
 
 def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):

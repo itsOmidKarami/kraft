@@ -42,7 +42,7 @@ repos:
 | `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` or agent `profile:` and the work item's override. Keyed by profile because one model name means nothing to another provider. The retired `default_model` key is dropped with a warning. |
 | `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
-| `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |
+| `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `npm --prefix frontend test`, not `npm test`. Not synthesized from `test_command` — the two stay independently editable. |
 | `intent_dir` | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Its check runs as one of the repo's `test_scopes`. |
 | `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing"; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
 | `env` | `{}` | Literal environment variables every worker for this repo gets. A worker's environment is an allowlist, not the daemon's: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`, `TZ`, `TMPDIR`, `SSH_AUTH_SOCK`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case), the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`), Kraft's own `KRAFT_*` variables and the agent's credential variable. These values are layered on top of it. A sandboxed worker gets none of that allowlist, only what [Sandboxed workers](#sandboxed-workers) lists, which covers the daemon's proxy and an extra CA. |
@@ -273,6 +273,26 @@ scope for that directory:
 | `package.json` | `npm test` |
 | `Cargo.toml` | `cargo test` |
 | `go.mod` | `go test ./...` |
+
+A test scope for a directory one level down runs from the repository root,
+like every scope, so its command points the tool at that directory. For a
+`frontend/` or `backend/` directory, connect proposes:
+
+| File | Proposed scope `command` |
+|---|---|
+| A `justfile` with a `test` recipe | `just --justfile frontend/justfile test` |
+| `uv.lock` | `uv run --directory backend pytest -q` |
+| `package.json` | `npm --prefix frontend test` |
+| `Cargo.toml` | `cargo test --manifest-path backend/Cargo.toml` |
+| `go.mod` | `go -C backend test ./...` (Go 1.20 or later) |
+
+The setup command is not read below the root, so a monorepo with nothing at
+its root connects with none. Write one that installs each directory.
+`setup_command` runs in a shell, so `cd` works:
+
+```yaml
+setup_command: (cd backend && uv sync) && (cd frontend && npm ci)
+```
 
 A `pyproject.toml` with no `uv.lock` beside it gets neither command. `uv sync`
 and `uv run` both write a `uv.lock` when there is none, and the worker would
