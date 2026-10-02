@@ -975,15 +975,18 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         if body.agent_overrides is not None:
             written["agent_overrides"] = store.replace_agent_overrides(c, wid, body.agent_overrides)
         if body.node_overrides is not None:
-            written["node_overrides"] = store.set_node_overrides(c, wid, body.node_overrides)
+            now = store.set_node_overrides(c, wid, body.node_overrides)
+            # Each node the request named, as stored: `{node: {}}` once it is
+            # cleared, as 1.4 echoed it, and never another node's entry.
+            written["node_overrides"] = {n: now.get(n, {}) for n in body.node_overrides}
         if "budget_usd" in fields_set:
             store.set_budget(c, wid, body.budget_usd)
         if body.policy is not None:
             store.set_policy_override(c, wid, item_policy)
 
     # The overrides as stored after the write, which the echo reports in
-    # place of what was sent: `{}` once cleared, and for a node a field the
-    # request left out is still there.
+    # place of what was sent: `{}` once cleared, and for a node it named a
+    # field the request left out is still there.
     written: dict = {}
     filed = stored = entry.attachments_of(row)
     won = False

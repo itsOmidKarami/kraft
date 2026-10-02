@@ -107,3 +107,19 @@ def test_the_patch_echoes_the_overrides_as_stored_after_the_merge(client, repo):
     # Cleared, the override echoes `{}`, as 1.4's did: never `null`.
     cleared = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
     assert cleared.json()["agent_overrides"] == {}
+
+
+def test_a_node_override_echoes_only_the_nodes_it_named(client, repo):
+    """`kraft item set-node-override --node implementation --clear --json`
+    echoed 1.4's `{"implementation": {}}`; it must not become `{}`, or carry
+    another node's entry."""
+    wid = _paused_item(client, repo)
+    client.patch(f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": "opus"}}})
+    r = client.patch(
+        f"/api/work-items/{wid}", json={"node_overrides": {"implementation": {"effort": "low"}}}
+    )
+    assert r.json()["node_overrides"] == {"implementation": {"effort": "low"}}
+    cleared = client.patch(
+        f"/api/work-items/{wid}", json={"node_overrides": {"implementation": {}}}
+    )
+    assert cleared.json()["node_overrides"] == {"implementation": {}}
