@@ -75,7 +75,8 @@ together is in
 - **macOS or Linux.** CI runs on Linux, and `kraft admin install-service`
   supports launchd and systemd only. Windows is not supported, and WSL is
   untested.
-- **`git`.**
+- **`git`**, with `user.name` and `user.email` set (globally, or in each repo
+  you connect). Kraft commits the agents' work under that identity.
 - **[uv](https://docs.astral.sh/uv/)**, which uses a Python 3.12 or newer
   already on your machine, or fetches one. Or Homebrew on macOS.
 - **[Claude Code](https://code.claude.com/docs)**, installed

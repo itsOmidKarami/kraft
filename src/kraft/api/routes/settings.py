@@ -95,10 +95,13 @@ async def get_library(request: Request):
 @api_router.get("/templates/library/{ref}")
 async def get_library_component(ref: str, request: Request):
     """One component, by its id (`tasks.implementer`) or a bare name no
-    other section shares."""
+    other section shares; 409 naming each id for a bare name that is shared."""
     st = request.app.state
     listed = _library_view(st, deps.library_or_503(st))["components"]
-    found = catalogue.find(listed, ref)
+    try:
+        found = catalogue.find(listed, ref)
+    except catalogue.AmbiguousName as exc:
+        raise HTTPException(409, str(exc)) from exc
     if found is None:
         raise HTTPException(404, f"no library component {ref!r}")
     return found

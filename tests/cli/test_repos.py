@@ -95,7 +95,17 @@ def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "saved disabled: no test command found" in out
-    assert "setup command" not in out
+    assert "setup command: none found" in out
+
+
+def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
+    """A package.json with no lockfile has a test command and no setup one:
+    connect says so, since an undeclared setup_command stops the first item."""
+    (repo / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "test command: npm test (from package.json)" in out
+    assert "setup command: none found" in out and '`""` if it needs no preparation' in out
 
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
@@ -103,6 +113,7 @@ def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "setup command: uv sync" in out
+    assert "none found" not in out
     assert "saved disabled" not in out
 
 

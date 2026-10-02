@@ -307,8 +307,8 @@ def _carry_policy(old: Path, new: Path, backup: Path) -> CarriedPolicy | None:
     carried = CarriedPolicy.from_legacy(legacy, seed)
     if carried.data != seed:
         new.write_text(
-            f"# The V1 policy, with the values `kraft admin update` carried over from\n"
-            f"# the pre-V1 policy.yaml; that file is unchanged in {backup}.\n"
+            f"# The default policy, with the values `kraft admin update` carried over\n"
+            f"# from the Kraft 0.x policy.yaml; that file is unchanged in {backup}.\n"
             + yaml.safe_dump(carried.data, sort_keys=False)
         )
     return carried
@@ -330,7 +330,7 @@ def finish_interrupted_update(templates_dir: Path) -> bool:
     staging.rename(templates_dir)
     (templates_dir / UPDATE_STAGED).unlink()
     print(
-        f"kraft: finished an interrupted update: installed the staged V1 configuration "
+        f"kraft: finished an interrupted update: installed the staged template configuration "
         f"in {templates_dir}; the old one is at {backup}",
         file=sys.stderr,
     )
@@ -345,9 +345,9 @@ def _warn_if_pre_v1(templates_dir: Path) -> None:
 
     if is_pre_v1(templates_dir):
         print(
-            f"kraft: {templates_dir} holds a pre-V1 template configuration. Starting "
+            f"kraft: {templates_dir} holds a Kraft 0.x template configuration. Starting "
             "degraded, refusing new work; run `kraft admin update` to back it up and "
-            "install the V1 configuration.",
+            "install the current one.",
             file=sys.stderr,
         )
 
@@ -906,15 +906,16 @@ def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
         f"{templates_dir.name}.pre-v1-{time.strftime('%Y%m%d-%H%M%S')}"
     )
     print(
-        f"kraft: {templates_dir} holds a pre-V1 template configuration (a hook registry\n"
-        "and gate_after chains). It is not compatible with this Kraft, which runs\n"
-        "Template Schema V1 only, and there is no migration: replacing it installs the\n"
-        "V1 configuration and moves the current one, whole, to a backup at\n"
+        f"kraft: {templates_dir} holds a Kraft 0.x template configuration (a hook\n"
+        "registry and gate_after chains). It is not compatible with this Kraft, which\n"
+        "runs only the library.yaml format 1.0 introduced, and there is no migration:\n"
+        "replacing it installs the bundled configuration and moves the old one, whole,\n"
+        "to a backup at\n"
         f"  {backup}\n"
         f"Carried across unchanged: {', '.join(MACHINE_CONFIG)}.\n"
-        "policy.yaml keeps your value for every key V1 still has; any other key is\n"
-        "dropped and listed. Your chains and registry.yaml are replaced. All of it\n"
-        "stays in the backup.",
+        "policy.yaml keeps your value for every key the current format still has; any\n"
+        "other key is dropped and listed. Your chains and registry.yaml are replaced.\n"
+        "All of it stays in the backup.",
         file=sys.stderr,
     )
     # No terminal to ask on is a refusal, never a default yes.
@@ -927,13 +928,15 @@ def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
         )
         raise SystemExit(1)
     carried = replace_pre_v1_config(templates_dir, backup)
-    print(f"kraft: installed the V1 configuration in {templates_dir}; the old one is at {backup}")
+    print(
+        f"kraft: installed the bundled configuration in {templates_dir}; the old one is at {backup}"
+    )
     if carried is None:
-        print("kraft: policy.yaml: no readable pre-V1 policy; the V1 default is installed")
+        print("kraft: policy.yaml: no readable 0.x policy; the default is installed")
     for key, value in (carried.dropped if carried else {}).items():
         print(
             f"kraft: policy.yaml: dropped {key} = {value!r} "
-            "(V1 has no such key, or refuses the value)"
+            "(the current format has no such key, or refuses the value)"
         )
 
 
@@ -1030,7 +1033,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         "-y",
         "--yes",
         action="store_true",
-        help="accept replacing a pre-V1 template configuration, which is backed up first",
+        help=(
+            "accept replacing a Kraft 0.x template configuration (registry.yaml, "
+            "no library.yaml), which is backed up first"
+        ),
     )
     update_p.add_argument(
         "--restart",
@@ -1063,7 +1069,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     hook = subs.add_parser(
         "permission-hook",
-        help="answer a harness's pre-tool hook from Kraft's permission gate (run by the CLI)",
+        help=(
+            "answer a harness's pre-tool hook from Kraft's permission gate "
+            "(run by the agent's CLI, not by hand)"
+        ),
     )
     hook.add_argument("harness", choices=sorted(permission_hooks.TRANSLATORS))
     hook.add_argument(

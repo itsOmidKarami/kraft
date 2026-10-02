@@ -125,8 +125,12 @@ def test_one_component_by_id(client, ref):
 
 
 @pytest.mark.api_client(edit_templates=_with_extras)
-def test_a_bare_name_two_sections_share_is_404_and_each_id_answers(client):
-    assert client.get("/api/templates/library/lone").status_code == 404
+def test_a_bare_name_two_sections_share_is_409_naming_each_id_and_each_id_answers(client):
+    """Not a 404: "no library component 'lone'" sent an operator looking for
+    a component that is there twice."""
+    response = client.get("/api/templates/library/lone")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "'lone' is ambiguous: tasks.lone, nodes.lone"
     assert client.get("/api/templates/library/nodes.lone").json()["kind"] == "nodes"
 
 

@@ -434,6 +434,28 @@ def test_the_major_update_warns_before_it_asks(legacy_home, monkeypatch, capsys)
     assert "backup" in seen.err
 
 
+def test_the_major_update_names_the_old_format_by_its_release(legacy_home, monkeypatch, capsys):
+    """ "pre-V1" read as "before 1.0" to a reviewer, and V1 is a name the
+    operator never sees elsewhere: the update, its `-y` help and the server's
+    refusal call the old configuration Kraft 0.x's, by the files that mark it."""
+    from kraft import cli
+    from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+
+    with pytest.raises(TemplateLibraryError) as refused:
+        TemplateLibrary.from_yaml_dir(legacy_home)
+    cli.admin._warn_if_pre_v1(legacy_home)  # what a start says
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "update"])
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "update", "--help"])
+    seen = capsys.readouterr()
+    start, update_ = seen.err.split("\n", 1)
+    for text in (str(refused.value), start, update_, " ".join(seen.out.split())):
+        assert "0.x template configuration" in text
+        assert "V1" not in text
+
+
 def test_an_update_leaves_a_v1_home_alone(legacy_home, monkeypatch):
     """A home that already has the V1 `library.yaml` is not legacy, whatever
     else sits beside it -- no prompt, no backup, no change."""

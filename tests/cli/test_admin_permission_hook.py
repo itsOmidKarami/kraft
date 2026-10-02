@@ -107,3 +107,13 @@ def test_a_hook_that_breaks_before_asking_still_answers(monkeypatch, capsys, fai
         admin._cmd_permission_hook(argparse.Namespace(harness="cursor", fail_closed=fail_closed))
     assert done.value.code == 0
     assert json.loads(capsys.readouterr().out).get("permission") == expected
+
+
+def test_its_help_says_whose_cli_runs_it(capsys):
+    """Not Kraft's own CLI, which a reader of `kraft admin --help` took it for."""
+    from kraft import cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "permission gate (run by the agent's CLI, not by hand)" in text
