@@ -146,7 +146,7 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-override { margin: 0; font-size: 12.5px; color: var(--text-sub); }
 
 /* Task pane (Decisions §5, §6): attempts, log, thread. */
-.ip-attempts { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ip-attempts { display: flex; align-items: center; gap: 10px; font-size: 12px; }
 .ip-attempt-box { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
 .ip-attempt-btn { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-sub); cursor: pointer; }
 .ip-attempt-btn:disabled { color: var(--text-faint); cursor: default; }

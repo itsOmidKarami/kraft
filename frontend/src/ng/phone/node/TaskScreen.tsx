@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import * as api from "../../../api";
 import { ago, elapsed, tokens, usd } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
-import { escalationsOf, ESCALATION, lookWord, sessionLook, sessionsOf } from "../../item/nodeGraph";
+import { escalationsOf, ESCALATION, lookWord, messagesThrough, sessionLook, sessionsOf } from "../../item/nodeGraph";
 import { stepsOf } from "../../item/paths";
 import { selPath, type Place } from "../../item/url";
 import { LogLines } from "../log/LogLines";
@@ -22,7 +22,8 @@ export function TaskScreen({ item, docs, place, node: nodeId, now, setPlace }: P
   const path = selPath(place.sel)!;
   const esc = place.sel.step === ESCALATION;
   const sessions = esc ? escalationsOf(item, nodeId) : sessionsOf(item, path);
-  const wanted = place.attempt ? sessions.findIndex((s) => (esc ? s.thread : s.attempt) === place.attempt) : -1;
+  // An escalation's picker is per thread: it shows that thread through its last turn.
+  const wanted = place.attempt ? (esc ? sessions.map((s) => s.thread).lastIndexOf(place.attempt) : sessions.findIndex((s) => s.attempt === place.attempt)) : -1;
   const at: WorkerSession | undefined = sessions[wanted >= 0 ? wanted : sessions.length - 1];
   const look = sessionLook(at, now);
   const tabs: { id: TaskTab; label: string }[] = [...(esc ? [{ id: "thread" as const, label: "Thread" }] : []), { id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
@@ -61,6 +62,7 @@ export function TaskScreen({ item, docs, place, node: nodeId, now, setPlace }: P
             <>
               <Facts rows={[
                 ["state", at.status.replaceAll("_", " ")],
+                ...(at.harness ? ([["harness", <span key="h" className="ph-mono">{at.harness}</span>]] as [string, React.ReactNode][]) : []),
                 ...(at.model ? ([["model", <span key="m" className="ph-mono">{at.model}</span>]] as [string, React.ReactNode][]) : []),
                 ["path", <span key="p" className="ph-mono">{path}</span>],
                 ...(at.wall_ms != null ? ([["duration", elapsed(at.wall_ms)]] as [string, React.ReactNode][]) : []),
@@ -106,7 +108,7 @@ export function TaskScreen({ item, docs, place, node: nodeId, now, setPlace }: P
             ...(at?.head_sha ? ([["head", <span key="h" className="ph-mono">{at.head_sha.slice(0, 10)}</span>]] as [string, React.ReactNode][]) : []),
           ]} />
         )}
-        {tab === "thread" && <Thread item={item} node={nodeId} />}
+        {tab === "thread" && <Thread item={item} node={nodeId} upTo={at === sessions.at(-1) ? undefined : at} />}
       </div>
     </>
   );
@@ -129,16 +131,19 @@ function TaskLog({ session }: { session?: WorkerSession }) {
   );
 }
 
-/** The node's escalation thread: every message, by thread and turn. */
-function Thread({ item, node }: { item: PlaceProps["item"]; node: string }) {
+/** The node's escalation thread: every message through the picked thread's last turn, by thread and turn. */
+function Thread({ item, node, upTo }: { item: PlaceProps["item"]; node: string; upTo?: WorkerSession }) {
   const [events, setEvents] = useState<KraftEvent[] | null>(null);
   useEffect(() => {
     api.getEvents(item.id).then(setEvents, () => setEvents([]));
   }, [item.id, item.updated_at]);
-  const turns = (events ?? []).filter((e) => e.type === "escalation_message" && (e.node_id ?? node) === node).map((e) => ({ thread: Number(e.payload.thread ?? 1), turn: Number(e.payload.turn ?? 1), who: e.payload.auto ? "kraft" : "you", text: String(e.payload.message ?? ""), at: e.created_at }));
+  const all = (events ?? []).filter((e) => e.type === "escalation_message" && (e.node_id ?? node) === node).map((e) => ({ thread: Number(e.payload.thread ?? 1), turn: Number(e.payload.turn ?? 1), who: e.payload.auto ? "kraft" : "you", text: String(e.payload.message ?? ""), at: e.created_at, node, session: typeof e.payload.session_id === "string" ? e.payload.session_id : null }));
+  const turns = all.slice(0, messagesThrough(all, upTo, item));
   if (events == null) return <p className="ph-note">Reading the thread…</p>;
   if (!turns.length) return <p className="ph-note">No messages yet.</p>;
   return (
+    <>
+    {turns.length < all.length && <p className="ph-note">{all.length - turns.length} later {all.length - turns.length === 1 ? "message" : "messages"} after this thread.</p>}
     <ol className="ph-turns">
       {turns.map((t, i) => (
         <li key={i} className="ph-turn">
@@ -148,5 +153,6 @@ function Thread({ item, node }: { item: PlaceProps["item"]; node: string }) {
         </li>
       ))}
     </ol>
+    </>
   );
 }

@@ -438,6 +438,10 @@ export interface WorkerSession {
   cost_estimated?: boolean;
   wall_ms: number | null;
   model: string | null;
+  /** The harnesses.yaml profile an agent session ran on; null
+   *  for a subprocess or builtin task and on a row from before the column.
+   *  Optional so fixture/test literals that predate it keep typechecking. */
+  harness?: string | null;
   /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
    *  for a builtin/agent task that stamps nothing, and for a historical row. */
   head_sha: string | null;

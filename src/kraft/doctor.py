@@ -731,11 +731,15 @@ def _runs_forge_tasks() -> bool:
     )
 
 
-async def _sandbox_check(repo: config.RepoEntry, policy) -> dict:
+async def _sandbox_check(repo: config.RepoEntry, policy, asked: set[str]) -> dict:
     """Can this repository's sandbox run here at all? Its work items stop
-    for a human otherwise, and better learned here."""
+    for a human otherwise, and better learned here. Each backend asks the
+    machine once per run (`asked`, its kinds so far): a runtime that does
+    not answer costs its wait once, not once per sandboxed repository."""
     value = policy.model_dump()
-    ok, detail = await backends.for_sandbox(value).health(value)
+    backend = backends.for_sandbox(value)
+    ok, detail = await backend.health(value, refresh=backend.kind not in asked)
+    asked.add(backend.kind)
     return _check(f"sandbox {_label(repo)}", ok, detail)
 
 
@@ -974,6 +978,7 @@ async def _repo_checks() -> list[dict]:
         for r in await client.repos()
     ]
     networked = False
+    asked: set[str] = set()
     for repo in repos:
         path = Path(repo.path)
         name = f"repo {_label(repo)}"
@@ -1017,7 +1022,7 @@ async def _repo_checks() -> list[dict]:
             policy, found = await _kit_checks(repo, policy)
             checks.extend(found)
         if policy is not None:
-            checks.append(await _sandbox_check(repo, policy))
+            checks.append(await _sandbox_check(repo, policy, asked))
             networked = networked or policy.network is not None
             for extra in (
                 _egress_check(repo, policy),
