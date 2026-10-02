@@ -192,6 +192,26 @@ describe("the task screen (E)", () => {
     expect(await screen.findByText("decide if the race is real")).toBeInTheDocument();
   });
 
+  it("names the harness the attempt ran on", async () => {
+    mount(item("running", null, { worker_sessions: [session({ harness: "codex" })] }), TASK);
+    expect(await screen.findByText("harness")).toBeInTheDocument();
+    expect(screen.getByText("codex")).toBeInTheDocument();
+  });
+
+  it("shows the escalation thread through the thread picked, and all of it on the latest", async () => {
+    const esc = (id: string, thread: number, created_at: string) => session({ id, hook_point: "verification.escalation.escalation", status: "done", thread, created_at });
+    const msg = (seq: number, thread: number, message: string, session_id: string) => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread, turn: seq, message, session_id }, node_id: "verification", created_at: "2026-09-13T09:00:00Z" });
+    mount(item("running", null, { worker_sessions: [esc("e1", 1, "2026-09-13T09:00:00Z"), esc("e1b", 1, "2026-09-13T09:02:00Z"), esc("e2", 2, "2026-09-13T09:05:00Z")] }), "/work-items/w1/nodes/verification?sel=verification.escalation.escalation", {
+      "GET /work-items/w1/events": [200, [msg(1, 1, "decide if the race is real", "e1"), msg(2, 1, "check the lock order too", "e1b"), msg(3, 2, "start over on the lock", "e2")]],
+    });
+    expect(await screen.findByText("start over on the lock")).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: /thread 1/ })[0]);
+    expect(await screen.findByText("decide if the race is real")).toBeInTheDocument();
+    expect(screen.getByText("check the lock order too")).toBeInTheDocument();
+    expect(screen.queryByText("start over on the lock")).toBeNull();
+    expect(screen.getByText("1 later message after this thread.")).toBeInTheDocument();
+  });
+
   it("says what a task that has not started waits for", async () => {
     mount(item("running", null, { worker_sessions: [] }), "/work-items/w1/nodes/verification?sel=verification.review.code_review");
     expect(await screen.findByText(/After step checks finishes\./)).toBeInTheDocument();

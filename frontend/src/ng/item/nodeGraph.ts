@@ -16,6 +16,19 @@ export function sessionsOf(item: ItemDetail, path: string): WorkerSession[] {
 /** The node's escalation turns, oldest first. */
 export const escalationsOf = (item: ItemDetail, node: string) => item.worker_sessions.filter((s) => s.node_id === node && isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
 
+/** How many of an item's escalation messages, oldest first, a thread shows for
+ *  the turn `upTo`: through that turn's own message, and all of them when no
+ *  turn is picked. A message names the session it started; one that does not
+ *  is matched by the turn's place among its node's turns and messages. */
+export function messagesThrough(msgs: { session: string | null; node: string | null }[], upTo: WorkerSession | undefined, item: ItemDetail): number {
+  if (!upTo) return msgs.length;
+  const own = msgs.findIndex((m) => m.session === upTo.id);
+  if (own >= 0) return own + 1;
+  const k = escalationsOf(item, upTo.node_id).findIndex((s) => s.id === upTo.id);
+  const here = msgs.flatMap((m, i) => (m.node === upTo.node_id ? [i] : []));
+  return k >= 0 && k < here.length ? here[k] + 1 : msgs.length;
+}
+
 /** What a session draws as: its glyph state and the one meta word (Decisions §5 Task meta: duration only). */
 export function sessionLook(s: WorkerSession | undefined, now: number): Pick<GraphItem, "state" | "meta" | "running" | "paused" | "attemptStopped"> {
   if (!s) return { state: "todo" };
