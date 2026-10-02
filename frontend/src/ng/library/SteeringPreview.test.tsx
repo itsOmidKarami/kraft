@@ -49,6 +49,13 @@ describe("Library: a steering profile", () => {
     expect(await screen.findByText("Preview shows the published text. Publish to see this change.")).toBeInTheDocument();
   });
 
+  it("says nothing about the published text when only another component has draft changes", async () => {
+    draftWith({ changes: [{ path: "nodes.verification", kind: "change", summary: "tasks" }] }, true);
+    open();
+    await rowsText();
+    expect(screen.queryByText(/Preview shows the published text/)).toBeNull();
+  });
+
   it("says what to do with no use, and with no repository", async () => {
     mount("/templates/library/steering.never-signal-processes-you-didnt-start");
     expect(await screen.findByText("Use this profile on a task to preview it.")).toBeInTheDocument();

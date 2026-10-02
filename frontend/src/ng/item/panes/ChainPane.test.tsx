@@ -2,9 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
-import { detail, stubFetch } from "../testkit";
+import { acceptWrites, detail, stubFetch } from "../testkit";
 import * as toast from "../../ui/Toast";
 import { ChainConfig, ChainOverview, STILL_STOPPED } from "./ChainPane";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/budget/raise", "POST /work-items/w1/retry");
 
 afterEach(() => vi.unstubAllGlobals());
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -66,7 +69,7 @@ describe("ChainConfig", () => {
   });
 
   it("raises the budget with a quick pick through PATCH, or /budget/raise on a budget stop", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const { reload } = show({}, true);
     await userEvent.click(screen.getByRole("button", { name: "+$5" }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
@@ -74,14 +77,14 @@ describe("ChainConfig", () => {
   });
 
   it("on a budget stop raises and retries in one call", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null, scope: "work_item" } }, true);
     await userEvent.click(screen.getByRole("button", { name: "No cap" }));
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: null } }]));
   });
 
   it("on a budget stop the item's own cap did not make, sets that cap without /budget/raise, which would refuse it", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const said = vi.spyOn(toast, "showToast");
     // The daily cap stopped it: the item's own is not the one in the way.
     show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null, scope: "daily" } }, true);
@@ -92,7 +95,7 @@ describe("ChainConfig", () => {
   });
 
   it("on a policy budget stop raises that policy and retries, with no No-cap pick", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const { reload } = show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null, limit: { path: "", key: "budget_usd", value: 5, maximum: 25 } } }, true);
     expect(screen.queryByRole("button", { name: "No cap" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "+$5" }));
@@ -101,7 +104,7 @@ describe("ChainConfig", () => {
   });
 
   it("after a Raise cap, meters and lists the item's policy cap, and the pencil raises that cap keeping the rest of the override", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const policy_override = { budget_usd: 1, paths: { verification: { max_attempts: 5 } } };
     const { reload } = show({ budget_cap: { cap_usd: 1, source: "item", key: "policy.budget_usd", spent_usd: 0.07 }, policy_override }, true);
     expect(screen.getByText("Budget").closest(".meter")).toHaveTextContent("$0.070 of $1.00");

@@ -15,7 +15,8 @@ describe("Archived (the desktop's /archived at phone width)", () => {
     const links = within(newer.closest(".ph-list") as HTMLElement).getAllByRole("link");
     expect(links.map((l) => l.getAttribute("href"))).toEqual(["/work-items/w2", "/work-items/w1"]);
     expect(newer).toHaveTextContent(/kraft · archived \d+d ago/);
-    expect(calls.some((c) => c.method === "GET" && c.path === "/work-items")).toBe(true);
+    const read = calls.filter((c) => c.method === "GET" && c.path === "/work-items");
+    expect(read.map((c) => Object.fromEntries(c.query))).toEqual([{ archived: "true", include_abandoned: "true" }]);
   });
 
   it("says so when nothing is archived", async () => {

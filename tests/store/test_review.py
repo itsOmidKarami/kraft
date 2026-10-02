@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from support.store_fixtures import mk_item
 
 from kraft import events, store
@@ -92,6 +94,47 @@ async def test_a_new_thread_is_a_draft_until_submitted(database):
     assert t["comments"][0]["review_id"] == rid and t["draft"] is False
     types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
     assert "review_submitted" in types
+
+
+def _comment(database, cid):
+    row = database.read(lambda c: store.comment_row(c, cid))
+    return None if row is None else (row["body"], row["suggestion"])
+
+
+async def test_editing_a_draft_reply_rewrites_its_body_and_suggestion(database):
+    """`PATCH /api/comments/{cid}` replaces both fields; an empty suggestion
+    clears the one there was. The thread's first comment is not touched."""
+    await mk_item(database)
+    tid = await _thread(database)
+    suggestion = {"start_line": 3, "end_line": 3, "replacement": "x = 1"}
+    cid = await database.write(
+        lambda c: store.add_draft_reply(c, tid, body="first try", suggestion=suggestion)
+    )
+
+    edited = {"start_line": 3, "end_line": 4, "replacement": "x = 2"}
+    await database.write(
+        lambda c: store.update_draft_comment(c, cid, body="second try", suggestion=edited)
+    )
+    assert _comment(database, cid) == ("second try", json.dumps(edited))
+
+    await database.write(lambda c: store.update_draft_comment(c, cid, body="plain", suggestion={}))
+    assert _comment(database, cid) == ("plain", None)
+    [thread] = database.read(lambda c: store.threads_for(c, "w1"))
+    assert [c["body"] for c in thread["comments"]] == ["fix it", "plain"]
+
+
+async def test_deleting_a_draft_reply_leaves_the_rest_of_its_thread(database):
+    await mk_item(database)
+    tid = await _thread(database)
+    keep = await database.write(lambda c: store.add_draft_reply(c, tid, body="keep me"))
+    gone = await database.write(lambda c: store.add_draft_reply(c, tid, body="drop me"))
+
+    await database.write(lambda c: store.delete_draft_comment(c, gone))
+
+    assert _comment(database, gone) is None
+    [thread] = database.read(lambda c: store.threads_for(c, "w1"))
+    assert [c["id"] for c in thread["comments"]][1:] == [keep]
+    assert [c["body"] for c in thread["comments"]] == ["fix it", "keep me"]
 
 
 async def test_submit_stamps_every_draft_on_the_item(database):

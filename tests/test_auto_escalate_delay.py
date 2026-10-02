@@ -106,13 +106,6 @@ async def test_tick_spends_no_slot_on_a_gate_no_agent_may_review(
     this request already had its `auto_review_attempts`. Spawning a check for
     it anyway would only hand the status back, holding a slot meanwhile."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    calls = []
-
-    async def fake_review(*a, **kw):
-        calls.append(1)
-        return "undecided", None
-
-    monkeypatch.setattr("kraft.executor.gates.gate_review.review", fake_review)
     monkeypatch.setattr("kraft.executor.gates._seconds_since", lambda evts, pred: 10_000.0)
     pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=600)
 
@@ -127,9 +120,13 @@ async def test_tick_spends_no_slot_on_a_gate_no_agent_may_review(
         await app.state.db.write(
             lambda c: events.append(c, "w1", "gate_auto_review_started", {"gate": "g"})
         )
-    assert await auto_escalate_delay.tick(app) == []
-    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
-    assert calls == []
+    try:
+        assert await auto_escalate_delay.tick(app) == []
+        # Nothing spawned, so no task holds the item's slot: a spawned check
+        # would still be here, since `tick` returns without awaiting it.
+        assert app.state.tasks == {}
+    finally:
+        await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
 
 
 async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(

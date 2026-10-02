@@ -7,9 +7,12 @@ import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItem } from "../../../types";
 import { groupOf, groupsOf } from "../../board/model";
 import { resetBoardPrefs } from "../../board/prefs";
-import { detail, stubFetch } from "../../item/testkit";
+import { acceptWrites, detail, stubFetch } from "../../item/testkit";
 import { Board } from "./Board";
 import { useNeedsCount } from "../nav/needsCount";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/g1/gates/plan_approval/approve", "POST /work-items/p5/resume");
 
 const item = (id: string, display_status: DisplayStatus, over: Partial<WorkItem> = {}): WorkItem =>
   detail({ id, title: `Item ${id}`, display_status, bead_id: `kraft-${id}`, updated_at: `2026-09-13T0${id.slice(-1)}:00:00Z`, ...over });
@@ -136,7 +139,7 @@ describe("the phone board (B)", () => {
 describe("a card's inline actions (B.4)", () => {
   it("gate stop: Approve asks first, then calls act.approve once; Reject… opens the reject composer", async () => {
     put(gate("g1", { chain_definition: { template_id: "default", nodes: [{ id: "plan_approval" }, { id: "implementation" }] } as never }));
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
     // One tap only asks: a passed gate is not taken back.
@@ -212,7 +215,7 @@ describe("a card's inline actions (B.4)", () => {
 
   it("paused mid-chain: Resume calls act.resume", async () => {
     put(item("p5", "paused"));
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     await waitFor(() => expect(calls.at(-1)).toEqual({ method: "POST", path: "/work-items/p5/resume", body: { steer: null } }));
