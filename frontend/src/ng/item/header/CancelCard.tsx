@@ -6,6 +6,7 @@ import { Button } from "../../ui/Button";
 import { Popover } from "../../ui/Popover";
 import { act, cancelPreview } from "../actions";
 import { taskName } from "../paths";
+import { sendOnModEnter } from "../../keys";
 
 /** Cancel… (Decisions §14, prototype lines 43–48): what stops, what is kept,
  *  what the spend does, the MR option, a reason, then `POST /cancel`. The
@@ -59,7 +60,7 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
             <input type="checkbox" checked={closeMr} onChange={(e) => setCloseMr(e.target.checked)} /> Also close !{preview.mr.ref} on the forge
           </label>
         )}
-        <textarea aria-label="Reason" ref={reasonRef} className="item-input" rows={2} placeholder="Reason (required, goes in the run log)" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <textarea aria-label="Reason" ref={reasonRef} className="item-input" rows={2} placeholder="Reason (required, goes in the run log)" value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={sendOnModEnter(submit, !busy && !!reason.trim())} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
           <Button variant="danger" disabled={busy || !reason.trim()} onClick={submit}>Cancel item</Button>

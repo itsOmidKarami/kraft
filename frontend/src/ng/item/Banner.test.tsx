@@ -177,6 +177,16 @@ describe("QuestionCard", () => {
     expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: "Accept the finding." } }]);
   });
 
+  it("sends the answer on ⌘↵", async () => {
+    const calls = stubFetch();
+    const reload = vi.fn();
+    render(<QuestionCard item={asked} compact={false} reload={reload} onOpenThread={() => {}} />);
+    await userEvent.type(screen.getByLabelText("Your answer"), "Accept the finding.");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: "Accept the finding." } }]);
+  });
+
   it("is one line with Open thread in a node view", async () => {
     const onOpenThread = vi.fn();
     render(<QuestionCard item={asked} compact reload={() => {}} onOpenThread={onOpenThread} />);
