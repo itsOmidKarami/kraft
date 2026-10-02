@@ -512,6 +512,9 @@ def runtime(*, refresh: bool = False) -> Runtime:
             fresh = detect_runtime()
         except BaseException:
             with _LOCK:
+                # A cached runtime it failed to replace waits `UNSURE_TTL`
+                # too, or every `cached_runtime()` would detect again.
+                _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
                 _DETECTING = None
             running.set()
             raise

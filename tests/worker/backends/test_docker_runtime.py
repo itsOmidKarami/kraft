@@ -338,6 +338,25 @@ def test_the_event_loop_reads_the_cache_and_detects_aside(due, monkeypatch):
     assert docker._RUNTIME.rootless is True
 
 
+def test_a_detection_that_raises_waits_before_the_next(due, monkeypatch):
+    """A broken `sandbox.yaml` raises on every detection: the event loop's
+    reads must not start one per call while the cached answer is unsure."""
+    detected = []
+
+    def detect():
+        detected.append(1)
+        raise ConfigError("sandbox.yaml does not parse")
+
+    monkeypatch.setattr(docker, "detect_runtime", detect)
+    with pytest.raises(ConfigError):
+        docker.runtime()
+    for _ in range(50):
+        assert docker.cached_runtime() is due
+    for aside in [t for t in threading.enumerate() if t.name == "kraft-runtime"]:
+        aside.join(5)
+    assert detected == [1]
+
+
 class _Watched:
     """A lock that says when someone starts waiting for it."""
 
