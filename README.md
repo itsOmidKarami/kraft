@@ -13,7 +13,7 @@
 | src/kraft/adapters/forge/\_\_init\_\_.py     |        8 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py               |       45 |        0 |    100% |           |
 | src/kraft/adapters/forge/gh.py               |      156 |       14 |     91% |172, 252, 276, 282-292, 314-315, 370, 421 |
-| src/kraft/adapters/forge/git.py              |      132 |        4 |     97% |47, 288-289, 467 |
+| src/kraft/adapters/forge/git.py              |      132 |        5 |     96% |47, 282-289, 467 |
 | src/kraft/adapters/forge/glab.py             |      180 |        9 |     95% |239-240, 327, 359-360, 426, 429, 442, 464 |
 | src/kraft/adapters/forge/models.py           |      170 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py               |      124 |        5 |     96% |74, 197, 249, 315-316 |
@@ -25,7 +25,7 @@
 | src/kraft/api/\_\_init\_\_.py                |       31 |        0 |    100% |           |
 | src/kraft/api/config\_check.py               |      329 |       24 |     93% |111, 188, 203-204, 246, 282-283, 293-294, 367, 387, 406, 462-465, 490, 541-542, 594-595, 610-611, 613, 619, 621 |
 | src/kraft/api/deps.py                        |      317 |       21 |     93% |83-84, 211-212, 405, 408-410, 482-483, 521-522, 531-532, 665-666, 701, 704, 707, 730-731 |
-| src/kraft/api/perimeter.py                   |       87 |        0 |    100% |           |
+| src/kraft/api/perimeter.py                   |       92 |        1 |     99% |       284 |
 | src/kraft/api/routes/\_\_init\_\_.py         |        0 |        0 |    100% |           |
 | src/kraft/api/routes/admin.py                |       37 |        2 |     95% |     34-35 |
 | src/kraft/api/routes/artifacts.py            |      181 |       10 |     94% |145, 163-164, 216, 244-251, 373 |
@@ -39,7 +39,7 @@
 | src/kraft/api/routes/repos.py                |      183 |        6 |     97% |86-90, 127, 146, 286-287 |
 | src/kraft/api/routes/review.py               |      292 |       40 |     86% |46, 51, 83, 108, 142-145, 148, 150, 160, 171-172, 185-190, 195-211, 216-219, 227, 340-341, 386-387, 457, 489 |
 | src/kraft/api/routes/search.py               |      117 |       14 |     88% |47-48, 75-78, 81, 108-112, 135, 141-142, 172 |
-| src/kraft/api/routes/sessions.py             |      180 |       11 |     94% |97, 144, 148, 289, 297, 376-378, 382, 384, 387 |
+| src/kraft/api/routes/sessions.py             |      177 |       11 |     94% |97, 144, 148, 289, 297, 372-374, 378, 380, 383 |
 | src/kraft/api/routes/settings.py             |      411 |       32 |     92% |84-85, 127-128, 195-196, 211-212, 221-222, 236-237, 312, 354-355, 476-479, 482, 523-524, 530, 549-552, 555-556, 560-565, 623 |
 | src/kraft/api/routes/work\_items.py          |      372 |       37 |     90% |135, 378-381, 467-485, 527-528, 548-549, 572-573, 626-627, 790, 807, 824-825, 921-922, 974-975, 980 |
 | src/kraft/api/startup.py                     |      165 |        6 |     96% |100-102, 111-112, 169-170 |
@@ -169,7 +169,7 @@
 | src/kraft/worker/steering.py                 |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py           |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **26285** | **1378** | **95%** |           |
+| **TOTAL**                                    | **26287** | **1380** | **95%** |           |
 
 
 ## Setup coverage badge
