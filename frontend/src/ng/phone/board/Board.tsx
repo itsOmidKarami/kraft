@@ -111,7 +111,7 @@ export function Board() {
         {load.state === "loading" && empty && <div className="ph-skeleton" aria-hidden="true"><span /><span /><span /></div>}
         {empty && load.state !== "loading" && (
           <p className="ph-empty">
-            {noRepos ? <>No repository is connected. Connect one from <Link className="ph-link" to="/templates/repos">More › Repos</Link>, or run <code>kraft admin init</code> on the machine.</> : "Nothing here. Tap + to file one."}
+            {noRepos ? <>No repository is connected. Run <code>kraft repo connect</code> in a repo on the machine, or connect one from a computer.</> : "Nothing here. Tap + to file one."}
           </p>
         )}
         {!empty && shown.length === 0 && <p className="ph-empty">Nothing here for this filter.</p>}

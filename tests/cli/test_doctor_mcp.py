@@ -42,3 +42,32 @@ def test_mcp_check_warns_naming_a_repo_whose_committed_settings_turn_the_plugin_
     assert str(repo) in check["detail"]
     assert "on harness claude" in check["detail"]
     assert "Claude Code's registration only" in check["detail"]
+
+
+def test_mcp_check_fails_when_a_connected_repo_has_nothing_registered_either(app, tmp_path):
+    """Nothing at user scope and nothing in the only connected repo is no
+    registration at all: the first Claude worker is refused, so doctor fails
+    with repos connected exactly as it does with none."""
+    (Path.home() / ".claude.json").unlink()
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
+    assert check["ok"] is False and check["warn"] is False
+    assert "Claude workers are refused" in check["detail"]
+    assert "install the Kraft plugin" in check["detail"] and "kraft admin init" in check["detail"]
+
+
+def test_mcp_check_still_only_warns_when_one_repo_registers_it_and_another_does_not(app, tmp_path):
+    """No user scope, but one repo's committed `.mcp.json` registers the
+    server: a repo-by-repo difference, which stays the Kraft-9efnk.31 warning
+    and names only the repo without one."""
+    (Path.home() / ".claude.json").unlink()
+    registered, bare = make_repo(tmp_path, "registered"), make_repo(tmp_path, "bare")
+    for repo in (registered, bare):
+        asyncio.run(client.ensure_repo(str(repo)))
+    _write(registered / ".mcp.json", {"mcpServers": {"kraft": {}}})
+    subprocess.run(["git", "add", ".mcp.json"], cwd=registered, check=True)
+    subprocess.run(["git", "commit", "-qm", "mcp"], cwd=registered, check=True)
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
+    assert check["ok"] is True and check["warn"] is True
+    assert str(bare) in check["detail"] and str(registered) not in check["detail"]

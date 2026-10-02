@@ -522,7 +522,10 @@ async def _mcp_check(server_up: bool) -> dict:
         repos = [Path(r["path"]) for r in await client.repos()]
         per_repo = {repo: registration.permission_tool(repo) for repo in repos}
         refused = [str(repo) for repo, tool in per_repo.items() if tool is None]
-        if refused:
+        # Every repo refused and nothing at user scope is no registration at
+        # all: it falls through to the same failure as no repo connected,
+        # since the first Claude worker anywhere is refused.
+        if refused and (found or len(refused) < len(per_repo)):
             # A warning, not a failure (Kraft-9efnk.31): the launch refuses
             # only an unsandboxed task on a harness asking through the direct
             # tool, and whether a repo's items ever launch one depends on
@@ -560,12 +563,22 @@ def _path_check() -> dict:
     """Is the `kraft` on PATH this one? Every MCP registration runs it by name,
     so an older install ahead of this one on PATH answers every agent's tool
     call with that install's code, whatever `kraft admin update` installed.
+    No `kraft` on PATH at all fails too: those same registrations then start
+    nothing, the usual fresh `uv tool install` whose bin dir is not on PATH yet.
     `ok=False` for the same reason as `_mcp_check`: it breaks silently."""
     from kraft import update
 
+    found = shutil.which("kraft")
+    if found is None:
+        return _check(
+            "kraft on PATH",
+            False,
+            "not on PATH -- MCP servers and hooks run `kraft` by name; add its directory to "
+            "PATH (`uv tool update-shell` for a uv install), then restart Kraft from a new shell",
+        )
     other = update.shadowing_kraft()
     if other is None:
-        return _check("kraft on PATH", True, shutil.which("kraft") or "not on PATH")
+        return _check("kraft on PATH", True, found)
     return _check(
         "kraft on PATH",
         False,

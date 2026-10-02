@@ -52,6 +52,8 @@ export interface RepoProbe {
   has_engineering: boolean;
   test_command: string | null;
   test_scopes: TestScope[] | null;
+  /** What `repo connect` and `POST /repos` save as `setup_command` when the caller gives none. */
+  setup_command: string | null;
   forge: string | null;
   project: string | null;
 }

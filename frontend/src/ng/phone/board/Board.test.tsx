@@ -116,8 +116,12 @@ describe("the phone board (B)", () => {
     expect(await screen.findByText("Nothing here. Tap + to file one.")).toBeInTheDocument();
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     mount();
-    expect(await screen.findByText(/No repository is connected/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "More › Repos" })).toHaveAttribute("href", "/templates/repos");
+    // `kraft repo connect` connects one; `kraft admin init` never does, and
+    // More › Repos on a phone cannot connect a path either.
+    expect(await screen.findByText(/No repository is connected/)).toHaveTextContent(
+      "No repository is connected. Run kraft repo connect in a repo on the machine, or connect one from a computer.",
+    );
+    expect(screen.queryByRole("link", { name: "More › Repos" })).toBeNull();
   });
 
   it("says offline beside the title when the list read fails, and keeps the rows", async () => {
