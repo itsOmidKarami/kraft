@@ -119,7 +119,7 @@ class Remote:
     def release(self, run_dirs, worktree, work_item_id):
         pass
 
-    async def health(self, sandbox):
+    async def health(self, sandbox, *, refresh=True):
         return True, "remote"
 
 

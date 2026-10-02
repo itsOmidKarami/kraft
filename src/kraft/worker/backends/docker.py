@@ -491,6 +491,9 @@ def runtime(*, refresh: bool = False) -> Runtime:
         if not refresh and not _due(host):
             return host
         with _LOCK:
+            host = _RUNTIME
+            if not refresh and not _due(host):
+                return host  # a detection published since the read above
             running = _DETECTING
             if running is None:
                 running = _DETECTING = threading.Event()
@@ -527,12 +530,36 @@ def runtime(*, refresh: bool = False) -> Runtime:
                     selinux=known.selinux,
                     identity_known=True,
                 )
-            _RUNTIME = fresh
+            # The deadline first: a lock-free reader that sees the new
+            # runtime sees its deadline too, and never starts another
+            # detection off an answer that has only just arrived.
             _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+            _RUNTIME = fresh
             _REASK = None
             _DETECTING = None
         running.set()
         return fresh
+
+
+def cached_runtime() -> Runtime:
+    """`runtime()` for a caller on the event loop (`docker_argv`, the relay
+    argv, `launch_failed`): the cached answer, at once. One that is due to
+    be asked again is asked in a thread of its own, for the next caller;
+    only with nothing cached at all does this caller ask, which a launch's
+    probe, run in a worker thread, has always done first."""
+    host = _RUNTIME
+    if host is None:
+        return runtime()
+    if _due(host) and _DETECTING is None:
+        threading.Thread(target=_detect_aside, name="kraft-runtime", daemon=True).start()
+    return host
+
+
+def _detect_aside() -> None:
+    try:
+        runtime()
+    except Exception:  # noqa: BLE001 -- the next caller that waits on it says why
+        logger.debug("detecting the container runtime failed", exc_info=True)
 
 
 def _launch_runtime() -> Runtime:
@@ -560,7 +587,7 @@ def _launch_runtime() -> Runtime:
         return _RUNTIME
     try:
         logger.warning(
-            "`%s info` did not answer within 10 s; asking once more, waiting up to %g s",
+            "`%s info` gave no answer; asking once more, waiting up to %g s",
             host.cli,
             REASK_TIMEOUT_S,
         )
@@ -644,8 +671,10 @@ def socket_channel(relay_image: str) -> bool | None:
     host = runtime()
     if host.socket_channel is None:
         answer = _probe_socket_channel(host, relay_image)
-        if answer is not None and _RUNTIME is host:
-            _RUNTIME = replace(host, socket_channel=answer)
+        if answer is not None:
+            with _LOCK:
+                if _RUNTIME is host:
+                    _RUNTIME = replace(host, socket_channel=answer)
         return answer
     return host.socket_channel
 
@@ -694,7 +723,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
     locked down as a worker, read-only, small, labelled as a relay, and
     named (no `--rm`: `close_session` removes it; `sweep_orphans` whatever a
     crash left)."""
-    host = runtime()
+    host = cached_runtime()
     if problem := host.refusal():
         raise SandboxRefused(problem)
     limits = {n: v for n, v in _RELAY_LIMITS.items() if n in host.limits}
@@ -750,7 +779,7 @@ def relay_b_argv(session_id: str, relay_image: str, port: int, cert_dir: Path) -
     verifying the daemon's against the Kraft CA. It mounts that volume and
     `cert_dir` (the session's certificate, key and the CA's certificate,
     read-only), nothing else; the worker shares neither."""
-    gateway = _ca.GATEWAY_HOSTS[1 if runtime().podman else 0]
+    gateway = _ca.GATEWAY_HOSTS[1 if cached_runtime().podman else 0]
     certs = _RELAY_B_CERTS
     return _relay_argv(
         relay_b_name(session_id),
@@ -893,7 +922,7 @@ def docker_argv(
     API, and its permission hook's command.
     """
     try:
-        host = runtime()
+        host = cached_runtime()
     except ConfigError as exc:
         raise SandboxRefused(str(exc)) from exc
     if problem := host.refusal():
@@ -1271,7 +1300,8 @@ async def oom_killed(session_id: str) -> OomKill | None:
             return None
         # Podman on cgroup v1 never sets the flag (4.9.3, conmon 2.1.10): its
         # conmon writes an `oom` file into the client's directory instead.
-        if killed == "true" or (runtime().podman and (client_dir(session_id) / "oom").exists()):
+        podman = (await asyncio.to_thread(runtime)).podman
+        if killed == "true" or (podman and (client_dir(session_id) / "oom").exists()):
             return OomKill(_size(int(memory)), True)
         if code != "137":
             return None
@@ -1515,7 +1545,7 @@ def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
     its own, before or instead of the command (probed with 4.9.3). A session
     no longer runs `--rm`, but the exit code stays the rule: it holds
     whichever way a container was run."""
-    if runtime().podman:
+    if cached_runtime().podman:
         return returncode == 125
     try:
         return not cidfile.read_text().strip()
@@ -1772,13 +1802,15 @@ class DockerBackend:
         _refstore.discard_item(run_dirs.base, work_item_id)
         shutil.rmtree(sandbox_home(run_dirs, work_item_id), ignore_errors=True)
 
-    async def health(self, sandbox: dict) -> tuple[bool, str]:
+    async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
         """A sandboxed repository's work items stop for a human without a
         runtime to run them in, and its first launch pulls an image inside
         that session's time cap: both are better learned from doctor.
-        Re-detects, so an edited `sandbox.yaml` shows here first."""
+        Re-detects, so an edited `sandbox.yaml` shows here first; doctor
+        does that once per run, not once per sandboxed repository."""
         try:
-            await asyncio.to_thread(runtime, refresh=True)
+            if refresh:
+                await asyncio.to_thread(runtime, refresh=True)
             # Asked again as a launch would, so doctor fails what a launch would.
             host = await asyncio.to_thread(_launch_runtime)
         except ConfigError as exc:

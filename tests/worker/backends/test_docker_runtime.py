@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from kraft.config import ConfigError
 from kraft.worker.backends import docker
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -248,3 +249,122 @@ def test_the_second_ask_does_not_ask_the_version_again(monkeypatch):
     monkeypatch.setattr(docker, "_run", run)
     assert docker._ask("podman", docker.REASK_TIMEOUT_S, "podman") == ("podman", True, False)
     assert ran == ["info"]
+
+
+@pytest.fixture
+def due(monkeypatch):
+    """A cached runtime that did not say whether it is rootless, its
+    `UNSURE_TTL` up: the next `runtime()` detects again."""
+    unsure = docker.Runtime("podman", engine="podman", identity_known=False)
+    monkeypatch.setattr(docker, "_RUNTIME", unsure)
+    monkeypatch.setattr(docker, "_UNSURE_UNTIL", 0.0)
+    monkeypatch.setattr(docker, "_DETECTING", None)
+    monkeypatch.setattr(docker, "_REASK", None)
+    return unsure
+
+
+def _in_thread(call):
+    """`call()` on a thread of its own: `(thread, results)`."""
+    out = []
+    thread = threading.Thread(target=lambda: out.append(call()), daemon=True)
+    thread.start()
+    return thread, out
+
+
+def test_a_cached_runtime_is_read_while_another_thread_detects(due, monkeypatch):
+    detecting, answer = threading.Event(), threading.Event()
+
+    def held():
+        detecting.set()
+        answer.wait()
+        return docker.Runtime("podman", engine="podman", rootless=True)
+
+    monkeypatch.setattr(docker, "detect_runtime", held)
+    detector, _ = _in_thread(docker.runtime)
+    assert detecting.wait(5)
+    reader, read = _in_thread(docker.runtime)
+    reader.join(2)
+    answered = not reader.is_alive()
+    answer.set()
+    detector.join(5)
+    reader.join(5)
+    assert answered and read == [due]
+    assert docker.runtime().rootless is True
+
+
+def test_a_detection_that_raises_lets_a_waiting_caller_go(monkeypatch):
+    """With nothing cached, a second caller waits on the first's detection;
+    when that raises, the second detects for itself instead of spinning."""
+    monkeypatch.setattr(docker, "_RUNTIME", None)
+    monkeypatch.setattr(docker, "_UNSURE_UNTIL", docker._UNSURE_UNTIL)
+    monkeypatch.setattr(docker, "_DETECTING", None)
+    monkeypatch.setattr(docker, "_REASK", None)
+    detecting, fail = threading.Event(), threading.Event()
+    calls = []
+
+    def detect():
+        calls.append(1)
+        if len(calls) == 1:
+            detecting.set()
+            fail.wait()
+            raise ConfigError("sandbox.yaml does not parse")
+        return docker.Runtime("podman", engine="podman", rootless=True)
+
+    monkeypatch.setattr(docker, "detect_runtime", detect)
+    first, _ = _in_thread(lambda: pytest.raises(ConfigError, docker.runtime))
+    assert detecting.wait(5)
+    second, got = _in_thread(docker.runtime)
+    fail.set()
+    first.join(5)
+    second.join(5)
+    assert not second.is_alive(), "the second caller never stopped waiting"
+    assert got[0].rootless is True
+
+
+def test_the_event_loop_reads_the_cache_and_detects_aside(due, monkeypatch):
+    """`docker_argv`, the relay argv and `launch_failed` run on the event
+    loop: a detection that is due runs in a thread of its own."""
+    published = threading.Event()
+
+    def detect():
+        published.set()
+        return docker.Runtime("podman", engine="podman", rootless=True)
+
+    monkeypatch.setattr(docker, "detect_runtime", detect)
+    assert docker.cached_runtime() is due
+    assert published.wait(5)
+    for aside in [t for t in threading.enumerate() if t.name == "kraft-runtime"]:
+        aside.join(5)
+    assert docker._RUNTIME.rootless is True
+
+
+class _Watched:
+    """A lock that says when someone starts waiting for it."""
+
+    def __init__(self):
+        self.lock, self.waiting = threading.Lock(), threading.Event()
+
+    def __enter__(self):
+        self.waiting.set()
+        self.lock.acquire()
+
+    def __exit__(self, *exc):
+        self.lock.release()
+
+
+def test_a_read_during_a_publish_does_not_detect_again(due, monkeypatch):
+    """A lock-free reader can catch a new no-answer runtime before its
+    deadline: it must find the deadline under the lock, not detect again,
+    which on the event loop would stall it."""
+    watched = _Watched()
+    monkeypatch.setattr(docker, "_LOCK", watched)
+    detected = []
+    monkeypatch.setattr(docker, "detect_runtime", lambda: detected.append(1) or due)
+    with watched.lock:  # the publisher, half way through
+        fresh = docker.Runtime("podman", engine="podman", identity_known=False)
+        monkeypatch.setattr(docker, "_RUNTIME", fresh)
+        reader, read = _in_thread(docker.runtime)
+        assert watched.waiting.wait(5)
+        monkeypatch.setattr(docker, "_UNSURE_UNTIL", time.monotonic() + 3600)
+    reader.join(5)
+    assert read == [fresh] and detected == []
