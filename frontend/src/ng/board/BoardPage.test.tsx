@@ -73,6 +73,15 @@ describe("BoardPage", () => {
     expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
+  it("drops a kept first-run whose repo is no longer connected, and keeps the board", async () => {
+    localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/elsewhere/other", name: "other", disabled: false }));
+    board();
+    await act(async () => {});
+    expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(localStorage.getItem("kraft.firstRun")).toBeNull();
+  });
+
   it("keeps the board while the repo list is unknown or non-empty", async () => {
     vi.spyOn(api, "getRepos").mockRejectedValue(new Error("down"));
     board();

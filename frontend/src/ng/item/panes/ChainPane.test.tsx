@@ -105,6 +105,11 @@ describe("ChainConfig", () => {
     expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { policy: { ...policy_override, budget_usd: 6 } } }]);
   });
 
+  it("lists the item's own cap whenever it set one, beside a lower policy cap", () => {
+    show({ budget_set: 1, budget_usd: 20, budget_cap: { cap_usd: 5, source: "item", key: "policy.budget_usd", spent_usd: 1 }, policy_override: { budget_usd: 5, max_attempts: 4 } });
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["budget $20.00", "budget_usd $5.00 · item policy", "max_attempts 4 · item policy"]);
+  });
+
   it("says nothing changed without overrides, and resets a node override", async () => {
     const { unmount } = render(<ChainConfig item={detail({ node_overrides: {} })} policy={null} reload={() => {}} editBudget={false} onEditBudget={() => {}} />);
     expect(screen.getByText(/Nothing changed/)).toBeInTheDocument();

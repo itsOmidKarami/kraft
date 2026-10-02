@@ -10,6 +10,7 @@ import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { budgetRaise } from "../status";
+import { limitPolicy } from "../limitPolicy";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -110,8 +111,7 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
   const send = async (usdCap: number | null) => {
     let r;
     if (limit && usdCap != null) {
-      // A budget limit is item-wide. A PATCH replaces the whole override, so keep what else the item set.
-      r = await act.patch(item.id, { policy: { ...item.policy_override, budget_usd: usdCap } });
+      r = await act.patch(item.id, limitPolicy(item.policy_override, limit, usdCap));
       if (r.ok && item.stop?.kind === "budget") r = await act.retry(item.id);
     } else r = budgetRaise(item) === "item" ? await act.raiseBudget(item.id, usdCap) : await act.patch(item.id, { budget_usd: usdCap });
     if (!r.ok) return setError(r.error);
@@ -168,8 +168,8 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
   };
   const policyCap = policy?.budget?.work_item_usd;
   const ownPolicy = policyRows(item.policy_override);
-  // The item's own cap, unless the cap in force is its policy's (listed below).
-  const ownCap = cap?.source === "item" && cap.key !== "policy.budget_usd";
+  // The item's own cap, whenever it set one, even while its policy's is the lower one.
+  const ownCap = !!item.budget_set;
   return (
     <>
       <h3 className="ip-h">Limits in use</h3>
@@ -195,7 +195,7 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
         <p className="item-muted">Nothing changed. This item runs the chain and policy as frozen.</p>
       ) : (
         <ul className="ip-overrides">
-          {ownCap && <li><span className="is-mono">budget</span> {cap.cap_usd != null ? usd(cap.cap_usd) : "no cap"}{policyCap != null && <span className="item-muted"> · policy {usd(policyCap)}</span>}</li>}
+          {ownCap && <li><span className="is-mono">budget</span> {item.budget_usd != null ? usd(item.budget_usd) : "no cap"}{policyCap != null && <span className="item-muted"> · policy {usd(policyCap)}</span>}</li>}
           {ownPolicy.map(([k, v]) => <li key={k}><span className="is-mono">{k}</span> {v} <span className="item-muted">· item policy</span></li>)}
           {agent && Object.keys(agent).length > 0 && (
             <li><span className="is-mono">model</span> {Object.entries(agent).map(([k, v]) => `${k} ${v}`).join(", ")} <button type="button" className="item-link" onClick={() => reset({ agent_overrides: {} })}>reset</button></li>

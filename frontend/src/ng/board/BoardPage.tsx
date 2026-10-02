@@ -90,8 +90,9 @@ export function BoardPage() {
   useEffect(() => {
     api.getRepos().then((r) => {
       // A wizard left part-way through comes back, until its last step is done
-      // or skipped; one whose repo has since gone starts over.
-      if (!r.repos.length) clearFirstRun();
+      // or skipped; one whose repo is no longer connected starts over.
+      const saved = savedFirstRun();
+      if (saved && !r.repos.some((x) => x.path === saved.path)) clearFirstRun();
       setFresh(r.repos.length === 0 || savedFirstRun() != null);
     }).catch(() => {});
     api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});

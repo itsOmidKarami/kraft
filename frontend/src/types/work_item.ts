@@ -343,6 +343,10 @@ export interface WorkItem {
   /** This item's effective spend cap and its source. Only on the detail
    *  endpoint. */
   budget_cap?: BudgetCap;
+  /** Whether the item set its own dollar cap, and that cap (null: no cap).
+   *  Unset, the policy's `work_item_usd` holds it. Only on the detail endpoint. */
+  budget_set?: number | boolean;
+  budget_usd?: number | null;
   /** The item's own policy override: item-wide fields, and `paths` for one
    *  node, step or task's. Null when it has none. Only on the detail endpoint. */
   policy_override?: (Record<string, unknown> & { paths?: Record<string, Record<string, unknown>> }) | null;
