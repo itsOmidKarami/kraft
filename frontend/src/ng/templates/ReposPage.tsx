@@ -11,6 +11,7 @@ import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
 import type { Problem } from "./draft/types";
 import { Kv, Note } from "./panes/controls";
 import { ConnectForm } from "./repos/ConnectForm";
+import { testsCell, testsTitle } from "./repos/evidence";
 import { RepoConfig } from "./repos/RepoConfig";
 import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "./repos/types";
 import { useRepoFragment } from "./repos/useRepoFragment";
@@ -155,7 +156,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                         </span>
                         <span className="rp-cell">{String(x.entry.default_chain_template ?? "default")}</span>
                         <span className="rp-cell rp-cut" data-allow-ellipsis title={steer || undefined}>{steer || "—"}</span>
-                        <span className="rp-cell rp-cut" data-allow-ellipsis title={typeof x.entry.test_command === "string" ? x.entry.test_command : undefined}>{typeof x.entry.test_command === "string" ? x.entry.test_command : "—"}</span>
+                        <span className="rp-cell rp-cut" data-allow-ellipsis title={testsTitle(x.entry)}>{testsCell(x.entry)}</span>
                         <span className={`rp-cell rp-state${x.entry.enabled === false ? "" : " is-on"}`}>{state}</span>
                       </div>
                     );

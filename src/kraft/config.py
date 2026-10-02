@@ -15,7 +15,7 @@ import ipaddress
 import logging
 import os
 import re
-import shlex
+import stat
 import subprocess
 import tempfile
 from collections.abc import Iterator, Mapping
@@ -104,6 +104,64 @@ def read_yaml(path: str | Path, default: dict | None = None) -> dict:
     if not isinstance(data, dict):
         raise ConfigError(f"{path.name}: expected a mapping at the top level")
     return data
+
+
+class YamlTooLarge(ValueError):
+    """A YAML document past its node budget: refused before it is built."""
+
+
+def bounded_yaml(text: str, budget: list[int]) -> object:
+    """`yaml.safe_load`, for a file whoever committed it wrote. The node
+    graph is composed (linear in the text: an alias is a shared node) and
+    walked first, every use of an alias counting again, spending
+    `budget[0]`; past it, `YamlTooLarge`, and nothing is constructed. A
+    merge key over nested aliases (`<<: [*a, *a, ...]`) would otherwise
+    build in time exponential in its depth, from a few hundred bytes."""
+    loader = yaml.SafeLoader(text)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None
+        stack = [node]
+        while stack:
+            budget[0] -= 1
+            if budget[0] < 0:
+                raise YamlTooLarge("more YAML nodes than a repository's config holds")
+            n = stack.pop()
+            if isinstance(n, yaml.MappingNode):
+                for key, value in n.value:
+                    stack += (key, value)
+            elif isinstance(n, yaml.SequenceNode):
+                stack.extend(n.value)
+        return loader.construct_document(node)
+    finally:
+        loader.dispose()
+
+
+def _small_text(path: Path, cap: int = 1 << 20) -> str | None:
+    """A repository's own file, read from its working copy: a regular file
+    only (not a symlink to a FIFO, whose read would block forever), of at
+    most `cap` bytes. None otherwise: the facts a probe reports from it are
+    never a reason to fail."""
+    try:
+        st = path.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap:
+            return None
+        with open(path, "rb") as f:
+            return f.read(cap).decode("utf-8")
+    except (OSError, ValueError):  # not UTF-8 is unreadable too
+        return None
+
+
+def _small_yaml(path: Path) -> dict:
+    """`_small_text`'s YAML, bounded as `bounded_yaml` bounds it; empty when
+    it is not a small regular file or not a mapping."""
+    text = _small_text(path)
+    try:
+        data = bounded_yaml(text, [20_000]) if text is not None else None
+    except (ValueError, RecursionError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_text(path: str | Path, text: str) -> None:
@@ -584,7 +642,9 @@ def git_read(
     diff body ending in a blank context line loses that line to the strip, and
     git_read is a diff transport now as well as a `rev-parse` reader.
     """
-    cmd = ["git", "--no-optional-locks", *args]
+    # `core.fsmonitor` names a program git runs on a status-like read: from
+    # a repository's own .git/config, that is the repository running code.
+    cmd = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", *args]
     try:
         out = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -646,44 +706,36 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
         yield ["-c", f"core.excludesFile={f.name}"]
 
 
-#: Test commands to look for, in the order a repo is most likely to want them.
-#: A justfile with a `test` recipe comes first: an explicit wrapper (Kraft's own
-#: `just test`) beats a manifest beside it (Kraft-reriq, Kraft-enc5z).
-#:
-#: A None command is a marker that ends the search with no guess. `uv run`
-#: locks before it runs, so on a `pyproject.toml` with no `uv.lock` it writes
-#: one into the worktree, every verify, for the worker to commit. Such a repo
-#: connects disabled, and is not handed the `package.json` beside it either:
-#: `npm test` would leave its Python suite unrun with nothing to say so. One
-#: level down it only matters when the root has no command of its own: see
-#: `_probe_test_scopes`.
-_TEST_COMMANDS: list[tuple[str, str | None]] = [
-    ("Justfile", "just test"),
-    ("justfile", "just test"),
-    ("uv.lock", "uv run pytest -q"),
-    ("pyproject.toml", None),
-    ("package.json", "npm test"),
-    ("Cargo.toml", "cargo test"),
-    ("go.mod", "go test ./..."),
-]
-
-
-#: Hostnames Kraft can recognize in an origin URL. Self-hosted instances have
-#: arbitrary hostnames and no read-only signal, so they are set by hand in
-#: repos.yaml instead.
-_FORGES = {
-    "gitlab.com": "gitlab",
-    "github.com": "github",
-}
+#: Forges Kraft has an adapter for, by what an origin's host says. A
+#: self-hosted instance counts when its host names the forge
+#: (`gitlab.example.com`, `github.example.com`); any other host is set by hand
+#: in repos.yaml.
+_FORGES = ("gitlab", "github")
+#: A URL-style remote (`https://`, `ssh://`, which may carry a port), or an
+#: scp-style one (`git@host:group/repo`, where what follows the colon is
+#: always the path: GitLab's numeric group ids included).
+_REMOTE = (
+    re.compile(
+        r"^[a-z][a-z0-9+.-]*://(?:[^@/]+@)?(?P<host>[^/:]+)(?::\d+)?/(?P<path>.+)$", re.IGNORECASE
+    ),
+    re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>[^/].*)$"),
+)
 
 
 def _detect_forge(remote: str) -> tuple[str | None, str | None]:
-    """(forge, project) from an origin URL, or (None, None). Never raises."""
-    for host, forge in _FORGES.items():
-        if host in remote:
-            tail = remote.split(host, 1)[-1].lstrip(":/")
-            return forge, (tail.removesuffix(".git") or None)
-    return None, None
+    """(forge, project) from an origin URL, or (None, None). Never raises.
+
+    Read from the URL's host, not anywhere in the string: `github.com` in a
+    path, or a host like `notgithub.company.io`, says nothing about the forge.
+    """
+    match = next((m for rx in _REMOTE if (m := rx.match(remote.strip()))), None)
+    if match is None:
+        return None, None
+    labels = match["host"].lower().split(".")
+    forge = next((f for f in _FORGES if f in labels or f"{f}.com" == match["host"].lower()), None)
+    if forge is None:
+        return None, None
+    return forge, (match["path"].strip("/").removesuffix(".git") or None)
 
 
 def normalized_repo_root(p: Path) -> Path | None:
@@ -712,145 +764,6 @@ def normalized_repo_root(p: Path) -> Path | None:
     return Path(common).parent if common and Path(common).name == ".git" else Path(toplevel)
 
 
-_JUST_TEST_RECIPE = re.compile(r"^@?test(?:\s[^:\n]*)?:(?!=)", re.MULTILINE)
-
-
-def _first_test_marker(directory: Path) -> tuple[str, str | None] | None:
-    """(marker, command) for the first `_TEST_COMMANDS` marker here. Names come
-    from the listing: a case-insensitive disk says `Justfile` is a file when the
-    file is `justfile`. A justfile counts only with a `test` recipe.
-
-    `(marker, None)` is a marker that stops the search with no guess, which a
-    caller must not read as "nothing here": None is that."""
-    try:
-        names = {f.name for f in directory.iterdir() if f.is_file()}
-    except OSError:
-        return None
-    for marker, cmd in _TEST_COMMANDS:
-        if marker in names and (
-            cmd != "just test"
-            or _JUST_TEST_RECIPE.search((directory / marker).read_text("utf-8", "replace"))
-        ):
-            return marker, cmd
-    return None
-
-
-#: Marker -> the command that prepares a checkout of this kind of repo. A
-#: *suggestion* written into repos.yaml at connect time for a human to check,
-#: never consulted at run time: the runtime runs what is declared and infers
-#: nothing. Ordered so a lockfile beats the manifest beside it.
-#:
-#: `uv sync` is keyed on `uv.lock`, the way `npm ci` is on its lockfile: on a
-#: `pyproject.toml` alone it creates `uv.lock` in the worktree, and the worker
-#: commits it onto the item's branch. A `pyproject.toml` with no lock ends the
-#: search with no guess, as in `_TEST_COMMANDS`, so connect and doctor say none
-#: was found rather than propose a command that edits the repo.
-_SETUP_COMMANDS: list[tuple[str, str | None]] = [
-    ("package-lock.json", "npm ci"),
-    ("yarn.lock", "yarn install --frozen-lockfile"),
-    ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
-    ("uv.lock", "uv sync"),
-    ("pyproject.toml", None),
-    ("Cargo.toml", "cargo fetch"),
-    ("go.mod", "go mod download"),
-]
-
-
-def _first_setup_command(directory: Path) -> str | None:
-    return next((cmd for marker, cmd in _SETUP_COMMANDS if (directory / marker).is_file()), None)
-
-
-#: A `_TEST_COMMANDS` command -> the same command for a project one level down,
-#: run from the repository root. Verify runs every scope's command from the
-#: worktree root without a shell (`dispatch._select_scopes`), so a bare `npm
-#: test` there finds no `package.json`; each toolchain's own directory flag
-#: points it at the project instead. `{dir}` is the directory, `{manifest}`
-#: the marker file inside it, both shell-quoted for `shlex.split`.
-_NESTED_TEST_COMMANDS = {
-    "just test": "just --justfile {manifest} test",
-    "uv run pytest -q": "uv run --directory {dir} pytest -q",
-    "npm test": "npm --prefix {dir} test",
-    "cargo test": "cargo test --manifest-path {manifest}",
-    "go test ./...": "go -C {dir} test ./...",
-}
-
-
-def _nested_test_command(name: str, marker: str, command: str) -> str:
-    """`command`, found at `name/marker`, as it must be written to run from the root."""
-    return _NESTED_TEST_COMMANDS[command].format(
-        dir=shlex.quote(name), manifest=shlex.quote(f"{name}/{marker}")
-    )
-
-
-#: Root markers whose test command can run a stopped subdirectory's Python
-#: tests: the operator's own justfile recipe, or `uv run pytest -q` from a root
-#: `uv.lock` (a uv workspace). `npm test`, `cargo test` and `go test` cannot.
-_COVERS_PYTHON = frozenset({"Justfile", "justfile", "uv.lock"})
-
-
-def _probe_test_scopes(
-    root: Path, *, test_command: str | None = None
-) -> tuple[str | None, list[dict], list[str]]:
-    """(legacy singular `test_command`, `test_scopes`, their marker files) for `root`.
-
-    Markers are read at the root and one level under it -- deliberately shallow,
-    like Kraft's own `frontend/`. A subdirectory match becomes a nested scope,
-    its command written to run from the root (`_NESTED_TEST_COMMANDS`),
-    and the root scope's `paths` exclude every directory one claimed, so a
-    frontend-only diff cannot also match the backend. None -> `paths: ["**"]`.
-
-    `test_command`, when given, takes the root's marker-derived command's place
-    rather than suppressing probing, so nested scopes are still found (Kraft-k4mx).
-
-    A stop marker (a `pyproject.toml` with no `uv.lock`) at the root, with no
-    `test_command` given, proposes nothing at all. One in a subdirectory is
-    left unclaimed when the root's command can run its Python tests (a given
-    `test_command`, or one from `_COVERS_PYTHON`): the root scope covers it,
-    as it covers a uv workspace member, which never has a lock of its own
-    (`uv run` there uses the root's). Otherwise nothing is proposed either: a
-    diff to that Python code would select a root `go test` or fail open to a
-    lone `npm test` scope (`dispatch._matched_scopes`), and its suite would
-    never run.
-    """
-    found = None if test_command else _first_test_marker(root)
-    root_command = test_command or (found and found[1])
-    covers_python = bool(test_command) or (found is not None and found[0] in _COVERS_PYTHON)
-    try:
-        subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
-    except OSError:
-        subdirs = []
-    probed = [(d.name, hit) for d in subdirs if (hit := _first_test_marker(d))]
-    hits = [(name, hit) for name, hit in probed if hit[1]]
-    if (found and not root_command) or (len(hits) < len(probed) and not covers_python):
-        return None, [], []
-    nested = [(name, _nested_test_command(name, marker, cmd)) for name, (marker, cmd) in hits]
-    markers = ([found[0]] if found else []) + [f"{name}/{marker}" for name, (marker, _) in hits]
-
-    if not nested:
-        scopes = [{"paths": ["**"], "command": root_command}] if root_command else []
-        return root_command, scopes, markers
-
-    claimed = {name for name, _ in nested}
-    try:
-        # `/**` on every directory: fnmatch has no notion of "this dir and
-        # everything under it", so a bare "src" never matches a changed path
-        # like "src/foo.py" and a backend-only diff fails open to every scope,
-        # nested ones included (verify finding, Kraft-9wzy). A top-level file
-        # (e.g. "pyproject.toml") has no children to cover, so it stays literal.
-        top_level = sorted(
-            f"{p.name}/**" if p.is_dir() else p.name
-            for p in root.iterdir()
-            if p.name not in claimed
-        )
-    except OSError:
-        top_level = []
-    scopes = []
-    if root_command:
-        scopes.append({"paths": top_level, "command": root_command})
-    scopes.extend({"paths": [f"{name}/**"], "command": cmd} for name, cmd in nested)
-    return root_command or nested[0][1], scopes, markers
-
-
 def repository_identity(path: str | Path) -> tuple[str, str]:
     """`path` resolved, and its origin's URL as `same_repository` compares
     them: a local origin resolved like a path (its `.git` directory is the
@@ -876,16 +789,33 @@ def same_repository(a: tuple[str, str], b: tuple[str, str]) -> bool:
     return bool(origin_a) and origin_a in (origin_b, path_b)
 
 
-def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
+def probe_repo(
+    path: str | Path,
+    *,
+    test_command: str | None = None,
+    templates_dir: Path | None = None,
+    detect: bool = True,
+    timeout: float | None = None,
+) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 
     Read-only on purpose (design 5a): "Kraft flags it but does not change repo
     files". Everything is best-effort — a field it cannot determine comes back
-    None or empty rather than failing the probe.
+    None or empty rather than failing the probe. The one exception is a broken
+    `detectors.yaml` under `templates_dir`, which raises `ConfigError`.
 
-    `test_command`, when given, overrides the marker-derived root command
-    probing would otherwise use -- see `_probe_test_scopes`.
+    The setup and test commands are `kraft.detect`'s proposal: the detector
+    table packaged with Kraft, with `templates_dir`'s `detectors.yaml` on top.
+    `test_command`, when given, takes the root's proposed test command's place
+    (`""`: the root has no tests), and nested scopes are still probed.
+
+    `detect=False` stops at the facts that need no detector table -- the
+    repository's path, name, branch, submodules, beads, forge -- which is all
+    a caller resolving a path or checking "already connected" needs, and
+    cannot be broken by an operator's `detectors.yaml`.
     """
+    from kraft import detect as detect_mod  # `kraft.detect` imports this module
+
     p = Path(path).expanduser()
     if not p.is_dir():
         raise ConfigError(f"{p} is not a directory")
@@ -894,15 +824,14 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
         raise ConfigError(f"{p} is not a git repository")
 
     submodules: list[str] = []
-    gitmodules = root / ".gitmodules"
-    if gitmodules.is_file():
+    gitmodules = _small_text(root / ".gitmodules")
+    if gitmodules is not None:
         parser = ConfigParser()
         try:
             # .gitmodules is INI-shaped: [submodule "libs/x"] with a path key.
-            # ValueError covers read_text()'s UnicodeDecodeError: this read is
-            # best-effort, so a .gitmodules that is not UTF-8 degrades to no
-            # submodules rather than failing the whole probe.
-            parser.read_string(gitmodules.read_text())
+            # This read is best-effort: one that does not parse degrades to
+            # no submodules rather than failing the whole probe.
+            parser.read_string(gitmodules)
             submodules = sorted(
                 parser.get(s, "path") for s in parser.sections() if parser.has_option(s, "path")
             )
@@ -910,15 +839,13 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
             submodules = []
 
     beads = root / ".beads"
-    beads_config = read_yaml(beads / "config.yaml", {}) if beads.is_dir() else {}
+    beads_config = _small_yaml(beads / "config.yaml") if beads.is_dir() else {}
     export = beads_config.get("export") or {}
 
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
     forge, project = _detect_forge(remote)
 
-    test_command, test_scopes, test_markers = _probe_test_scopes(root, test_command=test_command)
-
-    return {
+    facts = {
         "path": str(root),
         "name": root.name,
         "branch": git_read(root, "rev-parse", "--abbrev-ref", "HEAD"),
@@ -927,12 +854,27 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
         "beads_export_auto": bool(export.get("auto")),
         "beads_export_git_add": bool(export.get("git-add")),
         "has_engineering": (root / ".engineering").is_dir(),
-        "test_command": test_command,
-        "test_scopes": test_scopes,
-        "test_markers": test_markers,  # what each command was read from (Kraft-enc5z)
-        "setup_command": _first_setup_command(root),
         "forge": forge,
         "project": project,
+    }
+    if not detect:
+        return facts
+    proposal = detect_mod.probe(root, templates_dir, test_command=test_command, timeout=timeout)
+    return {
+        **facts,
+        "test_command": proposal.test_command,
+        "test_scopes": proposal.test_scopes,
+        "test_markers": proposal.test_markers,  # what each command was read from (Kraft-enc5z)
+        "setup_command": proposal.setup_command,
+        # Told, not stored: which directories have tests and no setup, each
+        # directory's own commands, every command the evidence supports, and
+        # the commit they were read from.
+        "missing_setup": proposal.missing_setup,
+        "scopes": proposal.scopes,
+        "candidates": proposal.candidates,
+        "read_from": proposal.ref,
+        "stopped": proposal.stopped,
+        "missing_tools": proposal.missing_tools,
     }
 
 

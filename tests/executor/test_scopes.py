@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import _git, entry_of, v1_chain, v1_walk
+from support.harness import _git, commit_all, entry_of, v1_chain, v1_walk
 
 from kraft import executor, store
 from kraft.config import git_read, probe_repo
@@ -54,7 +54,9 @@ def _selected(it, round, scopes=(_FRONTEND, _BACKEND)):
     return [tuple(s["cmd"]) for s in to_run]
 
 
-async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wid="w1"):
+async def _dispatch(
+    item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wid="w1", test_command=None
+):
     """Dispatch the builtin once, on a repo whose own test scopes are
     `test_scopes`. Returns the status and the item."""
     it = await item_on(_verify(task, node_id), wid=wid)
@@ -67,7 +69,9 @@ async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wi
         it.row(),
         it.repo,
         launch=executor.LaunchContext(
-            repo_entry=entry_of({"setup_command": "", "test_scopes": test_scopes}),
+            repo_entry=entry_of(
+                {"setup_command": "", "test_scopes": test_scopes, "test_command": test_command}
+            ),
         ),
     )
     return status, it
@@ -84,6 +88,16 @@ async def test_a_repo_that_declares_no_test_command_stops_naming_what_to_configu
     log = Path(session["log_path"]).read_text()
     assert "neither test_scopes nor test_command in repos.yaml" in log
     assert "will not guess a command" in log
+
+
+async def test_a_repo_that_declares_it_has_no_tests_passes_verify_saying_so(item_on):
+    """`test_command: ""` is a decision, as `setup_command: ""` is: a repo with
+    no tests (docs, infrastructure) passes verify, and its session says why."""
+    status, it = await _dispatch(item_on, test_scopes=None, test_command="")
+
+    [session] = it.sessions()
+    assert (status, session["status"]) == ("done", "done")
+    assert 'test_command: "" (no tests)' in Path(session["log_path"]).read_text()
 
 
 # -- selection (Kraft-9wzy, C7 Kraft-s7c04.14) --------------------------------
@@ -313,10 +327,11 @@ async def test_a_probed_nested_scope_finds_its_project_from_the_worktree_root(it
     for path, text in files.items():
         (repo / path).parent.mkdir(parents=True, exist_ok=True)
         (repo / path).write_text(text)
+    commit_all(repo)  # the probe reads the committed tree
 
     status, it = await _dispatch(item_on, test_scopes=probe_repo(repo)["test_scopes"])
-
     assert status == "done", [Path(s["log_path"]).read_text() for s in it.sessions()]
+    assert it.sessions(), "no scope ran"
 
 
 async def test_the_repos_declared_env_reaches_a_test_scopes_run_task(tmp_path, repo):

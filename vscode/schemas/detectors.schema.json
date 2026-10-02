@@ -1,0 +1,248 @@
+{
+  "$defs": {
+    "Command": {
+      "additionalProperties": false,
+      "description": "One proposal a detector can make. `tasks`: names to look for among the\ntasks the detector's reader finds, the first present substituted for\n`{task}`. `when`: any one of these conditions must hold.",
+      "properties": {
+        "run": {
+          "minLength": 1,
+          "title": "Run",
+          "type": "string"
+        },
+        "tasks": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "when": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    "Condition": {
+      "additionalProperties": false,
+      "description": "Holds when any `files` glob matches (or none is given), every\n`contains` glob names some file its regex matches, and every `toml` glob\nnames some TOML file with, at each dotted key given, a value whose JSON\nits regex matches: `{pyproject.toml: {project.optional-dependencies:\npytest}}`. A key reads one table, where a regex over the text would run\nfrom that table's header to the end of the file.",
+      "properties": {
+        "contains": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Contains",
+          "type": "object"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "toml": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "title": "Toml",
+          "type": "object"
+        }
+      },
+      "title": "Condition",
+      "type": "object"
+    },
+    "Detector": {
+      "additionalProperties": false,
+      "properties": {
+        "contains": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Contains",
+          "type": "object"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Files",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "lockfile": {
+          "default": false,
+          "title": "Lockfile",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "setup": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "title": "Setup",
+          "type": "array"
+        },
+        "stop": {
+          "default": false,
+          "title": "Stop",
+          "type": "boolean"
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tasks"
+        },
+        "test": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "title": "Test",
+          "type": "array"
+        },
+        "tier": {
+          "enum": [
+            "runner",
+            "toolchain"
+          ],
+          "title": "Tier",
+          "type": "string"
+        },
+        "unless": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unless",
+          "type": "array"
+        },
+        "workspace": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "title": "Workspace",
+          "type": "array"
+        },
+        "wrap": {
+          "anyOf": [
+            {
+              "pattern": "\\{command\\}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wrap"
+        }
+      },
+      "required": [
+        "id",
+        "tier",
+        "files"
+      ],
+      "title": "Detector",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`detectors.yaml`, packaged or an operator's.",
+  "properties": {
+    "detectors": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Detector"
+      },
+      "title": "Detectors",
+      "type": "array"
+    },
+    "disable": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Disable",
+      "type": "array"
+    },
+    "ignore_dirs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Ignore Dirs",
+      "type": "array"
+    },
+    "max_depth": {
+      "anyOf": [
+        {
+          "maximum": 4,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Depth"
+    }
+  },
+  "title": "Kraft repo detectors",
+  "type": "object"
+}

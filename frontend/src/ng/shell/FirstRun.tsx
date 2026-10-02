@@ -5,6 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
+import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "../templates/repos/evidence";
 import "./first-run.css";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
@@ -20,7 +21,7 @@ const PLUGIN_COMMANDS = "claude plugin marketplace add itsOmidKarami/kraft\nclau
  *  own, and step 3 is the one that says Claude workers need Kraft registered.
  *  So a reload, or a visit to Templates › Repos from step 1, comes back to it. */
 const SAVED = "kraft.firstRun";
-type Saved = { step: number; reached: number; path: string; name: string; disabled: boolean; noSetup?: boolean };
+type Saved = { step: number; reached: number; path: string; name: string; disabled: boolean; noSetup?: boolean; repoPath?: string; missing?: string[] };
 
 export function savedFirstRun(): Saved | null {
   try {
@@ -69,13 +70,29 @@ function StepCircle({ n, state, onClick }: { n: number; state: "done" | "current
   );
 }
 
+function also(p: RepoProbe, role: "test" | "setup", label: string): [string, string][] {
+  const saved = [p.test_command, p.setup_command, ...(p.test_scopes ?? []).map((s) => s.command)];
+  const found = others(p.candidates, role, saved);
+  return found ? [[label, found]] : [];
+}
+
 function probeRows(p: RepoProbe): [string, string][] {
   return [
     [".gitmodules", p.submodules.length ? `${p.submodules.length} submodule${p.submodules.length === 1 ? "" : "s"}` : "none"],
     [".beads/", p.has_beads ? "found" : "not found"],
-    ["Test command", p.test_command ?? "not detected"],
-    ["Setup command", p.setup_command ?? "none found"],
+    ["Test command", p.test_command ? withSource(p.test_command, chosenSource(p.candidates, "test")) : p.stopped?.length ? "stopped" : "not detected"],
+    // A monorepo's other scopes: without them the one command above reads as the repo's whole suite.
+    ...(p.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => [`Tests in ${s.paths[0]}`, s.command] as [string, string]),
+    ["Setup command", setupLine(p)],
     ["Forge remote", p.forge ? `${p.forge}${p.project ? ` · ${p.project}` : ""}` : "none"],
+    ...also(p, "test", "Also found for tests"),
+    ...also(p, "setup", "Also found for setup"),
+    ...(p.stopped ?? []).map((s) => ["No tests", stopLine(s)] as [string, string]),
+    ...(p.missing_setup?.length
+      ? [["No setup", "the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos"] as [string, string]]
+      : []),
+    ...(missingLine(p.missing_tools) ? [["Not installed", missingLine(p.missing_tools)!] as [string, string]] : []),
+    ...(readFrom(p.read_from) ? [["Read from", readFrom(p.read_from)!] as [string, string]] : []),
   ];
 }
 
@@ -103,10 +120,32 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   const [disabled, setDisabled] = useState(saved?.disabled ?? false);
   /** The server saved no setup command: the repo's first item stops before it starts until one is set. */
   const [noSetup, setNoSetup] = useState(saved?.noSetup ?? false);
+  /** The resolved path of the added repo, and its directories with tests and no setup. */
+  const [repoPath, setRepoPath] = useState(saved?.repoPath ?? "");
+  const [missing, setMissing] = useState<string[]>(saved?.missing ?? []);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (added) keep({ step, reached, path, name: added, disabled, noSetup });
-  }, [added, step, reached, path, disabled, noSetup]);
+    if (added) keep({ step, reached, path, name: added, disabled, noSetup, repoPath, missing });
+  }, [added, step, reached, path, disabled, noSetup, repoPath, missing]);
+  // Fixed in Templates › Repos and back here: what it said is read again, not kept stale.
+  useEffect(() => {
+    if (!repoPath || (!disabled && !noSetup)) return;
+    const reread = () => {
+      if (document.visibilityState === "hidden") return;
+      api.getRepos().then(({ repos }) => {
+        const entry = repos.find((r) => r.path === repoPath);
+        if (!entry) return;
+        setDisabled(entry.enabled === false);
+        setNoSetup(entry.setup_command == null);
+      }, () => {});
+    };
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", reread);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", reread);
+    };
+  }, [repoPath, disabled, noSetup]);
   const finish = () => {
     clearFirstRun();
     onDone?.();
@@ -152,6 +191,8 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
       });
       setDisabled(repo.enabled === false);
       setNoSetup(repo.setup_command === null);
+      setRepoPath(probe.path);
+      setMissing(probe.missing_setup ?? []);
       setAdded(probe.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -160,6 +201,8 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     }
   };
 
+  /** Directories below the root with tests and no setup: "No setup needed" would leave them unprepared. */
+  const nested = missing.filter((d) => d !== ".").map((d) => `${d}/`);
   const chains = useLoad(api.getTemplates);
   const policy = useLoad(api.getPolicy);
   const [copied, setCopied] = useState(false);
@@ -220,8 +263,10 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 )}
                 {added && <span className="fr-ok">Added {added}</span>}
               </div>
-              {added && disabled && <p>No tests found: connected disabled until you set a test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>}
-              {added && noSetup && <p>No setup command found: its first work item stops before it starts until you set one, or tick No setup needed, in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>}
+              {added && disabled && <p>No test command: connected disabled. In <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>, set its test command and Enable it, then publish.</p>}
+              {added && noSetup && (nested.length
+                ? <p>No setup command: {nested.join(", ")} {nested.length > 1 ? "have" : "has"} tests and nothing found prepares {nested.length > 1 ? "them" : "it"}. Its first work item stops before it starts until you set a setup command that does, in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>
+                : <p>No setup command found: its first work item stops before it starts until you set one, or tick No setup needed, in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>)}
             </>
           )}
           {step === 2 && (
@@ -243,7 +288,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             <>
               <h2>First work item</h2>
               <p>It is created paused, so nothing runs until you start it.</p>
-              {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link> first.</p>}
+              {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command and Enable it in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link> first.</p>}
               <div className="fr-actions">
                 <Link className="btn btn-primary" to="/?new=1" onClick={finish}>+ New work item</Link>
                 <Button onClick={finish}>Go to the board</Button>

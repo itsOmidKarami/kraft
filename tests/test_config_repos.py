@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from support.harness import make_repo
+from support.harness import commit_all, make_repo
 
 from kraft import config
 from kraft.policy import SandboxPolicy
@@ -363,6 +363,11 @@ def test_migration_is_idempotent(tmp_path):
         ("git@github.com:owner/repo.git", "github", "owner/repo"),
         ("https://github.com/owner/repo", "github", "owner/repo"),
         ("git@git.example.com:team/repo.git", None, None),
+        ("git@gitlab.example.com:team/repo.git", "gitlab", "team/repo"),
+        ("ssh://git@gitlab.corp.io:2222/team/sub/repo.git", "gitlab", "team/sub/repo"),
+        ("https://github.example.com/org/repo.git", "github", "org/repo"),
+        ("https://notgithub.io/github.com/repo.git", None, None),
+        ("git@gitlab.com:123/repo.git", "gitlab", "123/repo"),
     ],
     ids=[
         "no-remote",
@@ -371,6 +376,11 @@ def test_migration_is_idempotent(tmp_path):
         "github-ssh",
         "github-https",
         "an-unknown-host-is-not-an-error",
+        "self-hosted-gitlab",
+        "self-hosted-gitlab-ssh-url-with-a-port",
+        "github-enterprise",
+        "a-forge-name-in-the-path-is-not-the-host",
+        "a-numeric-gitlab-group-is-not-a-port",
     ],
 )
 def test_probe_detects_the_forge(tmp_path, origin, forge, project):
@@ -406,6 +416,43 @@ def test_probe_survives_a_gitmodules_that_is_not_utf8(tmp_path):
     assert config.probe_repo(repo)["submodules"] == []
 
 
+def test_the_working_copys_beads_config_is_read_only_as_a_small_regular_file(tmp_path):
+    """Read on the way to "already connected": a symlink to a FIFO there
+    blocked the server until something wrote to it, and a YAML merge bomb
+    froze it for seconds."""
+    import os
+    import threading
+
+    repo = make_repo(tmp_path)
+    beads = repo / ".beads"
+    beads.mkdir()
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    (beads / "config.yaml").symlink_to(fifo)
+    out: list[dict] = []
+    reader = threading.Thread(target=lambda: out.append(config.probe_repo(repo, detect=False)))
+    reader.daemon = True
+    reader.start()
+    reader.join(5)
+    stuck = reader.is_alive()
+    if stuck:  # let the stuck read finish, so the test can
+        with open(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK), "w"):
+            pass
+    assert not stuck, "the read blocked on a FIFO"
+    assert out[0]["has_beads"] and not out[0]["beads_export_auto"]
+    (beads / "config.yaml").unlink()
+    bomb = ["a0: &a0 {export: {auto: true}}"]
+    bomb += [f"a{i}: &a{i} {{<<: [{', '.join([f'*a{i - 1}'] * 9)}]}}" for i in range(1, 10)]
+    (beads / "config.yaml").write_text("\n".join(bomb) + "\nexport: {auto: true}\n")
+    assert config.probe_repo(repo, detect=False)["beads_export_auto"] is False
+
+
+def test_bounded_yaml_refuses_a_document_past_its_budget_before_building_it():
+    assert config.bounded_yaml("a: [1, 2]\n", [10]) == {"a": [1, 2]}
+    with pytest.raises(config.YamlTooLarge):
+        config.bounded_yaml("a: [1, 2, 3, 4, 5, 6, 7, 8, 9]\n", [10])
+
+
 def test_probe_from_a_worktree_reports_the_main_checkout(tmp_path):
     """An agent's cwd IS a linked worktree, and `/kraft:handoff` tells it to call
     `ensure_repo()` every time. Without this, every handoff registers the
@@ -437,30 +484,6 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
     assert Path(config.probe_repo(sub)["path"]) == sub.resolve()
 
 
-#: Files in a repo's root -> the setup command probed from them.
-_SETUP_PROBES = {
-    "uv": (["pyproject.toml", "uv.lock"], "uv sync"),
-    "a-pyproject-with-no-uv-lock-gets-nothing": (["pyproject.toml"], None),
-    "npm": (["package-lock.json"], "npm ci"),
-    "yarn": (["yarn.lock"], "yarn install --frozen-lockfile"),
-    "pnpm": (["pnpm-lock.yaml"], "pnpm install --frozen-lockfile"),
-    "cargo": (["Cargo.toml"], "cargo fetch"),
-    "go": (["go.mod"], "go mod download"),
-    "a-pyproject-with-no-uv-lock-is-not-handed-go": (["pyproject.toml", "go.mod"], None),
-    "a-lockfile-before-it-still-wins": (["pyproject.toml", "package-lock.json"], "npm ci"),
-    "an-unmarked-repo-gets-nothing": ([], None),
-}
-
-
-@pytest.mark.parametrize(("markers", "expected"), _SETUP_PROBES.values(), ids=_SETUP_PROBES)
-def test_the_setup_probe_suggests_per_marker(tmp_path, markers, expected):
-    """`uv sync` with no `uv.lock` writes one, which the worker then commits
-    onto the item's branch: a `pyproject.toml` alone is no reason to guess it."""
-    for marker in markers:
-        (tmp_path / marker).write_text("")
-    assert config._first_setup_command(tmp_path) == expected
-
-
 @pytest.mark.parametrize(
     ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
 )
@@ -469,69 +492,24 @@ def test_probe_repo_suggests_a_setup_command(tmp_path, lockfile, expected):
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     if lockfile:
         (repo / "uv.lock").write_text("version = 1\n")
+    commit_all(repo)
     assert config.probe_repo(repo)["setup_command"] == expected
 
 
-@pytest.mark.parametrize("name", ["Justfile", "justfile"], ids=["capitalized", "lowercase"])
-def test_the_test_probe_recognizes_a_justfile_marker(tmp_path, name):
-    """Kraft-reriq: a repo whose tests must go through a Justfile target (like
-    Kraft itself: `just test`, never raw pytest) was probed with the wrong
-    command -- `pyproject.toml` matched first and suggested plain pytest."""
-    (tmp_path / name).write_text("test:\n    pytest\n")
-    assert config._first_test_marker(tmp_path) == (name, "just test")
-
-
-@pytest.mark.parametrize(
-    ("justfile", "expected"),
-    [
-        ("test:\n    pytest\n", ("Justfile", "just test")),
-        (
-            "set shell := ['zsh']\n[no-cd]\n@test *ARGS: build\n    pytest {{ARGS}}\n",
-            ("Justfile", "just test"),
-        ),
-        ("test-ui:\n    npm test\nlint:\n    ruff\n", ("uv.lock", "uv run pytest -q")),
-        ("test := 'x'\n", ("uv.lock", "uv run pytest -q")),
-    ],
-    ids=[
-        "a-test-recipe",
-        "a-test-recipe-with-args-and-attributes",
-        "no-test-recipe",
-        "a-variable-named-test",
-    ],
-)
-def test_the_test_probe_prefers_the_justfiles_test_recipe_over_pyproject(
-    tmp_path, justfile, expected
-):
-    """Kraft-enc5z: a justfile wins only when `just test` would run something;
-    one without a `test` recipe falls through to the manifest beside it."""
-    (tmp_path / "Justfile").write_text(justfile)
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
-    (tmp_path / "uv.lock").write_text("version = 1\n")
-    assert config._first_test_marker(tmp_path) == expected
-
-
-#: Files in a repo's root -> the (marker, test command) probed from them.
-_UV_TEST_PROBES = {
-    "uv": (["pyproject.toml", "uv.lock"], ("uv.lock", "uv run pytest -q")),
-    "a-pyproject-with-no-uv-lock-stops": (["pyproject.toml"], ("pyproject.toml", None)),
-    "a-pyproject-with-no-uv-lock-is-not-handed-npm": (
-        ["pyproject.toml", "package.json"],
-        ("pyproject.toml", None),
-    ),
-    "an-unmarked-directory-gets-nothing": ([], None),
-    "npm": (["package.json"], ("package.json", "npm test")),
-    "cargo": (["Cargo.toml"], ("Cargo.toml", "cargo test")),
-    "go": (["go.mod"], ("go.mod", "go test ./...")),
-}
-
-
-@pytest.mark.parametrize(("markers", "expected"), _UV_TEST_PROBES.values(), ids=_UV_TEST_PROBES)
-def test_the_test_probe_suggests_uv_run_only_beside_a_uv_lock(tmp_path, markers, expected):
-    """`uv run` locks before it runs: with no `uv.lock` it writes one into the
-    worktree on every verify, for the worker to commit onto the item's branch."""
-    for marker in markers:
-        (tmp_path / marker).write_text("")
-    assert config._first_test_marker(tmp_path) == expected
+def test_probe_repo_reads_the_operators_detectors_file(tmp_path):
+    """`templates_dir` is where the operator's `detectors.yaml` lives; probing
+    without it is the packaged table alone."""
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "detectors.yaml").write_text(
+        "detectors:\n  - id: pyproject\n    tier: toolchain\n    files: [pyproject.toml]\n"
+        "    setup: [{run: pip install -e .}]\n"
+    )
+    commit_all(repo)
+    assert config.probe_repo(repo, templates_dir=templates)["setup_command"] == "pip install -e ."
+    assert config.probe_repo(repo)["setup_command"] is None, "the packaged one stops"
 
 
 def test_probe_repo_names_the_marker_each_test_command_came_from(tmp_path):
@@ -539,7 +517,8 @@ def test_probe_repo_names_the_marker_each_test_command_came_from(tmp_path):
     repo = make_repo(tmp_path)
     (repo / "justfile").write_text("test:\n    pytest\n")
     (repo / "frontend").mkdir()
-    (repo / "frontend" / "package.json").write_text("{}")
+    (repo / "frontend" / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    commit_all(repo)
     probed = config.probe_repo(repo)
     assert probed["test_command"] == "just test"
     assert probed["test_markers"] == ["justfile", "frontend/package.json"]

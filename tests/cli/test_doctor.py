@@ -42,6 +42,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "health",
         "templates",
         "access.yaml",
+        "detectors.yaml",
         "pidfile",
         "mcp token",
         "agent: claude",

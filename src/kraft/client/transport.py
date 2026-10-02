@@ -109,6 +109,12 @@ async def _send(method: str, path: str, **kwargs) -> httpx.Response:
             return await session.request(method, _api(path), **kwargs)
     except httpx.ConnectError as exc:
         raise ValueError(f"no Kraft server at {base_url()} — start one with `kraft`") from exc
+    except httpx.TimeoutException as exc:
+        # The server may still finish what it was asked: say so, rather than
+        # hand an agent a traceback, or a person a reason to ask twice.
+        raise ValueError(
+            f"Kraft did not answer {method} {path} in time; it may still finish it"
+        ) from exc
 
 
 async def _get(path: str, **params) -> dict | list:

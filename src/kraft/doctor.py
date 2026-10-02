@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, harness, registration
+from kraft import auth, capabilities, client, config, detect, harness, registration
 from kraft.adapters import forge
 from kraft.executor import fallback
 from kraft.paths import (
@@ -156,6 +156,7 @@ def _config_checks() -> list[dict]:
             # Nothing seeded yet, so nothing to upgrade: the first start seeds
             # every capability and stamps the version.
             _check("capabilities", True, "skipped: no templates dir", skipped=True),
+            _check("detectors.yaml", True, "skipped: no templates dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
@@ -189,12 +190,28 @@ def _config_checks() -> list[dict]:
             checks.append(_check("access.yaml", True, "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
+    checks.append(_detectors_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
     checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
     return checks
+
+
+def _detectors_check(templates: Path) -> dict:
+    """The operator's `detectors.yaml`: optional, and read only when a repo is
+    connected, so a broken one would otherwise surface as a failed connect
+    long after it was written."""
+    own = templates / detect.FILE
+    if not own.is_file():
+        return _check("detectors.yaml", True, "not present: the packaged detectors alone")
+    try:
+        detect.load(templates)
+        count = len(detect.DetectorFile.model_validate(config.read_yaml(own, {})).detectors)
+    except config.ConfigError as exc:
+        return _check("detectors.yaml", False, str(exc))
+    return _check("detectors.yaml", True, f"parses ({count} detector(s) of your own)")
 
 
 def _pidfile_check() -> dict:
@@ -946,6 +963,18 @@ async def _tls_listener_check() -> dict:
     return _check("egress listener", problem is None, detail)
 
 
+def _suggested_setup(path: Path, templates_dir: Path) -> str | None:
+    """What `kraft repo connect` would propose today, or None when it finds
+    nothing (or cannot read the repo or `detectors.yaml`: the row already
+    fails, and a second error would only bury it)."""
+    if not path.is_dir():
+        return None
+    try:
+        return detect.probe(path, templates_dir).setup_command
+    except config.ConfigError:
+        return None
+
+
 def _label(repo: config.RepoEntry) -> str:
     return repo.name or repo.path
 
@@ -990,7 +1019,7 @@ async def _repo_checks() -> list[dict]:
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
             # makes it survivable.
-            suggestion = config._first_setup_command(path) if path.is_dir() else None
+            suggestion = await asyncio.to_thread(_suggested_setup, path, live)
             checks.append(
                 _check(
                     f"setup {_label(repo)}",

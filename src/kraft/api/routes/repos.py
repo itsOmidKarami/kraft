@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import tempfile
+import time
 from itertools import count
 from pathlib import Path
 from typing import Annotated
@@ -51,10 +53,60 @@ class RepoBody(BaseModel):
 
 class ProbeBody(BaseModel):
     path: AbsolutePath
+    #: False: only what needs no detector table (the path, name, forge),
+    #: which is what resolving a path or checking "already connected" needs.
+    detect: bool = True
+
+
+#: How long probing all of a connect's submodules may take, together.
+_CHILDREN_BUDGET_S = 120.0
+
+
+def _probe_children(
+    parent: str, submodule_paths: list[str], templates_dir: Path
+) -> dict[str, dict]:
+    """Each submodule's probe, by its path relative to `parent`. Done before
+    repos.yaml is read, in the probe's thread: the read-to-save section of a
+    connect must not await, or a PATCH or DELETE in between is overwritten.
+    An uninitialized submodule is an empty directory, not a repo: it is left
+    out, and reappears as a candidate the next time the parent is connected,
+    so skipping is the whole recovery.
+
+    `.gitmodules` is the repository's to write: a path that resolves to the
+    parent itself (`path = .`), outside it (`..`), or to one already probed
+    is skipped, and all of them together get `_CHILDREN_BUDGET_S`."""
+    out: dict[str, dict] = {}
+    root = Path(parent).resolve()
+    seen: set[Path] = set()
+    deadline = time.monotonic() + _CHILDREN_BUDGET_S
+    for rel in submodule_paths:
+        where = (root / rel).resolve()
+        if where == root or not where.is_relative_to(root) or where in seen:
+            continue
+        seen.add(where)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        try:
+            out[rel] = config_mod.probe_repo(where, templates_dir=templates_dir, timeout=left)
+        except config_mod.ConfigError:
+            continue
+    return out
+
+
+def _nested_scopes(probed: dict) -> list[dict] | None:
+    """The probe's `test_scopes` worth persisting: only when one is nested.
+    A single-stack repo probes to one root `["**"]` scope that just repeats
+    test_command, and persisting it would shadow every later test_command
+    edit (config.TestScope, Kraft-9wzy). Counting the scopes would be wrong:
+    a repo whose only project is nested probes to exactly one, and it is
+    real."""
+    scopes = probed.get("test_scopes") or []
+    return scopes if any(s.get("paths") != ["**"] for s in scopes) else None
 
 
 def _auto_connect_children(
-    repos: list[dict], parent: dict, submodule_paths: list[str]
+    repos: list[dict], parent: dict, probes: dict[str, dict]
 ) -> dict[str, dict]:
     """One disabled entry per `.gitmodules` path, appended to `repos` in place.
     Returns every child now connected -- new or already there -- by its path
@@ -79,15 +131,7 @@ def _auto_connect_children(
         for r in repos
         if r is not parent and r.get("managed", True)
     ]
-    for rel in submodule_paths:
-        child_path = Path(parent["path"]) / rel
-        try:
-            probed = config_mod.probe_repo(child_path)
-        except config_mod.ConfigError:
-            # An uninitialized submodule is an empty directory, not a repo.
-            # It reappears as a candidate the next time the parent is
-            # connected, so skipping is the whole recovery.
-            continue
+    for rel, probed in probes.items():
         if probed["path"] in known:
             children[rel] = known[probed["path"]]
             continue
@@ -104,7 +148,7 @@ def _auto_connect_children(
             "name": probed["name"],
             "default_chain_template": "default",
             "test_command": probed["test_command"],
-            "test_scopes": None,
+            "test_scopes": _nested_scopes(probed),
             "setup_command": probed["setup_command"],
             "forge": probed["forge"],
             "project": probed["project"],
@@ -209,42 +253,96 @@ async def list_repos(request: Request):
 
 @api_router.post("/repos/probe")
 async def probe_repo(body: ProbeBody, request: Request):
-    """Read-only inspection of a candidate repo — Kraft never edits repo files."""
-    try:
-        return config_mod.probe_repo(body.path)
-    except config_mod.ConfigError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    """Read-only inspection of a candidate repo — Kraft never edits repo files.
+    Off the event loop: it reads the whole tree's listing through git."""
+    st = request.app.state
+    if not body.detect:  # what needs no detector table is quick, and never queued
+        try:
+            return await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+        except config_mod.ConfigError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    # Each probe is a process of up to 2 GB for up to two minutes: a few at
+    # once, and a caller past that is told so rather than queued.
+    if getattr(st, "probing", None) is None:
+        st.probing = asyncio.Semaphore(_PROBES_AT_ONCE)
+    if st.probing.locked():
+        raise HTTPException(429, "Kraft is already probing other repositories; try again shortly")
+    async with st.probing:
+        try:
+            return await asyncio.to_thread(
+                config_mod.probe_repo, body.path, templates_dir=st.templates_dir
+            )
+        except config_mod.ConfigError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+_PROBES_AT_ONCE = 2
 
 
 @api_router.post("/repos", status_code=201)
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
+    # One connect at a time between reading repos.yaml and saving it: the
+    # probe runs in a thread, and two connects interleaving at that await
+    # would each save the list without the other's entry. Per app, so the
+    # lock belongs to the loop that serves it.
+    if getattr(st, "connecting", None) is None:
+        st.connecting = asyncio.Lock()
+    async with st.connecting:
+        return await _add_repo(body, st)
+
+
+async def _add_repo(body: RepoBody, st) -> dict:
+    templates_dir = st.templates_dir
     try:
-        probed = config_mod.probe_repo(body.path, test_command=body.test_command)
+        # "Already connected" first, from what needs no detector table: a
+        # reconnect (`ensure_repo` on every handoff) must not pay for the probe,
+        # or fail on an operator's broken detectors.yaml.
+        # In a thread: it reads the working copy's .gitmodules and beads config.
+        facts = await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+        if any(r["path"] == facts["path"] for r in _editable_repos(st)[0]):
+            raise HTTPException(409, f"{facts['path']} is already connected")
+        try:
+            probed = await asyncio.to_thread(
+                config_mod.probe_repo,
+                body.path,
+                test_command=body.test_command,
+                templates_dir=templates_dir,
+            )
+        except config_mod.ConfigError as exc:
+            if body.test_command is None or body.setup_command is None:
+                raise
+            # Both commands given: the proposal they replace is not needed, so
+            # a repository the probe cannot read still connects with them.
+            probed = {
+                **facts,
+                "test_command": body.test_command,
+                "setup_command": body.setup_command,
+                "test_scopes": None,
+                **{k: [] for k in ("test_markers", "candidates", "scopes", "missing_setup")},
+                "stopped": [],
+                "missing_tools": [],
+                "read_from": None,
+                "probe_failed": str(exc),
+            }
+        child_probes = await asyncio.to_thread(
+            _probe_children, probed["path"], probed["submodules"], templates_dir
+        )
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
+    # From here to the save, nothing awaits: PATCH and DELETE save without the
+    # connect lock, and a stale list saved over theirs would undo them.
     repos, _ = _editable_repos(st)
-    if any(r["path"] == probed["path"] for r in repos):
-        raise HTTPException(409, f"{probed['path']} is already connected")
-    test_command = body.test_command or probed["test_command"]
+    # `""` is a decision, not an absence: the repo deliberately has no tests.
+    test_command = body.test_command if body.test_command is not None else probed["test_command"]
     # Probed regardless of test_command now (Kraft-k4mx): probe_repo already
     # folded body.test_command into the root scope's command above, so there
     # is no longer a reason to suppress the nested scopes it finds alongside
     # it. body.test_scopes, when a caller supplies it directly, wins outright
     # -- the same "explicit beats probed" rule test_command already followed.
     #
-    # A single-stack repo has no nested scopes, so probe_repo hands back one
-    # root `["**"]` scope that just repeats test_command. Persisting that
-    # would shadow every later test_command edit forever, the same
-    # stale-override bug config.TestScope's comment describes
-    # (Kraft-9wzy) -- so only a probe that actually found a nested scope (one
-    # whose paths are not the root `["**"]`) is worth persisting here.
-    # Counting the scopes would be wrong: a repo whose only marker is nested
-    # (frontend/package.json, no root pyproject.toml) probes to exactly one
-    # scope, and that one is real.
-    probed_scopes = probed.get("test_scopes") or []
-    has_nested = any(scope.get("paths") != ["**"] for scope in probed_scopes)
-    nested_probed_scopes = probed_scopes if has_nested else None
+    # Only a nested scope is worth persisting (`_nested_scopes`).
+    nested_probed_scopes = _nested_scopes(probed)
     # An empty list states nothing: repos.yaml refuses `test_scopes: []`, and
     # the first-run wizard once sent exactly that for a repo with no
     # recognised stack, so the probe decides as it does for None.
@@ -261,7 +359,9 @@ async def add_repo(body: RepoBody, request: Request):
         "setup_command": setup_command,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
-        "enabled": body.enabled if body.enabled is not None else bool(test_command or test_scopes),
+        "enabled": body.enabled
+        if body.enabled is not None
+        else _has_tests({"test_command": test_command, "test_scopes": test_scopes}),
         "models": body.models or {},
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
@@ -271,7 +371,7 @@ async def add_repo(body: RepoBody, request: Request):
         "managed": True,
     }
     repos.append(entry)
-    children = _auto_connect_children(repos, entry, probed["submodules"])
+    children = _auto_connect_children(repos, entry, child_probes)
     workspaces = _workspaces(st)
     _declare_workspace(workspaces, repos, entry, children)
     _refuse_enable_without_test_command(entry)
@@ -285,8 +385,23 @@ async def add_repo(body: RepoBody, request: Request):
         await st.indexer.rescan_repo(entry["path"])
     except Exception:  # noqa: BLE001 -- scan_repo touches git and the filesystem
         logger.exception("index scan failed for newly connected repo %s", entry["path"])
-    # Told, not stored: which marker files the proposed commands came from.
-    return {**entry, "test_markers": probed["test_markers"]}
+    # Told, not stored: which marker files the proposed commands came from,
+    # every command the evidence supported, and what is still undecided.
+    told = (
+        "test_markers",
+        "candidates",
+        "scopes",
+        "missing_setup",
+        "read_from",
+        "stopped",
+        "missing_tools",
+    )
+    return {**entry, **{k: probed[k] for k in told}, **_failed(probed)}
+
+
+def _failed(probed: dict) -> dict:
+    """Why the probe failed, when the commands were given and saved anyway."""
+    return {"probe_failed": probed["probe_failed"]} if "probe_failed" in probed else {}
 
 
 class RepoPatch(BaseModel):
@@ -306,7 +421,9 @@ class RepoPatch(BaseModel):
 
 
 def _has_tests(entry: dict) -> bool:
-    return bool(entry.get("test_command") or entry.get("test_scopes"))
+    """Whether verification has been told what to run: a test command (`""`
+    is the deliberate "no tests"), or test scopes."""
+    return entry.get("test_command") is not None or bool(entry.get("test_scopes"))
 
 
 def _refuse_enable_without_test_command(entry: dict) -> None:
@@ -322,7 +439,8 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
     if entry.get("enabled", True) and not _has_tests(entry):
         raise HTTPException(
             422,
-            "cannot enable a repo with no test command — set its test command or test scopes first",
+            "cannot enable a repo with no test command — set its test command or test scopes "
+            'first (test_command: "" declares a repo with no tests)',
         )
 
 

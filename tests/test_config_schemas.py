@@ -54,6 +54,15 @@ def test_every_shipped_config_file_validates(file, schema):
     assert not list(validator(schema).iter_errors(data))
 
 
+def test_the_packaged_detector_table_validates():
+    """The table Kraft ships is the example an operator's detectors.yaml
+    copies, so the editor schema must accept it whole."""
+    from kraft import detect
+
+    data = yaml.safe_load(detect.PACKAGED.read_text())
+    assert not list(validator("detectors.schema.json").iter_errors(data))
+
+
 def test_a_task_that_only_extends_is_valid_in_authored_form():
     chain = {
         "id": "c",

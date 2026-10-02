@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from support.api import _client
 from support.harness import (
+    commit_all,
     connect_repo,
     fake_templates_dir,
     isolated_bd,
@@ -93,15 +94,16 @@ def test_a_relative_path_is_refused_not_resolved_against_the_servers_cwd(
 
 def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
     repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
     (repo / "uv.lock").write_text("version = 1\n")
     (repo / ".gitmodules").write_text(
         '[submodule "libs/a"]\n\tpath = libs/a\n\turl = ../a.git\n'
         '[submodule "libs/b"]\n\tpath = libs/b\n\turl = ../b.git\n'
     )
+    commit_all(repo)
     body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["submodules"] == ["libs/a", "libs/b"]
-    assert body["test_command"] == "uv run pytest -q"
+    assert body["test_command"] == "uv run pytest"
 
 
 def _set_origin(repo, url):
@@ -293,8 +295,9 @@ def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, clie
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
+    commit_all(repo)
     r = client.post(
         "/api/repos",
         json={"path": str(repo), "enabled": False, "test_command": "just test"},
@@ -307,7 +310,7 @@ def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, clie
     assert "just test" in by_paths.values()
     # ...but the nested frontend scope _probe_test_scopes found on its own
     # survives untouched, not silently dropped by the override.
-    assert by_paths[("frontend/**",)] == "npm --prefix frontend test"
+    assert by_paths[("frontend/**",)] == "sh -c 'cd frontend && npm test'"
 
 
 def test_add_repo_without_nested_scopes_does_not_persist_a_root_scope(tmp_path, client):
@@ -345,12 +348,13 @@ def test_add_repo_keeps_a_lone_nested_scope(tmp_path, client):
     repo = make_repo(tmp_path, name="frontendonly")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
+    commit_all(repo)
     r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert r.status_code == 201, r.text
     assert r.json()["test_scopes"] == [
-        {"paths": ["frontend/**"], "command": "npm --prefix frontend test"}
+        {"paths": ["frontend/**"], "command": "sh -c 'cd frontend && npm test'"}
     ]
 
 
@@ -677,40 +681,6 @@ def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(cli
     assert patched.status_code == 200
     assert patched.json()["steering"] == []
     assert client.get("/api/repos").json()["repos"][0]["steering"] == []
-
-
-@pytest.mark.parametrize(
-    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
-)
-@pytest.mark.parametrize("route", ["/api/repos/probe", "/api/repos"], ids=["probe", "add"])
-def test_add_repo_writes_the_probed_setup_command(tmp_path, client, route, lockfile, expected):
-    """The first-run and Templates › Repos probe proposes what connecting
-    writes: `uv sync` only beside a `uv.lock`, since it writes one otherwise."""
-    repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    if lockfile:
-        (repo / "uv.lock").write_text("version = 1\n")
-    entry = client.post(route, json={"path": str(repo)}).json()
-    assert entry["setup_command"] == expected
-
-
-@pytest.mark.parametrize(
-    ("lockfile", "expected"),
-    [(True, "uv run pytest -q"), (False, None)],
-    ids=["uv-lock", "no-uv-lock"],
-)
-def test_a_pyproject_gets_uv_run_pytest_only_beside_a_uv_lock(tmp_path, client, lockfile, expected):
-    """`uv run` writes a `uv.lock` when there is none, on every verify: the
-    probe proposes no test command then, and the repo is added disabled."""
-    repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    if lockfile:
-        (repo / "uv.lock").write_text("version = 1\n")
-    assert (
-        client.post("/api/repos/probe", json={"path": str(repo)}).json()["test_command"] == expected
-    )
-    entry = client.post("/api/repos", json={"path": str(repo)}).json()
-    assert (entry["test_command"], entry["enabled"]) == (expected, lockfile)
 
 
 def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, client):

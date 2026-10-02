@@ -43,6 +43,23 @@ export interface Workspace {
   members: Record<string, { repository: string; path: string }>;
 }
 
+/** One command the probe's evidence supports (`kraft.detect.Candidate`). */
+export interface ProbeCandidate {
+  /** Relative to the repo root; `""` is the root. */
+  dir: string;
+  role: "test" | "setup";
+  command: string;
+  tier: "runner" | "ci" | "toolchain" | "devenv";
+  /** What it was read from, for a person: "justfile recipe `test`". */
+  source: string;
+  marker: string;
+  detector: string;
+  family: string | null;
+  corroborated: boolean;
+  /** Part of the proposal, rather than an alternative. */
+  chosen: boolean;
+}
+
 export interface RepoProbe {
   path: string;
   name: string;
@@ -58,6 +75,30 @@ export interface RepoProbe {
   setup_command: string | null;
   forge: string | null;
   project: string | null;
+  /** Every command the evidence supports, chosen or not. Told, never stored. */
+  candidates?: ProbeCandidate[];
+  /** The commit the proposal was read from (`refs/remotes/origin/main`). */
+  read_from?: string | null;
+  /** Directories with tests and nothing to prepare them: `setup_command` is left undecided. */
+  missing_setup?: string[];
+  /** Why no test command was proposed, by directory. */
+  stopped?: ProbeStop[];
+  /** Programs a proposed command runs that the server's PATH does not have. */
+  missing_tools?: MissingTool[];
+}
+
+/** A program a proposed command runs that the server's PATH lacks: a work
+ *  item there fails on it. */
+export interface MissingTool {
+  dir: string;
+  tool: string;
+}
+
+/** A directory the probe proposes no test command for, and why. */
+export interface ProbeStop {
+  dir: string;
+  reason: string;
+  detector: string;
 }
 
 /** One saved chain as `GET /templates/chains` lists it: its resolved nodes in the
