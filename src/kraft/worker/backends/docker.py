@@ -172,6 +172,10 @@ class Runtime:
     #: cannot write the worktree, so `refusal` refuses every launch and
     #: `runtime()` asks again instead of keeping it.
     identity_known: bool = True
+    #: The identity is an earlier answer, kept because the latest ask got
+    #: none (`runtime()`), so a launch probed with it is not refused before
+    #: its `docker run`. See `kept_root`.
+    identity_kept: bool = False
     #: None unless SELinux enforces; then `sandbox.yaml`'s `relabel` or
     #: `disable`, or `refuse` when it says neither.
     selinux: str | None = None
@@ -274,6 +278,15 @@ class Runtime:
     @property
     def podman(self) -> bool:
         return (self.engine or self.cli) == "podman"
+
+    @property
+    def kept_root(self) -> bool:
+        """A kept identity (`identity_kept`) that runs containers as root:
+        rootless docker's `-u 0:0`, which is real root if the daemon has
+        since become rootful. Asked again before the next launch
+        (`_launch_runtime`), which refuses rather than run on it. Any other
+        kept identity guessed wrong runs as the operator's uid, never root."""
+        return self.identity_kept and self.rootless and not self.podman
 
     def refusal(self) -> str | None:
         if not self.identity_known:
@@ -466,7 +479,8 @@ def _due(host: Runtime | None) -> bool:
     """Whether `host` is to be detected again: nothing cached yet, or an
     answer that did not say everything once `UNSURE_TTL` is up."""
     return host is None or (
-        not (host.identity_known and host.limits_known) and time.monotonic() >= _UNSURE_UNTIL
+        not (host.identity_known and not host.kept_root and host.limits_known)
+        and time.monotonic() >= _UNSURE_UNTIL
     )
 
 
@@ -532,6 +546,7 @@ def runtime(*, refresh: bool = False) -> Runtime:
                     rootless=known.rootless,
                     selinux=known.selinux,
                     identity_known=True,
+                    identity_kept=True,
                 )
             # The deadline first: a lock-free reader that sees the new
             # runtime sees its deadline too, and never starts another
@@ -571,10 +586,12 @@ def _launch_runtime() -> Runtime:
     the first launch that meets it, at once and with `REASK_TIMEOUT_S`,
     since one slow answer is no reason to stop a task; a launch meanwhile
     waits for that answer. Still none, and `Runtime.refusal` stops the
-    launch, and every launch until `UNSURE_TTL` is up again stops at once."""
+    launch, and every launch until `UNSURE_TTL` is up again stops at once.
+    A kept identity that runs containers as root (`Runtime.kept_root`) is
+    asked again the same way, and no answer drops it."""
     global _RUNTIME, _UNSURE_UNTIL, _REASK
     host = runtime()
-    if host.identity_known:
+    if host.identity_known and not host.kept_root:
         return host
     with _LOCK:
         if _RUNTIME is not host:
@@ -602,6 +619,8 @@ def _launch_runtime() -> Runtime:
                     # The TTL counts from this answer: a hung daemon is not
                     # asked again on the next launch.
                     _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+                    if host.kept_root:
+                        _RUNTIME = replace(host, identity_known=False, identity_kept=False)
                 else:
                     _RUNTIME = replace(
                         host,
@@ -609,6 +628,7 @@ def _launch_runtime() -> Runtime:
                         rootless=rootless,
                         selinux=selinux,
                         identity_known=True,
+                        identity_kept=False,
                     )
             return _RUNTIME
     finally:

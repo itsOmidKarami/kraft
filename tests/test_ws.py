@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from support.harness import connect_repo, fake_templates_dir, isolated_bd
+from support.harness import connect_repo, fake_templates_dir
 from support.server import running_server
 
 from kraft import db, events
@@ -367,8 +367,7 @@ def test_ws_events_delivered_under_real_uvicorn(tmp_path, repo):
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     connect_repo(repo, templates)
-    tracker = isolated_bd(tmp_path)
-    with running_server(run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=tracker) as srv:
+    with running_server(run_dir=tmp_path / "run", templates_dir=templates) as srv:
         with connect(f"ws://127.0.0.1:{srv.port}/api/ws/events?after_seq=0") as ws:
             r = srv.client.post(
                 "/api/work-items",

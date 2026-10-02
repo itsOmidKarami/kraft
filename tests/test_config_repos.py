@@ -445,6 +445,9 @@ def test_the_working_copys_beads_config_is_read_only_as_a_small_regular_file(tmp
     bomb += [f"a{i}: &a{i} {{<<: [{', '.join([f'*a{i - 1}'] * 9)}]}}" for i in range(1, 10)]
     (beads / "config.yaml").write_text("\n".join(bomb) + "\nexport: {auto: true}\n")
     assert config.probe_repo(repo, detect=False)["beads_export_auto"] is False
+    # Parsed in the server: past what a beads config needs, it is not read.
+    (beads / "config.yaml").write_text("export: {auto: true}\n" + "#" * (64 << 10) + "\n")
+    assert config.probe_repo(repo, detect=False)["beads_export_auto"] is False
 
 
 def test_bounded_yaml_refuses_a_document_past_its_budget_before_building_it():

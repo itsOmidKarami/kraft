@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.harness import fake_templates_dir, isolated_bd
+from support.harness import fake_templates_dir
 
 from kraft import cli, client
 
@@ -62,9 +62,8 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     (templates / "repos.yaml").write_text(
         yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
     )
-    tracker = isolated_bd(tmp_path)
     run_dir = tmp_path / "run"
-    with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
+    with running_server(run_dir=run_dir, templates_dir=templates) as srv:
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
         monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
         monkeypatch.setenv("KRAFT_PORT", str(srv.port))
@@ -285,9 +284,8 @@ def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monk
     (templates / "repos.yaml").write_text(
         yaml.safe_dump({"repos": [{"path": str(repo), "setup_command": ""}]})
     )
-    tracker = isolated_bd(tmp_path)
     run_dir = tmp_path / "run"
-    with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
+    with running_server(run_dir=run_dir, templates_dir=templates) as srv:
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
         monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")

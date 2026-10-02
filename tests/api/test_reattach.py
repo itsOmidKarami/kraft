@@ -36,7 +36,6 @@ def _impl(e):
 def test_reattach_adopts_running_agent(tmp_path):
     run_dir = tmp_path / "run"
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
     # A worktree needs a declared setup_command since Kraft-kji8w; this test
     # is about reattaching a running agent, not preparation. `env_passthrough`
@@ -59,9 +58,7 @@ def test_reattach_adopts_running_agent(tmp_path):
     )
     slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "8"}
 
-    with running_server(
-        run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
-    ) as srv:
+    with running_server(run_dir=run_dir, templates_dir=templates, env=slow_env) as srv:
         wid = srv.client.post(
             "/api/work-items",
             # quick-task, not the default chain: this test needs the
@@ -91,9 +88,7 @@ def test_reattach_adopts_running_agent(tmp_path):
     # the detached fake-claude.sh is still sleeping
     assert psutil.pid_exists(pid)
 
-    with running_server(
-        run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
-    ) as srv:
+    with running_server(run_dir=run_dir, templates_dir=templates, env=slow_env) as srv:
         health = srv.client.get("/api/health").json()
         assert wid in health["reattach_summary"]["resumed_work_items"]
         assert sess_id in health["reattach_summary"]["adopted"], (

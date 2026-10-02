@@ -139,7 +139,7 @@ markers = [
     "beads_adapter: tests of kraft.adapters.beads itself; keeps the real adapter, with bd stubbed, instead of the suite's in-memory fake",
     "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",
     "api_client(**kwargs): options for the `client` fixture, passed to support.api._client (peer, env, default_setup)",
-    "real_executor: opts a test out of a suite-level executor stub; it drives the real executor and real subprocesses",
+    "real_executor: turns off tests/conftest.py's real-binary guard for the test (the PATH stubs, the Popen check and run_task's refusal by name), and tests/test_intake_poller.py's file-local executor.run stub; for a test that drives the real executor on purpose",
 ]
 
 # relative_files: python-coverage-comment-action diffs coverage against the
