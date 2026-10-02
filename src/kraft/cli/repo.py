@@ -214,7 +214,8 @@ def _say_connected(result: dict) -> None:
         )
         _print(
             f"setup command: {why}; pass --setup-command or set `setup_command` in its "
-            'repos.yaml entry, `""` if it needs no preparation'
+            'repos.yaml entry, `""` if it needs no preparation, or tick No setup needed '
+            "under Templates › Repos"
         )
     saved = [result.get("test_command") or "", setup or ""]
     saved += [s["command"] for s in result.get("test_scopes") or ()]
@@ -272,7 +273,7 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         if test_command is not None or setup_command is not None:
             print(
                 "  its commands are unchanged: edit its repos.yaml entry "
-                "(Templates, Repos) to change them"
+                "(Templates › Repos) to change them"
             )
     else:
         _say_connected(result)

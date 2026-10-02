@@ -166,7 +166,7 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
         # not necessarily the connected repo's checkout (Kraft-2jy6) — the
         # same worktree-first lookup `get_document` already reads its content
         # from. `resolve_attachment_path` does its own containment check
-        # (`Indexer._summary_path`), so there is no separate escape check here.
+        # (`Indexer._worktree_file`), so there is no separate escape check here.
         path = st.indexer.resolve_attachment_path(doc_id)
         if path is None:
             raise HTTPException(404, "attachment file not found")

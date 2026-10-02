@@ -1,7 +1,7 @@
 import { Archive, Bell, Bot, ChartColumn, Download, GitBranch, Info, LibraryBig, Lock, Palette, SlidersHorizontal, Workflow, type LucideIcon } from "lucide-react";
 import { useEffect } from "react";
 import { useDraftCounts } from "../../shell/useDraftCounts";
-import { SELF_RESTART, useApply } from "../../apply/store";
+import { restartNote, SELF_RESTART, useApply } from "../../apply/store";
 import { Button } from "../../ui/Button";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -53,7 +53,7 @@ export function More() {
             {apply.error && <p className="ph-error" role="alert">{apply.error}</p>}
             <div className="ph-actions-row">
               {apply.reload.length > 0 && <Button className="ph-btn" disabled={apply.phase !== "idle"} onClick={() => void apply.runReload()}>Reload</Button>}
-              {apply.restart.length > 0 && apply.managed && <Button className="ph-btn" disabled={apply.phase !== "idle"} onClick={() => { void apply.askRestart(); sheet.open("restart"); }}>Restart Kraft</Button>}
+              {apply.restart.length > 0 && apply.managed && <Button className="ph-btn" disabled={apply.phase !== "idle"} onClick={async () => { await apply.askRestart(); sheet.open("restart"); }}>Restart Kraft</Button>}
               {apply.restart.length > 0 && !apply.managed && <p className="ph-note">{SELF_RESTART}</p>}
             </div>
           </Group>
@@ -65,7 +65,7 @@ export function More() {
       {sheet.is("restart") && (
         <ConfirmSheet
           title="Restart Kraft?"
-          text={`${apply.restart.map((i) => i.text).join(" · ") || "Pending changes"} apply after the restart. Running items are not lost; their agents are stopped and picked up again.`}
+          text={`${apply.restart.map((i) => i.text).join(" · ") || "Pending changes"} apply after the restart. ${restartNote(apply.active)}`}
           confirm={{ label: "Restart now", danger: true, run: () => { sheet.close(); void apply.runRestart(); } }}
           onClose={() => { apply.cancelRestart(); sheet.close(); }}
         />

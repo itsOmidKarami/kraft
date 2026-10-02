@@ -722,5 +722,7 @@ def test_no_other_site_may_frame_any_response(dist, client, method, path, header
     hole the next route opens."""
     r = client.request(method, path, headers=headers)
     assert r.status_code == status, r.text
-    assert r.headers["content-security-policy"] == "frame-ancestors 'self'"
+    # One directive of the policy: a page may carry others of its own (/docs).
+    directives = [d.strip() for d in r.headers["content-security-policy"].split(";")]
+    assert "frame-ancestors 'self'" in directives
     assert r.headers["x-frame-options"] == "SAMEORIGIN"

@@ -29,8 +29,15 @@ _SWAGGER_JS = f"{_SWAGGER}/swagger-ui-bundle.js"
 _SWAGGER_CSS = f"{_SWAGGER}/swagger-ui.css"
 _REDOC_JS = "https://cdn.jsdelivr.net/npm/redoc@2.5.4/bundles/redoc.standalone.js"
 #: The board's own icon (`frontend/public/icon.svg`), not FastAPI's from its
-#: docs site: nothing on these pages need come from a third party unpinned.
+#: docs site: nothing on these pages comes from a third party unpinned.
 _FAVICON = "/icon.svg"
+
+#: What the pages may show as an image: their own origin's and inline ones.
+#: ReDoc's bundle puts a "Redocly" logo from `cdn.redoc.ly` in its sidebar,
+#: which an integrity attribute cannot cover; this keeps the browser from
+#: fetching it, and with it from naming this server to a third party in its
+#: `Referer`. The perimeter adds `frame-ancestors` to it.
+CONTENT_SECURITY_POLICY = "img-src 'self' data:"
 
 #: Subresource Integrity: the sha384 of each file above.
 INTEGRITY = {
@@ -41,14 +48,15 @@ INTEGRITY = {
 
 
 def _with_integrity(page: HTMLResponse) -> HTMLResponse:
-    """`page` with an `integrity` on every pinned asset it loads. FastAPI's
-    page builders take a URL but no attributes for it, so they are added to
-    the tag the URL sits in. `crossorigin` is what lets the browser check a
-    hash on a file from another origin at all."""
+    """`page` with an `integrity` on every pinned asset it loads, and no image
+    from another site. FastAPI's page builders take a URL but no attributes
+    for it, so they are added to the tag the URL sits in. `crossorigin` is
+    what lets the browser check a hash on a file from another origin at
+    all."""
     html = page.body.decode()
     for url, digest in INTEGRITY.items():
         html = html.replace(f'"{url}"', f'"{url}" integrity="{digest}" crossorigin="anonymous"')
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={"content-security-policy": CONTENT_SECURITY_POLICY})
 
 
 async def swagger(request: Request) -> HTMLResponse:

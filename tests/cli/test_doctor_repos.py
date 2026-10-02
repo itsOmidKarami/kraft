@@ -42,6 +42,7 @@ def test_doctor_reports_a_connected_repo_with_no_setup_command(app, tmp_path):
     row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("setup "))
     assert not row["ok"]
     assert "setup_command" in row["detail"]
+    assert "tick No setup needed under Templates › Repos" in row["detail"]
 
 
 @pytest.mark.parametrize(

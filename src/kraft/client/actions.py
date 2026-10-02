@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import EllipsisType
-from urllib.parse import quote
 
 from kraft import config
 from kraft.client import context, reads, transport
@@ -229,7 +228,7 @@ async def approve_gate(
     target = context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
     return await transport._act(
-        f"/work-items/{target}/gates/{quote(gate, safe='')}/approve",
+        f"/work-items/{transport.segment(target)}/gates/{transport.segment(gate)}/approve",
         {"digest": digest} if digest else None,
     )
 
@@ -254,20 +253,20 @@ async def reject_gate(
     if node:
         payload["node"] = node
     return await transport._act(
-        f"/work-items/{target}/gates/{quote(gate, safe='')}/reject", payload
+        f"/work-items/{transport.segment(target)}/gates/{transport.segment(gate)}/reject", payload
     )
 
 
 async def pause(work_item_id: str | None = None) -> dict:
     """Stop the running node's sessions. Only an active item can be paused."""
     target = context._forbid_self_action(work_item_id)
-    return await transport._act(f"/work-items/{target}/pause")
+    return await transport._act(f"/work-items/{transport.segment(target)}/pause")
 
 
 async def abandon(work_item_id: str | None = None) -> dict:
     """Terminal. Removes the worktree, destroying anything uncommitted in it."""
     target = context._forbid_self_action(work_item_id)
-    return await transport._act(f"/work-items/{target}/abandon")
+    return await transport._act(f"/work-items/{transport.segment(target)}/abandon")
 
 
 async def resume(
@@ -286,7 +285,7 @@ async def resume(
     payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
     if steers:
         payload["steers"] = steers
-    return await transport._act(f"/work-items/{target}/resume", payload)
+    return await transport._act(f"/work-items/{transport.segment(target)}/resume", payload)
 
 
 async def retry(
@@ -310,7 +309,7 @@ async def retry(
         payload["path"] = path
     if restart:
         payload["restart"] = True
-    return await transport._act(f"/work-items/{target}/retry", payload)
+    return await transport._act(f"/work-items/{transport.segment(target)}/retry", payload)
 
 
 async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
@@ -319,7 +318,9 @@ async def raise_budget(budget_usd: float | None, work_item_id: str | None = None
     stop the item's own cap made, or the item-wide `budget_usd` of its
     policy, which it merges into the item's policy override."""
     target = context._forbid_self_action(work_item_id)
-    return await transport._act(f"/work-items/{target}/budget/raise", {"budget_usd": budget_usd})
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/budget/raise", {"budget_usd": budget_usd}
+    )
 
 
 async def skip(
@@ -334,7 +335,7 @@ async def skip(
     payload: dict = {"note": note.strip()} if note and note.strip() else {}
     if path:
         payload["path"] = path
-    return await transport._act(f"/work-items/{target}/skip", payload)
+    return await transport._act(f"/work-items/{transport.segment(target)}/skip", payload)
 
 
 async def complete(reason: str, work_item_id: str | None = None, close_beads: bool = False) -> dict:
@@ -344,13 +345,15 @@ async def complete(reason: str, work_item_id: str | None = None, close_beads: bo
     payload: dict = {"reason": reason}
     if close_beads:
         payload["close_beads"] = True
-    return await transport._act(f"/work-items/{target}/complete", payload)
+    return await transport._act(f"/work-items/{transport.segment(target)}/complete", payload)
 
 
 async def cancel(reason: str, work_item_id: str | None = None) -> dict:
     """Cancel the item. A reason is required and recorded; the worktree stays."""
     target = context._forbid_self_action(work_item_id)
-    return await transport._act(f"/work-items/{target}/cancel", {"reason": reason})
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/cancel", {"reason": reason}
+    )
 
 
 async def report_progress(task: int, work_item_id: str | None = None) -> dict:
@@ -360,7 +363,7 @@ async def report_progress(task: int, work_item_id: str | None = None) -> dict:
     worker's own item. Reporting where you are decides nothing.
     """
     target = await context.resolve_work_item(work_item_id)
-    return await transport._act(f"/work-items/{target}/progress", {"task": task})
+    return await transport._act(f"/work-items/{transport.segment(target)}/progress", {"task": task})
 
 
 async def reply_to_thread(thread_id: str, body: str, claim: str | None = None) -> dict:
@@ -368,7 +371,7 @@ async def reply_to_thread(thread_id: str, body: str, claim: str | None = None) -
     resolving is the reviewer's, and the server takes the author from the
     session, not from anything passed here."""
     payload = {"body": body, **({"claim": claim} if claim else {})}
-    return await transport._act(f"/threads/{thread_id}/replies", payload)
+    return await transport._act(f"/threads/{transport.segment(thread_id)}/replies", payload)
 
 
 async def escalate(message: str, work_item_id: str | None = None, new_thread: bool = False) -> dict:
@@ -383,7 +386,8 @@ async def escalate(message: str, work_item_id: str | None = None, new_thread: bo
     """
     target = context._forbid_self_action(work_item_id)
     return await transport._act(
-        f"/work-items/{target}/escalate", {"message": message, "new_thread": new_thread}
+        f"/work-items/{transport.segment(target)}/escalate",
+        {"message": message, "new_thread": new_thread},
     )
 
 
@@ -392,7 +396,8 @@ async def open_worktree(work_item_id: str | None = None, editor: str | None = No
     launch as the UI's "Open worktree", including its 501 when headless."""
     target = await context.resolve_work_item(work_item_id)
     return await transport._act(
-        f"/work-items/{target}/open-worktree", {"editor": editor} if editor else {}
+        f"/work-items/{transport.segment(target)}/open-worktree",
+        {"editor": editor} if editor else {},
     )
 
 
@@ -405,7 +410,9 @@ async def mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
     not a gate decision, which is the thing the self-action guard protects.
     """
     target = await context.resolve_work_item(work_item_id)
-    return await transport._act(f"/work-items/{target}/mr-labels", {"labels": labels})
+    return await transport._act(
+        f"/work-items/{transport.segment(target)}/mr-labels", {"labels": labels}
+    )
 
 
 async def set_chain_template(template: str, work_item_id: str | None = None) -> dict:
@@ -418,7 +425,9 @@ async def set_chain_template(template: str, work_item_id: str | None = None) -> 
     decision, the same reasoning `mr_labels` above gives for its own door.
     """
     target = await context.resolve_work_item(work_item_id)
-    return await transport._patch(f"/work-items/{target}", {"chain_template": template})
+    return await transport._patch(
+        f"/work-items/{transport.segment(target)}", {"chain_template": template}
+    )
 
 
 async def set_attachments(
@@ -441,7 +450,7 @@ async def set_attachments(
         raise ValueError("kraft: set-attachments needs --spec, --plan or --drop")
     target = context._forbid_self_action(work_item_id)
     return await transport._patch(
-        f"/work-items/{target}", {"attachments": changes, "cwd": str(Path.cwd())}
+        f"/work-items/{transport.segment(target)}", {"attachments": changes, "cwd": str(Path.cwd())}
     )
 
 
@@ -479,7 +488,9 @@ async def set_agent_overrides(
             raise ValueError(
                 "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear"
             )
-    return await transport._patch(f"/work-items/{target}", {"agent_overrides": overrides})
+    return await transport._patch(
+        f"/work-items/{transport.segment(target)}", {"agent_overrides": overrides}
+    )
 
 
 async def set_node_overrides(
@@ -527,7 +538,9 @@ async def set_node_overrides(
                 "kraft: set-node-override needs --auto-escalate, --auto-escalate-stuck, "
                 "--auto-escalate-delay-s, --model, --effort, --extra-prompt, or --clear"
             )
-    return await transport._patch(f"/work-items/{target}", {"node_overrides": {node_id: fields}})
+    return await transport._patch(
+        f"/work-items/{transport.segment(target)}", {"node_overrides": {node_id: fields}}
+    )
 
 
 async def set_work_item_policy(
@@ -546,7 +559,9 @@ async def set_work_item_policy(
     target = context._forbid_self_action(work_item_id)
     if not clear and not policy:
         raise ValueError("kraft: set-policy needs --policy FIELD=VALUE or --clear")
-    return await transport._patch(f"/work-items/{target}", {"policy": {} if clear else policy})
+    return await transport._patch(
+        f"/work-items/{transport.segment(target)}", {"policy": {} if clear else policy}
+    )
 
 
 async def add_review_comment(
@@ -569,7 +584,7 @@ async def add_review_comment(
     """
     if thread_id:
         payload = {"body": body}
-        return await transport._act(f"/threads/{thread_id}/comments", payload)
+        return await transport._act(f"/threads/{transport.segment(thread_id)}/comments", payload)
     target = context._forbid_self_action(work_item_id)
     payload: dict = {"body": body, "file_path": file_path, "label": label}
     if start_line is not None:
@@ -582,18 +597,19 @@ async def add_review_comment(
                 "replacement": suggestion,
             }
     return await transport._act(
-        f"/work-items/{target}/threads", {k: v for k, v in payload.items() if v is not None}
+        f"/work-items/{transport.segment(target)}/threads",
+        {k: v for k, v in payload.items() if v is not None},
     )
 
 
 async def resolve_thread(thread_id: str) -> dict:
     """Mark a review thread resolved."""
-    return await transport._act(f"/threads/{thread_id}/resolve")
+    return await transport._act(f"/threads/{transport.segment(thread_id)}/resolve")
 
 
 async def reopen_thread(thread_id: str) -> dict:
     """Reopen a resolved review thread."""
-    return await transport._act(f"/threads/{thread_id}/reopen")
+    return await transport._act(f"/threads/{transport.segment(thread_id)}/reopen")
 
 
 async def submit_review(
@@ -607,7 +623,8 @@ async def submit_review(
     target = context._forbid_self_action(work_item_id)
     payload = {"outcome": outcome, "summary": summary, "node": node}
     return await transport._act(
-        f"/work-items/{target}/review", {k: v for k, v in payload.items() if v is not None}
+        f"/work-items/{transport.segment(target)}/review",
+        {k: v for k, v in payload.items() if v is not None},
     )
 
 

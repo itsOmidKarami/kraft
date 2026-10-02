@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Dialog } from "../ui/Dialog";
 import { Popover } from "../ui/Popover";
 import { RefreshCw, RotateCw, TriangleAlert, ExternalLink } from "../icons";
-import { SELF_RESTART, useApply } from "./store";
+import { restartNote, SELF_RESTART, useApply } from "./store";
 import "./apply.css";
 
 /** Waiting to apply (UX V2 W16 A): config saved but not yet running. Reload
@@ -71,7 +71,7 @@ export function ApplyChip() {
 
 /** The restart confirmation and the wait for the server to come back; mounted once in the shell. */
 export function ApplyDialogs() {
-  const { confirming, phase, address, error } = useApply();
+  const { confirming, phase, address, active, error } = useApply();
   const cancel = useApply((s) => s.cancelRestart);
   const restart = useApply((s) => s.runRestart);
   if (confirming)
@@ -81,7 +81,7 @@ export function ApplyDialogs() {
         onClose={cancel}
         footer={<><button type="button" className="apply-btn" onClick={cancel}>Cancel</button><button type="button" className="apply-btn is-primary" onClick={() => void restart()}><RotateCw size={14} aria-hidden />Restart</button></>}
       >
-        <p>Running work is interrupted while the server restarts. It comes back at <code>{address}</code> and this page follows.</p>
+        <p>{restartNote(active)} It comes back at <code>{address}</code> and this page follows.</p>
         <p className="apply-muted">same as: kraft admin restart</p>
       </Dialog>
     );
