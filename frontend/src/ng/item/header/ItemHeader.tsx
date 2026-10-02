@@ -8,6 +8,7 @@ import { Menu, type MenuItem } from "../../ui/Menu";
 import { Popover } from "../../ui/Popover";
 import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
+import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
 import { actionPath } from "../paths";
 import { archivable, headerState, type PanelItem } from "../status";
@@ -74,12 +75,16 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
     return r.ok;
   };
 
+  const draft = useDraft();
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onSettings();
     // Start is a resume from node zero: a never-started item has no current node.
-    if (hs.main === "resume" || hs.main === "start") return void run(act.resume(item.id));
+    const start = () => void run(act.resume(item.id));
+    // Start never applies a draft, so with one it asks first: Apply and start, or start without it.
+    if (hs.main === "start" && draft?.ops.some((o) => !o.passed)) return draft.setReviewing(true, start);
+    if (hs.main === "resume" || hs.main === "start") return start();
     if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));

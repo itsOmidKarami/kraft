@@ -37,6 +37,9 @@
 .cfg-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text); }
 .cfg-chip { flex: none; padding: 0 6px; border-radius: 4px; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
 .cfg-chip.is-own { background: var(--surface-2); color: var(--text); }
+/* An own value only the item's draft holds, until Review & apply applies it. */
+.cfg-chip.is-draft { background: color-mix(in oklab, var(--warn) 14%, transparent); color: var(--warn); }
+.cfg-dot.is-draft { background: var(--warn); }
 .cfg-row .icon-btn { min-width: 22px; min-height: 22px; }
 .cfg-gap { flex: none; width: 22px; }
 .cfg-lock { flex: none; font-size: 10.5px; color: var(--text-muted); }

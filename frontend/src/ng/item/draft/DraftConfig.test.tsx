@@ -75,7 +75,10 @@ describe("DraftConfig", () => {
   it("shows an override as the item's own, and ↺ removes that one field, deleting an emptied draft", async () => {
     await show(TASK, reply([ov(TASK, { model: "opus" })]), { "PUT /work-items/w1/draft": reply([]) });
     expect(await screen.findByText("opus")).toBeInTheDocument();
-    expect(screen.getByLabelText("overridden for this item")).toBeInTheDocument();
+    // Only the draft holds it until Review & apply: its chip says so, not "this item".
+    expect(screen.getByLabelText("in this item's draft, not applied yet")).toBeInTheDocument();
+    expect(screen.getByTitle("in this item's draft, not applied yet")).toHaveTextContent(/^draft$/);
+    expect(screen.queryByText("this item")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Reset model" }));
     await waitFor(() => expect(puts()).toEqual([{ ops: [] }]));
   });

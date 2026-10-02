@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Seam } from "../../graph/layout";
 import { showToast } from "../../ui/Toast";
 import type { ItemDetail } from "../useItem";
@@ -22,7 +22,11 @@ export type DraftCtx = {
   seams: Seam[];
   editable: (node: string) => boolean;
   reviewing: boolean;
-  setReviewing: (on: boolean) => void;
+  /** While Start waits on the draft: starts the item, which Review & apply
+   *  runs after applying, or without applying when the person says so. */
+  starting: (() => void) | null;
+  /** Open or close Review & apply; `start` opens it as Start's question. */
+  setReviewing: (on: boolean, start?: () => void) => void;
   reload: () => void;
 };
 
@@ -31,7 +35,8 @@ export const useDraft = () => useContext(Ctx);
 
 export function ItemDraftProvider({ item, reload, children }: { item: ItemDetail; reload: () => void; children: ReactNode }) {
   const draft = useItemDraft(item);
-  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState<{ on: boolean; start: (() => void) | null }>({ on: false, start: null });
+  const setReviewing = useCallback((on: boolean, start?: () => void) => setReview({ on, start: on ? start ?? null : null }), []);
   const { view, error } = draft;
   useEffect(() => { if (error) showToast(error, 6000); }, [error]);
   const value = useMemo<DraftCtx>(() => {
@@ -42,8 +47,8 @@ export function ItemDraftProvider({ item, reload, children }: { item: ItemDetail
       draft, raw: item, shown, ops, changes: count(ops), issues: view ? issues(view) : [],
       seams: draft.status === "ready" ? seamsOf(item, nodes) : [],
       editable: (node) => draft.status === "ready" && editableAt(item, nodes, node),
-      reviewing, setReviewing, reload,
+      reviewing: review.on, starting: review.start, setReviewing, reload,
     };
-  }, [draft, view, item, reviewing, reload]);
+  }, [draft, view, item, review, setReviewing, reload]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

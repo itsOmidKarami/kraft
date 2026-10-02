@@ -39,11 +39,13 @@ export function DraftState() {
   );
 }
 
-/** **Review & apply**, rendered inside the header's actions: live with a draft, disabled while it has problems or an op the run has passed. */
+/** **Review & apply**, rendered inside the header's actions: live with a draft,
+ *  disabled while it has problems. An op the run has passed leaves it live:
+ *  Review is where that op comes out of the draft, so the rest can apply. */
 export function ReviewButton() {
   const d = useDraft();
   if (!d || !d.ops.length) return null;
-  const blocked = d.issues.length > 0;
+  const blocked = d.issues.some((i) => !i.passed);
   return (
     <Button variant="primary" aria-label="Review & apply" disabled={blocked} title={blocked ? "Fix the problems first" : `DRAFT · ${d.changes} ${plural(d.changes, "CHANGE", "CHANGES")}`} onClick={() => d.setReviewing(true)}>
       <span className="idr-full">Review &amp; apply</span>
