@@ -1,7 +1,7 @@
 {
   "name": "kraft",
   "displayName": "Kraft",
-  "description": "For Kraft, the local orchestrator for coding agents: clear what your agents are waiting on you for (gates, diff review, config) without leaving the editor.",
+  "description": "Approve gates, review diffs and edit config for Kraft, the local orchestrator for your coding agent, without leaving VS Code.",
   "version": "1.4.0",
   "publisher": "kraft-sdlc",
   "license": "SEE LICENSE IN LICENSE",

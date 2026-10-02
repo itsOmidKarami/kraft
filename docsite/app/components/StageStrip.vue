@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The shipped `default` chain (templates/chains/default.yaml), simplified for
 // an overview: one verb per stage, and only the final review marked as a stop.
+// "PR" as in the tagline; on GitLab the same node opens a merge request.
 // The real chain has more nodes and approval gates than this. A stop is
 // marked in words, not colour alone.
 const stages: { name: string, stop?: string }[] = [
@@ -8,7 +9,7 @@ const stages: { name: string, stop?: string }[] = [
   { name: 'plan' },
   { name: 'implement' },
   { name: 'verify' },
-  { name: 'draft MR' },
+  { name: 'draft PR' },
   { name: 'review', stop: 'you approve' },
   { name: 'merge' },
 ]

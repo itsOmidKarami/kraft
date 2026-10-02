@@ -104,8 +104,9 @@ their worktrees, `admin` is this machine's server. Typing an old flat verb
 (`kraft list`) prints where it moved.
 
 Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
-databases, logs and worktrees, `templates/` for the YAML the Settings screens
-edit, seeded from the packaged defaults on first run and never overwritten after.
+databases, logs and worktrees, `templates/` for the YAML the Templates and
+Settings screens edit, seeded from the packaged defaults on first run and never
+overwritten after.
 
 ## Architecture Overview
 
