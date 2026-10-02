@@ -9,7 +9,7 @@ import { FirstRun, PROBE_STEP_MS } from "./FirstRun";
 const PROBE: RepoProbe = {
   path: "/code/acme", name: "acme", branch: "main", submodules: ["vendor/a", "vendor/b"], has_beads: true,
   beads_export_auto: false, beads_export_git_add: false, has_engineering: false,
-  test_command: "uv run pytest -q", test_scopes: null, setup_command: "uv sync", forge: "gitlab", project: "acme/acme",
+  test_command: "uv run pytest -q", test_scopes: [{ paths: ["**"], command: "uv run pytest -q" }], setup_command: "uv sync", forge: "gitlab", project: "acme/acme",
 };
 const CHAIN = { id: "default", nodes: [...new Array(6).fill({}), { fix_loop: "verification.fix_loop" }], gates: 2 } as unknown as TemplateSummary;
 const POLICY = { loops: { "verification.fix_loop": { attempts: 4, wall_clock_s: 60 } }, default: { attempts: 9, wall_clock_s: 60 }, max_concurrent: 1, budget: { work_item_usd: 25, daily_usd: null } } as Policy;
@@ -65,9 +65,53 @@ describe("FirstRun", () => {
     expect(calls).toEqual(["probe", "add"]);
     expect(api.addRepo).toHaveBeenCalledWith({
       path: "/code/acme", name: "acme", default_chain_template: "default", test_command: "uv run pytest -q",
-      test_scopes: null, forge: "gitlab", project: "acme/acme",
+      forge: "gitlab", project: "acme/acme",
     });
     expect(await screen.findByText("Added acme")).toBeInTheDocument();
+  });
+
+  it("sends no root scope for a single-stack repo: it would shadow later test command edits", async () => {
+    const user = userEvent.setup();
+    mount();
+    await probeAndAdd(user);
+    expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
+  });
+
+  it("sends the probe's scopes when it found a nested one", async () => {
+    const scopes = [{ paths: ["pyproject.toml", "src/**"], command: "uv run pytest -q" }, { paths: ["frontend/**"], command: "npm test" }];
+    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_scopes: scopes });
+    const user = userEvent.setup();
+    mount();
+    await probeAndAdd(user);
+    expect(api.addRepo).toHaveBeenCalledWith(expect.objectContaining({ test_scopes: scopes }));
+  });
+
+  it("adds a repo with no detected test command, and says it is disabled until one is set", async () => {
+    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_command: null, test_scopes: [] });
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: false } as never);
+    const user = userEvent.setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
+    await user.click(screen.getByRole("button", { name: "Add repo" }));
+    expect(await screen.findByText("Added acme")).toBeInTheDocument();
+    expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
+    expect(screen.getByText(/connected disabled until you set a test command/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(screen.getByText(/acme is disabled, so New work item cannot file to it yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+  });
+
+  it("says nothing about a disabled repo when the server enabled it", async () => {
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true } as never);
+    const user = userEvent.setup();
+    mount();
+    await probeAndAdd(user);
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(screen.queryByText(/disabled/)).toBeNull();
   });
 
   it("keeps step 1 and says why when the probe fails", async () => {

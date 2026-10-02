@@ -245,7 +245,10 @@ async def add_repo(body: RepoBody, request: Request):
     probed_scopes = probed.get("test_scopes") or []
     has_nested = any(scope.get("paths") != ["**"] for scope in probed_scopes)
     nested_probed_scopes = probed_scopes if has_nested else None
-    test_scopes = body.test_scopes if body.test_scopes is not None else nested_probed_scopes
+    # An empty list states nothing: repos.yaml refuses `test_scopes: []`, and
+    # the first-run wizard once sent exactly that for a repo with no
+    # recognised stack, so the probe decides as it does for None.
+    test_scopes = body.test_scopes if body.test_scopes else nested_probed_scopes
     setup_command = (
         body.setup_command if body.setup_command is not None else probed["setup_command"]
     )

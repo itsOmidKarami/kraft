@@ -322,6 +322,21 @@ def test_add_repo_without_nested_scopes_does_not_persist_a_root_scope(tmp_path, 
     assert r.json()["test_scopes"] is None
 
 
+def test_add_repo_with_an_empty_test_scopes_list_connects_it_disabled(tmp_path, client):
+    """A repo with no recognised stack probes to `test_scopes: []`, and the
+    first-run wizard sent that back on Add repo. repos.yaml refuses an empty
+    list, so the connect answered 422; an empty list must mean "none given"."""
+    repo = make_repo(tmp_path, name="nostack")
+    r = client.post("/api/repos", json={"path": str(repo), "test_scopes": []})
+    assert r.status_code == 201, r.text
+    assert r.json()["test_scopes"] is None
+    assert r.json()["enabled"] is False
+    [entry] = [
+        x for x in client.get("/api/repos").json()["repos"] if x["path"] == str(repo.resolve())
+    ]
+    assert entry["enabled"] is False
+
+
 def test_add_repo_keeps_a_lone_nested_scope(tmp_path, client):
     """A repo whose only test marker is nested probes to exactly one scope --
     a real nested one. Counting scopes would discard it and run the command

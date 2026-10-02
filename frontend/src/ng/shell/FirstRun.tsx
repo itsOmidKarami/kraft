@@ -66,6 +66,8 @@ export function FirstRun() {
   const [shown, setShown] = useState(0);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
+  /** The server saved the repo disabled: no test command, so the composer will not list it. */
+  const [disabled, setDisabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -92,16 +94,21 @@ export function FirstRun() {
     if (!probe || adding) return;
     setAdding(true);
     setError(null);
+    // As Templates › Repos' Connect does: a probe's lone root `["**"]` scope only repeats
+    // `test_command` and would shadow its later edits, and an empty list is not a valid
+    // `test_scopes`, so only scopes with a nested path are sent.
+    const nested = (probe.test_scopes ?? []).some((s) => s.paths.join() !== "**");
     try {
-      await api.addRepo({
+      const repo = await api.addRepo({
         path: probe.path,
         name: probe.name,
         default_chain_template: "default",
         test_command: probe.test_command,
-        test_scopes: probe.test_scopes,
+        ...(nested ? { test_scopes: probe.test_scopes } : {}),
         forge: probe.forge,
         project: probe.project,
       });
+      setDisabled(repo.enabled === false);
       setAdded(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -170,6 +177,7 @@ export function FirstRun() {
                 )}
                 {added && probe && <span className="fr-ok">Added {probe.name}</span>}
               </div>
+              {added && disabled && <p>No tests found: connected disabled until you set a test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>}
             </>
           )}
           {step === 2 && (
@@ -191,6 +199,7 @@ export function FirstRun() {
             <>
               <h2>First work item</h2>
               <p>It is created paused, so nothing runs until you start it.</p>
+              {disabled && probe && <p>{probe.name} is disabled, so New work item cannot file to it yet. Set its test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link> first.</p>}
               <div className="fr-actions">
                 <Link className="btn btn-primary" to="/?new=1">+ New work item</Link>
               </div>
