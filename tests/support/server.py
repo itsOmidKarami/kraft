@@ -54,7 +54,7 @@ def _bd_stub_dir() -> Path:
     `KRAFT_BD_STUB_LOG`, when set, collects each call's argv."""
     global _bd_stub
     if _bd_stub is None:
-        d = Path(tempfile.mkdtemp(prefix="kraft-bd-stub-"))
+        d = Path(tempfile.mkdtemp(prefix="kraft-bd-stub-", dir=harness.PROCESS_TMP))
         (d / "bd").write_text(
             "#!/bin/sh\n"
             'if [ -n "$KRAFT_BD_STUB_LOG" ]; then echo "$*" >> "$KRAFT_BD_STUB_LOG"; fi\n'

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import socket
+import tempfile
 import threading
 from pathlib import Path
 
@@ -16,7 +18,10 @@ from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
 
 from kraft import client as kraft_client
 from kraft import db
+from kraft.adapters.hook_install import FAIL_CLOSED_ENV
 from kraft.paths import RunDirs
+from kraft.worker import env as worker_env
+from kraft.worker.sandbox import FORWARDED_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -241,9 +246,27 @@ def _contain_hardened_git_env():
     Under pytest the "server process" is the test process, so any test that
     starts a lifespan would otherwise leave those vars set for every test
     after it, silently disabling hooks in suites that assert on them."""
-    before = {k: v for k, v in os.environ.items() if k.startswith("GIT_CONFIG_")}
+    yield from _restoring_env("GIT_CONFIG_")
+
+
+@pytest.fixture(autouse=True)
+def _contain_kraft_env():
+    """Every `KRAFT_*` variable is as it was before the test, whoever wrote it.
+
+    Subject code writes some straight into `os.environ` -- `_serve()` exports
+    `KRAFT_DAEMON_PID`/`KRAFT_DAEMON_PORT` for the workers it launches, and
+    `worker_env` copies both names into every later worker env -- and
+    monkeypatch only undoes what a test set through it. Restoring the whole
+    set makes such a leak impossible rather than avoided test by test."""
+    yield from _restoring_env("KRAFT_")
+
+
+def _restoring_env(prefix: str):
+    """Snapshot every `os.environ` key starting with `prefix`, yield, then put
+    back exactly that set: values reset, keys added since removed."""
+    before = {k: v for k, v in os.environ.items() if k.startswith(prefix)}
     yield
-    for key in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+    for key in [k for k in os.environ if k.startswith(prefix)]:
         del os.environ[key]
     os.environ.update(before)
 
@@ -293,6 +316,39 @@ def _no_daemon_ca(monkeypatch):
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
 
 
+#: Both spellings of every proxy variable `egress._upstream`, `worker_env` and
+#: `docker_forward` read.
+_PROXY_ENV = tuple(
+    name
+    for base in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY")
+    for name in (base, base.lower())
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_host_proxy(request, monkeypatch):
+    """No unit test inherits this machine's proxy, which an agent sandbox or a
+    corporate dev box sets: anything that defaults to the live environment
+    (`EgressProxy(environ=os.environ)`) would dial it instead of the test's
+    own upstream. A test of proxy handling sets its own. An e2e test keeps the
+    host's, since the real CLI it runs may have no other route out."""
+    if request.node.get_closest_marker("e2e") is not None:
+        return
+    for name in _PROXY_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _per_test_tempdir(tmp_path_factory, monkeypatch):
+    """`tempfile`'s default directory is one of this test's own, so what code
+    under test leaves there on purpose (a failed `verify` keeps its logs for
+    the operator, `cli/verify.py`) goes with pytest's temp dirs instead of
+    piling up in the machine's `/tmp`. Beside `tmp_path`, not in it, as `HOME`
+    is below: several tests list `tmp_path`. The per-process caches in
+    `support` keep the real one (`harness.PROCESS_TMP`)."""
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path_factory.mktemp("tmp")))
+
+
 @pytest.fixture(autouse=True)
 def _rootful_docker(monkeypatch):
     """Every test launches as rootful docker on a host without SELinux, the
@@ -304,6 +360,50 @@ def _rootful_docker(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_process_state(monkeypatch):
+    """What the product keeps for the life of the process starts empty in
+    every test, and is put back after: the once-per-process deprecation
+    warnings, the dev `FakeForge`'s remembered MRs, docker's re-ask timer and
+    in-flight detection, codex's cached hook flags, and the `httpx` logger
+    level a notifier's start turns down. Otherwise whichever test ran first
+    on a worker decides what a later one sees."""
+    from kraft import policy
+    from kraft.adapters import hook_install
+    from kraft.adapters.forge import run as forge_run
+    from kraft.worker.backends import docker
+
+    monkeypatch.setattr(policy, "_DEPRECATIONS_SAID", set())
+    monkeypatch.setattr(forge_run, "_DEV_FAKE", forge_run.FakeForge())
+    monkeypatch.setattr(docker, "_UNSURE_UNTIL", 0.0)
+    monkeypatch.setattr(docker, "_DETECTING", None)
+    monkeypatch.setattr(docker, "_REASK", None)
+    monkeypatch.setattr(hook_install, "_codex_flags", {})
+    httpx_logger = logging.getLogger("httpx")
+    level = httpx_logger.level
+    yield
+    httpx_logger.setLevel(level)
+
+
+#: The `KRAFT_*` a Kraft worker's own environment carries -- the names that
+#: locate the instance that launched it (`worker_env.BASELINE`) and its session
+#: identity (`sandbox.FORWARDED_ENV`, the fail-closed hook flag) -- and the rest
+#: of what the lifespan reads (`api/startup.py`, `deps._bd_cwd`). Run under a
+#: worker, or from a shell that exported any of them, each would point a test
+#: at that real instance, its bd workspace or its build, or make it act as that
+#: session.
+_INHERITED_INSTANCE_ENV = tuple(
+    sorted(
+        {
+            name
+            for name in (*worker_env.BASELINE, *FORWARDED_ENV, FAIL_CLOSED_ENV)
+            if name.startswith("KRAFT_")
+        }
+        | {"KRAFT_BD_CWD", "KRAFT_FRONTEND_DIST", "KRAFT_INDEX_REPOS"}
+    )
+)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 
@@ -312,7 +412,15 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     check that reads its env var lazily — resolved against the real home, which
     exists on a developer machine and not in a CI container. Autouse rather than
     part of `app`, so a test cannot reach the home by not opting in.
+
+    Nor inherit what locates the instance pytest was started from: the lifespan
+    reads `KRAFT_HOST` and `KRAFT_SKILLS_DIR` itself (`api/startup.py`), so an
+    inherited `KRAFT_HOST=0.0.0.0` turns every `client` into the locked-down
+    posture. Scrubbed here, at the start of the test, so a value a test or its
+    own fixture sets on purpose (`api_client(host=...)`) still applies.
     """
+    for name in _INHERITED_INSTANCE_ENV:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     # Nor a real `kraft admin start` on the default port 8765: a test that
     # doesn't opt into the `app` fixture's ASGI transport falls through to a

@@ -1,10 +1,11 @@
 """`kraft.detect` reading a repository whose files are built to hurt it: a
 committed file must neither stall the server nor crash the probe. Its
 regexes, parsers and CI walk get adversarial input sized like a real
-attack, and a time bound."""
+attack, and a bound on the CPU it may spend."""
 
 from __future__ import annotations
 
+import signal
 import time
 
 import pytest
@@ -14,9 +15,10 @@ from support.probe import repo_with as _repo
 
 from kraft import config, detect
 
-#: Comfortably above the probe of a real repo (well under a second), and far
-#: below the tens of seconds each case took before its fix.
-_BOUND_S = 3.0
+#: Seconds of CPU: comfortably above the probe of a real repo (well under a
+#: second) and the costliest case below (about 1.2s), and far below the tens
+#: of seconds each case took before its fix.
+_BUDGET_S = 3.0
 
 _WORKFLOW = ".github/workflows/ci.yml"
 #: A file at the size the probe reads one to.
@@ -27,10 +29,39 @@ def _step(command: str) -> str:
     return f"jobs:\n  t:\n    steps:\n      - run: '{command}'\n"
 
 
-def _timed(repo, **kw) -> tuple[detect.Proposal, float]:
-    started = time.monotonic()
-    p = _propose(repo, **kw)
-    return p, time.monotonic() - started
+class _OverBudget(BaseException):
+    """Raised by the CPU timer. Not an `Exception`, so no handler inside the
+    probe mistakes it for a parse error and reads on."""
+
+
+def _within_budget(repo, **kw) -> detect.Proposal:
+    """The proposal for `repo`, failing once this process has spent
+    `_BUDGET_S` of CPU on it.
+
+    CPU rather than wall time: a loaded machine makes the probe wait for a
+    core, never compute more, so a busy CI runner cannot fail this. And the
+    timer interrupts a regex mid-match (`re` checks for signals while it
+    backtracks), so a regex that regressed fails here with this message
+    instead of running into the suite's per-test timeout."""
+    fired = []
+
+    def over(signum, frame):
+        fired.append(signum)
+        raise _OverBudget
+
+    previous = signal.signal(signal.SIGPROF, over)
+    signal.setitimer(signal.ITIMER_PROF, _BUDGET_S)
+    try:
+        try:
+            p = _propose(repo, **kw)
+        finally:
+            signal.setitimer(signal.ITIMER_PROF, 0)
+    except _OverBudget:
+        pass
+    finally:
+        signal.signal(signal.SIGPROF, previous)
+    assert not fired, f"the probe spent more than {_BUDGET_S}s of CPU"
+    return p
 
 
 #: A file shaped to make one regex backtrack -> what still holds beside it.
@@ -80,8 +111,7 @@ _BACKTRACKING = {
 def test_a_file_built_to_backtrack_is_read_in_bounded_time(tmp_path, files):
     """A regex that backtracks holds the GIL: the whole server, not only the
     probe's thread, froze for as long as it ran (38 s on a 110 KB Makefile)."""
-    _, took = _timed(_repo(tmp_path, {**files, "go.mod": "module x\n"}))
-    assert took < _BOUND_S
+    _within_budget(_repo(tmp_path, {**files, "go.mod": "module x\n"}))
 
 
 def test_extras_naming_pytest_are_still_read_by_their_key(tmp_path):
@@ -111,8 +141,7 @@ def test_a_ci_file_of_nested_aliases_is_skipped_not_walked(tmp_path):
         ".github/workflows/bomb.yml": _alias_bomb(6),
         ".github/workflows/unit.yml": "jobs:\n  u:\n    steps:\n      - run: go test -race ./...\n",
     }
-    p, took = _timed(_repo(tmp_path, files))
-    assert took < _BOUND_S
+    p = _within_budget(_repo(tmp_path, files))
     assert [c["marker"] for c in p.candidates] == [".github/workflows/unit.yml"]
 
 
@@ -199,8 +228,7 @@ def test_a_yaml_merge_bomb_is_refused_before_it_is_built(tmp_path, where):
     top = (
         "jobs: {t: {steps: [{run: make test}]}}\n" if where == _WORKFLOW else "tasks: {test: {}}\n"
     )
-    p, took = _timed(_repo(tmp_path, {where: _merge_bomb(9, top), "go.mod": "module x\n"}))
-    assert took < _BOUND_S
+    p = _within_budget(_repo(tmp_path, {where: _merge_bomb(9, top), "go.mod": "module x\n"}))
     assert p.test_command == "go test ./..."
 
 

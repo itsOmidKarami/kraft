@@ -22,6 +22,12 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: test_gates.py's wall time spent waiting on work already done (Kraft-qmhfc).
 _POLL = 0.02
 
+#: How long a test waits for a whole chain to walk on the fake agent (a few
+#: seconds when healthy). Well under pyproject's 120s per-test timeout, which
+#: also covers the client's lifespan and the rest of the test: a wait at the
+#: ceiling can never fail with its own message, only as a killed worker.
+WALK_TIMEOUT = 90
+
 
 class _LoopbackClient(TestClient):
     """A websocket on the same loopback Host as every HTTP call. Starlette

@@ -4,6 +4,8 @@ repair task calls once it has decided which labels a red pipeline wants
 
 from __future__ import annotations
 
+from support.api import WALK_TIMEOUT
+
 from kraft.adapters import forge as forge_mod
 
 
@@ -19,7 +21,7 @@ def _completed_item(client, repo):
             "chain_template": "quick-task",
         },
     ).json()["id"]
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + WALK_TIMEOUT
     while time.monotonic() < deadline:
         evs = client.get(f"/api/work-items/{wid}/events").json()
         if any(e["type"] == "work_item_completed" for e in evs):

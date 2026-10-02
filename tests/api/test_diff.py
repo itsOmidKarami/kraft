@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from support.api import WALK_TIMEOUT
 from support.harness import connected_repo, make_repo, v1_chain, v1_item
 
 from kraft import store
@@ -26,7 +27,7 @@ def _write(path, text):
     path.write_text(text)
 
 
-def _wait_for_completion(client, wid, timeout=120):
+def _wait_for_completion(client, wid, timeout=WALK_TIMEOUT):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         evs = client.get(f"/api/work-items/{wid}/events").json()

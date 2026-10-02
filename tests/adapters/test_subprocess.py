@@ -451,11 +451,11 @@ async def test_run_task_kills_a_backgrounded_grandchild_when_the_session_ends(
 
 
 async def test_run_task_group_kill_does_not_delay_a_session_with_no_survivors(run):
-    """The common case (no backgrounded children) must not pay the grace
-    period -- `os.killpg` on an already-empty group raises immediately."""
+    """No backgrounded children, no grace paid: `killpg` on an empty group raises at
+    once. The grace is long enough that no load stretches a `true` to half of it."""
     start = time.monotonic()
-    assert (await run(["true"]))[0] == "done"
-    assert time.monotonic() - start < 2.0
+    assert (await run(["true"], group_kill_grace=30.0))[0] == "done"
+    assert time.monotonic() - start < 15.0, "paid the group-kill grace"
 
 
 async def test_cancelling_run_task_reaps_the_leader_instead_of_paying_the_grace(run, database):
@@ -464,14 +464,14 @@ async def test_cancelling_run_task_reaps_the_leader_instead_of_paying_the_grace(
     as a live group member, so `_kill_group` waited out the whole grace -- 10s
     per cancel in CI -- while macOS passed. Both halves are asserted so this
     fails for the real reason on either platform."""
-    task = asyncio.create_task(run(["sleep", "30"], "s-cancel", group_kill_grace=5.0))
+    task = asyncio.create_task(run(["sleep", "30"], "s-cancel", group_kill_grace=30.0))
     pid = (await _running(database, "s-cancel"))["pid"]
 
     start = time.monotonic()
     await _cancelled(task)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 4.0, f"cancel paid the grace ({elapsed:.1f}s)"  # healthy <2.1s, bug >5s
+    assert elapsed < 15.0, f"cancel paid the grace ({elapsed:.1f}s)"  # healthy <2.1s, bug 30s
     try:
         leftover = psutil.Process(pid).status()
     except psutil.NoSuchProcess:
