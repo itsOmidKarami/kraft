@@ -24,6 +24,8 @@ MANIFESTS = (
     _ROOT / "plugins" / "kraft-lite" / ".cursor-plugin" / "plugin.json",
     # The VS Code extension ships in the same release at the same version.
     _ROOT / "vscode" / "package.json",
+    # Its lockfile repeats the version; unstamped, it fell a release behind.
+    _ROOT / "vscode" / "package-lock.json",
 )
 
 _VERSION = re.compile(r"\d+\.\d+\.\d+")
@@ -40,6 +42,10 @@ def stamp(version: str, manifests=MANIFESTS) -> None:
     for path in manifests:
         blob = json.loads(path.read_text())
         blob["version"] = version
+        # A package-lock.json says it twice: at the top, and for the root
+        # package under `packages[""]`.
+        if "" in blob.get("packages", {}):
+            blob["packages"][""]["version"] = version
         path.write_text(json.dumps(blob, indent=2) + "\n")
 
 

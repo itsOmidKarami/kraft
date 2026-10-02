@@ -1,6 +1,6 @@
 """Make the release's artifacts say which release they are.
 
-Two things a release writes into what it ships, which a tag alone does not:
+What a release writes into what it ships, which a tag alone does not:
 
   python3 dev/release_artifacts.py pin-wheel <wheel> <tag>
       Points the wheel's description (README.md, as PyPI renders it) at <tag>
@@ -10,6 +10,9 @@ Two things a release writes into what it ships, which a tag alone does not:
   python3 dev/release_artifacts.py vsix-version <tag>
       Prints <tag> as the version `vsce package` stamps on the .vsix, in
       semver: v1.5.0 -> 1.5.0, v1.5.0rc2 -> 1.5.0-rc.2.
+  python3 dev/release_artifacts.py vsix-links <vsix>
+      Points the packed .vsix's Get Started link at the extension's homepage.
+      vsce sets it to the repository's clone URL, `.git` and all.
 
 release.yml runs this from main's copy of `dev/`, like the other release tools.
 """
@@ -19,7 +22,9 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import html
 import io
+import json
 import os
 import re
 import sys
@@ -77,11 +82,41 @@ def pin_wheel(wheel: Path, tag: str, repository: str = REPOSITORY) -> None:
     out = io.StringIO()
     csv.writer(out, lineterminator="\n").writerows(rows)
     contents[record] = out.getvalue().encode()
-    tmp = wheel.with_suffix(".tmp")
+    _rewrite_zip(wheel, infos, contents)
+
+
+def _rewrite_zip(path: Path, infos: list[zipfile.ZipInfo], contents: dict[str, bytes]) -> None:
+    """Write `contents` back over `path`, keeping each entry's order, mode and stamp."""
+    tmp = path.with_suffix(".tmp")
     with zipfile.ZipFile(tmp, "w") as dst:
         for info in infos:
             dst.writestr(info, contents[info.filename], compress_type=info.compress_type)
-    tmp.replace(wheel)
+    tmp.replace(path)
+
+
+_GETSTARTED = re.compile(
+    r'(<Property Id="Microsoft\.VisualStudio\.Services\.Links\.Getstarted" Value=")[^"]*(")'
+)
+
+
+def vsix_links(vsix: Path) -> None:
+    """Point the .vsix manifest's Get Started link at the extension's homepage.
+
+    vsce writes the repository's clone URL there (`https://github.com/o/r.git`,
+    the same as the Source link) and has no setting to change it. The homepage
+    in the extension's package.json is its guide, where a newcomer should land.
+    """
+    with zipfile.ZipFile(vsix) as src:
+        infos = src.infolist()
+        contents = {info.filename: src.read(info) for info in infos}
+    homepage = json.loads(contents["extension/package.json"])["homepage"]
+    manifest = contents["extension.vsixmanifest"].decode()
+    value = html.escape(homepage, quote=True)
+    pointed, found = _GETSTARTED.subn(lambda m: f"{m[1]}{value}{m[2]}", manifest)
+    if found != 1:
+        raise ValueError(f"{vsix} has {found} Get Started links, not one; has vsce changed?")
+    contents["extension.vsixmanifest"] = pointed.encode()
+    _rewrite_zip(vsix, infos, contents)
 
 
 def vsix_version(tag: str) -> str:
@@ -104,6 +139,8 @@ def main(argv: list[str]) -> None:
         pin_wheel(Path(argv[1]), argv[2], os.environ.get("GITHUB_REPOSITORY") or REPOSITORY)
     elif len(argv) == 2 and argv[0] == "vsix-version":
         print(vsix_version(argv[1]))
+    elif len(argv) == 2 and argv[0] == "vsix-links":
+        vsix_links(Path(argv[1]))
     else:
         raise SystemExit(__doc__)
 
