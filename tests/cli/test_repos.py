@@ -118,6 +118,19 @@ def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
     assert "saved disabled" not in out
 
 
+def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, capsys, repo):
+    """`uv sync` and `uv run` would each write a `uv.lock` into the worktree,
+    so neither is proposed: the repo lands disabled, and connect names the
+    missing lockfile rather than leave the operator to guess."""
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "test command:" not in out
+    assert "setup command: none found" in out
+    assert "saved disabled: no test command found" in out
+    assert "a pyproject.toml without uv.lock gets none" in out
+
+
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -435,6 +448,7 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     from kraft import config
 
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     frontend = repo / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text("{}")
@@ -456,6 +470,7 @@ def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
     from kraft import config
 
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     src = repo / "src"
     src.mkdir()
     frontend = repo / "frontend"

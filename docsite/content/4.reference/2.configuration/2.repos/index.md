@@ -252,7 +252,7 @@ manifest) and prints the test command with the file it came from; check both
 before trusting them, and `kraft admin doctor` reports any connected repo still
 missing a `setup_command`.
 
-It proposes a `setup_command` from the first of these files it finds in the
+It proposes each command from the first of these files it finds in the
 repo's root:
 
 | File | Proposed `setup_command` |
@@ -264,10 +264,26 @@ repo's root:
 | `Cargo.toml` | `cargo fetch` |
 | `go.mod` | `go mod download` |
 
-A `package.json` or `pyproject.toml` with no lockfile beside it gets no
-proposal: `npm install` or `uv sync` would write the lockfile, and the worker
-would commit it on the item's branch. Connect then says it found none. Set
-`setup_command` yourself, or `""` if the repo needs no preparation.
+| File | Proposed `test_command` |
+|---|---|
+| A `justfile` with a `test` recipe | `just test` |
+| `uv.lock` | `uv run pytest -q` |
+| `package.json` | `npm test` |
+| `Cargo.toml` | `cargo test` |
+| `go.mod` | `go test ./...` |
+
+A `pyproject.toml` with no `uv.lock` beside it gets neither command. `uv sync`
+and `uv run` both write a `uv.lock` when there is none, and the worker would
+commit it on the item's branch. Kraft does not fall back to a `package.json`,
+`Cargo.toml` or `go.mod` beside it either, so a Python repo is never handed
+another language's commands. An npm, yarn or pnpm lockfile still wins the
+setup guess, and a justfile `test` recipe the test guess, since each comes
+first. A `package.json` with no lockfile gets no `setup_command` for the
+same reason: `npm install` would write one.
+
+Connect says when it found no command. With no `test_command` it saves the
+repo disabled. Set `setup_command` yourself, or `""` if the repo needs no
+preparation. Set `test_command`, then `enabled: true`.
 
 ## Repository steering
 

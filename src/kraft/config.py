@@ -645,10 +645,17 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 #: Test commands to look for, in the order a repo is most likely to want them.
 #: A justfile with a `test` recipe comes first: an explicit wrapper (Kraft's own
 #: `just test`) beats a manifest beside it (Kraft-reriq, Kraft-enc5z).
-_TEST_COMMANDS = [
+#:
+#: A None command is a marker that ends the search with no guess. `uv run`
+#: locks before it runs, so on a `pyproject.toml` with no `uv.lock` it writes
+#: one into the worktree, every verify, for the worker to commit. Such a repo
+#: connects disabled, and is not handed the `package.json` beside it either:
+#: `npm test` would leave its Python suite unrun with nothing to say so.
+_TEST_COMMANDS: list[tuple[str, str | None]] = [
     ("Justfile", "just test"),
     ("justfile", "just test"),
-    ("pyproject.toml", "uv run pytest -q"),
+    ("uv.lock", "uv run pytest -q"),
+    ("pyproject.toml", None),
     ("package.json", "npm test"),
     ("Cargo.toml", "cargo test"),
     ("go.mod", "go test ./..."),
@@ -715,7 +722,7 @@ def _first_test_marker(directory: Path) -> tuple[str, str] | None:
             cmd != "just test"
             or _JUST_TEST_RECIPE.search((directory / marker).read_text("utf-8", "replace"))
         ):
-            return marker, cmd
+            return (marker, cmd) if cmd else None
     return None
 
 
@@ -726,13 +733,15 @@ def _first_test_marker(directory: Path) -> tuple[str, str] | None:
 #:
 #: `uv sync` is keyed on `uv.lock`, the way `npm ci` is on its lockfile: on a
 #: `pyproject.toml` alone it creates `uv.lock` in the worktree, and the worker
-#: commits it onto the item's branch. Such a repo gets no guess, so connect and
-#: doctor say none was found rather than propose a command that edits the repo.
-_SETUP_COMMANDS = [
+#: commits it onto the item's branch. A `pyproject.toml` with no lock ends the
+#: search with no guess, as in `_TEST_COMMANDS`, so connect and doctor say none
+#: was found rather than propose a command that edits the repo.
+_SETUP_COMMANDS: list[tuple[str, str | None]] = [
     ("package-lock.json", "npm ci"),
     ("yarn.lock", "yarn install --frozen-lockfile"),
     ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
     ("uv.lock", "uv sync"),
+    ("pyproject.toml", None),
     ("Cargo.toml", "cargo fetch"),
     ("go.mod", "go mod download"),
 ]
