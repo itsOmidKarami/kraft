@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode } from "react";
+import { createContext, isValidElement, useContext, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "./ui.css";
@@ -30,19 +30,35 @@ function where(src: string): string {
 const urlTransform: UrlTransform = (url, key, node) =>
   key === "src" && node.tagName === "img" && /^data:image\//i.test(url) ? url : defaultUrlTransform(url);
 
+/** Set inside a link: an `<a>` in an `<a>` is invalid HTML, and a badge
+ *  (`[![build](https://ci/badge.svg)](https://ci)`) puts an image in one. */
+const InLink = createContext(false);
+
+/** A remote image: a link to it, or plain text inside a link, which stays
+ *  the one thing to click. */
+function RemoteImage({ src, alt }: { src: string; alt?: string }) {
+  const label = `image: ${where(src)}`;
+  if (useContext(InLink)) return <span className="md-img-link" title={alt || undefined}>{label}</span>;
+  return (
+    <a className="md-img-link" href={src} target="_blank" rel="noopener noreferrer" title={alt || undefined}>
+      {label}
+    </a>
+  );
+}
+
 /** Links stay plain anchors (a new tab, nothing executed); a remote image is a
  *  link to it, opened only on a click; fenced code is <pre><code>, where the
  *  review page's tokenizer plugs in (W8). */
 const components: Components = {
-  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      <InLink.Provider value>{children}</InLink.Provider>
+    </a>
+  ),
   img: ({ src, alt }) => {
     if (typeof src !== "string" || !src) return alt ? <span>{alt}</span> : null;
     if (loadsOnItsOwn(src)) return <img src={src} alt={alt ?? ""} />;
-    return (
-      <a className="md-img-link" href={src} target="_blank" rel="noopener noreferrer" title={alt || undefined}>
-        image: {where(src)}
-      </a>
-    );
+    return <RemoteImage src={src} alt={alt} />;
   },
   pre: ({ children }) => <pre className="md-pre">{children}</pre>,
 };

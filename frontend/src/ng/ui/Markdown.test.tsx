@@ -39,4 +39,13 @@ describe("Markdown", () => {
     expect(container.querySelector("img")).toHaveAttribute("src", src);
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("keeps a remote image inside a link as text, so the outer link is the only anchor", () => {
+    const { container } = render(<Markdown text={"[![build](https://evil.test/n.png?d=1)](https://ci.test/run)"} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("a a")).toBeNull();
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", "https://ci.test/run");
+    expect(link).toHaveTextContent("image: evil.test/n.png");
+  });
 });
