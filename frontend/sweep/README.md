@@ -2,6 +2,8 @@
 
 Screenshots + machine checks for every screen × data variant × viewport × shell state, against **mocked** `/api/**` so every display state (rate_limited, capped, budget, escalated, archived…) is reachable in milliseconds. No orchestrator, no fake agent.
 
+CI does not run it. Run it before opening a pull request that changes how a screen looks or lays out (see [Before an MR](#before-an-mr)); [`../README.md`](../README.md#three-layers-and-when-each-is-required) says when that is and when vitest or Playwright is what you need. Labels like `ux2-W<n>`, `R41` and "brief Decided 11" in this folder cite the maintainer's private UX V2 design notes, which a clone does not have (see CONTRIBUTING.md); the text beside each says what it means. The plain `W0`–`W14` waves are the earlier fix programme, and their briefs and receipts are tracked here (`briefs/`, `HISTORY.md`, `history/`).
+
 ## Install (once)
 
 ```bash
@@ -99,7 +101,7 @@ A wave **adds files and edits no shared list**; `sweep.spec.ts`, `interactions.s
 
 - `sweep/HISTORY.md`: the receipts of W0–W14. For each wave: its rules, the cells it changed, cleared or regressed, its commits, open questions and MRs. This file is the archive up to 2026-10-01: from then on each PR writes its own receipts to `sweep/history/<branch>.md` (the branch name with `/` as `-`), a file only that PR adds, so merges never conflict on it.
 - `sweep/briefs/`: the one home for wave briefs (`W<n>_BRIEF.md`). It also holds `PUNCHLIST-v3.md`, the evidence list the waves closed, and `QUESTIONS.md`, where a wave writes a decision it cannot make. A new brief goes here in the same MR as its wave; the design handoff links here and does not copy it. Feature specs are not briefs: they follow CLAUDE.md and go to Kraft as work-item attachments. `sweep/WAVES.md` is the W0–W9 plan and the loop every wave follows.
-- `design/handoff_v4/`: the rules the code follows, with sweep frames as the reference screens.
+- `design/handoff_v4/` (and the earlier `handoff_v3`) is the maintainer's private design handoff, which the waves were built against. `design/` is gitignored, so a clone does not have it, and nothing here depends on your reading it. What the code enforces is in tests you can read (`ng/css.contract.test.ts`, `ng/css.collision.test.ts`, `ng/phone/contract.test.ts`, `ng/phone/css.test.ts`) and is summarised in [`../README.md`](../README.md); what this harness checks is the per-shot flags under [Output](#output) and the `Accepted flags` below. The sweep's own shots, taken on `main` (see [Baseline](#baseline)), are the reference screens.
 
 ## Accepted flags
 

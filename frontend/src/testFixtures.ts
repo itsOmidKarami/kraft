@@ -3,7 +3,11 @@ import type { ChainNode, WorkerSession, WorkItem } from "./types";
 
 /** Shared test factories and stubs — not a `.test.*` file itself so
  *  importing it doesn't re-run another file's `describe` blocks. Each
- *  factory takes overrides; a test that depends on a value passes it. */
+ *  factory takes overrides; a test that depends on a value passes it.
+ *
+ *  The older shared set: a few tests still import it. New helpers go in the
+ *  area's own testkit (`ng/<area>/testkit.tsx` or `fixture.ts`), see
+ *  frontend/README.md. */
 
 /** Forces `usePhone()`/every media query to `matches` for the test. */
 export function setPhoneWidth(matches = true) {

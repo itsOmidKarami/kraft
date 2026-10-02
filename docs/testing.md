@@ -100,10 +100,17 @@ fixture refuses to answer a `param == "bd"` request against the fake).
   - `app` / `stub_app` — the ASGI app and a fake poller `app.state`, for
     tests below the HTTP layer.
 
-  Frontend setup lives in `frontend/src/testFixtures.ts`: `item()`,
-  `session()`, `NODES`, `setPhoneWidth()` — factories that take
-  overrides, not copy-pasted object literals. Add a factory there the
-  second time a setup recurs.
+  Frontend setup lives in the area's own testkit under
+  `frontend/src/ng/<area>/`: a `testkit.tsx`, `fixture.ts` or
+  `testSupport.tsx` beside the tests (`ng/item/testkit.tsx` has `detail()`
+  and `stubFetch()`; `ng/library/fixture.ts` a library draft; there are more
+  under `ng/settings/`, `ng/harnesses/`, `ng/phone/areas/`, `ng/templates/` and
+  `ng/item/draft/`) —
+  factories that take overrides, not copy-pasted object literals. Add a
+  factory to the nearest one the second time a setup recurs, not to a new
+  top-level file. `frontend/src/testFixtures.ts` is the older shared set that
+  a few tests still import; don't add to it. `frontend/README.md` lists the
+  testkits.
 
 - **A fixture that depends on another should pull it itself, not rely on
   argument order.** The `dist` fixture first only worked when listed
@@ -119,10 +126,12 @@ fixture refuses to answer a `param == "bd"` request against the fake).
   (below) or mixes concerns. Its name says what it covers.
 - **No behaviour pinned twice across files.** Before writing a test, search
   for an existing one covering the same branch.
-- **Frontend:** `it.each` / `describe.each`, shared render helpers and the
-  `WorkItem` factories in `testFixtures.ts`. Playwright proves the
-  UI↔server contract; vitest covers component behaviour. Don't duplicate
-  between them.
+- **Frontend:** `it.each` / `describe.each`, and the render helpers and
+  factories in the area's testkit. Playwright proves the UI↔server contract;
+  vitest covers component behaviour. Don't duplicate between them. The
+  screenshot sweep (`frontend/sweep/`) is a third layer, run by the author
+  for a change to how a screen looks and not by CI; `frontend/README.md` says
+  when each of the three is required.
 
 ## What counts as coverage
 

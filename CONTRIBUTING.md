@@ -95,11 +95,27 @@ point into the maintainer's private issue tracker (beads), which you cannot
 see. Read one as "this was discussed"; the text beside it says what matters.
 Don't add new ones: cite a GitHub issue or pull request number instead.
 
+The frontend, its tests and its sweep carry a second set of references of the
+same kind. **UX V2** is the design programme behind the 1.5 interface;
+**ux2-W\<n>** (often written just `W<n>` in a comment) is one of its numbered
+waves of work; **spec §n**, **brief**, **Decided n**, **R\<n>** and
+**Ruling n** are a numbered section, decision or review finding in that
+programme's notes; and `design/handoff_*` is a folder of design handoffs. Those
+notes are the maintainer's private ones: `design/` is gitignored and none of it
+can be opened from a clone. Read them as you read a `Kraft-` ID. The exception
+is the earlier fix programme, plain `W0`–`W14`, whose briefs and receipts are
+tracked in `frontend/sweep/` (`briefs/W<n>_BRIEF.md`, `HISTORY.md`,
+`history/`), so a bare `W11` can be looked up there but a `ux2-W11` cannot. The
+rules the code actually enforces are stated in the tests that enforce them and
+summarised in [`frontend/README.md`](frontend/README.md), so ask there, or in
+an issue, when a comment's own words don't say what a rule is for. Don't add
+new ones.
+
 ## Repository layout
 
 ```text
 src/kraft/        the orchestrator: api/, executor/, store/, adapters/, worker/, cli/, index/, ...
-frontend/         the React SPA (vite); e2e/ is Playwright, sweep/ is a screenshot harness
+frontend/         the React SPA (vite), see frontend/README.md; e2e/ is Playwright, sweep/ is a screenshot harness
 templates/        the default library, chains, harness profiles and policy: an install's seed
 tests/            backend tests, mirroring src/kraft/ (CLAUDE.md says why that matters)
 dev/              the dev-instance seeder, CI check scripts, release and codegen helpers
@@ -128,7 +144,8 @@ them unless you use the same tools:
 | `.gitlab/` | the PR template for GitLab, from before the move to GitHub; a symlink to `.github/`'s | No |
 
 In `frontend/sweep/`, `briefs/`, `WAVES.md` and `HISTORY.md` are the
-maintainer's working notes from past UI fix passes. `frontend/sweep/README.md`
+maintainer's working notes from past UI fix passes, and the `W<n>` and
+`ux2-` names in `waves/` and `cases/` are those passes. `frontend/sweep/README.md`
 covers the harness itself.
 
 ## Tests
@@ -136,7 +153,7 @@ covers the harness itself.
 ```bash
 just test       # backend tests affected by your change (testmon); --no-testmon for all
 just e2e        # Playwright (see frontend/e2e/README.md)
-just test-ui    # frontend unit tests
+just test-ui    # frontend typecheck and unit tests (see frontend/README.md for when the sweep is required too)
 just test-vscode # VS Code extension: schemas current, typecheck, unit tests
 just intent     # check that every enforced-by pin in docs/intent/ still resolves
 just lint       # ruff check + format check
@@ -321,6 +338,7 @@ Page rules:
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/4.reference/9.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | `docsite/content/1.get-started/3.troubleshooting.md` |
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/03.remote-access.md`, and `SECURITY.md` if it's security-relevant |
+| A screen or its behaviour (`frontend/src/ng/`) | the pages that show or name it: `docsite/content/1.get-started/2.first-work-item.md` (the board), `docsite/content/3.guides/08.review-a-change.md` (the review page), `docsite/content/3.guides/03.remote-access.md` (Access and the phone), and any other page that names the screen or a button on it (`git grep` its label under `docsite/content/`). If the screen is in a README or docs screenshot (`.github/assets/*.png`), retake it: [`frontend/README.md`](frontend/README.md#retaking-the-screenshots-in-githubassets) has the recipe |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer
