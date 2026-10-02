@@ -157,6 +157,27 @@ describe("FirstRun", () => {
     expect(screen.getByText("Setup command").nextSibling).toHaveTextContent("none found");
   });
 
+  it("says the first item stops until a setup command is set when the server saved none", async () => {
+    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, setup_command: null });
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true, setup_command: null } as never);
+    const user = userEvent.setup();
+    mount();
+    await probeAndAdd(user);
+    await user.click(stepButton(1)!);
+    expect(screen.getByText(/No setup command found: its first work item stops before it starts until you set one, or tick No setup needed/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+  });
+
+  it("says nothing about setup when the server saved a setup command", async () => {
+    vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true, setup_command: "uv sync" } as never);
+    const user = userEvent.setup();
+    mount();
+    await probeAndAdd(user);
+    await user.click(stepButton(1)!);
+    expect(screen.getByText("Added acme")).toBeInTheDocument();
+    expect(screen.queryByText(/No setup command found/)).toBeNull();
+  });
+
   it("step 2 names where Settings writes without assuming the default home", async () => {
     const user = userEvent.setup();
     mount();

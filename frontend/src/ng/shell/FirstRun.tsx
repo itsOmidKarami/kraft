@@ -20,7 +20,7 @@ const PLUGIN_COMMANDS = "claude plugin marketplace add itsOmidKarami/kraft\nclau
  *  own, and step 3 is the one that says Claude workers need Kraft registered.
  *  So a reload, or a visit to Templates › Repos from step 1, comes back to it. */
 const SAVED = "kraft.firstRun";
-type Saved = { step: number; reached: number; path: string; name: string; disabled: boolean };
+type Saved = { step: number; reached: number; path: string; name: string; disabled: boolean; noSetup?: boolean };
 
 export function savedFirstRun(): Saved | null {
   try {
@@ -101,10 +101,12 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   const [added, setAdded] = useState(saved?.name ?? "");
   /** The server saved the repo disabled: no test command, so the composer will not list it. */
   const [disabled, setDisabled] = useState(saved?.disabled ?? false);
+  /** The server saved no setup command: the repo's first item stops before it starts until one is set. */
+  const [noSetup, setNoSetup] = useState(saved?.noSetup ?? false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (added) keep({ step, reached, path, name: added, disabled });
-  }, [added, step, reached, path, disabled]);
+    if (added) keep({ step, reached, path, name: added, disabled, noSetup });
+  }, [added, step, reached, path, disabled, noSetup]);
   const finish = () => {
     clearFirstRun();
     onDone?.();
@@ -149,6 +151,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
         project: probe.project,
       });
       setDisabled(repo.enabled === false);
+      setNoSetup(repo.setup_command === null);
       setAdded(probe.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -218,6 +221,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 {added && <span className="fr-ok">Added {added}</span>}
               </div>
               {added && disabled && <p>No tests found: connected disabled until you set a test command in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>}
+              {added && noSetup && <p>No setup command found: its first work item stops before it starts until you set one, or tick No setup needed, in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>}
             </>
           )}
           {step === 2 && (

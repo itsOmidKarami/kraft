@@ -43,6 +43,8 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
   const set = v != null && !(Array.isArray(v) && v.length === 0);
   const source = sourceOf(repo, f);
   const [refused, setRefused] = useState<string | null>(null);
+  /** A refusal of the `none` checkbox, which has no cell of its own to show one. */
+  const [noneRefused, setNoneRefused] = useState<string | null>(null);
   const send = async (value: unknown) => {
     const msg = await setRepo(draft, repo, patchFor(repo, f, value));
     setRefused(msg);
@@ -67,7 +69,12 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
         ) : (
           <ValueCell label={f.label} value={f.show(v)} display={shown || f.fallback || "not set"} muted={!shown} bad={!!problem} changed={changed} placeholder={f.placeholder} onCommit={commit} />
         )}
-        {(problem || (f.choice && refused)) && <span className="adr-err" role="alert">{(f.choice && refused) || problem!.message}</span>}
+        {f.none && (
+          <label className="rp-none">
+            <input type="checkbox" checked={v === ""} onChange={(e) => void send(e.target.checked ? "" : null).then(setNoneRefused)} /> {f.none}
+          </label>
+        )}
+        {(problem || (f.choice && refused) || noneRefused) && <span className="adr-err" role="alert">{(f.choice && refused) || noneRefused || problem!.message}</span>}
       </span>
       <span className="rp-src">
         <span className={`rp-chip${changed ? " is-changed" : source === "this repo" ? " is-own" : ""}`}>{changed ? "changed" : source}</span>

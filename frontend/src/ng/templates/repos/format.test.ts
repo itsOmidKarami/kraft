@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { patchFor, sourceOf, valueOf, FIELDS } from "./fields";
-import { dollars, list, models, scopes, whole } from "./format";
+import { command, dollars, list, models, scopes, whole } from "./format";
 import { repo } from "./fixture";
 import { reposOf, runningOf } from "./types";
 import { reposView } from "./fixture";
@@ -22,6 +22,15 @@ describe("Repos Config row formats", () => {
     expect(scopes.parse("web/**, docs/** => npm test; api/** => pytest")).toEqual({ value: [{ paths: ["web/**", "docs/**"], command: "npm test" }, { paths: ["api/**"], command: "pytest" }] });
     expect(scopes.parse("npm test")).toEqual({ error: '"npm test" is not paths => command.' });
     expect(scopes.show([{ paths: ["a"], command: "c" }])).toBe("a => c");
+  });
+
+  it("reads a typed \"\" or '' as the empty command, shows it so, and clears a command on blank", () => {
+    expect(command.parse('""')).toEqual({ value: "" });
+    expect(command.parse(" '' ")).toEqual({ value: "" });
+    expect(command.parse("")).toEqual({ value: null });
+    expect(command.parse('echo ""')).toEqual({ value: 'echo ""' });
+    expect(command.show("")).toBe('""');
+    expect(command.show(null)).toBe("");
   });
 
   it("refuses a number that is not whole and positive, and clears on blank", () => {

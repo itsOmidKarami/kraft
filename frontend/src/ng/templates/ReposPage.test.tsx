@@ -174,6 +174,33 @@ describe("Repos page: the Config rows", () => {
     expect(vi.mocked(d.postOps).mock.calls.every((c) => c[3] === true)).toBe(true);
   });
 
+  it("says a repo needs no setup with a checkbox, or a typed \"\", both the empty command, never two quote marks", async () => {
+    cleanPreview();
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    const none = screen.getByRole("checkbox", { name: "No setup needed" });
+    expect(none).not.toBeChecked();
+    await userEvent.click(none);
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: "" } }]);
+    await userEvent.click(screen.getByRole("button", { name: /^setup command, not set/ }));
+    await userEvent.type(screen.getByLabelText("setup command"), '""{Enter}');
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(4));
+    expect(vi.mocked(d.postOps).mock.calls[2][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: "" } }]);
+  });
+
+  it("ticks No setup needed for a repo whose setup command is empty, and unticking clears it", async () => {
+    cleanPreview();
+    const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, setup_command: "" } } : r));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    expect(screen.getByRole("button", { name: /^setup command, ""/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "No setup needed" }));
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: null } }]);
+  });
+
   it("clears a value this repo sets with Reset, which sends null", async () => {
     cleanPreview();
     mount();
