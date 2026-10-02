@@ -62,3 +62,33 @@ describe("PillInput", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Removed web");
   });
 });
+
+describe("PillInput with a closed set", () => {
+  const GRANTS = [{ value: "git-commit", summary: "A plain git commit" }, { value: "git-rebase" }, { value: "git-push" }];
+  function Grants({ onChange = vi.fn() }) {
+    const [values, setValues] = useState(["git-commit"]);
+    return <PillInput label="escalation grants" values={values} choices={GRANTS} noun="grant" onChange={(n) => { setValues(n); onChange(n); }} />;
+  }
+
+  it("lists the values not yet added, and adds a pick", async () => {
+    const onChange = vi.fn();
+    render(<Grants onChange={onChange} />);
+    const box = screen.getByRole("combobox", { name: "Add to escalation grants" });
+    await userEvent.click(box);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["git-rebase", "git-push"]);
+    await userEvent.type(box, "push");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["git-commit", "git-push"]);
+    expect(box).toHaveValue("");
+  });
+
+  it("refuses a value it does not list, keeping the text, and adds nothing", async () => {
+    const onChange = vi.fn();
+    render(<Grants onChange={onChange} />);
+    const box = screen.getByRole("combobox", { name: "Add to escalation grants" });
+    await userEvent.type(box, "sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("“sds” is not a grant. Pick one from the list.");
+    expect(box).toHaveValue("sds");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
