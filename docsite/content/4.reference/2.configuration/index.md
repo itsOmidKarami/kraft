@@ -27,9 +27,9 @@ component of its own kind, and a `reject_to` may only name a node before the
 gate that declares it.
 
 `registry.yaml`, hook names and `gate_after` do not exist in the current
-template format (V1). Kraft refuses a home that still holds them until you run
+template format. Kraft refuses a home that still holds them until you run
 `kraft admin update`. See
-[Migrating a pre-V1 template configuration](/reference/cli/admin#migrating-a-pre-v1-template-configuration).
+[Migrating an older template configuration](/reference/cli/admin#migrating-an-older-template-configuration).
 
 ## Files
 

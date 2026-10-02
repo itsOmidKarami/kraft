@@ -262,8 +262,9 @@ class TemplateLibrary:
         library_path = root / LIBRARY_FILE
         if is_pre_v1(root):
             raise TemplateLibraryError(
-                f"{root} holds a pre-V1 template configuration, which this Kraft does not "
-                "run; `kraft admin update` backs it up and installs the V1 configuration"
+                f"{root} holds a Kraft 0.x template configuration (a registry.yaml and no "
+                "library.yaml), which this Kraft does not run; `kraft admin update` backs it "
+                "up and installs the current one"
             )
         if not library_path.is_file():
             raise TemplateLibraryError(f"{library_path}: no {LIBRARY_FILE} to read")
@@ -581,7 +582,7 @@ class _Resolution:
             # resolve it against. Say so, rather than letting the author read
             # pydantic's "Extra inputs are not permitted".
             raise TemplateLibraryError(
-                f"{self._chain.file}: chain-level 'extends' is not supported in V1; "
+                f"{self._chain.file}: chain-level 'extends' is not supported; "
                 "share structure through a reusable node instead"
             )
         nodes = data.get("nodes")

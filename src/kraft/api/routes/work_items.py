@@ -787,7 +787,7 @@ def _item_policy(row, patch: dict | None, new_materialized: str | None):
         else store.materialized_chain_of(row)
     )
     if chain is None:
-        raise HTTPException(409, "this work item has no V1 chain to hold a policy override")
+        raise HTTPException(409, "this work item has no chain snapshot to hold a policy override")
     try:
         # `{}` clears: nothing to check.
         wanted = store.policy_override_of(row) if patch is None else (patch or None)
@@ -804,7 +804,7 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
     from the moment anything is attached. 409 naming it when that is missing."""
     previous = store.materialized_chain_of(row)
     if previous is None:
-        raise HTTPException(409, "this work item has no V1 chain to re-trim")
+        raise HTTPException(409, "this work item has no chain snapshot to re-trim")
     untrimmed = previous.untrimmed if filed_kinds else previous.chain.chain
     if untrimmed is None and filed_kinds - kinds:
         raise HTTPException(
