@@ -15,11 +15,12 @@ def _help(capsys, *argv: str) -> str:
 
 
 def test_raise_budget_help_says_which_cap_it_raises(capsys):
-    """Only the item's own cap: a policy or daily cap's stop is refused."""
+    """The item's own cap or its policy's item-wide one: a node's, a token or
+    the daily cap's stop is refused."""
     text = _help(capsys, "item")
     assert (
-        "raise-budget raise an item's own dollar cap (create --budget) once that cap "
-        "stopped it, and retry it"
+        "raise-budget raise the dollar cap that stopped an item, its own (create --budget) "
+        "or its policy's item-wide budget_usd, and retry it"
     ) in text
 
 
