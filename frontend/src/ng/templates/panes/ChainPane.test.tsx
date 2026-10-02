@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
@@ -286,5 +286,66 @@ describe("closed-set fields", () => {
     await userEvent.type(input, "review_package, prev");
     await userEvent.keyboard("{ArrowDown}{Enter}{Enter}");
     expect(draft.field).toHaveBeenCalledWith("verification.review.code_review", "inputs", ["review_package", "previous_review"]);
+  });
+});
+
+describe("an agent task's fallback list", () => {
+  const TASK = "implementation.main.implement";
+  const withFallback = (value: unknown) => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources[TASK] = { ...sources[TASK], fallback: { value, source: "chain" } };
+    return mount(TASK, { sources });
+  };
+  const ENTRIES = [{ harness: "codex", profile: "strong" }, { harness: "claude", model: "opus", effort: "high" }];
+  /** As the resolved chain reports them: every key, unset ones null. */
+  const RESOLVED = ENTRIES.map((e) => ({ profile: null, model: null, effort: null, ...e }));
+  const pick = (name: string) => screen.findByRole("combobox", { name });
+
+  it("shows each entry with its harness and route, never as text", async () => {
+    withFallback(ENTRIES);
+    expect(await pick("Fallback 1 harness")).toHaveValue("codex");
+    expect(await pick("Fallback 1 profile")).toHaveValue("strong");
+    expect(await pick("Fallback 2 harness")).toHaveValue("claude");
+    expect(within(await pick("Fallback 2 profile")).getByRole("option", { selected: true })).toHaveTextContent("model opus · effort high");
+    expect(screen.queryByText(/object Object/)).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "fallback" })).toBeNull();
+  });
+
+  it("sends the list as entry mappings, only what each sets: a harness keeps the route, a profile replaces a model and effort", async () => {
+    const { draft } = withFallback(RESOLVED);
+    await userEvent.selectOptions(await pick("Fallback 1 harness"), "claude");
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [{ harness: "claude", profile: "strong" }, ENTRIES[1]]);
+    await userEvent.selectOptions(await pick("Fallback 2 profile"), "fast");
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [ENTRIES[0], { harness: "claude", profile: "fast" }]);
+    await userEvent.click(screen.getByRole("button", { name: "Remove fallback 1" }));
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [ENTRIES[1]]);
+  });
+
+  it("adds an entry on another harness than the task's", async () => {
+    const { draft } = mount(TASK);
+    const add = await screen.findByRole("button", { name: "+ Add a fallback" });
+    await waitFor(() => expect(add).toBeEnabled());
+    await userEvent.click(add);
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [{ harness: "codex" }]);
+  });
+
+  it("unsets the list when its last entry is removed, so an agent profile's own list applies", async () => {
+    const { draft } = withFallback([{ harness: "codex" }]);
+    await userEvent.click(await screen.findByRole("button", { name: "Remove fallback 1" }));
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", null);
+  });
+
+  it("reads a bare name a draft wrote as the harness it meant, so a change writes the schema's shape", async () => {
+    const { draft } = withFallback(["codex"]);
+    await userEvent.selectOptions(await pick("Fallback 1 profile"), "strong");
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [{ harness: "codex", profile: "strong" }]);
+  });
+
+  it("on the Config tab, shows the entries and sends the edit to the Overview", async () => {
+    withFallback(ENTRIES);
+    await configTab();
+    expect(rowOf("fallback")).toHaveTextContent("codex · strong, claude · model opus · effort high");
+    expect(within(rowOf("fallback")).queryByRole("button", { name: "Edit fallback" })).toBeNull();
+    expect(within(rowOf("fallback")).getByText("on Overview")).toBeInTheDocument();
   });
 });

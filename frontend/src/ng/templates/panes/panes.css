@@ -78,3 +78,11 @@
 .iy-issues { display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--bad) 8%, var(--surface)); }
 .iy-refused { display: flex; align-items: center; gap: 8px; }
 .iy-refused .yv-issue { flex: 1; color: var(--text); }
+
+/* An agent task's fallback list (Overview): one row per entry, tried in order. */
+.fb-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.fb-row { display: flex; align-items: center; gap: 6px; }
+.fb-n { flex: none; width: 12px; font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); }
+.fb-add { align-self: flex-start; padding: 2px 0; border: 0; background: none; font-size: 11.5px; color: var(--text-sub); cursor: pointer; }
+.fb-add:not(:disabled):is(:hover, :focus-visible) { color: var(--text); }
+.fb-add:disabled { color: var(--text-faint); cursor: default; }

@@ -3,6 +3,7 @@ import type { ConfigDraft } from "../draft/useConfigDraft";
 import type { Result, Scope } from "../draft/types";
 import { authoredAt, authoredNodes, kindOf, normalise, resolvedAt, valueAt, type NodeA, type Step, type Task } from "../draft/view";
 import { Head, Kv, Note, PauseText, SelectRow, type Option } from "./controls";
+import { FallbackRows } from "./Fallback";
 import type { PaneKind } from "./describe";
 import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
@@ -17,7 +18,6 @@ export type PaneCtx = {
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
-const list = (v: unknown) => (Array.isArray(v) ? v.map(str).join(", ") : "");
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The library components a chain uses: every `extends` it writes, anywhere. */
@@ -233,7 +233,13 @@ function TaskOverview({ kind, ctx }: { kind: PaneKind; ctx: PaneCtx }) {
           {kind === "review" ? (
             <Note>A gate reviewer has no fallback list and no on-failure handler.</Note>
           ) : (
-            <PauseText label="fallback" mono value={list(v("fallback"))} placeholder="none · e.g. codex, cursor" sub="Tried in order when a launch is rate-limited." onText={(t) => set("fallback", true)(t.split(",").map((x) => x.trim()).filter(Boolean))} onBlur={draft.flush} />
+            <FallbackRows
+              value={v("fallback")}
+              harness={harness}
+              harnesses={loading ? null : opts.harnesses.profiles.map((p) => p.id)}
+              profiles={loading ? null : opts.harnesses.agent_profiles.map((p) => p.id)}
+              onChange={(next) => draft.field(path, "fallback", next)}
+            />
           )}
         </>
       )}

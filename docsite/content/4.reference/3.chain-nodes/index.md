@@ -133,6 +133,8 @@ In Templates › Chains and Library, `ref`, `target` and `inputs` list the
 values above as you type, each with a line on what it does. So do `steering`,
 and a policy's `grants` and `allowed_harnesses`. A value that is not on the
 list is marked where you typed it and is not saved.
+An agent task's `fallback` is edited there as its list of entries, a harness
+and a profile picked for each; an entry's `model` and `effort` are set in YAML.
 
 ## read_only
 

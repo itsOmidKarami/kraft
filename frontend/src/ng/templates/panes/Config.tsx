@@ -103,6 +103,11 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
       {row.source !== undefined && <span className={`cfg-chip${own ? " is-own" : ""}`} title={row.source}>{sourceWord(row.source)}</span>}
       {row.locked ? (
         <span className="cfg-lock" title={row.locked}>locked</span>
+      ) : meta.elsewhere ? (
+        <>
+          <span className="cfg-lock" title={meta.elsewhere}>on Overview</span>
+          {own && row.source !== undefined ? <IconButton label={`Reset ${label}`} onClick={() => ctx.draft.ops([{ op: "reset_field", path: ctx.path, field: row.field }])}><RotateCcw size={12} aria-hidden /></IconButton> : <span className="cfg-gap" />}
+        </>
       ) : (
         editing === null && (
           <>
