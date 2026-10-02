@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
 from pathlib import Path
 
 import pytest
 import yaml
+from support.harness import connect_repo, make_repo
 
 from kraft import config, store
 from kraft.paths import RunDirs
@@ -354,10 +356,30 @@ def test_put_intake_no_longer_requires_max_concurrent(client):
     assert body.status_code == 200, body.text
 
 
-def test_get_intake_carries_repo_pickup_stats(client, templates_dir):
+def test_get_intake_carries_repo_pickup_stats(client, templates_dir, tmp_path, bd, monkeypatch):
+    """Per connected repo, how many beads `bd ready` would hand intake, and
+    None for a repo bd cannot answer for rather than a 500 on the page."""
+    from kraft.adapters import beads
+
+    ready = connect_repo(bd.init(make_repo(tmp_path, "ready")), templates_dir)
+    broken = connect_repo(make_repo(tmp_path, "broken"), templates_dir)
+    for title in ("one", "two"):
+        client.portal.call(functools.partial(beads.intake, title, cwd=str(ready)))
+    real_ready = beads.ready
+
+    async def ready_or_fail(*, cwd=None):
+        if Path(cwd) == broken.resolve():
+            raise RuntimeError("bd ready failed (exit 1)")
+        return await real_ready(cwd=cwd)
+
+    monkeypatch.setattr(beads, "ready", ready_or_fail)
+
     body = client.get("/api/intake").json()
-    assert "repo_pickups" in body
-    assert "recent_pickups" in body
+
+    assert body["repo_pickups"] == {
+        str(ready.resolve()): {"items": 2, "last_picked_up": None},
+        str(broken.resolve()): {"items": None, "last_picked_up": None},
+    }
     assert body["recent_pickups"] == []
 
 

@@ -145,6 +145,25 @@ def test_a_server_the_installed_service_started_restarts_with_a_202(
     assert ran == [client.app.state]
 
 
+@pytest.mark.parametrize(
+    ("failure", "says"),
+    [(OSError("no such file: kraft"), "no such file: kraft"), (SystemExit(2), "2")],
+    ids=["the-executable-cannot-start", "the-runner-exits"],
+)
+def test_a_restart_that_cannot_start_is_a_500_naming_why(
+    client, monkeypatch, tmp_path, failure, says
+):
+    _installed(monkeypatch, tmp_path, "linux")
+
+    def runner(st):
+        raise failure
+
+    monkeypatch.setattr(client.app.state, "restart_runner", runner, raising=False)
+    r = client.post("/api/apply/restart")
+    assert r.status_code == 500
+    assert r.json()["detail"] == f"could not start the restart: {says}"
+
+
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
 def test_a_server_started_from_a_terminal_is_told_to_restart_it_there(
     client, monkeypatch, tmp_path, platform

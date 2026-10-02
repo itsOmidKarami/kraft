@@ -9,6 +9,7 @@ import asyncio
 import os
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -214,6 +215,41 @@ def _started(client, body: dict) -> str:
     return r.json()["id"]
 
 
+def _paused(client, repo, **body) -> str:
+    """File a not-yet-started item (`autostart: False`, so no worktree, no
+    base commit and no current node yet); its id. `body` adds to or
+    overrides the create body (`chain_template`, `attachments`, ...)."""
+    r = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False, **body}
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
+    """Start an item and return its id once `node_id` has started, with every
+    fake agent task sleeping `delay` seconds first (`KRAFT_FAKE_CLAUDE=slow`,
+    the one sleep trigger: a `KRAFT_SLOW` title as well would sleep twice).
+    Held there, the item's worktree exists and no gate is pending yet."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", delay)
+    wid = _started(client, {"title": "t", "repo": str(repo), **body})
+    _poll_node_started(client, wid, node_id)
+    return wid
+
+
+def _completed_item(client, repo, *, timeout=120) -> str:
+    """A `quick-task` item (no gate on any node) started and walked to
+    `work_item_completed`; its id. Quick-task rather than the default chain:
+    a `gate_requested` left open by force-writing status past it reads to
+    `gates.pending_gate` as a still-open gate."""
+    wid = _started(
+        client, {"title": "make it pass", "repo": str(repo), "chain_template": "quick-task"}
+    )
+    _poll_events(client, wid, "work_item_completed", timeout=timeout)
+    return wid
+
+
 def _post_default(client, repo):
     return client.post(
         "/api/work-items",
@@ -270,7 +306,9 @@ def _budget_stopped_item(client, repo, breach: dict, **fields) -> str:
             **fields,
         },
     ).json()["id"]
-    with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
+    # `closing` closes; the inner `conn` commits (a bare `with connect()` only commits).
+    db = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute(
             "UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,)
         )

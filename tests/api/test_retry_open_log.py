@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from support.api import _completed_item
 from support.harness import (
     _git,
     make_repo_with_engineering,
@@ -210,27 +211,6 @@ def test_split_lines_is_the_one_numbering_rule(tmp_path):
 
 
 # ── endpoints ────────────────────────────────────────────────────────────────
-
-
-def _completed_item(client, repo):
-    import time
-
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "autostart": True,
-            "repo": str(repo),
-            "title": "make it pass",
-            "chain_template": "quick-task",
-        },
-    ).json()["id"]
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        evs = client.get(f"/api/work-items/{wid}/events").json()
-        if any(e["type"] == "work_item_completed" for e in evs):
-            return wid
-        time.sleep(0.2)
-    raise AssertionError("work item never completed")
 
 
 def test_work_item_documents_carry_the_run_their_session_came_from(client, repo):
