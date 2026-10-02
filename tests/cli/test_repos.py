@@ -467,12 +467,15 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     [
         ["pyproject.toml", "frontend/package.json"],
         ["backend/pyproject.toml", "frontend/package.json", "package-lock.json"],
+        ["backend/pyproject.toml", "go.mod"],
+        ["backend/pyproject.toml", "package.json"],
     ],
-    ids=["at-the-root", "one-level-down"],
+    ids=["at-the-root", "one-level-down", "under-a-go-root", "under-an-npm-root"],
 )
-def test_a_lockless_pyproject_with_no_root_command_proposes_no_test_scope(repo, layout):
+def test_a_lockless_pyproject_no_root_command_can_cover_proposes_no_test_scope(repo, layout):
     """A `frontend/` scope alone is what a diff to the Python code fails open
-    to, so it would pass on `npm test` with the Python suite never run."""
+    to, and a root `go test` or `npm test` is what it selects: either passes
+    with the Python suite never run."""
 
     from kraft import config
 

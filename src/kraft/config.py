@@ -756,6 +756,12 @@ def _first_setup_command(directory: Path) -> str | None:
     return next((cmd for marker, cmd in _SETUP_COMMANDS if (directory / marker).is_file()), None)
 
 
+#: Root markers whose test command can run a stopped subdirectory's Python
+#: tests: the operator's own justfile recipe, or `uv run pytest -q` from a root
+#: `uv.lock` (a uv workspace). `npm test`, `cargo test` and `go test` cannot.
+_COVERS_PYTHON = frozenset({"Justfile", "justfile", "uv.lock"})
+
+
 def _probe_test_scopes(
     root: Path, *, test_command: str | None = None
 ) -> tuple[str | None, list[dict], list[str]]:
@@ -771,22 +777,24 @@ def _probe_test_scopes(
 
     A stop marker (a `pyproject.toml` with no `uv.lock`) at the root, with no
     `test_command` given, proposes nothing at all. One in a subdirectory is
-    left unclaimed: the root scope's command covers it, as it covers a uv
-    workspace member, which never has a lock of its own (`uv run` there uses
-    the root's). With no root command to cover it, nothing is proposed either:
-    the other scopes would be what a diff to that Python code fails open to
-    (`dispatch._matched_scopes`), and its suite would never run.
+    left unclaimed when the root's command can run its Python tests (a given
+    `test_command`, or one from `_COVERS_PYTHON`): the root scope covers it,
+    as it covers a uv workspace member, which never has a lock of its own
+    (`uv run` there uses the root's). Otherwise nothing is proposed either: a
+    diff to that Python code would select a root `go test` or fail open to a
+    lone `npm test` scope (`dispatch._matched_scopes`), and its suite would
+    never run.
     """
     found = None if test_command else _first_test_marker(root)
     root_command = test_command or (found and found[1])
+    covers_python = bool(test_command) or (found is not None and found[0] in _COVERS_PYTHON)
     try:
         subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
     except OSError:
         subdirs = []
     probed = [(d.name, hit) for d in subdirs if (hit := _first_test_marker(d))]
     hits = [(name, hit) for name, hit in probed if hit[1]]
-    if not root_command and (found or len(hits) < len(probed)):
-        # `found` here can only be a stop: anything else is a root command.
+    if (found and not root_command) or (len(hits) < len(probed) and not covers_python):
         return None, [], []
     nested = [(name, cmd) for name, (_, cmd) in hits]
     markers = ([found[0]] if found else []) + [f"{name}/{marker}" for name, (marker, _) in hits]
