@@ -8,6 +8,7 @@ import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
 import { groupOf, groupsOf, type GroupKey } from "../../board/model";
+import { gateWords, nodeWords } from "../../board/rowText";
 import { useBoardPrefs } from "../../board/prefs";
 import { ChoiceSheet, ConfirmSheet, useSheet } from "../nav/Sheet";
 import { RootHeader } from "../nav/ScreenHeader";
@@ -96,7 +97,7 @@ export function Board() {
     setBusy(null);
     if (r.ok) {
       sheet.close();
-      return void showToast(`Approved ${gate}.`);
+      return void showToast(`Approved ${gateWords(gate)}.`);
     }
     if (needsDocument(r.error)) {
       showToast(r.error);
@@ -151,8 +152,9 @@ export function Board() {
       </div>
       {sheet.is("approve") && approving && (
         <ConfirmSheet
-          title={`Approve ${approving.gate}?`}
-          text={`${approving.item.title} ${nextAfter(approving.item, approving.gate) ? `moves on to ${nextAfter(approving.item, approving.gate)}` : "moves on"} at once. An approval is not taken back; to read first, open the review.`}
+          // The card's own words: its tail reads "approve spec" for spec_approval.
+          title={`Approve ${gateWords(approving.gate)}?`}
+          text={`${approving.item.title} ${nextAfter(approving.item, approving.gate) ? `moves on to ${nodeWords(nextAfter(approving.item, approving.gate)!)}` : "moves on"} at once. An approval is not taken back; to read first, open the review.`}
           busy={busy === approving.item.id}
           confirm={{ label: "Approve", run: () => void approve(approving) }}
           onClose={sheet.close}

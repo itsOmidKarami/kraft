@@ -140,7 +140,8 @@ describe("a card's inline actions (B.4)", () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
     // One tap only asks: a passed gate is not taken back.
-    const sheet = screen.getByRole("dialog", { name: "Approve plan_approval?" });
+    // Named as the card's tail names it ("approve plan"), not by the raw gate id.
+    const sheet = screen.getByRole("dialog", { name: "Approve plan?" });
     expect(sheet).toHaveTextContent("Item g1 moves on to implementation at once.");
     expect(calls.filter((c) => c.method === "POST")).toEqual([]);
     await userEvent.click(within(sheet).getByRole("button", { name: "Approve" }));
