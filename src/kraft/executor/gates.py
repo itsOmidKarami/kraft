@@ -452,7 +452,7 @@ async def review_gates(
             # stops the poller from spawning another session against it next
             # tick -- see the comment at that guard's call site.
             await db.write(
-                lambda c, gate=gate: events.append(
+                lambda c, gate=gate, why=why: events.append(
                     c,
                     work_item_id,
                     "gate_auto_review_skipped",
