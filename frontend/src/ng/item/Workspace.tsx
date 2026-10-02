@@ -105,7 +105,9 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const hasCurrent = graph.nodes.some((n) => n.state === "current" || n.state === "failed" || n.state === "amber");
 
   const sel = place.sel;
-  const pick = (to: Sel) => dispatch({ type: "pick", sel: to });
+  // A step or task picked from the chain canvas's pane opens its node's view, as
+  // Focus does, so the canvas shows where it sits and not only the pane.
+  const pick = (to: Sel) => dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
   const tab = place.tab ?? "";
   const pane = paneContent({
     item, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,

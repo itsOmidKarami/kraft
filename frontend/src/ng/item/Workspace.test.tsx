@@ -95,6 +95,18 @@ describe("Workspace", () => {
     expect(where()).toBe("/work-items/w1");
   });
 
+  it("opens the node view when a step or task is picked from a node's pane on the chain, and ← chain comes back", async () => {
+    mount("/work-items/w1?sel=verification");
+    const pane = () => screen.getByRole("complementary", { name: /pane$/ });
+    await userEvent.click(within(pane()).getByRole("button", { name: /review/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review");
+    expect(screen.getByRole("group", { name: "verification" })).toBeInTheDocument();
+    await userEvent.click(within(pane()).getByRole("button", { name: /code_review/ }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    await userEvent.click(screen.getByRole("button", { name: "Back to the chain" }));
+    expect(where()).toBe("/work-items/w1");
+  });
+
   it("goes back to the chain's pane from a node's crumb", async () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));
