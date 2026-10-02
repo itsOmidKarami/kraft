@@ -579,7 +579,17 @@ class Indexer:
         if mode == "fts":
             return self._fts(q, limit=limit, **filters), "fts"
 
-        vec_ids, snippets = self._vector_ids(q, limit=limit, **filters)
+        try:
+            vec_ids, snippets = self._vector_ids(q, limit=limit, **filters)
+        except Exception as exc:  # noqa: BLE001 - a model that will not load, for any reason
+            # Installed is not working: offline, a proxy refusing the model
+            # download, a corrupt cache. `encode` recorded why in `reason`,
+            # which health reports. Hybrid is still answered, by text.
+            logger.warning("vector search unavailable: %s", exc)
+            if mode == "vector":
+                problem = self.embedding_problem()
+                raise RuntimeError(f"vector search unavailable: {problem}") from exc
+            return self._fts(q, limit=limit, **filters), "fts"
         if mode == "vector":
             return self._hydrate(vec_ids, snippets), "vector"
 
@@ -752,10 +762,27 @@ class Indexer:
             "links": self._links_for([doc_id])[doc_id],
         }
 
+    def embedding_problem(self) -> str:
+        """Why vector search is not answering, for a search that fell back to text."""
+        return self._embedder.reason or "embeddings unavailable"
+
+    def vector_failing(self) -> str | None:
+        """Why an installed embedder is failing, or None: not installed is not failing."""
+        return self._embedder.reason if self._embedder.available() else None
+
     def health(self) -> dict:
         n = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
         chunks = self._conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
         available = self._embedder.available()
+        reason = self._embedder.reason
+        if not available:
+            state = "not installed"
+        elif reason:
+            state = "failing"
+        elif self._embedder.loaded:
+            state = "ready"
+        else:
+            state = "not loaded yet"
         return {
             "last_scan_at": self._last_scan_at,
             "repos_scanned": self._repos_scanned,
@@ -766,7 +793,11 @@ class Indexer:
                 "chunks": chunks,
                 # Unavailable: why not. Available: the last load/encode
                 # failure, None once one succeeds (Kraft-pm2rj).
-                "reason": self._embedder.reason,
+                "reason": reason,
+                # `available` is only whether the extra imports. This is
+                # whether the model answers: "failing" while `reason` is set,
+                # "not loaded yet" before the first search or ingest.
+                "state": state,
             },
             "errors": list(self._errors),
         }

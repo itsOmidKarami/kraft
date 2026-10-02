@@ -41,12 +41,20 @@ async def search(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except RuntimeError as exc:
-        # An explicit mode=vector on an instance with no embedder. `mode` echoes
-        # what was actually served, so hybrid quietly degrades instead (04 §9).
+        # An explicit mode=vector with no embedder, or with a model that will
+        # not load. `mode` echoes what was actually served, so hybrid quietly
+        # degrades instead (04 §9).
         raise HTTPException(422, str(exc)) from exc
     except sqlite3.OperationalError as exc:
         raise HTTPException(422, f"bad search query: {exc}") from exc
-    return {"query": q, "mode": served, "results": results}
+    body = {"query": q, "mode": served, "results": results}
+    problem = request.app.state.indexer.vector_failing()
+    if mode == "hybrid" and served != mode and problem:
+        # Said, not only implied by `mode`: an installed extra whose model will
+        # not load (offline, say) is something to fix, and nothing else in a
+        # search answer would show it. A missing extra is a choice, not news.
+        body["note"] = f"vector search is failing ({problem}), so this is text search only"
+    return body
 
 
 # Design 1h.

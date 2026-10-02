@@ -62,6 +62,11 @@ class Embedder:
             return False
         return True
 
+    @property
+    def loaded(self) -> bool:
+        """Whether the model has been loaded and answered once."""
+        return self._model is not None
+
     def _load(self):
         if self._model is not None:
             return self._model

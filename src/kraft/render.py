@@ -422,7 +422,9 @@ def health_block(payload: dict) -> str:
         ("last scan", relative_time(index.get("last_scan_at"))),
         (
             "embeddings",
-            "available"
+            f"failing ({embeddings['reason']})"
+            if embeddings.get("available") and embeddings.get("reason")
+            else "available"
             if embeddings.get("available")
             else f"unavailable ({embeddings.get('reason') or 'no reason given'})",
         ),

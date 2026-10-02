@@ -21,3 +21,16 @@ def test_list_refuses_a_status_typo_instead_of_showing_an_empty_board(capsys):
         cli.main(["view", "list", "--status", "needs-human"])
     assert caught.value.code == 2
     assert "invalid choice: 'needs-human'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "note", [None, "vector search is failing (403), so this is text search only"]
+)
+def test_search_prints_why_it_fell_back_to_text(note):
+    hit = {"kind": "specs", "repo": "/r", "path": "a.md"}
+    payload = {"mode": "fts", "results": [hit], **({"note": note} if note else {})}
+
+    out = view._render_search(payload)
+
+    assert "a.md" in out
+    assert (f"note: {note}" in out) if note else ("note:" not in out)

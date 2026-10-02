@@ -106,7 +106,9 @@ def _render_search(payload: dict) -> str:
         {"kind": hit.get("kind"), "repo": hit.get("repo"), "path": hit.get("path")}
         for hit in payload.get("results", [])
     ]
-    return render.table(rows, [("KIND", "kind"), ("REPO", "repo"), ("PATH", "path")])
+    table = render.table(rows, [("KIND", "kind"), ("REPO", "repo"), ("PATH", "path")])
+    # A hybrid search that fell back to text because the model is failing.
+    return f"{table}\nnote: {payload['note']}" if payload.get("note") else table
 
 
 def _cmd_list(ns: argparse.Namespace) -> None:

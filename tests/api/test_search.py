@@ -113,7 +113,7 @@ def test_health_has_index_block(client):
         "embeddings",
     }
     emb = h["index"]["embeddings"]
-    assert set(emb) == {"available", "model", "chunks", "reason"}
+    assert set(emb) == {"available", "model", "chunks", "reason", "state"}
     assert isinstance(emb["available"], bool)
 
 
@@ -148,6 +148,7 @@ def test_search_modes_without_embeddings(tmp_path, monkeypatch):
         body = client.get("/api/search", params={"q": "reconnect"}).json()
         assert body["mode"] == "fts"
         assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
+        assert "note" not in body  # not installed is a choice, not a failure
 
         r = client.get("/api/search", params={"q": "reconnect", "mode": "hybrid"})
         assert r.status_code == 200
@@ -158,6 +159,32 @@ def test_search_modes_without_embeddings(tmp_path, monkeypatch):
         r = client.get("/api/search", params={"q": "reconnect", "mode": "vector"})
         assert r.status_code == 422
         assert "vector" in r.json()["detail"]
+
+
+def test_search_with_a_model_that_will_not_load(tmp_path, monkeypatch):
+    """`[vector]` installed, the model's download refused: the default hybrid
+    search answered 500 and health still said `available`."""
+
+    def refused(self):
+        raise OSError("403 Forbidden")
+
+    monkeypatch.setattr("kraft.index.embed.Embedder.available", lambda self: True)
+    monkeypatch.setattr("kraft.index.embed.Embedder._load", refused)
+    repo = make_repo_with_engineering(
+        tmp_path, {".engineering/specs/ws.md": "# WS\nreconnect backoff schedule\n"}
+    )
+    with _indexing(tmp_path, monkeypatch, repo) as client:
+        body = client.get("/api/search", params={"q": "reconnect"}).json()
+        assert body["mode"] == "fts"
+        assert [h["path"] for h in body["results"]] == [".engineering/specs/ws.md"]
+        assert "403 Forbidden" in body["note"]
+
+        r = client.get("/api/search", params={"q": "reconnect", "mode": "vector"})
+        assert r.status_code == 422
+        assert "403 Forbidden" in r.json()["detail"]
+
+        emb = client.get("/api/health").json()["index"]["embeddings"]
+        assert (emb["available"], emb["state"]) == (True, "failing")
 
 
 def test_connecting_a_repo_indexes_it_immediately(client, tmp_path):
