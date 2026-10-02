@@ -8,6 +8,7 @@ import { StageGraph } from "./StageGraph";
 import { Workbench } from "./Workbench";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
+import "./gallery.css";
 
 const noop = () => {};
 

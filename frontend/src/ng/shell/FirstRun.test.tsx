@@ -127,6 +127,7 @@ describe("FirstRun", () => {
     expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
     expect(screen.getByText(/Claude workers need Kraft's MCP server, or Kraft refuses to launch them/)).toBeInTheDocument();
     expect(screen.getByText(/without the plugin, run/)).toHaveTextContent("kraft admin init");
+    expect(screen.getByText(/open a Claude Code session in your repo and run/)).toHaveTextContent("/kraft:onboard");
     await user.click(screen.getByRole("button", { name: /Copy commands/ }));
     expect(await screen.findByRole("button", { name: /Copied/ })).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe(

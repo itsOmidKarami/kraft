@@ -194,6 +194,7 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
     return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}
 
 
+# Design 6b.
 @api_router.get("/analytics")
 async def get_analytics(
     request: Request,
