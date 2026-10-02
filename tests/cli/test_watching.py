@@ -32,16 +32,21 @@ def test_latest_session_says_so_when_nothing_has_run(app, make_item, repo):
 
 
 def test_events_returns_the_chain_history(app, make_item, repo):
-    wid = make_item(repo)
+    wid = make_item(repo, "the history")
     rows = asyncio.run(client.events(wid))
-    assert isinstance(rows, list)
-    assert all("type" in row and "seq" in row for row in rows)
+    assert [(row["type"], row["payload"]["title"]) for row in rows] == [
+        ("work_item_created", "the history")
+    ]
+    assert isinstance(rows[0]["seq"], int)
 
 
 def test_events_defaults_to_the_resolved_work_item(app, monkeypatch, make_item, repo):
-    wid = make_item(repo)
+    make_item(repo, "someone else's")
+    wid = make_item(repo, "mine")
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
-    assert asyncio.run(client.events()) == asyncio.run(client.events(wid))
+    rows = asyncio.run(client.events())
+    assert [row["payload"]["title"] for row in rows] == ["mine"]
+    assert rows == asyncio.run(client.events(wid))
 
 
 @pytest.mark.slow

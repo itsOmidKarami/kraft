@@ -149,17 +149,17 @@ def test_broadcaster_drops_only_the_overflowing_client(tmp_path):
                 await database.write(
                     lambda c, i=i: events.append(c, "w1", "node_started", {"i": i})
                 )
-            await asyncio.sleep(0.05)
             # ok keeps up; slow never reads -> its queue is now full (maxsize=3)
-            drained = [ok.queue.get_nowait() for _ in range(3)]
+            drained = [await asyncio.wait_for(ok.queue.get(), timeout=5) for _ in range(3)]
             for i in range(3, 6):
                 await database.write(
                     lambda c, i=i: events.append(c, "w1", "node_started", {"i": i})
                 )
-            await asyncio.sleep(0.05)
+            # One fan-out pass offers each event to every client before the
+            # next, so once ok holds the later events slow has overflowed.
+            drained += [await asyncio.wait_for(ok.queue.get(), timeout=5) for _ in range(3)]
             assert slow.dropped is True
             assert ok.dropped is False
-            drained += [ok.queue.get_nowait() for _ in range(3)]
             assert [e["payload"]["i"] for e in drained] == list(range(6))
         finally:
             await bc.stop()
@@ -321,13 +321,25 @@ def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypa
 
     seen_types: list[str] = []
     seqs: list[int] = []
-    with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
-        for _ in range(60):
+
+    def read_until(want: str) -> None:
+        for _ in range(120):
             ev = ws.receive_json()
             seqs.append(ev["seq"])
             seen_types.append(ev["type"])
-            if {"race_a", "race_b"} <= set(seen_types):
-                break
+            if want in seen_types:
+                return
+        raise AssertionError(f"{want} never arrived; saw {seen_types}")
+
+    with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
+        read_until("race_b")
+        # A copy of a race event would come from the live queue, after the
+        # catch-up read that may already have sent it. An event committed only
+        # now lands behind any such copy, so reading up to it drains them all.
+        client.portal.call(
+            client.app.state.db.write, lambda c: events.append(c, wid, "race_after", {})
+        )
+        read_until("race_after")
 
     assert {"race_a", "race_b"} <= set(seen_types)
     assert seen_types.count("race_a") == 1 and seen_types.count("race_b") == 1

@@ -44,12 +44,24 @@ export const detail = (over: Partial<ItemDetail> = {}): ItemDetail =>
     ...over,
   }) as ItemDetail;
 
-export type Call = { method: string; path: string; body: unknown };
+/** One request `stubFetch` saw. `path` is the route without its query, which
+ *  is what answers are keyed on; `url` keeps the query and `query` parses it,
+ *  for a request that means something only through its parameters. Those two
+ *  are not enumerable, so `toEqual({ method, path, body })` still reads as the
+ *  request and a test about its query asks `query` for it. */
+export type Call = { method: string; path: string; body: unknown; readonly url: string; readonly query: URLSearchParams };
+
+function call(method: string, url: string, body: unknown): Call {
+  const [path, search = ""] = url.split("?");
+  return Object.defineProperties({ method, path, body } as Call, {
+    url: { value: url, enumerable: false },
+    query: { value: new URLSearchParams(search), enumerable: false },
+  });
+}
 
 /** What an unstubbed read answers: the route's own empty shape, so a component
  *  a test didn't mean to feed never sees an object where the API sends a list. */
-function emptyAnswer(method: string, path: string): [number, unknown] {
-  if (method !== "GET") return [200, {}];
+function emptyAnswer(path: string): [number, unknown] {
   if (/\/events$/.test(path) || /\/threads$/.test(path)) return [200, []];
   if (/\/diff$/.test(path)) return [200, { work_item_id: "w1", base_ref: null, files: [], diff: "", untracked: [], truncated: false }];
   if (/\/documents$/.test(path)) return [200, { work_item_id: "w1", documents: [] }];
@@ -57,18 +69,26 @@ function emptyAnswer(method: string, path: string): [number, unknown] {
   return [200, {}];
 }
 
-/** Stub fetch: `answers` maps "METHOD /path" (no /api) to [status, body]; anything else answers 200 {}. */
+/** Stub fetch: `answers` maps "METHOD /path" (no /api, no query) to [status, body].
+ *  An unrouted read answers its route's empty shape; an unrouted write is
+ *  recorded and then refused, so no test passes on a write it never routed. */
 export function stubFetch(answers: Record<string, [number, unknown]> = {}) {
   const calls: Call[] = [];
-  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-    const path = String(url).replace(/^\/api/, "").split("?")[0];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
-    calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    const [status, body] = answers[`${method} ${path}`] ?? emptyAnswer(method, path);
+    const c = call(method, String(input).replace(/^\/api/, ""), init?.body ? JSON.parse(String(init.body)) : undefined);
+    calls.push(c);
+    const routed = answers[`${method} ${c.path}`];
+    if (!routed && method !== "GET") throw new TypeError(`stubFetch: no route for ${method} ${c.url}`);
+    const [status, body] = routed ?? emptyAnswer(c.path);
     return new Response(JSON.stringify(body), { status });
   }));
   return calls;
 }
+
+/** `200 {}` for each "METHOD /path" named: the writes a test's page is
+ *  expected to send, so that `stubFetch` answers them instead of refusing. */
+export const acceptWrites = (...routes: string[]): Record<string, [number, unknown]> => Object.fromEntries(routes.map((r) => [r, [200, {}]]));
 
 export const inShell = (ui: ReactElement, path = "/work-items/w1") =>
   render(
