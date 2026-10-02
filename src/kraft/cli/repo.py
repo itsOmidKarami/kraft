@@ -204,7 +204,10 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
             )
     else:
         _say_connected(result)
-    if ns.verify and not verify_mod.verify(result, say=(lambda _line: None) if ns.json else print):
+    say = (lambda _line: None) if ns.json else print
+    if ns.verify and not verify_mod.verify(
+        result, say=say, timeout_minutes=ns.timeout, on_host=ns.on_host
+    ):
         raise SystemExit(1)
 
 
@@ -265,6 +268,18 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
         action="store_true",
         help="then run its setup and test commands once in a throwaway worktree; "
         "exit 1 on a failure",
+    )
+    connect.add_argument(
+        "--timeout",
+        type=float,
+        default=30,
+        metavar="MIN",
+        help="--verify: minutes each command may take (default 30)",
+    )
+    connect.add_argument(
+        "--on-host",
+        action="store_true",
+        help="--verify: run a sandboxed repo's commands on this machine anyway",
     )
     connect.set_defaults(func=_cmd_connect)
 
