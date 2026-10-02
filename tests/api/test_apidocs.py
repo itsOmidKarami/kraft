@@ -26,3 +26,5 @@ def test_every_cdn_asset_is_pinned_and_checked_by_hash(client, path):
         assert f'integrity="{apidocs.INTEGRITY[url]}"' in tag, tag
         assert 'crossorigin="anonymous"' in tag, tag
     assert "fonts.googleapis.com" not in r.text
+    assert "fastapi.tiangolo.com" not in r.text
+    assert '<link rel="shortcut icon" href="/icon.svg">' in r.text

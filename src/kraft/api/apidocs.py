@@ -28,6 +28,9 @@ _SWAGGER = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.15"
 _SWAGGER_JS = f"{_SWAGGER}/swagger-ui-bundle.js"
 _SWAGGER_CSS = f"{_SWAGGER}/swagger-ui.css"
 _REDOC_JS = "https://cdn.jsdelivr.net/npm/redoc@2.5.4/bundles/redoc.standalone.js"
+#: The board's own icon (`frontend/public/icon.svg`), not FastAPI's from its
+#: docs site: nothing on these pages need come from a third party unpinned.
+_FAVICON = "/icon.svg"
 
 #: Subresource Integrity: the sha384 of each file above.
 INTEGRITY = {
@@ -56,6 +59,7 @@ async def swagger(request: Request) -> HTMLResponse:
             title=f"{app.title} - Swagger UI",
             swagger_js_url=_SWAGGER_JS,
             swagger_css_url=_SWAGGER_CSS,
+            swagger_favicon_url=_FAVICON,
         )
     )
 
@@ -68,6 +72,7 @@ async def redoc(request: Request) -> HTMLResponse:
             openapi_url=app.openapi_url,
             title=f"{app.title} - ReDoc",
             redoc_js_url=_REDOC_JS,
+            redoc_favicon_url=_FAVICON,
             with_google_fonts=False,
         )
     )
