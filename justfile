@@ -66,6 +66,17 @@ dev: _dev-home
     export {{dev_env}}
     {{fake_agent}} uv run python -m kraft &
     cd frontend && npm run dev &
+    # The backend's own `kraft: http://127.0.0.1:{{dev_port}}` line prints after
+    # vite's banner, so it read as the address to open. It isn't: that port serves
+    # frontend/dist, the last `npm run build` (or no SPA at all), not the code
+    # being edited. Once the API answers, say which one is the UI.
+    for _ in $(seq 150); do
+        if curl -sf -o /dev/null http://127.0.0.1:{{dev_port}}/api/health; then
+            echo "just dev: open http://localhost:5173 (vite, live). :{{dev_port}} is the API, not the UI."
+            break
+        fi
+        sleep 0.2
+    done
     wait
 
 # Fill a running dev instance with work items in every interesting state
