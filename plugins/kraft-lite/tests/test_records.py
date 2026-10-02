@@ -3,6 +3,7 @@ which node runs next, so they are the part that must not be prose."""
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
 from pathlib import Path
@@ -18,6 +19,33 @@ import kl  # noqa: E402
 @pytest.fixture
 def chain():
     return json.loads((PLUGIN / "chains" / "default.json").read_text())
+
+
+#: Minute 0 of `stamp(minute)`, the stamps the walked records carry.
+STAMPED_FROM = dt.datetime(2026, 9, 7, 10, 0, 0)
+
+
+class Clock:
+    """`kl._now`, held still: a gate wait is timed to the second, so a test that
+    stamps a block and then banks it against the live clock is off by one
+    whenever a second turns over between the two. It reads an hour past
+    `STAMPED_FROM`, after every stamp a walk here writes."""
+
+    def __init__(self):
+        self.now = STAMPED_FROM + dt.timedelta(hours=1)
+
+    def __call__(self):
+        return self.now
+
+    def stamp(self, seconds=0):
+        return (self.now + dt.timedelta(seconds=seconds)).strftime(kl.BD_TIME)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    frozen = Clock()
+    monkeypatch.setattr(kl, "_now", frozen)
+    return frozen
 
 
 def test_materialize_makes_one_record_per_node_plus_an_epic(chain):
@@ -147,7 +175,7 @@ def walked(chain, stamps, statuses=None):
 
 
 def stamp(minute):
-    return f"2026-09-07T10:{minute:02d}:00Z"
+    return (STAMPED_FROM + dt.timedelta(minutes=minute)).strftime(kl.BD_TIME)
 
 
 def test_summary_times_the_run_from_the_epic_to_the_last_node(chain):
@@ -280,24 +308,23 @@ def test_summary_splits_out_the_time_a_node_spent_waiting_on_a_human(chain):
     assert out["totals"]["blocked_seconds"] == 30
 
 
-def test_a_gate_answered_in_no_time_banks_nothing_and_says_so(chain):
+def test_a_gate_answered_in_no_time_banks_nothing_and_says_so(chain, clock):
     """Zero is a different answer from null here: one node waited and was answered
     at once, the other never had a gate to wait at."""
     count = len(chain["nodes"])
     records = walked(chain, [stamp(m) for m in range(count + 1)])
-    just_now = kl._now().strftime(kl.BD_TIME)
-    records[1] = kl.bank_wait(kl.set_label(records[1], kl.BLOCKED_LABEL, just_now))
+    records[1] = kl.bank_wait(kl.set_label(records[1], kl.BLOCKED_LABEL, clock.stamp()))
 
     out = kl.summary(records, chain)
     assert out["nodes"][0]["blocked_seconds"] == 0
     assert out["nodes"][1]["blocked_seconds"] is None
 
 
-def test_a_block_stamp_from_the_future_never_banks_negative_time(chain):
+def test_a_block_stamp_from_the_future_never_banks_negative_time(chain, clock):
     """A clock that went backwards between the gate and the answer is not a reason
     to report that the human handed time back."""
     record = kl.set_label(
-        kl.materialize(chain, "t", "kl-abc123")[1], kl.BLOCKED_LABEL, "2099-01-01T00:00:00Z"
+        kl.materialize(chain, "t", "kl-abc123")[1], kl.BLOCKED_LABEL, clock.stamp(86_400)
     )
     assert kl.waited(kl.bank_wait(record)) == 0
 
@@ -323,14 +350,14 @@ def test_time_waited_is_banked_and_survives_a_rewind(chain):
     assert kl.summary(records[:1] + rewound, chain)["totals"]["blocked_seconds"] == 600
 
 
-def test_a_second_gate_round_does_not_erase_the_first_ones_wait(chain):
+def test_a_second_gate_round_does_not_erase_the_first_ones_wait(chain, clock):
     """`gate` on a node already blocked - a re-run, or a chain steered by hand -
     overwrote the open stamp, and an hour already waited went with it."""
     record = kl.materialize(chain, "t", "kl-abc123")[1]
     record = kl.set_label(record, kl.WAITED_LABEL, "3600")
-    record = kl.set_label(record, kl.BLOCKED_LABEL, kl._now().strftime(kl.BD_TIME))
+    record = kl.set_label(record, kl.BLOCKED_LABEL, clock.stamp(-600))
 
-    assert kl.waited(kl.open_gate(record, "spec_approval")) == 3600
+    assert kl.waited(kl.open_gate(record, "spec_approval")) == 3600 + 600
 
 
 def test_a_redone_node_is_timed_from_the_rewind_not_from_the_first_pass(chain):

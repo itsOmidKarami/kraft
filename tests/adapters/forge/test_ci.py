@@ -67,28 +67,31 @@ def _ago(seconds: int) -> str:
     return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
 
 
+#: Each case names how to stamp its cancel, called when the case runs: a stamp
+#: made here would be aged from collection, and a run that reaches this test
+#: more than the grace later reads the fresh cancel as abandoned.
 @pytest.mark.parametrize(
     "cancelled_at, sha, expected",
     [
         # Kraft-kbqmk: still the latest run for this head long after it was
         # cancelled -- nobody is re-running it, so a person decides now rather
         # than at the wait's full timeout.
-        (_ago(3600), "head", "abandoned"),
+        (lambda: _ago(3600), "head", "abandoned"),
         # Freshly cancelled: a successor for the same head (a relabel, GitLab's
         # auto-cancel) registers within seconds, so this is still a wait (#116).
-        (_ago(5), "head", "waiting"),
+        (lambda: _ago(5), "head", "waiting"),
         # A push superseded it: a run for another head is never a result.
-        (_ago(3600), "old", "waiting"),
+        (lambda: _ago(3600), "old", "waiting"),
         # A time with no zone cannot be aged against ours: it waits, and the
         # wait's own timeout still stops it.
-        ("2026-01-01T00:00:00", "head", "waiting"),
+        (lambda: "2026-01-01T00:00:00", "head", "waiting"),
     ],
     ids=["no-successor-stops", "fresh-cancel-waits", "other-head-waits", "zoneless-time-waits"],
 )
 async def test_render_ci_stops_only_on_a_cancel_nobody_followed_up(
     tmp_path, cancelled_at, sha, expected
 ):
-    ci = forge.CIStatus(state="pending", url="u", sha=sha, cancelled_at=cancelled_at)
+    ci = forge.CIStatus(state="pending", url="u", sha=sha, cancelled_at=cancelled_at())
 
     log, verdict = await forge.ci.render_ci(
         ci, forge=forge.FakeForge(), repo=tmp_path, branch="b", head_sha="head"

@@ -1,5 +1,9 @@
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from kraft import intent
 from kraft.intent import Report, Requirement, check, main, parse_collect_output, parse_file, render
 
 TREE = """\
@@ -225,6 +229,23 @@ def test_main_exits_one_on_a_broken_pin(tmp_path, monkeypatch, capsys):
 
     assert main([str(tmp_path)]) == 1
     assert "BROKEN" in capsys.readouterr().out
+
+
+def test_a_collection_that_found_nothing_is_an_error_not_every_pin_broken(tmp_path, monkeypatch):
+    """A suite that fails to collect cannot tell a broken pin from a broken
+    suite, so `collect_node_ids` says so with pytest's own output instead of
+    handing back an empty set that would read as every pin broken."""
+
+    def failed_collection(argv, **kw):
+        return subprocess.CompletedProcess(
+            argv, 2, stdout="no tests ran\n", stderr="ImportError while loading conftest\n"
+        )
+
+    monkeypatch.setattr(intent.subprocess, "run", failed_collection)
+    with pytest.raises(RuntimeError, match="pytest collected nothing") as exc:
+        intent.collect_node_ids(tmp_path)
+    assert str(tmp_path) in str(exc.value)
+    assert "ImportError while loading conftest" in str(exc.value)
 
 
 def test_main_exits_zero_when_only_unpinned(tmp_path, monkeypatch, capsys):
