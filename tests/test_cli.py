@@ -294,7 +294,11 @@ def test_serve_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path)
     """The security regression test for this sub-project. A flag must not be a
     way around a check an env var respects."""
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: pytest.fail("must not bind"))
+    # The seam `_serve` binds through: a regressed check fails here at once
+    # rather than starting a real server on 0.0.0.0.
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: pytest.fail("must not bind")
+    )
     with pytest.raises(SystemExit, match="refusing to bind 0.0.0.0"):
         cli.main(["admin", "start", "--host", "0.0.0.0"])
 

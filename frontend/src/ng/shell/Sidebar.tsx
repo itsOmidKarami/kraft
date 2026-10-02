@@ -48,7 +48,10 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   // out of it: focus left on a clicked row or the pin would hold it open.
   const retract = (moveFocus = true) => {
     setDismissed(true);
-    if (moveFocus && ref.current?.contains(document.activeElement)) document.getElementById("ng-main")?.focus({ preventScroll: true });
+    if (moveFocus) release();
+  };
+  const release = () => {
+    if (ref.current?.contains(document.activeElement)) document.getElementById("ng-main")?.focus({ preventScroll: true });
   };
   // Unpinning collapses it at once. From the keyboard, focus stays on the pin,
   // so the person keeps their place.
@@ -80,9 +83,13 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
     if (e.key !== "Escape" || mode === "pinned") return;
     retract();
   };
-  // Going to a page from the rail closes it.
-  const went = () => {
-    if (mode === "rail") retract();
+  // Going to a page from the rail closes it. A click leaves it to the pointer,
+  // open while it stays over the rail and closed once it leaves, and only takes
+  // the focus out that would hold it open; Enter from the keyboard closes it.
+  const went = (e: React.MouseEvent) => {
+    if (mode !== "rail") return;
+    if (e.detail > 0) release();
+    else retract();
   };
 
   const row = (r: NgRoute) => {
@@ -129,7 +136,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           <span className={`ng-side-live ng-side-label ${connection === "open" ? "ok" : "warn"}`}>{connectionWord(connection)}</span>
         </div>
         <nav className="ng-side-nav" aria-label="Pages">
-          <button type="button" className="ng-side-row" aria-label="Search" aria-keyshortcuts="Meta+K Control+K" onClick={() => { went(); onSearch?.(); }}>
+          <button type="button" className="ng-side-row" aria-label="Search" aria-keyshortcuts="Meta+K Control+K" onClick={() => { if (mode === "rail") retract(); onSearch?.(); }}>
             <SearchIcon size={16} aria-hidden />
             <span className="ng-side-label" aria-hidden>Search</span>
             <span className="ng-side-kbd ng-side-label" aria-hidden><Kbd>⌘K</Kbd></span>

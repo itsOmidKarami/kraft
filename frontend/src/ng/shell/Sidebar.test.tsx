@@ -140,12 +140,23 @@ describe("ng Sidebar", () => {
     expect(pin).toHaveFocus();
   });
 
-  it("closes a revealed rail when one of its rows goes to a page", async () => {
+  it("keeps a revealed rail open under the pointer when a row is clicked, with no focus left to hold it open", async () => {
     localStorage.setItem(SIDEBAR_KEY, "rail");
     mount();
     const row = screen.getByRole("link", { name: "Analytics" });
     await userEvent.hover(row);
     await userEvent.click(row);
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(document.querySelector(".ng-side")).not.toHaveAttribute("data-dismissed");
+    expect(screen.getByRole("main")).toHaveFocus();
+  });
+
+  it("closes a revealed rail when a row goes to a page from the keyboard", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
+    mount();
+    const row = screen.getByRole("link", { name: "Analytics" });
+    row.focus();
+    await userEvent.keyboard("{Enter}");
     expect(row).toHaveAttribute("aria-current", "page");
     expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
     expect(screen.getByRole("main")).toHaveFocus();
