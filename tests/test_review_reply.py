@@ -266,7 +266,7 @@ async def test_an_item_model_stored_before_model_ids_were_checked_never_reaches_
 
     assert status == "failed"
     [event] = it.events("reply_agent_failed")
-    assert "'sonnet 4' is not a model id" in event["payload"]["error"]
+    assert "stored model override is not a model id" in event["payload"]["error"]
     assert f"kraft item set-overrides {it.id} --clear" in event["payload"]["error"]
     assert not argv.exists() or argv.read_text() == ""
 

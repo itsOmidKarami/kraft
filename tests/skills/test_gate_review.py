@@ -181,7 +181,7 @@ async def test_an_item_model_stored_before_model_ids_were_checked_never_reaches_
         launch=launch,
     )
     assert verdict == "undecided"
-    assert "'sonnet 4' is not a model id" in why
+    assert "stored model override is not a model id" in why and "'sonnet 4'" in why
     assert "kraft item set-overrides w1 --clear" in why
     assert seen == {}
 

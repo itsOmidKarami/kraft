@@ -439,6 +439,10 @@ async def review_gates(
             )
             return status_of(db, work_item_id)
 
+        # Why the review itself left the gate to a person (a refused launch,
+        # a spent cap, the agent's own concerns), for the event below. Not an
+        # approval's note that a must-fix then overrode.
+        why = note if verdict == "undecided" and note.strip() else None
         if verdict == "approve" and db.read(lambda c: store.open_must_fix(c, work_item_id)):
             # A person's must-fix outranks an agent's approval (review flow §3).
             verdict = "undecided"
@@ -452,7 +456,7 @@ async def review_gates(
                     c,
                     work_item_id,
                     "gate_auto_review_skipped",
-                    {"gate": gate, "reason": "undecided"},
+                    {"gate": gate, "reason": "undecided", **({"note": why} if why else {})},
                     node_id=gate,
                 )
             )

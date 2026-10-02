@@ -5,9 +5,13 @@ import json
 from pathlib import Path
 
 import pytest
+from support.harness import entry_of
 
-from kraft import store
+from kraft import executor, store
 from kraft.executor import dispatch
+
+#: A real item id is 32 hex characters, which a stop reason must still carry whole.
+WID = "b45e5f7996" + "0" * 22
 
 
 def _exec(node_id, *tasks):
@@ -55,4 +59,44 @@ async def test_a_model_stored_before_model_ids_were_checked_stops_the_task(
     assert session["status"] == "config_error"
     log = Path(session["log_path"]).read_text()
     assert named in log and "is not a model id" in log and f"kraft item {clear}" in log
+    assert fake_agent.argv() == []
+
+
+@pytest.mark.parametrize(
+    ("item", "node", "clear"),
+    [
+        ({"model": "sonnet 4"}, {}, f"kraft item set-overrides {WID} --clear"),
+        (
+            {"escalate_model": "opus " + "x" * 300},
+            {},
+            f"kraft item set-overrides {WID} --clear",
+        ),
+        (
+            {},
+            {"model": "claude opus " + "y" * 300},
+            f"kraft item set-node-override {WID} --node implementation --clear",
+        ),
+    ],
+    ids=["item-model", "item-escalate_model", "node-model"],
+)
+async def test_the_stop_reason_names_the_whole_command_that_clears_the_override(
+    item_on, fake_agent, item, node, clear
+):
+    """The board cuts a stop reason at a few hundred characters. With a real
+    32-character id, and a long stored text, the reason must still carry
+    the whole command that clears the override."""
+    it = await item_on([_exec("implementation", _agent())], wid=WID)
+    await it.database.write(lambda c: store.set_agent_overrides(c, it.id, json.dumps(item)))
+    await it.database.write(lambda c: store.set_node_overrides(c, it.id, {"implementation": node}))
+
+    await executor.run_once(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        launch=executor.LaunchContext(repo_entry=entry_of({"setup_command": ""})),
+    )
+
+    assert it.status() == "needs_human"
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert f"`{clear}`" in reason, reason
     assert fake_agent.argv() == []

@@ -46,20 +46,25 @@ def stored_model_refusal(
     or None. The write doors refuse a model that is no model id, but an
     override stored before they did (1.4 took any text) never met that check,
     so a launch holds it to the same rule. A node's field wins over the
-    item's, as at launch, so the one that would be used is the one named."""
+    item's, as at launch, so the one that would be used is the one named.
+
+    The reason becomes the item's stop reason, which the board cuts at a few
+    hundred characters, so the command that clears it comes before the
+    stored text, and the rule itself is left to the write door's refusal."""
     for key in ("model", "escalate_model"):
         own = node is not None and node.get(key) is not None
-        why = model_id_problem((node if own else item or {}).get(key))
-        if why is not None:
+        value = (node if own else item or {}).get(key)
+        if model_id_problem(value) is not None:
             clear = (
                 f"kraft item set-node-override {work_item_id} --node {node_id} --clear"
                 if own
                 else f"kraft item set-overrides {work_item_id} --clear"
             )
             where = f"node {node_id}'s" if own else "the item's"
+            shown = repr(value) if len(repr(value)) <= 60 else repr(value)[:59] + "…"
             return (
-                f"{where} stored {key} override {why}. Set a valid one, or clear it "
-                f"with `{clear}`, then retry"
+                f"{where} stored {key} override is not a model id: clear it with "
+                f"`{clear}`, or set a valid one, then retry. It reads {shown}"
             )
     return None
 
