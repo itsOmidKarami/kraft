@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_review_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 18:22 +0000
+            created at 2026-10-02 18:39 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -572,7 +572,7 @@
     <p class="run"><span class="n"><a id="t490" href="#t490">490</a></span><span class="t">    <span class="key">if</span> <span class="nam">live</span> <span class="op">:=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="nam">open_counts_by_repo</span><span class="op">)</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="nam">entry</span><span class="op">[</span><span class="str">&quot;path&quot;</span><span class="op">]</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t491" href="#t491">491</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t492" href="#t492">492</a></span><span class="t">            <span class="num">409</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t493" href="#t493">493</a></span><span class="t">            <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">entry</span><span class="op">[</span><span class="str">&#x27;path&#x27;</span><span class="op">]</span><span class="op">}</span><span class="fst"> has </span><span class="op">{</span><span class="nam">live</span><span class="op">}</span><span class="fst"> running item(s); finish or abandon them first</span><span class="fst">&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t493" href="#t493">493</a></span><span class="t">            <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">entry</span><span class="op">[</span><span class="str">&#x27;path&#x27;</span><span class="op">]</span><span class="op">}</span><span class="fst"> has </span><span class="op">{</span><span class="nam">live</span><span class="op">}</span><span class="fst"> open item(s); finish or cancel them first</span><span class="fst">&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t494" href="#t494">494</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t495" href="#t495">495</a></span><span class="t">    <span class="nam">kept</span> <span class="op">=</span> <span class="op">[</span><span class="nam">r</span> <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">repos</span> <span class="key">if</span> <span class="nam">r</span><span class="op">[</span><span class="str">&quot;path&quot;</span><span class="op">]</span> <span class="op">!=</span> <span class="nam">entry</span><span class="op">[</span><span class="str">&quot;path&quot;</span><span class="op">]</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t496" href="#t496">496</a></span><span class="t">    <span class="com"># A workspace still naming it would no longer load; refused, not dropped.</span>&nbsp;</span><span class="r"></span></p>
@@ -592,7 +592,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_review_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 18:22 +0000
+            created at 2026-10-02 18:39 +0000
         </p>
     </div>
 </footer>
