@@ -57,14 +57,6 @@ export function MainButton({ main, panel, archivable, busy, onMain, onItem, grou
       }
     }
   };
-  const onListKey = (e: KeyboardEvent) => {
-    const at = live.indexOf(refs.current.findIndex((r) => r === document.activeElement));
-    const n = live.length;
-    const next = { ArrowDown: (at + 1) % n, ArrowUp: (at - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
-    if (next === undefined || !n) return;
-    e.preventDefault();
-    refs.current[live[next]]?.focus();
-  };
   const hover = (on: boolean) => {
     if (!panel.length) return;
     if (leave.current) clearTimeout(leave.current);
@@ -95,8 +87,8 @@ export function MainButton({ main, panel, archivable, busy, onMain, onItem, grou
       <Popover anchor={groupRef} open={open && panel.length > 0} onClose={() => {
         close();
         if (list.current?.contains(document.activeElement)) { quiet.current = true; toggle.current?.focus(); }
-      }} role="menu" label="Item actions">
-        <div ref={list} className="menu item-panel" onKeyDown={onListKey} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)} style={{ width: groupRef.current?.offsetWidth }}>
+      }} role="menu" label="Item actions" focusIn={false}>
+        <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)} style={{ width: groupRef.current?.offsetWidth }}>
           {panel.map((it, i) => {
             const { label, icon: I, tone } = ITEM[it];
             return (

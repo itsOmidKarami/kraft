@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "./Popover";
 import "./ui.css";
 
@@ -21,7 +21,7 @@ export interface MenuItem {
 }
 
 /** A button that opens a list of actions. Focus moves into the list; ↑/↓,
- *  Home and End move it; Escape, or picking an item, closes the list and
+ *  Home and End move it (Popover's keys); Escape, or picking an item, closes the list and
  *  hands focus back to the button. With `triggerClass` the trigger is a text
  *  button named by its own text (the list keeps `label`); `note` is a line
  *  under the items, `heading` a small title above them. */
@@ -41,22 +41,13 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const onKey = (e: KeyboardEvent) => {
-    const at = live.indexOf(refs.current.findIndex((r) => r === document.activeElement));
-    const n = live.length;
-    const next = { ArrowDown: (at + 1) % n, ArrowUp: (at - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
-    if (next === undefined || !n) return;
-    e.preventDefault();
-    refs.current[live[next]]?.focus();
-  };
-
   return (
     <>
       <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : { "aria-label": label, title: label })} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
       <Popover anchor={button} open={open} onClose={close} role="menu" label={label}>
-        <div onKeyDown={onKey} className="menu">
+        <div className="menu">
           {heading && <span className="menu-heading" aria-hidden="true">{heading}</span>}
           {items.map((it, i) => (
             <button

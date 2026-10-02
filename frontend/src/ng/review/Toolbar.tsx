@@ -61,6 +61,9 @@ function TargetPicker({ heading, value, options, item, onPick }: { heading: stri
 /** A box in a checklist: ticked, unticked, or mixed (All with some nodes off). */
 const Box = ({ on }: { on: boolean | "mixed" }) => <span className={`rv-box${on ? " is-on" : ""}`} aria-hidden="true">{on === "mixed" ? "−" : on ? "✓" : ""}</span>;
 
+/** A button that opens a checklist: a menu of checkbox and radio items that
+ *  stays open while you tick them. Popover moves focus to the first item and
+ *  gives ↑/↓; Escape closes it back to the button. */
 function Pop({ label, trigger, triggerClass, children }: { label: string; trigger: ReactNode; triggerClass: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
@@ -70,10 +73,10 @@ function Pop({ label, trigger, triggerClass, children }: { label: string; trigge
   };
   return (
     <>
-      <button ref={anchor} type="button" className={triggerClass} aria-label={label} title={label} aria-haspopup="true" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={anchor} type="button" className={triggerClass} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
-      <Popover anchor={anchor} open={open} onClose={close} role="group" label={label}>
+      <Popover anchor={anchor} open={open} onClose={close} role="menu" label={label}>
         <div className="rv-checklist">{children}</div>
       </Popover>
     </>

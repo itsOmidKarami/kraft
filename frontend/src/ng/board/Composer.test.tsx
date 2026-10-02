@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -89,6 +89,22 @@ describe("Composer", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "x" } });
     fireEvent.keyDown(screen.getByRole("button", { name: "More ways to create" }), { key: "ArrowDown" });
     expect(screen.getByRole("menuitem", { name: "Create and start" })).toBeInTheDocument();
+  });
+
+  it("moves focus onto Create and start from the ▾, and Escape hands it back without reopening", async () => {
+    mount();
+    await settle();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "x" } });
+    const toggle = screen.getByRole("button", { name: "More ways to create" });
+    // Focus alone opens the panel and leaves focus on the toggle.
+    act(() => toggle.focus());
+    expect(screen.getByRole("menuitem", { name: "Create and start" })).toBeInTheDocument();
+    expect(toggle).toHaveFocus();
+    fireEvent.keyDown(toggle, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Create and start" })).toHaveFocus());
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(toggle).toHaveFocus();
+    expect(screen.queryByRole("menuitem", { name: "Create and start" })).toBeNull();
   });
 
   it("asks before discarding a draft with text, and closes at once without", async () => {
