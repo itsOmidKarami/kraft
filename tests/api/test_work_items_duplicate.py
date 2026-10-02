@@ -10,6 +10,66 @@ from support.harness import make_repo_with_engineering
 # --- B3: duplicate ----------------------------------------------------------
 
 
+def _paused(client, repo) -> str:
+    r = client.post("/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _item_count(client) -> int:
+    db = client.app.state.db
+    return client.portal.call(
+        db.read, lambda c: c.execute("SELECT COUNT(*) FROM work_items").fetchone()[0]
+    )
+
+
+def test_duplicate_is_refused_while_the_policy_is_invalid(client, repo, monkeypatch):
+    """The same posture as `POST /work-items`: no item is filed under a
+    policy that cannot bound it."""
+    src_id = _paused(client, repo)
+    monkeypatch.setattr(client.app.state, "invalid_policy", ["policy.yaml: attempts must be >= 1"])
+
+    r = client.post(f"/api/work-items/{src_id}/duplicate")
+
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == (
+        "policy config invalid, refusing work: policy.yaml: attempts must be >= 1"
+    )
+    assert _item_count(client) == 1
+
+
+def test_a_failed_intake_is_a_502_naming_why(client, repo, monkeypatch):
+    from kraft.api.routes import work_items
+
+    src_id = _paused(client, repo)
+
+    async def failing_intake(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(work_items.executor, "intake", failing_intake)
+
+    r = client.post(f"/api/work-items/{src_id}/duplicate")
+
+    assert r.status_code == 502, r.text
+    assert r.json()["detail"] == "intake failed: disk full"
+
+
+def test_a_chain_the_policy_now_refuses_is_a_422(client, repo, templates_dir):
+    """The chain is resolved again, under today's policy: a maximum lowered
+    since the source was filed refuses the shipped implementer's own
+    120-minute task cap."""
+    src_id = _paused(client, repo)
+    policy = templates_dir / "policy.yaml"
+    policy.write_text(policy.read_text() + "\nmaxima:\n  tasks: { time_cap_minutes: 60 }\n")
+    assert client.post("/api/apply/reload").status_code == 200
+
+    r = client.post(f"/api/work-items/{src_id}/duplicate")
+
+    assert r.status_code == 422, r.text
+    assert "sets time_cap_minutes 120 > the administrator maximum 60" in r.json()["detail"]
+    assert _item_count(client) == 1
+
+
 def test_duplicate_carries_the_listed_fields_and_nothing_else(client, tmp_path):
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     r = client.post(

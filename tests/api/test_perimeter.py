@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import time
+
+import anyio
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
@@ -19,6 +23,25 @@ def _set_password(client, monkeypatch):
 
 
 _LAN = pytest.mark.api_client(peer=("10.0.0.5", 54321))
+
+
+def _first_frame_of_type(ws, frame_type: str, timeout: float = 10.0) -> dict:
+    """The first `frame_type` frame on `ws`, skipping any other a poller sent
+    first, and failing after `timeout` instead of hanging until pytest-timeout
+    ends the process. Starlette's test session has no receive timeout, so the
+    bound goes around its stream on the session's own portal."""
+    deadline = time.monotonic() + timeout
+
+    async def receive():
+        with anyio.fail_after(max(deadline - time.monotonic(), 0)):
+            return await ws._send_rx.receive()
+
+    while True:
+        message = ws.portal.call(receive)
+        ws._raise_on_close(message)
+        frame = json.loads(message["text"])
+        if frame["type"] == frame_type:
+            return frame
 
 
 def test_client_is_local_reads_the_peer_address():
@@ -428,7 +451,7 @@ def test_a_non_loopback_bind_streams_events_to_a_board_on_an_allowed_host(lan_bi
         lan_bind.post(
             "/api/work-items", json={"autostart": False, "title": "hi", "repo": str(tmp_path)}
         )
-        assert ws.receive_json()["type"] == "work_item_created"
+        assert _first_frame_of_type(ws, "work_item_created")
 
 
 @pytest.mark.api_client(host="0.0.0.0")
@@ -490,7 +513,17 @@ def test_the_perimeter_runs_before_the_spa_shell_middleware(client, dist):
     (tests/conftest.py), so declaration order no longer decides whether this
     test exercises anything. Do not use this as a template — list `dist`
     before `client` as usual; this ordering only proves the fixture no longer
-    depends on it."""
+    depends on it.
+
+    The loopback navigation first is what proves the pull: without it the
+    lifespan starts with no SPA build, the rebound request below gets the
+    403 whatever the middleware order, and this test would pass on neither."""
+    shell = client.get(
+        "/work-items", headers={"sec-fetch-site": "same-origin", "sec-fetch-dest": "document"}
+    )
+    assert shell.status_code == 200, shell.text
+    assert shell.text.startswith("<!doctype html>")
+
     r = client.get(
         "/work-items",
         headers={
@@ -563,7 +596,7 @@ def test_the_event_stream_needs_a_session_too(client, tmp_path):
         client.post(
             "/api/work-items", json={"autostart": True, "title": "hello", "repo": str(tmp_path)}
         )
-        assert ws.receive_json()["type"] == "work_item_created"
+        assert _first_frame_of_type(ws, "work_item_created")
 
 
 @pytest.mark.api_client(host="0.0.0.0")

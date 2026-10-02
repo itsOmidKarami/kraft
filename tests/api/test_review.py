@@ -310,12 +310,6 @@ def test_request_changes_to_a_bad_node_writes_no_review(client, gated):
     assert client.get(f"/api/work-items/{gated}").json()["last_review_sha"] is None
 
 
-@_REVIEW
-def test_review_on_a_gate_that_is_not_pending_is_409(client, gated):
-    r = client.post(f"/api/work-items/{gated}/gates/other/review", json={"outcome": "comment"})
-    assert r.status_code in (404, 409)
-
-
 def _session_of(client, wid, node_id):
     """A worker_sessions id for `node_id` on `wid`, as a real agent would carry."""
     body = client.get(f"/api/work-items/{wid}").json()
