@@ -9,13 +9,15 @@ import { appliedRows } from "../draft/AppliedRows";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
-import { budgetRaise } from "../status";
+import { budgetRaise, neverStarted } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
+  // As the header's badge says it: filed and never started, not paused.
+  if (neverStarted(item)) return "not started";
   if (st === "needs_you" && item.stop?.kind === "gate") return `waiting for you at ${item.pending_gate ?? item.stop.node}`;
   const step = item.summary?.step;
   const live = !["done", "archived", "cancelled"].includes(st);

@@ -6,7 +6,7 @@ import type { KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { notStarted } from "./status";
+import { neverStarted } from "./status";
 import { actionPath, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
@@ -210,7 +210,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (item.display_status !== "paused") return null;
-  if (notStarted(item)) return <NotStartedCard item={item} />;
+  if (neverStarted(item)) return <NotStartedCard item={item} />;
   // No agent task paused at this node: the server refuses a steer, so offer plain Resume only.
   const steerable = item.steerable !== false;
   const what = item.current_node_id ? ` at ${item.current_node_id}` : "";

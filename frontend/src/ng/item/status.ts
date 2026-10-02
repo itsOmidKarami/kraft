@@ -47,16 +47,18 @@ export const NOT_RAISABLE = "The item can't raise this cap: the policy or the ch
 
 /** A paused item with no current node was filed and never started (the
  *  server's row says so, as `board/model`'s `groupOf` reads it): it is "not
- *  started", with Start, wherever it is shown, never "paused" with Resume. */
-export const notStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
+ *  started", with Start, wherever it is shown, never "paused" with Resume.
+ *  How it is shown; `chainValues`' `notStarted` is the wider "no node has run
+ *  yet" that decides whether its config can still be edited. */
+export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
 
 /** GAP §1.4a, Decisions §1 and §14. `raise` is the capped Resume: it opens the
  *  chain's Config at the limit that stopped the item. A budget stop the item
  *  cannot raise (`budgetRaise`) has Retry instead. A never-started item
- *  (`notStarted`) has Start, and nothing to escalate or mark complete. */
+ *  (`neverStarted`) has Start, and nothing to escalate or mark complete. */
 export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id">): HeaderState {
   const status = item.display_status ?? "running";
-  if (notStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: "start", panel: ["cancel"] };
+  if (neverStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: "start", panel: ["cancel"] };
   const kind = item.stop?.kind;
   const main: Main =
     status === "paused" ? "resume"

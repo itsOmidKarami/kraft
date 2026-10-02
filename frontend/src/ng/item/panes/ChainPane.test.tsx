@@ -24,6 +24,14 @@ describe("ChainOverview", () => {
     expect(onSelect).toHaveBeenLastCalledWith("verification");
   });
 
+  it("says a never-started item is not started, as the header does, and a paused mid-chain one is paused", () => {
+    const { unmount } = render(<ChainOverview item={detail({ status: "paused", display_status: "paused", current_node_id: null })} events={[]} now={NOW} onSelect={() => {}} />);
+    expect(screen.getByText("status").nextElementSibling).toHaveTextContent(/^not started$/);
+    unmount();
+    render(<ChainOverview item={detail({ status: "paused", display_status: "paused", current_node_id: "verification" })} events={[]} now={NOW} onSelect={() => {}} />);
+    expect(screen.getByText("status").nextElementSibling).toHaveTextContent(/^paused/);
+  });
+
   it("lists the spec and plan attached at intake, each opening its document when the page can open one", async () => {
     const onDoc = vi.fn();
     const attachments = [{ kind: "spec" as const, path: "docs/specs/ws.md" }, { kind: "plan" as const, path: "docs/plans/ui.md" }];
