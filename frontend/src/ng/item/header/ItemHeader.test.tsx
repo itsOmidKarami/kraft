@@ -36,6 +36,18 @@ describe("ItemHeader", () => {
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request.open.open_draft" } }]);
   });
 
+  it("calls a never-started item NOT STARTED with Start, which resumes it from the first node", async () => {
+    const calls = stubFetch();
+    const reload = vi.fn();
+    show({ status: "paused", display_status: "paused", current_node_id: null }, { reload });
+    expect(screen.getByText("NOT STARTED")).toBeInTheDocument();
+    expect(screen.queryByText("PAUSED")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null } }]);
+  });
+
   it("asks before pausing, then pauses", async () => {
     const calls = stubFetch();
     show();

@@ -77,7 +77,8 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onSettings();
-    if (hs.main === "resume") return void run(act.resume(item.id));
+    // Start is a resume from node zero: a never-started item has no current node.
+    if (hs.main === "resume" || hs.main === "start") return void run(act.resume(item.id));
     if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));

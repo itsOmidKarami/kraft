@@ -2,7 +2,7 @@ import type { DisplayStatus, WorkItem } from "../../types";
 
 /** What the header shows for an item. Read from the server's `display_status`
  *  and `stop` only (R16, R27, R28): never derived from sessions or events. */
-export type Main = "pause" | "resume" | "raise" | "retry" | "archive" | "restore";
+export type Main = "pause" | "resume" | "start" | "raise" | "retry" | "archive" | "restore";
 export type Tone = "neutral" | "info" | "warn" | "bad" | "ok" | "muted";
 export type PanelItem = "escalate" | "complete" | "archive" | "cancel";
 
@@ -45,11 +45,18 @@ export function budgetRaise(item: Pick<WorkItem, "stop">): "limit" | "item" | nu
 /** What a budget stop the item cannot raise says instead of offering a raise. */
 export const NOT_RAISABLE = "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap.";
 
+/** A paused item with no current node was filed and never started (the
+ *  server's row says so, as `board/model`'s `groupOf` reads it): it is "not
+ *  started", with Start, wherever it is shown, never "paused" with Resume. */
+export const notStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
+
 /** GAP §1.4a, Decisions §1 and §14. `raise` is the capped Resume: it opens the
  *  chain's Config at the limit that stopped the item. A budget stop the item
- *  cannot raise (`budgetRaise`) has Retry instead. */
-export function headerState(item: Pick<WorkItem, "display_status" | "stop">): HeaderState {
+ *  cannot raise (`budgetRaise`) has Retry instead. A never-started item
+ *  (`notStarted`) has Start, and nothing to escalate or mark complete. */
+export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id">): HeaderState {
   const status = item.display_status ?? "running";
+  if (notStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: "start", panel: ["cancel"] };
   const kind = item.stop?.kind;
   const main: Main =
     status === "paused" ? "resume"
@@ -69,6 +76,7 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop">): He
 export const MAIN_LABEL: Record<Main, string> = {
   pause: "Pause",
   resume: "Resume",
+  start: "Start",
   raise: "Resume",
   retry: "Retry",
   archive: "Archive",

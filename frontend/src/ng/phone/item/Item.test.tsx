@@ -55,6 +55,14 @@ describe("the item screen (C)", () => {
     expect(screen.getByRole("button", { name: "Steer" })).toBeInTheDocument();
   });
 
+  it("calls a never-started item NOT STARTED above its Start, never PAUSED", async () => {
+    const calls = mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [] }));
+    expect(await screen.findByText("NOT STARTED")).toBeInTheDocument();
+    expect(screen.queryByText("PAUSED")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+  });
+
   it("opens a node on a tap of its row", async () => {
     mount(item("running"));
     await userEvent.click(await screen.findByRole("button", { name: /verification/ }));

@@ -16,7 +16,7 @@ import { useSelect } from "../item/draft/select";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { PausedCard, StateCard } from "../item/StateCard";
-import { headerState, MAIN_LABEL } from "../item/status";
+import { headerState, MAIN_LABEL, notStarted } from "../item/status";
 import { placeUrl } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
@@ -57,19 +57,19 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
   const item = loaded.item;
   // Raise cap / Raise budget: the Config tab, its budget editor open for a budget stop.
   const raise = () => { onTab("config"); onBudget(item.stop?.kind === "budget"); };
-  const notStarted = item.display_status === "paused" && !item.current_node_id;
+  const fresh = notStarted(item);
   return (
     <Inspector
       {...common}
       crumbs={[{ label: "Board", onClick: onClose }, { label: repoName(item.repo), onClick: () => onRepo(item.repo) }]}
       icon="workflow"
       title={item.bead_id || shortId(item.id)}
-      sub={`${notStarted ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
+      sub={`${fresh ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
       tabs={[{ value: "overview", label: "Overview" }, { value: "activity", label: "Activity" }, { value: "config", label: "Config" }]}
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}
       onFocus={open}
-      footer={<Footer item={item} reload={loaded.reload} offline={offline} notStarted={notStarted} onOpen={open} onRaise={raise} />}
+      footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} />}
     >
       {tab === "overview" && <Overview item={item} reload={loaded.reload} onRaise={raise} />}
       {tab === "activity" && <Activity id={item.id} version={item.updated_at} />}
@@ -144,7 +144,7 @@ function Config({ item, reload, budget, onBudget }: { item: ItemDetail; reload: 
 }
 
 /** The item's main action (W5's headerState; Start for a never-started item), then Open item. */
-function Footer({ item, reload, offline, notStarted, onOpen, onRaise }: { item: ItemDetail; reload: () => void; offline: boolean; notStarted: boolean; onOpen: () => void; onRaise: () => void }) {
+function Footer({ item, reload, offline, onOpen, onRaise }: { item: ItemDetail; reload: () => void; offline: boolean; onOpen: () => void; onRaise: () => void }) {
   const hs = headerState(item);
   const btn = useRef<HTMLButtonElement>(null);
   const [pausing, setPausing] = useState(false);
@@ -163,7 +163,7 @@ function Footer({ item, reload, offline, notStarted, onOpen, onRaise }: { item: 
   const main = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onRaise();
-    if (hs.main === "resume") return void run(act.resume(item.id));
+    if (hs.main === "resume" || hs.main === "start") return void run(act.resume(item.id));
     if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));
@@ -171,7 +171,7 @@ function Footer({ item, reload, offline, notStarted, onOpen, onRaise }: { item: 
   return (
     <>
       <button ref={btn} type="button" className={`btn ${hs.main === "pause" ? "btn-secondary" : "btn-primary"}`} disabled={offline || busy} onClick={main}>
-        {notStarted ? "Start" : hs.main === "pause" ? "‖ Pause" : MAIN_LABEL[hs.main]}
+        {hs.main === "pause" ? "‖ Pause" : MAIN_LABEL[hs.main]}
       </button>
       <button type="button" className="btn btn-secondary" onClick={onOpen}>Open item ↗</button>
       {error && !pausing && <span className="item-error peek-error" role="alert">{error}</span>}

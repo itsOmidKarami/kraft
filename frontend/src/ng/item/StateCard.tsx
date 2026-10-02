@@ -6,6 +6,7 @@ import type { KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
+import { notStarted } from "./status";
 import { actionPath, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
@@ -199,7 +200,9 @@ function useEndEvents(item: ItemDetail): KraftEvent[] {
 }
 
 /** The paused card (Decisions §6 Steer and pause, prototype lines 85–90): a
- *  steer, its target when more than one agent task is paused, and Resume. */
+ *  steer, its target when more than one agent task is paused, and Resume. A
+ *  never-started item gets the not-started card instead: nothing ran, so
+ *  there is nothing to resume or steer; Start is the main button. */
 export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const paused = item.worker_sessions.filter((s) => s.status === "paused" && s.hook_point.split(".").length === 3);
   const [steer, setSteer] = useState(item.pending_steer_context ?? "");
@@ -207,6 +210,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (item.display_status !== "paused") return null;
+  if (notStarted(item)) return <NotStartedCard item={item} />;
   // No agent task paused at this node: the server refuses a steer, so offer plain Resume only.
   const steerable = item.steerable !== false;
   const what = item.current_node_id ? ` at ${item.current_node_id}` : "";
@@ -237,6 +241,17 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
         {steerable && <Button variant="primary" disabled={busy || !steer.trim()} onClick={() => resume(true)}>Resume with steer</Button>}
         <Button variant={steerable ? "secondary" : "primary"} disabled={busy} onClick={() => resume(false)}>Resume</Button>
       </div>
+    </section>
+  );
+}
+
+/** Words only: Start is the header's main button (the peek's footer), as Resume is for a paused item. */
+function NotStartedCard({ item }: { item: ItemDetail }) {
+  const first = item.chain_definition.nodes[0]?.id;
+  return (
+    <section className="item-card is-neutral" aria-label="Not started">
+      <h2 className="item-card-head"><Clock size={14} aria-hidden /> <span className="item-card-title">Not started</span></h2>
+      <p className="item-muted">Nothing has run, and nothing spends tokens until you start it.{first ? ` Start runs it from ${first}.` : ""}</p>
     </section>
   );
 }
