@@ -1000,9 +1000,9 @@ def _shell_syntax(command: str) -> bool:
 #: A shell that runs the script it is given after `-c`.
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 _SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
-#: The flag an interpreter takes a script after: `python -c`, `node -e`,
-#: `perl -e`, `ruby -e`.
-_SCRIPT_FLAGS = {"-c", "-e", "-E", "--eval", "--command"}
+#: The flag an interpreter takes a script after: `python -c`, `python -Ic`,
+#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`.
+_SCRIPT_FLAGS = re.compile(r"-[a-zA-Z]*[ceEp][a-zA-Z]*|--(?:eval|print|command)=?")
 
 
 def _a_script(command: str) -> bool:
@@ -1012,13 +1012,17 @@ def _a_script(command: str) -> bool:
     a test runner reads, run as argv with no shell: `pytest -k "not (a or
     b)"`, `go test -run 'Test(Foo|Bar)'`."""
     words = command.split()
-    if posixpath.basename(words[0]) in _SHELLS and any(
-        _SHELL_FLAGS.fullmatch(w) for w in words[1:]
-    ):
-        return True
+    # A shell anywhere in the line, not only first: `env bash -lc "…"`,
+    # `xvfb-run bash -ec "…"` hand it the script all the same.
+    for i, word in enumerate(words):
+        if posixpath.basename(word) in _SHELLS and any(
+            _SHELL_FLAGS.fullmatch(w) for w in words[i + 1 :]
+        ):
+            return True
     for quoted in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
         before = command[: quoted.start()].split()
-        if before and before[-1] in _SCRIPT_FLAGS and re.search(r"[|;&<>(){}\\]", quoted[0]):
+        flag = before[-1] if before else ""
+        if _SCRIPT_FLAGS.fullmatch(flag) and re.search(r"[|;&<>(){}\\]", quoted[0]):
             return True
     return False
 
