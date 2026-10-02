@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { detail, stubFetch, type Call } from "../../item/testkit";
+import { detail, holdFetch, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -230,6 +230,24 @@ describe("the task screen (E)", () => {
     act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
     expect(await screen.findByText("start over on the lock")).toBeInTheDocument();
     expect(screen.getByText(/attempt 2 of 2/)).toBeInTheDocument();
+  });
+
+  it("keeps the newest read of the thread when an older one answers late", async () => {
+    const esc = (id: string, thread: number) => session({ id, hook_point: "verification.escalation.escalation", status: "failed", thread, attempt: thread });
+    const msg = (seq: number, thread: number, message: string, session_id: string) => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread, turn: 1, message, session_id }, node_id: "verification", created_at: "2026-09-13T09:00:00Z" });
+    const one = item("failed", stop("failed"), { worker_sessions: [esc("e1", 1)] });
+    const answers: Record<string, [number, unknown]> = { "GET /work-items/w1": [200, one] };
+    useStore.setState({ eventsByItem: {} });
+    const reads = holdFetch(/\/work-items\/w1\/events\?after_seq=/, answers);
+    render(<MemoryRouter initialEntries={["/work-items/w1/nodes/verification?sel=verification.escalation.escalation"]}><Routes><Route path="/work-items/:id/nodes/:node" element={<NodeRoute />} /></Routes></MemoryRouter>);
+    await waitFor(() => expect(reads).toHaveLength(1));
+    answers["GET /work-items/w1"] = [200, { ...one, worker_sessions: [esc("e1", 1), esc("e2", 2)] }];
+    act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => reads[1]([msg(1, 1, "decide if the race is real", "e1"), msg(2, 2, "start over on the lock", "e2")]));
+    expect(await screen.findByText("start over on the lock")).toBeInTheDocument();
+    await act(async () => reads[0]([msg(1, 1, "decide if the race is real", "e1")]));
+    expect(screen.getByText("start over on the lock")).toBeInTheDocument();
   });
 
   it("says what a task that has not started waits for", async () => {

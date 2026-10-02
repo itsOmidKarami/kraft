@@ -20,7 +20,10 @@ export function Thread({ item, version, node, upTo, reload, onNode }: { item: It
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    api.getEvents(item.id).then(setEvents, () => setEvents([]));
+    // Each read of the item reads the thread again: an older read that answers late must not win.
+    let live = true;
+    api.getEvents(item.id).then((e) => live && setEvents(e), () => live && setEvents([]));
+    return () => { live = false; };
   }, [item.id, version]);
   const all: Turn[] = (events ?? []).filter((e) => e.type === "escalation_message").map((e) => ({
     thread: Number(e.payload.thread ?? 1),

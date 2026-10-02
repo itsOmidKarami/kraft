@@ -135,7 +135,9 @@ function TaskLog({ session }: { session?: WorkerSession }) {
 function Thread({ item, version, node, upTo }: { item: PlaceProps["item"]; version: string; node: string; upTo?: WorkerSession }) {
   const [events, setEvents] = useState<KraftEvent[] | null>(null);
   useEffect(() => {
-    api.getEvents(item.id).then(setEvents, () => setEvents([]));
+    let live = true;
+    api.getEvents(item.id).then((e) => live && setEvents(e), () => live && setEvents([]));
+    return () => { live = false; };
   }, [item.id, version]);
   const all = (events ?? []).filter((e) => e.type === "escalation_message" && (e.node_id ?? node) === node).map((e) => ({ thread: Number(e.payload.thread ?? 1), turn: Number(e.payload.turn ?? 1), who: e.payload.auto ? "kraft" : "you", text: String(e.payload.message ?? ""), at: e.created_at, node, session: typeof e.payload.session_id === "string" ? e.payload.session_id : null }));
   const turns = all.slice(0, messagesThrough(all, upTo, item));

@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { detail, stubFetch } from "../testkit";
+import { detail, holdFetch, stubFetch } from "../testkit";
 import { Thread } from "./Thread";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -33,5 +33,17 @@ describe("Thread", () => {
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/escalate", body: { message: "Accept it.\nThen go on.", new_thread: false } }]);
+  });
+
+  it("keeps the newest read of the thread when an older one answers late", async () => {
+    const reads = holdFetch(/\/work-items\/w1\/events\?after_seq=/);
+    const props = { item: detail(), node: "verification", reload: () => {}, onNode: () => {} };
+    const { rerender } = render(<Thread {...props} version="1" />);
+    rerender(<Thread {...props} version="2" />);
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => reads[1]([msg(1, 1, 1, "Why did lint fail?", "verification"), msg(2, 2, 1, "sdas", "verification")]));
+    expect(await screen.findByText("sdas")).toBeInTheDocument();
+    await act(async () => reads[0]([msg(1, 1, 1, "Why did lint fail?", "verification")]));
+    expect(screen.getByText("sdas")).toBeInTheDocument();
   });
 });

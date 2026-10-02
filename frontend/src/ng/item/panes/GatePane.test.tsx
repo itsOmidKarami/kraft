@@ -1,10 +1,10 @@
-import { render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../../types";
-import { detail, stubFetch, V1 } from "../testkit";
+import { detail, holdFetch, stubFetch, V1 } from "../testkit";
 import { GateBody, GateFooter } from "./GatePane";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -91,5 +91,17 @@ describe("GateBody", () => {
     render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
     expect(await screen.findByText("no size bound")).toBeInTheDocument();
     expect(screen.queryByText("fixed already")).toBeNull();
+  });
+
+  it("reads the threads again on each read of the item, and an older read that answers late does not win", async () => {
+    const reads = holdFetch(/\/work-items\/w1\/threads/);
+    const at = (version: string) => <MemoryRouter><GateBody item={pending} version={version} gate={gate} events={[]} /></MemoryRouter>;
+    const { rerender } = rtlRender(at("1"));
+    rerender(at("2"));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => reads[1]([{ id: "a", state: "open", comments: [{ body: "no size bound" }] }]));
+    expect(await screen.findByText("no size bound")).toBeInTheDocument();
+    await act(async () => reads[0]([]));
+    expect(screen.getByText("no size bound")).toBeInTheDocument();
   });
 });
