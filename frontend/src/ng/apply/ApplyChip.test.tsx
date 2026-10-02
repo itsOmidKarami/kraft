@@ -9,11 +9,14 @@ const DISK = { id: "disk:policy.yaml", file: "policy.yaml", text: "changed on di
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 let calls: string[];
+let board: { status: string }[];
 beforeEach(() => {
   calls = [];
+  board = [];
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     const path = String(url).replace(/^.*\/api/, "");
     calls.push(`${init?.method ?? "GET"} ${path}`);
+    if (path === "/work-items") return Promise.resolve(reply(200, { items: board, cursor: 0 }));
     if (path === "/access") return Promise.resolve(reply(200, { port: 9000 }));
     if (path === "/apply/restart") return Promise.resolve(reply(202, { restarting: true }));
     if (path === "/apply/reload") return Promise.resolve(reply(200, { restart: [], reload: [{ ...DISK, problem: "policy: max_concurrent must be 1 or more" }], managed: true }));
@@ -67,6 +70,19 @@ describe("ApplyChip", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Restart" }));
     await waitFor(() => expect(calls).toContain("POST /apply/restart"));
     expect(await screen.findByRole("dialog", { name: "Restarting Kraft…" })).toBeInTheDocument();
+  });
+
+  it.each([
+    [[], /No item is active, so no agent is stopped\./],
+    [[{ status: "active" }, { status: "paused" }, { status: "active" }], /2 items are active\. Restarting stops their agents; each stops as failed and needs Retry afterwards\./],
+  ])("the dialog says what a restart does to the running work (%j)", async (items, said) => {
+    board = items;
+    show({ restart: [PORT], managed: true });
+    await userEvent.click(screen.getByRole("button", { name: "Restart needed, 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Restart Kraft" }));
+    const dialog = await screen.findByRole("dialog", { name: "Restart Kraft?" });
+    expect(dialog).toHaveTextContent(said);
+    expect(dialog).not.toHaveTextContent("Running work is interrupted");
   });
 
   it("offers no Restart for a server started from a terminal, and says how", async () => {

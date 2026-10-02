@@ -127,6 +127,18 @@ describe("Access (O.3)", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    [0, /No item is active, so no agent is stopped\./],
+    [2, /2 items are active\. Restarting stops their agents; each stops as failed and needs Retry afterwards\./],
+  ])("the Restart sheet says what a restart does to %i active items", async (active, said) => {
+    setup();
+    useApply.setState({ restart: [PORT_ITEM], managed: true, active, askRestart: async () => {} });
+    await userEvent.click(await screen.findByRole("button", { name: /Restart Kraft/ }));
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet).toHaveTextContent(said);
+    expect(sheet).not.toHaveTextContent("Running work is interrupted");
+  });
+
   it("says when the environment wins over the saved port", async () => {
     setup({ port: 9000 }, { port: 8765 });
     expect(await screen.findByRole("button", { name: /^port/ })).toHaveTextContent("Set by the environment: running on 8765");

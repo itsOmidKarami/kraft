@@ -23,6 +23,8 @@ interface ApplyState extends Pending {
   confirming: boolean;
   /** Where the restarted server answers, while `phase` is "restarting". */
   address: string;
+  /** Items with a running agent when the confirmation opened; null when the count was not read. */
+  active: number | null;
   error: string | null;
   refresh: () => Promise<void>;
   runReload: () => Promise<void>;
@@ -53,6 +55,22 @@ async function restartAddress(): Promise<string> {
   return `${location.protocol}//${location.hostname}${port ? `:${port}` : ""}`;
 }
 
+/** How many items are `active`, the count `kraft admin restart` shows before it asks. */
+async function activeItems(): Promise<number | null> {
+  const r = await request<{ items?: { status?: string }[] }>("/work-items");
+  return r.status === 200 && Array.isArray(r.body.items) ? r.body.items.filter((i) => i.status === "active").length : null;
+}
+
+/** What a restart does to running work, for the confirmations: a restart ends each active item's
+ *  agent, and the item stops as failed until someone retries it (`install#a-restart-ends-running-agents`). */
+export function restartNote(active: number | null | undefined): string {
+  if (active === 0) return "No item is active, so no agent is stopped.";
+  const avoid = " Pause them first to avoid that.";
+  if (active == null) return `Restarting stops the agent of any active item. Each stops as failed and needs Retry afterwards.${avoid}`;
+  if (active === 1) return `1 item is active. Restarting stops its agent; it stops as failed and needs Retry afterwards. Pause it first to avoid that.`;
+  return `${active} items are active. Restarting stops their agents; each stops as failed and needs Retry afterwards.${avoid}`;
+}
+
 /** A bind address as the host of a URL to it: a wildcard bind is reached on
  *  the host this page was opened on, and an IPv6 address goes in brackets
  *  (`http://::1:8765` is not a URL). */
@@ -72,6 +90,7 @@ export const useApply = create<ApplyState>((set, get) => ({
   phase: "idle",
   confirming: false,
   address: "",
+  active: null,
   error: null,
 
   refresh: async () => {
@@ -93,7 +112,9 @@ export const useApply = create<ApplyState>((set, get) => ({
 
   askRestart: async () => {
     if (!get().managed) return;
-    set({ address: await restartAddress(), confirming: true });
+    set({ active: null });
+    const [address, active] = await Promise.all([restartAddress(), activeItems()]);
+    set({ address, active, confirming: true });
   },
   cancelRestart: () => set({ confirming: false }),
 
