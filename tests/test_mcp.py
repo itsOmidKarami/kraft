@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import pytest
+from mcp import Client
 from support.harness import make_repo
 from support.server import child_env
 
@@ -186,13 +187,84 @@ def test_the_items_own_policy_reaches_the_api_from_both_tools(monkeypatch):
     assert seen == [override, override]
 
 
+async def _agent_reads(session, tool: str, args: dict) -> str:
+    """The text an agent gets back from a refused call, read through a real MCP
+    client session: what crosses the wire, not what the server raised."""
+    result = await session.call_tool(tool, args)
+    assert result.is_error, f"{tool} was not refused: {result.content}"
+    return result.content[0].text
+
+
 def test_a_worker_cannot_set_its_own_policy_through_mcp(monkeypatch):
-    """Kraft-j89jc: the MCP door reaches the same guard as the client's."""
+    """Kraft-j89jc: the MCP door reaches the same guard as the client's, and the
+    agent reads the guard's reason. The SDK replaces any exception but its own
+    `ToolError` with "Error executing tool <name>", so this once arrived empty."""
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
-    with pytest.raises(Exception, match="set_work_item_policy") as refused:
-        asyncio.run(mcp.build().call_tool("set_work_item_policy", {"policy": {"max_attempts": 9}}))
-    cause = refused.value.__cause__
-    assert isinstance(cause, PermissionError) and "its own work item" in str(cause)
+
+    async def scenario():
+        async with Client(mcp.build()) as session:
+            return await _agent_reads(
+                session, "set_work_item_policy", {"policy": {"max_attempts": 9}}
+            )
+
+    text = asyncio.run(scenario())
+    assert "kraft: a worker session cannot act on its own work item (mine)" in text
+    assert "report what you found instead" in text
+
+
+def test_an_api_refusal_reaches_the_agent_as_the_line_the_cli_prints(app, repo):
+    """A 404 and a 409 come back as the sentence `kraft <verb>` prints, once
+    prefixed: the agent needs the reason to recover, and `kraft: kraft 404:`
+    read as a stutter."""
+
+    async def scenario():
+        async with Client(mcp.build()) as session:
+            unknown = await _agent_reads(session, "get_work_item", {"work_item_id": "nope"})
+            await session.call_tool("ensure_repo", {"path": str(repo)})
+            created = await session.call_tool("create_work_item", {"title": "t", "repo": str(repo)})
+            wid = json.loads(created.content[0].text)["id"]
+            again = await _agent_reads(session, "pause_work_item", {"work_item_id": wid})
+            return unknown, again
+
+    unknown, again = asyncio.run(scenario())
+    assert unknown.endswith(": kraft: 404: unknown work item"), unknown
+    assert again.endswith(": kraft: 409: work item is paused, not running"), again
+
+
+#: A value of each JSON schema type, to fill a tool's required arguments.
+_SAMPLE = {"string": "x", "integer": 1, "number": 1.0, "boolean": False, "object": {}, "array": []}
+
+
+def _required_args(tool) -> dict:
+    args = {}
+    for name in tool.input_schema.get("required", []):
+        prop = tool.input_schema["properties"][name]
+        types = [prop["type"]] if "type" in prop else [a["type"] for a in prop["anyOf"]]
+        args[name] = _SAMPLE[next(t for t in types if t != "null")]
+    return args
+
+
+def test_every_tool_hands_the_agent_a_refusals_reason(monkeypatch):
+    """Not only the tools above: every client call refuses here, and every tool
+    the server registers must hand the agent the reason."""
+
+    async def refuse(*args, **kwargs):
+        raise ValueError("kraft 409: refused for the test")
+
+    for name, fn in list(vars(client).items()):
+        if inspect.iscoroutinefunction(fn):
+            monkeypatch.setattr(client, name, refuse)
+    server = mcp.build()
+
+    async def scenario():
+        async with Client(server) as session:
+            return {
+                tool.name: await _agent_reads(session, tool.name, _required_args(tool))
+                for tool in await server.list_tools()
+            }
+
+    for tool, text in asyncio.run(scenario()).items():
+        assert text.endswith(": kraft: 409: refused for the test"), (tool, text)
 
 
 def test_create_work_item_forwards_the_base_branch(monkeypatch):
@@ -341,3 +413,32 @@ def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, cl
     monkeypatch.setattr(mcp.client, client_fn, fake)
     asyncio.run(mcp.build().call_tool(tool, args))
     assert seen and all(seen.get(k) == v for k, v in args.items())
+
+
+def test_a_crash_is_still_a_crash_with_its_traceback_in_the_log(monkeypatch, caplog):
+    """Only Kraft's refusals are turned into reasons. A bug's own text stays on
+    the server, and its traceback reaches the log."""
+
+    async def crash(*args, **kwargs):
+        raise RuntimeError("internal detail")
+
+    monkeypatch.setattr(client, "get_work_item", crash)
+
+    async def scenario():
+        async with Client(mcp.build()) as session:
+            return await _agent_reads(session, "get_work_item", {"work_item_id": "w1"})
+
+    assert asyncio.run(scenario()) == "Error executing tool get_work_item"
+    logged = [r for r in caplog.records if r.levelname == "ERROR" and r.exc_info]
+    assert logged and isinstance(logged[0].exc_info[1].__cause__, RuntimeError)
+
+
+def test_a_sync_tool_is_refused_when_it_is_registered():
+    """The refusal wrapper awaits the tool, so a sync one would fail on every
+    call; it fails here instead, where its author sees it."""
+
+    def sync_tool() -> dict:
+        return {}
+
+    with pytest.raises(TypeError, match="sync_tool must be `async def`"):
+        mcp._Server("kraft").tool()(sync_tool)

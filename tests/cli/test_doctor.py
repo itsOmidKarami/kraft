@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import yaml
-from support.harness import make_repo
+from support.harness import connected_repo, make_repo
 
 from kraft import auth, capabilities, cli, client, doctor, harness
 
@@ -125,6 +125,21 @@ def test_an_orphaned_worktree_is_reported(app, tmp_path):
     row = _by_name(asyncio.run(doctor.run_checks()), "worktrees")
     assert not row["ok"]
     assert "wi-ghost" in row["detail"]
+
+
+def test_a_cancelled_items_kept_worktree_is_not_an_orphan(app, tmp_path):
+    """Cancel keeps the worktree until the item is archived, and the board's
+    list leaves a cancelled item off: the check counts every row, not just
+    the board's, or doctor fails for weeks after any cancel."""
+    _prime(tmp_path)
+    repo = connected_repo(tmp_path)
+    wid = asyncio.run(client.create_work_item("t", repo=str(repo)))["id"]
+    asyncio.run(client.cancel("not now", wid))
+    (tmp_path / "run" / "worktrees" / wid).mkdir(parents=True)
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "worktrees")
+
+    assert row["ok"], row["detail"]
 
 
 def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch):

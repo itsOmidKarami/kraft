@@ -112,7 +112,11 @@ def _cmd_pause(ns: argparse.Namespace) -> None:
 
 def _cmd_abandon(ns: argparse.Namespace) -> None:
     if not ns.yes:
-        raise ValueError("abandon destroys the worktree and anything uncommitted in it; pass --yes")
+        raise ValueError(
+            "abandon deletes the worktree and the item's branch: uncommitted work and "
+            "commits you never pushed are lost. To keep them, cancel the item instead. "
+            "To go ahead, pass --yes"
+        )
     common.emit(asyncio.run(client.abandon(ns.id)), common._render_action, ns.json)
 
 
@@ -616,10 +620,12 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     mr_label.set_defaults(func=_cmd_mr_label)
 
     abandon = subs.add_parser(
-        "abandon", parents=[common], help="drop an item and reclaim its worktree"
+        "abandon", parents=[common], help="drop an item, deleting its worktree and branch"
     )
     abandon.add_argument("id", nargs="?")
     abandon.add_argument(
-        "--yes", action="store_true", help="required: this destroys uncommitted work"
+        "--yes",
+        action="store_true",
+        help="required: uncommitted work and unpushed commits are lost",
     )
     abandon.set_defaults(func=_cmd_abandon)

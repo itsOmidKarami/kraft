@@ -149,7 +149,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
         {flagLabel && <div className="ph-list"><SwitchRow label={flagLabel} on={flag} onChange={setFlag} /></div>}
         {kind === "cancel" && preview && (
           <Facts rows={[
-            ["keeps", `branch ${preview.kept.branch}, the worktree${preview.kept.findings ? `, ${preview.kept.findings} findings` : ""}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ""} and the run log`],
+            ["keeps", `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ""}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ""} and the run log`],
             ["spend", `${usd(preview.spend.spent_usd)} stays on the ledger`],
           ]} />
         )}

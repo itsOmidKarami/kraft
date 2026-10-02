@@ -37,9 +37,9 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
   const rows: [string, string][] = preview
     ? [
         ["stops now", run ? `${run.task ? taskName(run.task) : run.node}${run.attempt ? `, attempt ${run.attempt}` : ""}. That attempt's work is lost.` : "Nothing is running."],
-        ["keeps", `branch ${preview.kept.branch}, the worktree${preview.kept.findings ? `, ${preview.kept.findings} findings` : ", findings"}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ", threads"} and the run log`],
+        ["keeps", `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ", findings"}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ", threads"} and the run log`],
         ["spend", `${usd(preview.spend.spent_usd)} stays on the ledger and in today's total`],
-        ["afterwards", "Status CANCELLED. Archive it, or duplicate it as a new item."],
+        ["afterwards", "Status CANCELLED. Archive it, or duplicate it as a new item. Archiving keeps the branch if it has commits that were never pushed."],
       ]
     : [];
 

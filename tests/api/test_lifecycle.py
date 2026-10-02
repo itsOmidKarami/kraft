@@ -411,6 +411,23 @@ def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):
     assert not worktree.exists()
 
 
+def test_abandon_reclaims_a_cancelled_items_worktree_and_branch(client, repo):
+    """Cancel stores `abandoned` and keeps everything; abandon on it then
+    does what it says, rather than answering a no-op."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
+
+    r = client.post(f"/api/work-items/{wid}/abandon")
+
+    assert r.json() == {"id": wid, "status": "abandoned", "worktree_removed": True}
+    assert not worktree.exists()
+    listed = subprocess.run(["git", "branch", "--list", branch], cwd=repo, capture_output=True)
+    assert listed.stdout == b""
+
+
 def test_abandon_reclaims_the_attachment_storage(client, repo):
     """The worktree is already reclaimed; the documents that fed it should not
     outlive it in $KRAFT_HOME."""

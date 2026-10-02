@@ -32,7 +32,7 @@ export function eventLine(e: KraftEvent): string | null {
     case "work_item_waiting": return `${node} is waiting`;
     case "work_item_cancelled": return "cancelled";
     case "work_item_completed": return "finished";
-    case "work_item_archived": return "archived";
+    case "work_item_archived": return p.kept_branch ? `archived · kept ${s(p.kept_branch)}: ${s(p.unpushed_commits)} unpushed commit${p.unpushed_commits === 1 ? "" : "s"}` : "archived";
     case "work_item_restored": return "restored";
     case "mr_opened": return `MR !${s(p.number)} opened`;
     case "mr_closed": return `MR !${s(p.ref)} closed${p.by && p.by !== "cancel" ? ` by ${s(p.by)}` : ""}`;

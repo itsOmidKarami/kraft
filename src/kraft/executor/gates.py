@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 #: What closes a requested gate.
-_GATE_CLOSED = (
+GATE_CLOSED = (
     "gate_approved",
     "gate_rejected",
     "node_skipped",
@@ -51,7 +51,7 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     """
     evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
-        if e["type"] in _GATE_CLOSED or e["type"] == "gate_requested":
+        if e["type"] in GATE_CLOSED or e["type"] == "gate_requested":
             return e["payload"]["gate"] if e["type"] == "gate_requested" else None
     return None
 
