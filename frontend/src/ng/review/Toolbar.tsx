@@ -97,14 +97,14 @@ export function NodesFilter({ files, chainOrder, nodes, onChange }: { files: Com
   };
   return (
     <Pop label={`Nodes: ${label}`} triggerClass="rv-pill" trigger={<>{label}<ChevronDown size={12} aria-hidden /></>}>
-      <button type="button" role="menuitemcheckbox" aria-checked={all} className="rv-check" onClick={() => onChange(all === true ? [] : null)}>
+      <button type="button" role="menuitemcheckbox" aria-checked={all} tabIndex={-1} className="rv-check" onClick={() => onChange(all === true ? [] : null)}>
         <Box on={all} />
         <span className="rv-check-label">All nodes</span>
         <span className="rv-check-count">{kept} of {files.length} files</span>
       </button>
       <span className="rv-check-rule" role="separator" />
       {rows.map((r) => (
-        <button key={r.id} type="button" role="menuitemcheckbox" aria-checked={on(r.id)} className="rv-check" onClick={() => toggle(r.id)}>
+        <button key={r.id} type="button" role="menuitemcheckbox" aria-checked={on(r.id)} tabIndex={-1} className="rv-check" onClick={() => toggle(r.id)}>
           <Box on={on(r.id)} />
           <span className="rv-check-label rv-mono">{r.id}</span>
           <span className="rv-check-count">{r.files} {r.files === 1 ? "file" : "files"}</span>
@@ -126,14 +126,14 @@ export function DiffSettings({ prefs, set }: { prefs: DiffPrefs; set: (patch: Pa
     <Pop label="Diff settings" triggerClass="icon-btn rv-settings" trigger={<><List size={16} aria-hidden /><ChevronDown size={12} aria-hidden /></>}>
       <span className="menu-heading" aria-hidden="true">Compare changes</span>
       {(["split", "unified"] as const).map((l) => (
-        <button key={l} type="button" role="menuitemradio" aria-checked={prefs.layout === l} className="rv-check" onClick={() => set({ layout: l })}>
+        <button key={l} type="button" role="menuitemradio" aria-checked={prefs.layout === l} tabIndex={-1} className="rv-check" onClick={() => set({ layout: l })}>
           <span className="rv-tick" aria-hidden="true">{prefs.layout === l ? "✓" : ""}</span>
           <span className="rv-check-label">{l === "split" ? "Side-by-side" : "Inline"}</span>
         </button>
       ))}
       <span className="rv-check-rule" role="separator" />
       {toggles.map(([k, text]) => (
-        <button key={k} type="button" role="menuitemcheckbox" aria-checked={!!prefs[k]} className="rv-check" onClick={() => set({ [k]: !prefs[k] })}>
+        <button key={k} type="button" role="menuitemcheckbox" aria-checked={!!prefs[k]} tabIndex={-1} className="rv-check" onClick={() => set({ [k]: !prefs[k] })}>
           <Box on={!!prefs[k]} />
           <span className="rv-check-label">{text}</span>
         </button>

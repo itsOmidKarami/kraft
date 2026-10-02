@@ -17,7 +17,7 @@ export const firstFocusable = (root: HTMLElement | null): HTMLElement | null =>
  *  - once placed, focus moves to its first menu item, field or button, unless
  *    what opened it already moved focus in, or `focusIn` is false (a toggle
  *    that opens on hover or focus and moves in only on a key);
- *  - ↑/↓, Home and End move between its menu items;
+ *  - ↑/↓, Home and End move between its menu items, and Tab leaves a menu as Escape does;
  *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere. */
 export function Popover({ anchor, open, onClose, children, role, label, focusIn = true }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -61,9 +61,7 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
-      onClose();
-      // Still inside: nobody took focus back, and it would fall to the page as this unmounts.
-      if (ref.current?.contains(document.activeElement)) (opener.current?.isConnected ? opener.current : anchor.current)?.focus();
+      closeBack();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -73,9 +71,22 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
     };
   }, [open, onClose, anchor]);
 
+  // Close, and hand focus back to what had it when this opened, unless `onClose` already moved it.
+  function closeBack() {
+    onClose();
+    // Still inside: nobody took focus back, and it would fall to the page as this unmounts.
+    if (ref.current?.contains(document.activeElement)) (opener.current?.isConnected ? opener.current : anchor.current)?.focus();
+  }
+
   // ↑/↓, Home and End over the menu items; a list that handles its own keys prevents the default first.
+  // Tab leaves a menu as Escape does: portalled to the end of the page, the
+  // next stop after its last item would be the top of the page, with the menu still open.
   const onItemKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented) return;
+    if (e.key === "Tab" && role === "menu") {
+      e.preventDefault();
+      return closeBack();
+    }
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>(ITEMS)];
     const n = items.length;
     const at = items.indexOf(document.activeElement as HTMLElement);

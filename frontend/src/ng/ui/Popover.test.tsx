@@ -109,6 +109,14 @@ describe("ng Popover", () => {
       expect(trigger).toHaveFocus();
     });
 
+    it("closes a menu on Tab and hands focus back, rather than leaving it open with focus at the top of the page", async () => {
+      const trigger = openIt();
+      await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "one" })).toHaveFocus());
+      fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(trigger).toHaveFocus();
+    });
+
     it("leaves focus where it is with focusIn off (a toggle that opens on hover or focus)", async () => {
       const trigger = openIt(false);
       await new Promise((r) => requestAnimationFrame(() => r(null)));
