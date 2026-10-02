@@ -42,6 +42,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "health",
         "templates",
         "access.yaml",
+        "detectors.yaml",
         "pidfile",
         "mcp token",
         "agent: claude",
@@ -51,6 +52,24 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "worktrees",
     ):
         assert name in _names(rows)
+
+
+@pytest.mark.parametrize(
+    ("text", "ok", "said"),
+    [
+        (None, True, "not present"),
+        ("detectors:\n  - {id: earthly, tier: runner, files: [Earthfile]}\n", True, "1 detector"),
+        ("detectorz: []\n", False, "detectors.yaml"),
+    ],
+    ids=["absent", "valid", "broken"],
+)
+def test_doctor_reads_the_operators_detectors_file(app, tmp_path, text, ok, said):
+    _prime(tmp_path)
+    templates = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    if text is not None:
+        (templates / "detectors.yaml").write_text(text)
+    row = _by_name(asyncio.run(doctor.run_checks()), "detectors.yaml")
+    assert (row["ok"], said in row["detail"]) == (ok, True), row
 
 
 def test_doctor_flags_a_dead_pidfile(app, tmp_path):

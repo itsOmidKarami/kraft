@@ -156,6 +156,7 @@ def _config_checks() -> list[dict]:
             # Nothing seeded yet, so nothing to upgrade: the first start seeds
             # every capability and stamps the version.
             _check("capabilities", True, "skipped: no templates dir", skipped=True),
+            _check("detectors.yaml", True, "skipped: no templates dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
@@ -165,12 +166,28 @@ def _config_checks() -> list[dict]:
         checks.append(_check("access.yaml", True, "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
+    checks.append(_detectors_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
     checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
     return checks
+
+
+def _detectors_check(templates: Path) -> dict:
+    """The operator's `detectors.yaml`: optional, and read only when a repo is
+    connected, so a broken one would otherwise surface as a failed connect
+    long after it was written."""
+    own = templates / detect.FILE
+    if not own.is_file():
+        return _check("detectors.yaml", True, "not present: the packaged detectors alone")
+    try:
+        detect.load(templates)
+        count = len(detect.DetectorFile.model_validate(config.read_yaml(own, {})).detectors)
+    except config.ConfigError as exc:
+        return _check("detectors.yaml", False, str(exc))
+    return _check("detectors.yaml", True, f"parses ({count} detector(s) of your own)")
 
 
 def _pidfile_check() -> dict:
