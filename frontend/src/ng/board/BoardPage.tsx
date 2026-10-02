@@ -120,7 +120,7 @@ export function BoardPage() {
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
     if (a.kind === "gate") return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
-    if (a.kind === "peek") return peek(item.id, a.tab, !!a.budget);
+    if (a.kind === "peek") return peek(item.id, a.tab);
     const r = await act.resume(item.id);
     setRowErrors((e) => {
       const { [item.id]: _, ...rest } = e;

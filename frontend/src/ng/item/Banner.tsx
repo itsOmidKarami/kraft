@@ -4,6 +4,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
 import { RaiseLimit } from "./RaiseLimit";
+import { budgetRaise, NOT_RAISABLE } from "./status";
 import type { ItemDetail } from "./useItem";
 
 /** The reason banner (Decisions §4): only when the item needs you at a gate
@@ -29,11 +30,14 @@ export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail
         <span className="item-banner-text">
           {(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached")).replace(/\.$/, "")}
           {stop.node && <> at <code>{stop.node}</code></>}.
+          {stop.kind === "budget" && !budgetRaise(item) && <> {NOT_RAISABLE}</>}
         </span>
-        {/* A cap that names its limit opens that limit's editor; any other stop opens the Config it can only point at. */}
+        {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,
+            and a budget stop on the item's own cap that Config's budget editor. A budget the item cannot raise says so, and the header's Retry is the way on. */}
         {stop.limit
           ? <Button variant="primary" onClick={() => setRaising(true)}>Raise cap</Button>
-          : <Button variant="primary" onClick={onRaise}>{stop.kind === "cap" ? "Open config" : "Raise cap"}</Button>}
+          : stop.kind === "cap" ? <Button variant="primary" onClick={onRaise}>Open config</Button>
+          : budgetRaise(item) && <Button variant="primary" onClick={onRaise}>Raise cap</Button>}
         {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}
       </div>
     );

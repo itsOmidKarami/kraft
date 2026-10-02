@@ -1,6 +1,6 @@
 import { ago, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
-import { headerState, archivable } from "../../item/status";
+import { budgetRaise, headerState, archivable, NOT_RAISABLE } from "../../item/status";
 import { taskName } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
@@ -25,6 +25,18 @@ const pathOf = (task?: string | null) => (task ? task.split(".").join(" › ") :
 
 const spent = (item: ItemDetail): [string, string][] =>
   item.budget_cap ? [["spent", `${usd(item.budget_cap.spent_usd)}${item.budget_cap.cap_usd != null ? ` of ${usd(item.budget_cap.cap_usd)}` : ""}`]] : [];
+
+/** A budget stop's spend, against the cap that stopped it when the item can
+ *  raise that cap, and to the cent, as the stop's reason prints it
+ *  (`executor.stops.budget_reason`): the two never show $0.04 and $0.035. A
+ *  daily or token cap's figures are in the reason itself. */
+const budgetSpent = (item: ItemDetail): [string, string][] => {
+  if (!item.budget_cap) return [];
+  const cents = (n: number) => `$${n.toFixed(2)}`;
+  const how = budgetRaise(item);
+  const cap = how === "limit" ? stopLimitOf(item)!.value : how === "item" ? item.budget_cap.cap_usd : null;
+  return [["spent", `${cents(item.budget_cap.spent_usd)}${cap != null ? ` of ${cents(cap)}` : ""}`]];
+};
 
 /** The words come from the desktop's StateCard, Banner and QuestionCard, so the two shapes say the same thing about the same stop. */
 export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null {
@@ -60,7 +72,11 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null
       if (!stop) return null;
       switch (stop.kind) {
         case "gate": return { tone: "warn", title: "Waiting for your approval", where: `at ${item.pending_gate ?? stop.node ?? ""}`, facts: spent(item) };
-        case "budget": return { tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined, text: "Raising the budget resumes the item at once.", facts: spent(item) };
+        case "budget": return {
+          tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined,
+          text: budgetRaise(item) ? "Raising the budget resumes the item at once." : NOT_RAISABLE,
+          facts: budgetSpent(item),
+        };
         case "cap": return { tone: "bad", title: (stop.reason ?? "A limit was reached").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined, text: "Retry runs the node again. Steer first if it should finish sooner.", facts: spent(item) };
         case "question": {
           const q = item.needs_context_question;
@@ -128,7 +144,7 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "needs_you":
       switch (stop?.kind) {
         case "gate": return { secondary: a("reject", "Reject…"), primary: a("review", "Review and decide") };
-        case "budget": return { secondary: a("steer", "Steer"), primary: a("raise", "Raise budget") };
+        case "budget": return { secondary: a("steer", "Steer"), primary: budgetRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
         case "cap": return { secondary: a("steer", "Steer"), primary: a("retry", "Retry") };
         case "question": return { secondary: a("escalate", "Escalate"), primary: a("answer", "Answer") };
         case "conflict": return { secondary: a("cancel", "Cancel…", true), primary: a("conflicts", "Review the conflicts") };
@@ -184,7 +200,7 @@ const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string; money?
 };
 export const limitWords = (l: StopLimit) => LIMIT_WORDS[l.key];
 
-/** The `stop.limit` of a cap or budget stop, or null: without it a cap stop keeps Steer and Retry, and a budget stop raises the item's own cap. */
+/** The `stop.limit` of a cap or budget stop, or null: without it a cap stop keeps Steer and Retry, and a budget stop raises the item's own cap if that is what stopped it (`item/status`'s `budgetRaise`). */
 export const stopLimitOf = (item: ItemDetail): StopLimit | null => (item.stop?.kind === "cap" || item.stop?.kind === "budget" ? (item.stop.limit ?? null) : null);
 
 /** The PATCH body that sets one limit: item-wide under `policy`, a node's under `policy.paths`. */

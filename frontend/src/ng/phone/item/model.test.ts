@@ -6,6 +6,9 @@ import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
 const mk = (display_status: DisplayStatus, s: WorkItemStop | null = null, over = {}) => detail({ display_status, stop: s, ...over });
+/** The item's own $10 cap, spent: the budget stop `/budget/raise` raises. */
+const OWN_CAP = { budget_cap: { cap_usd: 10, source: "item", spent_usd: 10 } } as const;
+const POLICY_USD = { limit: { path: "", key: "budget_usd", value: 0.01, maximum: null } } as const;
 const ids = (i: ReturnType<typeof detail>) => {
   const p = pairOf(i);
   return [p.secondary?.id ?? null, p.primary?.id ?? null];
@@ -18,7 +21,9 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["paused mid-chain", mk("paused"), ["steer", "resume"]],
     ["not started", mk("paused", null, { current_node_id: null }), [null, "start"]],
     ["gate", mk("needs_you", stop("gate", { node: "plan_approval" })), ["reject", "review"]],
-    ["budget", mk("needs_you", stop("budget")), ["steer", "raise"]],
+    ["budget, the item's own cap", mk("needs_you", stop("budget"), OWN_CAP), ["steer", "raise"]],
+    ["budget, an item-wide policy budget_usd", mk("needs_you", stop("budget", POLICY_USD)), ["steer", "raise"]],
+    ["budget, a cap the item cannot raise", mk("needs_you", stop("budget"), { budget_cap: { cap_usd: 10, source: "policy", spent_usd: 2 } }), ["steer", "retry"]],
     ["cap", mk("needs_you", stop("cap")), ["steer", "retry"]],
     ["question", mk("needs_you", stop("question")), ["escalate", "answer"]],
     ["conflict", mk("needs_you", stop("conflict")), ["cancel", "conflicts"]],
@@ -34,7 +39,7 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
   it("hides Steer when no agent task can read a note, and keeps the rest (#387)", () => {
     expect(ids(mk("paused", null, { steerable: false }))).toEqual([null, "resume"]);
     expect(ids(mk("running", null, { steerable: false }))).toEqual([null, "pause"]);
-    expect(ids(mk("needs_you", stop("budget"), { steerable: false }))).toEqual([null, "raise"]);
+    expect(ids(mk("needs_you", stop("budget"), { steerable: false, ...OWN_CAP }))).toEqual([null, "raise"]);
     expect(ids(mk("paused", null, { steerable: true }))).toEqual(["steer", "resume"]);
     expect(ids(mk("paused", null, {}))).toEqual(["steer", "resume"]);
   });
@@ -69,6 +74,8 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
     expect(cardOf(mk("running"))).toBeNull();
     expect(cardOf(mk("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval" }))).toMatchObject({ title: "Waiting for your approval", where: "at plan_approval" });
     expect(cardOf(mk("needs_you", stop("budget", { reason: "The budget ran out." })))).toMatchObject({ tone: "bad", title: "The budget ran out", where: "at verification" });
+    expect(cardOf(mk("needs_you", stop("budget"), OWN_CAP))?.text).toBe("Raising the budget resumes the item at once.");
+    expect(cardOf(mk("needs_you", stop("budget"), { budget_cap: { cap_usd: 10, source: "policy", spent_usd: 2 } }))?.text).toMatch(/^The item can't raise this cap: the policy or the chain sets it\. Retry/);
     expect(cardOf(mk("needs_you", stop("cap", { reason: "Running time hit its 8h cap" })))?.text).toMatch(/Retry runs the node again/);
     expect(cardOf(mk("needs_you", stop("question", { task: "verification.review.code_review" }), { needs_context_question: "Allow it?" }))).toMatchObject({ title: "Needs you", text: "“Allow it?”", where: "asked by code_review · on verification" });
     expect(cardOf(mk("failed", stop("failed", { reason: "exit 1", task: "verification.review.code_review", attempt: 2 })))).toMatchObject({ tone: "bad", title: "Failed", text: "exit 1", where: "verification › review › code_review · attempt 2" });
@@ -100,5 +107,19 @@ describe("nodeSub: a chain row's words", () => {
     expect(nodeSub(graph(mk("failed", stop("failed"))).find((n) => n.id === "verification")!)).toEqual({ text: "failed", tone: "bad" });
     expect(nodeSub(graph(mk("needs_you", stop("cap"))).find((n) => n.id === "verification")!)).toEqual({ text: "stopped at the cap", tone: "bad" });
     expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "warn" });
+  });
+});
+
+describe("a budget stop's spent fact", () => {
+  const spentOf = (s: WorkItemStop, budget_cap: object) => cardOf(mk("needs_you", s, { budget_cap }))?.facts;
+  it("is against the policy budget_usd that stopped the item, not the item's $10 cap, to the cent like the reason", () => {
+    const s = stop("budget", { reason: "budget_usd reached: $0.04 spent in the work item, cap $0.01.", ...POLICY_USD });
+    expect(spentOf(s, { cap_usd: 10, source: "policy", spent_usd: 0.035 })).toEqual([["spent", "$0.04 of $0.01"]]);
+  });
+  it("is against the item's own cap when that stopped it", () => {
+    expect(spentOf(stop("budget"), { cap_usd: 0.01, source: "item", spent_usd: 0.035 })).toEqual([["spent", "$0.04 of $0.01"]]);
+  });
+  it("names no cap for one the item cannot raise: the reason names it", () => {
+    expect(spentOf(stop("budget"), { cap_usd: 10, source: "policy", spent_usd: 2.5 })).toEqual([["spent", "$2.50"]]);
   });
 });

@@ -174,15 +174,16 @@ describe("a card's inline actions (B.4)", () => {
     await screen.findByText("Item c1");
     const card = (id: string) => within(document.querySelector(`[data-row="${id}"]`) as HTMLElement);
     expect(card("c1").getByRole("button", { name: "Open" })).toBeInTheDocument();
-    expect(card("b2").getByRole("button", { name: "Raise budget…" })).toBeInTheDocument();
+    // A list row cannot tell the item's own cap from a daily or token one, which the server will not raise: the item screen can.
+    expect(card("b2").getByRole("button", { name: "Open" })).toBeInTheDocument();
+    expect(card("b2").queryByRole("button", { name: /Raise/ })).toBeNull();
     expect(card("q3").getByRole("button", { name: "Answer…" })).toBeInTheDocument();
     expect(card("f4").getByRole("button", { name: "Retry…" })).toBeInTheDocument();
     // A running card has its tap target and nothing inline.
     expect(card("r6").getAllByRole("button")).toHaveLength(1);
 
-    await userEvent.click(card("b2").getByRole("button", { name: "Raise budget…" }));
+    await userEvent.click(card("b2").getByRole("button", { name: "Open" }));
     expect(where()).toContain("/work-items/b2");
-    expect(where()).toContain('"phSheet":"raise"');
     expect(calls).toEqual([]);
   });
 

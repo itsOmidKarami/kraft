@@ -66,9 +66,17 @@ describe("ChainConfig", () => {
 
   it("on a budget stop raises and retries in one call", async () => {
     const calls = stubFetch();
-    show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null } }, true);
+    show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null }, budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } }, true);
     await userEvent.click(screen.getByRole("button", { name: "No cap" }));
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: null } }]));
+  });
+
+  it("on a budget stop the item's own cap did not make, sets that cap without /budget/raise, which would refuse it", async () => {
+    const calls = stubFetch();
+    // Under its own $5: the daily or a token cap stopped it.
+    show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null } }, true);
+    await userEvent.click(screen.getByRole("button", { name: "+$5" }));
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: 10 } }]));
   });
 
   it("on a policy budget stop raises that policy and retries, with no No-cap pick", async () => {
