@@ -8,6 +8,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+from urllib.parse import urljoin
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,16 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: timeout; only the granularity is short, since a 0.2s sleep was ~1/3 of
 #: test_gates.py's wall time spent waiting on work already done (Kraft-qmhfc).
 _POLL = 0.02
+
+
+class _LoopbackClient(TestClient):
+    """A websocket on the same loopback Host as every HTTP call. Starlette
+    joins a relative websocket URL onto ws://testserver, not onto `base_url`,
+    and `/ws/events` refuses that name on a loopback bind as the HTTP routes
+    do (`perimeter._refusal`)."""
+
+    def websocket_connect(self, url, *args, **kwargs):
+        return super().websocket_connect(urljoin("ws://127.0.0.1", url), *args, **kwargs)
 
 
 def _client(
@@ -86,7 +97,7 @@ def _client(
     # A loopback Host, as every real client sends: a loopback-bound server
     # refuses any other name (`perimeter._perimeter`, rule 2), and starlette's
     # default is "testserver".
-    return TestClient(api.app, client=peer, base_url="http://127.0.0.1")
+    return _LoopbackClient(api.app, client=peer, base_url="http://127.0.0.1")
 
 
 def _poll_events(client, wid, want, timeout=30, count=1):

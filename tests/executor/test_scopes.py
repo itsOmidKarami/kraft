@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import _git, entry_of, v1_chain, v1_walk
+from support.harness import _git, commit_all, entry_of, v1_chain, v1_walk
 
 from kraft import executor, store
-from kraft.config import git_read
+from kraft.config import git_read, probe_repo
 from kraft.executor import dispatch
 from kraft.findings import JobRef
 
@@ -302,6 +302,36 @@ async def test_changed_test_scopes_report_one_aggregate_result(item_on):
         ("verify.main.t", "failed"),
         ("verify.main.t", "done"),
     ]
+
+
+#: A CLI -> a project one level down that passes only when its test command
+#: runs inside that directory.
+_NESTED_PROJECTS = {
+    "npm": {"web/package.json": '{"scripts": {"test": "test -f package.json"}}'},
+    "just": {"tools/justfile": "test:\n    test -f justfile\n"},
+    "go": {
+        "svc/go.mod": "module svc\n\ngo 1.20\n",
+        "svc/svc_test.go": 'package svc\n\nimport "testing"\n\nfunc TestX(t *testing.T) {}\n',
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "files",
+    [pytest.param(f, id=cli, marks=pytest.mark.e2e(cli)) for cli, f in _NESTED_PROJECTS.items()],
+)
+async def test_a_probed_nested_scope_finds_its_project_from_the_worktree_root(item_on, repo, files):
+    """A monorepo's probed scope, run the way verify runs every scope: from the
+    worktree root, without a shell. A bare `npm test` there read
+    `<worktree>/package.json` and failed, so a nested scope could never pass."""
+    for path, text in files.items():
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text(text)
+    commit_all(repo)  # the probe reads the committed tree
+
+    status, it = await _dispatch(item_on, test_scopes=probe_repo(repo)["test_scopes"])
+    assert status == "done", [Path(s["log_path"]).read_text() for s in it.sessions()]
+    assert it.sessions(), "no scope ran"
 
 
 async def test_the_repos_declared_env_reaches_a_test_scopes_run_task(tmp_path, repo):

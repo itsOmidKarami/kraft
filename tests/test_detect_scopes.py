@@ -4,6 +4,8 @@ Split from `test_detect.py` for its line budget."""
 
 from __future__ import annotations
 
+import shlex
+
 import pytest
 from support.probe import JEST, PYTEST
 from support.probe import propose as _propose
@@ -231,3 +233,32 @@ def test_a_given_test_command_replaces_the_roots_and_keeps_nested_scopes(tmp_pat
 )
 def test_combine_setup(scopes, expected):
     assert detect.combine_setup(scopes) == expected
+
+
+#: A project one level down, with nothing at the root -> the argv its scope's
+#: command splits into (#453): it runs from the repository root, so it moves
+#: into its own directory first.
+_NESTED_PROJECTS = {
+    "npm": ({"web app/package.json": JEST}, "cd 'web app' && npm test"),
+    "uv": (
+        {"backend/pyproject.toml": PYTEST, "backend/uv.lock": ""},
+        "cd backend && uv run pytest",
+    ),
+    "cargo": ({"crate/Cargo.toml": ""}, "cd crate && cargo test"),
+    "go": ({"svc/go.mod": "module svc\n"}, "cd svc && go test ./..."),
+    "just": ({"tools/Justfile": "test:\n    true\n"}, "cd tools && just test"),
+}
+
+
+@pytest.mark.parametrize(("files", "script"), _NESTED_PROJECTS.values(), ids=_NESTED_PROJECTS)
+def test_a_nested_scopes_command_runs_in_its_own_directory(tmp_path, files, script):
+    """Verify runs every scope's command from the worktree root, without a
+    shell, so a bare `npm test` there looks for its project at the root. A
+    name with a space stays one argument to `cd`."""
+    p = _propose(_repo(tmp_path, files))
+    (directory,) = {path.rpartition("/")[0] for path in files}
+    [scope] = p.test_scopes
+    assert (scope["paths"], shlex.split(scope["command"])) == (
+        [f"{directory}/**"],
+        ["sh", "-c", script],
+    )

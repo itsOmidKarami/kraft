@@ -212,7 +212,12 @@ jobs:
           # serves every version, so the oldest is the one it can break on.
           uv venv --python 3.12 /tmp/smoke
           VIRTUAL_ENV=/tmp/smoke uv pip install "$WHEEL"
-          /tmp/smoke/bin/kraft --version | grep -qF "${TAG#v}"
+          # The whole line, not a substring: `1.5.0` is inside `1.5.0rc11`.
+          VERSION=$(/tmp/smoke/bin/kraft --version)
+          if [ "$VERSION" != "kraft ${TAG#v}" ]; then
+            echo "::error::the wheel says '$VERSION', not 'kraft ${TAG#v}'"
+            exit 1
+          fi
           # Ask the installed package where its bundle is, rather than guessing
           # a site-packages path that a python version bump would invalidate.
           /tmp/smoke/bin/python -c \
@@ -281,23 +286,6 @@ jobs:
       - name: publish to PyPI
         if: steps.impact.outputs.tag != '' && contains(fromJSON('["none","rc"]'), steps.impact.outputs.pre)
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-
-      - name: publish the VS Code extension
-        # Only once the maintainer has created the Marketplace publisher and
-        # added VSCE_PAT; until then the .vsix is still attached to the
-        # GitHub Release.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
-        run: |
-          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
-          npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
-
-      - name: publish the VS Code extension to Open VSX
-        # No token: Open VSX trusted publishing, registered for kraft-sdlc.kraft
-        # against this workflow and the `release` environment.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
-        run: |
-          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
-          npx --prefix vscode ovsx publish "$VSIX" --trusted-publishing
 
       - name: mint a token to open the stamp PR
         # The default GITHUB_TOKEN deliberately can't do this part: GitHub
@@ -388,6 +376,31 @@ jobs:
           done
           echo "::error::kraft-sdlc ${TAG#v} is not on PyPI after 10 minutes"
           exit 1
+
+      - name: publish the VS Code extension
+        # Last, after Kraft itself is on PyPI, Homebrew and main. A failed step
+        # stops every step after it, and VSCE_PAT is a token that expires: run
+        # first, an expired one left Homebrew on the old version and main
+        # unstamped. Run here, it fails the run and skips only the extension's
+        # own steps. The order also suits VS Code's auto-update: an extension
+        # newer than the daemon is read-only, so it should not reach users
+        # before the Kraft that matches it can be installed.
+        #
+        # Only once the maintainer has created the Marketplace publisher and
+        # added VSCE_PAT; until then the .vsix is still attached to the
+        # GitHub Release.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
+        run: |
+          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
+          npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
+
+      - name: publish the VS Code extension to Open VSX
+        # No token: Open VSX trusted publishing, registered for kraft-sdlc.kraft
+        # against this workflow and the `release` environment.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
+        run: |
+          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
+          npx --prefix vscode ovsx publish "$VSIX" --trusted-publishing
 
       - name: check the Marketplace lists this release
         # Warns only: the Marketplace can take a while to index a publish.
