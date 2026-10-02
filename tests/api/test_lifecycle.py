@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
-from support.api import _force_node, _poll_events, _post_default, _set_status
+from support.api import _completed_item, _force_node, _poll_events, _post_default, _set_status
 
 
 def test_happy_path_via_api(client, repo, monkeypatch):
@@ -187,19 +187,6 @@ def _rebase_fails(monkeypatch, error):
     return calls
 
 
-def _completed_quick_task(client, repo):
-    """`quick-task` (no gate on any node) rather than the default chain: a
-    `gate_requested` event left open by force-writing status past it reads
-    to `gates.pending_gate` as a still-open gate, which makes
-    `auto_escalate_stuck` no-op regardless of whether it is armed."""
-    wid = client.post(
-        "/api/work-items",
-        json={"autostart": True, "title": "x", "repo": str(repo), "chain_template": "quick-task"},
-    ).json()["id"]
-    _poll_events(client, wid, "work_item_completed")
-    return wid
-
-
 _STOP_STATUS = {"resume": "paused", "retry": "needs_human"}
 
 
@@ -212,7 +199,7 @@ def test_a_non_conflict_rebase_failure_goes_to_a_human_even_when_armed(
     (Kraft-s7c04.23). It is not in the stuck set, so no agent is dispatched
     onto it even with `auto_escalate_stuck` armed (Ruling 176)."""
     calls = _rebase_fails(monkeypatch, lambda b: RuntimeError)
-    wid = _completed_quick_task(client, repo)
+    wid = _completed_item(client, repo)
     _force_node(wid, "verify", _STOP_STATUS[verb])
 
     r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/{verb}")
@@ -241,7 +228,7 @@ def test_a_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeyp
     `/retry` never persists a steer ahead of the rebase, so for it this is
     the assertion that the helper writes it at all."""
     calls = _rebase_fails(monkeypatch, lambda b: b.RebaseConflict)
-    wid = _completed_quick_task(client, repo)
+    wid = _completed_item(client, repo)
     # `implementation`, not wherever the walk left it: that node has an agent
     # task downstream to steer, unlike `verify`'s subprocess-only tasks, which
     # `_steer_reachable` refuses on principle.

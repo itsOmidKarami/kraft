@@ -5,12 +5,21 @@ docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import sqlite3
 import time
 from pathlib import Path
 
-from support.api import WALK_TIMEOUT, _poll_events, _set_status, _wait_for_status
+import pytest
+from support.api import (
+    WALK_TIMEOUT,
+    _force_node,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _wait_for_status,
+)
 
 
 def _post(client, repo, title="fine so far", **body):
@@ -29,7 +38,7 @@ def _post(client, repo, title="fine so far", **body):
 def _needs_human_item(client, repo, title="KRAFT_FAIL once"):
     """A real item driven to `needs_human` by the fake agent's own KRAFT_FAIL
     marker -- same recipe as
-    test_api_retry_open_log.py::test_retry_restarts_a_stopped_node_that_has_no_fix_loop.
+    test_retry_open_log.py::test_retry_restarts_a_stopped_node_that_has_no_fix_loop.
     """
     # Kraft-lpdd: this file drives the manual escalate/stop-escalate routes by
     # hand -- the unrelated auto-escalate trigger would otherwise race it onto
@@ -54,19 +63,24 @@ def _sql(sql, *args):
         conn.close()
 
 
-def _seed_running_escalation(client, wid, session_id="running-turn"):
+def _seed_running_escalation(client, wid, session_id="running-turn", *, pid=None):
     """A `pending` escalation session on the item's current node, inserted
     directly -- the dispatch machinery itself is exercised elsewhere; these
     tests only need the guard every door onto the same worktree has to check."""
     node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
     _sql(
         "INSERT INTO worker_sessions "
-        "(id, work_item_id, node_id, hook_point, log_path, result_path, status, created_at) "
-        "VALUES (?, ?, ?, 'escalation', 'l', 'r', 'pending', 'now')",
+        "(id, work_item_id, node_id, hook_point, pid, log_path, result_path, status, created_at) "
+        "VALUES (?, ?, ?, 'escalation', ?, 'l', 'r', 'pending', 'now')",
         session_id,
         wid,
         node_id,
+        pid,
     )
+
+
+def _session_status(session_id="running-turn"):
+    return _sql("SELECT status FROM worker_sessions WHERE id = ?", session_id)[0][0]
 
 
 def _settled(client, repo):
@@ -92,7 +106,10 @@ def _escalate(client, wid, message="help", **body):
 def test_escalate_refuses_an_item_that_is_not_needs_human(client, repo):
     wid = _settled(client, repo)
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "completed"
-    assert _escalate(client, wid).status_code == 409
+    r = _escalate(client, wid)
+    # The ended-item guard, ahead of the status check that would 409 it too.
+    assert r.status_code == 409
+    assert r.json()["detail"] == "work item is completed; its chain does not run again"
 
 
 def test_escalate_succeeds_from_paused(client, repo):
@@ -145,16 +162,71 @@ def test_escalate_refuses_a_second_call_while_one_is_running(client, repo):
 def test_retry_kills_a_running_escalation_turn_and_proceeds(client, repo, monkeypatch):
     """`retry` dispatches into the same worktree an escalation agent may
     already be committing in -- a stranger's retry (no matching session
-    header) now kills that turn first rather than refusing outright
-    (Kraft-vyk8; see test_api_lifecycle.py's
-    test_retry_kills_a_strangers_running_escalation_and_proceeds for the
-    self-retry-vs-stranger distinction this pins from the other side)."""
-    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: None)
+    header) kills that turn first rather than refusing outright
+    (Kraft-vyk8), here on a real `needs_human` stop rather than a forced one
+    (test_lifecycle.py's test_retry_kills_a_strangers_running_escalation_and_proceeds
+    pins the self-retry-vs-stranger distinction from the other side)."""
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
     wid = _needs_human_item(client, repo)
-    _seed_running_escalation(client, wid)
+    _seed_running_escalation(client, wid, pid=4242)
 
     r = client.post(f"/api/work-items/{wid}/retry", json={})
     assert r.status_code == 200, r.text
+    assert terminated == [4242]
+    assert _session_status() == "paused"
+    types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+    assert "worker_session_paused" in types and "work_item_retried" in types
+
+
+def _stopped_with_a_running_escalation(client, repo, node_id):
+    """An item stopped `needs_human` at `node_id` with an escalation turn
+    (pid 4242) still running on it, as a stranger's `/retry` finds it."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, node_id, "needs_human")
+    _seed_running_escalation(client, wid, pid=4242)
+    return wid
+
+
+def _full_board(client, repo):
+    other = _post_default(client, repo)
+    _poll_events(client, other, "gate_requested")
+    _set_status(other, "active")
+    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+
+
+def _no_downstream_steer(client, repo):
+    return {"steer": "commit the leftover file"}
+
+
+@pytest.mark.parametrize(
+    ("node_id", "setup", "detail"),
+    [
+        ("implementation", _full_board, "all 1 slots are busy"),
+        ("merge", _no_downstream_steer, "node 'merge' has no agent task downstream to steer"),
+    ],
+    ids=["all-slots-busy", "a-steer-nothing-downstream-reads"],
+)
+def test_a_strangers_retry_refuses_before_it_kills_the_escalation_turn(
+    client, repo, monkeypatch, node_id, setup, detail
+):
+    """Both refusals run ahead of the kill: `_stop_live_sessions` SIGINTs the
+    turn and that does not undo itself because the request then 409s, so a
+    human who gets the error must find the turn still running. `merge` is
+    the chain's last node and forge-only, so a steer there reaches nothing."""
+    terminated = []
+    monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
+    wid = _stopped_with_a_running_escalation(client, repo, node_id)
+    body = setup(client, repo) or {}
+
+    r = client.post(f"/api/work-items/{wid}/retry", json=body)
+
+    assert r.status_code == 409, r.text
+    assert detail in r.json()["detail"]
+    assert terminated == []
+    assert _session_status() == "pending"
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
 
 def test_a_strangers_retry_cancels_the_escalation_task_not_just_its_pid(client, repo, monkeypatch):
@@ -171,7 +243,7 @@ def test_a_strangers_retry_cancels_the_escalation_task_not_just_its_pid(client, 
     # Stand in for the live escalation coroutine `/escalate` would have
     # spawned under this same key -- registered directly rather than
     # driven through a real dispatch, the same seam
-    # test_api_lifecycle.py's task_is_live tests already use.
+    # test_lifecycle.py's task_is_live tests already use.
     import kraft.api as api
 
     async def _never_returning():

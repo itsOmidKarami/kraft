@@ -236,6 +236,15 @@ def _stage_bundle(templates_dir: Path) -> Path:
     # Deliberately not `.yaml`, so nothing that globs this directory's YAML
     # ever reads the stamp as configuration.
     (staging / ".seeded-version").write_text(f"{_version()}\n")
+    # The operator's alone, as every file Kraft saves there is (`config.
+    # write_text` creates 0600) and as `run/` is: the copy would otherwise
+    # carry the package's 0644 until its first save from Settings.
+    staging.chmod(0o700)
+    for parent, dirs, files in os.walk(staging):
+        for name in dirs:
+            os.chmod(os.path.join(parent, name), 0o700)
+        for name in files:
+            os.chmod(os.path.join(parent, name), 0o600)
     return staging
 
 

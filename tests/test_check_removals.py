@@ -165,3 +165,89 @@ def test_a_binary_file_in_the_change_does_not_crash_the_check(cr, repo, tmp_path
     body = tmp_path / "body.md"
     body.write_text("## Summary\nAn icon.\n")
     assert cr.main(["check_removals.py", base, str(body)]) == 0
+
+
+_PARAMETRIZED = (
+    "import pytest\n"
+    "@pytest.mark.parametrize('x', [1, pytest.param(2, id='two')], ids=['one', None])\n"
+    "@pytest.mark.parametrize('y', ['a', -1])\n"
+    "def test_p(x, y): pass\n"
+)
+
+
+def test_tests_in_names_each_parametrize_case_as_pytest_does(cr):
+    """Stacked decorators multiply, nearest the function first; an `ids=`
+    entry, a `pytest.param(id=)` and a constant's own text each name one."""
+    assert cr.tests_in("t/test_x.py", _PARAMETRIZED) == {
+        "t/test_x.py::test_p",
+        "t/test_x.py::test_p[a-one]",
+        "t/test_x.py::test_p[a-two]",
+        "t/test_x.py::test_p[-1-one]",
+        "t/test_x.py::test_p[-1-two]",
+    }
+
+
+def test_a_dropped_parametrize_case_is_a_removal(cr, repo, tmp_path, monkeypatch, capsys):
+    """`ids=["ok", "refused", "secret"]` cut to `["ok"]` loses two cases while
+    the function stays; each has to be declared by its own id, and the test
+    removed whole is declared by its id alone, cases and all."""
+    (repo / "test_cases.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('v', [1, 2, 3], ids=['ok', 'refused', 'secret'])\n"
+        "def test_kept(v): pass\n"
+        "@pytest.mark.parametrize('v', [1, 2])\n"
+        "def test_gone(v): pass\n"
+    )
+    base = _commit_all(repo, "base")
+    _git(repo, "checkout", "-qb", "pr")
+    (repo / "test_cases.py").write_text(
+        "import pytest\n@pytest.mark.parametrize('v', [1], ids=['ok'])\ndef test_kept(v): pass\n"
+    )
+    _commit_all(repo, "drop cases")
+    monkeypatch.chdir(repo)
+    body = tmp_path / "body.md"
+    body.write_text("## Removed tests\n- test_cases.py::test_kept -- not the cases\n")
+    assert cr.main(["check_removals.py", base, str(body)]) == 1
+    printed = capsys.readouterr().out
+    assert printed[printed.index("## Removed tests") :].splitlines()[:5] == [
+        "## Removed tests",
+        "- test_cases.py::test_gone",
+        "- test_cases.py::test_kept[refused]",
+        "- test_cases.py::test_kept[secret]",
+        "",
+    ]
+    body.write_text(
+        "## Removed tests\n- test_cases.py::test_kept[refused]\n"
+        "- test_cases.py::test_kept[secret]\n- test_cases.py::test_gone\n"
+    )
+    assert cr.main(["check_removals.py", base, str(body)]) == 0
+
+
+@pytest.mark.parametrize(
+    ("after", "skipped"),
+    [
+        ("@pytest.mark.skip(reason='later')\ndef test_a(): pass\n", True),
+        ("@pytest.mark.skip\ndef test_a(): pass\n", True),
+        ("pytestmark = pytest.mark.skip\ndef test_a(): pass\n", True),
+        ("@pytest.mark.skipif(False, reason='never')\ndef test_a(): pass\n", False),
+        ("def test_a():\n    assert 1\n", False),
+    ],
+    ids=["skip-reason", "bare-skip", "module-pytestmark", "skipif", "unmarked"],
+)
+def test_a_test_newly_marked_skip_is_a_removal(cr, repo, tmp_path, monkeypatch, after, skipped):
+    """A skipped test pins nothing, the same as a deleted one; a `skipif`
+    still runs wherever its condition is false, so it does not count."""
+    (repo / "test_skip.py").write_text("import pytest\ndef test_a(): pass\n")
+    base = _commit_all(repo, "base")
+    _git(repo, "checkout", "-qb", "pr")
+    (repo / "test_skip.py").write_text(f"import pytest\n{after}")
+    _commit_all(repo, "skip it")
+    monkeypatch.chdir(repo)
+    removed, _, _ = cr.removals(base, "HEAD")
+    assert removed == ({"test_skip.py::test_a"} if skipped else set())
+
+
+def test_a_removed_tests_heading_ending_in_a_colon_still_declares(cr):
+    body = "## Removed tests:\n- t/test_x.py::test_a\n### Removed requirements:\n- req-a\n"
+    assert cr.declared(body) == {"tests": {"t/test_x.py::test_a"}, "requirements": {"req-a"}}
+    assert cr.declared("## Removed tests, mostly\n- t/test_x.py::test_a\n")["tests"] == set()

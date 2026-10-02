@@ -11,10 +11,11 @@ from pathlib import Path
 import httpx
 import pytest
 from support import api as api_support
-from support import harness
+from support import harness, real_binaries
 from support.fake_beads import Bd, FakeBeads
 from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
+from support.real_binaries import GUARDED_BINARIES as _GUARDED_BINARIES
 
 from kraft import client as kraft_client
 from kraft import db
@@ -81,23 +82,32 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_real_agent_binary(request, monkeypatch):
-    """Fail loudly rather than spend tokens: a test that reaches a real agent CLI
-    gets an `AssertionError` naming itself and the command.
+    """Fail loudly rather than spend tokens or touch a real forge: a test that
+    reaches a real agent CLI, `gh` or `glab` fails, naming itself and the
+    command. Yields the test's `support.real_binaries.Guard`
+    (`real_binary_guard`).
 
-    At `adapters.subprocess.run_task`, where the argv is final -- not at
-    `resolve_invocation`, because the whole class of defect here is a *resolved*
-    launch whose command nobody expected. The check is on the command's basename
-    only, so every fixture agent (`fixtures/fake-claude.sh`,
-    `tests/support/fake_agent.py`, `sys.executable`) passes untouched, and so
-    does every non-agent subprocess a node runs (`pytest`, `just`, `git`).
+    Three layers. `support.real_binaries.install` puts a refusing stub for
+    every guarded name first on `PATH` and checks `subprocess.Popen` for an
+    installed real binary reached by path; whatever either refused fails the
+    test at teardown, so a launch Kraft swallowed into a failed task still
+    counts. On top, `adapters.subprocess.run_task` refuses a guarded basename
+    in the argv it is about to launch, in the test itself, so a walk sees an
+    `AssertionError` rather than a stub's exit 127. Every fixture agent
+    (`fixtures/fake-claude.sh`, `tests/support/fake_agent.py`,
+    `sys.executable`) and every other subprocess (`pytest`, `just`, `git`)
+    passes untouched.
 
-    `real_executor` is the opt-out, the same marker `_no_agent_launch` already
-    uses in `tests/test_intake_poller.py` -- and even then this only lets the
-    launch through; `KRAFT_E2E` still gates the tests that mean to reach a real
-    agent.
+    A test marked `e2e("<cli>")` gets that CLI back. `real_executor` turns the
+    whole guard off, for a test that drives the real executor on purpose;
+    `KRAFT_E2E` still gates the tests that mean to reach a real agent.
     """
-    if "real_executor" in request.keywords or _REAL_AGENT_BINARIES & _e2e_binaries(request.node):
+    if "real_executor" in request.keywords:
+        yield None
         return
+    allowed = _GUARDED_BINARIES & _e2e_binaries(request.node)
+    guard = real_binaries.install(monkeypatch, request.node.nodeid, allowed)
+    refused = _REAL_AGENT_BINARIES - allowed
 
     import kraft.adapters.subprocess as sp_mod
 
@@ -105,7 +115,7 @@ def _no_real_agent_binary(request, monkeypatch):
 
     async def guarded(*args, cmd=None, **kwargs):
         first = (cmd[0] if isinstance(cmd, list | tuple) and cmd else cmd) or ""
-        if Path(str(first)).name in _REAL_AGENT_BINARIES:
+        if Path(str(first)).name in refused:
             raise AssertionError(
                 f"{request.node.nodeid} tried to launch the real agent binary {first!r} "
                 f"(argv {list(cmd)!r}). Point it at a fixture agent, or mark the test "
@@ -125,7 +135,18 @@ def _no_real_agent_binary(request, monkeypatch):
             f"{session_id}`. Stub `kraft.usage._export_opencode` in the test."
         )
 
-    monkeypatch.setattr(usage_mod, "_export_opencode", no_export)
+    if not allowed & _REAL_AGENT_BINARIES:
+        monkeypatch.setattr(usage_mod, "_export_opencode", no_export)
+    yield guard
+    guard.check()
+
+
+@pytest.fixture
+def real_binary_guard(_no_real_agent_binary):
+    """The running test's `support.real_binaries.Guard` (None under
+    `real_executor`): `.take()` reads and forgets what it refused, for a test
+    proving the guard fires; `.stubs` is the stub directory on `PATH`."""
+    return _no_real_agent_binary
 
 
 @pytest.fixture(autouse=True)
@@ -160,8 +181,8 @@ def pytest_collection_modifyitems(config, items):
     """An e2e test runs only where every CLI it names is installed, and one
     naming a real agent also needs KRAFT_E2E=1, since it spends tokens. Each
     skip names what is missing. A CLI listed in KRAFT_E2E_REQUIRE (CI's e2e
-    job sets `bd`) makes that skip an error, so the job cannot go green having
-    run nothing."""
+    job sets `bd,docker,podman`) makes that skip an error, so the job cannot
+    go green having run nothing."""
     required = set(filter(None, os.environ.get("KRAFT_E2E_REQUIRE", "").split(",")))
     for item in items:
         if "e2e" not in item.keywords:

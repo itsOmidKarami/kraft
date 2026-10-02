@@ -8,6 +8,7 @@ import gc
 import os
 import sqlite3
 import warnings
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -336,7 +337,8 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
     reject its own item's gate."""
     permissions.seed_session(sid="s-escalation", wid="w1", hook_point="escalation")
     permissions.seed_session(sid="s-other", wid="w2")
-    with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
+    db = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    with closing(sqlite3.connect(db)) as conn, conn:
         store.create_session(
             conn,
             id="s-own",
