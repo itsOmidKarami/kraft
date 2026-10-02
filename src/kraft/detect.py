@@ -134,6 +134,9 @@ class Command(BaseModel):
     run: str = Field(min_length=1)
     tasks: list[str] = []
     when: list[Condition] = []
+    #: The files it reads, named as its source; when not given, the first
+    #: of the detector's `files` there is.
+    reads: list[str] = []
 
 
 class Detector(BaseModel):
@@ -791,14 +794,15 @@ def _detect(index: _Index, d: str, table: Table) -> tuple[list[Candidate], list[
                         )
                     )
                 else:
+                    reads = [_join(d, r) for r in cmd.reads] or [_join(d, marker)]
                     found.append(
                         Candidate(
                             d,
                             role,
                             cmd.run,
                             det.tier,
-                            _join(d, marker),
-                            _join(d, marker),
+                            " + ".join(reads),
+                            reads[0],
                             det.id,
                             det.family,
                         )

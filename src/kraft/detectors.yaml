@@ -250,10 +250,17 @@ detectors:
     setup:
       # The venv ignores itself, as Python 3.13's `venv` does on its own: on
       # 3.12 and older nothing does, and a repo that never ignored `.venv/`
-      # would have every work item commit it.
-      - {when: [{files: [requirements-dev.txt]}], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements-dev.txt"}
-      - {when: [{files: [requirements_dev.txt]}], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements_dev.txt"}
-      - {when: [{files: [dev-requirements.txt]}], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r dev-requirements.txt"}
+      # would have every work item commit it. A dev file beside
+      # requirements.txt is installed after it, unless it includes it (`-r`).
+      - {when: [{contains: {requirements-dev.txt: &includes-base '(?m)^[ \t]*+(?:-r|--requirement)[ \t=]*+(?:\./)?+requirements\.txt[ \t]*+$'}}], reads: [requirements-dev.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements-dev.txt"}
+      - {when: [{contains: {requirements_dev.txt: *includes-base}}], reads: [requirements_dev.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements_dev.txt"}
+      - {when: [{contains: {dev-requirements.txt: *includes-base}}], reads: [dev-requirements.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r dev-requirements.txt"}
+      - {when: [{contains: {requirements.txt: "", requirements-dev.txt: ""}}], reads: [requirements.txt, requirements-dev.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt"}
+      - {when: [{contains: {requirements.txt: "", requirements_dev.txt: ""}}], reads: [requirements.txt, requirements_dev.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements.txt -r requirements_dev.txt"}
+      - {when: [{contains: {requirements.txt: "", dev-requirements.txt: ""}}], reads: [requirements.txt, dev-requirements.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements.txt -r dev-requirements.txt"}
+      - {when: [{files: [requirements-dev.txt]}], reads: [requirements-dev.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements-dev.txt"}
+      - {when: [{files: [requirements_dev.txt]}], reads: [requirements_dev.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements_dev.txt"}
+      - {when: [{files: [dev-requirements.txt]}], reads: [dev-requirements.txt], run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r dev-requirements.txt"}
       - run: "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install -r requirements.txt"
 
   # ── JavaScript and TypeScript ───────────────────────────────────────────────

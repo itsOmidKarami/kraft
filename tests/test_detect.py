@@ -10,6 +10,7 @@ import subprocess
 import pytest
 from support.harness import commit_all
 from support.probe import JEST, PYTEST
+from support.probe import chosen as _chosen
 from support.probe import propose as _propose
 from support.probe import repo_with as _repo
 
@@ -778,3 +779,37 @@ def test_a_test_paired_with_the_pip_setup_runs_in_its_venv(tmp_path, d, files, t
     subprocess.run(shlex.split(p.test_command), cwd=repo, env={"PATH": "/usr/bin:/bin"}, check=True)
     ran = (repo / d / ".venv" / "ran").read_text()
     assert ("pytest -q" if test is None else "python -m unittest") in ran
+
+
+_VENV = "python3 -m venv .venv && echo '*' > .venv/.gitignore && .venv/bin/pip install"
+
+
+@pytest.mark.parametrize(
+    ("files", "installs", "source"),
+    [
+        (
+            {"requirements.txt": "humanize\n", "requirements-dev.txt": "pytest\n"},
+            "-r requirements.txt -r requirements-dev.txt",
+            "requirements.txt + requirements-dev.txt",
+        ),
+        (
+            {
+                "requirements.txt": "humanize\n",
+                "dev-requirements.txt": "-r requirements.txt\npytest\n",
+            },
+            "-r dev-requirements.txt",
+            "dev-requirements.txt",
+        ),
+        ({"requirements_dev.txt": "pytest\n"}, "-r requirements_dev.txt", "requirements_dev.txt"),
+        ({"requirements.txt": "pytest\n"}, "-r requirements.txt", "requirements.txt"),
+    ],
+    ids=["beside-requirements", "including-requirements", "dev-alone", "requirements-alone"],
+)
+def test_a_dev_requirements_file_is_installed_with_the_one_it_does_not_include(
+    tmp_path, files, installs, source
+):
+    """requirements-dev.txt alone was installed, without the requirements.txt
+    beside it, and the setup was said to come from requirements.txt."""
+    p = _propose(_repo(tmp_path, files))
+    assert p.setup_command == f"{_VENV} {installs}"
+    assert _chosen(p, "setup")["source"] == source

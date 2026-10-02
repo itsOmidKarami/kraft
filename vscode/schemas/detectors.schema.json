@@ -4,6 +4,14 @@
       "additionalProperties": false,
       "description": "One proposal a detector can make. `tasks`: names to look for among the\ntasks the detector's reader finds, the first present substituted for\n`{task}`. `when`: any one of these conditions must hold.",
       "properties": {
+        "reads": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Reads",
+          "type": "array"
+        },
         "run": {
           "minLength": 1,
           "title": "Run",
