@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_config_schemas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 08:56 +0000
+            created at 2026-10-02 09:04 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1199,13 +1199,13 @@
     <p class="pln"><span class="n"><a id="t1117" href="#t1117">1117</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1118" href="#t1118">1118</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1119" href="#t1119">1119</a></span><span class="t"><span class="key">def</span> <span class="nam">migrate_theme</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="nam">Path</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">bool</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1120" href="#t1120">1120</a></span><span class="t">    <span class="str">&quot;&quot;&quot;UX V2 cutover (spec &#167;11.3): write the look `palette` stands for as the</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1121" href="#t1121">1121</a></span><span class="t"><span class="str">    file&#x27;s own `surface`, `accent` and `colour_amount`, then drop `palette`.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1122" href="#t1122">1122</a></span><span class="t"><span class="str">    All three are written: a file with its own surface defaults to no accent at</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1123" href="#t1123">1123</a></span><span class="t"><span class="str">    subtle, so `surface` alone would change the look. `effective()` answers the</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1124" href="#t1124">1124</a></span><span class="t"><span class="str">    same before and after, which is the point (kickoff &#167;4.5: silent).</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1120" href="#t1120">1120</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The 1.5 upgrade: write the look `palette` stands for as the file&#x27;s own</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1121" href="#t1121">1121</a></span><span class="t"><span class="str">    `surface`, `accent` and `colour_amount`, then drop `palette`. All three are</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1122" href="#t1122">1122</a></span><span class="t"><span class="str">    written: a file with its own surface defaults to no accent at subtle, so</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1123" href="#t1123">1123</a></span><span class="t"><span class="str">    `surface` alone would change the look. `effective()` answers the same</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1124" href="#t1124">1124</a></span><span class="t"><span class="str">    before and after, which is the point: the user sees no change.</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1125" href="#t1125">1125</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1126" href="#t1126">1126</a></span><span class="t"><span class="str">    The original bytes go to `theme.yaml.pre-ux2` first, never overwriting an</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1126" href="#t1126">1126</a></span><span class="t"><span class="str">    The original bytes go to `theme.yaml.pre-1.5` first, never overwriting an</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1127" href="#t1127">1127</a></span><span class="t"><span class="str">    earlier copy. A missing, unreadable or invalid file, or one without</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1128" href="#t1128">1128</a></span><span class="t"><span class="str">    `palette`, is left alone. True when the file was rewritten.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1129" href="#t1129">1129</a></span><span class="t">    <span class="nam">path</span> <span class="op">=</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -1219,7 +1219,7 @@
     <p class="run"><span class="n"><a id="t1137" href="#t1137">1137</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;surface&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1138" href="#t1138">1138</a></span><span class="t">        <span class="nam">data</span><span class="op">.</span><span class="nam">update</span><span class="op">(</span><span class="op">{</span><span class="nam">key</span><span class="op">:</span> <span class="nam">look</span><span class="op">[</span><span class="nam">key</span><span class="op">]</span> <span class="key">for</span> <span class="nam">key</span> <span class="key">in</span> <span class="nam">THEME_V2_KEYS</span><span class="op">}</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1139" href="#t1139">1139</a></span><span class="t">    <span class="key">del</span> <span class="nam">data</span><span class="op">[</span><span class="str">&quot;palette&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1140" href="#t1140">1140</a></span><span class="t">    <span class="nam">backup</span> <span class="op">=</span> <span class="nam">path</span><span class="op">.</span><span class="nam">with_name</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">name</span> <span class="op">+</span> <span class="str">&quot;.pre-ux2&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1140" href="#t1140">1140</a></span><span class="t">    <span class="nam">backup</span> <span class="op">=</span> <span class="nam">path</span><span class="op">.</span><span class="nam">with_name</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">name</span> <span class="op">+</span> <span class="str">&quot;.pre-1.5&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1141" href="#t1141">1141</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">backup</span><span class="op">.</span><span class="nam">exists</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1142" href="#t1142">1142</a></span><span class="t">        <span class="nam">backup</span><span class="op">.</span><span class="nam">write_bytes</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">read_bytes</span><span class="op">(</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1143" href="#t1143">1143</a></span><span class="t">    <span class="nam">write_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">data</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -1233,7 +1233,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_config_schemas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 08:56 +0000
+            created at 2026-10-02 09:04 +0000
         </p>
     </div>
 </footer>
