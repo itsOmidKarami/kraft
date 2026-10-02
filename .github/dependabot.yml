@@ -46,7 +46,8 @@ updates:
   # Majors are left to a person, as for /frontend: a better-sqlite3 or Nuxt
   # major needs the build checked by hand. docus is pinned exactly in
   # package.json because files under app/ are copies of its own components;
-  # a docus bump has to copy them again from the new version.
+  # a docus bump has to copy them again from the new version, so Dependabot
+  # leaves every docus bump to a person.
   - package-ecosystem: npm
     directory: /docsite
     schedule:
@@ -54,6 +55,7 @@ updates:
     labels:
       - release::none
     ignore:
+      - dependency-name: "docus"
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 

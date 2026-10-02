@@ -128,8 +128,10 @@ def release_body(tag: str | None, notes: str) -> str:
 
     Nothing finds a pre-release unless it asks for one, so its notes say how.
     The channel is the pre-release's kind, which `kraft admin update --channel`
-    takes by the same name. Only an rc reaches PyPI, so only an rc gets the
-    `uv tool install` form. A stable release's text is `notes`, byte for byte.
+    takes by the same name. Only an rc reaches PyPI, so an rc gets the
+    `uv tool install` form from there; a beta or alpha, which neither PyPI nor
+    Homebrew carries, points at the wheel attached to its own release. A stable
+    release's text is `notes`, byte for byte.
     The changelogs take the plain notes, not this.
     """
     match = _PRE_TAG.fullmatch(tag or "")
@@ -140,6 +142,8 @@ def release_body(tag: str | None, notes: str) -> str:
     line = f"This is a pre-release. Install it with `kraft admin update --channel {channel}`"
     if channel == "rc":
         line += f', or `uv tool install --force "kraft-sdlc=={version}"`'
+    else:
+        line += ", or `uv tool install --force` the wheel attached below"
     return f"{line}.\n\n{notes}" if notes else f"{line}.\n"
 
 
@@ -166,7 +170,11 @@ def main(argv: list[str]) -> None:
     elif len(argv) == 3 and argv[0] == "pre":
         print(pre_tag(argv[1], argv[2], sys.stdin.read().split()))
     elif len(argv) == 4 and argv[0] == "body":
-        Path(argv[3]).write_text(release_body(argv[1] or None, Path(argv[2]).read_text()))
+        # newline="": a PR body's CRLF survives, so a stable body stays the notes' bytes.
+        with open(argv[2], newline="") as f:
+            notes = f.read()
+        with open(argv[3], "w", newline="") as f:
+            f.write(release_body(argv[1] or None, notes))
     elif len(argv) in (3, 4) and argv[0] == "changelog":
         write_changelog(argv[1], Path(argv[2]).read_text(), *map(Path, argv[3:]))
     else:

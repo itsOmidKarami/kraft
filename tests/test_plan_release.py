@@ -153,12 +153,20 @@ _PRE = "This is a pre-release. Install it with"
             f"{_PRE} `kraft admin update --channel rc`, "
             'or `uv tool install --force "kraft-sdlc==1.5.0rc2"`.',
         ),
-        ("v1.5.0b1", f"{_PRE} `kraft admin update --channel beta`."),
-        ("v1.5.0a3", f"{_PRE} `kraft admin update --channel alpha`."),
+        (
+            "v1.5.0b1",
+            f"{_PRE} `kraft admin update --channel beta`, "
+            "or `uv tool install --force` the wheel attached below.",
+        ),
+        (
+            "v1.5.0a3",
+            f"{_PRE} `kraft admin update --channel alpha`, "
+            "or `uv tool install --force` the wheel attached below.",
+        ),
     ],
 )
 def test_a_pre_release_says_how_to_install_it_above_its_notes(tag, line):
-    """Only an rc is on PyPI, so only an rc gets the `uv tool install` form."""
+    """Only an rc is on PyPI; a beta or alpha points at its release's own wheel."""
     notes = "### Highlights\n\n- the headline (#1)\n\n### Fixes\n\n- a fix (#2)\n"
     assert plan_release.release_body(tag, notes) == f"{line}\n\n{notes}"
 
@@ -235,3 +243,11 @@ def test_the_extension_changelog_takes_the_release_notes_the_way_the_root_one_do
     assert text.startswith("# Changelog\n\nNotable changes to the Kraft VS Code extension")
     assert text.endswith("\n\n## 1.5.0\n\n### New\n\n- new (#4)\n")
     assert "do not\nedit this file by hand" in text
+
+
+def test_a_stable_release_body_keeps_crlf_notes_byte_for_byte(tmp_path):
+    """A PR body written with CRLF line ends reaches the notes as CRLF."""
+    notes, body = tmp_path / "notes.md", tmp_path / "body.md"
+    notes.write_bytes(b"### Fixes\r\n\r\n- a fix (#2)\r\n")
+    plan_release.main(["body", "v1.5.0", str(notes), str(body)])
+    assert body.read_bytes() == notes.read_bytes()
