@@ -579,3 +579,28 @@ def test_a_browser_navigation_to_fastapis_docs_gets_them_not_the_board(dist, cli
     r = client.get(path, headers={"sec-fetch-dest": "document"})
     assert r.status_code == 200, r.text
     assert "/openapi.json" in r.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "headers", "status"),
+    [
+        ("GET", "/work-items/abc", {"sec-fetch-dest": "document"}, 200),
+        ("GET", "/", {}, 200),
+        ("GET", "/assets/app.js", {}, 200),
+        ("GET", "/api/health", {}, 200),
+        ("GET", "/docs", {}, 200),
+        ("GET", "/api/nothing-here", {}, 404),
+        ("GET", "/work-items/abc", {"host": "evil.com:8765", "sec-fetch-dest": "document"}, 403),
+    ],
+    ids=["spa-navigation", "spa-root", "static-asset", "api", "swagger", "api-404", "refused"],
+)
+def test_no_other_site_may_frame_any_response(dist, client, method, path, headers, status):
+    """A framed loopback board is live with no login, so a page that framed it
+    under its own content could turn a click there into Resume or Approve.
+    Every response forbids it, a refusal included: the SPA shell is what a
+    frame would load, but a shell served by one route and not another is a
+    hole the next route opens."""
+    r = client.request(method, path, headers=headers)
+    assert r.status_code == status, r.text
+    assert r.headers["content-security-policy"] == "frame-ancestors 'self'"
+    assert r.headers["x-frame-options"] == "SAMEORIGIN"

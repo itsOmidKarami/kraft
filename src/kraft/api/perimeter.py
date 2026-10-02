@@ -2,8 +2,9 @@
 middleware. Applied to `app` by `kraft.api.__init__` (an `app.middleware`
 decorator needs `app`, which does not exist until the package `__init__`
 builds it) -- registration order there must stay `_spa_navigation`,
-`_authenticate`, `_perimeter` (rule 9: Starlette runs the last-declared
-middleware first, so `_perimeter` must be declared last)."""
+`_authenticate`, `_perimeter`, `_frame_guard` (rule 9: Starlette runs the
+last-declared middleware first, so `_perimeter` must come after the other two,
+and `_frame_guard` after it so a refusal carries its headers too)."""
 
 from __future__ import annotations
 
@@ -182,6 +183,26 @@ async def _perimeter(request: Request, call_next):
     if refused is not None:
         return JSONResponse({"detail": refused}, status_code=403)
     return await call_next(request)
+
+
+#: No other site may put Kraft in a frame. A loopback board has no login, so
+#: a page that framed it invisibly could turn a click on its own content into
+#: Resume or Approve (clickjacking). `X-Frame-Options` is the older spelling
+#: of the same rule, for a browser that ignores `frame-ancestors`.
+_FRAME_HEADERS = {
+    "content-security-policy": "frame-ancestors 'self'",
+    "x-frame-options": "SAMEORIGIN",
+}
+
+
+async def _frame_guard(request: Request, call_next):
+    """Every response, the SPA shell and the API alike, says only Kraft's own
+    pages may frame it. Declared last, so it is the outermost middleware and
+    a 401 or 403 from the ones inside carries the headers as well."""
+    response = await call_next(request)
+    for name, value in _FRAME_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:

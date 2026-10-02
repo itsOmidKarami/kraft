@@ -36,12 +36,14 @@ api_router = APIRouter(prefix="/api")
 
 # Registration order matters: Starlette runs the *last*-declared middleware
 # first, so `_perimeter` (who may talk to this server at all) has to be
-# declared last, after `_authenticate` (session/bearer), after
-# `_spa_navigation` (the SPA-shell fast path) -- see `perimeter._perimeter`'s
-# own docstring.
+# declared after `_authenticate` (session/bearer), after `_spa_navigation`
+# (the SPA-shell fast path) -- see `perimeter._perimeter`'s own docstring.
+# `_frame_guard` only adds response headers, and goes last so that even a
+# refusal from `_perimeter` carries them.
 app.middleware("http")(perimeter._spa_navigation)
 app.middleware("http")(perimeter._authenticate)
 app.middleware("http")(perimeter._perimeter)
+app.middleware("http")(perimeter._frame_guard)
 
 # Each of these decorates `api_router` (imported above) with its own routes.
 from kraft.api.routes import (  # noqa: E402,F401
