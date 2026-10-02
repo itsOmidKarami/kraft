@@ -127,9 +127,9 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _read_listed(repo: Path, rel: str) -> str | None:
-    """A listed document's text, or None for anything but a regular file at
-    that very path inside the repo.
+def read_inside(repo: Path, rel: str) -> str | None:
+    """The text of `rel` under `repo`, or None for anything but a regular
+    file at that very path inside it.
 
     Untrusted input: git checks a committed symlink out as a symlink, so
     `.engineering/specs/x.md -> ~/.aws/credentials` would put that file in the
@@ -172,7 +172,7 @@ def scan_repo(repo: Path) -> list[ScannedDoc]:
     rels = [r for r in listed.stdout.split("\0") if r.endswith(".md")]
     docs: list[ScannedDoc] = []
     for rel in rels:
-        text = _read_listed(repo, rel)
+        text = read_inside(repo, rel)
         if text is None:
             continue
         fm, body = split_front_matter(text)

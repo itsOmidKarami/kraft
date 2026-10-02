@@ -150,24 +150,34 @@ class Indexer:
         self._errors = []
         return await self.rescan_all()
 
-    def _summary_path(self, ref: str, work_item_id: str, repo: str) -> Path | None:
-        """Resolve a worker-reported ref. Untrusted input: absolute paths and
-        anything escaping its base are refused (4B design §7)."""
-        if not ref or Path(ref).is_absolute():
+    def _worktree_file(self, ref: str, work_item_id: str, *, markdown: bool = False) -> Path | None:
+        """Resolve a ref into the item's own worktree. Untrusted input: a
+        worker reports a summary ref, and absolute paths and anything escaping
+        the worktree are refused (4B design §7). The main checkout is not
+        searched: it holds files no worker wrote, ignored ones such as `.env`
+        among them, and what is read here lands in an index every repo's
+        agents can search. `markdown`: a summary is a `.md` file, wherever a
+        symlink to it points."""
+        if not ref or Path(ref).is_absolute() or self._run_dirs is None:
             return None
-        bases = []
-        if self._run_dirs is not None:
-            bases.append(self._run_dirs.worktrees / work_item_id)
-        bases.append(Path(repo))
-        for base in bases:
-            candidate = (base / ref).resolve()
-            try:
-                candidate.relative_to(base.resolve())
-            except ValueError:
-                continue
-            if candidate.is_file():
-                return candidate
-        return None
+        base = (self._run_dirs.worktrees / work_item_id).resolve()
+        candidate = (base / ref).resolve()
+        if not candidate.is_relative_to(base) or candidate == base:
+            return None
+        if markdown and candidate.suffix.lower() != ".md":
+            return None
+        return candidate
+
+    def _read_worktree_file(
+        self, ref: str, work_item_id: str, *, markdown: bool = False
+    ) -> str | None:
+        """The text `_worktree_file` names, read only if it is a regular file:
+        never blocking on a FIFO a worker swapped in (`ingest.read_inside`)."""
+        path = self._worktree_file(ref, work_item_id, markdown=markdown)
+        if path is None:
+            return None
+        base = (self._run_dirs.worktrees / work_item_id).resolve()
+        return ingest.read_inside(base, str(path.relative_to(base)))
 
     async def ingest_session_summary(self, session_id: str) -> bool:
         """Ingest the summary a finished worker session reported. Returns False
@@ -184,14 +194,11 @@ class Indexer:
         if row is None or not row["session_summary_ref"]:
             return False
         ref = row["session_summary_ref"]
-        path = self._summary_path(ref, row["work_item_id"], row["repo"])
-        if path is None:
+        text = await asyncio.to_thread(
+            self._read_worktree_file, ref, row["work_item_id"], markdown=True
+        )
+        if text is None:
             logger.warning("session %s summary ref %r not readable; skipping", session_id, ref)
-            return False
-        try:
-            text = path.read_text()
-        except OSError:
-            logger.warning("session %s summary %s unreadable; skipping", session_id, path)
             return False
 
         fm, body = ingest.split_front_matter(text)
@@ -444,7 +451,7 @@ class Indexer:
                 # Not indexed yet: scan_repo lists via `git ls-files` against the
                 # registered main checkout, so a committed-but-unmerged attachment
                 # doesn't show up there. Read it live from the item's own worktree
-                # instead — same fallback `_summary_path` already does above.
+                # instead — the same lookup `_worktree_file` does.
                 synthesized = self._synthesize_attachment_doc(work_item_id, row["repo"], attachment)
                 if synthesized is None:
                     continue
@@ -467,12 +474,8 @@ class Indexer:
         """Read an unindexed attachment straight from the item's own worktree
         and shape it like a `documents` row, so an attach-based item shows its
         spec/plan before the branch that carries them ever merges."""
-        path = self._summary_path(attachment["path"], work_item_id, repo)
-        if path is None:
-            return None
-        try:
-            text = path.read_text()
-        except OSError:
+        text = self._read_worktree_file(attachment["path"], work_item_id)
+        if text is None:
             return None
         fm, body = ingest.split_front_matter(text)
         return {
@@ -670,7 +673,7 @@ class Indexer:
 
     def resolve_attachment_path(self, doc_id: str) -> Path | None:
         """The absolute on-disk path an `attachment:{work_item_id}:{kind}` id
-        names — worktree-first, same lookup `_synthesize_attachment_doc` uses
+        names — in the worktree, the same lookup `_synthesize_attachment_doc` uses
         for content, so `open_document` (Kraft-2jy6) points an editor at the
         file that actually exists pre-merge instead of `doc['repo'] /
         doc['path']`, which is only ever right after the branch lands."""
@@ -685,7 +688,7 @@ class Indexer:
         attachment = next((a for a in json.loads(row["attachments"]) if a["kind"] == kind), None)
         if attachment is None:
             return None
-        return self._summary_path(attachment["path"], work_item_id, row["repo"])
+        return self._worktree_file(attachment["path"], work_item_id)
 
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
         """Content fetch for the synthetic `attachment:{work_item_id}:{kind}` ids
@@ -705,11 +708,7 @@ class Indexer:
         doc = self._synthesize_attachment_doc(work_item_id, row["repo"], attachment)
         if doc is None:
             return None
-        path = self._summary_path(attachment["path"], work_item_id, row["repo"])
-        try:
-            text = path.read_text() if path is not None else None
-        except OSError:
-            text = None
+        text = self._read_worktree_file(attachment["path"], work_item_id)
         if text is None:
             return None
         _, content = ingest.split_front_matter(text)
