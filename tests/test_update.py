@@ -278,8 +278,8 @@ def test_just_install_uses_the_pyproject_package_name():
     assert package_name in install_line.split()
 
 
-def test_perform_reports_a_failing_installer(monkeypatch):
-    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
+def test_perform_reports_a_failing_installer(uv_tool):
+    uv_tool("[tool]\n")
 
     def run(_command, **_kwargs):
         return type("R", (), {"returncode": 2})()
@@ -287,8 +287,8 @@ def test_perform_reports_a_failing_installer(monkeypatch):
     assert update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run) == 2
 
 
-def test_perform_without_uv_is_a_readable_failure(monkeypatch):
-    monkeypatch.setattr(update, "_request", lambda _url, _timeout: b"")
+def test_perform_without_uv_is_a_readable_failure(uv_tool):
+    uv_tool("[tool]\n")
 
     def run(_command, **_kwargs):
         raise FileNotFoundError("uv")
@@ -340,12 +340,13 @@ PRE_RENAME_LISTING = "black v24.1.0\n- black\nkraft v0.40.0\n- kraft\nkraft-sdlc
     ],
     ids=["pre-rename-receipt", "kraft-sdlc-only", "no-tools"],
 )
-def test_perform_refuses_a_stale_pre_rename_kraft_tool(monkeypatch, listing, stale):
+def test_perform_refuses_a_stale_pre_rename_kraft_tool(monkeypatch, uv_tool, listing, stale):
     """Kraft-rswxq: a `kraft` uv tool left over from before the PyPI rename
     shares the `kraft` command with `kraft-sdlc`, and `uv tool uninstall
     kraft` -- the obvious cleanup -- deletes that command for both. Update
     stops before it downloads anything and names both commands, in order;
     `uv` itself is never reached past `tool list`."""
+    uv_tool("[tool]\n")
     downloads = []
     monkeypatch.setattr(update, "_request", lambda url, _timeout: downloads.append(url) or b"")
     calls = []
@@ -366,6 +367,44 @@ def test_perform_refuses_a_stale_pre_rename_kraft_tool(monkeypatch, listing, sta
     assert not downloads, "the wheel was downloaded for an update that cannot run"
     message = str(err.value)
     assert "uv tool uninstall kraft\n  uv tool install --force --reinstall kraft-sdlc" in message
+
+
+@pytest.mark.parametrize(
+    ("marker", "says", "command"),
+    [
+        ("pipx_metadata.json", "installed with pipx", "pipx install --force --python "),
+        (None, "installed with pip, into", ' --upgrade "kraft-sdlc==0.4.0"'),
+    ],
+    ids=["pipx", "pip-venv"],
+)
+def test_perform_refuses_an_install_uv_did_not_make(tmp_path, monkeypatch, marker, says, command):
+    """On a pipx or pip install, `uv tool install` added a second copy and
+    reported "installed" while the `kraft` on PATH stayed old."""
+    import importlib.util
+
+    prefix = tmp_path / "venv"
+    prefix.mkdir()
+    if marker:
+        (prefix / marker).write_text("{}")
+    monkeypatch.setattr(update.sys, "prefix", str(prefix))
+    monkeypatch.setattr(
+        "importlib.metadata.distribution",
+        lambda name: type("D", (), {"read_text": lambda self, f: None})(),
+    )
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None)
+    run = _installs()
+
+    with pytest.raises(SystemExit) as refused:
+        update.perform(update.Release(tag="v0.4.0", wheel_url="https://x/w.whl"), run=run)
+
+    assert run.commands == []
+    assert says in str(refused.value) and command in str(refused.value)
+
+
+def test_perform_refuses_a_source_checkout():
+    """This suite runs from an editable install, the shape `uv run kraft` has."""
+    with pytest.raises(SystemExit, match="from a source checkout"):
+        update.perform(update.Release(tag="v0.4.0", wheel_url="u"), run=_installs())
 
 
 def test_is_homebrew_install_is_false_for_a_uv_tool_prefix(monkeypatch):

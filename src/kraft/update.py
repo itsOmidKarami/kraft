@@ -258,6 +258,66 @@ def _stale_kraft_tool(run) -> bool:
 PACKAGE = "kraft-sdlc"
 
 
+def install_kind() -> str:
+    """Which installer made this Kraft: `brew`, `uv` (a uv tool, which the
+    install script makes too), `pipx`, `source` (an editable checkout), or
+    `pip` for any other environment.
+
+    Read off this process's own environment, as `shadowing_kraft` reads
+    which `kraft` this is: uv and pipx each leave a file in the venv they
+    made, and Homebrew's venv has its own path shape."""
+    import json
+    from importlib.metadata import PackageNotFoundError, distribution
+    from pathlib import Path
+
+    if _is_homebrew_install():
+        return "brew"
+    prefix = Path(sys.prefix)
+    if (prefix / "uv-receipt.toml").is_file():
+        return "uv"
+    if (prefix / "pipx_metadata.json").is_file():
+        return "pipx"
+    try:
+        direct = json.loads(distribution(PACKAGE).read_text("direct_url.json") or "{}")
+    except (PackageNotFoundError, ValueError):
+        direct = {}
+    if (direct.get("dir_info") or {}).get("editable"):
+        return "source"
+    return "pip"
+
+
+def _not_by_uv(kind: str, release: Release) -> str:
+    """Why `perform` will not update a pipx, pip or source install, and the
+    command that will. A `uv tool install` there adds a second copy and
+    leaves the `kraft` on PATH, and every MCP server and hook that runs it,
+    on the old one."""
+    import importlib.util
+
+    wanted = requirement(release)
+    python = os.path.realpath(sys.executable)
+    # A venv uv made has no pip of its own.
+    pip = (
+        f"{sys.executable} -m pip install --upgrade"
+        if importlib.util.find_spec("pip") is not None
+        else f"uv pip install --python {sys.executable} --upgrade"
+    )
+    command = {
+        "pipx": f'pipx install --force --python {python} "{wanted}"',
+        "pip": f'{pip} "{wanted}"',
+        "source": "git pull, then just setup (or just install for the `kraft` command)",
+    }[kind]
+    where = {
+        "pipx": "with pipx",
+        "pip": f"with pip, into {sys.prefix}",
+        "source": "from a source checkout",
+    }[kind]
+    return (
+        f"kraft admin update: this Kraft was installed {where}. Updating it with uv "
+        "would add a second copy, and the `kraft` you run would stay as it is. "
+        f"Update it the way it was installed:\n  {command}"
+    )
+
+
 def _receipt() -> dict:
     """uv's record of how this tool was installed, or {} when it is not a uv tool."""
     import tomllib
@@ -320,6 +380,9 @@ def perform(release: Release, *, run=None) -> int:
     -- that's a dev-only edge of `kraft admin update --force`, and `brew
     upgrade` no-opping on an up-to-date formula is a fine ceiling for it.
 
+    Installed by pipx, pip or from a checkout -> refused, with the command
+    that does update it (`install_kind`).
+
     Otherwise, `uv tool install --force` of `kraft-sdlc[extras]==X` from the
     package index, on the same Python: the extras and the interpreter the
     user installed with survive the update, and uv's record of the tool is
@@ -341,6 +404,9 @@ def perform(release: Release, *, run=None) -> int:
                 "on PATH. Install it, or run this yourself:\n"
                 f"  {' '.join(command)}"
             ) from None
+
+    if (kind := install_kind()) != "uv":
+        raise SystemExit(_not_by_uv(kind, release))
 
     if _stale_kraft_tool(run):
         # ponytail: told, not migrated -- a `kraft` receipt could be another
