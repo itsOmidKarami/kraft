@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_17f1e2281569e48d_startup_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 11:01 +0000
+            created at 2026-10-02 11:11 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -869,7 +869,7 @@
     <p class="run run2"><span class="n"><a id="t787" href="#t787">787</a></span><span class="t">        <span class="key">else</span> <span class="nam">store</span><span class="op">.</span><span class="nam">materialized_chain_of</span><span class="op">(</span><span class="nam">row</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t788" href="#t788">788</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t789" href="#t789">789</a></span><span class="t">    <span class="key">if</span> <span class="nam">chain</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t790" href="#t790">790</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;this work item has no V1 chain to hold a policy override&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t790" href="#t790">790</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;this work item has no chain snapshot to hold a policy override&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t791" href="#t791">791</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t792" href="#t792">792</a></span><span class="t">        <span class="com"># `{}` clears: nothing to check.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t793" href="#t793">793</a></span><span class="t">        <span class="nam">wanted</span> <span class="op">=</span> <span class="nam">store</span><span class="op">.</span><span class="nam">policy_override_of</span><span class="op">(</span><span class="nam">row</span><span class="op">)</span> <span class="key">if</span> <span class="nam">patch</span> <span class="key">is</span> <span class="key">None</span> <span class="key">else</span> <span class="op">(</span><span class="nam">patch</span> <span class="key">or</span> <span class="key">None</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -886,7 +886,7 @@
     <p class="pln"><span class="n"><a id="t804" href="#t804">804</a></span><span class="t"><span class="str">    from the moment anything is attached. 409 naming it when that is missing.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t805" href="#t805">805</a></span><span class="t">    <span class="nam">previous</span> <span class="op">=</span> <span class="nam">store</span><span class="op">.</span><span class="nam">materialized_chain_of</span><span class="op">(</span><span class="nam">row</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t806" href="#t806">806</a></span><span class="t">    <span class="key">if</span> <span class="nam">previous</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t807" href="#t807">807</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;this work item has no V1 chain to re-trim&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t807" href="#t807">807</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;this work item has no chain snapshot to re-trim&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t808" href="#t808">808</a></span><span class="t">    <span class="nam">untrimmed</span> <span class="op">=</span> <span class="nam">previous</span><span class="op">.</span><span class="nam">untrimmed</span> <span class="key">if</span> <span class="nam">filed_kinds</span> <span class="key">else</span> <span class="nam">previous</span><span class="op">.</span><span class="nam">chain</span><span class="op">.</span><span class="nam">chain</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t809" href="#t809">809</a></span><span class="t">    <span class="key">if</span> <span class="nam">untrimmed</span> <span class="key">is</span> <span class="key">None</span> <span class="key">and</span> <span class="nam">filed_kinds</span> <span class="op">-</span> <span class="nam">kinds</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t810" href="#t810">810</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
@@ -1083,7 +1083,7 @@
             <a class="nav" href="z_17f1e2281569e48d_startup_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 11:01 +0000
+            created at 2026-10-02 11:11 +0000
         </p>
     </div>
 </footer>
