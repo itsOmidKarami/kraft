@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from kraft import config as config_mod
 from kraft import executor, review_reply, store
@@ -40,10 +40,18 @@ class ThreadIn(BaseModel):
     # across sides, such as a removed line through its replacement. Omitted, `side`.
     start_side: Literal["old", "new"] | None = None
     # The range's lines as the diff showed them, each led by its diff mark.
-    quote: str | None = Field(default=None, max_length=QUOTE_MAX_CHARS)
+    # Clipped, never refused: a quote is context, and must not block a comment.
+    quote: str | None = None
     label: Literal["must_fix", "question", "nit"] | None = None
     suggestion: Suggestion | None = None
     anchor_sha: str | None = None
+
+    @field_validator("quote")
+    @classmethod
+    def _clip_quote(cls, quote: str | None) -> str | None:
+        if quote is None or len(quote) <= QUOTE_MAX_CHARS:
+            return quote
+        return quote[: QUOTE_MAX_CHARS - 1] + "…"
 
     @model_validator(mode="after")
     def _ranges(self):

@@ -193,6 +193,21 @@ describe("useComments", () => {
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("half a thought");
   });
 
+  it("drops a suggested change when the pencil moves the start, so it never replaces lines it was not written for", () => {
+    const { result } = renderHook(() => useComments({ itemId: "w1", compare: cmp({ target: "latest", sha: null }), files: [file([])], patch, threads: [], reload: () => {} }));
+    act(() => result.current.openPick({ path: "a.py", side: "new", anchor: 2, head: 2 }));
+    const first = render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
+    fireEvent.change(first.container.querySelector("textarea")!, { target: { value: "use this" } });
+    fireEvent.click(screen.getByRole("button", { name: "± Suggest change" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Suggested change" }), { target: { value: "z = CHANGED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change the start line" }));
+    act(() => fireEvent.click(screen.getByRole("menuitemradio", { name: /^\+1/ })));
+    first.unmount();
+    render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("use this");
+    expect(screen.queryByRole("textbox", { name: "Suggested change" })).toBeNull();
+  });
+
   it("quotes a range thread's lines as they were stored, else as the diff shows them; one line is not quoted", () => {
     const t = (id: string, o: Partial<ReviewThread>) => ({ id, file_path: "a.py", side: "new", start_line: 2, end_line: 2, comments: [], draft: false, state: "open", label: null, ...o }) as unknown as ReviewThread;
     const threads = [t("stored", { start_side: "old", quote: "-y was\n+z was" }), t("older", { start_line: 1 }), t("one", {})];

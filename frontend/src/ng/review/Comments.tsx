@@ -116,10 +116,11 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   const retarget = (o: NonNullable<typeof open>, start: Anchor) => {
     const r = o.target.range!;
     const target = { path: o.target.path, range: rangeBetween(start, { side: r.side, line: r.end }, indexOf(o.target.path)) };
-    // The text so far goes with it.
+    // The text so far goes with it; a suggested change does not: it was
+    // written for the old lines, and would replace the new range's.
     const d = drafts.get(targetKey(o.target));
     drafts.delete(targetKey(o.target));
-    if (d) drafts.set(targetKey(target), d);
+    if (d) drafts.set(targetKey(target), { ...d, suggest: null });
     setOpen({ ...o, target });
     onRetarget?.(target);
   };

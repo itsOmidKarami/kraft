@@ -32,7 +32,6 @@ def test_a_range_across_sides_round_trips_and_takes_no_suggestion(client, gated)
         {"start_side": "old", "side": None, "start_line": None, "end_line": None},
         {"side": None, "start_line": None, "end_line": None, "quote": "x"},
         {"start_side": "both"},
-        {"quote": "x" * 64_001},
     ]
     for kw in refused:
         assert _new_thread(client, gated, **kw).status_code == 422, kw
@@ -41,3 +40,12 @@ def test_a_range_across_sides_round_trips_and_takes_no_suggestion(client, gated)
     reply = {"body": "like this", "suggestion": fix}
     assert client.post(f"/api/threads/{tid}/comments", json=reply).status_code == 422
     assert len(client.get(f"/api/work-items/{gated}/threads").json()) == 3
+
+
+@_REVIEW
+def test_a_long_quote_is_clipped_and_never_blocks_the_comment(client, gated):
+    """A quote is context: one 70,000-character line is clipped, not refused."""
+    r = _new_thread(client, gated, quote="+" + "a" * 70_000)
+    assert r.status_code == 201, r.text[:200]
+    quote = r.json()["quote"]
+    assert len(quote) == 64_000 and quote.endswith("…")
