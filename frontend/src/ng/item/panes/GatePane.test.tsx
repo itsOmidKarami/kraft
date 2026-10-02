@@ -104,4 +104,15 @@ describe("GateBody", () => {
     await act(async () => reads[0]([]));
     expect(screen.getByText("no size bound")).toBeInTheDocument();
   });
+
+  it("reads the changed files again when a session starts or ends", async () => {
+    const answers: Record<string, [number, unknown]> = { "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }] }] };
+    stubFetch(answers);
+    const at = (it: typeof pending) => <MemoryRouter><GateBody item={it} version="1" gate={gate} events={[]} /></MemoryRouter>;
+    const { rerender } = rtlRender(at(pending));
+    expect(await screen.findByText("a.py")).toBeInTheDocument();
+    answers["GET /work-items/w1/diff"] = [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }, { path: "b.py", insertions: 2, deletions: 0 }] }];
+    rerender(at({ ...pending, worker_sessions: [{ id: "s9", status: "done" } as never] }));
+    expect(await screen.findByText("b.py")).toBeInTheDocument();
+  });
 });

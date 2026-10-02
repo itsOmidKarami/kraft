@@ -250,6 +250,19 @@ describe("the task screen (E)", () => {
     expect(screen.getByText("start over on the lock")).toBeInTheDocument();
   });
 
+  it("lists a new attempt's documents without a reload", async () => {
+    const one = item("running", null, { worker_sessions: [session({ id: "s1", attempt: 1, status: "failed" })] });
+    useStore.setState({ eventsByItem: {} });
+    mount(one, TASK);
+    expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
+    stubFetch({
+      "GET /work-items/w1": [200, { ...one, worker_sessions: [session({ id: "s1", attempt: 1, status: "failed" }), session({ id: "s2", attempt: 2, status: "done" })] }],
+      "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [{ document_id: "d2", title: "Review notes", path: "a.md", kind: "reviews", worker_session_id: "s2", hook_point: "verification.review.code_review", attempt: 2 }] }],
+    });
+    act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
+    expect(await screen.findByText(/Review notes/)).toBeInTheDocument();
+  });
+
   it("says what a task that has not started waits for", async () => {
     mount(item("running", null, { worker_sessions: [] }), "/work-items/w1/nodes/verification?sel=verification.review.code_review");
     expect(await screen.findByText(/After step checks finishes\./)).toBeInTheDocument();

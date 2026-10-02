@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -91,5 +91,42 @@ describe("ItemPage, live", () => {
     live(2);
     expect(await within(pane("code_review")).findByText(/attempt 1 of 3/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Later attempt" })).toBeEnabled();
+  });
+
+  it("reads the diff line again when a new attempt starts", async () => {
+    const path = "verification.review.code_review";
+    const one = detail({ worker_sessions: [sess("r1", path, 1)] });
+    const answers: Record<string, [number, unknown]> = { "GET /work-items/w1": [200, one], "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }] }] };
+    stubFetch(answers);
+    mount(`/work-items/w1/nodes/verification?sel=${path}`);
+    expect(await screen.findByText(/1 file/)).toBeInTheDocument();
+    answers["GET /work-items/w1"] = [200, { ...one, worker_sessions: [...one.worker_sessions, sess("r2", path, 2, { status: "running" })] }];
+    answers["GET /work-items/w1/diff"] = [200, { files: [{ path: "a.py", insertions: 1, deletions: 0 }, { path: "b.py", insertions: 2, deletions: 0 }] }];
+    live(2);
+    expect(await screen.findByText(/2 files/)).toBeInTheDocument();
+  });
+
+  it("shows a draft applied while Config is open, without a reload", async () => {
+    const applied = { seq: 2, work_item_id: "w1", type: "chain_revised", node_id: null, payload: { gate: null, source: "draft", changes: [{ op: "override", path: "merge_request.open.open_draft", task_config: { model: "opus" } }], diff: [] }, created_at: "2026-09-13T09:00:00Z" };
+    const answers: Record<string, [number, unknown]> = { "GET /work-items/w1": [200, detail()], "GET /work-items/w1/events": [200, []] };
+    stubFetch(answers);
+    mount("/work-items/w1?tab=config");
+    const pane = await screen.findByRole("complementary", { name: "default pane" });
+    await waitFor(() => expect(within(pane).queryByText("model opus")).toBeNull());
+    answers["GET /work-items/w1/events"] = [200, [applied]];
+    live(2);
+    expect(await within(pane).findByText("model opus")).toBeInTheDocument();
+  });
+
+  it("adds a new event to the chain's Recent without a reload", async () => {
+    const started = (seq: number, node: string) => ({ seq, work_item_id: "w1", type: "node_started", node_id: node, payload: { node_id: node }, created_at: "2026-09-13T09:00:00Z" });
+    const answers: Record<string, [number, unknown]> = { "GET /work-items/w1": [200, detail()], "GET /work-items/w1/events": [200, [started(1, "plan")]] };
+    stubFetch(answers);
+    mount("/work-items/w1");
+    const pane = await screen.findByRole("complementary", { name: "default pane" });
+    expect(await within(pane).findByText("plan started")).toBeInTheDocument();
+    answers["GET /work-items/w1/events"] = [200, [started(1, "plan"), started(2, "verification")]];
+    live(2);
+    expect(await within(pane).findByText("verification started")).toBeInTheDocument();
   });
 });

@@ -112,6 +112,15 @@ describe("Peek", () => {
     expect(await within(screen.getByRole("list")).findByText(/verification/)).toBeInTheDocument();
   });
 
+  it("adds a new event to the Overview's Recent live", async () => {
+    useStore.setState({ eventsByItem: {} });
+    mount({}, { events: [ev(1, "node_started", "plan")] });
+    expect(await screen.findByText("plan started")).toBeInTheDocument();
+    stubFetch({ "GET /work-items/w1": [200, detail({})], "GET /work-items/w1/events": [200, [ev(1, "node_started", "plan"), ev(2, "node_started", "verification")]], "GET /policy": [200, {}] });
+    act(() => useStore.getState().applyEvent(ev(2, "worker_session_created")));
+    expect(await screen.findByText("verification started")).toBeInTheDocument();
+  });
+
   it("says so when the item is gone", async () => {
     stubFetch({ "GET /work-items/w1": [404, { detail: "work item not found" }] });
     render(<MemoryRouter><Harness /></MemoryRouter>);
