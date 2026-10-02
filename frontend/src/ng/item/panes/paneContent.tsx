@@ -209,7 +209,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const current = item.current_node_id === node.id;
   const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={a.setAttempt} now={a.now} />;
   const bodies: Record<string, ReactNode> = {
-    thread: <Thread item={item} node={node.id} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
+    thread: <Thread item={item} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} />,
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,

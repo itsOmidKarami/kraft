@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
 import * as api from "../../../api";
 import { ago } from "../../../format";
-import type { KraftEvent } from "../../../types";
+import type { KraftEvent, WorkerSession } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { ItemDetail } from "../useItem";
 
-type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null };
+type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null; session: string | null };
+
+/** How many of `turns` the thread shows when `upTo` is the turn picked above
+ *  the tabs: through that turn's own message, which names its session. */
+function shownThrough(turns: Turn[], upTo: WorkerSession | undefined): number {
+  const own = upTo ? turns.findIndex((t) => t.session === upTo.id) : -1;
+  return own >= 0 ? own + 1 : turns.length;
+}
 
 /** The escalation's thread (Decisions §6 Escalation, prototype lines 167–176):
- *  every message, by thread and turn, with the node it was about; a reply goes
- *  on in the same thread or starts a new one (GAP §2 #14). */
-export function Thread({ item, node, reload, onNode }: { item: ItemDetail; node: string; reload: () => void; onNode: (node: string) => void }) {
+ *  every message through the turn picked above the tabs, by thread and turn,
+ *  with the node it was about; a reply goes on in the same thread or starts a
+ *  new one (GAP §2 #14). */
+export function Thread({ item, node, upTo, reload, onNode }: { item: ItemDetail; node: string; upTo?: WorkerSession; reload: () => void; onNode: (node: string) => void }) {
   const [events, setEvents] = useState<KraftEvent[] | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,14 +27,16 @@ export function Thread({ item, node, reload, onNode }: { item: ItemDetail; node:
   useEffect(() => {
     api.getEvents(item.id).then(setEvents, () => setEvents([]));
   }, [item.id, item.updated_at]);
-  const turns: Turn[] = (events ?? []).filter((e) => e.type === "escalation_message").map((e) => ({
+  const all: Turn[] = (events ?? []).filter((e) => e.type === "escalation_message").map((e) => ({
     thread: Number(e.payload.thread ?? 1),
     turn: Number(e.payload.turn ?? 1),
     who: e.payload.auto ? "kraft" : "you",
     text: String(e.payload.message ?? ""),
     at: e.created_at,
     node: e.node_id ?? null,
+    session: typeof e.payload.session_id === "string" ? e.payload.session_id : null,
   }));
+  const turns = all.slice(0, shownThrough(all, upTo));
   const threads = [...new Set(turns.map((t) => t.thread))];
   const send = async (fresh: boolean) => {
     setBusy(true);
@@ -59,6 +69,7 @@ export function Thread({ item, node, reload, onNode }: { item: ItemDetail; node:
           </section>
         );
       })}
+      {turns.length < all.length && <p className="item-muted">{all.length - turns.length} later {all.length - turns.length === 1 ? "message" : "messages"} after this turn.</p>}
       <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} />
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
