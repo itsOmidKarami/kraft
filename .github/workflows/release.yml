@@ -17,6 +17,10 @@
 # Marketplace, and the next stable's notes still cover everything since the last
 # stable tag.
 #
+# A dry run stops after the notes: every step below that builds, packs or
+# publishes is skipped, so it cannot exercise them. RELEASING.md says what a
+# run publishes and how to check each target.
+#
 # Order matters. The tag is created locally first (setuptools-scm reads the
 # version from it, so the wheel cannot be built before it exists), and pushed
 # only after the wheel has built and passed its smoke test. A failed build
@@ -179,6 +183,18 @@ jobs:
           just bundle
           uv build --wheel
 
+      - name: point the wheel's README at this tag
+        # The README's images are hot-linked to `main`, and PyPI renders the
+        # description baked into the wheel. Left alone, every version's PyPI
+        # page would show whatever UI `main` has today. On the built wheel, not
+        # README.md: editing the tree before the build would make setuptools-scm
+        # version it `+d<date>`, which PyPI refuses. The tag is pushed below,
+        # before the publish, so the URLs resolve by the time PyPI shows them.
+        if: steps.impact.outputs.tag != ''
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+        run: python3 "$RUNNER_TEMP/dev/release_artifacts.py" pin-wheel "$(ls dist/*.whl)" "$TAG"
+
       - name: smoke test the wheel
         if: steps.impact.outputs.tag != ''
         env:
@@ -197,6 +213,13 @@ jobs:
           # a site-packages path that a python version bump would invalidate.
           /tmp/smoke/bin/python -c \
             "from kraft.paths import BUNDLED; import sys; sys.exit(0 if (BUNDLED / 'web' / 'index.html').is_file() else 1)"
+          # And a description that still hot-links `main` would show main's UI
+          # on this version's PyPI page for as long as the version exists.
+          if unzip -p "$WHEEL" '*.dist-info/METADATA' \
+              | grep -qE 'raw\.githubusercontent\.com/[^/]+/[^/]+/(main|HEAD)/'; then
+            echo "::error::the wheel's README still points at main, not $TAG"
+            exit 1
+          fi
 
       - name: build the VS Code extension
         if: steps.impact.outputs.tag != ''
@@ -209,11 +232,24 @@ jobs:
           cd vscode
           npm ci
           npm run build
-          # vsce wants semver, which has no aN/bN/rcN; a pre-release packs as its base.
+          # A pre-release is packed as semver, `1.5.0-rc.2`, so it sorts below
+          # the release it leads up to and a side-loaded rc is updated by the
+          # real 1.5.0. Packing it as its base version made the two equal.
+          VSIX_VERSION=$(python3 "$RUNNER_TEMP/dev/release_artifacts.py" vsix-version "$TAG")
+          # The Changelog tab shows CHANGELOG.md from inside the .vsix, and the
+          # stamp PR that writes this release's section lands after the build.
+          # Add it here too, then put the file back: the stamp step below must
+          # start from a clean tree.
+          python3 "$RUNNER_TEMP/dev/plan_release.py" changelog "${TAG#v}" "$RUNNER_TEMP/notes.md" CHANGELOG.md
           # Not in dist/: the PyPI publish step uploads everything there, and
           # PyPI rejects a .vsix (v1.2.0 stopped on exactly that).
           mkdir -p "$RUNNER_TEMP/vsix"
-          npx vsce package "$(echo "${TAG#v}" | sed -E 's/(a|b|rc)[0-9]+$//')" --no-update-package-json --out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
+          # README.md links its screenshots relative to vscode/; vsce makes
+          # them absolute, and without this flag points them at `HEAD`.
+          npx vsce package "$VSIX_VERSION" --no-update-package-json \
+            --baseImagesUrl "https://github.com/$GITHUB_REPOSITORY/raw/$TAG/vscode/" \
+            --out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
+          git checkout -- CHANGELOG.md
 
       - name: push the tag and create the release
         if: steps.impact.outputs.tag != ''
@@ -297,6 +333,7 @@ jobs:
           # After the build, never before: a dirty tree would give the wheel a
           # setuptools-scm dev version and fail the smoke test.
           python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md"
+          python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md" vscode/CHANGELOG.md
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
             commit -am "chore: stamp plugin manifests and changelog for $TAG"
           # actions/checkout persisted GITHUB_TOKEN's own auth header, which

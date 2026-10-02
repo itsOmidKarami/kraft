@@ -1,0 +1,234 @@
+"""What a release writes into its artifacts: the wheel's README and the .vsix's version."""
+
+from __future__ import annotations
+
+import base64
+import csv
+import hashlib
+import importlib.util
+import io
+import re
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+# `dev/` is not a package; release_artifacts imports next_tag as a sibling script.
+_ROOT = Path(__file__).resolve().parents[1]
+_DEV = _ROOT / "dev"
+sys.path.insert(0, str(_DEV))
+_SPEC = importlib.util.spec_from_file_location("release_artifacts", _DEV / "release_artifacts.py")
+release_artifacts = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(release_artifacts)
+
+RELEASE_YML = _ROOT / ".github" / "workflows" / "release.yml"
+IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (
+            "![a](https://raw.githubusercontent.com/o/r/main/.github/assets/a.png)",
+            "![a](https://raw.githubusercontent.com/o/r/v1.5.0/.github/assets/a.png)",
+        ),
+        (
+            "![a](https://raw.githubusercontent.com/o/r/HEAD/a.png)",
+            "![a](https://raw.githubusercontent.com/o/r/v1.5.0/a.png)",
+        ),
+        (
+            "![a](https://github.com/o/r/raw/HEAD/vscode/media/a.png)",
+            "![a](https://github.com/o/r/raw/v1.5.0/vscode/media/a.png)",
+        ),
+        # Already pinned, someone else's, a link and not an image, or a branch of a
+        # longer name: nothing to move.
+        ("https://raw.githubusercontent.com/o/r/v1.4.0/a.png", None),
+        ("https://raw.githubusercontent.com/o/r/0123abc/a.png", None),
+        ("https://example.com/o/r/main/a.png", None),
+        ("https://github.com/o/r/blob/main/LICENSE", None),
+        ("https://raw.githubusercontent.com/o/r/maintenance/a.png", None),
+    ],
+)
+def test_a_moving_asset_url_is_pinned_to_the_tag(before, after):
+    assert release_artifacts.pin_refs(before, "v1.5.0") == (after or before)
+
+
+def test_every_image_in_the_pypi_readme_is_one_the_pin_knows():
+    readme = (_ROOT / "README.md").read_text()
+    pinned = release_artifacts.pin_refs(readme, "v9.9.9")
+    urls = IMAGE.findall(pinned)
+    assert urls, "README.md has no images; the pin has nothing to do and this test nothing to check"
+    # A README that hot-links some other form of branch URL (`?raw=true`, a
+    # `blob/main` path) would slip past the pin and put `main` back on PyPI.
+    for url in urls:
+        assert not re.search(r"/(main|master|HEAD)/", url), url
+        if "githubusercontent" in url:
+            assert "/v9.9.9/" in url, url
+
+
+def test_the_extension_readme_links_its_images_relative_to_vscode():
+    # `vsce package --baseImagesUrl` makes these absolute at the release's tag.
+    urls = IMAGE.findall((_ROOT / "vscode" / "README.md").read_text())
+    assert urls
+    for url in urls:
+        assert not url.startswith(("http:", "https:", "/")), url
+        assert (_ROOT / "vscode" / url).is_file(), url
+
+
+def _record(rows):
+    out = io.StringIO()
+    csv.writer(out, lineterminator="\n").writerows(rows)
+    return out.getvalue()
+
+
+def _digest(data: bytes) -> str:
+    return "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+
+
+def _wheel(path: Path, description: str) -> dict[str, bytes]:
+    metadata = (
+        "Metadata-Version: 2.4\nName: kraft-sdlc\nVersion: 1.5.0\n"
+        "Project-URL: Source, https://github.com/o/r\n"
+        "Description-Content-Type: text/markdown\n\n" + description
+    ).encode()
+    files = {
+        "kraft/__init__.py": b"x = 1\n",
+        "kraft/bin/kraft": b"#!/bin/sh\n",
+        "kraft_sdlc-1.5.0.dist-info/METADATA": metadata,
+        "kraft_sdlc-1.5.0.dist-info/WHEEL": b"Wheel-Version: 1.0\n",
+    }
+    rows = [[n, _digest(d), str(len(d))] for n, d in files.items()]
+    rows.append(["kraft_sdlc-1.5.0.dist-info/RECORD", "", ""])
+    files["kraft_sdlc-1.5.0.dist-info/RECORD"] = _record(rows).encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 10, 1, 12, 0, 0))
+            info.external_attr = (0o755 if name.endswith("/kraft") else 0o644) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, data)
+    return files
+
+
+def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
+    wheel = tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl"
+    image = "![board](https://raw.githubusercontent.com/o/r/main/.github/assets/board.png)\n"
+    before = _wheel(wheel, image)
+    release_artifacts.pin_wheel(wheel, "v1.5.0")
+    with zipfile.ZipFile(wheel) as z:
+        assert z.testzip() is None
+        assert [i.filename for i in z.infolist()] == list(before)
+        after = {i.filename: z.read(i) for i in z.infolist()}
+        modes = {i.filename: i.external_attr >> 16 for i in z.infolist()}
+        stamps = {i.date_time for i in z.infolist()}
+        compression = {i.compress_type for i in z.infolist()}
+    meta = "kraft_sdlc-1.5.0.dist-info/METADATA"
+    assert b"/o/r/v1.5.0/.github/assets/board.png" in after[meta]
+    assert b"/main/" not in after[meta]
+    # The header's own github.com link is not an asset URL.
+    assert b"Project-URL: Source, https://github.com/o/r\n" in after[meta]
+    for name in before:
+        if name not in (meta, "kraft_sdlc-1.5.0.dist-info/RECORD"):
+            assert after[name] == before[name]
+    assert modes["kraft/bin/kraft"] == 0o755
+    assert stamps == {(2026, 10, 1, 12, 0, 0)}
+    assert compression == {zipfile.ZIP_DEFLATED}
+    # RECORD tells the truth about the file that changed, and only that one.
+    rows = {
+        r[0]: r
+        for r in csv.reader(io.StringIO(after["kraft_sdlc-1.5.0.dist-info/RECORD"].decode()))
+    }
+    assert rows[meta] == [meta, _digest(after[meta]), str(len(after[meta]))]
+    assert rows["kraft/__init__.py"] == ["kraft/__init__.py", _digest(b"x = 1\n"), "6"]
+    assert rows["kraft_sdlc-1.5.0.dist-info/RECORD"] == [
+        "kraft_sdlc-1.5.0.dist-info/RECORD",
+        "",
+        "",
+    ]
+
+
+def test_pinning_a_wheel_with_nothing_to_pin_leaves_it_byte_for_byte(tmp_path):
+    wheel = tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl"
+    _wheel(wheel, "No images here.\n")
+    before = wheel.read_bytes()
+    release_artifacts.pin_wheel(wheel, "v1.5.0")
+    assert wheel.read_bytes() == before
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize(
+    ("tag", "version"),
+    [
+        ("v1.5.0", "1.5.0"),
+        ("v1.5.0rc1", "1.5.0-rc.1"),
+        ("v1.5.0rc10", "1.5.0-rc.10"),
+        ("v1.5.0b2", "1.5.0-beta.2"),
+        ("v1.5.0a3", "1.5.0-alpha.3"),
+        ("1.5.0rc1", "1.5.0-rc.1"),
+    ],
+)
+def test_the_vsix_is_packed_at_a_semver_that_sorts_below_its_release(tag, version):
+    assert release_artifacts.vsix_version(tag) == version
+
+
+def _precedence(version: str):
+    """semver 2.0 precedence, which is how VS Code orders extension versions."""
+    core, _, pre = version.partition("-")
+    ids = [(0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split(".")] if pre else None
+    return tuple(int(n) for n in core.split(".")), ids is None, ids or []
+
+
+def test_a_pre_release_is_older_than_its_release_and_newer_than_the_last_one():
+    tags = ["v1.5.0a1", "v1.5.0b1", "v1.5.0rc1", "v1.5.0rc2", "v1.5.0rc9", "v1.5.0rc10", "v1.5.0"]
+    versions = [release_artifacts.vsix_version(t) for t in tags]
+    assert sorted(versions, key=_precedence) == versions
+    assert _precedence("1.4.0") < _precedence(versions[0])
+
+
+@pytest.mark.parametrize("tag", ["", "main", "v1.5", "v1.5.0-rc.1", "v1.5.0.rc1", "v1.5.0rc"])
+def test_a_tag_that_is_not_one_of_ours_is_refused(tag):
+    with pytest.raises(ValueError, match="cannot read a version"):
+        release_artifacts.vsix_version(tag)
+
+
+def test_the_command_line(capsys, tmp_path):
+    release_artifacts.main(["vsix-version", "v1.5.0rc2"])
+    assert capsys.readouterr().out == "1.5.0-rc.2\n"
+    wheel = tmp_path / "w.whl"
+    _wheel(wheel, "![a](https://raw.githubusercontent.com/o/r/main/a.png)\n")
+    release_artifacts.main(["pin-wheel", str(wheel), "v1.5.0"])
+    with zipfile.ZipFile(wheel) as z:
+        assert b"/o/r/v1.5.0/a.png" in z.read("kraft_sdlc-1.5.0.dist-info/METADATA")
+    with pytest.raises(SystemExit):
+        release_artifacts.main(["pin-wheel", str(wheel)])
+
+
+def _steps() -> list[str]:
+    return re.findall(r"- (?:name: (.+)|uses: .+)", RELEASE_YML.read_text())
+
+
+def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
+    names = [n for n in _steps() if n]
+    pin, build, smoke = (
+        names.index("point the wheel's README at this tag"),
+        names.index("tag locally, then build"),
+        names.index("smoke test the wheel"),
+    )
+    assert build < pin < smoke
+
+
+def test_the_extension_is_packed_with_the_release_tags_version_images_and_changelog():
+    text = RELEASE_YML.read_text()
+    step = text[
+        text.index("- name: build the VS Code extension") : text.index("- name: push the tag")
+    ]
+    assert 'release_artifacts.py" vsix-version "$TAG"' in step
+    assert 'npx vsce package "$VSIX_VERSION"' in step
+    assert '--baseImagesUrl "https://github.com/$GITHUB_REPOSITORY/raw/$TAG/vscode/"' in step
+    # The extension's changelog is written before packing and put back after, so
+    # the stamp step branches off a clean tree.
+    assert (
+        step.index("changelog")
+        < step.index("vsce package")
+        < step.index("git checkout -- CHANGELOG.md")
+    )
