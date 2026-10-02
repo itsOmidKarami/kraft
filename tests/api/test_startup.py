@@ -1,0 +1,28 @@
+"""What the server does to existing state as it starts."""
+
+import json
+import sys
+
+import pytest
+
+from kraft.adapters import hook_install
+
+_OLD = [sys.executable, "-m", "kraft", "admin", "permission-hook", "cursor"]
+
+
+@pytest.fixture
+def old_cursor_hook(tmp_path):
+    """A worktree whose `.cursor/hooks.json` an earlier Kraft wrote, before
+    the server starts: its entry ran the hook with plain `-m`."""
+    path = tmp_path / "run/worktrees/w1/.cursor/hooks.json"
+    path.parent.mkdir(parents=True)
+    entry = {"command": hook_install.command_of(_OLD), "timeout": 10, "failClosed": True}
+    path.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": [entry]}}))
+    return path
+
+
+def test_start_up_gives_an_earlier_krafts_cursor_hook_safe_path(old_cursor_hook, client):
+    """An upgrade must reach worktrees that already exist, or a session adopted
+    across the restart keeps a hook a planted module can answer."""
+    (entry,) = json.loads(old_cursor_hook.read_text())["hooks"]["preToolUse"]
+    assert entry["command"] == hook_install.command_of([sys.executable, "-P", *_OLD[1:]])

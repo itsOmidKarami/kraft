@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -24,6 +25,8 @@ import sys
 from pathlib import Path
 
 from kraft.worker import shim as _shim
+
+logger = logging.getLogger(__name__)
 
 _REL = ".cursor/hooks.json"
 _EXCLUDE_LINE = f"/{_REL}"
@@ -56,10 +59,15 @@ FAIL_CLOSED_ENV = "KRAFT_PERMISSION_FAIL_CLOSED"
 def hook_argv(harness_id: str, sandbox: dict | None = None) -> list[str]:
     """The hook's command. In a sandbox under `network:`, the `kraft` shim at
     its fixed container path, answered by the daemon through the session's
-    channel: never the host's interpreter, which the container has not got."""
+    channel: never the host's interpreter, which the container has not got.
+
+    On the host, `-P`: the CLI runs the hook from the worktree, which the
+    worker writes, and plain `-m` puts that directory first on `sys.path`. An
+    `argcomplete.py` (or any module Kraft imports) planted there would run in
+    place of Kraft's and answer the gate itself."""
     if sandbox and sandbox.get("network"):
         return [f"{_shim.CONTAINER_DIR}/kraft", "admin", "permission-hook", harness_id]
-    return [sys.executable, "-m", "kraft", "admin", "permission-hook", harness_id]
+    return [sys.executable, "-P", "-m", "kraft", "admin", "permission-hook", harness_id]
 
 
 def command_of(argv: list[str]) -> str:
@@ -70,39 +78,35 @@ def _git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(worktree), *args], capture_output=True, text=True)
 
 
-def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
-    """Kraft's entry into `hooks.json` under the open `.cursor` directory,
-    never through a symlink and never blocking on what a worker planted:
-    opened O_NONBLOCK|O_NOFOLLOW and read only if it is a regular file (a
-    FIFO opened blocking waits for a writer forever, and the daemon's loop
-    with it), replaced by a rename of a fresh temp file."""
-    name = path.name
+def _read_hooks(dfd: int, path: Path) -> dict:
+    """`hooks.json` under the open `.cursor` directory, never through a
+    symlink and never blocking on what a worker planted: opened
+    O_NONBLOCK|O_NOFOLLOW and read only if it is a regular file (a FIFO
+    opened blocking waits for a writer forever, and the daemon's loop with
+    it). An absent file is an empty one."""
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
     except FileNotFoundError:
-        data = {"version": 1, "hooks": {}}
+        return {"version": 1, "hooks": {}}
     except OSError as exc:
         raise HookFileError(
             f"{path} is not a file Kraft can read (a symlink, or {exc.strerror}); remove it"
         ) from exc
-    else:
-        with os.fdopen(fd, "rb") as f:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise HookFileError(f"{path} is not a regular file; remove it")
-            os.set_blocking(fd, True)
-            text = f.read().decode(errors="replace")
-        try:
-            data = json.loads(text)
-        except ValueError as exc:
-            raise _unusable(path, exc) from exc
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise HookFileError(f"{path} is not a regular file; remove it")
+        os.set_blocking(fd, True)
+        text = f.read().decode(errors="replace")
     try:
-        entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
-        entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
-    except (AttributeError, TypeError) as exc:
+        return json.loads(text)
+    except ValueError as exc:
         raise _unusable(path, exc) from exc
-    # Cursor allows the call when a hook crashes, times out or prints nothing,
-    # unless the entry says otherwise: Kraft's gate must deny instead.
-    entries.append({"command": command_of(argv), "timeout": 10, "failClosed": True})
+
+
+def _replace_hooks(dfd: int, path: Path, data: dict) -> None:
+    """`data` as `hooks.json`, by a rename of a fresh temp file: nothing
+    planted under either name is opened or written through."""
+    name = path.name
     # Random and exclusive: nothing planted under the name is opened.
     tmp = f".{name}.{secrets.token_hex(8)}.tmp"
     try:
@@ -115,6 +119,20 @@ def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp, dir_fd=dfd)
         raise HookFileError(f"could not write {path}: {exc}") from exc
+
+
+def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
+    """Kraft's entry into `hooks.json` under the open `.cursor` directory."""
+    data = _read_hooks(dfd, path)
+    try:
+        entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
+        entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
+    except (AttributeError, TypeError) as exc:
+        raise _unusable(path, exc) from exc
+    # Cursor allows the call when a hook crashes, times out or prints nothing,
+    # unless the entry says otherwise: Kraft's gate must deny instead.
+    entries.append({"command": command_of(argv), "timeout": 10, "failClosed": True})
+    _replace_hooks(dfd, path, data)
 
 
 def _unusable(path: Path, exc: Exception) -> HookFileError:
@@ -168,6 +186,63 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     else:
         renamed += [_EXCLUDE_NOTE, _EXCLUDE_LINE]
     exclude.write_text("\n".join(renamed) + "\n")
+
+
+def _with_safe_path(command: str) -> str | None:
+    """`command` with `-P` put in, if it is Kraft's entry as an earlier Kraft
+    wrote it: the host interpreter run with `-m` and no `-P` before it. None
+    for anything else, the sandbox shim's entry included."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if _OURS not in " ".join(argv) or "-m" not in argv:
+        return None
+    at = argv.index("-m")
+    if "-P" in argv[:at]:
+        return None
+    return command_of([*argv[:at], "-P", *argv[at:]])
+
+
+def refresh_cursor_hooks(worktrees: Path) -> list[Path]:
+    """Put `-P` into Kraft's entry in every worktree under `worktrees` that
+    an earlier Kraft wrote it into without one. Returns the files rewritten.
+
+    Run at server start, so an upgrade reaches worktrees that already exist:
+    the entry is otherwise rewritten only by the next cursor launch there that
+    has policy to enforce, and a session adopted across the restart, or a
+    launch with nothing to enforce, would keep running the old command. The
+    rest of each entry, interpreter and flags, is kept as it was."""
+    fixed: list[Path] = []
+    try:
+        dirs = sorted(d for d in worktrees.iterdir() if d.is_dir())
+    except OSError:
+        return fixed
+    for wt in dirs:
+        path = wt / _REL
+        try:
+            dfd = os.open(
+                wt / ".cursor", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+            )
+        except OSError:
+            continue  # no `.cursor`, or not one Kraft would ever have written
+        try:
+            data = _read_hooks(dfd, path)
+            changed = False
+            for entry in data.get("hooks", {}).get("preToolUse", []):
+                command = _with_safe_path(str(entry.get("command", "")))
+                if command is not None:
+                    entry["command"] = command
+                    changed = True
+            if changed:
+                _replace_hooks(dfd, path, data)
+                fixed.append(path)
+        except (HookFileError, AttributeError, TypeError) as exc:
+            # The next launch with policy refuses on the same file, by name.
+            logger.warning("left %s as it was: %s", path, exc)
+        finally:
+            os.close(dfd)
+    return fixed
 
 
 # -- codex ---------------------------------------------------------------------

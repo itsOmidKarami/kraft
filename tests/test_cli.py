@@ -339,6 +339,45 @@ def test_detach_returns_once_the_child_is_up(monkeypatch, tmp_path, capsys):
     assert "detached" in out
 
 
+def test_the_detached_child_imports_kraft_not_the_shell_cwd(monkeypatch, tmp_path, capsys):
+    """Plain `python -m` puts the cwd first on `sys.path`: started from a repo
+    that ships an `mcp.py` (or anything Kraft imports), the child ran that file
+    and `start --detach` and `restart` failed."""
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    run_dir = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    argvs = []
+
+    def fake_popen(argv, **kwargs):
+        argvs.append(argv)
+        return _FakePopen(
+            on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(str(os.getpid()))
+        )
+
+    async def healthy():
+        return {"status": "ok"}
+
+    monkeypatch.setattr(cli.admin.client, "health", healthy)
+    with monkeypatch.context() as patched:  # the real Popen back for the run below
+        patched.setattr(subprocess, "Popen", fake_popen)
+        cli.main(["admin", "start", "--detach"])
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    for module in ("mcp.py", "argcomplete.py"):
+        (shadow / module).write_text('raise SystemExit("shadowed: the repo\'s own module")\n')
+    # The child's own command, asked for its help instead of serving.
+    done = subprocess.run(
+        [*argvs[0], "--help"],
+        cwd=shadow,
+        capture_output=True,
+        text=True,
+        env=child_env({"KRAFT_HOME": str(tmp_path / "k")}),
+        timeout=30,
+    )
+    assert "shadowed" not in done.stderr
+    assert (done.returncode, "usage: kraft admin start" in done.stdout) == (0, True), done.stderr
+
+
 def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, capsys):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"

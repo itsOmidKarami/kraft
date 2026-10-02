@@ -25,6 +25,7 @@ from kraft import intake as intake_mod
 from kraft import notify as notify_mod
 from kraft import policy as policy_mod
 from kraft import triggers as triggers_mod
+from kraft.adapters import hook_install
 from kraft.adapters.forge import git as forge_git
 from kraft.api import deps
 from kraft.db import Database
@@ -153,6 +154,11 @@ async def lifespan(app: FastAPI):
     notify_cursor = database.read(
         lambda c: c.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
     )
+
+    # Before reattach, so a cursor session adopted across an upgrade runs the
+    # permission hook as this Kraft writes it, not as an earlier one did.
+    for path in await asyncio.to_thread(hook_install.refresh_cursor_hooks, run_dirs.worktrees):
+        logger.info("%s: Kraft's permission hook now runs with -P", path)
 
     summary, adopted = await reattach.reattach(
         database,
