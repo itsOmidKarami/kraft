@@ -108,6 +108,24 @@ def test_an_ended_item_cannot_be_ended_again(client, repo, verb, ended):
     assert client.get(f"/api/work-items/{wid}").json()["status"] == ended
 
 
+@VERBS
+def test_a_terminal_action_echoes_the_overrides_as_objects_as_the_detail_does(client, repo, verb):
+    """The echo is the item's row, but its override columns come back decoded,
+    as `GET /work-items/{id}` has them: an object at every door, never the
+    column's JSON text."""
+    wid = _stopped(client, repo)
+    patch = {
+        "agent_overrides": {"effort": "low"},
+        "policy": {"max_attempts": 4},
+    }
+    assert client.patch(f"/api/work-items/{wid}", json=patch).status_code == 200
+
+    echo = client.post(f"/api/work-items/{wid}/{verb}", json={"reason": "r"}).json()
+    assert echo["agent_overrides"] == {"effort": "low"}
+    assert echo["policy_override"] == {"max_attempts": 4}
+    assert echo["node_overrides"] == {}
+
+
 @pytest.mark.parametrize("close", [False, True], ids=["by-default", "opted-in"])
 def test_manual_completion_closes_beads_only_when_asked(client, repo, monkeypatch, close):
     """Ruling 167 (Kraft-kgbwt): a hand-completed item's work may have landed

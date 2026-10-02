@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useProviders } from "../../harnesses/useProviders";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import type { ChainNode, Policy } from "../../../types";
@@ -43,13 +43,24 @@ function useSave(item: ItemDetail, reload: () => void) {
 
 /** The chain pane's model and effort for every agent task of an item that has
  *  not started (`agent_overrides`; `kraft item set-overrides`). Saved at once,
- *  one field per PATCH: the server merges fields, and `null` drops one. */
+ *  in one PATCH: the server replaces the whole override, so each save sends
+ *  every field, the one changed and the others as they stand. */
 export function ItemAgentRows({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const c = useChoices(item);
   const { errors, send } = useSave(item, reload);
+  // What this pane last sent, until the reload brings the item back: a second
+  // row saved before then builds on the first one's field, not on a copy
+  // that never had it.
+  const sent = useRef<{ over: ItemDetail["agent_overrides"]; next: Agent } | null>(null);
   const own: Agent = item.agent_overrides ?? {};
   if (!c.tasks.length) return null;
-  const put = (key: keyof Agent, value: unknown) => void send(key, { agent_overrides: { [key]: value ?? null } });
+  const put = (key: keyof Agent, value: unknown) => {
+    const last = sent.current;
+    const { [key]: _old, ...rest } = last && last.over === item.agent_overrides ? last.next : own;
+    const next: Agent = value == null ? rest : { ...rest, [key]: value };
+    sent.current = { over: item.agent_overrides, next };
+    void send(key, { agent_overrides: next });
+  };
   return (
     <>
       <h3 className="ip-h">Every agent task</h3>

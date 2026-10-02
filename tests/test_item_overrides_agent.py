@@ -47,23 +47,24 @@ def test_an_item_wide_agent_override_the_chain_harness_refuses_is_refused(
         assert refused in r.json()["detail"] and "codex" in r.json()["detail"]
 
 
-def test_the_detail_reports_the_item_wide_override_as_an_object_and_patches_merge(client, repo):
+def test_the_detail_reports_the_item_wide_override_as_an_object_and_a_patch_replaces_it(
+    client, repo
+):
     """The column is JSON text; the detail decodes it, as it does
-    `policy_override`. Two partial PATCHes (the item page's model row, then
-    its effort row) keep each other's field, and `null` drops one."""
+    `policy_override`. A PATCH replaces the whole override, as in 1.4: a
+    field it leaves out is gone, and one sent as `null` is not stored."""
     wid = _paused_item(client, repo)
     assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] is None
 
     client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "opus"}})
     client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"effort": "low"}})
-    assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] == {
-        "model": "opus",
-        "effort": "low",
-    }
-
-    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": None}})
-    assert r.status_code == 200, r.text
     assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] == {"effort": "low"}
+
+    r = client.patch(
+        f"/api/work-items/{wid}", json={"agent_overrides": {"model": "opus", "effort": None}}
+    )
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] == {"model": "opus"}
 
 
 def test_a_model_that_is_no_model_id_is_refused(client, repo):
@@ -90,7 +91,8 @@ def test_a_null_node_field_drops_only_that_field(client, repo):
 
 
 def test_the_patch_echoes_the_overrides_as_stored_after_the_merge(client, repo):
-    """A field the request left out is still stored, so the echo says so."""
+    """A node field the request left out is still stored, so the echo says
+    so; the item-wide override is replaced, so its echo is what was sent."""
     wid = _paused_item(client, repo)
     client.patch(
         f"/api/work-items/{wid}",
@@ -100,7 +102,8 @@ def test_the_patch_echoes_the_overrides_as_stored_after_the_merge(client, repo):
         f"/api/work-items/{wid}",
         json={"agent_overrides": {"effort": "low"}, "node_overrides": {"plan": {"effort": "high"}}},
     )
-    assert r.json()["agent_overrides"] == {"model": "opus", "effort": "low"}
+    assert r.json()["agent_overrides"] == {"effort": "low"}
     assert r.json()["node_overrides"] == {"plan": {"model": "opus", "effort": "high"}}
+    # Cleared, the override echoes `{}`, as 1.4's did: never `null`.
     cleared = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
-    assert cleared.json()["agent_overrides"] is None
+    assert cleared.json()["agent_overrides"] == {}

@@ -891,7 +891,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
-            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            return deps.work_item_answer(st, wid)
         # `refresh_worktree_base` now reports the upstream head even when the
         # branch already contained it (Kraft-jypzx), which is the common case
         # on an ordinary resume -- compare against what was already recorded
@@ -1209,7 +1209,7 @@ async def _retry(wid: str, body: Retry, request: Request):
                 lambda c: store.mark_needs_human(c, wid, node_id, reason, kind="infra")
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
-            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            return deps.work_item_answer(st, wid)
         # See the matching comment in `resume_work_item` (Kraft-jypzx): an
         # ordinary retry finds the branch already containing the upstream
         # head, so gate the write on this actually changing base_ref.
@@ -1647,7 +1647,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                 )
             except deps.AlreadyRunning:
                 raise HTTPException(409, "a walk is already running for this work item") from None
-            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            return deps.work_item_answer(st, wid)
 
 
 def _skip_node_id(st, wid: str, row) -> str | None:
@@ -1695,7 +1695,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
         )
         for s in sessions:
             _terminate(s["pid"])
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        return deps.work_item_answer(st, wid)
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -1731,7 +1731,7 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        return deps.work_item_answer(st, wid)
 
 
 # Beads stay open: Ruling 167.
@@ -1745,7 +1745,7 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
         await executor.close_beads(
             request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs, by_hand=True
         )
-    return deps._work_item_row(request.app.state, wid)
+    return deps.work_item_answer(request.app.state, wid)
 
 
 # close_mr: B4.
@@ -1759,7 +1759,7 @@ async def cancel_work_item(wid: str, body: CancelWorkItem, request: Request):
     the response's `close_mr`.
     """
     row = await _end_work_item(request, wid, "cancel", body.reason)
-    result = dict(deps._work_item_row(request.app.state, wid))
+    result = deps.work_item_answer(request.app.state, wid)
     if body.close_mr:
         result["close_mr"] = await _close_cancelled_mr(request.app.state, wid, row)
     return result

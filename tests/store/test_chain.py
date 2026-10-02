@@ -1,4 +1,5 @@
-"""`store.chain`'s override writes: a field merge in which `None` drops a field."""
+"""The override writes: a node's fields merge, `None` dropping one; the
+item-wide `agent_overrides` is replaced whole."""
 
 from __future__ import annotations
 
@@ -53,17 +54,20 @@ def test_a_node_whose_last_field_is_dropped_goes(conn):
     assert _stored(conn, "node_overrides") == {"verify": {"effort": "low"}}
 
 
-def test_agent_overrides_merge_field_by_field_and_null_drops_one(conn):
-    store.merge_agent_overrides(conn, "w1", {"model": "opus"})
-    store.merge_agent_overrides(conn, "w1", {"effort": "high"})
-    assert _stored(conn, "agent_overrides") == {"model": "opus", "effort": "high"}
-    store.merge_agent_overrides(conn, "w1", {"model": None})
+def test_agent_overrides_are_replaced_whole_and_a_null_field_is_dropped(conn):
+    """As in 1.4: a write names the whole override, so a field it leaves out
+    is gone. A `None` is dropped rather than stored."""
+    store.replace_agent_overrides(conn, "w1", {"model": "opus"})
+    assert store.replace_agent_overrides(conn, "w1", {"effort": "high"}) == {"effort": "high"}
     assert _stored(conn, "agent_overrides") == {"effort": "high"}
-    store.merge_agent_overrides(conn, "w1", {"effort": None})
+    assert store.replace_agent_overrides(conn, "w1", {"model": "opus", "effort": None}) == {
+        "model": "opus"
+    }
+    store.replace_agent_overrides(conn, "w1", {"model": None})
     assert _stored(conn, "agent_overrides") is None
 
 
 def test_an_empty_agent_patch_clears_every_field(conn):
-    store.merge_agent_overrides(conn, "w1", {"model": "opus", "effort": "high"})
-    assert store.merge_agent_overrides(conn, "w1", {}) == {}
+    store.replace_agent_overrides(conn, "w1", {"model": "opus", "effort": "high"})
+    assert store.replace_agent_overrides(conn, "w1", {}) == {}
     assert _stored(conn, "agent_overrides") is None
