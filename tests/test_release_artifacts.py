@@ -7,6 +7,7 @@ import csv
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -398,6 +399,9 @@ def test_the_extension_is_packed_with_the_release_tags_version_images_and_change
         < step.index("vsce package")
         < step.index("git checkout -- CHANGELOG.md")
     )
+    # The Get Started link is fixed on the packed .vsix, the one released.
+    assert 'release_artifacts.py" vsix-links "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"' in step
+    assert step.index("--out ") < step.index("vsix-links")
 
 
 def test_the_command_line_defaults_to_this_repository(tmp_path, monkeypatch):
@@ -412,3 +416,97 @@ def test_the_command_line_defaults_to_this_repository(tmp_path, monkeypatch):
         assert f"/{release_artifacts.REPOSITORY}/v1.5.0/a.png".encode() in z.read(
             "kraft_sdlc-1.5.0.dist-info/METADATA"
         )
+
+
+def _vsix(path: Path, homepage: str = "https://example.com/guide?a=1&b=2") -> dict[str, bytes]:
+    repo = "https://github.com/o/r.git"
+    links = "".join(
+        f'<Property Id="Microsoft.VisualStudio.Services.Links.{kind}" Value="{repo}" />\n'
+        for kind in ("Source", "Getstarted", "GitHub")
+    )
+    files = {
+        "extension.vsixmanifest": f"<Properties>\n{links}</Properties>\n".encode(),
+        "[Content_Types].xml": b"<Types />\n",
+        "extension/package.json": json.dumps({"name": "kraft", "homepage": homepage}).encode(),
+        "extension/dist/extension.js": b"module.exports = 1;\n",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(zipfile.ZipInfo(name, date_time=(2026, 10, 1, 12, 0, 0)), data)
+    return files
+
+
+def test_the_vsix_get_started_link_goes_to_the_extensions_guide(tmp_path):
+    """vsce sets Get Started to the clone URL, `.git` and all, and has no
+    setting for it. The other repository links are right as they are."""
+    vsix = tmp_path / "kraft-1.5.0.vsix"
+    before = _vsix(vsix)
+    release_artifacts.vsix_links(vsix)
+    with zipfile.ZipFile(vsix) as z:
+        assert z.testzip() is None
+        assert [i.filename for i in z.infolist()] == list(before)
+        after = {i.filename: z.read(i) for i in z.infolist()}
+    manifest = after["extension.vsixmanifest"].decode()
+    assert (
+        '<Property Id="Microsoft.VisualStudio.Services.Links.Getstarted" '
+        'Value="https://example.com/guide?a=1&amp;b=2" />'
+    ) in manifest
+    assert manifest.count('Value="https://github.com/o/r.git"') == 2
+    for name in before:
+        if name != "extension.vsixmanifest":
+            assert after[name] == before[name]
+
+
+def test_a_vsix_whose_get_started_link_moved_stops_the_release(tmp_path):
+    vsix = tmp_path / "kraft-1.5.0.vsix"
+    _vsix(vsix)
+    with zipfile.ZipFile(vsix) as z:
+        contents = {i.filename: z.read(i) for i in z.infolist()}
+    contents["extension.vsixmanifest"] = b"<Properties />\n"
+    with zipfile.ZipFile(vsix, "w") as z:
+        for name, data in contents.items():
+            z.writestr(name, data)
+    with pytest.raises(ValueError, match="0 Get Started links"):
+        release_artifacts.vsix_links(vsix)
+
+
+def test_the_extension_declares_kraft_s_own_license():
+    """Not `SEE LICENSE IN LICENSE`: the Marketplace and npm read an SPDX id."""
+    package = json.loads((_ROOT / "vscode" / "package.json").read_text())
+    pyproject = (_ROOT / "pyproject.toml").read_text()
+    assert f'license = "{package["license"]}"' in pyproject
+
+
+def test_the_packed_extension_is_built_without_a_source_map():
+    """`.vscodeignore` keeps *.map out of the .vsix, so the build `vsce
+    package` runs must not link one."""
+    package = json.loads((_ROOT / "vscode" / "package.json").read_text())
+    assert package["scripts"]["vscode:prepublish"] == "node esbuild.mjs --production"
+    assert "**/*.map" in (_ROOT / "vscode" / ".vscodeignore").read_text().splitlines()
+
+
+def _source_map_check() -> str:
+    text = RELEASE_YML.read_text()
+    start = text.index("- name: build the VS Code extension")
+    step = text[start : text.index("- name: push the tag")]
+    match = re.search(r"^ *(if unzip -p [^\n]*sourceMappingURL.*?^ *fi\n)", step, re.M | re.S)
+    assert match, "the extension's build no longer checks extension.js for a source map link"
+    return match.group(1)
+
+
+@pytest.mark.parametrize(
+    ("tail", "ok"),
+    [("", True), ("//# sourceMappingURL=extension.js.map\n", False)],
+    ids=["no-link", "dangling-link"],
+)
+def test_a_vsix_that_links_a_missing_source_map_fails_the_run(tmp_path, tail, ok):
+    (tmp_path / "vsix").mkdir()
+    with zipfile.ZipFile(tmp_path / "vsix" / "kraft-1.5.0.vsix", "w") as z:
+        z.writestr("extension/dist/extension.js", "x".join(["module.exports = 1;\n"] * 9000) + tail)
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", _source_map_check()],
+        env={"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "TAG": "v1.5.0"},
+        capture_output=True,
+        text=True,
+    )
+    assert (run.returncode == 0) is ok, run.stdout + run.stderr

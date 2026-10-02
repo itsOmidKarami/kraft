@@ -261,10 +261,19 @@ jobs:
             --baseImagesUrl "https://github.com/$GITHUB_REPOSITORY/raw/$TAG/vscode/" \
             --out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
           git checkout -- CHANGELOG.md
+          # vsce points the Marketplace's Get Started link at the repository's
+          # clone URL, `.git` and all, and has no setting for it.
+          python3 "$RUNNER_TEMP/dev/release_artifacts.py" vsix-links "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
           # The extension bundles `ws`, whose license asks for its notice to go
           # wherever its code does.
           if ! unzip -l "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/THIRD_PARTY_LICENSES.txt >/dev/null; then
             echo "::error::the .vsix has no extension/dist/THIRD_PARTY_LICENSES.txt"
+            exit 1
+          fi
+          # `vsce package` builds with `--production`, which writes no source
+          # map; the .vsix leaves *.map out, so a link to one would dangle.
+          if unzip -p "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/extension.js | grep -c '^//# sourceMappingURL=' >/dev/null; then
+            echo "::error::the .vsix's extension.js links a source map it does not ship"
             exit 1
           fi
 

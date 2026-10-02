@@ -3,6 +3,12 @@ import { resolve } from "node:path";
 import { build } from "esbuild";
 import { thirdPartyLicenses } from "../dev/third_party_licenses.mjs";
 
+// `--production` is the build `vsce package` runs (`vscode:prepublish`). It
+// writes no source map: `.vscodeignore` keeps *.map out of the .vsix, and a
+// `sourceMappingURL` comment pointing at a file that is not there is noise.
+// The F5 build keeps its map for the debugger.
+const production = process.argv.includes("--production");
+
 const result = await build({
   entryPoints: ["src/extension.ts"],
   bundle: true,
@@ -11,7 +17,7 @@ const result = await build({
   format: "cjs",
   target: "node20",
   external: ["vscode"],
-  sourcemap: true,
+  sourcemap: !production,
   metafile: true,
 });
 
