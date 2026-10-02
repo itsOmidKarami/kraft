@@ -178,6 +178,21 @@ async def _perimeter(request: Request, call_next):
     outermost and runs first — this has to be entered before the auth gate and
     before the SPA-shell branch, or a refused request gets answered by them.
     """
+    refused = _refusal(request, check_origin=request.method not in ("GET", "HEAD"))
+    if refused is not None:
+        return JSONResponse({"detail": refused}, status_code=403)
+    return await call_next(request)
+
+
+def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
+    """Why `_perimeter` refuses this request, or None to let it through.
+
+    HTTP middleware does not run for websockets, so `/ws/events` asks this
+    too, with `check_origin` always on: a browser opens a websocket to any
+    site with no same-origin check, so its Origin is the only sign of which
+    page asked. One set of rules for both, or the board's own live stream
+    is refused on a LAN bind its HTTP calls pass.
+    """
     st = request.app.state
     peer = request.client.host if request.client else "an unknown peer"
     has_password = bool((getattr(st, "access", None) or {}).get("password_hash"))
@@ -187,10 +202,7 @@ async def _perimeter(request: Request, call_next):
     #    otherwise serve the whole API to the LAN with the auth gate wide open,
     #    because `_requires_auth` has no password to demand.
     if not _client_is_local(request) and not has_password:
-        return JSONResponse(
-            {"detail": f"this server is configured for a loopback bind; refusing {peer}"},
-            status_code=403,
-        )
+        return f"this server is configured for a loopback bind; refusing {peer}"
 
     # 2. DNS rebinding: a page on evil.com whose name flips to 127.0.0.1 is
     #    same-origin with a local Kraft and can read every response, ids
@@ -223,10 +235,7 @@ async def _perimeter(request: Request, call_next):
         allowed = set((getattr(st, "access", None) or {}).get("allowed_hosts") or [])
         refused = _from_a_browser(request) and hostname not in allowed | _LOCAL_HOSTS
     if refused:
-        return JSONResponse(
-            {"detail": f"unexpected Host for a server bound to {bound_host}"},
-            status_code=403,
-        )
+        return f"unexpected Host for a server bound to {bound_host}"
 
     # 3. Cross-site write. `_origin_ok` plus one clause, so that a LAN instance
     #    serving its own SPA (Origin and Host both 192.168.1.5:8765) is not
@@ -234,14 +243,14 @@ async def _perimeter(request: Request, call_next):
     #    mutating routes that take no JSON body and so need no preflight.
     origin = request.headers.get("origin")
     if (
-        request.method not in ("GET", "HEAD")
+        check_origin
         and origin
         and not _origin_ok(origin)
         and urlsplit(origin).netloc != request.headers.get("host")
     ):
-        return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+        return "cross-site request refused"
 
-    return await call_next(request)
+    return None
 
 
 def _hostname(host: str) -> str | None:
@@ -257,7 +266,7 @@ def _hostname(host: str) -> str | None:
         return None
 
 
-def _from_a_browser(request: Request) -> bool:
+def _from_a_browser(request: Request | WebSocket) -> bool:
     """Whether a request carries anything a browser adds on its own: Fetch
     metadata, an Origin, a Referer, or the Accept of a page navigation. The
     CLI, MCP and curl send none of these."""

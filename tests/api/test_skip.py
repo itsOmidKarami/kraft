@@ -416,10 +416,8 @@ def _unskippable_spec_approval(templates_dir):
     chain.write_text(text.replace(old, old + "    skippable: false\n"))
 
 
-@pytest.mark.api_client(edit_templates=_unskippable_spec_approval)
-def test_a_pending_gate_that_disallows_skipping_is_not_skipped(client, repo, walked):
-    """Kraft-v1iz2: the no-path `/skip` on a pending gate honours the gate's own
-    `skippable: false`."""
+def _at_spec_approval(client, repo):
+    """A not-started item put straight onto the default chain's first gate."""
     from kraft import store
 
     wid = client.post(
@@ -433,9 +431,35 @@ def test_a_pending_gate_that_disallows_skipping_is_not_skipped(client, repo, wal
         await db.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
 
     client.portal.call(at_the_gate)
+    return wid
+
+
+@pytest.mark.api_client(edit_templates=_unskippable_spec_approval)
+def test_a_pending_gate_that_disallows_skipping_is_not_skipped(client, repo, walked):
+    """Kraft-v1iz2: the no-path `/skip` on a pending gate honours the gate's own
+    `skippable: false`."""
+    wid = _at_spec_approval(client, repo)
 
     r = client.post(f"/api/work-items/{wid}/skip", json={})
 
     assert r.status_code == 409, r.text
     assert "'spec_approval' does not allow skipping" in r.json()["detail"]
     assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"
+
+
+def test_a_skipped_gate_is_no_longer_pending_on_the_board(client, repo, walked):
+    """The board list took the latest `gate_*` event as the pending gate, and a
+    skip writes `node_skipped`. So the list kept the skipped gate pending for
+    good, even once the item completed, while the item's own page said none was."""
+    wid = _at_spec_approval(client, repo)
+
+    def listed():
+        items = client.get("/api/work-items").json()["items"]
+        return next(item for item in items if item["id"] == wid)["pending_gate"]
+
+    assert listed() == "spec_approval"
+
+    assert client.post(f"/api/work-items/{wid}/skip", json={}).status_code == 200
+
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] is None
+    assert listed() is None

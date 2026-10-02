@@ -151,6 +151,18 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.status).toBe("active");
   });
 
+  // The server's `executor.GATE_CLOSED`: each of these closes a pending gate.
+  it.each([
+    ["node_skipped", { node_id: "spec_approval", gate: "spec_approval", note: null }, "active"],
+    ["work_item_completed", {}, "completed"],
+    ["work_item_abandoned", {}, "abandoned"],
+  ])("%s clears a pending gate", (type, payload, status) => {
+    const st = useStore.getState();
+    st.applyEvent(ev({ seq: 2, type: "gate_requested", payload: { gate: "spec_approval" } }));
+    st.applyEvent(ev({ seq: 3, type, payload }));
+    expect(useStore.getState().workItems.w1).toMatchObject({ pending_gate: null, status });
+  });
+
   it("gate_rejected keeps the note", () => {
     useStore.getState().applyEvent(ev({ type: "gate_rejected", payload: { gate: "spec_approval", note: "nope" } }));
     expect(useStore.getState().workItems.w1.rejectNote).toBe("nope");
@@ -278,6 +290,7 @@ describe("applyEvent", () => {
     ["work_item_created for an unknown id", "w2", "work_item_created", {}],
     ["chain_loaded for an unknown id", "w2", "chain_loaded", {}],
     ["gate_requested", "w1", "gate_requested", { gate: "human_review_approval" }],
+    ["node_skipped", "w1", "node_skipped", { node_id: "spec_approval", gate: "spec_approval" }],
   ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
     useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));

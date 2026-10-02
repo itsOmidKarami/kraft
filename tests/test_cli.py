@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 import uvicorn
+from support.server import child_env
 
 from kraft import cli, paths
 
@@ -366,3 +369,69 @@ def test_abandon_refuses_without_yes(monkeypatch):
     with pytest.raises(ValueError, match="--yes") as refused:
         ns.func(ns)
     assert "commits you never pushed are lost" in str(refused.value)
+
+
+def _run_flooding(tmp_path, body: str) -> subprocess.Popen:
+    """`kraft view events` in a child whose verb is `body`, stdout on a pipe.
+    Block-buffered, as a pipe normally is: under `PYTHONUNBUFFERED` (which
+    the suite may set) nothing is left for the exit's own flush to trip on."""
+    script = f"""
+import subprocess, sys
+from kraft import cli
+from kraft.cli import view
+
+
+def flood(ns):
+{textwrap.indent(textwrap.dedent(body), "    ")}
+
+
+view._cmd_events = flood
+cli.main(["view", "events", "w1", "--json"])
+"""
+    env = child_env({"KRAFT_HOME": str(tmp_path / "home")})
+    env.pop("PYTHONUNBUFFERED", None)
+    return subprocess.Popen(
+        [sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+    )
+
+
+def test_a_reader_that_closes_early_ends_the_command_quietly(tmp_path):
+    """`kraft view events ID --json | head` once ended in a BrokenPipeError
+    traceback. A real pipe, since only a closed reader raises it."""
+    # The `finally` is what /dev/null is for: CPython drops the bytes whose
+    # write failed, so the exit's flush fails only on output written after the
+    # failure, such as a closing line printed on the way out.
+    proc = _run_flooding(
+        tmp_path,
+        """
+        try:
+            for _ in range(100_000):
+                print("x" * 80)
+        finally:
+            print("done")
+        """,
+    )
+    assert proc.stdout.readline() == b"x" * 80 + b"\n"
+    proc.stdout.close()  # what `head` does once it has its lines
+    stderr = proc.stderr.read().decode()
+    assert proc.wait(timeout=60) == 141, stderr
+    assert stderr == ""
+
+
+def test_a_broken_pipe_that_is_not_stdout_still_fails_loudly(tmp_path):
+    """Only stdout's reader leaving is the reader being done. A child process
+    that died under us is a failure, and its traceback must show."""
+    proc = _run_flooding(
+        tmp_path,
+        """
+        print("started", flush=True)
+        child = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.PIPE)
+        child.wait()
+        child.stdin.write(b"x" * 1_000_000)
+        child.stdin.flush()
+        """,
+    )
+    out, err = proc.communicate(timeout=60)
+    assert out == b"started\n"
+    assert proc.returncode == 1
+    assert b"BrokenPipeError" in err

@@ -147,8 +147,7 @@ def test_an_operation_failure_is_a_kraft_message_on_stderr(app, capsys):
     assert caught.value.code == 1
     captured = capsys.readouterr()
     assert captured.out == ""  # stdout stays clean so --json stays pipeable
-    assert captured.err.startswith("kraft: ")
-    assert "404" in captured.err
+    assert captured.err == "kraft: 404: unknown work item\n"  # one `kraft: `, not two
 
 
 def test_create_uses_the_cwd_repo_and_its_default_chain_and_lands_paused(
