@@ -1,14 +1,15 @@
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { Head, Note } from "../../templates/panes/controls";
 import { useProviders } from "../../harnesses/useProviders";
-import { capAt, effortOf, effortOptions, materialized, modelOf, modelSuggestions, notStarted, providerOf, taskAt, type Materialized } from "../chainValues";
+import { capAt, capText, effortOf, effortOptions, materialized, modelOf, modelSuggestions, notStarted, providerOf, taskAt, type Given, type Materialized } from "../chainValues";
 import { OverrideRow } from "../panes/OverrideRow";
 import { show } from "../../templates/fields";
+import { useRepoEntry } from "../useRepoEntry";
 import { useDraft } from "./context";
 import { fieldsFor, type DraftField } from "./fields";
 import type { Op } from "./types";
 import { overrideOf, setField } from "./view";
-import type { Harnesses } from "../../../types";
+import type { Harnesses, Repo } from "../../../types";
 import type { ItemDetail } from "../useItem";
 
 /** The Config rows ✎ makes overrides on, for a node, step or task that has not
@@ -21,6 +22,7 @@ export function DraftConfig({ path, saying }: { path: string; saying?: string })
   const d = useDraft();
   const opts = useHarnessOptions();
   const listed = useProviders();
+  const repo = useRepoEntry(d?.raw.repo ?? "");
   if (!d || d.draft.status !== "ready") return null;
   const node = path.split(".")[0];
   if (!d.editable(node)) return <Note>{saying ?? "Already run or running: edit a later node."}</Note>;
@@ -31,7 +33,7 @@ export function DraftConfig({ path, saying }: { path: string; saying?: string })
   return (
     <>
       <Head>Override for this item</Head>
-      <div className="cfg">{fields.map((f) => <Row key={`${f.group}.${f.key}`} f={f} path={path} chain={chain} h={h} listed={listed} wider={chain ? wider(d.raw, path, f) : null} />)}</div>
+      <div className="cfg">{fields.map((f) => <Row key={`${f.group}.${f.key}`} f={f} path={path} chain={chain} h={h} listed={listed} given={chain ? wider(d.raw, path, f) ?? given(chain, d.raw, path, f, h, repo) : null} />)}</div>
       {path.split(".").length === 3 && <Note>The run reads an override when it reaches this task.{!task || task.kind === "agent" ? " A prompt override replaces the whole prompt for this item." : ""}</Note>}
     </>
   );
@@ -43,7 +45,7 @@ const applies = (f: DraftField, kind: string) =>
 
 /** A task's model or effort set for the item over the chain's: by its node,
  *  else item-wide. Either wins over the task's own when it runs. */
-function wider(item: ItemDetail, path: string, f: DraftField): { value: string; source: string } | null {
+function wider(item: ItemDetail, path: string, f: DraftField): Given | null {
   if (f.key !== "model" && f.key !== "effort") return null;
   const key = f.key;
   const node = item.node_overrides?.[path.split(".")[0]]?.[key];
@@ -52,23 +54,22 @@ function wider(item: ItemDetail, path: string, f: DraftField): { value: string; 
   return all ? { value: all, source: "item-wide" } : null;
 }
 
-/** What the chain gives a field at `path`, or null when it does not say. */
-function inherited(chain: Materialized | null, path: string, f: DraftField, h: Harnesses | null): string | null {
-  if (!chain) return null;
+/** What applies to a field at `path` while this item's draft sets nothing, and where it comes from; null when that is not known. */
+function given(chain: Materialized, item: ItemDetail, path: string, f: DraftField, h: Harnesses | null, repo: Repo | null): Given | null {
   if (f.group === "policy") {
-    const v = capAt(chain, path, f.key);
-    return v == null ? "no cap" : f.key === "budget_usd" ? `$${v}` : show(v, f.kind);
+    const c = capAt(chain, path, f.key, item.policy_override);
+    return { value: capText(f.key, c.value), source: c.source };
   }
   const t = taskAt(chain, path);
   if (!t) return null;
-  if (f.key === "model") return modelOf(t, h);
+  if (f.key === "model") return modelOf(t, h, repo);
   if (f.key === "effort") return effortOf(t, h);
-  if (f.key === "command") return show(t.command, "list");
+  if (f.key === "command") return { value: show(t.command, "list"), source: "chain" };
   const v = (t as Record<string, unknown>)[f.key];
-  return typeof v === "string" && v ? v : null;
+  return typeof v === "string" && v ? { value: v, source: "chain" } : null;
 }
 
-function Row({ f, path, chain, h, listed, wider }: { f: DraftField; path: string; chain: Materialized | null; h: Harnesses | null; listed: ReturnType<typeof useProviders>; wider: { value: string; source: string } | null }) {
+function Row({ f, path, chain, h, listed, given }: { f: DraftField; path: string; chain: Materialized | null; h: Harnesses | null; listed: ReturnType<typeof useProviders>; given: Given | null }) {
   const d = useDraft()!;
   const opts = useHarnessOptions();
   const set = overrideOf(d.ops, path)?.[f.group]?.[f.key];
@@ -86,8 +87,7 @@ function Row({ f, path, chain, h, listed, wider }: { f: DraftField; path: string
       hint={task ? undefined : f.hint}
       kind={f.kind}
       own={set}
-      inherited={wider?.value ?? inherited(chain, path, f, h)}
-      source={wider?.source}
+      given={given}
       options={options}
       suggest={f.key === "model" && task ? modelSuggestions(providers, listed, h) : undefined}
       problem={problem?.message}

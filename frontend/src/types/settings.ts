@@ -131,6 +131,9 @@ export interface AgentProfile {
   effort: string | null;
   /** Provider id -> model id. A provider it omits cannot run it. */
   model: Record<string, string>;
+  /** Provider id -> the model and effort it runs there; `effort` above is
+   *  null when these differ. */
+  providers?: Record<string, { model?: string | null; effort?: string | null }>;
   used_by: string[];
   chains: string[];
   /** Why a task pairing it would not launch, in the launch's words. */

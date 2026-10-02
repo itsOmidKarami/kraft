@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import { resetProviders } from "../../harnesses/useProviders";
+import { API_ITEM } from "../fixture.api";
+import { resetRepoEntries } from "../useRepoEntry";
 import { detail, fresh, FROZEN, stubFetch, V1, type Call } from "../testkit";
 import type { ItemDetail } from "../useItem";
 import { ItemDraftProvider } from "./context";
@@ -21,7 +23,7 @@ const show = async (path: string, draft = reply([]), more: Record<string, [numbe
   await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1/draft")).toBe(true));
 };
 const puts = () => calls.filter((c) => c.method === "PUT").map((c) => c.body);
-beforeEach(() => { resetHarnessOptions(); resetProviders(); });
+beforeEach(() => { resetHarnessOptions(); resetProviders(); resetRepoEntries(); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DraftConfig", () => {
@@ -118,7 +120,8 @@ describe("DraftConfig", () => {
     expect(row("command")).toHaveTextContent("make, lint");
     expect(row("running cap")).toHaveTextContent("10m");
     expect(row("budget ($)")).toHaveTextContent("no cap");
-    expect(within(row("command") as HTMLElement).getByTitle("from the chain")).toHaveTextContent("chain");
+    expect(within(row("command") as HTMLElement).getByTitle("from this item's chain")).toHaveTextContent("chain");
+    expect(row("budget ($)")).toHaveTextContent("no cappolicy");
     expect(screen.queryByText("as the chain gives it")).toBeNull();
     expect(screen.getByText("The run reads an override when it reaches this task.")).toBeInTheDocument();
   });
@@ -126,7 +129,7 @@ describe("DraftConfig", () => {
   it("on an agent task that has not started, offers its model with the provider's choices, any text still allowed", async () => {
     const profiles = { "GET /harnesses/profiles": [200, { profiles: [{ id: "claude", provider: "claude", defaults: { model: "sonnet" } }], agent_profiles: [{ id: "strong", effort: "high", model: { claude: "opus-4" } }] }] } as Record<string, [number, unknown]>;
     await show("plan.write.plan", reply([]), { ...profiles, "GET /harnesses": [200, [{ id: "claude", models: ["claude-x"], efforts: ["low", "high"] }]] }, fresh());
-    expect(await screen.findByText("opus-4 · strong profile")).toBeInTheDocument();
+    expect(await screen.findByText("opus-4 · strong")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Override command" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Override model" }));
     const input = screen.getByRole("combobox", { name: "model" });
@@ -140,6 +143,23 @@ describe("DraftConfig", () => {
     await screen.findByRole("button", { name: "Override model" });
     expect(row("model")).toHaveTextContent("haikunode");
     expect(row("effort")).toHaveTextContent("lowitem-wide");
+  });
+
+  it("reads the item's own overrides as the API sends them: its policy on a cap, its item-wide model", async () => {
+    await show("plan.main.author", reply([]), {}, detail({ ...API_ITEM, id: "w1" }));
+    const row = (label: string) => screen.getByRole("button", { name: `Override ${label}` }).closest(".cfg-row")!;
+    await screen.findByRole("button", { name: "Override model" });
+    expect(row("running cap")).toHaveTextContent("20mitem policy");
+    expect(row("budget ($)")).toHaveTextContent("$1.50item policy");
+    expect(row("model")).toHaveTextContent("opusitem-wide");
+  });
+
+  it("gives a task with no model of its own the repo's model for its harness", async () => {
+    const frozen = JSON.parse(FROZEN);
+    delete frozen.chain.nodes[2].steps[1].tasks[0].model;
+    await show("verification.review.code_review", reply([]), { "GET /repos": [200, { repos: [{ path: "/code/kraft-plugins", models: { claude: "opus-repo" } }] }] }, fresh({ materialized_chain: JSON.stringify(frozen) }));
+    expect(await screen.findByText("opus-repo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Override model" }).closest(".cfg-row")).toHaveTextContent("opus-reporepo");
   });
 
   it("once the item has started, says as the chain gives it and offers every field, as before", async () => {
