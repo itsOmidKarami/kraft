@@ -352,6 +352,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         # 200, not this route's default 201: nothing was created.
         content = _dry_run_response(st, body, chain, materialized, attachment_kinds)
         return JSONResponse(status_code=200, content=content)
+    # Before intake: a lookup after it could answer 422 for an item filed.
+    repo_entry = deps.connected_or_422(st, body.repo)
     # Read before this item exists, so it cannot find itself. Warned, not
     # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
     # the usual reason to re-file, a revised spec, now has its own door.
@@ -417,8 +419,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             + ". To revise its spec or plan, use `kraft item set-attachments` on it "
             "rather than filing again; abandon whichever of the two is not wanted"
         )
-    if warning := repo_warning(deps.connected_or_422(st, body.repo)):
-        extra["repo_warning"] = warning
+    if cannot_run := repo_warning(repo_entry):
+        extra["repo_warning"] = cannot_run
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
