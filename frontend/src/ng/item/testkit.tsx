@@ -16,6 +16,25 @@ export const V1: ChainNode[] = [
   { id: "merge_request", kind: "exec", gate_after: null, tasks: ["merge_request.open.open_draft"], steps: [["merge_request.open.open_draft"]] },
 ];
 
+/** `V1` as intake freezes it (`materialized_chain`), for an item that has not
+ *  started: the chain's own values its Config rows read. */
+export const FROZEN = JSON.stringify({
+  chain: {
+    nodes: [
+      { id: "plan", kind: "exec", steps: [{ id: "write", tasks: [{ id: "plan", kind: "agent", harness: "claude", profile: "strong", prompt: "Write the plan." }] }] },
+      { id: "plan_approval", kind: "gate" },
+      { id: "verification", kind: "exec", fix_loop: { max_attempts: 2 }, steps: [
+        { id: "checks", tasks: [{ id: "lint", kind: "subprocess", command: ["make", "lint"], policy: { time_cap_minutes: 10 } }] },
+        { id: "review", tasks: [{ id: "code_review", kind: "agent", harness: "claude", model: "opus", prompt: "Review the change." }] },
+      ] },
+      { id: "merge_request", kind: "exec", policy: { budget_usd: 2 }, steps: [{ id: "open", tasks: [{ id: "open_draft", kind: "builtin" }] }] },
+    ],
+  },
+  policy: { cap_defaults: { tasks: { time_cap_minutes: 60 } }, maxima: { nodes: { time_cap_minutes: 30 } } },
+});
+/** An item filed with `FROZEN` and not started. */
+export const fresh = (over: Partial<ItemDetail> = {}) => detail({ current_node_id: null, display_status: "paused", materialized_chain: FROZEN, ...over });
+
 export const detail = (over: Partial<ItemDetail> = {}): ItemDetail =>
   ({
     id: "w1", title: "Design the cache", description: "Cache embeddings by content hash.", repo: "/code/kraft-plugins", status: "active",

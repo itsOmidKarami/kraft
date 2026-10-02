@@ -1,87 +1,101 @@
-import { Pencil, RotateCcw } from "lucide-react";
-import { useState } from "react";
-import { parse, show } from "../../templates/fields";
-import { Head, Note } from "../../templates/panes/controls";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
-import { IconButton } from "../../ui/IconButton";
+import { Head, Note } from "../../templates/panes/controls";
+import { useProviders } from "../../harnesses/useProviders";
+import { capAt, capText, effortOf, effortOptions, materialized, modelOf, modelSuggestions, notStarted, providerOf, taskAt, type Given, type Materialized } from "../chainValues";
+import { OverrideRow } from "../panes/OverrideRow";
+import { show } from "../../templates/fields";
+import { useRepoEntry } from "../useRepoEntry";
 import { useDraft } from "./context";
 import { fieldsFor, type DraftField } from "./fields";
 import type { Op } from "./types";
 import { overrideOf, setField } from "./view";
+import type { Harnesses, Repo } from "../../../types";
+import type { ItemDetail } from "../useItem";
 
 /** The Config rows ✎ makes overrides on, for a node, step or task that has not
- *  run (Decisions §5 Editing the chain). The inherited value is not known to the
- *  item API (Kraft-jmofl), so a row says "as the chain gives it" until it is
- *  overridden, and an editor starts empty (Decided 7). */
+ *  run (Decisions §5 Editing the chain). On an item that has not started, each
+ *  row shows what the chain gives, read from the chain it froze at intake, and
+ *  a task offers only the fields its kind has. Once it has started a row says
+ *  "as the chain gives it" until it is overridden, and an editor starts empty
+ *  (Decided 7). */
 export function DraftConfig({ path, saying }: { path: string; saying?: string }) {
   const d = useDraft();
+  const opts = useHarnessOptions();
+  const listed = useProviders();
+  const repo = useRepoEntry(d?.raw.repo ?? "");
   if (!d || d.draft.status !== "ready") return null;
   const node = path.split(".")[0];
   if (!d.editable(node)) return <Note>{saying ?? "Already run or running: edit a later node."}</Note>;
-  const fields = fieldsFor(path);
+  const chain = notStarted(d.raw) ? materialized(d.raw) : null;
+  const h = typeof opts === "string" ? null : opts.harnesses;
+  const task = chain ? taskAt(chain, path) : undefined;
+  const fields = fieldsFor(path).filter((f) => !task || applies(f, task.kind));
   return (
     <>
       <Head>Override for this item</Head>
-      <div className="cfg">{fields.map((f) => <Row key={`${f.group}.${f.key}`} f={f} path={path} />)}</div>
-      {path.split(".").length === 3 && <Note>The run reads an override when it reaches this task. A prompt override replaces the whole prompt for this item.</Note>}
+      <div className="cfg">{fields.map((f) => <Row key={`${f.group}.${f.key}`} f={f} path={path} chain={chain} h={h} listed={listed} given={chain ? wider(d.raw, path, f) ?? given(chain, d.raw, path, f, h, repo) : null} />)}</div>
+      {path.split(".").length === 3 && <Note>The run reads an override when it reaches this task.{!task || task.kind === "agent" ? " A prompt override replaces the whole prompt for this item." : ""}</Note>}
     </>
   );
 }
 
-function Row({ f, path }: { f: DraftField; path: string }) {
+/** The task fields a kind has: an agent's model and prompt, a subprocess's command; a cap applies to any. */
+const applies = (f: DraftField, kind: string) =>
+  f.group === "policy" || (kind === "agent" ? f.key !== "command" : kind === "subprocess" ? f.key === "command" : false);
+
+/** A task's model or effort set for the item over the chain's: by its node,
+ *  else item-wide. Either wins over the task's own when it runs. */
+function wider(item: ItemDetail, path: string, f: DraftField): Given | null {
+  if (f.key !== "model" && f.key !== "effort") return null;
+  const key = f.key;
+  const node = item.node_overrides?.[path.split(".")[0]]?.[key];
+  if (node) return { value: node, source: "node" };
+  const all = item.agent_overrides?.[key];
+  return all ? { value: all, source: "item-wide" } : null;
+}
+
+/** What applies to a field at `path` while this item's draft sets nothing, and where it comes from; null when that is not known. */
+function given(chain: Materialized, item: ItemDetail, path: string, f: DraftField, h: Harnesses | null, repo: Repo | null): Given | null {
+  if (f.group === "policy") {
+    const c = capAt(chain, path, f.key, item.policy_override);
+    return { value: capText(f.key, c.value), source: c.source };
+  }
+  const t = taskAt(chain, path);
+  if (!t) return null;
+  if (f.key === "model") return modelOf(t, h, repo);
+  if (f.key === "effort") return effortOf(t, h);
+  if (f.key === "command") return { value: show(t.command, "list"), source: "chain" };
+  const v = (t as Record<string, unknown>)[f.key];
+  return typeof v === "string" && v ? { value: v, source: "chain" } : null;
+}
+
+function Row({ f, path, chain, h, listed, given }: { f: DraftField; path: string; chain: Materialized | null; h: Harnesses | null; listed: ReturnType<typeof useProviders>; given: Given | null }) {
   const d = useDraft()!;
-  const op = overrideOf(d.ops, path);
-  const set = op?.[f.group]?.[f.key];
-  const own = set !== undefined;
-  const [editing, setEditing] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const opts = useHarnessOptions();
+  const set = overrideOf(d.ops, path)?.[f.group]?.[f.key];
   const problem = d.issues.find((i) => i.path === path && !i.passed && opHolds(d.ops[i.index], f));
-  const save = (text: string) => {
-    setEditing(false);
-    if (text.trim() === "") return void setErr(null);
-    const p = parse(text, f.kind);
-    if ("error" in p) return void (setErr(`${f.label}: ${p.error}`), setEditing(true));
-    if (f.kind === "number" && p.value === 0) return void (setErr(`${f.label}: A number above 0.`), setEditing(true));
-    setErr(null);
-    void d.draft.edit((ops) => setField(ops, path, f.group, f.key, p.value), path);
-  };
-  const reset = () => void d.draft.edit((ops) => setField(ops, path, f.group, f.key, undefined), path);
+  const task = chain ? taskAt(chain, path) : undefined;
+  const providers = task ? [providerOf(h, task.harness)] : [];
+  const options = f.key === "harness" && typeof opts !== "string"
+    ? opts.harnesses.profiles.map((p) => p.id)
+    : f.key === "effort"
+      ? task ? effortOptions(providers, listed) : [...new Set(typeof opts === "string" ? [] : Object.values(opts.providers.valid).flatMap((p) => p.capabilities?.effort?.values ?? []))]
+      : null;
   return (
-    <div className={`cfg-row${own ? " is-own" : ""}`}>
-      <span className="cfg-k">{f.label}{f.hint && <span className="idr-hint"> · {f.hint}</span>}</span>
-      {editing ? <Editor f={f} onSave={save} onCancel={() => { setEditing(false); setErr(null); }} /> : (
-        <span className={`cfg-v${own ? "" : " is-unset"}${f.kind === "long" ? " is-prose" : ""}`}>{own ? show(set, f.kind) : "as the chain gives it"}</span>
-      )}
-      {own && <span className="cfg-dot" aria-label="overridden for this item" />}
-      {own && <span className="cfg-chip is-own">this item</span>}
-      {!editing && (
-        <>
-          <IconButton label={`Override ${f.label}`} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden /></IconButton>
-          {own ? <IconButton label={`Reset ${f.label}`} onClick={reset}><RotateCcw size={12} aria-hidden /></IconButton> : <span className="cfg-gap" />}
-        </>
-      )}
-      {(err || problem) && <p className="cfg-err" role="alert">{err ?? problem?.message}</p>}
-    </div>
+    <OverrideRow
+      label={f.label}
+      hint={task ? undefined : f.hint}
+      kind={f.kind}
+      own={set}
+      given={given}
+      options={options}
+      suggest={f.key === "model" && task ? modelSuggestions(providers, listed, h) : undefined}
+      problem={problem?.message}
+      placeholder={f.key === "prompt" ? "Replaces the whole prompt for this item" : undefined}
+      onSave={(value) => void d.draft.edit((ops) => setField(ops, path, f.group, f.key, value), path)}
+      onReset={() => void d.draft.edit((ops) => setField(ops, path, f.group, f.key, undefined), path)}
+    />
   );
 }
 
 const opHolds = (op: Op | undefined, f: DraftField) => op?.op === "override" && op[f.group]?.[f.key] !== undefined;
-
-function Editor({ f, onSave, onCancel }: { f: DraftField; onSave: (t: string) => void; onCancel: () => void }) {
-  const [text, setText] = useState("");
-  const opts = useHarnessOptions();
-  const options = f.key === "harness" && typeof opts !== "string" ? opts.harnesses.profiles.map((p) => p.id) : f.key === "effort" ? [...new Set(typeof opts === "string" ? [] : Object.values(opts.providers.valid).flatMap((p) => p.capabilities?.effort?.values ?? []))] : null;
-  const keys = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") { e.stopPropagation(); onCancel(); }
-    if (e.key === "Enter" && !(f.kind === "long" && e.shiftKey)) { e.preventDefault(); onSave(text); }
-  };
-  if (options?.length)
-    return (
-      <select autoFocus aria-label={f.label} className="cfg-edit" value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => onSave(e.target.value)}>
-        <option value="">not set</option>
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-    );
-  if (f.kind === "long") return <textarea autoFocus aria-label={f.label} className="cfg-edit is-long" rows={4} placeholder="Replaces the whole prompt for this item" value={text} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => setText(e.target.value)} />;
-  return <input autoFocus aria-label={f.label} className="cfg-edit" value={text} spellCheck={false} placeholder={f.kind === "minutes" ? "minutes" : undefined} onKeyDown={keys} onBlur={() => onSave(text)} onChange={(e) => setText(e.target.value)} />;
-}

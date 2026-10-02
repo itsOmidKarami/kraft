@@ -562,7 +562,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     set_overrides = subs.add_parser(
         "set-overrides",
         parents=[common],
-        help="per-item model/effort override, without changing the chain",
+        help="per-item model/effort override, without changing the chain; "
+        "replaces the whole override",
     )
     set_overrides.add_argument("id", nargs="?")
     set_overrides.add_argument("--model", help="plain model override")

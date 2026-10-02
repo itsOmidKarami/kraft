@@ -10,6 +10,8 @@ import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { budgetRaise } from "../status";
+import { notStarted } from "../chainValues";
+import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
 
 const statusLine = (item: ItemDetail) => {
@@ -159,7 +161,9 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
   const used = item.usage?.total;
   const overrides = Object.entries(item.node_overrides ?? {});
   const draftRows = appliedRows(applied);
-  const agent = (item as { agent_overrides?: Record<string, unknown> | null }).agent_overrides;
+  // Before the item starts, its agents' model and effort have rows of their own.
+  const fresh = notStarted(item);
+  const agent = fresh ? null : item.agent_overrides;
   const reset = async (body: Record<string, unknown>) => {
     setError(null);
     const r = await act.patch(item.id, body);
@@ -189,6 +193,8 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
       <dl className="item-facts ip-facts ip-gap">
         <div><dt>auto gate</dt><dd>{item.auto_gate ? "on · an agent may review a gate before you" : "off · every gate waits for you"}</dd></div>
       </dl>
+
+      {fresh && <ItemAgentRows item={item} reload={reload} />}
 
       <h3 className="ip-h">Changed for this item</h3>
       {!ownCap && !ownPolicy.length && !overrides.length && !draftRows.length && !(agent && Object.keys(agent).length) ? (

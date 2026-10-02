@@ -5,6 +5,7 @@ cannot drift into two ideas of a valid field."""
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
@@ -14,6 +15,28 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 #: already paid for a worktree and a session (Kraft-tff).
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 _EFFORT_LEVELS = set(get_args(Effort))
+
+
+#: What a model id looks like (`claude-sonnet-4-5`, `gpt-5.6-sol`,
+#: `us.anthropic.claude-opus:0`, `openrouter/x`, `opus[1m]`, OpenRouter's
+#: `~vendor/model-latest` aliases): a harness's own
+#: list may be empty, which accepts any value, so this is the floor every
+#: override is held to. It keeps text that is no model -- a space, a `;` --
+#: from reaching an agent's command line.
+_MODEL_ID = re.compile(r"~?[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,127}")
+MODEL_ID_RULE = (
+    "letters, digits and . _ : / @ + [ ] -, starting with a letter or digit (or a ~ "
+    "before one, as in ~vendor/model-latest), at most 128 characters"
+)
+
+
+def model_id_problem(value: object) -> str | None:
+    """Why `value` is not a model id, or None. A `None` is no value at all."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _MODEL_ID.fullmatch(value):
+        return f"{value!r} is not a model id: use {MODEL_ID_RULE}"
+    return None
 
 
 class _ModelEffortOverride(BaseModel):
@@ -41,7 +64,15 @@ class _NodeOverride(_ModelEffortOverride):
 def _errors(
     schema: type[BaseModel], values: object, *, unknown: str, object_name: str | None = None
 ) -> list[str]:
-    """Typed-schema errors as the terse API errors each caller returns."""
+    """Typed-schema errors as the terse API errors each caller returns. A
+    known key set to `None` asks a PATCH to drop it, so it is not checked;
+    an unknown one is still named."""
+    if isinstance(values, dict):
+        for field in ("model", "escalate_model"):
+            value = values.get(field)
+            if isinstance(value, str) and (why := model_id_problem(value)) is not None:
+                return [f"{field!r}: {why}"]
+        values = {k: v for k, v in values.items() if not (v is None and k in schema.model_fields)}
     try:
         schema.model_validate(values)
     except ValidationError as exc:

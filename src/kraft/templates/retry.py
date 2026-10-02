@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
+from kraft.overrides import model_id_problem
 from kraft.policy import PolicyError, TaskPolicyOverride, TemplatePolicyOverride
 from kraft.templates.models import (
     MAIN_STEP,
@@ -105,6 +106,11 @@ def validate_retry_override(
                 "identifiers, order and task kinds",
                 field=f"task_config.{name}",
             )
+
+    for name in ("model", "escalate_model"):
+        value = task_config.get(name)
+        if isinstance(value, str) and (why := model_id_problem(value)) is not None:
+            raise RetryOverrideError(why, field=f"task_config.{name}")
 
     shape = TemplatePolicyOverride if kind == "node" else TaskPolicyOverride
     try:

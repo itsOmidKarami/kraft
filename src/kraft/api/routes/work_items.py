@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 from pathlib import Path
 from typing import Literal
 
@@ -366,7 +365,13 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             skip_nodes=frozenset(body.skip_nodes),
             budget_set="budget_usd" in body.model_fields_set,
             budget_usd=body.budget_usd,
-            node_overrides=body.node_overrides or None,
+            # A `null` field drops it on a PATCH; at intake there is nothing to drop.
+            node_overrides={
+                n: kept
+                for n, f in body.node_overrides.items()
+                if (kept := {k: v for k, v in f.items() if v is not None})
+            }
+            or None,
             policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
             if item_policy is not None
             else None,
@@ -662,9 +667,10 @@ class WorkItemPatch(BaseModel):
     #: started item.
     chain_template: str | None = None
     #: `None` (default) leaves the override alone. `{}` clears every field
-    #: back to the template's own binding; a non-empty object *replaces* the
-    #: whole stored override -- it does not merge with what is already there
-    #: (Kraft-4k6l). No `current_node_id` restriction, unlike `chain_template`:
+    #: back to the template's own binding; a non-empty object is merged into
+    #: the stored one field by field, a field sent as `null` dropped, in one
+    #: write, like `node_overrides`' fields. No `current_node_id` restriction,
+    #: unlike `chain_template`:
     #: a model/effort dial can change mid-chain, including on a paused item --
     #: that is the point, making a stuck item cheaper before its next retry.
     agent_overrides: dict | None = None
@@ -672,10 +678,9 @@ class WorkItemPatch(BaseModel):
     #: overrides alone. `{}` resets every node to the template -- refused
     #: (409) once the item has started. A non-empty object is per node id:
     #: `{node_id: {}}` drops that node's overrides, `{node_id: {field:
-    #: value}}` sets fields on it -- merged into what's already stored, not a
-    #: whole-object replace (unlike `agent_overrides`), so toggling one
-    #: node's switch never wipes another's. Refused (409) for any node id
-    #: that has already started.
+    #: value}}` sets fields on it and `{node_id: {field: null}}` drops one --
+    #: merged into what's already stored, so toggling one node's switch never
+    #: wipes another's. Refused (409) for any node id that has already started.
     node_overrides: dict[str, dict] | None = None
     #: Per-item spend cap (point 4). Presence, not value, is what matters:
     #: omitted leaves the cap alone; sent as `null` sets an explicit "no
@@ -968,16 +973,19 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         if body.chain_template is not None:
             store.set_chain_template(c, wid, body.chain_template, new_materialized)
         if body.agent_overrides is not None:
-            store.set_agent_overrides(
-                c, wid, json.dumps(body.agent_overrides) if body.agent_overrides else None
+            written["agent_overrides"] = (
+                store.merge_agent_overrides(c, wid, body.agent_overrides) or None
             )
         if body.node_overrides is not None:
-            store.set_node_overrides(c, wid, body.node_overrides)
+            written["node_overrides"] = store.set_node_overrides(c, wid, body.node_overrides)
         if "budget_usd" in fields_set:
             store.set_budget(c, wid, body.budget_usd)
         if body.policy is not None:
             store.set_policy_override(c, wid, item_policy)
 
+    # The overrides as stored after the merge, which the echo reports in
+    # place of what was sent: a field the request left out is still there.
+    written: dict = {}
     filed = stored = entry.attachments_of(row)
     won = False
     try:
@@ -1005,5 +1013,6 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             entry.discard_attachments(st.run_dirs, wid, drop, keep)
     # `model_dump(exclude_none=True)` would drop an explicit `budget_usd:
     # null` along with every untouched field, so build the echo from
-    # `fields_set` (what the caller actually sent) instead.
-    return {"id": wid, **{f: getattr(body, f) for f in fields_set}}
+    # `fields_set` (what the caller actually sent) instead. The overrides
+    # merge, so for them the echo is what is now stored, as the detail shows it.
+    return {"id": wid, **{f: getattr(body, f) for f in fields_set}, **written}
