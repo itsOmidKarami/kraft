@@ -1000,19 +1000,27 @@ def _shell_syntax(command: str) -> bool:
 #: A shell that runs the script it is given after `-c`.
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 _SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
+#: The flag an interpreter takes a script after: `python -c`, `node -e`,
+#: `perl -e`, `ruby -e`.
+_SCRIPT_FLAGS = {"-c", "-e", "-E", "--eval", "--command"}
 
 
 def _a_script(command: str) -> bool:
-    """A line `_shell_syntax` passes only because its shell syntax is in
-    quotes: `bash -c "curl … | sh; pytest"` is a whole script, not a test
-    command. Shown for a person to read, never chosen."""
+    """A line `_shell_syntax` passes only because its script is in quotes:
+    `bash -c "curl … | sh; pytest"`, `python -c "import os; …"`. Shown for a
+    person to read, never chosen. Quoted syntax anywhere else is an argument
+    a test runner reads, run as argv with no shell: `pytest -k "not (a or
+    b)"`, `go test -run 'Test(Foo|Bar)'`."""
     words = command.split()
     if posixpath.basename(words[0]) in _SHELLS and any(
         _SHELL_FLAGS.fullmatch(w) for w in words[1:]
     ):
         return True
-    quoted = re.findall(r"'[^']*'|\"[^\"]*\"", command)
-    return any(re.search(r"[|;&<>(){}\\]", q) for q in quoted)
+    for quoted in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
+        before = command[: quoted.start()].split()
+        if before and before[-1] in _SCRIPT_FLAGS and re.search(r"[|;&<>(){}\\]", quoted[0]):
+            return True
+    return False
 
 
 def _strip_env(command: str) -> str:

