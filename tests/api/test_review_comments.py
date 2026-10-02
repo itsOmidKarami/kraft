@@ -5,7 +5,7 @@ agents' reply door are in test_review.py."""
 from __future__ import annotations
 
 import pytest
-from support.api import _poll_node_started, _started
+from support.api import _held_at
 
 _AGENT = {"x-kraft-session-id": "s1"}
 
@@ -14,11 +14,7 @@ _AGENT = {"x-kraft-session-id": "s1"}
 def running(client, repo, monkeypatch):
     """An item held at `spec`'s agent task, with no gate pending: its
     worktree exists, so a thread and a review can be filed against it."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
-    _poll_node_started(client, wid, "spec")
-    return wid
+    return _held_at(client, repo, "spec", monkeypatch)
 
 
 def _thread(client, wid) -> str:

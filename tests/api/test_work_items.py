@@ -13,20 +13,18 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.api import _await_gate, _poll_events, _post_default, _set_status, _started
+from support.api import (
+    _await_gate,
+    _paused,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _started,
+)
 from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
 from kraft.api.routes.work_items import NewWorkItem
-
-
-def _paused(client, repo, **body):
-    """File a not-yet-started item (`autostart: False`); return its id."""
-    r = client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False, **body}
-    )
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
 
 
 @pytest.mark.parametrize("policy", ["nope", "skip"], ids=["unknown", "a-retired-v0-value"])

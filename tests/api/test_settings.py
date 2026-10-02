@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import functools
 import os
 import sqlite3
 from pathlib import Path
@@ -364,7 +364,7 @@ def test_get_intake_carries_repo_pickup_stats(client, templates_dir, tmp_path, b
     ready = connect_repo(bd.init(make_repo(tmp_path, "ready")), templates_dir)
     broken = connect_repo(make_repo(tmp_path, "broken"), templates_dir)
     for title in ("one", "two"):
-        asyncio.run(beads.intake(title, cwd=str(ready)))
+        client.portal.call(functools.partial(beads.intake, title, cwd=str(ready)))
     real_ready = beads.ready
 
     async def ready_or_fail(*, cwd=None):

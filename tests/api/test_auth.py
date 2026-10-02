@@ -161,13 +161,17 @@ def test_post_triggers_requires_auth(client, repo, monkeypatch):
 
 
 class _Clock:
-    """`time.monotonic` for the login route, moved by hand."""
+    """The auth routes' `time` module with `monotonic` moved by hand; every
+    other name (`time.time`, ...) is the real module's."""
 
     def __init__(self):
         self.now = 1000.0
 
     def monotonic(self):
         return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
 
 
 @pytest.fixture

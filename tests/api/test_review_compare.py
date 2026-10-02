@@ -9,7 +9,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.api import _await_gate, _force_node, _poll_node_started, _review_early, _started
+from support.api import (
+    _await_gate,
+    _force_node,
+    _paused,
+    _poll_node_started,
+    _review_early,
+    _started,
+)
 
 _REVIEW = pytest.mark.api_client(edit_templates=_review_early)
 
@@ -178,26 +185,15 @@ def test_fix_target_route_ends_with_the_item(client, gated):
     assert client.get(f"/api/work-items/{gated}/fix-target").status_code == 409
 
 
-def _paused_default(client, repo) -> str:
-    """A not-yet-started default-chain item: no gate pending, no worktree, no
-    base commit."""
-    r = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    )
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
-
-
 def test_fix_target_without_a_gate_needs_a_current_node(client, repo):
-    wid = _paused_default(client, repo)
+    wid = _paused(client, repo, chain_template="default")
     r = client.get(f"/api/work-items/{wid}/fix-target")
     assert r.status_code == 409, r.text
     assert r.json()["detail"] == "this work item has no current node"
 
 
 def test_fix_target_without_a_gate_refuses_a_node_after_the_current_one(client, repo):
-    wid = _paused_default(client, repo)
+    wid = _paused(client, repo, chain_template="default")
     _force_node(wid, "implementation", "paused")
     url = f"/api/work-items/{wid}/fix-target"
 
@@ -213,7 +209,7 @@ def test_fix_target_without_a_gate_refuses_a_node_after_the_current_one(client, 
 def test_fix_target_without_a_gate_needs_a_working_agent_at_or_before_it(client, repo):
     """`spec` writes through a skill, so nothing at or before it is a node a
     gateless `request_changes` could re-run."""
-    wid = _paused_default(client, repo)
+    wid = _paused(client, repo, chain_template="default")
     _force_node(wid, "spec", "paused")
     r = client.get(f"/api/work-items/{wid}/fix-target")
     assert r.status_code == 409, r.text
@@ -221,7 +217,7 @@ def test_fix_target_without_a_gate_needs_a_working_agent_at_or_before_it(client,
 
 
 def test_compare_needs_a_base_commit(client, repo):
-    wid = _paused_default(client, repo)
+    wid = _paused(client, repo, chain_template="default")
     r = client.get(f"/api/work-items/{wid}/compare", params={"from": "base", "to": "latest"})
     assert r.status_code == 409, r.text
     assert r.json()["detail"] == "this work item has no base commit to compare against"

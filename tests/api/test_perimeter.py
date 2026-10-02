@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 
-import anyio
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
@@ -28,20 +27,19 @@ _LAN = pytest.mark.api_client(peer=("10.0.0.5", 54321))
 def _first_frame_of_type(ws, frame_type: str, timeout: float = 10.0) -> dict:
     """The first `frame_type` frame on `ws`, skipping any other a poller sent
     first, and failing after `timeout` instead of hanging until pytest-timeout
-    ends the process. Starlette's test session has no receive timeout, so the
-    bound goes around its stream on the session's own portal."""
+    ends the process. Starlette's test session has no receive timeout, so each
+    read runs on a worker thread and the wait for it is bounded; a read still
+    blocked at the timeout ends when the websocket closes."""
     deadline = time.monotonic() + timeout
-
-    async def receive():
-        with anyio.fail_after(max(deadline - time.monotonic(), 0)):
-            return await ws._send_rx.receive()
-
-    while True:
-        message = ws.portal.call(receive)
-        ws._raise_on_close(message)
-        frame = json.loads(message["text"])
-        if frame["type"] == frame_type:
-            return frame
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        while True:
+            wait = max(deadline - time.monotonic(), 0)
+            frame = pool.submit(ws.receive_json).result(timeout=wait)
+            if frame["type"] == frame_type:
+                return frame
+    finally:
+        pool.shutdown(wait=False)
 
 
 def test_client_is_local_reads_the_peer_address():

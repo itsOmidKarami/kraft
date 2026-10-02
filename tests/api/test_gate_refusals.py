@@ -9,7 +9,7 @@ import asyncio
 
 import httpx
 import pytest
-from support.api import _await_gate, _poll_events, _post_default
+from support.api import _await_gate, _paused, _poll_events, _post_default
 
 
 @pytest.mark.parametrize(
@@ -21,11 +21,7 @@ from support.api import _await_gate, _poll_events, _post_default
     ids=["a-gate-that-is-not-pending", "a-gate-this-chain-does-not-have"],
 )
 def test_a_review_needs_the_pending_gate(client, repo, gate, code, detail):
-    r = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    )
-    wid = r.json()["id"]
+    wid = _paused(client, repo, chain_template="default")
 
     r = client.post(f"/api/work-items/{wid}/gates/{gate}/review", json={"outcome": "comment"})
 
@@ -46,11 +42,10 @@ def test_reject_of_a_gate_that_is_not_pending_is_409_and_changes_nothing(client,
     assert "gate_rejected" not in types
 
 
-def test_two_concurrent_rejects_produce_one_walk_and_one_409(client, repo, monkeypatch):
-    """A pending gate has no status to claim, so `spawn`'s own refusal is
-    what stands between two concurrent rejects and two walks re-running the
-    same node, as it does for approve."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+def _two_concurrent_rejects(client, repo):
+    """Two rejects of `spec_approval` sent at once; the item id, both
+    responses, and the events once the surviving walk has re-run `spec` and
+    come back to the gate."""
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     app = client.app
@@ -65,6 +60,39 @@ def test_two_concurrent_rejects_produce_one_walk_and_one_409(client, repo, monke
             )
 
     a, b = client.portal.call(scenario)
+    return wid, (a, b), _poll_events(client, wid, "gate_requested", count=2)
+
+
+def test_two_concurrent_rejects_produce_one_walk_and_one_409(client, repo):
+    """A pending gate has no status to claim, so `spawn`'s own refusal is
+    what stands between two concurrent rejects and two walks re-running the
+    same node, as it does for approve."""
+    _wid, (a, b), events = _two_concurrent_rejects(client, repo)
+
     refused = b if a.status_code == 200 else a
     assert sorted([a.status_code, b.status_code]) == [200, 409], (a.text, b.text)
     assert refused.json()["detail"] == "a walk is already running for this work item"
+    spec_runs = [
+        e for e in events if e["type"] == "node_started" and e["payload"]["node_id"] == "spec"
+    ]
+    assert len(spec_runs) == 2  # the first run, then one re-run
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="the refused reject has already called `store.reject_gate` before `spawn` "
+    "refuses it: a second `gate_rejected` and a second reject-loop attempt are recorded",
+)
+def test_the_refused_concurrent_reject_records_nothing(client, repo):
+    wid, _responses, events = _two_concurrent_rejects(client, repo)
+
+    assert sum(e["type"] == "gate_rejected" for e in events) == 1
+    db = client.app.state.db
+    count = client.portal.call(
+        db.read,
+        lambda c: c.execute(
+            "SELECT count FROM retry_counters WHERE work_item_id = ? AND key = ?",
+            (wid, "spec_approval_reject_loop"),
+        ).fetchone()[0],
+    )
+    assert count == 1

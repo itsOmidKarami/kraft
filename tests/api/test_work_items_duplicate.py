@@ -4,16 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from support.api import _poll_events, _post_default, _set_status
+from support.api import _paused, _poll_events, _post_default, _set_status
 from support.harness import make_repo_with_engineering
 
 # --- B3: duplicate ----------------------------------------------------------
-
-
-def _paused(client, repo) -> str:
-    r = client.post("/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False})
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
 
 
 def _item_count(client) -> int:
