@@ -135,10 +135,13 @@ jobs:
           else
             PRE=none
           fi
+          # The GitHub Release's text. A pre-release's opens with how to install
+          # it; a stable one's is notes.md as it is. The changelogs take notes.md.
+          python3 "$RUNNER_TEMP/dev/plan_release.py" body "$TAG" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/body.md"
           {
             echo "## ${TAG:-No release} (previous: ${PREVIOUS:-none})"
             echo
-            cat "$RUNNER_TEMP/notes.md"
+            cat "$RUNNER_TEMP/body.md"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ -z "$TAG" ]; then
             echo "nothing since ${PREVIOUS:-the start} ships; not releasing"
@@ -260,7 +263,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin "$TAG"
-          gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl "$RUNNER_TEMP"/vsix/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl "$RUNNER_TEMP"/vsix/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/body.md"
 
       - name: rebuild the docs for this release
         # The docs site serves the latest stable tag's pages at /kraft/. The
