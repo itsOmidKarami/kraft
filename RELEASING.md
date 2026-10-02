@@ -77,12 +77,62 @@ hand from the Actions tab on `main`. The tag is created locally
 before the build (setuptools-scm reads the version from it) and pushed only
 after the smoke test passes, so a failed build leaves nothing behind.
 
+## Before a stable run
+
+A dry run can't tell you whether a credential still works, and a stable run is
+the only one that publishes the extension. Check the two that can lapse before
+you press the button:
+
+- [ ] **`VSCE_PAT` hasn't expired.** It is an Azure DevOps personal access
+  token, and those last a year at most. Sign in at <https://dev.azure.com> as
+  the account that owns the `kraft-sdlc` Marketplace publisher, open **User
+  settings → Personal access tokens**, and read the token's **Expires** date.
+  If it has expired, or will before the run, regenerate it there. A token you
+  create from scratch needs **Organization** set to *All accessible
+  organizations* and the Marketplace *Manage* scope, or the publish is
+  refused. Paste the new value into the `VSCE_PAT` secret, in this
+  repository's **Settings → Environments → release** or **Settings → Secrets
+  and variables → Actions**, wherever it is kept. With the new token in
+  `VSCE_PAT`, `npx --prefix vscode vsce verify-pat kraft-sdlc` confirms it may
+  publish.
+- [ ] **Open VSX still trusts this workflow.** Open VSX takes no token, so
+  nothing expires, but its trusted publisher can be removed. Sign in at
+  <https://open-vsx.org/user-settings/trusted-publishers> as an owner of the
+  `kraft-sdlc` namespace. Check that it still lists this repository,
+  `release.yml` and the `release` environment.
+
 ## What a stable run publishes
 
 In this order. A step that fails stops the ones after it, and what already
 published stays published: the tag exists, so a rerun finds nothing new to
 release and you finish the rest by hand. Secrets are repository secrets or
 secrets of the `release` environment.
+
+The VS Code extension goes last, after the run has checked that PyPI serves the
+new version. Its Marketplace token expires, so its publish is the step most
+likely to fail. Run last, a failure there skips only the extension's own steps,
+never Homebrew or the stamp pull request, and the run still goes red. Last is
+also the safe order for users. VS Code updates the extension on its own, and an
+extension newer than the Kraft it talks to is read-only. It shouldn't arrive
+before that Kraft can be installed.
+
+The cost of that order: any failure before it leaves the extension unpublished.
+That covers minting the stamp token, the stamp pull request, Homebrew, and the
+PyPI check, which fails when PyPI hasn't served the version within 10 minutes,
+even if it does a minute later. A rerun can't recover it, because the tag
+exists and the run plans nothing. Fix the step that failed, then publish the
+extension by hand from the GitHub Release:
+
+```bash
+gh release download vX.Y.Z -p '*.vsix'
+npx --prefix vscode vsce publish --packagePath kraft-X.Y.Z.vsix -p "$VSCE_PAT"
+npx --prefix vscode ovsx publish kraft-X.Y.Z.vsix -p <token>
+```
+
+The Open VSX publish by hand can't use trusted publishing, which works only
+inside the workflow. It needs an access token from
+<https://open-vsx.org/user-settings/tokens>, made by an owner of the
+`kraft-sdlc` namespace.
 
 1. **GitHub Release** `vX.Y.Z`, with the wheel and `kraft-X.Y.Z.vsix` attached.
    Needs nothing: the workflow's own `GITHUB_TOKEN`. Check:
@@ -96,29 +146,29 @@ secrets of the `release` environment.
    repository, `release.yml` and the `release` environment. Check:
    `curl -sf -o /dev/null https://pypi.org/pypi/kraft-sdlc/X.Y.Z/json && echo ok`.
    The run does this itself and fails after 10 minutes.
-4. **VS Code Marketplace**, `kraft-sdlc.kraft`. Needs `VSCE_PAT`: a personal
-   access token for the `kraft-sdlc` publisher with the Marketplace *Manage*
-   scope. **With it empty the publish and its check are skipped and the run
-   still goes green**; the `.vsix` is only on the GitHub Release. Check:
-   `npx --prefix vscode vsce show kraft-sdlc.kraft`, and read the version. The
-   run warns if the Marketplace hasn't listed it within 5 minutes.
-5. **Open VSX**, `kraft-sdlc/kraft`, which VSCodium and Cursor install from.
-   Needs no secret: trusted publishing, registered for `kraft-sdlc.kraft`
-   against this workflow and the `release` environment. Check:
-   `curl -s https://open-vsx.org/api/kraft-sdlc/kraft | jq -r .version`.
-6. **The stamp pull request**, which brings the five manifests and both
+4. **The stamp pull request**, which brings the five manifests and both
    changelogs up to date on `main`. Needs the release-bot GitHub App:
    `RELEASE_BOT_CLIENT_ID` and `RELEASE_BOT_PRIVATE_KEY`, with the App
    installed on `kraft` and allowed contents and pull-request writes. Auto-merge
    must be on for the repository. Check:
    `gh pr list --state merged --search "stamp plugin manifests" --limit 1` names
    `vX.Y.Z`.
-7. **The Homebrew tap**, `itsOmidKarami/homebrew-kraft`, whose formula is pointed
+5. **The Homebrew tap**, `itsOmidKarami/homebrew-kraft`, whose formula is pointed
    at step 1's wheel. Needs `HOMEBREW_TAP_TOKEN`: a token with contents write
    on the tap. The tap's `main` is protected, so the token must be one that may
    push to it. Check:
    `curl -s https://raw.githubusercontent.com/itsOmidKarami/homebrew-kraft/main/Formula/kraft.rb | grep '^  url'`
    names `vX.Y.Z`.
+6. **VS Code Marketplace**, `kraft-sdlc.kraft`. Needs `VSCE_PAT`: a personal
+   access token for the `kraft-sdlc` publisher with the Marketplace *Manage*
+   scope. **With it empty the publish and its check are skipped and the run
+   still goes green**; the `.vsix` is only on the GitHub Release. Check:
+   `npx --prefix vscode vsce show kraft-sdlc.kraft`, and read the version. The
+   run warns if the Marketplace hasn't listed it within 5 minutes.
+7. **Open VSX**, `kraft-sdlc/kraft`, which VSCodium and Cursor install from.
+   Needs no secret: trusted publishing, registered for `kraft-sdlc.kraft`
+   against this workflow and the `release` environment. Check:
+   `curl -s https://open-vsx.org/api/kraft-sdlc/kraft | jq -r .version`.
 
 Two things the build writes into those artifacts, because the tag alone doesn't:
 
@@ -188,11 +238,12 @@ skipped. So it can't tell you the wheel was pinned, the `.vsix` got its version,
 or a credential works; a change to any of those first shows on a real
 pre-release (`rc`, which reaches PyPI and the GitHub Release and nothing else).
 
-A stable run checks its own publishing as its last steps. It fails if PyPI
-doesn't serve the new version within 10 minutes. It warns if the Marketplace
-hasn't listed it within 5; check that by hand, since the Marketplace can be slow
-to index. It dispatches the docs rebuild without waiting for it, so open the
-**docs** run on the Actions tab and confirm it passed.
+A stable run checks its own publishing. It fails if PyPI doesn't serve the new
+version within 10 minutes, before it publishes the extension. As its last step,
+it warns if the Marketplace hasn't listed the extension within 5 minutes; check
+that by hand, since the Marketplace can be slow to index. It dispatches the
+docs rebuild without waiting for it, so open the **docs** run on the Actions tab
+and confirm it passed.
 
 If the run stops on an unlabeled pull request, label it (labels can be changed
 after merge) and run the workflow again. A failed build leaves no tag behind, so
