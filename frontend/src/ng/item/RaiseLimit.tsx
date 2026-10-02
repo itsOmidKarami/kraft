@@ -1,9 +1,10 @@
 import { useState } from "react";
-import type { StopLimit } from "../../types";
+import type { StopLimit, WorkItem } from "../../types";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 import { act } from "./actions";
+import { limitPolicy } from "./limitPolicy";
 
 const WHAT: Record<StopLimit["key"], { label: (path: string) => string; unit: string; money?: true }> = {
   budget_usd: { label: () => "Budget cap", unit: "dollars", money: true },
@@ -13,11 +14,9 @@ const WHAT: Record<StopLimit["key"], { label: (path: string) => string; unit: st
   total_time_cap_minutes: { label: () => "Total-time cap", unit: "minutes" },
 };
 
-/** The item-policy PATCH that sets `limit` to `n`: item-wide, or on the fix loop's node. */
-export const raiseBody = (limit: StopLimit, n: number) => ({ policy: limit.path ? { paths: { [limit.path]: { [limit.key]: n } } } : { [limit.key]: n } });
-
-/** A cap stop's one limit, raised: PATCH the item's policy, then retry the node. */
-export function RaiseLimit({ itemId, limit, onClose, onDone }: { itemId: string; limit: StopLimit; onClose: () => void; onDone: () => void }) {
+/** A cap stop's one limit, raised: PATCH the item's policy, keeping the rest
+ *  of its override (`override`), then retry the node. */
+export function RaiseLimit({ itemId, limit, override, onClose, onDone }: { itemId: string; limit: StopLimit; override: WorkItem["policy_override"]; onClose: () => void; onDone: () => void }) {
   const { label, unit, money } = WHAT[limit.key];
   const show = (v: number) => (money ? `$${v}` : String(v));
   const [text, setText] = useState(String(limit.value));
@@ -28,7 +27,7 @@ export function RaiseLimit({ itemId, limit, onClose, onDone }: { itemId: string;
   const save = async () => {
     setBusy(true);
     setError(null);
-    const set = await act.patch(itemId, raiseBody(limit, n));
+    const set = await act.patch(itemId, limitPolicy(override, limit, n));
     if (!set.ok) { setBusy(false); return setError(set.error); }
     const retried = await act.retry(itemId);
     setBusy(false);

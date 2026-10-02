@@ -76,7 +76,7 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           <Kv k="forge" v={probe.forge ? `${probe.forge}${probe.project ? ` · ${probe.project}` : ""}` : "no forge remote"} muted={!probe.forge} />
           <Kv k="tests" v={probe.test_command ?? "none found"} mono muted={!probe.test_command} />
           <Kv k="test scopes" v={probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes} />
-          <p className="rp-connect-note">{probe.test_command || probe.test_scopes ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
+          <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
         </div>
       )}
     </form>

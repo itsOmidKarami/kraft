@@ -241,7 +241,7 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
     if (n <= limit.value) return setError(`It has to be above the current ${show(limit.value)}.`);
     if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${show(limit.maximum)}.`);
     setError(null);
-    const patched = await act.patch(item.id, limitPatch(limit, n));
+    const patched = await act.patch(item.id, limitPatch(item, limit, n));
     if (!patched.ok) return setError(patched.error);
     const r = await run(act.retry(item.id), "Raised. Retrying.");
     if (r.ok) sheet.close();

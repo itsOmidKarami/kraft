@@ -69,6 +69,19 @@ describe("Composer", () => {
     expect((creates(calls).at(-1)?.body as { autostart: boolean }).autostart).toBe(false);
   });
 
+  it("with no enabled repo, says where to get one and creates nothing, rather than sending an empty repo", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/notests", default_chain_template: "default", enabled: false }] as never });
+    const { calls } = mount();
+    await settle();
+    expect(screen.getByText(/No enabled repo to file to/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "x" } });
+    expect(screen.getByRole("button", { name: "Create paused" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(creates(calls)).toEqual([]);
+  });
+
   it("is disabled without a title, and opens Create and start from the ▾ by keyboard", async () => {
     mount();
     await settle();
