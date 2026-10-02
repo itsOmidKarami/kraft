@@ -49,16 +49,19 @@ bin_dir=$(uv tool dir --bin 2>/dev/null) || bin_dir="$HOME/.local/bin"
 echo
 if [ -x "$bin_dir/kraft" ]; then
     echo "$("$bin_dir/kraft" --version) installed in $bin_dir."
+    case ":$user_path:" in
+        *":$bin_dir:"*) ;;
+        *)
+            echo "$bin_dir is not on your PATH: run  uv tool update-shell  and open a new"
+            echo "terminal, or call kraft as $bin_dir/kraft"
+            ;;
+    esac
 else
-    echo "kraft installed."
+    # A uv too old for `tool dir --bin`, with its bin directory moved: there is
+    # no path to name, only the fix.
+    echo "kraft installed. If \`kraft\` is not found, run  uv tool update-shell  and open"
+    echo "a new terminal."
 fi
-case ":$user_path:" in
-    *":$bin_dir:"*) ;;
-    *)
-        echo "$bin_dir is not on your PATH: run  uv tool update-shell  and open a new"
-        echo "terminal, or call kraft as $bin_dir/kraft"
-        ;;
-esac
 echo "next: kraft              # start the server"
 echo "then, in Claude Code:  /plugin marketplace add itsOmidKarami/kraft"
 echo "                       /plugin install kraft@kraft, then /kraft:onboard in your repo"

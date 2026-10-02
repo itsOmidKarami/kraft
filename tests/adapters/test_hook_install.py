@@ -80,10 +80,23 @@ def test_an_exclude_note_written_with_a_tracker_id_is_rewritten_not_repeated(tmp
     that install's exclude keeps its one entry, and the note loses the id."""
     main, wt = _worktree(tmp_path)
     exclude = main / ".git/info/exclude"
-    exclude.write_text(f"*.log\n{hi._EXCLUDE_NOTE} (x-1)\n/.cursor/hooks.json\n")
+    exclude.write_text(f"*.log\n{hi._EXCLUDE_NOTE} (Kraft-ab12)\n/.cursor/hooks.json\n")
     hi.install_cursor_hook(wt, ARGV)
     assert exclude.read_text() == f"*.log\n{hi._EXCLUDE_NOTE}\n/.cursor/hooks.json\n"
     assert "(" not in hi._EXCLUDE_NOTE
+
+
+def test_a_kept_note_whose_entry_went_gets_the_entry_back_once(tmp_path):
+    """An old note survives the user deleting its entry: the entry goes back
+    under the one note, the note is never doubled, and the user's own similar
+    comment is left alone."""
+    main, wt = _worktree(tmp_path)
+    exclude = main / ".git/info/exclude"
+    own = f"{hi._EXCLUDE_NOTE} (mine)"
+    exclude.write_text(f"{own}\n{hi._EXCLUDE_NOTE} (Kraft-ab12)\n*.log\n")
+    hi.install_cursor_hook(wt, ARGV)
+    hi.install_cursor_hook(wt, ARGV)
+    assert exclude.read_text() == f"{own}\n{hi._EXCLUDE_NOTE}\n/.cursor/hooks.json\n*.log\n"
 
 
 def test_a_tracked_hooks_file_keeps_its_own_hooks_and_is_not_staged(tmp_path):

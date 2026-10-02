@@ -499,8 +499,12 @@ def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
         ({"c": "a", "agy-impl": "gone"}, "chain agy-impl can't run"),
         ({"c": "a", "x": "gone", "y": "gone"}, "chains x, y can't run"),
         ({"x": "gone", "y": "gone"}, "no chain can run"),
+        (
+            {"c": "a", **{f"x{n}": "gone" for n in range(7)}},
+            "chains x0, x1, x2, x3, x4 and 2 more can't run",
+        ),
     ],
-    ids=["one-of-two", "two-of-three", "all"],
+    ids=["one-of-two", "two-of-three", "all", "many"],
 )
 def test_a_missing_agent_names_the_chains_it_stops(tmp_path, monkeypatch, chains, says):
     """Only the chains that select a profile need its executable: saying "no

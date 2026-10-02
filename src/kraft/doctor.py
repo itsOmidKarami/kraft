@@ -499,13 +499,19 @@ def _selected_profiles(chains: list) -> dict[str, list[str]]:
     return selected
 
 
+#: How many chain ids a doctor row names before it counts the rest.
+_CHAINS_NAMED = 5
+
+
 def _cannot_run(chain_ids: list[str], of: int) -> str:
     """What a missing agent stops: every chain only when it is in all of them."""
     if len(chain_ids) == of:
         return "no chain can run"
     if len(chain_ids) == 1:
         return f"chain {chain_ids[0]} can't run"
-    return f"chains {', '.join(sorted(chain_ids))} can't run"
+    named = sorted(chain_ids)
+    more = f" and {len(named) - _CHAINS_NAMED} more" if len(named) > _CHAINS_NAMED else ""
+    return f"chains {', '.join(named[:_CHAINS_NAMED])}{more} can't run"
 
 
 #: What the `mcp server` row does not read (Kraft-9efnk.43): each other

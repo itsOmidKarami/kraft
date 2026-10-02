@@ -29,10 +29,11 @@ def test_install_script_is_valid_shell():
     assert result.returncode == 0, result.stderr
 
 
-def _run_installer(tmp_path: Path, *, bin_on_path: bool):
+def _run_installer(tmp_path: Path, *, bin_on_path: bool, old_uv: bool = False):
     """install.sh against a stub `curl` and `uv`: the release feed names one
     wheel, and `uv tool install` puts a `kraft` into a bin directory that is
-    on the caller's PATH or, as after a first uv install, not."""
+    on the caller's PATH or, as after a first uv install, not. An `old_uv`
+    has no `tool dir --bin` to say where that directory is."""
     import subprocess
 
     stubs, bin_dir = tmp_path / "stubs", tmp_path / "uv-bin"
@@ -44,9 +45,10 @@ def _run_installer(tmp_path: Path, *, bin_on_path: bool):
         """echo '"browser_download_url": "https://x/kraft_sdlc-9.9.9-py3-none-any.whl"';; """
         "*) echo wheel;; esac\n"
     )
+    tool_dir = "exit 2" if old_uv else f'echo "{bin_dir}"'
     (stubs / "uv").write_text(
         "#!/bin/sh\n"
-        f'case "$1 $2" in "tool dir") echo "{bin_dir}";;\n'
+        f'case "$1 $2" in "tool dir") {tool_dir};;\n'
         f"\"tool install\") printf '#!/bin/sh\\necho kraft 9.9.9\\n' > {bin_dir}/kraft; "
         f"chmod +x {bin_dir}/kraft;; esac\n"
     )
@@ -69,6 +71,14 @@ def test_install_script_runs_the_kraft_it_installed_off_path(tmp_path):
     out, bin_dir = _run_installer(tmp_path, bin_on_path=False)
     assert f"kraft 9.9.9 installed in {bin_dir}." in out
     assert f"{bin_dir} is not on your PATH: run  uv tool update-shell" in out
+
+
+def test_install_script_names_no_path_it_cannot_find(tmp_path):
+    """Without `uv tool dir --bin` the script guesses ~/.local/bin; when the
+    command is not there, it must not tell you to run it from there."""
+    out, _ = _run_installer(tmp_path, bin_on_path=False, old_uv=True)
+    assert "kraft installed. If `kraft` is not found, run  uv tool update-shell" in out
+    assert ".local/bin" not in out
 
 
 def test_install_script_says_nothing_of_path_when_kraft_is_on_it(tmp_path):
