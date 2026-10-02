@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 # `dev/` is not a package; release_artifacts imports next_tag as a sibling script.
 _ROOT = Path(__file__).resolve().parents[1]
@@ -251,6 +252,43 @@ def test_kraft_ships_everywhere_before_the_extension_is_published():
         "check PyPI serves this release",
     ]:
         assert names.index(kraft) < extension, kraft
+
+
+def _job() -> dict:
+    return yaml.safe_load(RELEASE_YML.read_text())["jobs"]["release"]
+
+
+def test_only_the_marketplace_steps_hold_the_marketplace_token():
+    """VSCE_PAT is a year-long token. As a job-level variable it sat in the
+    environment of every step, `npm ci`'s install scripts among them."""
+    job = _job()
+    assert "VSCE_PAT" not in (job.get("env") or {})
+    holders = [s.get("name") for s in job["steps"] if "secrets.VSCE_PAT" in str(s.get("env"))]
+    assert holders == ["is there a Marketplace token", "publish the VS Code extension"]
+    assert RELEASE_YML.read_text().count("secrets.VSCE_PAT") == 2
+    steps = job["steps"]
+    gated = {s["name"]: s["if"] for s in steps if re.search("VSCE_PAT|has_pat", s.get("if", ""))}
+    assert list(gated) == [
+        "publish the VS Code extension",
+        "check the Marketplace lists this release",
+    ]
+    for condition in gated.values():
+        assert condition.endswith("&& steps.marketplace.outputs.has_pat == 'true'"), condition
+
+
+@pytest.mark.parametrize(("pat", "has_pat"), [("a-token", "true"), ("", "")], ids=["set", "unset"])
+def test_the_marketplace_steps_run_only_when_the_token_is_set(tmp_path, pat, has_pat):
+    (probe,) = (s for s in _job()["steps"] if s.get("id") == "marketplace")
+    output = tmp_path / "output"
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", probe["run"]],
+        env={"PATH": os.environ["PATH"], "VSCE_PAT": pat, "GITHUB_OUTPUT": str(output)},
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 0, run.stderr
+    # The token itself never reaches the output, which later steps can read.
+    assert output.read_text() == f"has_pat={has_pat}\n"
 
 
 def _smoke_version_check() -> str:

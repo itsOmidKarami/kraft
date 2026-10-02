@@ -59,10 +59,6 @@ jobs:
     # environment only deploys from main (repo settings), and PyPI's trusted
     # publisher is pinned to it, so a run from any other ref cannot publish.
     environment: release
-    env:
-      # Read by the publish step's `if:` -- a step's own `env` is not visible
-      # to its `if:`, a job's is. Empty until the maintainer adds the secret.
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -389,6 +385,18 @@ jobs:
           echo "::error::kraft-sdlc ${TAG#v} is not on PyPI after 10 minutes"
           exit 1
 
+      - name: is there a Marketplace token
+        # Says whether VSCE_PAT is set, for the Marketplace steps' `if:`, which
+        # cannot see a step's own `env`. Only the publish step gets the token
+        # itself: as a job-level variable it sat in the environment of every
+        # step, `npm ci`'s install scripts and the build among them. Empty
+        # until the maintainer adds the secret.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
+        id: marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: echo "has_pat=${VSCE_PAT:+true}" >> "$GITHUB_OUTPUT"
+
       - name: publish the VS Code extension
         # Last, after Kraft itself is on PyPI, Homebrew and main. A failed step
         # stops every step after it, and VSCE_PAT is a token that expires: run
@@ -401,7 +409,9 @@ jobs:
         # Only once the maintainer has created the Marketplace publisher and
         # added VSCE_PAT; until then the .vsix is still attached to the
         # GitHub Release.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.marketplace.outputs.has_pat == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
           npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
@@ -416,7 +426,7 @@ jobs:
 
       - name: check the Marketplace lists this release
         # Warns only: the Marketplace can take a while to index a publish.
-        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && steps.marketplace.outputs.has_pat == 'true'
         env:
           TAG: ${{ steps.impact.outputs.tag }}
         run: |
