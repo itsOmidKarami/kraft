@@ -6,7 +6,10 @@ import type { Notify } from "../../../types";
 import { NotificationChannel, NotificationsList } from "./Notifications";
 import { mountAt, where } from "./testkit";
 
-const BASE: Notify = { enabled: true, url_set: true, base_url: "http://192.168.1.20:8765", events: ["gate_requested", "work_item_needs_human"], last_test: { at: new Date(Date.now() - 120_000).toISOString(), status: 200, ms: 184, error: null } };
+// Every test runs on a clock held at NOW (see beforeEach), so the last send
+// reads "2m ago" however long the file has been running.
+const NOW = Date.parse("2026-09-30T12:00:00Z");
+const BASE: Notify = { enabled: true, url_set: true, base_url: "http://192.168.1.20:8765", events: ["gate_requested", "work_item_needs_human"], last_test: { at: new Date(NOW - 120_000).toISOString(), status: 200, ms: 184, error: null } };
 
 function stubNotification(permission: NotificationPermission | null) {
   if (permission === null) return vi.stubGlobal("Notification", undefined);
@@ -25,8 +28,11 @@ const serve = (over: Partial<Notify> = {}) => {
   return vi.spyOn(api, "putNotify").mockImplementation(async (b) => ({ ...served, ...b, url_set: b.url === "" ? false : served.url_set || !!b.url }) as Notify);
 };
 const channel = (name: string, tab = "") => mountAt(<NotificationChannel />, `/settings/notifications/${name}${tab}`, "/settings/notifications/:channel");
-beforeEach(() => localStorage.clear());
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => {
+  localStorage.clear();
+  vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+});
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Notifications list (O.2)", () => {
   it("lists the two channels, each active or inactive, and says progress events are not offered", async () => {

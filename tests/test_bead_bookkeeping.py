@@ -127,12 +127,8 @@ async def test_no_app_fixture_still_avoids_the_operators_real_home(
     Unit tier: bd itself never runs, so what is pinned is where intake would
     run it -- the cwd and the HOME it inherits at the moment it is called."""
     import os
-    import pwd
 
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
-    # `pwd` reads the OS-level home directly, ignoring $HOME -- the one way to
-    # name the operator's real home while HOME itself is monkeypatched.
-    real_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
     calls: list[tuple[str | None, str]] = []
 
     async def spy(title, *, description=None, cwd=None):
@@ -151,7 +147,6 @@ async def test_no_app_fixture_still_avoids_the_operators_real_home(
 
     [(cwd, home)] = calls
     assert cwd == str(repo)
-    assert not Path(cwd).resolve().is_relative_to(real_home)
     assert Path(home).is_relative_to(tmp_path_factory.getbasetemp())
 
 

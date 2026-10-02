@@ -2,7 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Banner, QuestionCard } from "./Banner";
-import { detail, stubFetch } from "./testkit";
+import { acceptWrites, detail, stubFetch } from "./testkit";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 afterEach(() => vi.unstubAllGlobals());
 const stop = (kind: string, over = {}) => ({ kind, node: "verification", task: null, resume_at: null, reason: null, ...over }) as never;
@@ -42,7 +45,7 @@ describe("Banner", () => {
   describe("raising the limit a cap stop names", () => {
     const capped = (limit: object) => detail({ display_status: "needs_you", stop: stop("cap", { reason: "verify.fix_loop exhausted after 3 fix cycle(s)", limit }) });
     const mount = (limit: object, answers = {}) => {
-      const calls = stubFetch(answers);
+      const calls = stubFetch({ ...WRITES, ...answers });
       const reload = vi.fn();
       const onRaise = vi.fn();
       render(<Banner item={capped(limit)} onOpenGate={() => {}} onRaise={onRaise} reload={reload} />);
@@ -69,7 +72,7 @@ describe("Banner", () => {
     });
 
     it("keeps the item's other policy overrides: a PATCH policy replaces the whole override", async () => {
-      const calls = stubFetch({});
+      const calls = stubFetch(WRITES);
       const policy_override = { budget_usd: 5, max_attempts: 4, paths: { verification: { timeout_minutes: 30 }, review: { max_attempts: 2 } } };
       render(<Banner item={{ ...capped({ path: "verification", key: "max_attempts", value: 3, maximum: 5 }), policy_override }} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
@@ -115,7 +118,7 @@ describe("Banner", () => {
   describe("a policy budget_usd stop (Kraft-9d8b2.59)", () => {
     const budgeted = (limit: object) => detail({ display_status: "needs_you", stop: stop("budget", { reason: "budget_usd reached: $5.00 spent in the work item, cap $5.00", limit }) });
     const mount = (limit: object, answers = {}) => {
-      const calls = stubFetch(answers);
+      const calls = stubFetch({ ...WRITES, ...answers });
       const reload = vi.fn();
       const onRaise = vi.fn();
       render(<Banner item={budgeted(limit)} onOpenGate={() => {}} onRaise={onRaise} reload={reload} />);
@@ -167,7 +170,7 @@ describe("QuestionCard", () => {
   const asked = detail({ display_status: "needs_you", stop: stop("question", { task: "verification.escalation.escalation" }), needs_context_question: "Allow the API change?" });
 
   it("answers with Send & resume, the answer as the steer", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<QuestionCard item={asked} compact={false} reload={reload} onOpenThread={() => {}} />);
     expect(screen.getByText("“Allow the API change?”")).toBeInTheDocument();
@@ -178,7 +181,7 @@ describe("QuestionCard", () => {
   });
 
   it("sends the answer on ⌘↵", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<QuestionCard item={asked} compact={false} reload={reload} onOpenThread={() => {}} />);
     await userEvent.type(screen.getByLabelText("Your answer"), "Accept the finding.");
