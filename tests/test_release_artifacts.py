@@ -41,17 +41,27 @@ IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
             "![a](https://github.com/o/r/raw/HEAD/vscode/media/a.png)",
             "![a](https://github.com/o/r/raw/v1.5.0/vscode/media/a.png)",
         ),
-        # Already pinned, someone else's, a link and not an image, or a branch of a
-        # longer name: nothing to move.
+        # Already pinned, a link and not an image, or a branch of a longer name:
+        # nothing to move.
         ("https://raw.githubusercontent.com/o/r/v1.4.0/a.png", None),
         ("https://raw.githubusercontent.com/o/r/0123abc/a.png", None),
         ("https://example.com/o/r/main/a.png", None),
+        # Someone else's repository: its tag is not ours, so its link would break.
+        ("https://raw.githubusercontent.com/other/repo/main/a.png", None),
+        ("https://github.com/other/repo/raw/main/a.png", None),
+        ("https://raw.githubusercontent.com/o/r2/main/a.png", None),
+        ("https://raw.githubusercontent.com/o2/r/main/a.png", None),
         ("https://github.com/o/r/blob/main/LICENSE", None),
         ("https://raw.githubusercontent.com/o/r/maintenance/a.png", None),
     ],
 )
 def test_a_moving_asset_url_is_pinned_to_the_tag(before, after):
-    assert release_artifacts.pin_refs(before, "v1.5.0") == (after or before)
+    assert release_artifacts.pin_refs(before, "v1.5.0", "o/r") == (after or before)
+
+
+def test_the_repository_matches_however_github_spells_it():
+    url = "https://raw.githubusercontent.com/ITSomidkarami/Kraft/main/a.png"
+    assert release_artifacts.pin_refs(url, "v1.5.0") == url.replace("/main/", "/v1.5.0/")
 
 
 def test_every_image_in_the_pypi_readme_is_one_the_pin_knows():
@@ -113,8 +123,9 @@ def _wheel(path: Path, description: str) -> dict[str, bytes]:
 def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
     wheel = tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl"
     image = "![board](https://raw.githubusercontent.com/o/r/main/.github/assets/board.png)\n"
+    image += "![theirs](https://raw.githubusercontent.com/other/repo/main/a.png)\n"
     before = _wheel(wheel, image)
-    release_artifacts.pin_wheel(wheel, "v1.5.0")
+    release_artifacts.pin_wheel(wheel, "v1.5.0", "o/r")
     with zipfile.ZipFile(wheel) as z:
         assert z.testzip() is None
         assert [i.filename for i in z.infolist()] == list(before)
@@ -124,7 +135,8 @@ def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
         compression = {i.compress_type for i in z.infolist()}
     meta = "kraft_sdlc-1.5.0.dist-info/METADATA"
     assert b"/o/r/v1.5.0/.github/assets/board.png" in after[meta]
-    assert b"/main/" not in after[meta]
+    assert b"/o/r/main/" not in after[meta]
+    assert b"/other/repo/main/a.png" in after[meta]
     # The header's own github.com link is not an asset URL.
     assert b"Project-URL: Source, https://github.com/o/r\n" in after[meta]
     for name in before:
@@ -151,7 +163,7 @@ def test_pinning_a_wheel_with_nothing_to_pin_leaves_it_byte_for_byte(tmp_path):
     wheel = tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl"
     _wheel(wheel, "No images here.\n")
     before = wheel.read_bytes()
-    release_artifacts.pin_wheel(wheel, "v1.5.0")
+    release_artifacts.pin_wheel(wheel, "v1.5.0", "o/r")
     assert wheel.read_bytes() == before
     assert not list(tmp_path.glob("*.tmp"))
 
@@ -191,7 +203,8 @@ def test_a_tag_that_is_not_one_of_ours_is_refused(tag):
         release_artifacts.vsix_version(tag)
 
 
-def test_the_command_line(capsys, tmp_path):
+def test_the_command_line(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     release_artifacts.main(["vsix-version", "v1.5.0rc2"])
     assert capsys.readouterr().out == "1.5.0-rc.2\n"
     wheel = tmp_path / "w.whl"
@@ -226,9 +239,25 @@ def test_the_extension_is_packed_with_the_release_tags_version_images_and_change
     assert 'npx vsce package "$VSIX_VERSION"' in step
     assert '--baseImagesUrl "https://github.com/$GITHUB_REPOSITORY/raw/$TAG/vscode/"' in step
     # The extension's changelog is written before packing and put back after, so
-    # the stamp step branches off a clean tree.
+    # the stamp step branches off a clean tree. The section is headed with the
+    # version the package carries, `1.5.0-rc.2`, not the tag's spelling.
+    assert 'changelog "$VSIX_VERSION"' in step
     assert (
         step.index("changelog")
         < step.index("vsce package")
         < step.index("git checkout -- CHANGELOG.md")
     )
+
+
+def test_the_command_line_defaults_to_this_repository(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    wheel = tmp_path / "w.whl"
+    _wheel(
+        wheel,
+        f"![a](https://raw.githubusercontent.com/{release_artifacts.REPOSITORY}/main/a.png)\n",
+    )
+    release_artifacts.main(["pin-wheel", str(wheel), "v1.5.0"])
+    with zipfile.ZipFile(wheel) as z:
+        assert f"/{release_artifacts.REPOSITORY}/v1.5.0/a.png".encode() in z.read(
+            "kraft_sdlc-1.5.0.dist-info/METADATA"
+        )

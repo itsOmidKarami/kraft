@@ -217,7 +217,7 @@ jobs:
           # And a description that still hot-links `main` would show main's UI
           # on this version's PyPI page for as long as the version exists.
           if unzip -p "$WHEEL" '*.dist-info/METADATA' \
-              | grep -qE 'raw\.githubusercontent\.com/[^/]+/[^/]+/(main|HEAD)/'; then
+              | grep -qiE "(raw\.githubusercontent\.com/$GITHUB_REPOSITORY|github\.com/$GITHUB_REPOSITORY/raw)/(main|master|HEAD)/"; then
             echo "::error::the wheel's README still points at main, not $TAG"
             exit 1
           fi
@@ -241,7 +241,7 @@ jobs:
           # stamp PR that writes this release's section lands after the build.
           # Add it here too, then put the file back: the stamp step below must
           # start from a clean tree.
-          python3 "$RUNNER_TEMP/dev/plan_release.py" changelog "${TAG#v}" "$RUNNER_TEMP/notes.md" CHANGELOG.md
+          python3 "$RUNNER_TEMP/dev/plan_release.py" changelog "$VSIX_VERSION" "$RUNNER_TEMP/notes.md" CHANGELOG.md
           # Not in dist/: the PyPI publish step uploads everything there, and
           # PyPI rejects a .vsix (v1.2.0 stopped on exactly that).
           mkdir -p "$RUNNER_TEMP/vsix"

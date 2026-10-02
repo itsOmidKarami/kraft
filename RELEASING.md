@@ -138,6 +138,10 @@ Two things the build writes into those artifacts, because the tag alone doesn't:
   puts the file back. The stamp pull request commits it to `main` with the root
   one.
 
+A run with **sha** set to a commit from before `vscode/CHANGELOG.md` existed fails
+at the extension build, which comes before the tag is pushed, so nothing is
+published and a rerun at a later commit is safe.
+
 ## Plugin manifest versions
 
 Each plugin carries its own `version` field in `.claude-plugin/plugin.json`
