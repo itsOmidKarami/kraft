@@ -11,6 +11,7 @@ import pytest
 
 from kraft.drafts import authored, resolve
 from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.templates import catalogue
 from kraft.templates.library import TemplateLibrary
 
 CHAIN = "chains/scratch.yaml"
@@ -240,6 +241,13 @@ async def test_an_agent_task_lists_every_agent_only_field(st):
 async def test_policy_values_are_the_instances(st, policy, values):
     st.policy = policy
     assert scratch(st, SCRATCH)["policy_values"] == values
+
+
+async def test_every_result_carries_the_closed_sets_the_editors_offer(st):
+    """A field whose values are a closed set is offered as a list to pick
+    from, read from here, not typed and refused (or hard-coded in the UI)."""
+    assert scratch(st, SCRATCH)["choices"] == catalogue.choices()
+    assert library(st)["choices"] == catalogue.choices()
 
 
 # ── the library ──
