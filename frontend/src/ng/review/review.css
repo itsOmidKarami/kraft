@@ -106,7 +106,9 @@
 .rv-half.is-none { background: var(--surface-2); }
 .is-add .rv-word-change { background: color-mix(in oklab, var(--rv-add) 22%, transparent); border-radius: 2px; }
 .is-del .rv-word-change { background: color-mix(in oklab, var(--rv-del) 22%, transparent); border-radius: 2px; }
-:is(.rv-row, .rv-half).is-picked { box-shadow: inset 3px 0 0 var(--text-sub); background: color-mix(in oklab, var(--selection) 10%, transparent); }
+/* A thread's range keeps a quiet bar; the pick, live while it is dragged, a stronger one and a wash over the line's own colour. */
+:is(.rv-row, .rv-half).is-commented { box-shadow: inset 3px 0 0 color-mix(in oklab, var(--info) 55%, transparent); }
+:is(.rv-row, .rv-half).is-picked { --rv-pick: color-mix(in oklab, var(--info) 16%, transparent); box-shadow: inset 3px 0 0 var(--info); background-image: linear-gradient(var(--rv-pick), var(--rv-pick)); }
 /* The + that comments on a line, in its own lane left of the numbers so it never covers one:
    shown on hover, on the pick's last line, and on focus. Hidden, it takes no tap and leaves the a11y tree. */
 .rv-row:not(.is-split), .rv-half { position: relative; box-sizing: border-box; padding-left: 22px; }
@@ -149,6 +151,12 @@
 .rv-suggest-line.is-del { background: color-mix(in oklab, var(--diff-del-theme) 9%, transparent); }
 .rv-suggest-line.is-add { background: color-mix(in oklab, var(--diff-add-theme) 9%, transparent); }
 .rv-suggest .rv-textarea { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+/* The composer's "Comment on lines −2 to +2": each end coloured by its side. */
+.rv-range-name { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.rv-line-chip { padding: 0 5px; border-radius: 4px; font: 500 11.5px/1.6 ui-monospace, Menlo, monospace; color: var(--text); }
+.rv-line-chip.is-old { background: color-mix(in oklab, var(--rv-del, var(--diff-del-theme)) 22%, transparent); }
+.rv-line-chip.is-new { background: color-mix(in oklab, var(--rv-add, var(--diff-add-theme)) 22%, transparent); }
+.rv-notes { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .rv-elsewhere { margin: 0 16px 24px; }
 .rv-elsewhere h2 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 

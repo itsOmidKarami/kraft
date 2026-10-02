@@ -6,19 +6,34 @@ import { Menu } from "../ui/Menu";
 import { showToast } from "../ui/Toast";
 import type { PatchFile } from "./patch";
 import type { DiffPrefs } from "./prefs";
+import { inRange, lineIndex, rangeBetween, toward, type LineIndex, type LineRange } from "./range";
 import { anchorsOf, buildRows, spans, type Anchor, type Cell, type Row, type Side } from "./rows";
 import { rangeName } from "./Thread";
 import { languageOf } from "./tokenize";
 
-/** A picked range of lines on one side of one file. `anchor` is where the
- *  pick started, `head` where it ends now; Shift moves only the head. */
+/** A picked range of one file's lines. `anchor` is where the pick started,
+ *  `head` where it ends now; Shift moves only the head. Both are on `side`,
+ *  unless `anchorSide` puts the anchor on the other one: a pick across sides. */
 export interface Pick {
   path: string;
   side: Side;
   anchor: number;
   head: number;
+  anchorSide?: Side;
 }
 export const pickRange = (p: Pick) => [Math.min(p.anchor, p.head), Math.max(p.anchor, p.head)] as const;
+export const anchorOf = (p: Pick): Anchor => ({ side: p.anchorSide ?? p.side, line: p.anchor });
+export const headOf = (p: Pick): Anchor => ({ side: p.side, line: p.head });
+/** The pick from `anchor` to `head`. */
+export const pickOf = (path: string, anchor: Anchor, head: Anchor): Pick => ({
+  path,
+  side: head.side,
+  anchor: anchor.line,
+  head: head.line,
+  ...(anchor.side !== head.side && { anchorSide: anchor.side }),
+});
+/** The lines a pick covers, start first. */
+export const rangeOfPick = (p: Pick, ix: LineIndex): LineRange => rangeBetween(anchorOf(p), headOf(p), ix);
 
 export interface DiffViewProps {
   /** The files to draw, in the comparison's order. */
@@ -41,6 +56,8 @@ export interface DiffViewProps {
   onFileComment: (path: string) => void;
   /** What sits under a line (threads, the composer), and at a file's top. */
   after?: (path: string, a: Anchor) => ReactNode;
+  /** The ranges of a file's open threads, shaded in the diff. */
+  commented?: (path: string) => LineRange[];
   top?: (path: string) => ReactNode;
   /** Set when the server cut the diff: its byte cap and how many files it left out. */
   truncated: { bytes: number; files: number } | null;
@@ -96,50 +113,52 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const viewed = p.isViewed(file.path);
   const threads = p.threadCount(file.path);
   const picked = p.picked?.path === file.path ? p.picked : null;
-  const [lo, hi] = picked ? pickRange(picked) : [0, -1];
-  const isPicked = (a: Anchor) => !!picked && a.side === picked.side && a.line >= lo && a.line <= hi;
+  const index = useMemo(() => lineIndex(pf), [pf]);
+  const range = useMemo(() => picked && rangeOfPick(picked, index), [picked, index]);
+  const isPicked = (a: Anchor) => !!range && inRange(range, a, index);
+  const commented = p.commented?.(file.path) ?? NO_RANGES;
   const lines = rows.filter((r): r is Exclude<Row, { t: "hunk" }> => r.t !== "hunk");
   const { anchors, hunkOf } = useMemo(() => {
     let h = -1;
     return { anchors: rows.map(anchorsOf), hunkOf: rows.map((r) => (r.t === "hunk" ? ++h : h)) };
   }, [rows]);
+  // Each row's anchors in the pick and in a thread's range, as a string the memoized row compares.
+  const keys = (as: Anchor[], hit: (a: Anchor) => boolean) => as.filter(hit).map((a) => `|${a.side}${a.line}|`).join("");
+  const commentedKeys = useMemo(() => anchors.map((as) => keys(as, (a) => commented.some((r) => inRange(r, a, index)))), [anchors, commented, index]);
 
-  const pick = (a: Anchor, extend: boolean) =>
-    !p.readOnly &&
-    p.onPick(extend && picked && picked.side === a.side ? { ...picked, head: a.line } : { path: file.path, side: a.side, anchor: a.line, head: a.line });
+  const pick = (a: Anchor, extend: boolean) => !p.readOnly && p.onPick(extend && picked ? pickOf(file.path, anchorOf(picked), a) : pickOf(file.path, a, a));
 
   // The gutter's handlers are made once per file and read the current render
   // through `live`, so a pick re-renders only the rows it touches (RowView is memoized).
-  const live = useRef({ p, picked, isPicked, pick });
-  live.current = { p, picked, isPicked, pick };
+  const live = useRef({ p, picked, isPicked, pick, index });
+  live.current = { p, picked, isPicked, pick, index };
   const gutter = useMemo<Gutter>(() => {
     const path = file.path;
     // Enter and `c` are read off the line group, so a click in the gutter hands focus back to it.
     const refocus = (e: MouseEvent) => e.currentTarget.closest<HTMLElement>(".rv-lines")?.focus({ preventScroll: true });
     const rowOf = (el: EventTarget | null) => (el instanceof Element ? el.closest<HTMLElement>("[data-hunk]") : null);
-    // Shift extends on the pick's side, whichever of a row's numbers was pressed (as the arrows do).
+    // Shift extends the pick to the line pressed: a context line on the pick's side (as the arrows do),
+    // a line on the other side only across sides, as a removed line and its replacement.
     const extendTo = (a: Anchor, e: MouseEvent): Anchor => {
-      const { picked } = live.current;
-      if (!e.shiftKey || !picked || picked.side === a.side) return a;
-      const line = Number(rowOf(e.currentTarget)?.dataset[picked.side]);
-      return line ? { side: picked.side, line } : a;
+      const { picked, index } = live.current;
+      return e.shiftKey && picked ? toward(a, anchorOf(picked), index) : a;
     };
     // + comments on the pick when its line is in it, else on its own line.
     const plus = (a: Anchor) => {
       const { p, picked, isPicked } = live.current;
       if (picked && isPicked(a)) return p.onCompose(picked);
-      const one = { path, side: a.side, anchor: a.line, head: a.line };
+      const one = pickOf(path, a, a);
       p.onPick(one);
       p.onCompose(one);
     };
-    // A press in the gutter starts a drag: the pick follows the pointer down the
-    // lines of its hunk on the side it started on, at most once a frame, and a
-    // drag that began on + opens the composer on the range when the button comes up.
+    // A press in the gutter starts a drag: the pick follows the pointer over the
+    // lines of its hunk, at most once a frame, and a drag that began on + opens
+    // the composer on the range when the button comes up.
     let frame = 0;
     const emit = () => {
       frame = 0;
       const d = drag.current;
-      if (d?.moved) live.current.p.onPick({ path, side: d.side, anchor: d.anchor, head: d.head });
+      if (d?.moved) live.current.p.onPick(pickOf(path, d.anchor, d.head));
     };
     const startDrag = (at: Anchor, isPlus: boolean) => (e: MouseEvent) => {
       const { p, picked, isPicked } = live.current;
@@ -150,10 +169,10 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       const a = extendTo(at, e);
       // + on a line of the pick keeps the pick until the pointer moves: a click there comments on all of it.
       const keep = isPlus && isPicked(at) && !e.shiftKey;
-      const anchor = e.shiftKey && picked?.side === a.side ? picked.anchor : a.line;
+      const anchor = e.shiftKey && picked ? anchorOf(picked) : a;
       const button = e.currentTarget;
-      drag.current = { side: a.side, anchor: keep ? a.line : anchor, head: a.line, from: a.line, hunk: rowOf(button)?.dataset.hunk, moved: false };
-      if (!keep) p.onPick({ path, side: a.side, anchor, head: a.line });
+      drag.current = { anchor: keep ? a : anchor, head: a, from: a, hunk: rowOf(button)?.dataset.hunk, moved: false };
+      if (!keep) p.onPick(pickOf(path, anchor, a));
       window.addEventListener(
         "mouseup",
         (up) => {
@@ -162,7 +181,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           const d = drag.current;
           drag.current = null;
           if (!d || !isPlus) return;
-          if (d.head !== d.from) live.current.p.onCompose({ path, side: d.side, anchor: d.anchor, head: d.head });
+          if (!same(d.head, d.from)) live.current.p.onCompose(pickOf(path, d.anchor, d.head));
           // Let go on the row it started on: the same as a click on its + (a release on the + itself is that click).
           else if (!(up.target instanceof Node && button.contains(up.target))) plus(at);
         },
@@ -172,16 +191,23 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
     const onOver = (e: MouseEvent) => {
       const d = drag.current;
       const row = rowOf(e.target);
-      // A row carries its line on each side it has one; a line on the other side only, or in another hunk, is passed over.
-      const line = Number(row?.dataset[d?.side ?? "new"]);
-      if (!d || !line || line === d.head || row!.dataset.hunk !== d.hunk) return;
-      d.head = line;
+      if (!d || !row || row.dataset.hunk !== d.hunk) return;
+      // The line under the pointer: a split half's own, else the row's. A context line
+      // is read on the drag's side; a line on the other side only makes a range across sides.
+      const half = e.target instanceof Element ? e.target.closest<HTMLElement>(".rv-half[data-line]") : null;
+      const at: Anchor | null = half
+        ? { side: half.dataset.side as Side, line: Number(half.dataset.line) }
+        : row.dataset.new ? { side: "new", line: Number(row.dataset.new) } : row.dataset.old ? { side: "old", line: Number(row.dataset.old) } : null;
+      if (!at) return;
+      const head = toward(at, d.anchor, live.current.index);
+      if (same(head, d.head)) return;
+      d.head = head;
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
     return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, onPlus: (a) => () => plus(a), onOver };
   }, [file.path]);
-  const drag = useRef<{ side: Side; anchor: number; head: number; from: number; hunk: string | undefined; moved: boolean } | null>(null);
+  const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean } | null>(null);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     // Only the line area's own keys: a thread or the composer sits inside it, and its typing is its own.
@@ -254,6 +280,9 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
                   hunk={hunkOf[i]}
                   // Only the rows the pick touches see it, so the rest skip the render.
                   pick={picked && anchors[i].some(isPicked) ? picked : null}
+                  range={picked && anchors[i].some(isPicked) ? range : null}
+                  picked={picked ? keys(anchors[i], isPicked) : ""}
+                  commented={commentedKeys[i]}
                   readOnly={!!p.readOnly}
                   g={gutter}
                   slots={p.after ? anchors[i].map((a) => p.after!(file.path, a)) : NONE}
@@ -288,11 +317,10 @@ interface Gutter {
 }
 
 const NONE: ReactNode[] = [];
-const inPick = (pick: Pick | null, a: Anchor) => {
-  if (!pick || pick.side !== a.side) return false;
-  const [lo, hi] = pickRange(pick);
-  return a.line >= lo && a.line <= hi;
-};
+const NO_RANGES: LineRange[] = [];
+const same = (a: Anchor, b: Anchor) => a.side === b.side && a.line === b.line;
+/** Whether `keys` (a row's `|old5|`-style anchors) holds `a`. */
+const has = (keys: string, a: Anchor) => keys.includes(`|${a.side}${a.line}|`);
 
 /** A line number: a press picks its line on its own side, Shift extends, a drag sweeps a range.
  *  An empty one (an added line's old number) picks the row's line. */
@@ -306,10 +334,9 @@ function Num({ shown, a, g }: { shown: number | null; a: Anchor; g: Gutter }) {
 
 /** The + that opens the composer, in its own lane left of the numbers and shown
  *  on hover. Only the pick's last line keeps it in the tab order: one stop per file, not one per line. */
-function PlusButton({ a, pick, g }: { a: Anchor; pick: Pick | null; g: Gutter }) {
+function PlusButton({ a, pick, range, inPick, g }: { a: Anchor; pick: Pick | null; range: LineRange | null; inPick: boolean; g: Gutter }) {
   const head = !!pick && pick.side === a.side && pick.head === a.line;
-  const [start, end] = pick && inPick(pick, a) ? pickRange(pick) : [a.line, a.line];
-  const name = rangeName({ side: a.side, start, end });
+  const name = rangeName(range && inPick ? range : { side: a.side, start: a.line, end: a.line });
   const what = `Comment on ${name[0].toLowerCase()}${name.slice(1)}`;
   return (
     <button type="button" tabIndex={head ? 0 : -1} className={`rv-plus${head ? " is-head" : ""}`} aria-label={what} title={what} onMouseDown={g.startDrag(a, true)} onClick={g.onPlus(a)}>
@@ -321,29 +348,34 @@ function PlusButton({ a, pick, g }: { a: Anchor; pick: Pick | null; g: Gutter })
 interface RowProps {
   row: Row;
   hunk: number;
-  /** The pick, when it covers a line of this row; else null. */
+  /** The pick and its range, when it covers a line of this row; else null. */
   pick: Pick | null;
+  range: LineRange | null;
+  /** The row's anchors in the pick, and in a thread's range (`has`). */
+  picked: string;
+  commented: string;
   readOnly: boolean;
   g: Gutter;
   /** What sits under each of the row's anchors (`anchorsOf`). */
   slots: ReactNode[];
 }
 
-const RowView = memo(function RowView({ row, hunk, pick, readOnly, g, slots }: RowProps) {
+const RowView = memo(function RowView({ row, hunk, pick, range, picked, commented, readOnly, g, slots }: RowProps) {
   if (row.t === "hunk") return <div className="rv-hunk rv-mono">{row.text}</div>;
   const kind = (c: Cell | null) => (c ? (c.kind === "+" ? " is-add" : c.kind === "-" ? " is-del" : "") : " is-none");
+  const marks = (as: Anchor[]) => `${as.some((a) => has(picked, a)) ? " is-picked" : ""}${as.some((a) => has(commented, a)) ? " is-commented" : ""}`;
   const anchors = anchorsOf(row);
   const tail = slots.length > 0 && anchors.map((a, i) => <AfterSlot key={`${a.side}${a.line}`} node={slots[i]} />);
   if (row.t === "u") {
     const c = row.cell;
     // A context line is on both sides: each number picks its own, and + follows a pick on either.
-    const plusAt = anchors.find((a) => inPick(pick, a)) ?? row.at;
+    const plusAt = anchors.find((a) => has(picked, a)) ?? row.at;
     return (
       <>
-        <div className={`rv-row${kind(c)}${inPick(pick, plusAt) ? " is-picked" : ""}`} data-hunk={hunk} data-old={c.old ?? undefined} data-new={c.new ?? undefined}>
+        <div className={`rv-row${kind(c)}${marks(anchors)}`} data-hunk={hunk} data-old={c.old ?? undefined} data-new={c.new ?? undefined}>
           <Num shown={c.old} a={c.old === null ? row.at : { side: "old", line: c.old }} g={g} />
           <Num shown={c.new} a={c.new === null ? row.at : { side: "new", line: c.new }} g={g} />
-          {!readOnly && <PlusButton a={plusAt} pick={pick} g={g} />}
+          {!readOnly && <PlusButton a={plusAt} pick={pick} range={range} inPick={has(picked, plusAt)} g={g} />}
           <span className="rv-mark" aria-hidden="true">{MARK[c.kind]}</span>
           <Code cell={c} />
         </div>
@@ -354,9 +386,9 @@ const RowView = memo(function RowView({ row, hunk, pick, readOnly, g, slots }: R
   const half = (c: Cell | null, side: Side) => {
     const a: Anchor | null = c ? { side, line: side === "old" ? c.old! : c.new! } : null;
     return (
-      <div className={`rv-half${kind(c)}${a && inPick(pick, a) ? " is-picked" : ""}`}>
+      <div className={`rv-half${kind(c)}${a ? marks([a]) : ""}`} data-side={a?.side} data-line={a?.line}>
         {a ? <Num shown={a.line} a={a} g={g} /> : <span className="rv-num" />}
-        {a && !readOnly && <PlusButton a={a} pick={pick} g={g} />}
+        {a && !readOnly && <PlusButton a={a} pick={pick} range={range} inPick={has(picked, a)} g={g} />}
         <span className="rv-mark" aria-hidden="true">{c ? MARK[c.kind] : ""}</span>
         {c ? <Code cell={c} /> : <code className="rv-code" />}
       </div>
@@ -371,6 +403,6 @@ const RowView = memo(function RowView({ row, hunk, pick, readOnly, g, slots }: R
       {tail}
     </>
   );
-}, (a, b) => a.row === b.row && a.hunk === b.hunk && a.pick === b.pick && a.readOnly === b.readOnly && a.g === b.g && a.slots.length === b.slots.length && a.slots.every((n, i) => n === b.slots[i]));
+}, (a, b) => a.row === b.row && a.hunk === b.hunk && a.pick === b.pick && a.range === b.range && a.picked === b.picked && a.commented === b.commented && a.readOnly === b.readOnly && a.g === b.g && a.slots.length === b.slots.length && a.slots.every((n, i) => n === b.slots[i]));
 
 const AfterSlot = ({ node }: { node: ReactNode }) => (node ? <div className="rv-after">{node}</div> : null);
