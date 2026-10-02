@@ -3,7 +3,7 @@ import * as api from "../../../api";
 import { ago, until } from "../../../format";
 import type { Access, AuthSession, Health } from "../../../types";
 import { parseUserAgent } from "../../../ua";
-import { SELF_RESTART, useApply } from "../../apply/store";
+import { SELF_RESTART, bindHost, useApply } from "../../apply/store";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
@@ -58,8 +58,7 @@ export function AccessScreen() {
   // The server drops its restart item when KRAFT_HOST / KRAFT_PORT wins over the file.
   const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
   const envNote = (key: "bind" | "port") => (overridden(key) ? `Set by the environment: running on ${health?.[key]}, which wins over this.` : undefined);
-  const hostOf = (h: string) => (h === "0.0.0.0" ? location.hostname : h);
-  const address = `${location.protocol}//${hostOf(access.bind)}:${access.port}`;
+  const address = `${location.protocol}//${bindHost(access.bind)}:${access.port}`;
   const undo = () => (health ? put("bind", { bind: health.bind ?? access.bind, port: health.port ?? access.port }) : Promise.resolve(null));
 
   const hosts = () =>
