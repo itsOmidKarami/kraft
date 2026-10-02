@@ -53,6 +53,14 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         assert name in _names(rows)
 
 
+def test_doctor_names_an_allowed_host_that_never_matches(templates_dir, monkeypatch):
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    (templates_dir / "access.yaml").write_text("allowed_hosts: [kraft.local, '*.ts.net']\n")
+    row = _by_name(doctor._config_checks(), "access.yaml")
+    assert not row["ok"]
+    assert "'*.ts.net' is not a host name or IP address" in row["detail"], row
+
+
 def test_doctor_flags_a_dead_pidfile(app, tmp_path):
     _prime(tmp_path)
     pid_path = tmp_path / "run" / "kraft.pid"

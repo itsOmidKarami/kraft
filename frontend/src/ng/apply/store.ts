@@ -53,6 +53,12 @@ async function restartAddress(): Promise<string> {
   return `${location.protocol}//${location.hostname}${port ? `:${port}` : ""}`;
 }
 
+/** A bind address as the host of a URL to it: a wildcard bind is reached on
+ *  the host this page was opened on, and an IPv6 address goes in brackets
+ *  (`http://::1:8765` is not a URL). */
+export const bindHost = (bind: string): string =>
+  bind === "0.0.0.0" ? location.hostname : bind.includes(":") && !bind.startsWith("[") ? `[${bind}]` : bind;
+
 /** What to do when no service manager started Kraft: `kraft admin restart`
  *  brings a detached server back, but only stops one attached to a terminal
  *  (`cli/admin.py` `_cmd_restart`), which that terminal starts again. */

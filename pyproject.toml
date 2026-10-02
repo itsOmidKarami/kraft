@@ -58,6 +58,9 @@ dependencies = [
     # dependency until the agent surface existed; a `kraft mcp` installed from a
     # wheel has no dev group to fall back on.
     "httpx>=0.28.1,<1",
+    # `config.normalize_host` maps a Unicode `allowed_hosts` entry the way a
+    # browser maps the name it sends (UTS #46); the stdlib codec is IDNA 2003.
+    "idna>=3.7",
     # mcp 2.x: FastMCP was renamed MCPServer and list_tools() became sync, so
     # this is a floor on the API kraft/mcp.py actually uses, not just on bugfixes.
     "mcp>=2",

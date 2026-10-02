@@ -176,6 +176,58 @@ def test_get_access_reports_allowed_hosts(client):
     assert r.json()["allowed_hosts"] == ["a.example.com"]
 
 
+@pytest.mark.api_client(host="0.0.0.0")
+def test_an_allowed_host_typed_with_a_port_case_or_scheme_still_matches(client):
+    """A Host header carries the port, so `kraft.test:8765` is a natural thing
+    to type into the list. Saved as typed, it never matched the lowercased,
+    portless name the perimeter compares, and the browser got a 403 on its own
+    board. Saved normalized, the list reads back the way it is compared."""
+    typed = ["Kraft.Test:8765", "http://phone.test/", "[FD00::5]:8765", "tab.test.", "kraft.test"]
+    saved = client.put(
+        "/api/access", json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": typed}
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["allowed_hosts"] == ["kraft.test", "phone.test", "[fd00::5]", "tab.test"]
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+    for host in ("kraft.test:8765", "Phone.Test:8765", "[fd00::5]:8765", "tab.test.:8765"):
+        browser = {"host": host, "sec-fetch-site": "same-origin"}
+        assert client.get("/api/work-items", headers=browser).status_code == 200, host
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+def test_an_allowed_host_that_is_not_one_name_is_refused_by_name(client):
+    """Wildcards are not supported. Saved, `*.ts.net` would be a name no
+    browser sends; refused, the 422 says which entry and what form works."""
+    r = client.put(
+        "/api/access",
+        json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["ok.test", "*.ts.net"]},
+    )
+    assert r.status_code == 422, r.text
+    assert "'*.ts.net' is not a host name or IP address" in r.json()["detail"]
+    assert client.get("/api/access").json()["allowed_hosts"] == []
+
+
+def _a_hand_edited_wildcard(templates_dir):
+    (templates_dir / "access.yaml").write_text("allowed_hosts: ['*.ts.net', kraft.local]\n")
+
+
+@pytest.mark.api_client(edit_templates=_a_hand_edited_wildcard)
+def test_a_bad_entry_already_stored_does_not_block_the_next_save(client):
+    """The Access screens send the whole list back on every add and remove.
+    `access.yaml` loads a hand-edited `*.ts.net` as written, so refusing
+    every entry again would make each later save of that list a 422. Only a
+    new entry is checked; the stored one stays for `config_check` to name."""
+    assert client.get("/api/access").json()["allowed_hosts"] == ["*.ts.net", "kraft.local"]
+    added = client.put(
+        "/api/access", json={"allowed_hosts": ["*.ts.net", "kraft.local", "Phone.Local:8765"]}
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["allowed_hosts"] == ["*.ts.net", "kraft.local", "phone.local"]
+    another = client.put("/api/access", json={"allowed_hosts": ["*.ts.net", "*.lan"]})
+    assert another.status_code == 422, another.text
+    assert "'*.lan' is not a host name" in another.json()["detail"]
+
+
 def test_a_rebound_host_is_refused_for_a_browser_request(client):
     """DNS rebinding: a page on evil.com whose name flips to 127.0.0.1 becomes
     same-origin with the local board and can read every response and drive every
@@ -217,12 +269,31 @@ def test_a_loopback_bind_refuses_a_foreign_host_with_no_fetch_metadata(client, m
 
 @pytest.mark.parametrize(
     "host",
-    ["127.0.0.1:8765", "localhost:8765", "[::1]:8765", "LOCALHOST", "127.0.0.1"],
-    ids=["v4-port", "localhost-port", "v6-port", "case", "no-port"],
+    [
+        "127.0.0.1:8765",
+        "localhost:8765",
+        "[::1]:8765",
+        "LOCALHOST",
+        "127.0.0.1",
+        "localhost.:8765",
+        "127.0.0.1.:8765",
+        "[0:0:0:0:0:0:0:1]:8765",
+    ],
+    ids=[
+        "v4-port",
+        "localhost-port",
+        "v6-port",
+        "case",
+        "no-port",
+        "localhost-trailing-dot",
+        "v4-trailing-dot",
+        "v6-uncompressed",
+    ],
 )
 def test_a_loopback_bind_answers_to_every_loopback_name(client, host):
     """The CLI, MCP, the VS Code extension and the dev proxy all dial one of
-    these, browser or not."""
+    these, browser or not. A trailing dot or an uncompressed ::1 is the same
+    name, and no one else can own it."""
     for headers in ({"host": host}, {"host": host, "sec-fetch-site": "same-origin"}):
         assert client.get("/api/work-items", headers=headers).status_code == 200
 
@@ -579,3 +650,28 @@ def test_a_browser_navigation_to_fastapis_docs_gets_them_not_the_board(dist, cli
     r = client.get(path, headers={"sec-fetch-dest": "document"})
     assert r.status_code == 200, r.text
     assert "/openapi.json" in r.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "headers", "status"),
+    [
+        ("GET", "/work-items/abc", {"sec-fetch-dest": "document"}, 200),
+        ("GET", "/", {}, 200),
+        ("GET", "/assets/app.js", {}, 200),
+        ("GET", "/api/health", {}, 200),
+        ("GET", "/docs", {}, 200),
+        ("GET", "/api/nothing-here", {}, 404),
+        ("GET", "/work-items/abc", {"host": "evil.com:8765", "sec-fetch-dest": "document"}, 403),
+    ],
+    ids=["spa-navigation", "spa-root", "static-asset", "api", "swagger", "api-404", "refused"],
+)
+def test_no_other_site_may_frame_any_response(dist, client, method, path, headers, status):
+    """A framed loopback board is live with no login, so a page that framed it
+    under its own content could turn a click there into Resume or Approve.
+    Every response forbids it, a refusal included: the SPA shell is what a
+    frame would load, but a shell served by one route and not another is a
+    hole the next route opens."""
+    r = client.request(method, path, headers=headers)
+    assert r.status_code == status, r.text
+    assert r.headers["content-security-policy"] == "frame-ancestors 'self'"
+    assert r.headers["x-frame-options"] == "SAMEORIGIN"
