@@ -164,6 +164,11 @@ class Detector(BaseModel):
     #: {command}`): a runner's test task that calls `pytest` or `python`
     #: bare is run through it, since a worker's PATH has no virtualenv on it.
     wrap: str | None = Field(default=None, pattern=r"\{command\}")
+    #: The virtualenv its setup makes, relative to the directory (`.venv`):
+    #: a test command another detector proposes beside it (a Makefile's
+    #: `make test`, CI's `python -m unittest`) is run with it active, or it
+    #: would import from whatever Python a worker's PATH has.
+    venv: str | None = Field(default=None, pattern=r"^[\w.-]+(?:/[\w.-]+)*$")
     test: list[Command] = []
     setup: list[Command] = []
 
@@ -1423,6 +1428,26 @@ def _in_env(index: _Index, by_dir: dict[str, list[Candidate]], matches: dict[str
             c.source += f", run through {env.detector.id} ({env.marker})"
 
 
+def _in_venv(test: Candidate, venv: str) -> None:
+    """`test` run with the virtualenv `venv` active: its `python` named
+    outright, or anything else run with the venv's `bin` first on PATH --
+    `make test` runs whatever `pytest` it finds there. Spelled with `$PWD`,
+    since a test command runs from its own directory, and through `sh -c`,
+    since a test command is split into argv with no shell to expand it."""
+    try:
+        words = shlex.split(test.command)
+    except ValueError:
+        return
+    if not words:
+        return
+    if words[0] in ("python", "python3"):
+        test.command = shlex.join([f"{venv}/bin/python", *words[1:]])
+    else:
+        active = f'VIRTUAL_ENV="$PWD/{venv}" PATH="$PWD/{venv}/bin:$PATH"'
+        test.command = f"sh -c {shlex.quote(f'{active} {shlex.join(words)}')}"
+    test.source += f", in the setup's {venv}"
+
+
 def _stop(
     by_dir: dict[str, list[Candidate]], matches: dict[str, list[_Match]], table: Table
 ) -> dict[str, Detector]:
@@ -1679,6 +1704,7 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
     def reach(a: str, f: str, of: dict[str, set[str] | None]) -> bool:
         return a in of and f in workspaces.get(a, ()) and (of[a] is None or f in of[a])
 
+    venvs = {det.id: det.venv for det in table.detectors}
     scopes: list[Scope] = []
     claimed: set[str] = set()
     #: The root runner's file, when its setup recipe is the root's setup: a
@@ -1711,6 +1737,9 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         named = recipe_text is not None and _names_dir(recipe_text, d)
         if named:
             setup = [c for c in setup if c.tier == "runner"]
+        venv = next((venvs[c.detector] for c in setup if venvs.get(c.detector)), None)
+        if venv and test is not None and test.tier in ("runner", "ci"):
+            _in_venv(test, venv)
         if test is None and d != "" and not workspaces.get(d):
             continue
         if test is None and d == "" and not setup:

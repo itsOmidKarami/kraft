@@ -243,6 +243,7 @@ detectors:
     family: python
     files: [requirements.txt, requirements-dev.txt, requirements_dev.txt, dev-requirements.txt]
     unless: [pyproject.toml, Pipfile, setup.py]
+    venv: .venv
     test:
       - {when: *pytest, run: ".venv/bin/python -m pytest"}
       - {when: [{files: [manage.py]}], run: ".venv/bin/python manage.py test"}

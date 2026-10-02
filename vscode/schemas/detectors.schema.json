@@ -169,6 +169,19 @@
           "title": "Unless",
           "type": "array"
         },
+        "venv": {
+          "anyOf": [
+            {
+              "pattern": "^[\\w.-]+(?:/[\\w.-]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Venv"
+        },
         "workspace": {
           "default": [],
           "items": {
