@@ -43,6 +43,30 @@ describe("Access (O.3)", () => {
     expect(screen.getByRole("button", { name: /^iPhone/ })).toHaveTextContent("192.168.1.31");
   });
 
+  it("Reach says 0.0.0.0 listens on every network and points to Remote access, never that Kraft cannot bind publicly", async () => {
+    setup();
+    await screen.findByRole("switch", { name: /Local network/ });
+    expect(screen.getByText(/0\.0\.0\.0 listens on every network this machine is on\. .*prefer a Tailscale address: see Remote access/)).toBeInTheDocument();
+    expect(screen.queryByText(/never binds publicly/)).toBeNull();
+  });
+
+  it("on loopback with no password, Local network asks for one and sends it with the bind in one save", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: false, auth_required: false });
+    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    expect(put).not.toHaveBeenCalled();
+    const box = screen.getByLabelText("Set a password", { selector: "input" });
+    expect(box).toHaveAttribute("type", "password");
+    await userEvent.type(box, "hunter2{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", password: "hunter2" }));
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it("on loopback with a password set, Local network switches at once", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: true, auth_required: false });
+    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0" }));
+  });
+
   it("on loopback says the hosts, password and sessions are not used", async () => {
     setup({ bind: "127.0.0.1", auth_required: false });
     expect(await screen.findByRole("region", { name: "Not used on 127.0.0.1" })).toBeInTheDocument();
