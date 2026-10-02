@@ -165,7 +165,13 @@ def _config_checks() -> list[dict]:
         # Loaded as written, so this is the only place a bad one shows.
         bad = [why for h in access.allowed_hosts if (why := config.host_entry_problem(h))]
         bind = os.environ.get("KRAFT_HOST") or access.bind
-        if bad:
+        if bad and bind in config.LOOPBACK:
+            # A loopback bind never reads the list, so a leftover entry
+            # breaks nothing until the bind changes: a warning, not a failure
+            # a `doctor && ...` script trips on after an upgrade.
+            detail = "; ".join(bad) + f" (unused while bound to {bind})"
+            checks.append(_check("access.yaml", True, detail, warn=True))
+        elif bad:
             checks.append(_check("access.yaml", False, "; ".join(bad)))
         elif bind not in config.LOOPBACK and not access.allowed_hosts:
             # Every browser on another device is refused, and 1.4 let a

@@ -53,11 +53,21 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         assert name in _names(rows)
 
 
-def test_doctor_names_an_allowed_host_that_never_matches(templates_dir, monkeypatch):
+@pytest.mark.parametrize(
+    ("bind", "fails"), [("0.0.0.0", True), ("127.0.0.1", False)], ids=["network", "loopback"]
+)
+def test_doctor_names_an_allowed_host_that_never_matches(templates_dir, monkeypatch, bind, fails):
+    """It fails a network bind, where a device using that name is refused.
+    A loopback bind never reads the list, so a wildcard 1.4 accepted only
+    warns there: `doctor && ...` must not go red on an upgrade."""
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
-    (templates_dir / "access.yaml").write_text("allowed_hosts: [kraft.local, '*.ts.net']\n")
+    monkeypatch.delenv("KRAFT_HOST", raising=False)
+    (templates_dir / "access.yaml").write_text(
+        f"bind: {bind}\nallowed_hosts: [kraft.local, '*.ts.net']\n"
+    )
     row = _by_name(doctor._config_checks(), "access.yaml")
-    assert not row["ok"]
+    assert row["ok"] is not fails
+    assert row["warn"] is not fails
     assert "'*.ts.net' is not a host name or IP address" in row["detail"], row
 
 
