@@ -13,35 +13,43 @@ connection error.
 Four steps, each followed by a check against the repo itself — a
 zero exit code says the command ran, not that what it did was right.
 
-1. **Connect.** `ensure_repo()` (or `kraft repo connect [PATH]` from a
-   terminal) - files the repo and probes it: test command, forge. Read back
-   the probed `test_command`.
+1. **Connect.** Read how the repo says to build and test itself before you
+   connect it: its README, CONTRIBUTING, agent instructions (`CLAUDE.md`,
+   `AGENTS.md`) and CI config. Look for the command a contributor is told to
+   run, and any rule that the raw runner must not be called directly.
 
-   Check it against what the repo actually runs. The probe reads markers at
-   the repo root, in order: a `justfile` with a `test` recipe (`just test`),
-   then `pyproject.toml`, `package.json`, `Cargo.toml`, `go.mod`. It cannot
-   see a wrapper under any other name — a `make test` target, a
-   `scripts/test` script, a recipe called `check` — or a rule that the raw
-   runner must not be called directly. Read the repo's own README,
-   CONTRIBUTING and agent instructions (`CLAUDE.md`, `AGENTS.md`) for how it
-   says to run its tests; if that differs from the probe, prefer what the
-   repo says and say so.
+   Then `ensure_repo()` (or `kraft repo connect [PATH]` from a terminal). It
+   proposes a test and a setup command from the repo's own files, best
+   evidence first:
+   - a task runner's `test`/`setup` task (justfile, Makefile, Taskfile, mise,
+     `script/test`)
+   - what CI runs
+   - the toolchain its lockfile names (pnpm, Poetry, Gradle, Cargo, ...)
 
-   Neither `ensure_repo`/`kraft repo connect` nor any MCP tool takes a
-   `test_command` override — only the HTTP API does, and there
-   is no CLI/MCP verb for it. So correct a wrong probe by editing this
-   repo's entry in `~/.kraft/templates/repos.yaml` directly,
-   setting `test_command` to the right command, and say what you changed —
-   the running server reads that file fresh on each request, no restart
-   needed.
+   It returns each command's source and every other candidate it saw. Compare
+   them with what the repo's docs say. When the docs say something else (a
+   wrapper the probe cannot know, such as `./ci/run-tests`), connect with the
+   repo's own commands rather than correcting afterwards:
+   `ensure_repo(test_command=..., setup_command=...)`, or
+   `kraft repo connect --test-command ... --setup-command ...`. Say which you
+   chose and why.
 
-   Read back the probed `setup_command` the same way, and check it just as
-   hard. It is what prepares every worktree for this repo, and there is no
-   default behind it: a repo with no `setup_command` stops its next work item
-   rather than guessing. A repo that genuinely needs no preparation declares
-   `setup_command: ""` — deliberately nothing, not an oversight. Correct a
-   wrong probe by editing this repo's entry in `repos.yaml` directly, the same
-   way as `test_command`.
+   A repo with nothing to prepare declares `setup_command: ""`, and a repo
+   with no tests declares `test_command: ""` (`--no-tests`). Both mean
+   "deliberately nothing", not an oversight. Without a `setup_command`, the
+   repo's next work item stops rather than guessing.
+
+   The setup command prepares every worktree for this repo, so check it as
+   hard as the test command. A repo with more than one project in it gets a
+   test scope per project, with its commands run from that directory
+   (`sh -c 'cd web && npm test'`). Read those back too.
+
+   Once a repo is connected, `ensure_repo` leaves it alone. Correct it by
+   editing this repo's entry in `~/.kraft/templates/repos.yaml` directly, and
+   say what you changed. The running server reads that file fresh on each
+   request, so no restart is needed. A convention Kraft keeps getting wrong
+   across repos belongs in `~/.kraft/templates/detectors.yaml` instead: see
+   https://itsomidkarami.github.io/kraft/next/reference/configuration/repos/detectors
 
    If the repo has submodules, connect writes each `.gitmodules` path as its
    own repo entry, not a sub-field of this one — run `kraft repo list --all`
@@ -62,65 +70,21 @@ zero exit code says the command ran, not that what it did was right.
    comes with it. Find out now, while you can still ask, rather than on the
    repo's first work item.
 
-   Cut a throwaway worktree outside the repo, once, capturing the path
-   `mktemp` actually created:
+   `kraft repo connect --verify` cuts a throwaway worktree, runs the declared
+   `setup_command` the way every work item does, then each test scope's
+   command, and removes the worktree. It prints each command's result and
+   time, and the tail of the output of any that failed. The test suite can
+   take minutes, not seconds, so say what you are about to run and let the
+   person decide whether to wait for it now.
 
-   ```bash
-   PROBE=$(mktemp -d /tmp/kraft-onboard-XXXXXX)
-   git -C <repo> worktree add -q "$PROBE" -b "kraft-onboard-${PROBE##*-}"
-   echo "$PROBE"
-   ```
-
-   Every command below is a separate shell, so `$PROBE` is not set in it.
-   Substitute the literal path the `echo` printed (e.g.
-   `/tmp/kraft-onboard-a1b2c3`) wherever `$PROBE` appears, and never re-run
-   `mktemp`.
-
-   First, the repo's own declared preparation — this is what every real
-   worktree gets, so a wrong `setup_command` should fail here, once, while
-   someone is still watching:
-
-   ```bash
-   (cd "$PROBE" && <setup_command>)
-   ```
-
-   Use the `setup_command` confirmed in step 1, not a guess.
-
-   Next, cheap and fast — whatever fits this repo's toolchain (`uv run
-   python -V`, `node -v`, ...), not the test suite:
-
-   ```bash
-   (cd "$PROBE" && uv run python -V)
-   ```
-
-   This is the one likeliest to catch a missing pin silently: `requires-python
-   = "~=3.11"` is satisfied by 3.14 too, so the wrong interpreter can pass
-   every test without ever saying so.
-
-   Second probe, opt-in — the repo's own test command, in the same worktree.
-   Say what you're about to run and roughly how long it takes before you run
-   it (a cold `uv sync` plus a full suite can be minutes, not seconds), and
-   let the person decide whether to wait for it now:
-
-   ```bash
-   (cd "$PROBE" && <test_command>)
-   ```
-
-   Use the `test_command` you confirmed in step 1, not a guess. Then clean up,
-   with the same literal path:
-
-   ```bash
-   git -C <repo> worktree remove --force "$PROBE"
-   git -C <repo> branch -D "kraft-onboard-${PROBE##*-}"
-   ```
-
-   A failure in either probe is the finding, not an error to route around.
-   Compare `git -C <repo> ls-files --others --directory` against the
-   worktree: a root-level file listed there and missing from the probe is a
-   file Kraft will not carry either. A toolchain pin (`.python-version`,
+   A failure is the finding, not an error to route around. Run
+   `git -C <repo> ls-files --others --directory`: a root-level file it lists
+   is a file no worktree gets. A toolchain pin (`.python-version`,
    `.nvmrc`, `.tool-versions`), a `.env`, an `.npmrc` — any of these can
-   change what the worktree resolves without changing whether either probe
-   exits zero, so read the list even when both probes pass.
+   change what the worktree resolves without changing whether either command
+   exits zero, so read the list even when `--verify` passes. A pin is the
+   likeliest to fail silently: `requires-python = "~=3.11"` is satisfied by
+   3.14 too, so the wrong interpreter can pass every test without saying so.
 
    Anything the repo genuinely needs goes in its `repos.yaml` entry:
 
@@ -132,8 +96,8 @@ zero exit code says the command ran, not that what it did was right.
    Kraft copies those into every worktree before it runs `setup_command`, and
    **refuses any entry the repo does not gitignore** — it cannot keep an
    unignored file out of a commit. If a needed file is not ignored, add it to
-   `.gitignore` rather than dropping it from `local_files`. Cut a fresh probe
-   worktree and re-run after editing, and say whether it went green.
+   `.gitignore` rather than dropping it from `local_files`. Re-run
+   `kraft repo connect --verify` after editing, and say whether it went green.
 
    Do not put a directory or a glob in `local_files`; it takes literal file
    paths, and the list is validated on load.

@@ -54,7 +54,9 @@ def _selected(it, round, scopes=(_FRONTEND, _BACKEND)):
     return [tuple(s["cmd"]) for s in to_run]
 
 
-async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wid="w1"):
+async def _dispatch(
+    item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wid="w1", test_command=None
+):
     """Dispatch the builtin once, on a repo whose own test scopes are
     `test_scopes`. Returns the status and the item."""
     it = await item_on(_verify(task, node_id), wid=wid)
@@ -67,7 +69,9 @@ async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wi
         it.row(),
         it.repo,
         launch=executor.LaunchContext(
-            repo_entry=entry_of({"setup_command": "", "test_scopes": test_scopes}),
+            repo_entry=entry_of(
+                {"setup_command": "", "test_scopes": test_scopes, "test_command": test_command}
+            ),
         ),
     )
     return status, it
@@ -84,6 +88,16 @@ async def test_a_repo_that_declares_no_test_command_stops_naming_what_to_configu
     log = Path(session["log_path"]).read_text()
     assert "neither test_scopes nor test_command in repos.yaml" in log
     assert "will not guess a command" in log
+
+
+async def test_a_repo_that_declares_it_has_no_tests_passes_verify_saying_so(item_on):
+    """`test_command: ""` is a decision, as `setup_command: ""` is: a repo with
+    no tests (docs, infrastructure) passes verify, and its session says why."""
+    status, it = await _dispatch(item_on, test_scopes=None, test_command="")
+
+    [session] = it.sessions()
+    assert (status, session["status"]) == ("done", "done")
+    assert 'test_command: "" (no tests)' in Path(session["log_path"]).read_text()
 
 
 # -- selection (Kraft-9wzy, C7 Kraft-s7c04.14) --------------------------------

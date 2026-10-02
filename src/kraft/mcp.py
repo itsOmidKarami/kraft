@@ -117,11 +117,21 @@ def build() -> MCPServer:
         )
 
     @server.tool()
-    async def ensure_repo(path: str | None = None) -> dict:
+    async def ensure_repo(
+        path: str | None = None,
+        test_command: str | None = None,
+        setup_command: str | None = None,
+    ) -> dict:
         """Connect a repository to Kraft if it is not already connected, so work
         items can be created against it. Idempotent — safe to call every time.
-        `path` defaults to the current working directory."""
-        return await client.ensure_repo(path)
+        `path` defaults to the current working directory. Kraft proposes a test
+        and a setup command from the repo's own files (task runners, CI,
+        lockfiles) and returns every candidate it saw; pass `test_command` or
+        `setup_command` to use the repo's own documented commands instead
+        (`""` declares none). An already-connected repo is left as it is."""
+        return await client.ensure_repo(
+            path, test_command=test_command, setup_command=setup_command
+        )
 
     @server.tool()
     async def approve_gate(

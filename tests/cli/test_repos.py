@@ -86,7 +86,7 @@ def test_connect_names_the_test_command_and_the_marker_it_came_from(app, capsys,
     says what it proposed and which file it read that from."""
     (repo / "justfile").write_text("test:\n    pytest\n")
     cli.main(["repo", "connect", str(repo)])
-    assert "test command: just test (from justfile)" in capsys.readouterr().out
+    assert "test command: just test (from justfile recipe `test`)" in capsys.readouterr().out
 
 
 def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
@@ -99,37 +99,104 @@ def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
 
 
 def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
-    """A package.json with no lockfile has a test command and no setup one:
-    connect says so, since an undeclared setup_command stops the first item."""
-    (repo / "package.json").write_text('{"scripts": {"test": "jest"}}')
+    """A Makefile with a `test` target and nothing else has a test command and
+    no setup one: connect says so, naming the directory, since an undeclared
+    setup_command stops the first item."""
+    (repo / "Makefile").write_text("test:\n\tctest\n")
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "test command: npm test (from package.json)" in out
-    assert "setup command: none found" in out and '`""` if it needs no preparation' in out
+    assert "test command: make test (from Makefile target `test`)" in out
+    assert "setup command: none found for ." in out and '`""` if it needs no preparation' in out
 
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
-    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
-    (repo / "uv.lock").write_text("version = 1\n")
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "setup command: uv sync" in out
+    assert "setup command: uv sync (from pyproject.toml)" in out
     assert "none found" not in out
     assert "saved disabled" not in out
 
 
-def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, capsys, repo):
-    """`uv sync` and `uv run` would each write a `uv.lock` into the worktree,
-    so neither is proposed: the repo lands disabled, and connect names the
-    missing lockfile rather than leave the operator to guess."""
-    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+def test_connect_takes_the_commands_given_on_the_command_line(app, capsys, repo):
+    (repo / "Makefile").write_text("test:\n\tctest\n")
+    cli.main(["repo", "connect", str(repo), "--test-command", "ctest -j4", "--setup-command", ""])
+    out = capsys.readouterr().out
+    assert "test command: ctest -j4" in out
+    assert 'setup command: "" (nothing to prepare)' in out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == (
+        "ctest -j4",
+        "",
+        True,
+    )
+
+
+def test_connect_no_tests_declares_a_repo_with_none(app, capsys, repo):
+    cli.main(["repo", "connect", str(repo), "--no-tests"])
+    assert 'test command: "" (no tests)' in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["enabled"]) == ("", True)
+
+
+def test_connect_flags_on_a_connected_repo_change_nothing_and_say_so(app, capsys, repo):
+    cli.main(["repo", "connect", str(repo)])
+    cli.main(["repo", "connect", str(repo), "--test-command", "make check"])
+    assert "its commands are unchanged" in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] is None
+
+
+def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
-    assert "test command:" not in out
-    assert "setup command: none found" in out
-    assert "saved disabled: no test command found" in out
-    assert "A pyproject.toml without uv.lock gets none." in out
-    assert "A pyproject.toml without uv.lock in either place gets none." in out
+    assert "test command: make test (from Makefile target `test`)" in out
+    assert "also found for test: go test ./... (go.mod)" in out
+
+
+def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monkeypatch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["2", ""])  # the test command: go's; the setup: keep the proposal
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "1) make test    from Makefile target `test`  [proposed]" in out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["setup_command"]) == ("go test ./...", "go mod download")
+
+
+def test_connect_yes_takes_the_proposal_without_asking(app, capsys, repo, monkeypatch):
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("asked"))
+    cli.main(["repo", "connect", str(repo), "-y"])
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == "make test"
+
+
+@pytest.mark.parametrize(
+    ("test_command", "code", "said"),
+    [("true", None, "verify: passed"), ("false", 1, "verify: failed")],
+    ids=["passing", "failing"],
+)
+def test_connect_verify_exits_by_whether_the_commands_passed(
+    app, capsys, repo, test_command, code, said
+):
+    argv = ["repo", "connect", str(repo), "--test-command", test_command, "--setup-command", ""]
+    try:
+        cli.main([*argv, "--verify"])
+        exited = None
+    except SystemExit as caught:
+        exited = caught.code
+    assert exited == code
+    assert said in capsys.readouterr().out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
@@ -448,16 +515,15 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
 
     from kraft import config
 
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    (repo / "uv.lock").write_text("version = 1\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
     probed = config.probe_repo(repo)
-    nested = next(s for s in probed["test_scopes"] if s["command"] == "npm test")
+    nested = next(s for s in probed["test_scopes"] if "npm test" in s["command"])
     assert nested["paths"] == ["frontend/**"]
-    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
+    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest")
     assert "frontend" not in root["paths"]
     assert "pyproject.toml" in root["paths"]
 
@@ -509,16 +575,16 @@ def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
 
     from kraft import config
 
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    (repo / "uv.lock").write_text("version = 1\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
     src = repo / "src"
     src.mkdir()
+    (src / "app.py").write_text("")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
     probed = config.probe_repo(repo)
-    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest -q")
+    root = next(s for s in probed["test_scopes"] if s["command"] == "uv run pytest")
     assert "src/**" in root["paths"]
     assert "pyproject.toml" in root["paths"]
     src_pattern = next(p for p in root["paths"] if p.startswith("src"))

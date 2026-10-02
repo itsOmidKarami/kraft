@@ -93,15 +93,14 @@ def test_a_relative_path_is_refused_not_resolved_against_the_servers_cwd(
 
 def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
     repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    (repo / "uv.lock").write_text("version = 1\n")
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n[tool.pytest.ini_options]\n")
     (repo / ".gitmodules").write_text(
         '[submodule "libs/a"]\n\tpath = libs/a\n\turl = ../a.git\n'
         '[submodule "libs/b"]\n\tpath = libs/b\n\turl = ../b.git\n'
     )
     body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["submodules"] == ["libs/a", "libs/b"]
-    assert body["test_command"] == "uv run pytest -q"
+    assert body["test_command"] == "uv run pytest"
 
 
 def _set_origin(repo, url):
@@ -293,7 +292,7 @@ def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, clie
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
     r = client.post(
         "/api/repos",
@@ -307,7 +306,7 @@ def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, clie
     assert "just test" in by_paths.values()
     # ...but the nested frontend scope _probe_test_scopes found on its own
     # survives untouched, not silently dropped by the override.
-    assert by_paths[("frontend/**",)] == "npm test"
+    assert by_paths[("frontend/**",)] == "sh -c 'cd frontend && npm test'"
 
 
 def test_add_repo_without_nested_scopes_does_not_persist_a_root_scope(tmp_path, client):
@@ -345,11 +344,13 @@ def test_add_repo_keeps_a_lone_nested_scope(tmp_path, client):
     repo = make_repo(tmp_path, name="frontendonly")
     frontend = repo / "frontend"
     frontend.mkdir()
-    (frontend / "package.json").write_text("{}")
+    (frontend / "package.json").write_text('{"scripts": {"test": "jest"}}')
 
     r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert r.status_code == 201, r.text
-    assert r.json()["test_scopes"] == [{"paths": ["frontend/**"], "command": "npm test"}]
+    assert r.json()["test_scopes"] == [
+        {"paths": ["frontend/**"], "command": "sh -c 'cd frontend && npm test'"}
+    ]
 
 
 def test_patch_repo_sets_test_scopes_on_an_existing_entry(client, tmp_path):
@@ -772,6 +773,47 @@ def test_patch_repo_can_enable_alongside_a_test_command_in_the_same_request(
     path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
     r = client.patch(f"/api/repos?path={path}", json={"enabled": True, "test_command": "pytest"})
     assert r.status_code == 200, r.text
+
+
+def test_a_repo_that_declares_no_tests_connects_enabled(tmp_path, client, templates_dir):
+    """`test_command: ""` is the decision "this repo has no tests", not an
+    absence: it is stored as written and the repo connects enabled."""
+    repo = make_repo(tmp_path)
+    r = client.post("/api/repos", json={"path": str(repo), "test_command": ""})
+    assert r.status_code == 201, r.text
+    assert (r.json()["test_command"], r.json()["enabled"]) == ("", True)
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())["repos"][0]
+    assert on_disk["test_command"] == ""
+
+
+def test_add_repo_tells_the_candidates_and_does_not_store_them(tmp_path, client, templates_dir):
+    repo = make_repo(tmp_path)
+    (repo / "Makefile").write_text("test:\n\tctest\n")
+    (repo / "go.mod").write_text("module x\n")
+    body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
+    assert body["test_command"] == "make test"
+    assert ("go test ./...", False) in [(c["command"], c["chosen"]) for c in body["candidates"]]
+    assert body["scopes"] == [{"dir": "", "test": "make test", "setup": "go mod download"}]
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())["repos"][0]
+    assert not {"candidates", "scopes", "missing_setup"} & set(on_disk)
+
+
+def test_probe_reads_the_instances_own_detectors_file(tmp_path, client, templates_dir):
+    (templates_dir / "detectors.yaml").write_text(
+        "detectors:\n  - id: earthly\n    tier: runner\n    files: [Earthfile]\n"
+        "    test: [{run: earthly +test}]\n"
+    )
+    repo = make_repo(tmp_path)
+    (repo / "Earthfile").write_text("")
+    body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
+    assert body["test_command"] == "earthly +test"
+
+
+def test_a_broken_detectors_file_fails_the_probe_naming_it(tmp_path, client, templates_dir):
+    (templates_dir / "detectors.yaml").write_text("detectorz: []\n")
+    r = client.post("/api/repos/probe", json={"path": str(make_repo(tmp_path))})
+    assert r.status_code == 400
+    assert "detectors.yaml" in r.json()["detail"]
 
 
 def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, monkeypatch):

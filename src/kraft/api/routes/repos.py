@@ -54,7 +54,7 @@ class ProbeBody(BaseModel):
 
 
 def _auto_connect_children(
-    repos: list[dict], parent: dict, submodule_paths: list[str]
+    repos: list[dict], parent: dict, submodule_paths: list[str], templates_dir: Path
 ) -> dict[str, dict]:
     """One disabled entry per `.gitmodules` path, appended to `repos` in place.
     Returns every child now connected -- new or already there -- by its path
@@ -82,7 +82,7 @@ def _auto_connect_children(
     for rel in submodule_paths:
         child_path = Path(parent["path"]) / rel
         try:
-            probed = config_mod.probe_repo(child_path)
+            probed = config_mod.probe_repo(child_path, templates_dir=templates_dir)
         except config_mod.ConfigError:
             # An uninitialized submodule is an empty directory, not a repo.
             # It reappears as a candidate the next time the parent is
@@ -211,7 +211,7 @@ async def list_repos(request: Request):
 async def probe_repo(body: ProbeBody, request: Request):
     """Read-only inspection of a candidate repo — Kraft never edits repo files."""
     try:
-        return config_mod.probe_repo(body.path)
+        return config_mod.probe_repo(body.path, templates_dir=request.app.state.templates_dir)
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -220,13 +220,16 @@ async def probe_repo(body: ProbeBody, request: Request):
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
     try:
-        probed = config_mod.probe_repo(body.path, test_command=body.test_command)
+        probed = config_mod.probe_repo(
+            body.path, test_command=body.test_command, templates_dir=st.templates_dir
+        )
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     repos, _ = _editable_repos(st)
     if any(r["path"] == probed["path"] for r in repos):
         raise HTTPException(409, f"{probed['path']} is already connected")
-    test_command = body.test_command or probed["test_command"]
+    # `""` is a decision, not an absence: the repo deliberately has no tests.
+    test_command = body.test_command if body.test_command is not None else probed["test_command"]
     # Probed regardless of test_command now (Kraft-k4mx): probe_repo already
     # folded body.test_command into the root scope's command above, so there
     # is no longer a reason to suppress the nested scopes it finds alongside
@@ -261,7 +264,9 @@ async def add_repo(body: RepoBody, request: Request):
         "setup_command": setup_command,
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
-        "enabled": body.enabled if body.enabled is not None else bool(test_command or test_scopes),
+        "enabled": body.enabled
+        if body.enabled is not None
+        else _has_tests({"test_command": test_command, "test_scopes": test_scopes}),
         "models": body.models or {},
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
@@ -271,7 +276,7 @@ async def add_repo(body: RepoBody, request: Request):
         "managed": True,
     }
     repos.append(entry)
-    children = _auto_connect_children(repos, entry, probed["submodules"])
+    children = _auto_connect_children(repos, entry, probed["submodules"], st.templates_dir)
     workspaces = _workspaces(st)
     _declare_workspace(workspaces, repos, entry, children)
     _refuse_enable_without_test_command(entry)
@@ -285,8 +290,10 @@ async def add_repo(body: RepoBody, request: Request):
         await st.indexer.rescan_repo(entry["path"])
     except Exception:  # noqa: BLE001 -- scan_repo touches git and the filesystem
         logger.exception("index scan failed for newly connected repo %s", entry["path"])
-    # Told, not stored: which marker files the proposed commands came from.
-    return {**entry, "test_markers": probed["test_markers"]}
+    # Told, not stored: which marker files the proposed commands came from,
+    # every command the evidence supported, and what is still undecided.
+    told = ("test_markers", "candidates", "scopes", "missing_setup")
+    return {**entry, **{k: probed[k] for k in told}}
 
 
 class RepoPatch(BaseModel):
@@ -306,7 +313,9 @@ class RepoPatch(BaseModel):
 
 
 def _has_tests(entry: dict) -> bool:
-    return bool(entry.get("test_command") or entry.get("test_scopes"))
+    """Whether verification has been told what to run: a test command (`""`
+    is the deliberate "no tests"), or test scopes."""
+    return entry.get("test_command") is not None or bool(entry.get("test_scopes"))
 
 
 def _refuse_enable_without_test_command(entry: dict) -> None:
@@ -322,7 +331,8 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
     if entry.get("enabled", True) and not _has_tests(entry):
         raise HTTPException(
             422,
-            "cannot enable a repo with no test command — set its test command or test scopes first",
+            "cannot enable a repo with no test command — set its test command or test scopes "
+            'first (test_command: "" declares a repo with no tests)',
         )
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, harness, registration
+from kraft import auth, capabilities, client, config, detect, harness, registration
 from kraft.adapters import forge
 from kraft.executor import fallback
 from kraft.paths import (
@@ -918,6 +918,18 @@ async def _tls_listener_check() -> dict:
     return _check("egress listener", problem is None, detail)
 
 
+def _suggested_setup(path: Path, templates_dir: Path) -> str | None:
+    """What `kraft repo connect` would propose today, or None when it finds
+    nothing (or cannot read the repo or `detectors.yaml`: the row already
+    fails, and a second error would only bury it)."""
+    if not path.is_dir():
+        return None
+    try:
+        return detect.propose(path, detect.load(templates_dir)).setup_command
+    except config.ConfigError:
+        return None
+
+
 def _label(repo: config.RepoEntry) -> str:
     return repo.name or repo.path
 
@@ -961,7 +973,7 @@ async def _repo_checks() -> list[dict]:
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
             # makes it survivable.
-            suggestion = config._first_setup_command(path) if path.is_dir() else None
+            suggestion = _suggested_setup(path, live)
             checks.append(
                 _check(
                     f"setup {_label(repo)}",

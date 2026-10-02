@@ -269,6 +269,15 @@ def test_ensure_repo_through_the_mcp_tool_returns_the_stored_entry(app, tmp_path
     assert "submodules" not in out
 
 
+def test_ensure_repo_through_the_mcp_tool_takes_the_repos_own_commands(app, tmp_path):
+    """An agent that read the repo's README can connect it with the commands
+    the repo documents, rather than editing repos.yaml after the probe."""
+    repo = make_repo(tmp_path)
+    args = {"path": str(repo), "test_command": "make check", "setup_command": "./configure"}
+    out = json.loads(asyncio.run(mcp.build().call_tool("ensure_repo", args)).content[0].text)
+    assert (out["test_command"], out["setup_command"]) == ("make check", "./configure")
+
+
 def test_approve_gate_forwards_the_digest_the_artifact_carried(monkeypatch):
     """Kraft-ec66w: a chain revision's approval is refused without it."""
     seen = {}

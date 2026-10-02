@@ -34,13 +34,13 @@ repos:
 | `path` | *(required)* | Absolute path to the repo. |
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `id` | — | The repository id a workspace names this entry by (`[a-z][a-z0-9_-]*`, unique). Only a workspace's root and members need one; connecting a repo with submodules writes it for them. |
-| `enabled` | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. It governs auto-intake only: you can still file and run items on a disabled repo, and running items keep going. `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it stops at `verify` until it has a `test_command` or `test_scopes`. An absent key counts as enabled. Kraft refuses an edit that would leave an enabled repo with neither a `test_command` nor `test_scopes`. |
+| `enabled` | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. It governs auto-intake only: you can still file and run items on a disabled repo, and running items keep going. `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it stops at `verify` until it has a `test_command` or `test_scopes`. An absent key counts as enabled. Kraft refuses an edit that would leave an enabled repo with neither a `test_command` (`""` counts) nor `test_scopes`. |
 | `managed` | `true` | Keeps a human-connected repo out of Templates, Repos' "Detected · not connected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly, however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake. Unset, it is `default`. |
-| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the repo's remote. |
+| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the host of the repo's remote: `github.com`, `gitlab.com`, or a self-hosted host that names one (`gitlab.example.com`). |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. A legacy `gitlab_project` key still reads. |
 | `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` or agent `profile:` and the work item's override. Keyed by profile because one model name means nothing to another provider. The retired `default_model` key is dropped with a warning. |
-| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
+| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. It runs from the worktree root without a shell. `""` declares a repo with no tests (docs, infrastructure): verification passes and its session says so. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |
 | `intent_dir` | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Its check runs as one of the repo's `test_scopes`. |
@@ -246,11 +246,18 @@ Kraft reads only the first page of 100 of each list it asks for: the pull reques
 
 ## Connecting a repo
 
-`kraft repo connect` probes a `setup_command` and a test command from the repo's
-markers (a justfile with a `test` recipe proposes `just test` ahead of any
-manifest) and prints the test command with the file it came from; check both
-before trusting them, and `kraft admin doctor` reports any connected repo still
-missing a `setup_command`.
+`kraft repo connect` proposes a `setup_command`, a `test_command` and, for a
+repo with more than one project in it, `test_scopes`. It reads them from the
+repo's own task runner (a justfile, Makefile, Taskfile or mise task,
+`script/test`), from its CI, and from its toolchain's lockfile, in that order.
+It prints each command with the file it came from and lists what else it found.
+See [Detectors](/reference/configuration/repos/detectors) for the ranking, and
+for how `detectors.yaml` teaches Kraft your own conventions.
+
+Check the proposal before you trust it. `--verify` runs it once in a throwaway
+worktree; `--test-command`, `--setup-command` and `--no-tests` replace it; in a
+terminal, connect asks which candidate to use. `kraft admin doctor` reports any
+connected repo still missing a `setup_command`.
 
 It proposes each command from the first of these files it finds. The setup
 command is read from the repo's root only. The test command is read from the
@@ -328,4 +335,5 @@ the same refusal a run gives. Each field's source (`repo`, `library` or
 
 ## In this section
 
+- [Detectors](/reference/configuration/repos/detectors): how `kraft repo connect` proposes setup and test commands, and `detectors.yaml`.
 - [Workspaces](/reference/configuration/repos/workspaces): a root repository with other repositories mounted as submodules.

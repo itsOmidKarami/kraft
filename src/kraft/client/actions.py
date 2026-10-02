@@ -116,14 +116,33 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     )
 
 
-async def ensure_repo(path: str | None = None) -> dict:
+async def probe_repo(path: str | None = None) -> dict:
+    """What connecting `path` would propose, changing nothing: its setup and
+    test commands, and every candidate the evidence supports."""
+    path = context.absolute_path(path or os.getcwd())
+    status, body = await transport._post("/repos/probe", {"path": path})
+    if status >= 400:
+        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+    return body
+
+
+async def ensure_repo(
+    path: str | None = None,
+    *,
+    test_command: str | None = None,
+    setup_command: str | None = None,
+) -> dict:
     """Register a repo with Kraft if it is not already connected.
 
     Idempotent by construction: `POST /repos` 409s on a path it already holds,
-    and "already connected" is the goal state, not a failure.
+    and "already connected" is the goal state, not a failure. `test_command`
+    and `setup_command` replace what the probe would propose (`""` for none);
+    an already-connected repo keeps what it has -- edit repos.yaml to change it.
     """
     path = context.absolute_path(path or os.getcwd())
-    status, body = await transport._post("/repos", {"path": path})
+    fields = {"test_command": test_command, "setup_command": setup_command}
+    payload = {"path": path, **{k: v for k, v in fields.items() if v is not None}}
+    status, body = await transport._post("/repos", payload)
     if status == 409:
         # The probe still runs, and still first: it is what resolves the given
         # path to the connected one, which is how `kraft repo list` marks the
