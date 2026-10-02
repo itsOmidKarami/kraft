@@ -24,18 +24,17 @@ def _state(tmp_path, *, archive_after_days) -> dict:
     }
 
 
+def _days_ago(days: int) -> str:
+    """An `updated_at` value `days` before the wall clock."""
+    return (datetime.now(UTC) - timedelta(days=days)).isoformat()
+
+
 async def _seed_completed_item(
-    app,
-    repo: Path,
-    *,
-    updated_days_ago: int = 0,
-    wid: str = "w1",
-    updated_at: str | None = None,
-    end=store.mark_completed,
+    app, repo: Path, *, updated_at: str, wid: str = "w1", end=store.mark_completed
 ) -> Path:
-    """A completed item with a real worktree, backdated `updated_at` (to
-    exactly `updated_at` when given). `end` is how it ended:
-    `store.abandon_work_item` for an abandoned one."""
+    """A completed item with a real worktree, its `updated_at` backdated to
+    `updated_at`. `end` is how it ended: `store.abandon_work_item` for an
+    abandoned one."""
     branch = f"kraft/{wid}"
     worktree = app.state.run_dirs.worktrees / wid
     subprocess.run(
@@ -44,8 +43,6 @@ async def _seed_completed_item(
         check=True,
         capture_output=True,
     )
-    if updated_at is None:
-        updated_at = (datetime.now(UTC) - timedelta(days=updated_days_ago)).isoformat()
 
     def _write(c):
         store.create_work_item(
@@ -66,7 +63,7 @@ async def _seed_completed_item(
 
 async def test_tick_archives_a_completed_item_past_after_days(tmp_path, repo, stub_app):
     app = stub_app(**_state(tmp_path, archive_after_days=30))
-    worktree = await _seed_completed_item(app, repo, updated_days_ago=31)
+    worktree = await _seed_completed_item(app, repo, updated_at=_days_ago(31))
 
     archived = await archive.tick(app)
 
@@ -81,7 +78,7 @@ async def test_tick_archives_a_completed_item_past_after_days(tmp_path, repo, st
 async def test_tick_archives_an_abandoned_item_past_after_days(tmp_path, repo, stub_app):
     app = stub_app(**_state(tmp_path, archive_after_days=30))
     worktree = await _seed_completed_item(
-        app, repo, updated_days_ago=31, end=store.abandon_work_item
+        app, repo, updated_at=_days_ago(31), end=store.abandon_work_item
     )
     assert (
         app.state.db.read(
@@ -109,7 +106,7 @@ async def test_tick_archives_an_item_exactly_at_the_cutoff(tmp_path, repo, stub_
 
 async def test_tick_ignores_an_item_not_yet_due(tmp_path, repo, stub_app):
     app = stub_app(**_state(tmp_path, archive_after_days=30))
-    await _seed_completed_item(app, repo, updated_days_ago=1)
+    await _seed_completed_item(app, repo, updated_at=_days_ago(1))
     assert await archive.tick(app) == []
 
 
@@ -118,13 +115,13 @@ async def test_tick_does_nothing_when_after_days_is_none_or_zero(
     tmp_path, repo, stub_app, after_days
 ):
     app = stub_app(**_state(tmp_path, archive_after_days=after_days))
-    await _seed_completed_item(app, repo, updated_days_ago=999)
+    await _seed_completed_item(app, repo, updated_at=_days_ago(999))
     assert await archive.tick(app) == []
 
 
 async def test_tick_archives_an_item_whose_repository_is_gone(tmp_path, repo, stub_app):
     app = stub_app(**_state(tmp_path, archive_after_days=30))
-    worktree = await _seed_completed_item(app, repo, updated_days_ago=31)
+    worktree = await _seed_completed_item(app, repo, updated_at=_days_ago(31))
     repo.rename(repo.with_name("moved"))
 
     assert await archive.tick(app) == ["w1"]
@@ -138,8 +135,8 @@ async def test_one_failing_row_does_not_stop_the_tick(tmp_path, repo, stub_app, 
     from kraft.api.routes import lifecycle
 
     app = stub_app(**_state(tmp_path, archive_after_days=30))
-    await _seed_completed_item(app, repo, updated_days_ago=31, wid="w1")
-    await _seed_completed_item(app, repo, updated_days_ago=31, wid="w2")
+    await _seed_completed_item(app, repo, updated_at=_days_ago(31), wid="w1")
+    await _seed_completed_item(app, repo, updated_at=_days_ago(31), wid="w2")
     real = lifecycle._archive_one
 
     async def first_one_fails(app, row, by):
