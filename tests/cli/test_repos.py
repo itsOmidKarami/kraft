@@ -108,7 +108,9 @@ def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "test command: make test (from Makefile target `test`)" in out
-    assert "setup command: none found for ." in out and '`""` if it needs no preparation' in out
+    assert (
+        "setup command: none found for the root" in out and '`""` if it needs no preparation' in out
+    )
 
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
@@ -235,6 +237,64 @@ def test_what_connect_prints_from_a_repo_is_shown_never_obeyed(capsys):
     assert "the probe failed: boom\\u202e" in out
 
 
+def test_connect_says_a_setup_found_but_left_undecided(capsys):
+    """Redis: `make bootstrap` was found, then dropped because src/ has
+    nothing to prepare it, and connect said "none found"."""
+    from kraft.cli import repo as repo_cli
+
+    bootstrap = {"dir": "", "role": "setup", "command": "make bootstrap", "chosen": True}
+    bootstrap |= {"tier": "runner", "source": "Makefile target `bootstrap`"}
+    repo_cli._say_connected(
+        {"path": "/r", "setup_command": None, "missing_setup": ["src"], "candidates": [bootstrap]}
+    )
+    out = capsys.readouterr().out
+    assert "setup command: make bootstrap found, but src has nothing to prepare it" in out
+
+
+def test_connect_does_not_list_what_it_saved_as_found_besides(capsys):
+    """jest's chosen `yarn test` came back under "also found" from CI."""
+    from kraft.cli import repo as repo_cli
+
+    ci = {"dir": "", "role": "test", "command": "yarn test", "chosen": False, "tier": "ci"}
+    web = {"dir": "web", "role": "setup", "command": "npm ci", "chosen": False, "tier": "toolchain"}
+    other = {"dir": "", "role": "test", "command": "make test", "chosen": False, "tier": "runner"}
+    for c in (ci, web, other):
+        c["source"] = "x"
+    repo_cli._say_connected(
+        {
+            "path": "/r",
+            "test_command": "yarn test",
+            "setup_command": "yarn install && (cd web && npm ci)",
+            "candidates": [ci, web, other],
+        }
+    )
+    out = capsys.readouterr().out
+    assert "also found for test: make test (x)" in out
+    assert "yarn test (x)" not in out and "npm ci (x)" not in out
+
+
+def test_a_proposed_combination_is_offered_whole(capsys, monkeypatch):
+    """Picking `mix deps.get` from a proposed `npm ci && mix deps.get`
+    dropped `npm ci`: the combination is an option of its own."""
+    from kraft.cli import repo as repo_cli
+
+    cands = [
+        {"dir": "", "role": "setup", "command": c, "chosen": True, "source": src}
+        for c, src in (("npm ci", "package-lock.json"), ("mix deps.get", "mix.exs"))
+    ]
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    assert repo_cli._pick("setup", cands, "npm ci && mix deps.get") == "npm ci && mix deps.get"
+    out = capsys.readouterr().out
+    assert "1) npm ci && mix deps.get    from package-lock.json + mix.exs  [proposed]" in out
+
+
+def test_connect_names_a_program_this_machine_lacks(capsys):
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected({"path": "/r", "missing_tools": [{"dir": "rt/deno", "tool": "deno"}]})
+    assert "not installed here: deno, which rt/deno/'s commands run" in capsys.readouterr().out
+
+
 def test_connect_names_origins_branch_whole(capsys):
     from kraft.cli import repo as repo_cli
 
@@ -291,7 +351,7 @@ def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, ca
     assert "test command:" not in out
     assert "setup command: none found" in out
     assert "saved disabled: no test command found" in out
-    assert "no test command proposed: . is a pyproject.toml with no lockfile" in out
+    assert "no test command proposed: the root is a pyproject.toml with no lockfile" in out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):

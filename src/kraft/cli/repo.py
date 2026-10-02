@@ -90,6 +90,13 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
             and c["command"] not in [o["command"] for o in options]
         ):
             options.append(c)
+    if proposed and proposed not in [o["command"] for o in options]:
+        # Several candidates at once (`npm ci && mix deps.get`, a test run
+        # per family): offered whole, so picking one does not drop the rest.
+        joined = " + ".join(
+            c["source"] for c in candidates if c["chosen"] and c["role"] == role and c["dir"] == ""
+        )
+        options.insert(0, {"command": proposed, "source": joined or "the proposal"})
     if len(options) < 2 and proposed is not None:
         return proposed
     _print(f"{role} command for the repo root:")
@@ -147,6 +154,15 @@ def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
     return test_command, setup_command
 
 
+def _runs(saved: str, c: dict) -> bool:
+    """Whether `saved`, a command as saved, already runs candidate `c`:
+    such a candidate is no alternative to list."""
+    if c["dir"]:
+        return f"cd {c['dir']} && {c['command']}" in saved
+    command = c["command"]
+    return saved == command or saved.startswith(f"{command} && ") or f" && {command}" in saved
+
+
 def _say_connected(result: dict) -> None:
     _print(f"connected: {result['path']}")
     ref = result.get("read_from")
@@ -178,22 +194,38 @@ def _say_connected(result: dict) -> None:
             _print(f"  {d}/: {s['test']}{source(d, 'test', s['test'])}")
     setup = result.get("setup_command")
     if setup:
-        root_setup = root.get("setup")
-        told = source("", "setup", root_setup) if setup == root_setup else ""
-        _print(f"setup command: {setup}{told}")
+        sources = [
+            f"{c['dir'] + '/: ' if c['dir'] else ''}{c['source']}"
+            for c in chosen
+            if c["role"] == "setup"
+        ]
+        _print(f"setup command: {setup}" + (f" (from {' + '.join(sources)})" if sources else ""))
     elif setup == "":
         _print('setup command: "" (nothing to prepare)')
     else:
-        missing = ", ".join(result.get("missing_setup") or []) or "the repo"
+        missing = [d if d != "." else "the root" for d in result.get("missing_setup") or ()]
+        found = [c["command"] for c in chosen if c["role"] == "setup"]
         # Undeclared stops the repo's first work item; "" is a declared none.
-        _print(
-            f"setup command: none found for {missing} (it reads task runners, CI and "
-            "lockfiles); pass --setup-command or set `setup_command` in its repos.yaml "
-            'entry, `""` if it needs no preparation'
+        why = (
+            f"{' && '.join(found)} found, but {', '.join(missing)} "
+            + ("have nothing to prepare them" if len(missing) > 1 else "has nothing to prepare it")
+            if found and missing
+            else f"none found for {', '.join(missing) or 'the repo'}"
         )
+        _print(
+            f"setup command: {why}; pass --setup-command or set `setup_command` in its "
+            'repos.yaml entry, `""` if it needs no preparation'
+        )
+    saved = [result.get("test_command") or "", setup or ""]
+    saved += [s["command"] for s in result.get("test_scopes") or ()]
     others = [
-        c for c in result.get("candidates") or () if not c.get("chosen") and c["tier"] != "ci"
-    ] + [c for c in result.get("candidates") or () if not c.get("chosen") and c["tier"] == "ci"]
+        c
+        for tier_ci in (False, True)
+        for c in result.get("candidates") or ()
+        if not c.get("chosen")
+        and (c["tier"] == "ci") == tier_ci
+        and not any(_runs(command, c) for command in saved if command)
+    ]
     for role in ("test", "setup"):
         rest = [c for c in others if c["role"] == role]
         if rest:
@@ -205,10 +237,17 @@ def _say_connected(result: dict) -> None:
                 f" and {len(rest) - _ALSO_SHOWN} more (--json)" if len(rest) > _ALSO_SHOWN else ""
             )
             _print(f"  also found for {role}: {shown}{more}")
+    for missing in result.get("missing_tools") or ():
+        where = "the root" if missing["dir"] == "." else f"{missing['dir']}/"
+        _print(
+            f"  not installed here: {missing['tool']}, which {where}'s commands run; "
+            "install it, or a work item fails on it (--verify shows how)"
+        )
     if result.get("probe_failed"):
         _print(f"  saved with the commands given; the probe failed: {result['probe_failed']}")
     for stop in result.get("stopped") or ():
-        _print(f"  no test command proposed: {stop['dir']} is {stop['reason']}")
+        where = "the root" if stop["dir"] == "." else f"{stop['dir']}/"
+        _print(f"  no test command proposed: {where} is {stop['reason']}")
     if result.get("enabled") is False:
         _print(
             "saved disabled: no test command found in its task runners, toolchain files or CI; "

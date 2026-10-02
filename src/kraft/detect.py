@@ -38,11 +38,13 @@ workspace, a Cargo `[workspace]`, a multi-module Maven or Gradle build).
 from __future__ import annotations
 
 import fnmatch
+import itertools
 import json
 import os
 import posixpath
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -826,6 +828,10 @@ _CI_WRAPPERS = {
     "mvn", "sbt", "dotnet", "bundle", "composer", "mix", "swift", "flutter", "dart", "zig",
     "stack", "cabal", "julia", "bazel", "bazelisk", "cmake", "ctest", "meson", "sh", "bash",
 }  # fmt: skip
+#: A workflow file named for the repo's tests or its CI as a whole.
+_CI_TEST_FILE = re.compile(
+    r"(?i)^(?:\.gitlab-ci|config|azure-pipelines|.*(?:test|ci|check)[^/]*)\.ya?ml$"
+)
 #: Workflow files whose tests are not the repo's unit tests, read last.
 _CI_LATE = re.compile(r"e2e|playwright|cypress|release|deploy|docs|nightly|publish|pages|bench")
 #: Inputs to a step, not commands: `actions/github-script`'s `with: script:`
@@ -1034,10 +1040,15 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
                 continue
             if d and d not in index.children:
                 continue
+            verb = command.split()[1] if len(command.split()) > 1 else ""
             if key in _CI_SETUP_KEYS or (
                 head in _CI_SETUP_TOOLS
-                and _CI_SETUP.search(command)
-                and not _CI_TEST.search(command)
+                # `uv sync --group tests`, `mix deps.get --only test`: the
+                # tool's own install, whatever its arguments name.
+                and (
+                    _CI_SETUP.fullmatch(verb)
+                    or (_CI_SETUP.search(command) and not _CI_TEST.search(command))
+                )
             ):
                 role = "setup"
                 if _CI_GLOBAL_INSTALL.search(command):
@@ -1107,6 +1118,8 @@ class Scope:
     #: Prepared by a setup above it (the root's runner recipe, or its
     #: workspace's install), so it needs none of its own.
     covered: bool = False
+    #: The candidates its test command runs: one, or one per family.
+    parts: list[Candidate] = field(default_factory=list)
 
     @property
     def setup_command(self) -> str | None:
@@ -1133,6 +1146,10 @@ class Proposal:
     #: Directories a `stop` detector stopped, with its reason: why there is
     #: no test command when one was not given.
     stopped: list[dict] = field(default_factory=list)
+    #: Programs a proposed command runs that this machine's PATH does not
+    #: have (hono's `deno`): `{dir, tool}`, said before the first work item
+    #: fails on them.
+    missing_tools: list[dict] = field(default_factory=list)
 
 
 def _depth(d: str) -> int:
@@ -1156,13 +1173,19 @@ def _first_by_tier(cands: list[Candidate], tiers: tuple[Tier, ...]) -> Candidate
     return next((c for c in cands if c.bare), None) if "ci" in tiers else None
 
 
-def _setups(cands: list[Candidate], skip_families: set[str], family: str | None) -> list[Candidate]:
-    """A runner's setup recipe if there is one, else a toolchain's: the one
-    of `family` when the test command is a toolchain's (`npm test` needs
-    `npm ci`, not the `cargo fetch` beside it), else one per family (a
-    runner's `make test` may need both a Python and a JavaScript install).
-    A devcontainer's commands are never chosen: they are written for a
-    container, and commonly install into its global interpreter."""
+def _setups(
+    cands: list[Candidate],
+    skip_families: set[str],
+    tested: set[str] | None,
+    test_files: frozenset[str] = frozenset(),
+) -> list[Candidate]:
+    """A runner's setup recipe if there is one, else a toolchain's: one for
+    each family the test command runs (`npm test` needs `npm ci`, not the
+    `cargo fetch` beside it), or one per family when that is not known
+    (`tested` None: a runner's `make test` may need both a Python and a
+    JavaScript install). A devcontainer's commands are never chosen: they
+    are written for a container, and commonly install into its global
+    interpreter."""
     runner = _first_by_tier(cands, ("runner",))
     if runner is not None:
         return [runner]
@@ -1171,10 +1194,112 @@ def _setups(cands: list[Candidate], skip_families: set[str], family: str | None)
     for c in cands:
         if c.tier != "toolchain" or c.family in families or c.family in skip_families:
             continue
-        if family is None or c.family == family:
+        if tested is None or c.family in tested:
             families.add(c.family)
-            picked.append(c)
+            picked.append(_with_ci_flags(c, cands, test_files))
     return picked
+
+
+def _with_ci_flags(
+    setup: Candidate, cands: list[Candidate], test_files: frozenset[str]
+) -> Candidate:
+    """`setup` with the flags CI adds to the same command in the same
+    directory, in a workflow that runs tests (`test_files`): fastapi's
+    tests need the extras its test workflow's `uv sync --group tests
+    --extra all` installs, which a plain `uv sync` leaves out, and its bot
+    workflows' `--group github-actions` does not. Only options and their
+    values are taken, never another command or argument."""
+    want = shlex.split(setup.command)
+    for c in cands:
+        if c.tier != "ci" or c.role != "setup" or c.marker not in test_files:
+            continue
+        words = shlex.split(c.command)
+        extra = words[len(want) :]
+        if words[: len(want)] != want or not extra or not extra[0].startswith("-"):
+            continue
+        if all(w.startswith("-") or prev.startswith("-") for prev, w in itertools.pairwise(extra)):
+            setup.command = c.command
+            setup.source += f", with CI's flags ({c.marker})"
+            break
+    return setup
+
+
+def _programs(command: str) -> list[str]:
+    """The programs `command` runs: each `&&` part's first word, past
+    assignments, and through `sh -c`'s script."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return []
+    out: list[str] = []
+    part: list[str] = []
+    for word in [*words, "&&"]:
+        if word != "&&":
+            part.append(word)
+            continue
+        while part and _ASSIGNMENT.fullmatch(part[0]):
+            part.pop(0)
+        if part[:2] == ["sh", "-c"] and len(part) > 2:
+            out += _programs(part[2])
+        elif part:
+            out.append(part[0])
+        part = []
+    return out
+
+
+def _missing_tools(scopes: list[Scope]) -> list[dict]:
+    """The programs proposed commands run that PATH here does not have. A
+    path (`./gradlew`, `.venv/bin/python`) is the repo's or its setup's."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for s in scopes:
+        for c in (*s.parts, *s.setup):
+            for tool in _programs(c.command):
+                if "/" in tool or tool in seen or shutil.which(tool) is not None:
+                    continue
+                seen.add(tool)
+                out.append({"dir": s.dir or ".", "tool": tool})
+    return out
+
+
+def _choose_test(cands: list[Candidate]) -> tuple[Candidate | None, list[Candidate]]:
+    """The directory's test command, and the candidates it runs. When the
+    best evidence is a toolchain's and toolchains of more than one family
+    have a test here (a pnpm workspace beside a Cargo one, a mix project
+    with a package.json), it runs each family's, one after another: one
+    family's tests passing says nothing of the other's, and a change to
+    either is this directory's."""
+    tests = [c for c in cands if c.role == "test"]
+    first = _first_by_tier(tests, TEST_TIERS)
+    if first is None or first.tier != "toolchain":
+        return first, [first] if first is not None else []
+    by_family: dict[str | None, Candidate] = {first.family: first}
+    for c in tests:
+        if c.tier == "toolchain" and not c.bare and c.family not in by_family:
+            by_family[c.family] = c
+    parts = list(by_family.values())
+    if len(parts) == 1:
+        return first, parts
+    joined = " && ".join(c.command for c in parts)
+    combined = Candidate(
+        first.dir,
+        "test",
+        f"sh -c {shlex.quote(joined)}",
+        "toolchain",
+        " + ".join(c.source for c in parts),
+        first.marker,
+        "+".join(c.detector for c in parts),
+    )
+    return combined, parts
+
+
+def _families(test: Candidate | None, parts: list[Candidate]) -> set[str] | None:
+    """The families a test command runs: None when not known (a runner's
+    task, a given command, a CI line) or when there is none, which is taken
+    to run, and need the setup of, them all."""
+    if test is None or test.tier != "toolchain":
+        return None
+    return {c.family for c in parts if c.family}
 
 
 def in_dir(d: str, command: str, *, shell: bool) -> str:
@@ -1330,21 +1455,24 @@ def _covered(
     """The stops that still stop the repo. A stopped subdirectory is covered
     by the root -- its changes match the root scope, whose command runs its
     tests -- when the root's command is given, comes from the repo's own task
-    runner (a justfile `test` recipe), or from a lockfile install of the
-    stopped project's family (a uv workspace's root `uv.lock`). Then it just
-    gets no scope of its own. A stop at the root itself always stands."""
+    runner (a justfile `test` recipe), or from a toolchain of the stopped
+    project's family (a uv workspace's root `uv.lock`, a root `hatch.toml`).
+    Then it just gets no scope of its own. A stop at the root itself always
+    stands."""
     if "" in stopped:
         return stopped
     root_test = _first_by_tier([c for c in by_dir.get("", []) if c.role == "test"], TEST_TIERS)
-    locked = {d.id for d in table.detectors if d.lockfile}
 
     def covers(stop: Detector) -> bool:
         if test_command:
             return True
         if root_test is None:
             return False
+        # The root's own toolchain of that family (a uv workspace's
+        # `uv run pytest`, hatch's `hatch test`) runs it from the root,
+        # where no lockfile is written.
         return root_test.tier == "runner" or (
-            root_test.detector in locked and root_test.family == stop.family
+            root_test.tier == "toolchain" and root_test.family == stop.family
         )
 
     return {d: stop for d, stop in stopped.items() if not covers(stop)}
@@ -1502,12 +1630,23 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
     ci = _ci_candidates(index)
     devenv = _devcontainer_candidate(index)
 
+    ignored = {n.casefold() for n in table.ignore_dirs}
+
     def eligible(d: str) -> bool:
-        parts = d.split("/")
-        return not any(p.startswith(".") or p in table.ignore_dirs for p in parts)
+        """Not hidden, and no part of it a usual non-project name, in any
+        case: `Tests/`, `Benchmarks/`."""
+        return not any(p.startswith(".") or p.casefold() in ignored for p in d.split("/"))
 
     dirs = {""} | {d for d in index.dirs if 0 < _depth(d) <= table.max_depth and eligible(d)}
-    dirs |= {c.dir for c in ci}
+    # A CI step's working directory is held to the same rules: vscode's ran
+    # in src/vs/sessions/test/e2e.
+    ci = [c for c in ci if c.dir in dirs]
+    #: The CI files that run a test, or are named for it (fastapi's test.yml
+    #: runs `bash scripts/test-cov.sh`): a setup line elsewhere is a bot's or
+    #: a deploy's, whose flags are no guide to what the tests need.
+    test_files = frozenset(c.marker for c in ci if c.role == "test") | frozenset(
+        c.marker for c in ci if _CI_TEST_FILE.search(posixpath.basename(c.marker))
+    )
     by_dir: dict[str, list[Candidate]] = {}
     matches: dict[str, list[_Match]] = {}
     for d in sorted(dirs, key=lambda x: (_depth(x), x)):
@@ -1525,12 +1664,21 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         if root is not None:
             stopped[""] = root
 
-    # A workspace root covers its family's members: their setup always (the
-    # root's install is what installs them), their tests when it has a test.
+    # A workspace root covers its family's members: their setup when its own
+    # setup installs that family, their tests when its test runs that
+    # family's (a pnpm root's `pnpm test` runs no Cargo member's tests).
     workspaces: dict[str, set[str]] = {
         d: {m.detector.family for m in ms if m.workspace and m.detector.family}
         for d, ms in matches.items()
     }
+    #: Per scope, the families its test runs and its setup installs (None:
+    #: any, a runner's task or a given command).
+    runs: dict[str, set[str] | None] = {}
+    installs: dict[str, set[str] | None] = {}
+
+    def reach(a: str, f: str, of: dict[str, set[str] | None]) -> bool:
+        return a in of and f in workspaces.get(a, ()) and (of[a] is None or f in of[a])
+
     scopes: list[Scope] = []
     claimed: set[str] = set()
     #: The root runner's file, when its setup recipe is the root's setup: a
@@ -1541,26 +1689,25 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         # site beside a pnpm workspace), so no workspace above covers it.
         locked = {m.detector.family for m in matches[d] if m.detector.lockfile}
         families = {m.detector.family for m in matches[d] if m.detector.family} - locked
-        covering = {f for a in _ancestors(d) for f in workspaces.get(a, ())}
+        covering = {f for a in _ancestors(d) for f in families if reach(a, f, installs)}
         if any(a in claimed and a for a in _ancestors(d)):
             continue  # inside a directory that is already a scope of its own
-        tested_by = [
-            a for a in _ancestors(d) if a in claimed and workspaces.get(a, set()) & families
-        ]
-        if tested_by:
-            continue
+        if any(reach(a, f, runs) for a in _ancestors(d) if a in claimed for f in families):
+            continue  # its workspace root's test runs its tests
+        parts: list[Candidate] = []
         if d == "" and test_command is not None:
             test = (
                 Candidate("", "test", test_command, "runner", "given", "", "given")
                 if test_command
                 else None
             )
+            parts = [test] if test else []
         elif stopped and test_command is None:
             test = None  # a suite Kraft cannot run would pass on the others'
         else:
-            test = _first_by_tier([c for c in cands if c.role == "test"], TEST_TIERS)
-        family = test.family if test is not None and test.tier == "toolchain" else None
-        setup = _setups([c for c in cands if c.role == "setup"], covering & families, family)
+            test, parts = _choose_test(cands)
+        tested = _families(test, parts)
+        setup = _setups([c for c in cands if c.role == "setup"], covering, tested, test_files)
         named = recipe_text is not None and _names_dir(recipe_text, d)
         if named:
             setup = [c for c in setup if c.tier == "runner"]
@@ -1568,15 +1715,17 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
             continue
         if test is None and d == "" and not setup:
             continue
-        covered = not setup and (named or bool(covering & families))
-        scopes.append(Scope(d, test, setup, covered))
+        covered = not setup and (named or bool(covering))
+        scopes.append(Scope(d, test, setup, covered, parts))
         if d == "" and [c.tier for c in setup] == ["runner"]:
             recipe_text = _recipe(index.text(setup[0].marker), setup[0].detector, setup[0].task)
+        runs[d] = tested
+        by_runner = [c.tier for c in setup] == ["runner"]
+        installs[d] = None if by_runner else {c.family for c in setup if c.family}
         if test is not None:
             claimed.add(d)
-        for c in (test, *setup):
-            if c is not None:
-                c.chosen = True
+        for c in (*parts, *setup):
+            c.chosen = True
 
     tested = [s for s in scopes if s.test is not None]
     nested = [s for s in tested if s.dir]
@@ -1600,7 +1749,7 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
     return Proposal(
         test_command=test_scopes[0]["command"] if test_scopes else None,
         test_scopes=test_scopes,
-        test_markers=[s.test.marker for s in tested if s.test.marker],
+        test_markers=[c.marker for s in tested for c in s.parts if c.marker],
         setup_command=combine_setup(shaped),
         missing_setup=[s.dir or "." for s in tested if s.setup_command is None],
         scopes=shaped,
@@ -1609,4 +1758,5 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         stopped=[
             {"dir": d or ".", "reason": s.reason, "detector": s.id} for d, s in stopped.items()
         ],
+        missing_tools=_missing_tools(scopes),
     )

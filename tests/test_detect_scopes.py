@@ -83,12 +83,12 @@ def test_a_workspace_member_with_its_own_lockfile_installs_on_its_own(tmp_path):
         "pnpm-lock.yaml": "",
         "package.json": JEST,
         "packages/a/package.json": JEST,
-        "docs/package.json": JEST,
-        "docs/package-lock.json": "",
+        "site/package.json": JEST,
+        "site/package-lock.json": "",
     }
     p = _propose(_repo(tmp_path, files))
-    assert p.setup_command == "pnpm install --frozen-lockfile && (cd docs && npm ci)"
-    assert [s["paths"] for s in p.test_scopes][1:] == [["docs/**"]]
+    assert p.setup_command == "pnpm install --frozen-lockfile && (cd site && npm ci)"
+    assert [s["paths"] for s in p.test_scopes][1:] == [["site/**"]]
 
 
 def test_a_workspace_root_covers_its_members(tmp_path):
@@ -119,6 +119,40 @@ def test_ignored_untracked_and_conventional_non_project_directories_are_not_scop
         "deps/hiredis/Makefile": "test:\n\t./run\n",  # redis vendors its dependencies here
     }
     assert _propose(_repo(tmp_path, files)).test_scopes == []
+
+
+def test_a_non_project_directory_is_skipped_whatever_its_case(tmp_path):
+    """hono's benchmarks/routers-deno joined every item's setup (and failed
+    on a machine with no deno), fmt's support/ an Android build, and
+    swift-argument-parser's Sources/ and Tests/ CMake fragments became
+    scopes of their own."""
+    files = {
+        "go.mod": "module x\n",
+        "benchmarks/routers-deno/deno.json": "{}",
+        "Benchmarks/x/go.mod": "module b\n",
+        "support/build.gradle": "",
+        "Tests/go.mod": "module t\n",
+        "Sources/CMakeLists.txt": "add_library(x x.c)\n",
+        "docs/Makefile": "check:\n\tsphinx-build -W . _build\n",  # django's docs
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert (p.test_scopes, p.setup_command) == (
+        [{"paths": ["**"], "command": "go test ./..."}],
+        "go mod download",
+    )
+
+
+def test_a_ci_working_directory_is_held_to_the_scope_rules(tmp_path):
+    """vscode's CI ran in src/vs/sessions/test/e2e, four levels down, under
+    a `test` directory: it became a scope."""
+    step = "      - run: npm test\n        working-directory: src/a/test/e2e\n"
+    files = {
+        "go.mod": "module x\n",
+        "src/a/test/e2e/x.js": "",
+        ".github/workflows/ci.yml": f"jobs:\n  t:\n    steps:\n{step}",
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert [s["command"] for s in p.test_scopes] == ["go test ./..."]
 
 
 def test_a_deno_workspace_root_tests_its_members(tmp_path):
@@ -262,3 +296,19 @@ def test_a_nested_scopes_command_runs_in_its_own_directory(tmp_path, files, scri
         [f"{directory}/**"],
         ["sh", "-c", script],
     )
+
+
+def test_a_program_this_machine_lacks_is_named_before_an_item_fails_on_it(tmp_path):
+    """hono's runtime-tests/deno joined every item's setup on a machine with
+    no deno: verify failed on `deno: not found`. The scope stays (its tests
+    are real), and connect says so."""
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "detectors.yaml").write_text(
+        "detectors:\n  - id: zz\n    tier: toolchain\n    family: zz\n    files: [zz.pkg]\n"
+        "    test: [{run: \"sh -c 'A=1 zz-not-installed test && go vet'\"}]\n"
+        "    setup: [{run: ./zz-setup}]\n"
+    )
+    files = {"go.mod": "module x\n", "rt/zz.pkg": ""}
+    p = _propose(_repo(tmp_path / "repo", files), templates)
+    assert p.missing_tools == [{"dir": "rt", "tool": "zz-not-installed"}]

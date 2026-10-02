@@ -3,8 +3,8 @@ import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { Kv } from "../panes/controls";
-import type { ProbeCandidate, ProbeStop } from "../../../types/settings";
-import { chosenSource, others, readFrom, withSource } from "./evidence";
+import type { MissingTool, ProbeCandidate, ProbeStop } from "../../../types/settings";
+import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "./evidence";
 
 /** `POST /repos/probe`'s answer, the fields Connect reads. */
 export interface Probe {
@@ -20,6 +20,7 @@ export interface Probe {
   read_from?: string | null;
   missing_setup?: string[];
   stopped?: ProbeStop[];
+  missing_tools?: MissingTool[];
 }
 
 /** The `fields` of `add_repo` from a probe: what `POST /repos` writes (Decided 9). A
@@ -67,6 +68,11 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
     else setError(detailOf(a.body));
   };
 
+  const stopped = !!probe?.stopped?.length;
+  const saved = probe ? [probe.test_command, probe.setup_command, ...(probe.test_scopes ?? []).map((s) => s.command)] : [];
+  const alsoTest = probe ? others(probe.candidates, "test", saved) : null;
+  const alsoSetup = probe ? others(probe.candidates, "setup", saved) : null;
+
   return (
     <form className="rp-connect" onSubmit={(e) => { e.preventDefault(); void (probe ? connect() : check()); }}>
       <label className="rp-connect-label" htmlFor="rp-connect-path">Path to a git repository</label>
@@ -80,18 +86,20 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           <Kv k="name" v={probe.name} />
           <Kv k="branch" v={probe.branch ?? "—"} mono />
           <Kv k="forge" v={probe.forge ? `${probe.forge}${probe.project ? ` · ${probe.project}` : ""}` : "no forge remote"} muted={!probe.forge} />
-          <Kv k="tests" v={probe.test_command ? withSource(probe.test_command, chosenSource(probe.candidates, "test")) : "none found"} mono muted={!probe.test_command} />
-          <Kv k="test scopes" v={probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes} />
+          <Kv k="tests" v={probe.test_command ? withSource(probe.test_command, chosenSource(probe.candidates, "test")) : stopped ? "stopped" : "none found"} mono muted={!probe.test_command} />
+          <Kv k="test scopes" v={stopped ? "stopped" : probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes?.length} />
           {/* Every command Connect saves is shown: a nested scope's is not the test command above. */}
           {(probe.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => (
             <Kv key={s.paths[0]} k={s.paths[0]} v={s.command} mono />
           ))}
-          <Kv k="setup" v={probe.setup_command ? withSource(probe.setup_command, chosenSource(probe.candidates, "setup")) : "none found"} mono muted={!probe.setup_command} />
-          {others(probe.candidates) && <Kv k="also found" v={others(probe.candidates)!} mono muted />}
-          {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={`${s.dir} is ${s.reason}`} muted />)}
-          {probe.missing_setup?.length ? <Kv k="no setup" v={`${probe.missing_setup.join(", ")}: tests and nothing to prepare them; the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos`} muted /> : null}
+          <Kv k="setup" v={setupLine(probe)} mono muted={!probe.setup_command} />
+          {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={stopLine(s)} muted />)}
+          {probe.missing_setup?.length ? <Kv k="no setup" v="the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos" muted /> : null}
+          {missingLine(probe.missing_tools) && <Kv k="not installed" v={missingLine(probe.missing_tools)!} />}
           {readFrom(probe.read_from) && <Kv k="read from" v={readFrom(probe.read_from)!} muted />}
-          <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : "No tests found: connected disabled until you set a test command."}</p>
+          {alsoTest && <p className="rp-connect-note">Also found for tests: {alsoTest}</p>}
+          {alsoSetup && <p className="rp-connect-note">Also found for setup: {alsoSetup}</p>}
+          <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : stopped ? "Tests stopped: connected disabled until you set a test command." : "No tests found: connected disabled until you set a test command."}</p>
         </div>
       )}
     </form>

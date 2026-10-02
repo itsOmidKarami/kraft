@@ -874,6 +874,7 @@ def probe_repo(
         "candidates": proposal.candidates,
         "read_from": proposal.ref,
         "stopped": proposal.stopped,
+        "missing_tools": proposal.missing_tools,
     }
 
 

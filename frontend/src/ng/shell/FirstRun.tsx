@@ -5,7 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
-import { chosenSource, others, readFrom, withSource } from "../templates/repos/evidence";
+import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "../templates/repos/evidence";
 import "./first-run.css";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
@@ -70,18 +70,26 @@ function StepCircle({ n, state, onClick }: { n: number; state: "done" | "current
   );
 }
 
+function also(p: RepoProbe, role: "test" | "setup", label: string): [string, string][] {
+  const saved = [p.test_command, p.setup_command, ...(p.test_scopes ?? []).map((s) => s.command)];
+  const found = others(p.candidates, role, saved);
+  return found ? [[label, found]] : [];
+}
+
 function probeRows(p: RepoProbe): [string, string][] {
   return [
     [".gitmodules", p.submodules.length ? `${p.submodules.length} submodule${p.submodules.length === 1 ? "" : "s"}` : "none"],
     [".beads/", p.has_beads ? "found" : "not found"],
-    ["Test command", p.test_command ? withSource(p.test_command, chosenSource(p.candidates, "test")) : "not detected"],
-    ["Setup command", p.setup_command ? withSource(p.setup_command, chosenSource(p.candidates, "setup")) : "none found"],
+    ["Test command", p.test_command ? withSource(p.test_command, chosenSource(p.candidates, "test")) : p.stopped?.length ? "stopped" : "not detected"],
+    ["Setup command", setupLine(p)],
     ["Forge remote", p.forge ? `${p.forge}${p.project ? ` · ${p.project}` : ""}` : "none"],
-    ...(others(p.candidates) ? [["Also found", others(p.candidates)!] as [string, string]] : []),
-    ...(p.stopped ?? []).map((s) => ["No tests", `${s.dir} is ${s.reason}`] as [string, string]),
+    ...also(p, "test", "Also found for tests"),
+    ...also(p, "setup", "Also found for setup"),
+    ...(p.stopped ?? []).map((s) => ["No tests", stopLine(s)] as [string, string]),
     ...(p.missing_setup?.length
-      ? [["No setup", `${p.missing_setup.join(", ")}: the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos`] as [string, string]]
+      ? [["No setup", "the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos"] as [string, string]]
       : []),
+    ...(missingLine(p.missing_tools) ? [["Not installed", missingLine(p.missing_tools)!] as [string, string]] : []),
     ...(readFrom(p.read_from) ? [["Read from", readFrom(p.read_from)!] as [string, string]] : []),
   ];
 }

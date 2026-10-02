@@ -131,7 +131,7 @@ _DEEP = 100_000
 #: file is no evidence (its tasks unread), the rest of the repo still is.
 _NESTED = {
     "package-json": ({"package.json": "[" * _DEEP, "package-lock.json": ""}, "go test ./..."),
-    "deno-jsonc": ({"deno.jsonc": "[" * _DEEP}, "deno test"),
+    "deno-jsonc": ({"deno.jsonc": "[" * _DEEP}, "sh -c 'deno test && go test ./...'"),
     "devcontainer": (
         {".devcontainer/devcontainer.json": '{"postCreateCommand": ' + "[" * _DEEP},
         "go test ./...",

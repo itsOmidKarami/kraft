@@ -42,6 +42,12 @@ ignore_dirs:
   - deps
   - examples
   - example
+  - docs
+  - doc
+  - benchmarks
+  - benchmark
+  - bench
+  - support
   - samples
   - fixtures
   - testdata
@@ -192,6 +198,18 @@ detectors:
     setup:
       - run: "hatch env create"
 
+  - id: hatch-toml
+    tier: toolchain
+    family: python
+    # Hatch's settings in a file of their own (pypa/hatch).
+    files: [hatch.toml]
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    wrap: "hatch run {command}"
+    test:
+      - run: "hatch test"
+    setup:
+      - run: "hatch env create"
+
   - id: pyproject
     tier: toolchain
     family: python
@@ -204,7 +222,21 @@ detectors:
     contains: {pyproject.toml: '(?m)^\[(project|tool\.poetry|build-system)\]'}
     unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
     stop: true
-    reason: "a pyproject.toml with no lockfile: `uv sync` and `uv run` would write uv.lock into every work item's worktree"
+    reason: "a pyproject.toml with no lockfile: uv sync and uv run would write a uv.lock into every work item's worktree"
+
+  - id: tox
+    tier: toolchain
+    family: python
+    files: [tox.ini]
+    # Beside a lockless pyproject.toml or a setup.py too: tox makes its own
+    # environments and writes no lockfile into the worktree.
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    # `py`: the interpreter tox runs on. A bare `tox` runs every env in its
+    # envlist, linters and every Python version, each needing its own.
+    test:
+      - run: "tox -e py"
+    setup:
+      - run: "tox -e py --notest"
 
   - id: requirements
     tier: toolchain
@@ -219,18 +251,6 @@ detectors:
       - {when: [{files: [requirements_dev.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r requirements_dev.txt"}
       - {when: [{files: [dev-requirements.txt]}], run: "python3 -m venv .venv && .venv/bin/pip install -r dev-requirements.txt"}
       - run: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
-
-  - id: tox
-    tier: toolchain
-    family: python
-    files: [tox.ini]
-    unless: [pyproject.toml, requirements.txt, Pipfile]
-    # `py`: the interpreter tox runs on. A bare `tox` runs every env in its
-    # envlist, linters and every Python version, each needing its own.
-    test:
-      - run: "tox -e py"
-    setup:
-      - run: "tox -e py --notest"
 
   # ── JavaScript and TypeScript ───────────────────────────────────────────────
   - id: bun
@@ -394,6 +414,9 @@ detectors:
     test:
       - run: "./mvnw -B test"
     setup:
+      # A reactor's modules depend on each other's jars, which test-compile
+      # does not build (gson's test-jpms module): install them, untested.
+      - {when: *maven-workspace, run: "./mvnw -B -DskipTests install"}
       - run: "./mvnw -B test-compile"
 
   - id: maven
@@ -405,6 +428,7 @@ detectors:
     test:
       - run: "mvn -B test"
     setup:
+      - {when: *maven-workspace, run: "mvn -B -DskipTests install"}
       - run: "mvn -B test-compile"
 
   - id: sbt
@@ -461,7 +485,10 @@ detectors:
       - {when: [{files: [phpunit.xml, phpunit.xml.dist]}], run: "vendor/bin/phpunit"}
       - {when: [{files: [vendor/bin/pest]}, {contains: {composer.json: '"pestphp/pest"'}}], run: "vendor/bin/pest"}
     setup:
-      - run: "composer install"
+      # With no composer.lock, `composer install` resolves and writes one into
+      # every work item's worktree: no setup is proposed, for a person to
+      # decide (commit a lockfile, or declare one).
+      - {when: [{files: [composer.lock]}], run: "composer install"}
 
   - id: mix
     tier: toolchain
@@ -553,6 +580,9 @@ detectors:
     tier: toolchain
     family: c
     files: [CMakeLists.txt]
+    # A project of its own, not a CMakeLists.txt a parent adds as a
+    # subdirectory (swift-argument-parser's Sources/, Tests/).
+    contains: {CMakeLists.txt: '(?mi)^[ \t]*+project[ \t]*+\('}
     test:
       # A test command is run without a shell, so the build and the run are one `sh -c`.
       - run: "sh -c 'cmake --build build && ctest --test-dir build --output-on-failure'"

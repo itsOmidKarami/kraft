@@ -137,6 +137,39 @@ def test_a_command_the_e2e_workflow_also_runs_is_the_test_workflows(tmp_path):
     )
 
 
+def test_ci_flags_on_the_toolchains_own_install_are_carried_over(tmp_path):
+    """fastapi's tests need the extras its test workflow's `uv sync` names;
+    a plain `uv sync` leaves them out, and its bot workflows' groups are no
+    guide. Only options are carried, never a command."""
+    steps = (
+        "      - run: uv sync --locked --extra all --group tests\n"
+        "      - run: uv sync tool\n      - run: uv run pytest\n"
+    )
+    bot = ".github/workflows/a-bot.yml"
+    files = {"pyproject.toml": PYTEST, "uv.lock": "", **_workflow(steps)}
+    files[bot] = "jobs:\n  b:\n    steps:\n      - run: uv sync --group github-actions\n"
+    p = _propose(_repo(tmp_path, files))
+    assert p.setup_command == "uv sync --locked --extra all --group tests"
+    assert "with CI's flags (.github/workflows/ci.yml)" in _chosen(p, "setup")["source"]
+    # A workflow named for the tests counts though its test line is a script.
+    named = {
+        ".github/workflows/test.yml": "jobs:\n  t:\n    steps:\n      - run: uv sync --extra x\n"
+    }
+    p = _propose(_repo(tmp_path / "n", {"pyproject.toml": PYTEST, "uv.lock": "", **named}))
+    assert p.setup_command == "uv sync --extra x"
+    other = _workflow("      - run: uv sync tool --extra x\n      - run: uv run pytest\n")
+    p = _propose(_repo(tmp_path / "o", {"pyproject.toml": PYTEST, "uv.lock": "", **other}))
+    assert p.setup_command == "uv sync"
+
+
+def test_an_install_for_the_test_environment_is_no_test(tmp_path):
+    """phoenix's CI: `mix deps.get --only test` installs; it runs no test."""
+    p = _propose(_repo(tmp_path, _workflow("      - run: mix deps.get --only test\n")))
+    assert [(c["role"], c["command"]) for c in p.candidates] == [
+        ("setup", "mix deps.get --only test")
+    ]
+
+
 _CIRCLE = (
     "jobs:\n  t:\n    steps:\n      - run:\n"
     "          command: make test\n          working_directory: svc\n"

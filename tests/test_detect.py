@@ -144,6 +144,13 @@ KINDS = [
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
     ),  # noqa: E501
     ("tox", {"tox.ini": "[tox]\n"}, "tox -e py", "tox -e py --notest"),
+    (
+        "tox-beside-a-lockless-pyproject",  # django, boto3
+        {"tox.ini": "[tox]\n", "pyproject.toml": PYTEST, "requirements.txt": "pytest\n"},
+        "tox -e py",
+        "tox -e py --notest",
+    ),
+    ("hatch-toml", {"hatch.toml": "[envs.default]\n"}, "hatch test", "hatch env create"),
     ("cargo", {"Cargo.toml": "[package]\n"}, "cargo test", "cargo fetch"),
     (
         "cargo-workspace",
@@ -178,6 +185,12 @@ KINDS = [
         "./mvnw -B test-compile",
     ),  # noqa: E501
     ("maven", {"pom.xml": "<project/>"}, "mvn -B test", "mvn -B test-compile"),
+    (
+        "maven-reactor",  # gson: test-compile does not build the modules' jars
+        {"pom.xml": "<project><modules><module>a</module></modules></project>"},
+        "mvn -B test",
+        "mvn -B -DskipTests install",
+    ),
     ("sbt", {"build.sbt": ""}, "sbt test", "sbt update"),
     ("dotnet-by-glob", {"App.sln": "", "src/App/App.csproj": ""}, "dotnet test", "dotnet restore"),  # noqa: E501
     (
@@ -201,10 +214,17 @@ KINDS = [
     ),
     (
         "composer",
-        {"composer.json": '{"scripts": {"test": "phpunit"}}'},
+        {"composer.json": '{"scripts": {"test": "phpunit"}}', "composer.lock": "{}"},
         "composer test",
         "composer install",
-    ),  # noqa: E501
+    ),
+    # `composer install` would write a composer.lock into every worktree.
+    (
+        "composer-without-a-lockfile",
+        {"composer.json": '{"scripts": {"test": "x"}}'},
+        "composer test",
+        None,
+    ),
     ("mix", {"mix.exs": ""}, "mix test", "mix deps.get"),
     ("swift", {"Package.swift": ""}, "swift test", "swift package resolve"),
     (
@@ -231,7 +251,7 @@ KINDS = [
     ("bazel", {"MODULE.bazel": ""}, "bazel test //...", "bazel fetch //..."),
     (
         "cmake",
-        {"CMakeLists.txt": ""},
+        {"CMakeLists.txt": "cmake_minimum_required(VERSION 3.20)\nproject(x C)\n"},
         "sh -c 'cmake --build build && ctest --test-dir build --output-on-failure'",
         "cmake -S . -B build",
     ),  # noqa: E501
@@ -325,13 +345,47 @@ def test_pytest_is_proposed_only_with_evidence_of_pytest(tmp_path, pyproject):
 _BOTH = {"pyproject.toml": PYTEST, "uv.lock": "", "package.json": JEST, "package-lock.json": ""}
 
 
-def test_of_two_toolchains_at_one_root_python_is_tested_and_prepared(tmp_path):
-    """One test command: the table's order breaks the tie, Python first, as
-    a Python project with a package.json for its tooling is the common
-    shape. Its setup is its own toolchain's; the other is shown."""
+def test_two_toolchains_at_one_root_are_both_tested_and_prepared(tmp_path):
+    """tauri's pnpm and Cargo, phoenix's npm and mix: one family's tests
+    passing says nothing of the other's, so the root runs both, in the
+    table's order (Python first), and installs both."""
     p = _propose(_repo(tmp_path, _BOTH))
-    assert (p.test_command, p.setup_command) == ("uv run pytest", "uv sync")
-    assert [c["command"] for c in p.candidates if not c["chosen"]] == ["npm test", "npm ci"]
+    assert p.test_command == "sh -c 'uv run pytest && npm test'"
+    assert p.setup_command == "uv sync && npm ci"
+    assert [c["command"] for c in p.candidates if not c["chosen"]] == []
+
+
+def test_a_workspace_covers_only_the_members_its_test_runs(tmp_path):
+    """A pnpm root's `pnpm test` ran no Cargo member's tests, yet the root
+    claimed them as a Cargo workspace: now its test runs Cargo's too."""
+    files = {
+        "pnpm-lock.yaml": "",
+        "package.json": '{"scripts": {"test": "vitest"}}',
+        "Cargo.toml": "[workspace]\nmembers = ['crates/a']\n",
+        "crates/a/Cargo.toml": "[package]\n",
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert p.test_scopes == [
+        {"paths": ["**"], "command": "sh -c 'pnpm test && cargo test --workspace'"}
+    ]
+    assert p.setup_command == "pnpm install --frozen-lockfile && cargo fetch"
+
+
+def test_a_workspace_root_whose_test_runs_another_family_leaves_its_members_a_scope(tmp_path):
+    """Every packaged workspace has a test at its root, which the root runs;
+    an operator's workspace detector need not. Its members then get scopes
+    of their own: the root's `cargo test` cannot run them."""
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "detectors.yaml").write_text(
+        "detectors:\n"
+        "  - {id: zz-root, tier: toolchain, family: zz, files: [zz.ws],"
+        " workspace: [{files: [zz.ws]}]}\n"
+        "  - {id: zz, tier: toolchain, family: zz, files: [zz.pkg], test: [{run: zz test}]}\n"
+    )
+    files = {"Cargo.toml": "[package]\n", "zz.ws": "", "m/zz.pkg": ""}
+    p = _propose(_repo(tmp_path / "repo", files), templates)
+    assert [s["command"] for s in p.test_scopes] == ["cargo test", "sh -c 'cd m && zz test'"]
 
 
 def test_a_runners_test_task_beside_two_toolchains_gets_both_installs(tmp_path):
@@ -434,6 +488,10 @@ _COVERED_BY_THE_ROOT = {
             "frontend/package.json": JEST,
         },
         ("just test", ["just test", "sh -c 'cd frontend && npm test'"], "backend"),
+    ),
+    "a-root-hatch-toml-and-a-lockless-backend": (  # pypa/hatch
+        {"hatch.toml": "[envs.default]\n", "backend/pyproject.toml": PYTEST},
+        ("hatch test", ["hatch test"], "backend"),
     ),
     "a-uv-lock-and-a-frontend": (
         {"pyproject.toml": PYTEST, "uv.lock": "", "src/app.py": "", "frontend/package.json": JEST},

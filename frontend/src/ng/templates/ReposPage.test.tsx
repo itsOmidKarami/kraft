@@ -152,7 +152,9 @@ describe("Repos page: connecting", () => {
         test_command: null,
         test_scopes: [],
         read_from: "refs/remotes/origin/main",
+        setup_command: null,
         missing_setup: ["web"],
+        candidates: [{ dir: "", role: "setup", command: "uv sync", tier: "toolchain", source: "uv.lock", marker: "uv.lock", detector: "uv", family: "python", corroborated: false, chosen: true }],
         stopped: [{ dir: ".", reason: "a project (Gemfile) with no test command found", detector: "ruby" }],
       }))
       : ok([{ id: "default" }]))) as never);
@@ -162,11 +164,11 @@ describe("Repos page: connecting", () => {
     await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
     const found = await screen.findByLabelText("What was found");
-    expect(found).toHaveTextContent(". is a project (Gemfile) with no test command found");
-    expect(found).toHaveTextContent("web: tests and nothing to prepare them");
+    expect(found).toHaveTextContent("the root is a project (Gemfile) with no test command found");
+    expect(found).toHaveTextContent("uv sync found, but web/ has nothing to prepare it");
     expect(found).toHaveTextContent("origin/main, where work items start");
-    // `test_scopes: []` is no test: the repo connects disabled, and says so.
-    expect(found).toHaveTextContent("No tests found: connected disabled");
+    // Stopped, not missing: the form says which.
+    expect(found).toHaveTextContent("Tests stopped: connected disabled");
   });
 
   it("says a repo with no tests connects disabled, as add_repo sends it, though the probe answers an empty scope list", async () => {

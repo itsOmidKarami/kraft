@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProbeCandidate } from "../../../types/settings";
-import { chosenSource, others, readFrom, withSource } from "./evidence";
+import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "./evidence";
 
 const c = (over: Partial<ProbeCandidate>): ProbeCandidate => ({
   dir: "", role: "test", command: "just test", tier: "runner", source: "justfile recipe `test`", marker: "justfile",
@@ -8,25 +8,51 @@ const c = (over: Partial<ProbeCandidate>): ProbeCandidate => ({
 });
 
 describe("probe evidence", () => {
-  it("names the root's chosen sources, joining two toolchains' setups", () => {
+  it("names a test's root sources, and every directory's setup sources", () => {
     const cands = [
       c({}),
       c({ role: "setup", command: "uv sync", source: "uv.lock", tier: "toolchain" }),
       c({ role: "setup", command: "npm ci", source: "package-lock.json", tier: "toolchain" }),
       c({ dir: "web", command: "npm test", source: "web/package.json script `test`" }),
+      c({ dir: "web", role: "setup", command: "npm ci", source: "web/package-lock.json", tier: "toolchain" }),
       c({ command: "uv run pytest", source: "uv.lock", chosen: false }),
     ];
     expect(chosenSource(cands, "test")).toBe("justfile recipe `test`");
-    expect(chosenSource(cands, "setup")).toBe("uv.lock + package-lock.json");
-    expect(others(cands)).toBe("uv run pytest (uv.lock)");
+    // A five-part setup was labelled with the root's one source.
+    expect(chosenSource(cands, "setup")).toBe("uv.lock + package-lock.json + web/: web/package-lock.json");
+    expect(others(cands, "test")).toBe("uv run pytest (uv.lock)");
   });
 
-  it("names the first few commands it did not propose, with their directory, and counts the rest", () => {
+  it("lists what it did not propose by role, leaving out what a saved command already runs", () => {
     const rest = ["a", "b", "c", "d"].map((x) => c({ command: `make ${x}`, source: "Makefile", chosen: false }));
-    expect(others([...rest, c({ dir: "web", command: "npm test", source: "web/package.json", chosen: false })], 1))
-      .toBe("make a (Makefile) and 4 more");
-    expect(others([c({ dir: "web", command: "npm test", source: "web/package.json", chosen: false })]))
-      .toBe("web/: npm test (web/package.json)");
+    expect(others(rest, "test", [], 1)).toBe("make a (Makefile) and 3 more");
+    const web = c({ dir: "web", command: "npm test", source: "web/package.json", chosen: false });
+    expect(others([web], "test")).toBe("web/: npm test (web/package.json)");
+    expect(others([web], "setup")).toBeNull();
+    // jest's chosen `yarn test` was listed again, a picked setup's other half too.
+    expect(others([web], "test", ["sh -c 'cd web && npm test'"])).toBeNull();
+    const ci = c({ role: "setup", command: "npm ci", chosen: false });
+    expect(others([ci], "setup", ["mix deps.get && npm ci"])).toBeNull();
+    expect(others([ci], "setup", ["pnpm ci"])).toBe("npm ci (justfile recipe `test`)");
+  });
+
+  it("says a setup found but left undecided, rather than none found", () => {
+    const bootstrap = c({ role: "setup", command: "make bootstrap" });
+    expect(setupLine({ setup_command: null, candidates: [bootstrap], missing_setup: ["src"] }))
+      .toBe("make bootstrap found, but src/ has nothing to prepare it");
+    expect(setupLine({ setup_command: null, candidates: [], missing_setup: ["."] })).toBe("none found");
+    expect(setupLine({ setup_command: "", candidates: [] })).toBe("none needed");
+  });
+
+  it("says which programs a work item would fail on, by directory", () => {
+    expect(missingLine([{ dir: "runtime-tests/deno", tool: "deno" }, { dir: ".", tool: "cargo" }]))
+      .toBe("deno (runtime-tests/deno/), cargo (the root): not installed here, so a work item would fail on it");
+    expect(missingLine([])).toBeNull();
+  });
+
+  it("names the root as the root in a stop", () => {
+    expect(stopLine({ dir: ".", reason: "a project", detector: "ruby" })).toBe("the root is a project");
+    expect(stopLine({ dir: "api", reason: "a project", detector: "ruby" })).toBe("api/ is a project");
   });
 
   it("says which commit it read, so an edit not pushed there is not a surprise", () => {
@@ -37,7 +63,7 @@ describe("probe evidence", () => {
 
   it("has nothing to say about a probe from a server that sends no candidates", () => {
     expect(chosenSource(undefined, "test")).toBeNull();
-    expect(others(undefined)).toBeNull();
+    expect(others(undefined, "test")).toBeNull();
     expect(withSource("pytest", null)).toBe("pytest");
     expect(withSource("pytest", "pytest.ini")).toBe("pytest — from pytest.ini");
   });

@@ -83,6 +83,15 @@ export interface RepoProbe {
   missing_setup?: string[];
   /** Why no test command was proposed, by directory. */
   stopped?: ProbeStop[];
+  /** Programs a proposed command runs that the server's PATH does not have. */
+  missing_tools?: MissingTool[];
+}
+
+/** A program a proposed command runs that the server's PATH lacks: a work
+ *  item there fails on it. */
+export interface MissingTool {
+  dir: string;
+  tool: string;
 }
 
 /** A directory the probe proposes no test command for, and why. */
