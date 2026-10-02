@@ -84,6 +84,15 @@ def child_env(env: dict | None = None) -> dict:
     return child
 
 
+def output_of(proc: subprocess.Popen) -> str:
+    """Everything `proc` printed to its captured stdout, once it is dead. A
+    live child never sends EOF on its pipe, so reading it first would block
+    for as long as the child runs; `kill` is a no-op on one already gone."""
+    proc.kill()
+    out, _ = proc.communicate()
+    return out if isinstance(out, str) else (out or b"").decode(errors="replace")
+
+
 def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | None):
     """One attempt at a live server. Returns a `Server`, or the child's returncode
     if it exited before it ever served.

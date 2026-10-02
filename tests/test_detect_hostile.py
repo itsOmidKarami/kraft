@@ -15,10 +15,14 @@ from support.probe import repo_with as _repo
 
 from kraft import config, detect
 
-#: Seconds of CPU: comfortably above the probe of a real repo (well under a
-#: second) and the costliest case below (about 1.2s), and far below the tens
-#: of seconds each case took before its fix.
-_BUDGET_S = 3.0
+#: Seconds of CPU: comfortably above the costliest case below, which is about
+#: 1.3s bare and 2.8s under CI's coverage tracer (`COVERAGE_CORE=ctrace`), and
+#: far below the tens of seconds each case took before its fix.
+_BUDGET_S = 10.0
+#: Seconds of wall time, loose on purpose: a probe that regresses into
+#: *waiting* (a subprocess per file, a lock, a sleep) spends no CPU here and
+#: would otherwise run on to the suite's 120s kill with no message.
+_WALL_S = 30.0
 
 _WORKFLOW = ".github/workflows/ci.yml"
 #: A file at the size the probe reads one to.
@@ -36,7 +40,7 @@ class _OverBudget(BaseException):
 
 def _within_budget(repo, **kw) -> detect.Proposal:
     """The proposal for `repo`, failing once this process has spent
-    `_BUDGET_S` of CPU on it.
+    `_BUDGET_S` of CPU on it, or `_WALL_S` of wall time.
 
     CPU rather than wall time: a loaded machine makes the probe wait for a
     core, never compute more, so a busy CI runner cannot fail this. And the
@@ -51,6 +55,7 @@ def _within_budget(repo, **kw) -> detect.Proposal:
 
     previous = signal.signal(signal.SIGPROF, over)
     signal.setitimer(signal.ITIMER_PROF, _BUDGET_S)
+    started = time.monotonic()
     try:
         try:
             p = _propose(repo, **kw)
@@ -60,7 +65,9 @@ def _within_budget(repo, **kw) -> detect.Proposal:
         pass
     finally:
         signal.signal(signal.SIGPROF, previous)
+    took = time.monotonic() - started
     assert not fired, f"the probe spent more than {_BUDGET_S}s of CPU"
+    assert took < _WALL_S, f"the probe took {took:.1f}s of wall time, over {_WALL_S}s"
     return p
 
 

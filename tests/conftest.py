@@ -18,10 +18,7 @@ from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
 
 from kraft import client as kraft_client
 from kraft import db
-from kraft.adapters.hook_install import FAIL_CLOSED_ENV
 from kraft.paths import RunDirs
-from kraft.worker import env as worker_env
-from kraft.worker.sandbox import FORWARDED_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -345,8 +342,12 @@ def _per_test_tempdir(tmp_path_factory, monkeypatch):
     the operator, `cli/verify.py`) goes with pytest's temp dirs instead of
     piling up in the machine's `/tmp`. Beside `tmp_path`, not in it, as `HOME`
     is below: several tests list `tmp_path`. The per-process caches in
-    `support` keep the real one (`harness.PROCESS_TMP`)."""
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path_factory.mktemp("tmp")))
+    `support` keep the real one (`harness.PROCESS_TMP`). `TMPDIR` too, so a
+    child Kraft (`support.server.child_env` copies this environment, and
+    `worker_env.BASELINE` forwards the name) writes there as well."""
+    tmp = str(tmp_path_factory.mktemp("tmp"))
+    monkeypatch.setattr(tempfile, "tempdir", tmp)
+    monkeypatch.setenv("TMPDIR", tmp)
 
 
 @pytest.fixture(autouse=True)
@@ -384,23 +385,10 @@ def _fresh_process_state(monkeypatch):
     httpx_logger.setLevel(level)
 
 
-#: The `KRAFT_*` a Kraft worker's own environment carries -- the names that
-#: locate the instance that launched it (`worker_env.BASELINE`) and its session
-#: identity (`sandbox.FORWARDED_ENV`, the fail-closed hook flag) -- and the rest
-#: of what the lifespan reads (`api/startup.py`, `deps._bd_cwd`). Run under a
-#: worker, or from a shell that exported any of them, each would point a test
-#: at that real instance, its bd workspace or its build, or make it act as that
-#: session.
-_INHERITED_INSTANCE_ENV = tuple(
-    sorted(
-        {
-            name
-            for name in (*worker_env.BASELINE, *FORWARDED_ENV, FAIL_CLOSED_ENV)
-            if name.startswith("KRAFT_")
-        }
-        | {"KRAFT_BD_CWD", "KRAFT_FRONTEND_DIST", "KRAFT_INDEX_REPOS"}
-    )
-)
+#: The `KRAFT_*` read once, at collection or import, which a per-test scrub
+#: cannot touch and must not hide: `pytest_collection_modifyitems` reads the
+#: first two, `support.fake_beads` and the `fake_beads` fixture the third.
+_SUITE_SWITCHES = frozenset({"KRAFT_E2E", "KRAFT_E2E_REQUIRE", "KRAFT_TEST_REAL_BD"})
 
 
 @pytest.fixture(autouse=True)
@@ -413,14 +401,17 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     exists on a developer machine and not in a CI container. Autouse rather than
     part of `app`, so a test cannot reach the home by not opting in.
 
-    Nor inherit what locates the instance pytest was started from: the lifespan
-    reads `KRAFT_HOST` and `KRAFT_SKILLS_DIR` itself (`api/startup.py`), so an
-    inherited `KRAFT_HOST=0.0.0.0` turns every `client` into the locked-down
-    posture. Scrubbed here, at the start of the test, so a value a test or its
-    own fixture sets on purpose (`api_client(host=...)`) still applies.
+    Nor inherit any `KRAFT_*` from the shell or worker pytest was started in:
+    the lifespan reads `KRAFT_HOST` and `KRAFT_SKILLS_DIR` itself
+    (`api/startup.py`), so an inherited `KRAFT_HOST=0.0.0.0` turns every
+    `client` into the locked-down posture, and the fake agent, `worker_env`
+    and the rest read their own names lazily. Every one but the suite's own
+    switches goes, rather than a list that reopens the leak one name at a
+    time. Scrubbed at the start of the test, so a value a test or its own
+    fixture sets on purpose (`api_client(host=...)`) still applies.
     """
-    for name in _INHERITED_INSTANCE_ENV:
-        monkeypatch.delenv(name, raising=False)
+    for name in [k for k in os.environ if k.startswith("KRAFT_") and k not in _SUITE_SWITCHES]:
+        monkeypatch.delenv(name)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     # Nor a real `kraft admin start` on the default port 8765: a test that
     # doesn't opt into the `app` fixture's ASGI transport falls through to a

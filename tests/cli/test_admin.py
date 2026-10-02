@@ -17,7 +17,7 @@ import pytest
 import uvicorn
 import yaml
 from support.harness import fake_templates_dir
-from support.server import child_env
+from support.server import child_env, output_of
 
 from kraft import cli, client
 from kraft.paths import RunDirs
@@ -624,15 +624,15 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
     try:
         # Serving, not only past its pidfile: a SIGTERM during startup would time that too.
         served = _wait_for(lambda: _answers(port) or proc.poll() is not None, timeout=30.0)
-        assert served and proc.poll() is None, f"server never served:\n{proc.stdout.read()}"
-        # A clean exit costs less than the startup this machine, loaded as it is now, just
-        # took (both 1.2s on 2026-09-12); uvicorn's 10s backstop costs 10s at any load.
-        budget = max(5.0, 2 * (time.monotonic() - spawned_at))
+        assert served and proc.poll() is None, f"server never served:\n{output_of(proc)}"
+        # A clean exit costs less than the startup just took (both 1.2s on 2026-09-12), capped
+        # under uvicorn's 10s backstop: past the cap a regression into the backstop would pass.
+        budget = min(max(5.0, 2 * (time.monotonic() - spawned_at)), 9.0)
         started_at = time.monotonic()
         proc.send_signal(signal.SIGTERM)
         stopped = _wait_for(lambda: proc.poll() is not None, timeout=budget + 10.0)
         elapsed = time.monotonic() - started_at
-        assert stopped, f"no exit {elapsed:.0f}s after SIGTERM (Kraft-9oab): {proc.stdout.read()}"
+        assert stopped, f"no exit {elapsed:.0f}s after SIGTERM (Kraft-9oab): {output_of(proc)}"
         # Asserted, not printed: a regression back to the backstop fails the test (Kraft-o8vs).
         assert elapsed < budget, (
             f"kraft-9oab: exited {elapsed:.1f}s after SIGTERM (budget {budget:.1f}s) -- "
