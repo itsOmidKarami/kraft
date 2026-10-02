@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { Combobox } from "../ui/Combobox";
 
 export const PAUSE_MS = 800;
 
@@ -34,28 +35,29 @@ export function ModelField({ label, value, suggestions = [], changed, clearable,
       onCommit(next);
     }
   };
+  const field = {
+    id,
+    className: `hn-input${changed ? " is-changed" : ""}`,
+    placeholder,
+    autoFocus,
+    onFocus: () => void (focused.current = true),
+    onBlur: () => { focused.current = false; commit(text); },
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") { e.preventDefault(); commit(text); } },
+  };
+  const type = (v: string) => {
+    setText(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => commit(v), PAUSE_MS);
+  };
   return (
     <div className="hn-field">
       <label htmlFor={id} className="hn-field-label">{label}</label>
-      <input
-        id={id}
-        className={`hn-input${changed ? " is-changed" : ""}`}
-        spellCheck={false}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        list={suggestions.length ? `${id}-s` : undefined}
-        value={text}
-        onFocus={() => void (focused.current = true)}
-        onBlur={() => { focused.current = false; commit(text); }}
-        onChange={(e) => {
-          setText(e.target.value);
-          clearTimeout(timer.current);
-          const v = e.target.value;
-          timer.current = setTimeout(() => commit(v), PAUSE_MS);
-        }}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(text); } }}
-      />
-      {suggestions.length > 0 && <datalist id={`${id}-s`}>{suggestions.map((s) => <option key={s} value={s} />)}</datalist>}
+      {suggestions.length > 0 ? (
+        // The provider's known models, to pick from; any other may still be typed.
+        <Combobox {...field} value={text} choices={suggestions.map((value) => ({ value }))} listLabel="Known models" onChange={type} onPick={commit} />
+      ) : (
+        <input {...field} spellCheck={false} value={text} onChange={(e) => type(e.target.value)} />
+      )}
     </div>
   );
 }

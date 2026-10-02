@@ -69,7 +69,7 @@ describe("area pane Config", () => {
     const server = serve(view(resolved()));
     renderPage();
     const pane = await openConfig();
-    await userEvent.type(within(pane).getByRole("textbox", { name: "Add to escalation grants" }), "git-push{Enter}");
+    await userEvent.type(within(pane).getByRole("combobox", { name: "Add to escalation grants" }), "git-push{Enter}");
     await waitFor(() => expect(server.ops).toHaveLength(1));
     expect(server.ops[0]).toEqual([{ op: "set_escalation", harness: "claude", grants: ["git-commit", "git-rebase", "git-push"] }]);
   });

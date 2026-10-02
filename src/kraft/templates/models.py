@@ -194,6 +194,17 @@ class BuiltinAction(StrEnum):
     #: talks to the forge.
     MR_REBASE = "kraft.mr_rebase"
 
+    @property
+    def summary(self) -> str:
+        """One line on what the action does, for the editor that offers it."""
+        return _BUILTIN_SUMMARIES[self]
+
+
+_BUILTIN_SUMMARIES = {
+    BuiltinAction.VERIFY_CHANGED_TEST_SCOPES: "Run the repo's test scopes the change touches",
+    BuiltinAction.MR_REBASE: "Rebase the worktree onto the item's base branch",
+}
+
 
 class ForgeAction(StrEnum):
     """The merge-request lifecycle points a `kind: forge` task may target
@@ -217,6 +228,22 @@ class ForgeAction(StrEnum):
         conditions outside Kraft."""
         return self in _WAIT_TARGETS
 
+    @property
+    def summary(self) -> str:
+        """One line on what the target does, for the editor that offers it."""
+        return _FORGE_SUMMARIES[self]
+
+
+_FORGE_SUMMARIES = {
+    ForgeAction.MR_OPEN_DRAFT: "Open the item's merge request as a draft",
+    ForgeAction.MR_SYNC: "Push the branch and rewrite the merge request's description",
+    ForgeAction.MR_CI: "Wait for the merge request's CI to pass",
+    ForgeAction.MR_AUTOMATED_REVIEW: "Wait for the repo's automated reviewer",
+    ForgeAction.MR_MARK_READY: "Mark the draft merge request ready for review",
+    ForgeAction.MR_EXTERNAL_APPROVAL: "Wait for a person to approve the merge request",
+    ForgeAction.MR_MERGE: "Merge, then wait until the merge lands",
+    ForgeAction.MR_POST_MERGE_CI: "Wait for CI on the base branch after the merge",
+}
 
 _WAIT_TARGETS = frozenset(
     {
@@ -248,6 +275,18 @@ class AgentInput(StrEnum):
     REVIEW_PACKAGE = "review_package"
     CARRIED_FINDINGS = "carried_findings"
     PREVIOUS_REVIEW = "previous_review"
+
+    @property
+    def summary(self) -> str:
+        """One line on what the input hands the agent, for the editor that offers it."""
+        return _INPUT_SUMMARIES[self]
+
+
+_INPUT_SUMMARIES = {
+    AgentInput.REVIEW_PACKAGE: "The change under review, written to a file",
+    AgentInput.CARRIED_FINDINGS: "The findings the node's last measurement reported",
+    AgentInput.PREVIOUS_REVIEW: "This task's previous result and summary",
+}
 
 
 class TaskScope(StrEnum):

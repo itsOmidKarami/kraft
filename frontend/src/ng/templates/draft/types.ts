@@ -1,5 +1,7 @@
 /** W9's config-draft answers, field for field (docsite 4.reference/7.http-api.md "Drafts"). */
 
+import type { Choice } from "../../ui/Combobox";
+
 export type Area = "chains" | "library" | "repos" | "policy" | "intake" | "harnesses";
 
 /** What a config draft edits: an area and its key (a chain id, or `library`). */
@@ -56,6 +58,10 @@ export interface ResolvedView {
   documents: Record<string, string[]>;
 }
 
+/** A builtin task's `ref`, a forge task's `target` (`waits`: it runs as an
+ *  external wait), an agent task's `inputs`, a policy layer's `grants`. */
+export type Choices = Record<"ref" | "inputs" | "grants", Choice[]> & { target: (Choice & { waits: boolean })[] };
+
 export interface Result {
   /** Per file, the last mapping that parsed. */
   model: Record<string, Authored>;
@@ -67,6 +73,8 @@ export interface Result {
   impact: { running?: number; repos?: string[]; chains?: string[] };
   warnings: { file: string; message: string }[];
   policy_values: { auto_escalate_delay_s: number; auto_review_attempts: number };
+  /** The closed sets a field takes its values from, by field (`catalogue.choices`). */
+  choices?: Choices;
   yaml_error?: { file: string; line: number; col: number; message: string };
 }
 
