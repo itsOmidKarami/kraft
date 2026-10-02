@@ -100,13 +100,13 @@ async def lifespan(app: FastAPI):
     except OSError:
         # Not a refused boot: the files stay put and the next start retries.
         logger.exception("steering migration failed; templates/steering/ left in place")
-    # The UX V2 cutover: an old theme.yaml's `palette` becomes the look it
-    # stood for, once, before anything reads the theme (spec §11.3).
+    # The 1.5 upgrade: an old theme.yaml's `palette` becomes the look it
+    # stood for, once, before anything reads the theme.
     try:
         if config_mod.migrate_theme(templates_dir / "theme.yaml"):
             logger.info(
                 "theme.yaml: palette converted to surface, accent and colour_amount;"
-                " the old file is theme.yaml.pre-ux2"
+                " the old file is theme.yaml.pre-1.5"
             )
     except OSError:
         logger.exception("theme migration failed; theme.yaml left as it was")
