@@ -233,3 +233,40 @@ def test_doctor_block_a_failure_still_wins_the_summary_over_a_warn():
         {"name": "spa bundle", "ok": False, "detail": "missing", "skipped": False, "warn": False},
     ]
     assert "1 of 2 checks failed" in render.doctor_block(rows)
+
+
+_COMMITTED = {
+    **_DIFF,
+    "files": [],
+    "diff": "",
+    "untracked": [],
+    "landed": {
+        "commits": ["add the fix", "add the tests"],
+        "files": [{"path": "calc.py", "insertions": 1, "deletions": 1}],
+        "diff": (
+            "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+            "@@ -1 +1 @@\n-a - b\n+a + b\n"
+        ),
+    },
+}
+
+
+def test_diff_names_the_committed_block_as_the_change_under_review(monkeypatch):
+    """Kraft commits after every task, so at a gate the reviewed change is the
+    committed block. It used to be filed under "landed", while the empty
+    working tree wore the "change under review" title."""
+    monkeypatch.setenv("NO_COLOR", "1")
+    for renderer in (render.diff_stat, render.diff_body):
+        lines = renderer(_COMMITTED).splitlines()
+        review = next(i for i, ln in enumerate(lines) if "the change under review" in ln)
+        uncommitted = next(i for i, ln in enumerate(lines) if ln.startswith("uncommitted"))
+        assert "2 commits" in lines[review]
+        assert any("calc.py" in ln for ln in lines[review:uncommitted])
+        assert "(nothing uncommitted)" in lines[uncommitted:]
+        assert "landed" not in "\n".join(lines) and "in flight" not in "\n".join(lines)
+
+
+def test_diff_without_commits_keeps_a_single_unlabelled_block(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    out = render.diff_body({**_DIFF, "landed": {"commits": [], "files": [], "diff": ""}})
+    assert "uncommitted" not in out and "the change under review" not in out
