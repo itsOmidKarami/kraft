@@ -94,6 +94,7 @@ def test_a_relative_path_is_refused_not_resolved_against_the_servers_cwd(
 def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     (repo / ".gitmodules").write_text(
         '[submodule "libs/a"]\n\tpath = libs/a\n\turl = ../a.git\n'
         '[submodule "libs/b"]\n\tpath = libs/b\n\turl = ../b.git\n'
@@ -675,11 +676,38 @@ def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(cli
     assert client.get("/api/repos").json()["repos"][0]["steering"] == []
 
 
-def test_add_repo_writes_the_probed_setup_command(tmp_path, client):
+@pytest.mark.parametrize(
+    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
+)
+@pytest.mark.parametrize("route", ["/api/repos/probe", "/api/repos"], ids=["probe", "add"])
+def test_add_repo_writes_the_probed_setup_command(tmp_path, client, route, lockfile, expected):
+    """The first-run and Templates › Repos probe proposes what connecting
+    writes: `uv sync` only beside a `uv.lock`, since it writes one otherwise."""
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    entry = client.post(route, json={"path": str(repo)}).json()
+    assert entry["setup_command"] == expected
+
+
+@pytest.mark.parametrize(
+    ("lockfile", "expected"),
+    [(True, "uv run pytest -q"), (False, None)],
+    ids=["uv-lock", "no-uv-lock"],
+)
+def test_a_pyproject_gets_uv_run_pytest_only_beside_a_uv_lock(tmp_path, client, lockfile, expected):
+    """`uv run` writes a `uv.lock` when there is none, on every verify: the
+    probe proposes no test command then, and the repo is added disabled."""
+    repo = make_repo(tmp_path)
+    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    assert (
+        client.post("/api/repos/probe", json={"path": str(repo)}).json()["test_command"] == expected
+    )
     entry = client.post("/api/repos", json={"path": str(repo)}).json()
-    assert entry["setup_command"] == "uv sync"
+    assert (entry["test_command"], entry["enabled"]) == (expected, lockfile)
 
 
 def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, client):

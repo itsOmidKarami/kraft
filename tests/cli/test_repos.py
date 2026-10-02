@@ -110,11 +110,26 @@ def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
     (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
     assert "setup command: uv sync" in out
     assert "none found" not in out
     assert "saved disabled" not in out
+
+
+def test_connect_saves_a_pyproject_without_uv_lock_disabled_and_says_why(app, capsys, repo):
+    """`uv sync` and `uv run` would each write a `uv.lock` into the worktree,
+    so neither is proposed: the repo lands disabled, and connect names the
+    missing lockfile rather than leave the operator to guess."""
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "test command:" not in out
+    assert "setup command: none found" in out
+    assert "saved disabled: no test command found" in out
+    assert "A pyproject.toml without uv.lock gets none." in out
+    assert "A pyproject.toml without uv.lock in either place gets none." in out
 
 
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
@@ -434,6 +449,7 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     from kraft import config
 
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     frontend = repo / "frontend"
     frontend.mkdir()
     (frontend / "package.json").write_text("{}")
@@ -446,6 +462,45 @@ def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
     assert "pyproject.toml" in root["paths"]
 
 
+@pytest.mark.parametrize(
+    "layout",
+    [
+        ["pyproject.toml", "frontend/package.json"],
+        ["backend/pyproject.toml", "frontend/package.json", "package-lock.json"],
+    ],
+    ids=["at-the-root", "one-level-down"],
+)
+def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(repo, layout):
+    """A `frontend/` scope alone is what a diff to the Python code fails open
+    to, so it would pass on `npm test` with the Python suite never run."""
+
+    from kraft import config
+
+    for path in layout:
+        (repo / path).parent.mkdir(exist_ok=True)
+        (repo / path).write_text("{}")
+    probed = config.probe_repo(repo)
+    assert (probed["test_command"], probed["test_scopes"]) == (None, [])
+    (repo / Path(layout[0]).parent / "uv.lock").write_text("version = 1\n")
+    assert config.probe_repo(repo)["test_command"] is not None
+
+
+def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(repo):
+    """With a command given, the stopped directory just gets no scope of its
+    own: the root scope, running that command, is what its changes match."""
+
+    from kraft import config
+
+    for path in ["backend/pyproject.toml", "frontend/package.json"]:
+        (repo / path).parent.mkdir()
+        (repo / path).write_text("{}")
+    probed = config.probe_repo(repo, test_command="make test")
+    assert probed["test_command"] == "make test"
+    root, nested = probed["test_scopes"]
+    assert ("backend/**" in root["paths"], root["command"]) == (True, "make test")
+    assert nested == {"paths": ["frontend/**"], "command": "npm test"}
+
+
 def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
     """A bare directory name in `paths` (e.g. "src") never matches
     `fnmatch`-checked paths like "src/foo.py", so a backend-only diff failed
@@ -455,6 +510,7 @@ def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
     from kraft import config
 
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (repo / "uv.lock").write_text("version = 1\n")
     src = repo / "src"
     src.mkdir()
     frontend = repo / "frontend"

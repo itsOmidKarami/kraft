@@ -645,10 +645,18 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 #: Test commands to look for, in the order a repo is most likely to want them.
 #: A justfile with a `test` recipe comes first: an explicit wrapper (Kraft's own
 #: `just test`) beats a manifest beside it (Kraft-reriq, Kraft-enc5z).
-_TEST_COMMANDS = [
+#:
+#: A None command is a marker that ends the search with no guess. `uv run`
+#: locks before it runs, so on a `pyproject.toml` with no `uv.lock` it writes
+#: one into the worktree, every verify, for the worker to commit. Such a repo
+#: connects disabled, and is not handed the `package.json` beside it either:
+#: `npm test` would leave its Python suite unrun with nothing to say so. That
+#: holds one level down too: `_probe_test_scopes` drops every scope then.
+_TEST_COMMANDS: list[tuple[str, str | None]] = [
     ("Justfile", "just test"),
     ("justfile", "just test"),
-    ("pyproject.toml", "uv run pytest -q"),
+    ("uv.lock", "uv run pytest -q"),
+    ("pyproject.toml", None),
     ("package.json", "npm test"),
     ("Cargo.toml", "cargo test"),
     ("go.mod", "go test ./..."),
@@ -702,10 +710,13 @@ def normalized_repo_root(p: Path) -> Path | None:
 _JUST_TEST_RECIPE = re.compile(r"^@?test(?:\s[^:\n]*)?:(?!=)", re.MULTILINE)
 
 
-def _first_test_marker(directory: Path) -> tuple[str, str] | None:
+def _first_test_marker(directory: Path) -> tuple[str, str | None] | None:
     """(marker, command) for the first `_TEST_COMMANDS` marker here. Names come
     from the listing: a case-insensitive disk says `Justfile` is a file when the
-    file is `justfile`. A justfile counts only with a `test` recipe."""
+    file is `justfile`. A justfile counts only with a `test` recipe.
+
+    `(marker, None)` is a marker that stops the search with no guess, which a
+    caller must not read as "nothing here": None is that."""
     try:
         names = {f.name for f in directory.iterdir() if f.is_file()}
     except OSError:
@@ -723,11 +734,18 @@ def _first_test_marker(directory: Path) -> tuple[str, str] | None:
 #: *suggestion* written into repos.yaml at connect time for a human to check,
 #: never consulted at run time: the runtime runs what is declared and infers
 #: nothing. Ordered so a lockfile beats the manifest beside it.
-_SETUP_COMMANDS = [
+#:
+#: `uv sync` is keyed on `uv.lock`, the way `npm ci` is on its lockfile: on a
+#: `pyproject.toml` alone it creates `uv.lock` in the worktree, and the worker
+#: commits it onto the item's branch. A `pyproject.toml` with no lock ends the
+#: search with no guess, as in `_TEST_COMMANDS`, so connect and doctor say none
+#: was found rather than propose a command that edits the repo.
+_SETUP_COMMANDS: list[tuple[str, str | None]] = [
     ("package-lock.json", "npm ci"),
     ("yarn.lock", "yarn install --frozen-lockfile"),
     ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
-    ("pyproject.toml", "uv sync"),
+    ("uv.lock", "uv sync"),
+    ("pyproject.toml", None),
     ("Cargo.toml", "cargo fetch"),
     ("go.mod", "go mod download"),
 ]
@@ -749,14 +767,23 @@ def _probe_test_scopes(
 
     `test_command`, when given, takes the root's marker-derived command's place
     rather than suppressing probing, so nested scopes are still found (Kraft-k4mx).
+
+    A stop marker (a `pyproject.toml` with no `uv.lock`) at the root or in any
+    subdirectory proposes nothing at all: a scope left for the rest would be
+    what a diff to that Python code fails open to (`dispatch._matched_scopes`),
+    and its suite would never run. With `test_command` given, a stopped
+    subdirectory is just not claimed, so the root scope's command covers it.
     """
     found = None if test_command else _first_test_marker(root)
-    root_command = test_command or (found and found[1])
     try:
         subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
     except OSError:
         subdirs = []
-    hits = [(d.name, hit) for d in subdirs if (hit := _first_test_marker(d))]
+    probed = [(d.name, hit) for d in subdirs if (hit := _first_test_marker(d))]
+    if not test_command and any(hit and hit[1] is None for hit in [found, *dict(probed).values()]):
+        return None, [], []
+    root_command = test_command or (found and found[1])
+    hits = [(name, hit) for name, hit in probed if hit[1]]
     nested = [(name, cmd) for name, (_, cmd) in hits]
     markers = ([found[0]] if found else []) + [f"{name}/{marker}" for name, (marker, _) in hits]
 

@@ -437,29 +437,39 @@ def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
     assert Path(config.probe_repo(sub)["path"]) == sub.resolve()
 
 
-@pytest.mark.parametrize(
-    ("marker", "expected"),
-    [
-        ("pyproject.toml", "uv sync"),
-        ("package-lock.json", "npm ci"),
-        ("yarn.lock", "yarn install --frozen-lockfile"),
-        ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
-        ("Cargo.toml", "cargo fetch"),
-        ("go.mod", "go mod download"),
-        (None, None),
-    ],
-    ids=["uv", "npm", "yarn", "pnpm", "cargo", "go", "an-unmarked-repo-gets-nothing"],
-)
-def test_the_setup_probe_suggests_per_marker(tmp_path, marker, expected):
-    if marker:
+#: Files in a repo's root -> the setup command probed from them.
+_SETUP_PROBES = {
+    "uv": (["pyproject.toml", "uv.lock"], "uv sync"),
+    "a-pyproject-with-no-uv-lock-gets-nothing": (["pyproject.toml"], None),
+    "npm": (["package-lock.json"], "npm ci"),
+    "yarn": (["yarn.lock"], "yarn install --frozen-lockfile"),
+    "pnpm": (["pnpm-lock.yaml"], "pnpm install --frozen-lockfile"),
+    "cargo": (["Cargo.toml"], "cargo fetch"),
+    "go": (["go.mod"], "go mod download"),
+    "a-pyproject-with-no-uv-lock-is-not-handed-go": (["pyproject.toml", "go.mod"], None),
+    "a-lockfile-before-it-still-wins": (["pyproject.toml", "package-lock.json"], "npm ci"),
+    "an-unmarked-repo-gets-nothing": ([], None),
+}
+
+
+@pytest.mark.parametrize(("markers", "expected"), _SETUP_PROBES.values(), ids=_SETUP_PROBES)
+def test_the_setup_probe_suggests_per_marker(tmp_path, markers, expected):
+    """`uv sync` with no `uv.lock` writes one, which the worker then commits
+    onto the item's branch: a `pyproject.toml` alone is no reason to guess it."""
+    for marker in markers:
         (tmp_path / marker).write_text("")
     assert config._first_setup_command(tmp_path) == expected
 
 
-def test_probe_repo_suggests_a_setup_command(tmp_path):
+@pytest.mark.parametrize(
+    ("lockfile", "expected"), [(True, "uv sync"), (False, None)], ids=["uv-lock", "no-uv-lock"]
+)
+def test_probe_repo_suggests_a_setup_command(tmp_path, lockfile, expected):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+    if lockfile:
+        (repo / "uv.lock").write_text("version = 1\n")
+    assert config.probe_repo(repo)["setup_command"] == expected
 
 
 @pytest.mark.parametrize("name", ["Justfile", "justfile"], ids=["capitalized", "lowercase"])
@@ -479,8 +489,8 @@ def test_the_test_probe_recognizes_a_justfile_marker(tmp_path, name):
             "set shell := ['zsh']\n[no-cd]\n@test *ARGS: build\n    pytest {{ARGS}}\n",
             ("Justfile", "just test"),
         ),
-        ("test-ui:\n    npm test\nlint:\n    ruff\n", ("pyproject.toml", "uv run pytest -q")),
-        ("test := 'x'\n", ("pyproject.toml", "uv run pytest -q")),
+        ("test-ui:\n    npm test\nlint:\n    ruff\n", ("uv.lock", "uv run pytest -q")),
+        ("test := 'x'\n", ("uv.lock", "uv run pytest -q")),
     ],
     ids=[
         "a-test-recipe",
@@ -496,6 +506,31 @@ def test_the_test_probe_prefers_the_justfiles_test_recipe_over_pyproject(
     one without a `test` recipe falls through to the manifest beside it."""
     (tmp_path / "Justfile").write_text(justfile)
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (tmp_path / "uv.lock").write_text("version = 1\n")
+    assert config._first_test_marker(tmp_path) == expected
+
+
+#: Files in a repo's root -> the (marker, test command) probed from them.
+_UV_TEST_PROBES = {
+    "uv": (["pyproject.toml", "uv.lock"], ("uv.lock", "uv run pytest -q")),
+    "a-pyproject-with-no-uv-lock-stops": (["pyproject.toml"], ("pyproject.toml", None)),
+    "a-pyproject-with-no-uv-lock-is-not-handed-npm": (
+        ["pyproject.toml", "package.json"],
+        ("pyproject.toml", None),
+    ),
+    "an-unmarked-directory-gets-nothing": ([], None),
+    "npm": (["package.json"], ("package.json", "npm test")),
+    "cargo": (["Cargo.toml"], ("Cargo.toml", "cargo test")),
+    "go": (["go.mod"], ("go.mod", "go test ./...")),
+}
+
+
+@pytest.mark.parametrize(("markers", "expected"), _UV_TEST_PROBES.values(), ids=_UV_TEST_PROBES)
+def test_the_test_probe_suggests_uv_run_only_beside_a_uv_lock(tmp_path, markers, expected):
+    """`uv run` locks before it runs: with no `uv.lock` it writes one into the
+    worktree on every verify, for the worker to commit onto the item's branch."""
+    for marker in markers:
+        (tmp_path / marker).write_text("")
     assert config._first_test_marker(tmp_path) == expected
 
 
