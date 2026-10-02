@@ -29,6 +29,16 @@ def test_a_permission_ask_reaches_the_gate_as_the_channel_session_alone(client, 
     monkeypatch.setattr(
         client.app.state, "access", {**client.app.state.access, "password_hash": "x"}
     )
+    _ask_as_another_session(client)
+
+
+def test_a_loopback_bound_daemon_answers_a_permission_ask(client):
+    """The default bind, where the daemon answers to a loopback Host only:
+    the worker's `kraft` reaches the session MCP server and goes no further."""
+    _ask_as_another_session(client)
+
+
+def _ask_as_another_session(client):
     seed_session(policy={"deny_tools": ["Bash"]})
     seed_session(sid="s2", wid="w2")
     proxy = client.app.state.egress_channels.proxy

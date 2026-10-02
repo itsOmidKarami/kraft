@@ -599,7 +599,7 @@ def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(monkeypatch,
 
     async def scenario():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
             return await asyncio.gather(
                 ac.post(f"/api/work-items/{wid}/resume", json={}),
                 ac.post(f"/api/work-items/{wid}/resume", json={}),

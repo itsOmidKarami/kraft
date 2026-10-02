@@ -482,7 +482,7 @@ def test_retry_racing_resume_on_a_needs_context_stop_produces_one_winner(monkeyp
 
     async def scenario():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
             return await asyncio.gather(
                 ac.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"}),
                 ac.post(f"/api/work-items/{wid}/retry", json={}),

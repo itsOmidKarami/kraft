@@ -524,7 +524,7 @@ def test_an_auto_started_item_stops_at_its_first_gate(bd, tmp_path, monkeypatch)
     )
     import kraft.api as api
 
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
+    with TestClient(api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1") as client:
         # `tick` is a coroutine and the chains it spawns are tasks on the app's
         # own loop; `portal.call` is how a sync test reaches that loop.
         started = client.portal.call(intake_mod.tick, client.app)
@@ -567,7 +567,7 @@ def test_a_malformed_intake_yaml_still_boots_with_intake_off(tmp_path, monkeypat
     )
     import kraft.api as api
 
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
+    with TestClient(api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1") as client:
         assert client.get("/api/work-items").status_code == 200
         assert client.app.state.intake["enabled"] is False
         # Not merely "the poller ticked nothing" — no poller task exists at all.

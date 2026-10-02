@@ -588,8 +588,12 @@ class EgressProxy:
             "Authorization": f"Bearer {self._app.state.mcp_token}",
             "X-Kraft-Session-Id": session_id,
         }
+        # Each app by the name it answers to: the session MCP server by
+        # `kraft`, the only Host it accepts; the daemon by 127.0.0.1, since a
+        # loopback-bound daemon refuses any other (`perimeter._perimeter`).
+        base = "http://kraft" if asgi is self._mcp_app else "http://127.0.0.1"
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=asgi), base_url="http://kraft"
+            transport=httpx.ASGITransport(app=asgi), base_url=base
         ) as client:
             return await asyncio.wait_for(
                 client.request(method, path, headers=headers, **kw), timeout or CALL_TIMEOUT

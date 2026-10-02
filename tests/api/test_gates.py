@@ -286,7 +286,7 @@ def test_two_concurrent_approves_produce_one_walk_and_one_409(client, repo, monk
 
     async def scenario():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
             return await asyncio.gather(
                 ac.post(f"/api/work-items/{wid}/gates/spec_approval/approve"),
                 ac.post(f"/api/work-items/{wid}/gates/spec_approval/approve"),

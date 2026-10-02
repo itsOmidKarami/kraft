@@ -621,7 +621,9 @@ def test_a_malformed_notify_yaml_does_not_crash_startup(tmp_path, monkeypatch, c
     import kraft.api as api
 
     with caplog.at_level("WARNING"):
-        with TestClient(api.app, client=("127.0.0.1", 54321)) as c:  # must not raise
+        with TestClient(
+            api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1"
+        ) as c:  # must not raise
             assert c.app.state.notifier.config["enabled"] is False
 
     assert "t0ken" not in caplog.text
@@ -677,7 +679,9 @@ def test_get_notify_with_invalid_utf8_returns_a_clean_422_and_disables(
     import kraft.api as api
 
     with caplog.at_level("WARNING"):
-        with TestClient(api.app, client=("127.0.0.1", 54321)) as c:  # must not raise
+        with TestClient(
+            api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1"
+        ) as c:  # must not raise
             assert c.app.state.notifier.config["enabled"] is False
             res = c.get("/api/notify")
 

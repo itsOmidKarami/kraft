@@ -45,7 +45,7 @@ def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):
         intake_mod.poller = never_returning_poller
         try:
             transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
                 # A poller has to already be live, or neither save reaches the
                 # `await` that opens the window and the race cannot show.
                 assert (await ac.put("/api/intake", json=body)).status_code == 200

@@ -517,7 +517,7 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(
         kraft_client.transport,
         "http",
-        lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"),
+        lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"),
     )
     return api
 

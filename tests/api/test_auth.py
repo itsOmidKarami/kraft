@@ -131,9 +131,9 @@ def test_a_successful_login_clears_the_failure_count(client, monkeypatch):
 @pytest.mark.parametrize(
     ("url", "headers", "secure"),
     [
-        ("https://testserver/api/login", {}, True),
-        ("http://testserver/api/login", {"x-forwarded-proto": "https"}, True),
-        ("http://testserver/api/login", {}, False),
+        ("https://127.0.0.1/api/login", {}, True),
+        ("http://127.0.0.1/api/login", {"x-forwarded-proto": "https"}, True),
+        ("http://127.0.0.1/api/login", {}, False),
     ],
     ids=["https", "tunnel-forwarded-https", "plain-http"],
 )
