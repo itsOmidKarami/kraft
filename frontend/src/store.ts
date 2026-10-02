@@ -241,6 +241,12 @@ export const useStore = create<State>((set, get) => ({
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, status: "active" })) };
         case "gate_rejected":
           return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, rejectNote: p.note })) };
+        case "node_skipped":
+          // store.skip_node sets the row active in the same transaction, and a
+          // skip closes a pending gate as approve and reject do (the server's
+          // `executor.GATE_CLOSED`). Without this an open board keeps offering
+          // Approve on a gate that was skipped.
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, pending_gate: null, status: "active" })) };
         case "pause_requested":
         // Both of these flip the row to paused in the same transaction that
         // appends the event (store/work_items.py), same as pause_requested --
@@ -308,11 +314,12 @@ export const useStore = create<State>((set, get) => ({
             })),
           };
         case "work_item_completed":
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed" })) };
+          // An ended item has no gate left to answer (`executor.GATE_CLOSED`).
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "completed", pending_gate: null })) };
         case "work_item_abandoned":
           // A live board would otherwise keep offering actions on a worktree
           // that has already been removed.
-          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "abandoned" })) };
+          return { ...base, ...patchItem(s, id, (w) => ({ ...w, status: "abandoned", pending_gate: null })) };
         case "work_item_archived":
           return {
             ...base,
@@ -346,6 +353,7 @@ const REREAD = new Set([
   "work_item_rate_limited",
   "work_item_completed",
   "work_item_cancelled",
+  "node_skipped",
 ]);
 
 /**

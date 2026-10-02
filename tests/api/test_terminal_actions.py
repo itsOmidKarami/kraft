@@ -168,6 +168,9 @@ def test_ending_an_item_closes_its_pending_gate(client, repo, verb):
     wid = _ended_at_a_gate(client, repo, verb)
 
     assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] is None
+    # and the board list agrees: it once kept offering the gate on an ended item
+    items = client.get("/api/work-items?include_abandoned=true").json()["items"]
+    assert next(item for item in items if item["id"] == wid)["pending_gate"] is None
 
 
 @VERBS
