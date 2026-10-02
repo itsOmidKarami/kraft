@@ -65,14 +65,20 @@ dev: _dev-home
     trap 'kill 0' EXIT
     export {{dev_env}}
     {{fake_agent}} uv run python -m kraft &
+    api=$!
     cd frontend && npm run dev &
     # The backend's own `kraft: http://127.0.0.1:{{dev_port}}` line prints after
     # vite's banner, so it read as the address to open. It isn't: that port serves
     # frontend/dist, the last `npm run build` (or no SPA at all), not the code
-    # being edited. Once the API answers, say which one is the UI.
+    # being edited. Once the API answers, say which one is the UI. The answer has
+    # to name this checkout's run dir: a backend that refused a taken port leaves
+    # somebody else's server answering there. Vite moves past a taken 5173 on its
+    # own, so its Local line, not this one, has the final say on the port.
     for _ in $(seq 150); do
-        if curl -sf -o /dev/null http://127.0.0.1:{{dev_port}}/api/health; then
-            echo "just dev: open http://localhost:5173 (vite, live). :{{dev_port}} is the API, not the UI."
+        kill -0 "$api" 2>/dev/null || break
+        if curl -sf http://127.0.0.1:{{dev_port}}/api/health 2>/dev/null \
+            | grep -F '"run_dir":"{{justfile_directory()}}/.dev/run"' >/dev/null; then
+            echo "just dev: the UI is vite's Local URL above (:5173 unless taken). :{{dev_port}} is the API, not the UI."
             break
         fi
         sleep 0.2
