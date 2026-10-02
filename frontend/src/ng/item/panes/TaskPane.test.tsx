@@ -11,7 +11,7 @@ beforeEach(() => usePaneMemory.setState({ pane: { open: true, userCollapsed: fal
 
 const sess = (hook_point: string, attempt: number, over: Partial<WorkerSession> = {}) =>
   ({ id: `${hook_point}-${attempt}`, node_id: hook_point.split(".")[0] === "escalation" ? "verification" : hook_point.split(".")[0], hook_point, status: "done", attempt, round: attempt - 1, thread: 1, created_at: `2026-09-13T09:0${attempt}:00Z`, started_at: null, exited_at: null, wall_ms: 60_000, model: "sonnet", tokens_in: 1, tokens_out: 1, cost_usd: 0.1, head_sha: "abc1234567890", ...over }) as WorkerSession;
-const item = detail({ worker_sessions: [sess("verification.review.code_review", 1), sess("verification.review.code_review", 2, { status: "failed" }), sess("escalation", 1, { node_id: "verification", status: "needs_context" })] });
+const item = detail({ worker_sessions: [sess("verification.review.code_review", 1), sess("verification.review.code_review", 2, { status: "failed", harness: "codex" }), sess("escalation", 1, { node_id: "verification", status: "needs_context" })] });
 function Where() { const l = useLocation(); return <output data-testid="where">{l.pathname + l.search}</output>; }
 const mount = (path: string) => {
   stubFetch({ "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [
@@ -48,6 +48,12 @@ describe("task pane", () => {
     expect(tabs).toEqual(["Thread", "Overview", "Input", "Output", "Log", "Config"]);
     expect(within(pane("escalation")).getByRole("tab", { name: "Thread" })).toHaveAttribute("aria-selected", "true");
     expect(within(pane("escalation")).getByText("needs you", { selector: ".ip-attempt-state" })).toBeInTheDocument();
+  });
+
+  it("names the harness the attempt ran on in Overview", () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    const facts = within(pane("code_review")).getByText("harness").closest("div")!;
+    expect(facts).toHaveTextContent("harnesscodex");
   });
 
   it("has no Thread tab on an ordinary task, and offers Retry once it stopped", () => {

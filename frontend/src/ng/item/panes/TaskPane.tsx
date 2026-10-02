@@ -30,6 +30,7 @@ export function TaskOverview({ path, s, docs, onDoc }: { path: string; s: Worker
       <dl className="item-facts ip-facts">
         {fact("status", s.status.replaceAll("_", " "))}
         {fact("kind", s.model ? "agent" : null)}
+        {fact("harness", s.harness && <span className="is-mono">{s.harness}</span>)}
         {fact("model", s.model && <span className="is-mono">{s.model}</span>)}
         {fact("path", <span className="is-mono">{path}</span>)}
         {fact("ran", s.wall_ms != null ? elapsed(s.wall_ms) : null)}
