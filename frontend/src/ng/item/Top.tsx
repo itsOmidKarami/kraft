@@ -5,6 +5,7 @@ import { plainMarkdown } from "../../format";
 import type { DiffFile } from "../../types";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
+import { sendOnModEnter } from "../keys";
 
 /** The title, edited in place (Decisions §2): Enter saves, Esc restores. */
 export function Title({ id, title, onSaved }: { id: string; title: string; onSaved: () => void }) {
@@ -68,20 +69,22 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
     const el = p.current;
     if (el && !more) setLong(el.scrollHeight > el.clientHeight + 1);
   }, [brief, more, editing]);
+  const save = async () => {
+    const r = await act.patch(id, { description: text });
+    if (!r.ok) return setError(r.error);
+    setEditing(false);
+    onSaved();
+  };
+  const send = sendOnModEnter(save);
   if (editing)
     return (
       <div className="item-brief-edit">
-        <textarea aria-label="Brief" className="item-input" rows={4} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setEditing(false); setText(brief); } }} />
+        <textarea aria-label="Brief" className="item-input" rows={4} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setEditing(false); setText(brief); } else send(e); }} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
           <span className="item-muted">The next agent to launch reads the new brief.</span>
           <Button onClick={() => { setEditing(false); setText(brief); setError(null); }}>Cancel</Button>
-          <Button variant="primary" onClick={async () => {
-            const r = await act.patch(id, { description: text });
-            if (!r.ok) return setError(r.error);
-            setEditing(false);
-            onSaved();
-          }}>Save</Button>
+          <Button variant="primary" onClick={save}>Save</Button>
         </div>
       </div>
     );

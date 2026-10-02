@@ -41,6 +41,18 @@ describe("Brief", () => {
     expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings. Bounded." } }]);
   });
 
+  it("saves on ⌘↵, a plain ↵ starting a new line", async () => {
+    const calls = stubFetch();
+    const onSaved = vi.fn();
+    render(<Brief id="w1" brief="Cache embeddings." onSaved={onSaved} />);
+    await userEvent.click(screen.getByRole("button", { name: "edit" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Brief" }), "{Enter}Bounded.");
+    expect(writes(calls)).toEqual([]);
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings.\nBounded." } }]);
+  });
+
   it("Esc leaves the brief as it was, without a write", async () => {
     const calls = stubFetch();
     render(<Brief id="w1" brief="Cache embeddings." onSaved={() => {}} />);

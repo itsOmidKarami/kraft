@@ -5,6 +5,7 @@ import type { KraftEvent } from "../../../types";
 import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { ItemDetail } from "../useItem";
+import { sendOnModEnter } from "../../keys";
 
 type Turn = { thread: number; turn: number; who: string; text: string; at: string; node: string | null };
 
@@ -59,7 +60,7 @@ export function Thread({ item, node, reload, onNode }: { item: ItemDetail; node:
           </section>
         );
       })}
-      <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} />
+      <textarea aria-label="Reply to the escalation" className="item-input" rows={2} placeholder="Reply…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={sendOnModEnter(() => send(false), !busy && !!text.trim())} />
       {error && <p className="item-error" role="alert">{error}</p>}
       <div className="item-actions">
         <Button variant="primary" disabled={busy || !text.trim()} onClick={() => send(false)}>Send</Button>

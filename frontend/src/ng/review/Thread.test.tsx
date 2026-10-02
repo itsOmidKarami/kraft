@@ -61,6 +61,19 @@ describe("Thread", () => {
     expect(calls()[0]).toEqual(["/threads/t1/comments", "POST", JSON.stringify({ body: "Why 50k?" })]);
   });
 
+  it("adds a reply, and saves an edited one, on ⌘↵", async () => {
+    vi.spyOn(http, "request").mockResolvedValue({ status: 201, body: {} });
+    show(thread({ comments: [comment(), comment({ id: "c9", review_id: null, draft: true, body: "and the TTL?" })] }));
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply" }), { target: { value: "Why 50k?" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Reply" }), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(calls()).toEqual([["/threads/t1/comments", "POST", JSON.stringify({ body: "Why 50k?" })]]));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Edit reply" }), { target: { value: "and the TTL, too?" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit reply" }), { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(calls()[1]).toEqual(["/comments/c9", "PATCH", JSON.stringify({ body: "and the TTL, too?" })]));
+  });
+
   it("deletes your pending reply", async () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 204, body: undefined });
     show(thread({ comments: [comment(), comment({ id: "c9", review_id: null, draft: true, body: "and the TTL?" })] }));
