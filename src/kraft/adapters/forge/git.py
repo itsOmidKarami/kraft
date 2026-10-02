@@ -158,11 +158,21 @@ async def _environment_dirs(repo: Path, base: str) -> list[str]:
     """Untracked directories that are an install, not work (`is_environment`):
     a setup's `.venv/` in a repo that never ignored it is a thousand files,
     and no merge request wants them. Only a directory git lists as untracked
-    whole: one the repo tracks is the repo's own, edits and all."""
+    whole: one the repo tracks is the repo's own, edits and all. Asked for
+    as `normal`, since `status.showUntrackedFiles=all` in a user's or the
+    repo's config would list its files one by one instead."""
     with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
             repo,
-            ["git", *ignore_args, "status", "--porcelain", "-z", sandbox.SUBMODULES_UNENTERED],
+            [
+                "git",
+                *ignore_args,
+                "status",
+                "--porcelain",
+                "-z",
+                "--untracked-files=normal",
+                sandbox.SUBMODULES_UNENTERED,
+            ],
         )
     return [
         entry[3:].rstrip("/")

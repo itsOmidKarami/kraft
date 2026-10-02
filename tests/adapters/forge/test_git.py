@@ -485,6 +485,24 @@ def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, marke
     asyncio.run(forge.assert_clean(repo, "main"))
 
 
+def test_an_unignored_install_stays_out_when_git_lists_every_untracked_file(tmp_path):
+    """With `status.showUntrackedFiles=all` git lists `.venv`'s files one by
+    one, never `.venv/` whole, so no entry read as an install and the sweep
+    committed the virtualenv again."""
+    repo = _repo_with_origin(tmp_path)
+    _git(repo, "config", "status.showUntrackedFiles", "all")
+    (repo / ".venv" / "lib").mkdir(parents=True)
+    (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (repo / ".venv" / "lib" / "site.py").write_text("installed\n")
+    (repo / "forgotten.py").write_text("never added\n")
+
+    asyncio.run(
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
+    )
+
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
+
+
 def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
     """`submodule.<path>.ignore = all` is a legitimate thing for a human to
     set on a six-submodule workspace -- it must not blind Kraft's own guard
