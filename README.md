@@ -9,7 +9,7 @@
 | src/kraft/adapters/\_\_init\_\_.py           |        0 |        0 |    100% |           |
 | src/kraft/adapters/agent.py                  |      262 |       11 |     96% |332, 386-387, 389, 602, 706-709, 923-924 |
 | src/kraft/adapters/artifact\_notes.py        |        2 |        0 |    100% |           |
-| src/kraft/adapters/beads.py                  |       62 |       20 |     68% |49, 82-88, 122, 125-126, 182-190 |
+| src/kraft/adapters/beads.py                  |       62 |       19 |     69% |82-88, 122, 125-126, 182-190 |
 | src/kraft/adapters/forge/\_\_init\_\_.py     |        8 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py               |       45 |        0 |    100% |           |
 | src/kraft/adapters/forge/gh.py               |      156 |       12 |     92% |172, 252, 276, 282-292, 370, 421 |
@@ -107,7 +107,7 @@
 | src/kraft/index/db.py                        |       68 |        5 |     93% |151-152, 161-163 |
 | src/kraft/index/embed.py                     |       58 |       12 |     79% |37-38, 63, 68-74, 94-96 |
 | src/kraft/index/ingest.py                    |      225 |       11 |     95% |79-80, 152-153, 267, 357-359, 469-471 |
-| src/kraft/index/service.py                   |      350 |       27 |     92% |140-142, 236-238, 274, 293-295, 348-349, 354, 357-358, 457, 479, 498-499, 515, 533, 537-538, 704, 707, 710, 713 |
+| src/kraft/index/service.py                   |      350 |       26 |     93% |140-142, 236-238, 274, 293-295, 349, 354, 357-358, 457, 479, 498-499, 515, 533, 537-538, 704, 707, 710, 713 |
 | src/kraft/init.py                            |       51 |        2 |     96% |     62-64 |
 | src/kraft/intake.py                          |      127 |       12 |     91% |89-91, 107, 150-151, 185-187, 206-211, 247 |
 | src/kraft/intent.py                          |      130 |        5 |     96% |91-92, 186, 203, 234 |
@@ -172,7 +172,7 @@
 | src/kraft/worker/steering.py                 |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py           |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **28347** | **1361** | **95%** |           |
+| **TOTAL**                                    | **28347** | **1359** | **95%** |           |
 
 
 ## Setup coverage badge
