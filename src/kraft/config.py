@@ -647,9 +647,14 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 #: (`gitlab.example.com`, `github.example.com`); any other host is set by hand
 #: in repos.yaml.
 _FORGES = ("gitlab", "github")
-_REMOTE = re.compile(
-    r"^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/]+@)?(?P<host>[^/:]+)(?::\d+)?[:/](?P<path>.+)$",
-    re.IGNORECASE,
+#: A URL-style remote (`https://`, `ssh://`, which may carry a port), or an
+#: scp-style one (`git@host:group/repo`, where what follows the colon is
+#: always the path: GitLab's numeric group ids included).
+_REMOTE = (
+    re.compile(
+        r"^[a-z][a-z0-9+.-]*://(?:[^@/]+@)?(?P<host>[^/:]+)(?::\d+)?/(?P<path>.+)$", re.IGNORECASE
+    ),
+    re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>[^/].*)$"),
 )
 
 
@@ -659,7 +664,7 @@ def _detect_forge(remote: str) -> tuple[str | None, str | None]:
     Read from the URL's host, not anywhere in the string: `github.com` in a
     path, or a host like `notgithub.company.io`, says nothing about the forge.
     """
-    match = _REMOTE.match(remote.strip())
+    match = next((m for rx in _REMOTE if (m := rx.match(remote.strip()))), None)
     if match is None:
         return None, None
     labels = match["host"].lower().split(".")
@@ -721,7 +726,11 @@ def same_repository(a: tuple[str, str], b: tuple[str, str]) -> bool:
 
 
 def probe_repo(
-    path: str | Path, *, test_command: str | None = None, templates_dir: Path | None = None
+    path: str | Path,
+    *,
+    test_command: str | None = None,
+    templates_dir: Path | None = None,
+    detect: bool = True,
 ) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 
@@ -734,8 +743,13 @@ def probe_repo(
     table packaged with Kraft, with `templates_dir`'s `detectors.yaml` on top.
     `test_command`, when given, takes the root's proposed test command's place
     (`""`: the root has no tests), and nested scopes are still probed.
+
+    `detect=False` stops at the facts that need no detector table -- the
+    repository's path, name, branch, submodules, beads, forge -- which is all
+    a caller resolving a path or checking "already connected" needs, and
+    cannot be broken by an operator's `detectors.yaml`.
     """
-    from kraft import detect  # `kraft.detect` imports this module
+    from kraft import detect as detect_mod  # `kraft.detect` imports this module
 
     p = Path(path).expanduser()
     if not p.is_dir():
@@ -767,9 +781,7 @@ def probe_repo(
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
     forge, project = _detect_forge(remote)
 
-    proposal = detect.propose(root, detect.load(templates_dir), test_command=test_command)
-
-    return {
+    facts = {
         "path": str(root),
         "name": root.name,
         "branch": git_read(root, "rev-parse", "--abbrev-ref", "HEAD"),
@@ -778,18 +790,25 @@ def probe_repo(
         "beads_export_auto": bool(export.get("auto")),
         "beads_export_git_add": bool(export.get("git-add")),
         "has_engineering": (root / ".engineering").is_dir(),
+        "forge": forge,
+        "project": project,
+    }
+    if not detect:
+        return facts
+    proposal = detect_mod.propose(root, detect_mod.load(templates_dir), test_command=test_command)
+    return {
+        **facts,
         "test_command": proposal.test_command,
         "test_scopes": proposal.test_scopes,
         "test_markers": proposal.test_markers,  # what each command was read from (Kraft-enc5z)
         "setup_command": proposal.setup_command,
         # Told, not stored: which directories have tests and no setup, each
-        # directory's own commands, and every command the evidence supports.
+        # directory's own commands, every command the evidence supports, and
+        # the commit they were read from.
         "missing_setup": proposal.missing_setup,
         "scopes": proposal.scopes,
         "candidates": proposal.candidates,
         "read_from": proposal.ref,
-        "forge": forge,
-        "project": project,
     }
 
 

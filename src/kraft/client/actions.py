@@ -116,11 +116,12 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     )
 
 
-async def probe_repo(path: str | None = None) -> dict:
+async def probe_repo(path: str | None = None, *, detect: bool = True) -> dict:
     """What connecting `path` would propose, changing nothing: its setup and
-    test commands, and every candidate the evidence supports."""
+    test commands, and every candidate the evidence supports. `detect=False`:
+    only the resolved path and the facts that need no detector table."""
     path = context.absolute_path(path or os.getcwd())
-    status, body = await transport._post("/repos/probe", {"path": path})
+    status, body = await transport._post("/repos/probe", {"path": path, "detect": detect})
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     return body
@@ -151,7 +152,9 @@ async def ensure_repo(
         # handing that back for an already-connected repo gives the caller
         # authoritative-looking `test_command`/`test_scopes`/`setup_command`
         # values the repo does not run (Kraft-djk08).
-        probe_status, probed = await transport._post("/repos/probe", {"path": path})
+        probe_status, probed = await transport._post(
+            "/repos/probe", {"path": path, "detect": False}
+        )
         if probe_status >= 400:
             raise ValueError(f"kraft {probe_status}: {probed.get('detail', probed)}")
         listing = await transport._get("/repos")
@@ -186,7 +189,7 @@ async def disconnect_repo(path: str | None = None) -> dict:
     """
     path = context.absolute_path(path or os.getcwd())
     if path not in {entry["path"] for entry in await reads.repos()}:
-        status, probed = await transport._post("/repos/probe", {"path": path})
+        status, probed = await transport._post("/repos/probe", {"path": path, "detect": False})
         if status < 400:
             path = probed["path"]
     await transport._delete("/repos", path=path)

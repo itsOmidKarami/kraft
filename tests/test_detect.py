@@ -183,8 +183,16 @@ def test_a_pyproject_holding_only_tool_settings_is_not_a_python_project(tmp_path
     assert (p.test_command, p.setup_command) == ("pnpm test", "pnpm install --frozen-lockfile")
 
 
-def test_pytest_is_proposed_only_with_evidence_of_pytest(tmp_path):
-    p = _propose(_repo(tmp_path, {"pyproject.toml": "[project]\nname = 'x'\n", "uv.lock": ""}))
+@pytest.mark.parametrize(
+    "pyproject",
+    [
+        "[project]\nname = 'x'\n",
+        "[project]\nname = 'x'\n[dependency-groups]\nlint = ['flake8-pytest-style']\n",
+    ],
+    ids=["nothing-names-it", "a-plugin-named-after-it"],
+)
+def test_pytest_is_proposed_only_with_evidence_of_pytest(tmp_path, pyproject):
+    p = _propose(_repo(tmp_path, {"pyproject.toml": pyproject, "uv.lock": ""}))
     assert (p.test_command, p.setup_command) == (None, "uv sync")
 
 
@@ -280,6 +288,51 @@ def test_a_cd_before_a_ci_command_is_its_directory(tmp_path):
     assert [(c["dir"], c["command"]) for c in p.candidates] == [("app", "go test ./...")]
 
 
+def test_a_ci_line_running_a_bare_tool_ranks_below_the_toolchain(tmp_path):
+    """CI installed `pytest` on its own PATH; a worktree has `uv run`."""
+    files = {"pyproject.toml": PYTEST, "uv.lock": "", **_workflow("      - run: pytest -x\n")}
+    p = _propose(_repo(tmp_path, files))
+    assert p.test_command == "uv run pytest"
+    assert [(c["command"], c["chosen"]) for c in p.candidates if c["tier"] == "ci"] == [
+        ("pytest -x", False)
+    ]
+    alone = _propose(_repo(tmp_path / "alone", _workflow("      - run: pytest -x\n")))
+    assert alone.test_command == "pytest -x"
+
+
+def test_the_repos_test_workflow_is_read_before_its_e2e_one(tmp_path):
+    files = {
+        ".github/workflows/e2e.yml": "jobs:\n  e:\n    steps:\n      - run: npm run test:e2e\n",
+        ".github/workflows/unit.yml": "jobs:\n  u:\n    steps:\n      - run: go test -race ./...\n",
+    }
+    assert _propose(_repo(tmp_path, files)).test_command == "go test -race ./..."
+
+
+_CIRCLE = (
+    "jobs:\n  t:\n    steps:\n      - run:\n"
+    "          command: make test\n          working_directory: svc\n"
+)
+_AZURE = "steps:\n  - bash: go test ./...\n    workingDirectory: api\n"
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        ({".circleci/config.yml": _CIRCLE, "svc/x.c": ""}, ("svc", "make test")),
+        ({"azure-pipelines.yml": _AZURE, "api/x.go": ""}, ("api", "go test ./...")),
+        (
+            {**_workflow("      - run: npm --prefix web test\n"), "web/x.js": ""},
+            ("web", "npm test"),
+        ),
+        ({**_workflow("      - run: yarn --cwd=web test\n"), "web/x.js": ""}, ("web", "yarn test")),
+    ],
+    ids=["circleci-long-form", "azure-bash-step", "npm-prefix", "yarn-cwd"],
+)
+def test_each_ci_form_names_its_directory(tmp_path, files, expected):
+    p = _propose(_repo(tmp_path, files))
+    assert [(c["dir"], c["command"]) for c in p.candidates if c["role"] == "test"] == [expected]
+
+
 def test_ci_setup_is_shown_and_never_chosen(tmp_path):
     steps = "      - run: pip install poetry\n      - run: npm ci\n      - run: npm test\n"
     p = _propose(_repo(tmp_path, _workflow(steps)))
@@ -305,18 +358,20 @@ def test_gitlab_ci_scripts_are_read(tmp_path):
 # ── devcontainer ──
 
 
-def test_a_devcontainer_is_the_setup_of_last_resort(tmp_path):
+def test_a_devcontainers_commands_are_shown_and_never_chosen(tmp_path):
+    """They are written for a container: commonly a global `pip install`."""
     dc = '{\n  // set up\n  "postCreateCommand": ["./tools/bootstrap", "--dev"],\n}'
     p = _propose(_repo(tmp_path, {".devcontainer/devcontainer.json": dc, "Makefile": "test:\n"}))
-    assert p.setup_command == "./tools/bootstrap --dev"
-    with_lock = {".devcontainer/devcontainer.json": dc, "go.mod": "module x\n"}
-    assert _propose(_repo(tmp_path / "go", with_lock)).setup_command == "go mod download"
+    assert p.setup_command is None
+    assert [
+        (c["command"], c["tier"], c["chosen"]) for c in p.candidates if c["role"] == "setup"
+    ] == [("./tools/bootstrap --dev", "devenv", False)]
 
 
-def test_a_devcontainer_provisioning_the_container_is_not_proposed(tmp_path):
+def test_a_devcontainer_provisioning_the_container_is_not_a_candidate(tmp_path):
     dc = '{"postCreateCommand": "sudo apt-get install -y libpq-dev && npm ci"}'
     p = _propose(_repo(tmp_path, {".devcontainer.json": dc, "Makefile": "test:\n"}))
-    assert p.setup_command is None
+    assert [c for c in p.candidates if c["tier"] == "devenv"] == []
 
 
 # ── scopes ──
@@ -351,6 +406,52 @@ def test_a_root_setup_recipe_prepares_the_whole_repo(tmp_path):
     p = _propose(_repo(tmp_path, files))
     assert p.setup_command == "just setup"
     assert p.test_scopes[1]["command"] == "sh -c 'cd web && npm test'"
+
+
+def test_a_root_setup_recipe_prepares_only_the_directories_it_installs(tmp_path):
+    """Kraft's own shape: `just setup` installs `frontend/`, and names
+    `vscode` only in a comment and another recipe, so vscode's install is
+    added beside it (spec A2)."""
+    justfile = (
+        "# setup installs the backend and the UI (not vscode)\n"
+        "setup: deps\n"
+        "    uv sync\n"
+        "deps:\n"
+        "    cd frontend && npm ci\n"
+        "test:\n"
+        "    pytest\n"
+        "test-vscode:\n"
+        "    cd vscode && npm ci && npm test\n"
+    )
+    files = {
+        "justfile": justfile,
+        "pyproject.toml": PYTEST,
+        "uv.lock": "",
+        "frontend/package.json": JEST,
+        "frontend/package-lock.json": "",
+        "vscode/package.json": JEST,
+        "vscode/package-lock.json": "",
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert (p.test_command, p.setup_command) == ("just test", "just setup && (cd vscode && npm ci)")
+    assert [s["command"] for s in p.test_scopes[1:]] == [
+        "sh -c 'cd frontend && npm test'",
+        "sh -c 'cd vscode && npm test'",
+    ]
+
+
+def test_a_workspace_member_with_its_own_lockfile_installs_on_its_own(tmp_path):
+    files = {
+        "pnpm-workspace.yaml": "packages: ['packages/*']\n",
+        "pnpm-lock.yaml": "",
+        "package.json": JEST,
+        "packages/a/package.json": JEST,
+        "docs/package.json": JEST,
+        "docs/package-lock.json": "",
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert p.setup_command == "pnpm install --frozen-lockfile && (cd docs && npm ci)"
+    assert [s["paths"] for s in p.test_scopes][1:] == [["docs/**"]]
 
 
 def test_a_workspace_root_covers_its_members(tmp_path):
@@ -423,13 +524,17 @@ def test_a_given_test_command_replaces_the_roots_and_keeps_nested_scopes(tmp_pat
                 {"dir": "web", "setup": "npm ci", "test": "t"},
             ],
             "(cd web && npm ci)",
-        ),  # noqa: E501
+        ),
+        ([{"dir": "", "setup": "", "test": "t"}, {"dir": "web", "setup": "", "test": "t"}], ""),
+        ([{"dir": "", "setup": None, "test": None}], None),
     ],
     ids=[
         "root-only",
         "a-directory-needing-quotes",
         "a-tested-scope-without-setup",
         "an-untested-root",
+        "every-scope-declares-nothing",
+        "nothing-declared",
     ],
 )
 def test_combine_setup(scopes, expected):
@@ -482,14 +587,27 @@ def test_disable_and_ignore_dirs_layer_onto_the_packaged_table(tmp_path):
         (
             "detectors: [{id: x, tier: runner, files: [a], test: [{run: t, tasks: [t]}]}]\n",
             "no `tasks` reader",
-        ),  # noqa: E501
+        ),
         (
             "detectors: [{id: x, tier: toolchain, files: [a], contains: {a: '('}}]\n",
             "not a valid regex",
-        ),  # noqa: E501
+        ),
         ("detectorz: []\n", "detectors.yaml"),
+        ("disable: [makefile]\n", "disable names no packaged detector: makefile"),
+        (
+            "detectors:\n  - {id: x, tier: runner, files: [a]}\n"
+            "  - {id: x, tier: runner, files: [b]}\n",
+            "detector id x is given twice",
+        ),
     ],
-    ids=["an-unknown-reader", "tasks-without-a-reader", "a-broken-regex", "a-typo"],
+    ids=[
+        "an-unknown-reader",
+        "tasks-without-a-reader",
+        "a-broken-regex",
+        "a-typo",
+        "disabling-an-unknown-id",
+        "a-duplicate-id",
+    ],
 )
 def test_a_broken_operators_file_is_refused_naming_it(tmp_path, text, match):
     with pytest.raises(config.ConfigError, match=match):
@@ -516,7 +634,9 @@ def test_origins_default_branch_is_read_before_a_local_commit(tmp_path):
     (clone / "Makefile").write_text("test:\n\tgo vet\n")
     commit_all(clone, "not pushed")
     p = _propose(clone)
-    assert (p.test_command, p.ref) == ("go test ./...", "refs/remotes/origin/HEAD")
+    assert (p.test_command, p.ref) == ("go test ./...", "refs/remotes/origin/main")
+    subprocess.run(["git", "-C", str(clone), "remote", "set-head", "origin", "-d"], check=True)
+    assert _propose(clone).ref == "refs/remotes/origin/main", "no origin/HEAD: origin's main"
 
 
 def test_a_repo_with_no_commit_is_read_from_its_working_copy(tmp_path):
@@ -535,3 +655,29 @@ def test_a_repo_with_no_commit_is_read_from_its_working_copy(tmp_path):
     (repo / "ignored" / "Cargo.toml").write_text("[package]\n")
     p = _propose(repo)
     assert (p.test_command, p.ref, p.test_scopes[0]["paths"]) == ("go test ./...", None, ["**"])
+
+
+def test_a_listing_git_refuses_fails_the_probe_rather_than_reading_as_empty(tmp_path):
+    """An empty proposal would save the repo disabled for "no test command
+    found", which is not why."""
+    repo = _repo(tmp_path, {"go.mod": "module x\n"})
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], capture_output=True, text=True
+    ).stdout.strip()
+    (repo / ".git" / "objects" / tree[:2] / tree[2:]).unlink()
+    with pytest.raises(config.ConfigError, match="git ls-tree .* failed"):
+        _propose(repo)
+
+
+def test_a_listing_that_takes_too_long_fails_the_probe(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, {"go.mod": "module x\n"})
+    monkeypatch.setattr(detect, "_LIST_TIMEOUT_S", 1e-6)
+    with pytest.raises(config.ConfigError, match="took more than"):
+        _propose(repo)
+
+
+def test_a_file_is_read_up_to_the_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(detect, "_TEXT_LIMIT", 64)
+    pad = "x" * 100
+    repo = _repo(tmp_path, {"Makefile": f"# {pad}\ntest:\n\tgo test\n", "go.mod": "module x\n"})
+    assert _propose(repo).test_command == "go test ./...", "the target past the cap is not read"

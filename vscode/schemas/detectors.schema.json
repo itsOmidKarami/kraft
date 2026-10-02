@@ -92,6 +92,11 @@
           "title": "Id",
           "type": "string"
         },
+        "lockfile": {
+          "default": false,
+          "title": "Lockfile",
+          "type": "boolean"
+        },
         "setup": {
           "default": [],
           "items": {

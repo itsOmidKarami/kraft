@@ -95,6 +95,7 @@ detectors:
   # ── JavaScript and TypeScript ───────────────────────────────────────────────
   - id: bun
     tier: toolchain
+    lockfile: true
     family: js
     files: [bun.lock, bun.lockb]
     tasks: npm
@@ -108,6 +109,7 @@ detectors:
 
   - id: pnpm
     tier: toolchain
+    lockfile: true
     family: js
     files: [pnpm-lock.yaml]
     tasks: npm
@@ -120,6 +122,7 @@ detectors:
 
   - id: yarn-berry
     tier: toolchain
+    lockfile: true
     family: js
     files: [yarn.lock]
     contains: {.yarnrc.yml: '.'}
@@ -133,6 +136,7 @@ detectors:
 
   - id: yarn
     tier: toolchain
+    lockfile: true
     family: js
     files: [yarn.lock]
     tasks: npm
@@ -145,6 +149,7 @@ detectors:
 
   - id: npm
     tier: toolchain
+    lockfile: true
     family: js
     files: [package-lock.json, npm-shrinkwrap.json]
     tasks: npm
@@ -182,6 +187,7 @@ detectors:
   # ── Python ──────────────────────────────────────────────────────────────────
   - id: uv
     tier: toolchain
+    lockfile: true
     family: python
     files: [uv.lock]
     tasks: poe
@@ -191,7 +197,7 @@ detectors:
       - {tasks: [test], run: "uv run poe {task}"}
       - when: &pytest
           - files: [pytest.ini, conftest.py, tests/conftest.py, test/conftest.py]
-          - contains: {pyproject.toml: '\bpytest\b'}
+          - contains: {pyproject.toml: '(?<![\w-])pytest\b'}
           - contains: {uv.lock: '(?m)^name = "pytest"$'}
           - contains: {poetry.lock: '(?m)^name = "pytest"$'}
           - contains: {pdm.lock: '(?m)^name = "pytest"$'}
@@ -205,6 +211,7 @@ detectors:
 
   - id: poetry
     tier: toolchain
+    lockfile: true
     family: python
     files: [poetry.lock]
     tasks: poe
@@ -216,6 +223,7 @@ detectors:
 
   - id: pdm
     tier: toolchain
+    lockfile: true
     family: python
     files: [pdm.lock]
     tasks: pdm

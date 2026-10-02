@@ -102,10 +102,10 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
 def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
     """(test_command, setup_command) a person picked from the probe's
     candidates for the repo root; None for a role the proposal stands for."""
+    resolved = asyncio.run(client.probe_repo(path, detect=False))["path"]
+    if resolved in {r["path"] for r in asyncio.run(client.repos())}:
+        return None, None  # connect says so; there is nothing to choose
     probed = asyncio.run(client.probe_repo(path))
-    connected = {r["path"] for r in asyncio.run(client.repos())}
-    if probed["path"] in connected:
-        return None, None
     root = next((s for s in probed.get("scopes") or () if s["dir"] == ""), None)
     cands = probed.get("candidates") or []
     test = _pick("test", cands, root["test"] if root else None)
@@ -120,10 +120,13 @@ def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
 
 def _say_connected(result: dict) -> None:
     print(f"connected: {result['path']}")
-    if result.get("read_from") == "refs/remotes/origin/HEAD":
+    ref = result.get("read_from")
+    if ref and ref.startswith("refs/remotes/origin/"):
         # Work items start from origin, so a commit not pushed yet is not read.
-        print("  read from origin's default branch, where work items start")
-    elif result.get("read_from") is None and "read_from" in result:
+        print(f"  read from origin/{ref.rsplit('/', 1)[-1]}, where work items start")
+    elif ref:
+        print(f"  read from {ref}")
+    elif "read_from" in result:
         print("  read from the working copy: the repo has no commit yet")
     by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
     chosen = [c for c in result.get("candidates") or () if c.get("chosen")]

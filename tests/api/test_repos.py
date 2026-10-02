@@ -802,6 +802,37 @@ def test_a_broken_detectors_file_fails_the_probe_naming_it(tmp_path, client, tem
     assert "detectors.yaml" in r.json()["detail"]
 
 
+def test_a_connected_repo_answers_409_before_any_detection(tmp_path, client, templates_dir):
+    """A reconnect (`ensure_repo` on every handoff) neither pays for the probe
+    nor fails on an operator's broken detectors.yaml."""
+    repo = make_repo(tmp_path)
+    assert client.post("/api/repos", json={"path": str(repo), "enabled": False}).status_code == 201
+    (templates_dir / "detectors.yaml").write_text("detectorz: []\n")
+    r = client.post("/api/repos", json={"path": str(repo)})
+    assert r.status_code == 409, r.text
+    facts = client.post("/api/repos/probe", json={"path": str(repo), "detect": False}).json()
+    assert facts["path"] == str(repo.resolve())
+    assert "test_command" not in facts
+
+
+def test_the_probe_runs_off_the_event_loop(tmp_path, client, monkeypatch):
+    from kraft.api.routes import repos as routes
+
+    ran = []
+    real = routes.asyncio.to_thread
+
+    async def spy(fn, *args, **kwargs):
+        ran.append((fn.__name__, kwargs.get("detect", True)))
+        return await real(fn, *args, **kwargs)
+
+    monkeypatch.setattr(routes.asyncio, "to_thread", spy)
+    repo = make_repo(tmp_path)
+    client.post("/api/repos/probe", json={"path": str(repo)})
+    client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    assert ("probe_repo", True) in ran
+    assert ran.count(("probe_repo", True)) == 2, ran
+
+
 def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, monkeypatch):
     """Kraft-rki: the sandbox's guarantee is that a hook a worker plants in
     the gitdir it must be able to write cannot execute on the host. That holds

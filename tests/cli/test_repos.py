@@ -205,6 +205,14 @@ def test_connect_verify_exits_by_whether_the_commands_passed(
     assert said in capsys.readouterr().out
 
 
+def test_reconnecting_survives_a_broken_detectors_file(app, capsys, repo, tmp_path):
+    cli.main(["repo", "connect", str(repo)])
+    templates = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    (templates / "detectors.yaml").write_text("detectorz: []\n")
+    cli.main(["repo", "connect", str(repo)])
+    assert "already connected" in capsys.readouterr().out
+
+
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
     plain = tmp_path / "plain"
     plain.mkdir()

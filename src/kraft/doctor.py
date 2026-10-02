@@ -990,7 +990,7 @@ async def _repo_checks() -> list[dict]:
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
             # makes it survivable.
-            suggestion = _suggested_setup(path, live)
+            suggestion = await asyncio.to_thread(_suggested_setup, path, live)
             checks.append(
                 _check(
                     f"setup {_label(repo)}",

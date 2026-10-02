@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import tempfile
@@ -51,6 +52,9 @@ class RepoBody(BaseModel):
 
 class ProbeBody(BaseModel):
     path: AbsolutePath
+    #: False: only what needs no detector table (the path, name, forge),
+    #: which is what resolving a path or checking "already connected" needs.
+    detect: bool = True
 
 
 def _auto_connect_children(
@@ -209,9 +213,13 @@ async def list_repos(request: Request):
 
 @api_router.post("/repos/probe")
 async def probe_repo(body: ProbeBody, request: Request):
-    """Read-only inspection of a candidate repo — Kraft never edits repo files."""
+    """Read-only inspection of a candidate repo — Kraft never edits repo files.
+    Off the event loop: it reads the whole tree's listing through git."""
+    templates_dir = request.app.state.templates_dir
     try:
-        return config_mod.probe_repo(body.path, templates_dir=request.app.state.templates_dir)
+        return await asyncio.to_thread(
+            config_mod.probe_repo, body.path, templates_dir=templates_dir, detect=body.detect
+        )
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -219,15 +227,34 @@ async def probe_repo(body: ProbeBody, request: Request):
 @api_router.post("/repos", status_code=201)
 async def add_repo(body: RepoBody, request: Request):
     st = request.app.state
+    # One connect at a time between reading repos.yaml and saving it: the
+    # probe runs in a thread, and two connects interleaving at that await
+    # would each save the list without the other's entry. Per app, so the
+    # lock belongs to the loop that serves it.
+    if getattr(st, "connecting", None) is None:
+        st.connecting = asyncio.Lock()
+    async with st.connecting:
+        return await _add_repo(body, st)
+
+
+async def _add_repo(body: RepoBody, st) -> dict:
+    templates_dir = st.templates_dir
     try:
-        probed = config_mod.probe_repo(
-            body.path, test_command=body.test_command, templates_dir=st.templates_dir
+        # "Already connected" first, from what needs no detector table: a
+        # reconnect (`ensure_repo` on every handoff) must not pay for the probe,
+        # or fail on an operator's broken detectors.yaml.
+        facts = config_mod.probe_repo(body.path, detect=False)
+        if any(r["path"] == facts["path"] for r in _editable_repos(st)[0]):
+            raise HTTPException(409, f"{facts['path']} is already connected")
+        probed = await asyncio.to_thread(
+            config_mod.probe_repo,
+            body.path,
+            test_command=body.test_command,
+            templates_dir=templates_dir,
         )
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
     repos, _ = _editable_repos(st)
-    if any(r["path"] == probed["path"] for r in repos):
-        raise HTTPException(409, f"{probed['path']} is already connected")
     # `""` is a decision, not an absence: the repo deliberately has no tests.
     test_command = body.test_command if body.test_command is not None else probed["test_command"]
     # Probed regardless of test_command now (Kraft-k4mx): probe_repo already
@@ -276,7 +303,9 @@ async def add_repo(body: RepoBody, request: Request):
         "managed": True,
     }
     repos.append(entry)
-    children = _auto_connect_children(repos, entry, probed["submodules"], st.templates_dir)
+    children = await asyncio.to_thread(
+        _auto_connect_children, repos, entry, probed["submodules"], templates_dir
+    )
     workspaces = _workspaces(st)
     _declare_workspace(workspaces, repos, entry, children)
     _refuse_enable_without_test_command(entry)

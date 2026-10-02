@@ -367,6 +367,7 @@ def test_migration_is_idempotent(tmp_path):
         ("ssh://git@gitlab.corp.io:2222/team/sub/repo.git", "gitlab", "team/sub/repo"),
         ("https://github.example.com/org/repo.git", "github", "org/repo"),
         ("https://notgithub.io/github.com/repo.git", None, None),
+        ("git@gitlab.com:123/repo.git", "gitlab", "123/repo"),
     ],
     ids=[
         "no-remote",
@@ -379,6 +380,7 @@ def test_migration_is_idempotent(tmp_path):
         "self-hosted-gitlab-ssh-url-with-a-port",
         "github-enterprise",
         "a-forge-name-in-the-path-is-not-the-host",
+        "a-numeric-gitlab-group-is-not-a-port",
     ],
 )
 def test_probe_detects_the_forge(tmp_path, origin, forge, project):

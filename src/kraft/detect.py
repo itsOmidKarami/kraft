@@ -37,6 +37,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -61,7 +62,7 @@ Tier = Literal["runner", "ci", "toolchain", "devenv"]
 #: Which evidence wins, per role. CI setup is evidence only: CI installs
 #: global tools (`npm i -g`, `pip install poetry`) a worktree must not.
 TEST_TIERS: tuple[Tier, ...] = ("runner", "ci", "toolchain")
-SETUP_TIERS: tuple[Tier, ...] = ("runner", "toolchain", "devenv")
+SETUP_TIERS: tuple[Tier, ...] = ("runner", "toolchain")
 
 _ID = r"^[a-z][a-z0-9_-]*$"
 _TEXT_LIMIT = 4_000_000
@@ -122,6 +123,9 @@ class Detector(BaseModel):
     tasks: str | None = None
     #: When a directory this detector matched is a workspace root.
     workspace: list[Condition] = []
+    #: Its `files` are lockfiles: a workspace member it matches has its own
+    #: lockfile, and installs on its own.
+    lockfile: bool = False
     test: list[Command] = []
     setup: list[Command] = []
 
@@ -184,6 +188,14 @@ def load(templates_dir: Path | None = None) -> Table:
     own = _read_file(templates_dir / FILE) if templates_dir else DetectorFile()
     by_id = {d.id: d for d in own.detectors}
     known = {d.id for d in packaged.detectors}
+    if len(by_id) != len(own.detectors):
+        twice = sorted(
+            {d.id for d in own.detectors if [o.id for o in own.detectors].count(d.id) > 1}
+        )
+        raise ConfigError(f"{FILE}: detector id {', '.join(twice)} is given twice")
+    unknown = sorted(set(own.disable) - known)
+    if unknown:
+        raise ConfigError(f"{FILE}: disable names no packaged detector: {', '.join(unknown)}")
     merged = [d for d in own.detectors if d.id not in known]
     merged += [by_id.get(d.id, d) for d in packaged.detectors if d.id not in own.disable]
     return Table(
@@ -203,10 +215,12 @@ _LIST_TIMEOUT_S = 120
 
 def source_ref(root: Path) -> str | None:
     """The commit a work item's worktree would be cut from: origin's default
-    branch when the clone knows it (`builtins.upstream_head` forks from
-    origin, not from the checkout), else the checkout's HEAD. None for a
-    repository with no commit yet."""
-    for ref in ("refs/remotes/origin/HEAD", "HEAD"):
+    branch when the clone has it (`builtins.upstream_head` forks from origin,
+    not from the checkout, and `git.default_branch` reads `origin/HEAD` or
+    falls back to `main`), else the checkout's HEAD. None for a repository
+    with no commit yet."""
+    target = git_read(root, "symbolic-ref", "-q", "refs/remotes/origin/HEAD", expected_failure=True)
+    for ref in (target or "refs/remotes/origin/main", "HEAD"):
         if git_read(
             root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", expected_failure=True
         ):
@@ -214,7 +228,14 @@ def source_ref(root: Path) -> str | None:
     return None
 
 
+#: A partial clone's missing blob is fetched on demand; a probe must not
+#: reach the network, let alone prompt for credentials.
+_GIT_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+
 def _git(root: Path, *args: str) -> bytes:
+    """A read the probe cannot do without: a failure is an error naming git's
+    reason, never an empty answer that reads as an empty repository."""
     try:
         done = subprocess.run(
             ["git", "--no-optional-locks", *args],
@@ -222,13 +243,32 @@ def _git(root: Path, *args: str) -> bytes:
             capture_output=True,
             timeout=_LIST_TIMEOUT_S,
             check=False,
+            env={**os.environ, **_GIT_ENV},
         )
     except subprocess.TimeoutExpired as exc:
         raise ConfigError(
             f"git {args[0]} in {root} took more than {_LIST_TIMEOUT_S}s; "
             "connect it with --test-command and --setup-command instead"
         ) from exc
-    return done.stdout if done.returncode == 0 else b""
+    if done.returncode != 0:
+        why = done.stderr.decode("utf-8", "replace").strip()
+        raise ConfigError(f"git {args[0]} in {root} failed: {why}")
+    return done.stdout
+
+
+def _blob(root: Path, oid: str) -> bytes:
+    """At most `_TEXT_LIMIT` bytes of a blob, however large it is; empty when
+    git cannot give it (a partial clone's missing blob)."""
+    with subprocess.Popen(
+        ["git", "--no-optional-locks", "cat-file", "blob", oid],
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, **_GIT_ENV},
+    ) as proc:
+        raw = proc.stdout.read(_TEXT_LIMIT) if proc.stdout else b""
+        proc.kill()
+    return raw
 
 
 class _Index:
@@ -294,7 +334,7 @@ class _Index:
         """`rel`'s content, at most `_TEXT_LIMIT` bytes of it, as text."""
         if rel not in self._text:
             if rel in self._blobs:
-                raw = _git(self.root, "cat-file", "blob", self._blobs[rel][0])
+                raw = _blob(self.root, self._blobs[rel][0])
             elif rel in self.files:
                 try:
                     with open(self.root / rel, "rb") as f:
@@ -526,6 +566,11 @@ class Candidate:
     family: str | None = None
     #: CI runs this same command: as strong as a CI line, and more specific.
     corroborated: bool = False
+    #: A CI line whose program is a bare tool rather than a runner, a
+    #: toolchain's wrapper or a script of the repo's own.
+    bare: bool = False
+    #: The runner task it runs (`setup`), when it runs one.
+    task: str | None = None
     chosen: bool = False
 
 
@@ -575,6 +620,7 @@ def _detect(index: _Index, d: str, table: Table) -> tuple[list[Candidate], list[
                             _join(d, where),
                             det.id,
                             det.family,
+                            task=task,
                         )
                     )
                 else:
@@ -609,7 +655,19 @@ _CI_FILES = (
     ".woodpecker/*.yml",
     ".travis.yml",
 )
-_CI_COMMAND_KEYS = {"run", "script", "commands", "command"}
+_CI_COMMAND_KEYS = {"run", "script", "commands", "command", "bash", "pwsh", "powershell"}
+_CI_DIR_KEYS = ("working-directory", "working_directory", "workingDirectory")
+#: Programs that run a project's tests through its own toolchain or scripts. A
+#: CI test line starting with anything else (`pytest`, `jest`) runs a tool CI
+#: installed on its own PATH.
+_CI_WRAPPERS = {
+    "just", "make", "task", "mise", "npm", "pnpm", "yarn", "bun", "bunx", "npx", "deno",
+    "uv", "uvx", "poetry", "pdm", "pipenv", "hatch", "tox", "nox", "cargo", "go", "gradle",
+    "mvn", "sbt", "dotnet", "bundle", "composer", "mix", "swift", "flutter", "dart", "zig",
+    "stack", "cabal", "julia", "bazel", "bazelisk", "cmake", "ctest", "meson", "sh", "bash",
+}  # fmt: skip
+#: Workflow files whose tests are not the repo's unit tests, read last.
+_CI_LATE = re.compile(r"e2e|playwright|cypress|release|deploy|docs|nightly|publish|pages|bench")
 #: Inputs to a step, not commands: `actions/github-script`'s `with: script:`
 #: is JavaScript.
 _CI_SKIP_KEYS = {"with", "env", "variables", "environment", "rules", "only", "except"}
@@ -631,7 +689,8 @@ _CI_SETUP_TOOLS = {
 _CI_NOT_COMMANDS = {
     "echo", "printf", "cat", "export", "mkdir", "cp", "mv", "rm", "ls", "curl", "wget", "git",
     "sudo", "apt", "apt-get", "brew", "choco", "test", "[", "if", "then", "fi", "for", "do",
-    "done", "set", "source", ".", "chmod", "docker", "gh", "glab", "tee",
+    "done", "set", "source", ".", "chmod", "docker", "gh", "glab", "tee", "apk", "yum", "dnf",
+    "pacman", "zypper", "port", "snap",
 }  # fmt: skip
 _CI_GLOBAL_INSTALL = re.compile(
     r"\s(-g|--global)\b|^(go|cargo) install\b|\btool install\b"
@@ -659,12 +718,13 @@ def _ci_walk(node: object, wd: str, out: list[tuple[str, str, str]]) -> None:
     run_defaults = defaults.get("run") if isinstance(defaults, dict) else None
     if isinstance(run_defaults, dict) and isinstance(run_defaults.get("working-directory"), str):
         wd = run_defaults["working-directory"]
-    if isinstance(node.get("working-directory"), str):
-        wd = node["working-directory"]
+    wd = next((node[k] for k in _CI_DIR_KEYS if isinstance(node.get(k), str)), wd)
     for key, value in node.items():
         if key in _CI_SKIP_KEYS:
             continue
-        if key in _CI_COMMAND_KEYS or key in _CI_SETUP_KEYS:
+        if key in _CI_COMMAND_KEYS and isinstance(value, dict):
+            _ci_walk(value, wd, out)  # CircleCI's long form: `run: {command: ...}`
+        elif key in _CI_COMMAND_KEYS or key in _CI_SETUP_KEYS:
             out.extend((wd, str(key), line) for line in _ci_lines(value))
         else:
             _ci_walk(value, wd, out)
@@ -673,10 +733,10 @@ def _ci_walk(node: object, wd: str, out: list[tuple[str, str, str]]) -> None:
 def _relative_dir(base: str, step: str) -> str | None:
     """`step` from `base`, relative to the repository root; None when it
     leaves the repository or cannot be known."""
-    d = os.path.normpath(_join(base, step) if base else step)
+    d = posixpath.normpath(_join(base, step) if base else step)
     if d == ".":
         return ""
-    if d.startswith("..") or os.path.isabs(d) or "$" in d:
+    if d.startswith("..") or posixpath.isabs(d) or "$" in d:
         return None
     return d
 
@@ -692,8 +752,20 @@ def _ci_split(wd: str, line: str) -> list[tuple[str | None, str]]:
         if len(words) == 2 and words[0] == "cd":
             here = _relative_dir(here, words[1]) if here is not None else None
             continue
+        moved = _PREFIX.match(part)
+        if moved and here is not None:
+            part = f"{moved['tool']} {moved['before']}{moved['after']}".strip()
+            out.append((_relative_dir(here, moved["dir"]), re.sub(r"\s+", " ", part)))
+            continue
         out.append((here, part))
     return out
+
+
+#: `npm --prefix web ci`, `pnpm --dir web test`, `yarn --cwd web test`: a
+#: package manager told which directory to run in.
+_PREFIX = re.compile(
+    r"^(?P<tool>npm|pnpm|yarn)\s+(?P<before>.*?)(?:--prefix|--dir|--cwd|-C)[=\s](?P<dir>\S+)(?P<after>.*)$"
+)
 
 
 def _shell_syntax(command: str) -> bool:
@@ -755,8 +827,12 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
                     if (d, role, command) in seen:
                         continue
                     seen.add((d, role, command))
-                    found.append(Candidate(d, role, command, "ci", rel, rel, "ci"))
-    return found
+                    bare = role == "test" and not (
+                        head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
+                    )
+                    found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
+    # The repo's own test workflow before its e2e, release or docs ones.
+    return sorted(found, key=lambda c: bool(_CI_LATE.search(posixpath.basename(c.marker))))
 
 
 # ── devcontainer ─────────────────────────────────────────────────────────────
@@ -843,19 +919,24 @@ def _ancestors(d: str) -> list[str]:
 
 
 def _first_by_tier(cands: list[Candidate], tiers: tuple[Tier, ...]) -> Candidate | None:
+    """The first candidate by tier. Within CI: one a runner or toolchain also
+    proposes first, then a line through a wrapper. A CI line running a bare
+    tool (`pytest`, `jest`) comes after the toolchain: CI installed that tool
+    on its own PATH, which a worktree's is not."""
     for tier in tiers:
-        hit = next((c for c in cands if c.tier == tier), None)
+        hit = next((c for c in cands if c.tier == tier and not c.bare), None)
         if tier == "ci":
             hit = next((c for c in cands if c.corroborated), hit)
         if hit is not None:
             return hit
-    return None
+    return next((c for c in cands if c.bare), None) if "ci" in tiers else None
 
 
 def _setups(cands: list[Candidate], skip_families: set[str]) -> list[Candidate]:
     """A runner's setup recipe if there is one, else one toolchain setup per
-    family (a Python and a JavaScript project at one root need both), else a
-    devcontainer's."""
+    family (a Python and a JavaScript project at one root need both). A
+    devcontainer's commands are never chosen: they are written for a
+    container, and commonly install into its global interpreter."""
     runner = _first_by_tier(cands, ("runner",))
     if runner is not None:
         return [runner]
@@ -865,10 +946,7 @@ def _setups(cands: list[Candidate], skip_families: set[str]) -> list[Candidate]:
         if c.tier == "toolchain" and c.family not in families and c.family not in skip_families:
             families.add(c.family)
             picked.append(c)
-    if picked:
-        return picked
-    devenv = _first_by_tier(cands, ("devenv",))
-    return [devenv] if devenv else []
+    return picked
 
 
 def in_dir(d: str, command: str, *, shell: bool) -> str:
@@ -887,14 +965,19 @@ def combine_setup(scopes: list[dict]) -> str | None:
     an undeclared setup stops the first work item, which is what should
     happen until a person decides."""
     parts = []
+    declared = False
     for s in scopes:
         if s.get("setup") is None:
             if s.get("test"):
                 return None
             continue
+        declared = True
         if s["setup"]:
             parts.append(in_dir(s["dir"], s["setup"], shell=True))
-    return " && ".join(parts) if parts else None
+    if parts:
+        return " && ".join(parts)
+    # Every scope says "nothing to prepare": that is a declaration too.
+    return "" if declared else None
 
 
 def _unclaimed(index: _Index, d: str, claimed: set[str]) -> list[str]:
@@ -909,6 +992,55 @@ def _unclaimed(index: _Index, d: str, claimed: set[str]) -> list[str]:
         else:
             out.append(f"{full}/**")
     return out
+
+
+def _uncommented(text: str) -> str:
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
+def _recipe(text: str, runner: str, task: str | None) -> str:
+    """What a runner's `task` runs: its own body and the bodies of the tasks
+    it depends on, without comments. For a runner whose file this cannot cut
+    into recipes (a Taskfile, a script), the whole file without comments."""
+    if runner not in ("just", "make") or task is None:
+        return _uncommented(text)
+    header = _JUST_RECIPE if runner == "just" else _MAKE_RULE
+    recipes: dict[str, tuple[list[str], list[str]]] = {}
+    current: list[str] | None = None
+    for line in _uncommented(text).splitlines():
+        if line[:1] in (" ", "\t") or not line.strip():
+            if current is not None:
+                current.append(line)
+            continue
+        match = header.match(line)
+        current = None
+        if match:
+            names = match.group(1).split() if runner == "make" else [match.group(1)]
+            deps = [re.split(r"[(\s]", w)[0] for w in line.split(":", 1)[1].split()]
+            current = []
+            for name in names:
+                recipes[name] = (current, deps)
+    out: list[str] = []
+    seen: set[str] = set()
+    todo = [task]
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in recipes:
+            continue
+        seen.add(name)
+        body, deps = recipes[name]
+        out += body
+        todo += deps
+    return "\n".join(out)
+
+
+def _names_dir(text: str, d: str) -> bool:
+    """Whether a setup recipe's text works in directory `d`: `cd web`,
+    `--prefix web` (or `--dir`, `--cwd`, `-C`), or a path `web/...`. A bare
+    word is not enough: it is as likely a comment or another subject."""
+    name = rf"(?:\./)?{re.escape(d)}"
+    moved = rf"(?:\bcd\s+|(?:--prefix|--dir|--cwd|-C)[=\s]+){name}(?![\w.-])"
+    return re.search(rf"{moved}|(?<![\w.-]){name}/", text) is not None
 
 
 def _corroborate(by_dir: dict[str, list[Candidate]], ci: list[Candidate]) -> None:
@@ -965,9 +1097,14 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
     }
     scopes: list[Scope] = []
     claimed: set[str] = set()
-    root_recipe = False
+    #: The root runner's file, when its setup recipe is the root's setup: a
+    #: nested directory it names is prepared by it.
+    recipe_text: str | None = None
     for d, cands in by_dir.items():
-        families = {m.detector.family for m in matches[d] if m.detector.family}
+        # A member with a lockfile of its own installs on its own (a docs
+        # site beside a pnpm workspace), so no workspace above covers it.
+        locked = {m.detector.family for m in matches[d] if m.detector.lockfile}
+        families = {m.detector.family for m in matches[d] if m.detector.family} - locked
         covering = {f for a in _ancestors(d) for f in workspaces.get(a, ())}
         if any(a in claimed and a for a in _ancestors(d)):
             continue  # inside a directory that is already a scope of its own
@@ -985,16 +1122,17 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
         else:
             test = _first_by_tier([c for c in cands if c.role == "test"], TEST_TIERS)
         setup = _setups([c for c in cands if c.role == "setup"], covering & families)
-        if root_recipe:
+        named = recipe_text is not None and _names_dir(recipe_text, d)
+        if named:
             setup = [c for c in setup if c.tier == "runner"]
         if test is None and d != "" and not workspaces.get(d):
             continue
         if test is None and d == "" and not setup:
             continue
-        covered = not setup and (root_recipe or bool(covering & families))
+        covered = not setup and (named or bool(covering & families))
         scopes.append(Scope(d, test, setup, covered))
         if d == "" and [c.tier for c in setup] == ["runner"]:
-            root_recipe = True
+            recipe_text = _recipe(index.text(setup[0].marker), setup[0].detector, setup[0].task)
         if test is not None:
             claimed.add(d)
         for c in (test, *setup):
