@@ -10,9 +10,9 @@ import { Config } from "./Config";
 import { ItemYaml } from "./ItemYaml";
 import { crumbPath, describe, type PaneKind } from "./describe";
 import { Overview, type PaneCtx } from "./Overview";
+import { RenameTitle } from "./RenameTitle";
 import { ChangeBaseCard, type BaseCheck } from "../cards/ChangeBaseCard";
 import { RemoveCard } from "../cards/RemoveCard";
-import { RenameCard } from "../cards/RenameCard";
 import { refsTo } from "../cards/refs";
 import { ExtendMenu } from "../menus/ExtendMenu";
 import { IconPicker } from "../IconPicker";
@@ -53,16 +53,22 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   onRemoved?: () => void;
   /** The paths the open remove card lists, for the canvas to mark red. */
   onMarking?: (nodes: string[]) => void;
-  /** The page asks for the rename card (a click on the selected node's name). */
-  renameNow?: { el: HTMLElement; tick: number } | null;
+  /** The page asks for the title's rename (a click on the selected node's name) with a new
+   *  count, and ends it with 0 (a double-click opens the node view instead). */
+  renameNow?: number;
 }) {
-  const [card, setCard] = useState<{ t: "move" } | { t: "rename" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
+  const [card, setCard] = useState<{ t: "move" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  // The path whose title is being renamed in place: another selection ends it.
+  const [renaming, setRenaming] = useState<string | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
+  useEffect(() => setRenaming(null), [path]);
   useEffect(() => {
-    if (!renameNow) return;
-    anchor.current = renameNow.el;
-    setCard({ t: "rename" });
+    if (renameNow === undefined) return;
+    setRenaming(renameNow ? path : null);
+    setRefused(null);
+    // Only when the page asks: the path is the one it asks about.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renameNow]);
   const [asking, setAsking] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -114,6 +120,10 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     setRefused(null);
     onMarking?.([]);
   };
+  const endRename = () => {
+    setRenaming(null);
+    setRefused(null);
+  };
   // What a remove or a rename touches (Decisions §9 Rename, Remove).
   const isNodeLike = d.kind === "node" || d.kind === "gate";
   const refs = isNodeLike ? refsTo(r, scope, path) : [];
@@ -135,7 +145,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     const a = await draft.ops([{ op: "rename", path, id }], { quiet: true });
     if (a.status !== 200) return setRefused(detailOf(a.body));
     const updated = (a.body.ops?.[0]?.result?.updated as unknown[] | undefined)?.length ?? 0;
-    closeCard();
+    endRename();
     showToast(`Renamed ${d.id} → ${id}${updated ? ` · ${plural(updated, "reference")} updated` : ""}${d.kind === "chain" ? " · publish moves the file" : ""}`);
     onRenamed?.(path, path ? [...path.split(".").slice(0, -1), id].join(".") : "");
   };
@@ -210,7 +220,10 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
       onCollapse={onCollapse}
       onExpand={onExpand}
       onFocus={node && onFocus ? onFocus : undefined}
-      onTitle={renameable ? (el) => { at(el); setCard({ t: "rename" }); } : undefined}
+      onTitle={renameable ? () => { setRefused(null); setRenaming(path); } : undefined}
+      titleEdit={renameable && renaming === path ? (
+        <RenameTitle key={path} what={d.kind === "chain" ? "chain" : d.kind === "gate" ? "gate" : d.kind === "node" ? "node" : d.kind === "step" ? "step" : "task"} id={d.kind === "chain" ? chain : d.id} taken={siblings} refs={refs} refused={refused} chain={d.kind === "chain"} onGo={(id) => void rename(id)} onCancel={endRename} />
+      ) : undefined}
       // Nodes, steps and tasks pick an icon; the chain, gates, the fix loop and the judge have fixed ones (Decisions §9 Icons).
       onIcon={["node", "step", "task", "esc", "review"].includes(d.kind) ? (el) => { at(el); setCard({ t: "icon" }); } : undefined}
       footer={footer}
@@ -228,9 +241,6 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
           </>}
     </Inspector>
     {card?.t === "move" && moveWhat && own && <MoveToLibraryCard anchor={anchor} draft={draft} path={path} id={d.id} own={own} what={moveWhat} onMoved={() => {}} onClose={closeCard} />}
-    {card?.t === "rename" && (
-      <RenameCard anchor={anchor} what={d.kind === "chain" ? "chain" : d.kind === "gate" ? "gate" : d.kind === "node" ? "node" : d.kind === "step" ? "step" : "task"} id={d.kind === "chain" ? chain : d.id} taken={siblings} refs={refs} refused={refused} chain={d.kind === "chain"} onGo={(id) => void rename(id)} onClose={closeCard} />
-    )}
     {card?.t === "remove" && <RemoveCard anchor={anchor} label={removeLabel} refs={refs} note={inherits ? "This chain will then own the step's list; ↺ on the node restores it." : undefined} onRemove={() => void remove()} onClose={closeCard} />}
     {card?.t === "extend" && <ExtendMenu anchor={anchor} title="Change base" note="Next, you'll see which of this chain's overrides fit the new base." onPick={(b) => void pickBase(b)} onClose={closeCard} />}
     {card?.t === "icon" && (

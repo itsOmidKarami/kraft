@@ -40,6 +40,10 @@ export function useBox() {
   return [setEl, box.w, box.h] as const;
 }
 
+/** How long a click waits to be sure it isn't the first of a double-click (the
+ *  common system default; a slower pair still ends the rename it began). */
+export const DOUBLE_CLICK_MS = 500;
+
 export const chainUrl = (chain: string) => `/templates/chains/${encodeURIComponent(chain)}`;
 export const nodeUrl = (chain: string, node: string) => `${chainUrl(chain)}/nodes/${encodeURIComponent(node)}`;
 
@@ -84,7 +88,10 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   // The nodes an open remove card lists, marked red on the canvas (Decisions §9 Remove).
   const [marked, setMarked] = useState<string[]>([]);
   const [strip, setStrip] = useState<{ ok: boolean; text: string } | null>(null);
-  const [renameNow, setRenameNow] = useState<{ el: HTMLElement; tick: number } | null>(null);
+  // A click on the selected node's name renames it once no second click makes it a double-click.
+  const [renameNow, setRenameNow] = useState(0);
+  const renameTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(renameTimer.current), []);
   // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
@@ -137,6 +144,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   }, []);
 
   const focusNode = useCallback((id: string, sel?: TSel) => {
+    // A double-click opens the node view: the click before it renames nothing.
+    window.clearTimeout(renameTimer.current);
+    setRenameNow(0);
     dispatch({ type: "focus", node: id, sel });
     navigate(nodeUrl(chain, id));
   }, [chain, navigate, dispatch]);
@@ -311,9 +321,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             refused={refused}
             onSelect={(id) => {
               if (review) return setHighlight(id);
-              // A click on the selected node's name while its pane is open renames it (Decisions §9 Rename).
-              const btn = document.querySelector<HTMLElement>(`.graph-node[aria-label^="${id}, "]`);
-              if (sel.kind === "node" && sel.node === id && s.open && btn) return setRenameNow((p) => ({ el: btn, tick: (p?.tick ?? 0) + 1 }));
+              // A click on the selected node's name while its pane is open renames it in the pane
+              // (Decisions §9 Rename), unless a second click makes it a double-click, which opens it.
+              window.clearTimeout(renameTimer.current);
+              if (sel.kind === "node" && sel.node === id && s.open) {
+                renameTimer.current = window.setTimeout(() => setRenameNow((k) => k + 1), DOUBLE_CLICK_MS);
+                return;
+              }
               dispatch({ type: "pick", sel: selOf(id) });
             }}
             onOpen={(id) => (review ? setHighlight(id) : dispatch({ type: "expand", sel: selOf(id) }))}

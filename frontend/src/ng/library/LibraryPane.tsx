@@ -9,7 +9,7 @@ import type { ConfigDraft } from "../templates/draft/useConfigDraft";
 import { authoredAt, normalise, valueAt, type NodeA } from "../templates/draft/view";
 import { ChangeBaseCard, type BaseCheck } from "../templates/cards/ChangeBaseCard";
 import { RemoveCard } from "../templates/cards/RemoveCard";
-import { RenameCard } from "../templates/cards/RenameCard";
+import { RenameTitle } from "../templates/panes/RenameTitle";
 import { fragment } from "../templates/draft/draftApi";
 import { IconPicker } from "../templates/IconPicker";
 import { ExtendMenu } from "../templates/menus/ExtendMenu";
@@ -56,12 +56,23 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
   onExpand: () => void;
 }) {
   const [tab, setTab] = useState("overview");
-  const [card, setCard] = useState<{ t: "icon" } | { t: "rename" } | { t: "remove" } | { t: "dup" } | { t: "extend" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
+  const [card, setCard] = useState<{ t: "icon" } | { t: "remove" } | { t: "dup" } | { t: "extend" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   const at = (el: HTMLElement) => void (anchor.current = el);
   const closeCard = () => {
     setCard(null);
+    setRefused(null);
+  };
+  // The path whose title is being renamed in place: another selection ends it.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  useEffect(() => setRenaming(null), [path]);
+  const startRename = () => {
+    setRefused(null);
+    setRenaming(path);
+  };
+  const endRename = () => {
+    setRenaming(null);
     setRefused(null);
   };
   // F2 renames what the pane shows (Decisions §9 Rename), outside a text field.
@@ -70,8 +81,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
       const title = document.querySelector<HTMLElement>(".pane-title-btn");
       if (e.key !== "F2" || isTextField(e.target) || !title) return;
       e.preventDefault();
-      at(title);
-      setCard({ t: "rename" });
+      title.click();
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
@@ -123,7 +133,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     const a = await draft.ops([{ op: "rename", path, id }], { quiet: true });
     if (a.status !== 200) return setRefused(detailOf(a.body));
     const updated = (a.body.ops?.[0]?.result?.updated as unknown[] | undefined)?.length ?? 0;
-    closeCard();
+    endRename();
     showToast(`Renamed ${d.id} → ${id}${updated ? ` · ${plural(updated, "reference")} updated` : ""}`);
     onRenamed([...path.split(".").slice(0, -1), id].join("."));
   };
@@ -185,7 +195,8 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
         onTab={setTab}
         onCollapse={onCollapse}
         onExpand={onExpand}
-        onTitle={renameable ? (el) => { at(el); setCard({ t: "rename" }); } : undefined}
+        onTitle={renameable ? startRename : undefined}
+        titleEdit={renameable && renaming === path ? <RenameTitle key={path} what={noun} id={d.id} taken={siblings} refs={uselist} refused={refused} onGo={(id) => void rename(id)} onCancel={endRename} /> : undefined}
         onIcon={pickable ? (el) => { at(el); setCard({ t: "icon" }); } : undefined}
         footer={footer}
       >
@@ -203,7 +214,6 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
           draft.field(path, "icon", name);
         }} />
       )}
-      {card?.t === "rename" && <RenameCard anchor={anchor} what={noun} id={d.id} taken={siblings} refs={uselist} refused={refused} onGo={(id) => void rename(id)} onClose={closeCard} />}
       {card?.t === "remove" && <RemoveCard anchor={anchor} label={`Remove ${noun}`} refs={uselist} onRemove={() => void remove()} onClose={closeCard} />}
       {card?.t === "dup" && <IdCard anchor={anchor} title={`Duplicate ${d.id} as`} initial={`${d.id}_copy`} taken={names} go="Duplicate" refused={refused} onGo={(name) => void duplicate(name)} onClose={closeCard} />}
       {card?.t === "extend" && <ExtendMenu anchor={anchor} title="Change base" note="Next, you'll see which of its overrides fit the new base." exclude={d.component.split(".")[1]} onPick={(b) => void pickBase(b)} onClose={closeCard} />}
