@@ -37,7 +37,7 @@ from pathlib import Path
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import detect
-from kraft.worker.env import worker_env
+from kraft.worker.env import TEST_ENV, worker_env
 
 #: Lines of a failed command's output shown; the rest is in the log it names.
 _TAIL = 20
@@ -226,7 +226,10 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
         shown = argv if isinstance(argv, str) else shlex.join(argv)
         say(f"  {label}: {shown} ...")
         log = logs / f"{n:02d}.log"
-        outcome, took = _run(argv, worktree, env, log, timeout_minutes * 60)
+        # Dispatch runs an area's setup and a test with `TEST_ENV` on top, so
+        # the bytecode a Python test would write is no file a work item leaves.
+        step_env = env if label == "setup" else {**env, **TEST_ENV}
+        outcome, took = _run(argv, worktree, step_env, log, timeout_minutes * 60)
         say(f"    {outcome if outcome == 'passed' else outcome.upper()} in {took:.1f}s")
         if outcome != "passed":
             ok = False

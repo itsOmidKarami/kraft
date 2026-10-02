@@ -173,6 +173,15 @@ def test_an_unignored_install_is_not_a_file_a_commit_would_take(tmp_path):
     assert "left files every work item would commit: stray.txt." in said
 
 
+def test_a_test_writes_no_bytecode_as_a_work_items_test_does_not(tmp_path):
+    """Dispatch runs a test with PYTHONDONTWRITEBYTECODE=1; verify did not,
+    and reported `__pycache__/` as files every work item would commit."""
+    repo = _repo(tmp_path)
+    ok, said = _verify(_entry(repo, test_command="python3 -c 'import calc'"))
+    assert ok, said
+    assert "__pycache__" not in said
+
+
 def test_a_step_that_does_not_finish_is_killed_with_its_children(tmp_path):
     repo = _repo(tmp_path)
     pidfile = tmp_path / "child.pid"
