@@ -33,7 +33,7 @@ describe("Composer", () => {
 
   it("offers no suggested change on the old side, nor on a whole file", () => {
     const { unmount } = compose({ path: "a.py", range: { side: "old", start: 4, end: 4 } });
-    expect(screen.getByRole("group", { name: "Comment: Line 4" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Old line 4" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "± Suggest change" })).toBeNull();
     unmount();
     compose({ path: "a.py", range: null });
@@ -54,6 +54,23 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onCancel).toHaveBeenCalled();
     expect(drafts.size).toBe(0);
+  });
+
+  it("sends on ⌘↵ or Ctrl+↵ from the comment or the suggestion, never with no text", async () => {
+    const { onSubmit } = compose(NEW);
+    const box = screen.getByRole("textbox", { name: "Comment" });
+    await act(async () => fireEvent.keyDown(box, { key: "Enter", ctrlKey: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: "Cap it lower" } });
+    // A plain Enter is a new line.
+    await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await act(async () => fireEvent.keyDown(box, { key: "Enter", metaKey: true }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "± Suggest change" }));
+    await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Suggested change" }), { key: "Enter", ctrlKey: true }));
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenLastCalledWith({ body: "Cap it lower", label: null, suggest: LINES.join("\n") });
   });
 
   it("closes on Escape at once when empty, and shows a refusal in place", async () => {
