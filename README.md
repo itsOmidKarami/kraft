@@ -116,8 +116,9 @@ claude plugin install kraft@kraft
 
 Codex, Cursor and Antigravity install the same plugin; their commands are on
 the [install guide's agent tabs](https://itsomidkarami.github.io/kraft/get-started/install#connect-your-agent).
-If you drive Kraft from one of them, install the Claude Code plugin as well:
-the shipped chains run their workers on Claude Code.
+If you drive Kraft from one of them, install the Claude Code plugin (or run
+`kraft admin init`) as well: the shipped chains run their workers on Claude
+Code.
 
 Start the server and leave it running in its own terminal:
 
