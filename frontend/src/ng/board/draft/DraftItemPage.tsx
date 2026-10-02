@@ -19,6 +19,7 @@ import { Attach, CreateSplit } from "../Composer";
 import { draftBody, emptyDraft, nodeOverrides, type DraftState } from "./draftBody";
 import "../board.css";
 import "../../item/item.css";
+import { sendOnModEnter } from "../../keys";
 
 export const DRAFT_KEY = "kraft.ng.newItem";
 type DryRun = { nodes: ChainNode[]; skipped: { node: string; why: string; kind?: string }[]; gates: string[]; caps: { budget_usd: number | null; budget_source: string; nodes: Record<string, { attempts: number; wall_clock_s: number }> } };
@@ -180,7 +181,7 @@ export function DraftItemPage() {
           <button type="button" className="draft-bead-drop" aria-label={`Do not implement ${d.bead}`} onClick={() => set({ bead: "" })}>×</button>
         </p>
       )}
-      <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
+      <textarea className="draft-brief" aria-label="Brief" placeholder="Brief. Context, constraints, what done looks like. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} onKeyDown={sendOnModEnter(() => create(true), ok)} />
       <div className="draft-chips">
         <span>Repo</span>
         <Menu

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { elapsed, tokens, usd } from "../../../format";
 import type { WorkerSession, WorkItemDocument } from "../../../types";
 import { FileText } from "../../icons";
@@ -8,12 +9,24 @@ import type { ItemDetail } from "../useItem";
 export function AttemptSwitcher({ sessions, at, onAt, now }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number }) {
   const i = sessions.indexOf(at);
   const look = sessionLook(at, now);
+  const earlier = useRef<HTMLButtonElement>(null);
+  const later = useRef<HTMLButtonElement>(null);
+  // An arrow that reaches the end disables itself: focus moves to the other one, not to the page.
+  const handoff = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    handoff.current?.focus();
+    handoff.current = null;
+  }, [at]);
+  const step = (to: number) => {
+    if (to <= 0 || to >= sessions.length - 1) handoff.current = to <= 0 ? later.current : earlier.current;
+    onAt(sessions[to].attempt);
+  };
   return (
     <div className="ip-attempts">
       <span className="ip-attempt-box">
-        <button type="button" className="ip-attempt-btn" aria-label="Earlier attempt" disabled={i <= 0} onClick={() => onAt(sessions[i - 1].attempt)}>‹</button>
+        <button ref={earlier} type="button" className="ip-attempt-btn" aria-label="Earlier attempt" disabled={i <= 0} onClick={() => step(i - 1)}>‹</button>
         <span>attempt {at.attempt} of {sessions.at(-1)!.attempt}{at.round ? ` · round ${at.round + 1}` : ""}</span>
-        <button type="button" className="ip-attempt-btn" aria-label="Later attempt" disabled={i >= sessions.length - 1} onClick={() => onAt(sessions[i + 1].attempt)}>›</button>
+        <button ref={later} type="button" className="ip-attempt-btn" aria-label="Later attempt" disabled={i >= sessions.length - 1} onClick={() => step(i + 1)}>›</button>
       </span>
       <span className={`ip-attempt-state${look.running ? " is-live" : look.state === "failed" ? " is-bad" : ""}`}>{lookWord(look)}</span>
     </div>
@@ -30,6 +43,7 @@ export function TaskOverview({ path, s, docs, onDoc }: { path: string; s: Worker
       <dl className="item-facts ip-facts">
         {fact("status", s.status.replaceAll("_", " "))}
         {fact("kind", s.model ? "agent" : null)}
+        {fact("harness", s.harness && <span className="is-mono">{s.harness}</span>)}
         {fact("model", s.model && <span className="is-mono">{s.model}</span>)}
         {fact("path", <span className="is-mono">{path}</span>)}
         {fact("ran", s.wall_ms != null ? elapsed(s.wall_ms) : null)}

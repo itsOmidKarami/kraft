@@ -4,6 +4,7 @@ import { detailOf, jsonBody, request } from "../http";
 import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import { languageOf, tokenizeSide } from "./tokenize";
+import { sendOnModEnter } from "../keys";
 
 /** Fenced code in a comment, coloured by the review's own tokenizer. */
 export function codeBlock(text: string, lang: string | undefined): ReactNode {
@@ -57,11 +58,18 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
   const [reply, setReply] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [busy, setBusy] = useState(false);
   const run = async (act: Act) => {
+    setBusy(true);
     const e = await act();
+    setBusy(false);
     setError(e);
     if (!e) onChanged();
     return e;
+  };
+  const saveEdit = async (id: string) => !(await run(() => send(`/comments/${id}`, jsonBody("PATCH", { body: editText.trim() })))) && setEditing(null);
+  const addReply = async () => {
+    if (!(await run(() => send(`/threads/${thread.id}/comments`, jsonBody("POST", { body: reply.trim() }))))) { setReplying(false); setReply(""); }
   };
   const [first, ...rest] = thread.comments;
   const who = (c: ReviewComment) => (c.author === "you" ? "You" : c.author);
@@ -92,10 +100,10 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
           </div>
           {editing === c.id ? (
             <div className="rv-reply-edit">
-              <textarea className="rv-textarea" aria-label="Edit reply" value={editText} onChange={(e) => setEditText(e.target.value)} />
+              <textarea className="rv-textarea" aria-label="Edit reply" value={editText} onChange={(e) => setEditText(e.target.value)} onKeyDown={sendOnModEnter(() => saveEdit(c.id), !busy && !!editText.trim())} />
               <div className="rv-row-actions">
                 <Button onClick={() => setEditing(null)}>Cancel</Button>
-                <Button variant="primary" disabled={!editText.trim()} onClick={async () => !(await run(() => send(`/comments/${c.id}`, jsonBody("PATCH", { body: editText.trim() })))) && setEditing(null)}>Save</Button>
+                <Button variant="primary" disabled={busy || !editText.trim()} onClick={() => saveEdit(c.id)}>Save</Button>
               </div>
             </div>
           ) : (
@@ -113,14 +121,12 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
       ))}
       {!thread.draft && replying && (
         <div className="rv-reply-edit">
-          <textarea className="rv-textarea" aria-label="Reply" placeholder="Reply…" value={reply} onChange={(e) => setReply(e.target.value)} autoFocus />
+          <textarea className="rv-textarea" aria-label="Reply" placeholder="Reply…" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={sendOnModEnter(addReply, !busy && !!reply.trim())} autoFocus />
           <div className="rv-row-actions">
             <span className="rv-muted">Sent with your next review</span>
             <span className="rv-spacer" />
             <Button onClick={() => { setReplying(false); setReply(""); }}>Cancel</Button>
-            <Button variant="primary" disabled={!reply.trim()} onClick={async () => {
-              if (!(await run(() => send(`/threads/${thread.id}/comments`, jsonBody("POST", { body: reply.trim() }))))) { setReplying(false); setReply(""); }
-            }}>Add reply</Button>
+            <Button variant="primary" disabled={busy || !reply.trim()} onClick={addReply}>Add reply</Button>
           </div>
         </div>
       )}

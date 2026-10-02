@@ -36,6 +36,10 @@ export const usePaneMemory = create<{ pane: { open: boolean; userCollapsed: bool
   setPane: (pane) => set({ pane }),
 }));
 
+/** Opens the pane for what someone asked to see (Open gate, a problem, a new
+ *  node): an earlier collapse does not keep it shut. */
+export const openPane = () => usePaneMemory.getState().setPane({ open: true, userCollapsed: false });
+
 /** The canvas and its side pane. The URL holds where the person is (node
  *  view, selection, tab, attempt: spec §6.2); this keeps only whether the pane
  *  is open, which survives moving between items within a session. */
@@ -105,7 +109,9 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const hasCurrent = graph.nodes.some((n) => n.state === "current" || n.state === "failed" || n.state === "amber");
 
   const sel = place.sel;
-  const pick = (to: Sel) => dispatch({ type: "pick", sel: to });
+  // A step or task picked from the chain canvas's pane opens its node's view, as
+  // Focus does, so the canvas shows where it sits and not only the pane.
+  const pick = (to: Sel) => dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
   const tab = place.tab ?? "";
   const pane = paneContent({
     item, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,
@@ -175,6 +181,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
           gate={pane.gate}
           title={pane.title}
           sub={pane.sub}
+          bar={pane.bar}
           tabs={pane.tabs}
           // The pane's first tab when the URL names none (Thread, on an escalation).
           tab={pane.tabs?.some((t) => t.value === tab) ? tab : pane.tabs?.[0]?.value}

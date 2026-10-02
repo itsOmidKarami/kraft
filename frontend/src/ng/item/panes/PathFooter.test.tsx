@@ -42,6 +42,15 @@ describe("PathFooter", () => {
     expect(screen.queryByLabelText("Steer for the retry")).toBeNull();
   });
 
+  it("retries on ⌘↵ from the steer", async () => {
+    const calls = stubFetch();
+    render(<PathFooter item={detail()} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await userEvent.type(screen.getByLabelText("Steer for the retry"), "check reindex");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "v.r.code_review", steer: "check reindex" } }]));
+  });
+
   it("shows the server's refusal in the pane", async () => {
     stubFetch({ "POST /work-items/w1/pause": [409, { detail: "already paused" }] });
     render(<PathFooter item={detail()} path="verification" what="node" state="running" reload={() => {}} />);

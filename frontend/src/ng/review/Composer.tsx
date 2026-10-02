@@ -4,6 +4,7 @@ import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import type { Side } from "./rows";
 import { LABELS, codeBlock, rangeName } from "./Thread";
+import { sendOnModEnter } from "../keys";
 
 /** Where a comment goes: a line range on one side of a file, or the whole file. */
 export interface Target {
@@ -58,6 +59,9 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
   };
   const dirty = !!(d.body.trim() || d.suggest !== null);
   const ready = !!d.body.trim() && !busy;
+  // One ⌘↵ handler, on the wrapper, for both boxes: a second one on a box
+  // would send twice before React re-renders `ready`.
+  const send = sendOnModEnter(() => submit(), ready);
   const submit = async () => {
     if (!ready) return;
     setBusy(true);
@@ -72,11 +76,8 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
       role="group"
       aria-label={`Comment: ${where}`}
       onKeyDown={(e) => {
-        // ⌘↵ or Ctrl+↵ sends it from either box, as the new work item composer does.
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          return void submit();
-        }
+        // ⌘↵ or Ctrl+↵ sends it from either box, as every composer does.
+        send(e);
         if (e.key !== "Escape") return;
         e.stopPropagation();
         if (dirty) setAsking(true);

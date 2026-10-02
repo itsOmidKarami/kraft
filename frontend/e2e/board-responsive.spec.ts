@@ -1,9 +1,8 @@
 import { createdId, expect, openComposer, test } from "./fixtures";
 
-// The peek (W6 C.2, R7): docked from 1024, so the list's right edge moves in
-// by the pane's width and nothing sits under the pane; overlaid below 1024,
-// so the list does not move. Either way a row keeps its height: the shipped
-// regression this replaces was a title rewrapping to a word per line.
+// The peek lies over the list at every width, so opening it moves and reflows
+// nothing: a row's box is the same before and after. The shipped regression
+// this replaces was a title rewrapping to a word per line beside a docked pane.
 for (const width of [1440, 1100, 900]) {
   test(`the peek opens without reflowing a row at ${width}`, async ({ page }) => {
     // One server serves every run, so the title is this run's own.
@@ -25,9 +24,8 @@ for (const width of [1440, 1100, 900]) {
     await row.click();
     const pane = page.getByRole("complementary", { name: / pane$/ });
     await expect(pane).toBeVisible();
-    const after = (await row.boundingBox())!;
-    expect(after.height).toBe(before.height);
-    if (width >= 1024) expect(after.x + after.width).toBeLessThanOrEqual((await pane.boundingBox())!.x);
-    else expect(after).toEqual(before);
+    expect(await row.boundingBox()).toEqual(before);
+    // Over the row, not beside it: a pane that docked again would start past the row's right edge.
+    if (width >= 1024) expect((await pane.boundingBox())!.x).toBeLessThan(before.x + before.width);
   });
 }
