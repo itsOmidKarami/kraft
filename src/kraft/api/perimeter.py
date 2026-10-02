@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
+from kraft.api import apidocs
 
 
 def _is_api_path(path: str) -> bool:
@@ -29,10 +30,10 @@ def _is_api_path(path: str) -> bool:
 
 
 def _is_fastapi_docs_path(app: FastAPI, path: str) -> bool:
-    """FastAPI's own pages: Swagger UI (and its OAuth redirect), ReDoc and the
-    schema. Their JS and CSS come from a CDN, so these paths are all a browser
-    fetches from us for them."""
-    own = {app.docs_url, app.redoc_url, app.openapi_url, app.swagger_ui_oauth2_redirect_url}
+    """FastAPI's own pages: Swagger UI, ReDoc and the schema. Their JS and CSS
+    come from a CDN, so these paths are all a browser fetches from us for
+    them."""
+    own = {apidocs.SWAGGER_PATH, apidocs.REDOC_PATH, app.openapi_url}
     return path in own - {None}
 
 
