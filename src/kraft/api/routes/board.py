@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 
 from fastapi import HTTPException, Request
@@ -853,16 +854,38 @@ async def get_fix_target(
     }
 
 
+def _item_wide_budget_usd(row) -> float | None:
+    """The item-wide `budget_usd` its frozen policy holds it to, the item's own
+    override folded in (`caps.budget_breach` reads the same), or None for no
+    such cap or a V1 item."""
+    chain = store.materialized_chain_of(row)
+    cap = chain.work_item_policy().budget_usd if chain is not None else None
+    return None if cap in (None, math.inf) else float(cap)
+
+
 def budget_cap(st, row) -> dict:
     """The item's effective dollar cap, where it comes from, its spend, and the
-    instance's spend today against the daily cap."""
+    instance's spend today against the daily cap.
+
+    Two caps hold an item: its own (`budget_usd`, else the policy's
+    `work_item_usd`) and the item-wide `budget_usd` of its chain policy, which
+    a stop's Raise cap writes into the item's policy override. Whichever is
+    lower stops it first, so that one is reported. `key` names the field a
+    `PATCH` changes it with, and `source` is `item` when the item set it."""
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, source = store.effective_work_item_cap(row, budget)
+    key = "budget_usd"
+    item_wide = _item_wide_budget_usd(row)
+    if item_wide is not None and (cap_usd is None or item_wide < cap_usd):
+        override = store.policy_override_of(row)
+        own = override is not None and override.budget_usd not in (None, policy_mod.NO_CAP)
+        cap_usd, key, source = item_wide, "policy.budget_usd", "item" if own else "policy"
     since = store.local_midnight_utc()
     spent_usd, daily_spent_usd = st.db.read(lambda c: store.budget_spend(c, row["id"], since=since))
     return {
         "cap_usd": cap_usd,
         "source": source,
+        "key": key,
         "spent_usd": spent_usd,
         "daily": {"spent_usd": daily_spent_usd, "cap_usd": budget.daily_usd},
     }

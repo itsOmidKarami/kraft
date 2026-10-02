@@ -9,7 +9,6 @@ import { appliedRows } from "../draft/AppliedRows";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
-import { raiseBody } from "../RaiseLimit";
 import { budgetRaise } from "../status";
 
 const statusLine = (item: ItemDetail) => {
@@ -96,19 +95,24 @@ function Meter({ label, used, of, ratio, max, onEdit }: { label: string; used: s
  *  on the item's own cap goes through /budget/raise, which also retries; one
  *  on a policy cap (`stop.limit`) patches that policy and retries; otherwise,
  *  a daily or token stop among them, PATCH budget_usd, which /budget/raise
- *  would refuse there. */
+ *  would refuse there. Off a stop it changes the cap in force, the item's
+ *  policy one when `budget_cap.key` says so. */
 export const STILL_STOPPED = "Saved the item's cap. It is still stopped: another cap stopped it, so Retry once that one is raised.";
 
 function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: () => void; onCancel: () => void }) {
-  const limit = item.stop?.kind === "budget" ? item.stop.limit : undefined;
+  // A stop's limit, else the item's policy cap when that is the one in force: the pencil changes the cap it shows.
+  const limit = item.stop?.kind === "budget" ? item.stop.limit
+    : item.budget_cap?.key === "policy.budget_usd" ? { path: "", key: "budget_usd" as const, value: item.budget_cap.cap_usd ?? 0, maximum: null }
+    : undefined;
   const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
   const [value, setValue] = useState(String(cap || ""));
   const [error, setError] = useState<string | null>(null);
   const send = async (usdCap: number | null) => {
     let r;
     if (limit && usdCap != null) {
-      r = await act.patch(item.id, raiseBody(limit, usdCap));
-      if (r.ok) r = await act.retry(item.id);
+      // A budget limit is item-wide. A PATCH replaces the whole override, so keep what else the item set.
+      r = await act.patch(item.id, { policy: { ...item.policy_override, budget_usd: usdCap } });
+      if (r.ok && item.stop?.kind === "budget") r = await act.retry(item.id);
     } else r = budgetRaise(item) === "item" ? await act.raiseBudget(item.id, usdCap) : await act.patch(item.id, { budget_usd: usdCap });
     if (!r.ok) return setError(r.error);
     // A budget stop this cap did not make: saving it retries nothing.
@@ -132,6 +136,18 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
   );
 }
 
+/** The item's own policy override as Config rows: an item-wide field by its
+ *  name (`budget_usd $1.00`), one on a path by the path (`verification
+ *  max_attempts 5`). Raise cap writes these. */
+export function policyRows(o: ItemDetail["policy_override"]): [string, string][] {
+  const val = (k: string, v: unknown) => (k === "budget_usd" ? (typeof v === "number" ? usd(v) : "no cap") : String(v));
+  const { paths, ...wide } = o ?? {};
+  return [
+    ...Object.entries(wide).filter(([, v]) => v != null).map(([k, v]) => [k, val(k, v)] as [string, string]),
+    ...Object.entries(paths ?? {}).map(([p, f]) => [p, Object.entries(f).filter(([, v]) => v != null).map(([k, v]) => `${k} ${val(k, v)}`).join(", ")] as [string, string]),
+  ];
+}
+
 /** The chain pane's Config: the item settings (Decisions §3, §14 Budget layers).
  *  Only what the API reports is drawn (Kraft-x8qzu: no running-time, wall-clock
  *  or token caps; Kraft-o114l: auto gate is read-only; Kraft-k3vq1: the budget
@@ -151,6 +167,9 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
     else setError(r.error);
   };
   const policyCap = policy?.budget?.work_item_usd;
+  const ownPolicy = policyRows(item.policy_override);
+  // The item's own cap, unless the cap in force is its policy's (listed below).
+  const ownCap = cap?.source === "item" && cap.key !== "policy.budget_usd";
   return (
     <>
       <h3 className="ip-h">Limits in use</h3>
@@ -172,11 +191,12 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
       </dl>
 
       <h3 className="ip-h">Changed for this item</h3>
-      {cap?.source !== "item" && !overrides.length && !draftRows.length && !(agent && Object.keys(agent).length) ? (
+      {!ownCap && !ownPolicy.length && !overrides.length && !draftRows.length && !(agent && Object.keys(agent).length) ? (
         <p className="item-muted">Nothing changed. This item runs the chain and policy as frozen.</p>
       ) : (
         <ul className="ip-overrides">
-          {cap?.source === "item" && <li><span className="is-mono">budget</span> {cap.cap_usd != null ? usd(cap.cap_usd) : "no cap"}{policyCap != null && <span className="item-muted"> · policy {usd(policyCap)}</span>}</li>}
+          {ownCap && <li><span className="is-mono">budget</span> {cap.cap_usd != null ? usd(cap.cap_usd) : "no cap"}{policyCap != null && <span className="item-muted"> · policy {usd(policyCap)}</span>}</li>}
+          {ownPolicy.map(([k, v]) => <li key={k}><span className="is-mono">{k}</span> {v} <span className="item-muted">· item policy</span></li>)}
           {agent && Object.keys(agent).length > 0 && (
             <li><span className="is-mono">model</span> {Object.entries(agent).map(([k, v]) => `${k} ${v}`).join(", ")} <button type="button" className="item-link" onClick={() => reset({ agent_overrides: {} })}>reset</button></li>
           )}
