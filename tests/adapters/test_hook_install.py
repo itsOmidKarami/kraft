@@ -75,6 +75,17 @@ def test_installed_once_and_never_seen_by_git(tmp_path):
     assert (main / ".git/info/exclude").read_text().count(".cursor/hooks.json") == 1
 
 
+def test_an_exclude_note_written_with_a_tracker_id_is_rewritten_not_repeated(tmp_path):
+    """The 1.5.0 release candidates wrote the note with a tracker id after it:
+    that install's exclude keeps its one entry, and the note loses the id."""
+    main, wt = _worktree(tmp_path)
+    exclude = main / ".git/info/exclude"
+    exclude.write_text(f"*.log\n{hi._EXCLUDE_NOTE} (x-1)\n/.cursor/hooks.json\n")
+    hi.install_cursor_hook(wt, ARGV)
+    assert exclude.read_text() == f"*.log\n{hi._EXCLUDE_NOTE}\n/.cursor/hooks.json\n"
+    assert "(" not in hi._EXCLUDE_NOTE
+
+
 def test_a_tracked_hooks_file_keeps_its_own_hooks_and_is_not_staged(tmp_path):
     _, wt = _worktree(tmp_path)
     (wt / ".cursor").mkdir()

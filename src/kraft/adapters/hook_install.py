@@ -28,7 +28,7 @@ _REL = ".cursor/hooks.json"
 _EXCLUDE_LINE = f"/{_REL}"
 #: On its own line: gitignore has no trailing comments, a `# ...` after a
 #: pattern would be part of it.
-_EXCLUDE_NOTE = "# kraft: cursor permission hook (Kraft-4in7z)"
+_EXCLUDE_NOTE = "# kraft: cursor permission hook"
 #: What marks an entry as Kraft's, whatever interpreter path or flag it carries.
 _OURS = "kraft admin permission-hook"
 
@@ -151,9 +151,17 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     exclude = Path(out.stdout.strip())
     exclude.parent.mkdir(parents=True, exist_ok=True)
     text = exclude.read_text() if exclude.exists() else ""
-    if _EXCLUDE_LINE not in text.splitlines():
-        sep = "\n" if text and not text.endswith("\n") else ""
-        exclude.write_text(f"{text}{sep}{_EXCLUDE_NOTE}\n{_EXCLUDE_LINE}\n")
+    lines = text.splitlines()
+    if _EXCLUDE_LINE in lines:
+        # The 1.5.0 release candidates wrote the note with a tracker id after it.
+        legacy = [n for n, line in enumerate(lines) if line.startswith(f"{_EXCLUDE_NOTE} (")]
+        for n in legacy:
+            lines[n] = _EXCLUDE_NOTE
+        if legacy:
+            exclude.write_text("\n".join(lines) + "\n")
+        return
+    sep = "\n" if text and not text.endswith("\n") else ""
+    exclude.write_text(f"{text}{sep}{_EXCLUDE_NOTE}\n{_EXCLUDE_LINE}\n")
 
 
 # -- codex ---------------------------------------------------------------------
