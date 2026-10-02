@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import builtins
+import os
+import pwd
+from pathlib import Path
 
 import pytest
 
@@ -70,6 +73,24 @@ def test_available_is_true_with_the_extra_installed():
     assert Embedder().available() is True
 
 
+@pytest.fixture
+def machine_model_cache(monkeypatch):
+    """This machine's model cache. `cache_dir()` derives it from `HOME`, which
+    tests/conftest.py points at an empty temp dir, so weights already on disk
+    were never found and the two tests below always skipped. Neither writes
+    a download into it: each skips when the weights are not there."""
+    if not os.environ.get("KRAFT_EMBED_CACHE"):
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        base = Path(os.environ.get("XDG_CACHE_HOME") or home / ".cache")
+        monkeypatch.setenv("KRAFT_EMBED_CACHE", str(base / "kraft" / "fastembed"))
+    return cache_dir()
+
+
+def test_the_model_cache_is_looked_for_under_the_real_home(machine_model_cache):
+    assert not machine_model_cache.is_relative_to(os.environ["HOME"])
+    assert machine_model_cache.parts[-2:] == ("kraft", "fastembed")
+
+
 def _model_is_cached() -> bool:
     """True when the weights are already on disk, so no network is needed."""
     root = cache_dir()
@@ -80,7 +101,7 @@ def _model_is_cached() -> bool:
 
 
 @pytest.mark.slow
-def test_real_embedding_has_the_declared_width_and_ranks_sensibly():
+def test_real_embedding_has_the_declared_width_and_ranks_sensibly(machine_model_cache):
     pytest.importorskip("fastembed")
     if not _model_is_cached():
         pytest.skip("model not cached; refusing to download in the test suite")
@@ -105,7 +126,7 @@ def test_real_embedding_has_the_declared_width_and_ranks_sensibly():
 
 
 @pytest.mark.slow
-def test_encode_async_matches_sync():
+def test_encode_async_matches_sync(machine_model_cache):
     import asyncio
 
     pytest.importorskip("fastembed")

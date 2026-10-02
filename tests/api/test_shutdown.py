@@ -19,7 +19,6 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
     """SIGTERM while an executor task is running must not hang and must leave the DB usable."""
     run_dir = tmp_path / "run"
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
     # A worktree needs a declared setup_command since Kraft-kji8w; this test
     # is about shutdown, not preparation, so declare deliberately nothing else.
@@ -42,9 +41,7 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
     )
     slow_env = {"KRAFT_FAKE_CLAUDE": "slow", "KRAFT_FAKE_CLAUDE_DELAY": "15"}
 
-    with running_server(
-        run_dir=run_dir, templates_dir=templates, bd_cwd=tracker, env=slow_env
-    ) as srv:
+    with running_server(run_dir=run_dir, templates_dir=templates, env=slow_env) as srv:
         wid = srv.client.post(
             "/api/work-items",
             # quick-task, not the default chain: this test needs an agent
