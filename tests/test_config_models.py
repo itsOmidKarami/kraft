@@ -59,6 +59,69 @@ def test_each_settings_file_loads_and_saves_through_its_own_model(tmp_path, name
         model.load(path)
 
 
+@pytest.mark.parametrize(
+    ("typed", "kept"),
+    [
+        ("Kraft.Local", "kraft.local"),
+        ("kraft.local:8765", "kraft.local"),
+        ("http://kraft.local/board", "kraft.local"),
+        ("kraft.local.", "kraft.local"),
+        ("192.168.1.5:8765", "192.168.1.5"),
+        ("FD00::5", "[fd00::5]"),
+        ("[fd00:0::5]:8765", "[fd00::5]"),
+        ("café.local", "xn--caf-dma.local"),
+        ("faß.de", "xn--fa-hia.de"),
+    ],
+    ids=[
+        "case",
+        "port",
+        "scheme-and-path",
+        "trailing-dot",
+        "ipv4-port",
+        "bare-ipv6",
+        "ipv6-port",
+        "unicode",
+        "unicode-uts46",
+    ],
+)
+def test_an_allowed_host_is_kept_as_a_host_header_compares_it(tmp_path, typed, kept):
+    """The perimeter compares a Host header lowercased, without its port, and
+    with an IPv6 literal bracketed. An entry kept as typed never matched one,
+    so the browser got a 403 on its own board."""
+    from kraft import config
+
+    path = tmp_path / "access.yaml"
+    path.write_text(f"allowed_hosts: [{typed!r}, kraft.local]\n")
+    assert config.Access.load(path).allowed_hosts == list(dict.fromkeys([kept, "kraft.local"]))
+    assert config.host_name(f"{kept}:8765") == kept
+
+
+@pytest.mark.parametrize(
+    "typed",
+    ["*.ts.net", "*", "evil@kraft.local", "two words", "kraft.local:http", "a..b", "-a.local", ""],
+    ids=[
+        "wildcard",
+        "star",
+        "userinfo",
+        "space",
+        "bad-port",
+        "empty-label",
+        "leading-hyphen",
+        "empty",
+    ],
+)
+def test_an_entry_that_is_not_one_host_does_not_normalize(tmp_path, typed):
+    """`PUT /access` refuses these. A file saved before it did still loads,
+    with the entry as written: it never matched anything, and refusing to
+    start over it would be worse."""
+    from kraft import config
+
+    assert config.normalize_host(typed) is None
+    path = tmp_path / "access.yaml"
+    path.write_text(f"allowed_hosts: [{typed!r}]\n")
+    assert config.Access.load(path).allowed_hosts == [typed]
+
+
 # ── theme.yaml V2 keys (UX V2, B30) ──
 
 

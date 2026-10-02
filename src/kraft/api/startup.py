@@ -237,7 +237,9 @@ async def lifespan(app: FastAPI):
     notifier = notify_mod.Notifier(
         database,
         templates_dir / "notify.yaml",
-        fallback_base_url=f"http://{app.state.bound_host}:{app.state.bound_port}",
+        fallback_base_url=(
+            f"http://{config_mod.url_host(app.state.bound_host)}:{app.state.bound_port}"
+        ),
     )
     await notifier.start(cursor=notify_cursor)
     database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify(), notifier.notify()))
