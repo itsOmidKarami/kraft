@@ -10,13 +10,16 @@ Three kinds of evidence, in the order a repository is most likely to mean them:
 - **runner**: a task runner the repository wrote itself -- a justfile recipe,
   a Makefile target, a Taskfile or mise task, `script/test`. Whatever tool
   sits underneath, the repository already said how it wants to be driven.
-- **ci**: the commands its CI runs (`.github/workflows`, `.gitlab-ci.yml` and
-  the like). A test command is what CI runs, so CI beats a toolchain's
-  default; a setup line from CI is shown and never chosen, since CI installs
-  tools a worktree must not.
 - **toolchain**: an ecosystem's default, picked by its lockfile, so a pnpm
   repository gets `pnpm`, a Poetry one `poetry`, and a pyproject.toml holding
   only ruff settings is not taken for a Python project.
+- **ci**: the commands its CI runs (`.github/workflows`, `.gitlab-ci.yml` and
+  the like). CI running what a runner or toolchain proposes corroborates it;
+  a CI line is proposed itself only where neither has a test command. A CI
+  job runs one slice of a matrix, a lint step that happens to say "test", or
+  a tool CI installed on its own PATH, so it is weaker evidence than the
+  repo's own `test` script. A setup line from CI is shown and never chosen,
+  since CI installs tools a worktree must not.
 
 A `.devcontainer`'s create commands are a last resort for setup ("devenv").
 
@@ -61,7 +64,7 @@ FILE = "detectors.yaml"
 Tier = Literal["runner", "ci", "toolchain", "devenv"]
 #: Which evidence wins, per role. CI setup is evidence only: CI installs
 #: global tools (`npm i -g`, `pip install poetry`) a worktree must not.
-TEST_TIERS: tuple[Tier, ...] = ("runner", "ci", "toolchain")
+TEST_TIERS: tuple[Tier, ...] = ("runner", "toolchain", "ci")
 SETUP_TIERS: tuple[Tier, ...] = ("runner", "toolchain")
 
 _ID = r"^[a-z][a-z0-9_-]*$"
@@ -133,6 +136,10 @@ class Detector(BaseModel):
     #: unless one is given. `reason` says why, to the person connecting.
     stop: bool = False
     reason: str | None = None
+    #: How a command runs inside this toolchain's environment (`uv run
+    #: {command}`): a runner's test task that calls `pytest` or `python`
+    #: bare is run through it, since a worker's PATH has no virtualenv on it.
+    wrap: str | None = Field(default=None, pattern=r"\{command\}")
     test: list[Command] = []
     setup: list[Command] = []
 
@@ -269,19 +276,55 @@ def _git(root: Path, *args: str) -> bytes:
     return done.stdout
 
 
-def _blob(root: Path, oid: str) -> bytes:
-    """At most `_TEXT_LIMIT` bytes of a blob, however large it is; empty when
-    git cannot give it (a partial clone's missing blob)."""
-    with subprocess.Popen(
-        ["git", "--no-optional-locks", "cat-file", "blob", oid],
-        cwd=root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        env={**os.environ, **_GIT_ENV},
-    ) as proc:
-        raw = proc.stdout.read(_TEXT_LIMIT) if proc.stdout else b""
-        proc.kill()
-    return raw
+class _Blobs:
+    """One `git cat-file --batch` for every blob a probe reads: a process
+    per file took seconds on a repository with a Makefile in every
+    directory."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self._proc: subprocess.Popen | None = None
+
+    def read(self, oid: str) -> bytes:
+        """At most `_TEXT_LIMIT` bytes of a blob, however large it is; empty
+        when git cannot give it (a partial clone's missing blob)."""
+        try:
+            if self._proc is None:
+                self._proc = subprocess.Popen(
+                    ["git", "--no-optional-locks", "cat-file", "--batch"],
+                    cwd=self.root,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, **_GIT_ENV},
+                )
+            stdin, stdout = self._proc.stdin, self._proc.stdout
+            assert stdin is not None and stdout is not None
+            stdin.write(f"{oid}\n".encode())
+            stdin.flush()
+            header = stdout.readline().split()  # `<oid> blob <size>`, or `<oid> missing`
+            if len(header) != 3:
+                if not header:  # git is gone: the next read starts another
+                    self.close()
+                return b""
+            size = int(header[2])
+            raw = stdout.read(min(size, _TEXT_LIMIT))
+            left = size - len(raw) + 1  # and the newline after it
+            while left > 0 and (chunk := stdout.read(min(left, 1 << 20))):
+                left -= len(chunk)
+            return raw
+        except (OSError, ValueError):
+            self.close()
+            return b""
+
+    def close(self) -> None:
+        if self._proc is not None:
+            self._proc.kill()
+            self._proc.wait()
+            for pipe in (self._proc.stdin, self._proc.stdout):
+                if pipe is not None:
+                    pipe.close()
+            self._proc = None
 
 
 class _Index:
@@ -296,6 +339,7 @@ class _Index:
         self.root = root
         self.ref = source_ref(root)
         self._blobs: dict[str, tuple[str, bool]] = {}
+        self._reader = _Blobs(root)
         if self.ref is not None:
             listed = _git(root, "ls-tree", "-r", "-z", "--full-tree", self.ref)
             for entry in listed.decode("utf-8", "surrogateescape").split("\0"):
@@ -347,7 +391,7 @@ class _Index:
         """`rel`'s content, at most `_TEXT_LIMIT` bytes of it, as text."""
         if rel not in self._text:
             if rel in self._blobs:
-                raw = _blob(self.root, self._blobs[rel][0])
+                raw = self._reader.read(self._blobs[rel][0])
             elif rel in self.files:
                 try:
                     with open(self.root / rel, "rb") as f:
@@ -358,6 +402,9 @@ class _Index:
                 raw = b""
             self._text[rel] = raw[:_TEXT_LIMIT].decode("utf-8", "replace")
         return self._text[rel]
+
+    def close(self) -> None:
+        self._reader.close()
 
     def executable(self, rel: str) -> bool:
         if rel in self._blobs:
@@ -506,7 +553,7 @@ def _read_rake(index: _Index, d: str) -> tuple[str, set[str], str] | None:
         return None
     text = index.text(_join(d, name))
     found = set(_RAKE_TASK.findall(text))
-    if "Rake::TestTask" in text:
+    if "Rake::TestTask" in text or "Minitest::TestTask" in text:
         found.add("test")
     if "RSpec::Core::RakeTask" in text:
         found.add("spec")
@@ -687,8 +734,11 @@ _CI_SKIP_KEYS = {"with", "env", "variables", "environment", "rules", "only", "ex
 _CI_SETUP_KEYS = {"before_script", "install", "before_install"}
 #: A word that says a line runs tests. `check` and `verify` only behind the
 #: runners that use them for that: `ruff check` and `cargo check` do not test.
+#: Not a word inside a task name (`typecheck:tests`), nor Gradle's `-x test`,
+#: which excludes the tests.
 _CI_TEST = re.compile(
-    r"(?<![\w./-])(test|tests|pytest|rspec|jest|vitest|phpunit|ctest|tox|nox)(?![\w-])"
+    r"(?<![\w./:-])(?<!-x )(?<!--exclude-task )"
+    r"(test|tests|pytest|rspec|jest|vitest|phpunit|ctest|tox|nox)(?![\w-])"
     r"|^(make|just|task)\s+check\b|^(\./mvnw|mvn)\b.*\bverify\b"
 )
 _CI_SETUP = re.compile(
@@ -830,52 +880,54 @@ def _strip_env(command: str) -> str:
 def _ci_candidates(index: _Index) -> list[Candidate]:
     found: list[Candidate] = []
     seen: set[tuple[str, str, str]] = set()
-    for glob in _CI_FILES:
-        for rel in index.matching("", glob):
-            try:
-                data = yaml.safe_load(index.text(rel))
-            except yaml.YAMLError:
+    # The repo's own test workflow before its e2e, release or docs ones, and
+    # before the dedup, so a command both run is credited to the first.
+    files = [rel for glob in _CI_FILES for rel in index.matching("", glob)]
+    files.sort(key=lambda rel: bool(_CI_LATE.search(posixpath.basename(rel))))
+    for rel in files:
+        try:
+            data = yaml.safe_load(index.text(rel))
+        except yaml.YAMLError:
+            continue
+        scripts: list[tuple[str, str, list[str]]] = []
+        _ci_walk(data, "", scripts)
+        lines = []
+        for wd, key, block in scripts:
+            here = _relative_dir("", wd) if wd else ""
+            for raw in block:  # a `cd` on one line holds for the lines after it
+                parts, here = _ci_split(here, raw.strip())
+                lines += [(key, d, part) for d, part in parts]
+        for key, d, part in lines:
+            if d is None:
                 continue
-            scripts: list[tuple[str, str, list[str]]] = []
-            _ci_walk(data, "", scripts)
-            lines = []
-            for wd, key, block in scripts:
-                here = _relative_dir("", wd) if wd else ""
-                for raw in block:  # a `cd` on one line holds for the lines after it
-                    parts, here = _ci_split(here, raw.strip())
-                    lines += [(key, d, part) for d, part in parts]
-            for key, d, part in lines:
-                if d is None:
+            command = _strip_env(part.strip())
+            if not command or command.startswith("#") or _shell_syntax(command):
+                continue
+            head = command.split()[0]
+            if head in _CI_NOT_COMMANDS or "--version" in command or "--help" in command:
+                continue
+            if d and d not in index.children:
+                continue
+            if key in _CI_SETUP_KEYS or (
+                head in _CI_SETUP_TOOLS
+                and _CI_SETUP.search(command)
+                and not _CI_TEST.search(command)
+            ):
+                role = "setup"
+                if _CI_GLOBAL_INSTALL.search(command):
                     continue
-                command = _strip_env(part.strip())
-                if not command or command.startswith("#") or _shell_syntax(command):
-                    continue
-                head = command.split()[0]
-                if head in _CI_NOT_COMMANDS or "--version" in command or "--help" in command:
-                    continue
-                if d and d not in index.children:
-                    continue
-                if key in _CI_SETUP_KEYS or (
-                    head in _CI_SETUP_TOOLS
-                    and _CI_SETUP.search(command)
-                    and not _CI_TEST.search(command)
-                ):
-                    role = "setup"
-                    if _CI_GLOBAL_INSTALL.search(command):
-                        continue
-                elif _CI_TEST.search(command):
-                    role = "test"
-                else:
-                    continue
-                if (d, role, command) in seen:
-                    continue
-                seen.add((d, role, command))
-                bare = role == "test" and not (
-                    head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
-                )
-                found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
-    # The repo's own test workflow before its e2e, release or docs ones.
-    return sorted(found, key=lambda c: bool(_CI_LATE.search(posixpath.basename(c.marker))))
+            elif _CI_TEST.search(command):
+                role = "test"
+            else:
+                continue
+            if (d, role, command) in seen:
+                continue
+            seen.add((d, role, command))
+            bare = role == "test" and not (
+                head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
+            )
+            found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
+    return found
 
 
 # ── devcontainer ─────────────────────────────────────────────────────────────
@@ -965,23 +1017,23 @@ def _ancestors(d: str) -> list[str]:
 
 
 def _first_by_tier(cands: list[Candidate], tiers: tuple[Tier, ...]) -> Candidate | None:
-    """The first candidate by tier. Within CI: one a runner or toolchain also
-    proposes first, then a line through a wrapper. A CI line running a bare
-    tool (`pytest`, `jest`) comes after the toolchain: CI installed that tool
-    on its own PATH, which a worktree's is not."""
+    """The first candidate by tier, and within a tier one CI also runs. A CI
+    line running a bare tool (`pytest`, `jest`) comes last of all: CI
+    installed that tool on its own PATH, which a worktree's is not."""
     for tier in tiers:
-        hit = next((c for c in cands if c.tier == tier and not c.bare), None)
-        if tier == "ci":
-            hit = next((c for c in cands if c.corroborated), hit)
+        pool = [c for c in cands if c.tier == tier and not c.bare]
+        hit = next((c for c in pool if c.corroborated), pool[0] if pool else None)
         if hit is not None:
             return hit
     return next((c for c in cands if c.bare), None) if "ci" in tiers else None
 
 
-def _setups(cands: list[Candidate], skip_families: set[str]) -> list[Candidate]:
-    """A runner's setup recipe if there is one, else one toolchain setup per
-    family (a Python and a JavaScript project at one root need both). A
-    devcontainer's commands are never chosen: they are written for a
+def _setups(cands: list[Candidate], skip_families: set[str], family: str | None) -> list[Candidate]:
+    """A runner's setup recipe if there is one, else a toolchain's: the one
+    of `family` when the test command is a toolchain's (`npm test` needs
+    `npm ci`, not the `cargo fetch` beside it), else one per family (a
+    runner's `make test` may need both a Python and a JavaScript install).
+    A devcontainer's commands are never chosen: they are written for a
     container, and commonly install into its global interpreter."""
     runner = _first_by_tier(cands, ("runner",))
     if runner is not None:
@@ -989,7 +1041,9 @@ def _setups(cands: list[Candidate], skip_families: set[str]) -> list[Candidate]:
     picked: list[Candidate] = []
     families: set[str | None] = set()
     for c in cands:
-        if c.tier == "toolchain" and c.family not in families and c.family not in skip_families:
+        if c.tier != "toolchain" or c.family in families or c.family in skip_families:
+            continue
+        if family is None or c.family == family:
             families.add(c.family)
             picked.append(c)
     return picked
@@ -1089,6 +1143,33 @@ def _names_dir(text: str, d: str) -> bool:
     return re.search(rf"{moved}|(?<![\w.-]){name}/", text) is not None
 
 
+#: A line of a task that runs Python's tools as whatever is first on PATH:
+#: `pytest -x`, `python -m coverage`, Taskfile's `- pytest`, mise's `run = "pytest"`.
+_BARE_PYTHON = re.compile(
+    r"""(?:^|&&|;|\|\|)[ \t]*(?:cmd:[ \t]*|run[ \t]*=[ \t]*)?["']?[@-]*[ \t]*"""
+    r"(?:[A-Za-z_]\w*=\S*[ \t]+)*(?:python3?|pytest|py\.test|coverage)(?![\w.-])",
+    re.MULTILINE,
+)
+
+
+def _in_env(index: _Index, by_dir: dict[str, list[Candidate]], matches: dict[str, list[_Match]]):
+    """A runner's test task that runs `pytest` or `python` bare, in a
+    directory a Python toolchain with a `wrap` locks, runs through that
+    toolchain: `uv run ./scripts/test.sh`. Bare, it would find whatever
+    Python a worker's PATH has, without the project's dependencies."""
+    for d, cands in by_dir.items():
+        env = next((m for m in matches.get(d, ()) if m.detector.wrap), None)
+        if env is None:
+            continue
+        for c in cands:
+            if c.tier != "runner" or c.role != "test":
+                continue
+            if not _BARE_PYTHON.search(_recipe(index.text(c.marker), c.detector, c.task)):
+                continue
+            c.command = env.detector.wrap.replace("{command}", c.command)
+            c.source += f", run through {env.detector.id} ({env.marker})"
+
+
 def _stop(
     by_dir: dict[str, list[Candidate]], matches: dict[str, list[_Match]], table: Table
 ) -> dict[str, Detector]:
@@ -1141,6 +1222,28 @@ def _covered(
     return {d: stop for d, stop in stopped.items() if not covers(stop)}
 
 
+def _untested_root(
+    by_dir: dict[str, list[Candidate]], matches: dict[str, list[_Match]]
+) -> Detector | None:
+    """A root that is a project (a Gemfile, a Makefile) with no test command
+    found, while directories below it have theirs: a change to the root's
+    own code would select only their scopes, and pass on them. Stopped like
+    a `stop` detector's directory, saying which file made it a project."""
+    if any(c.role == "test" for c in by_dir.get("", ())):
+        return None
+    tested = {d for d, cands in by_dir.items() if d and any(c.role == "test" for c in cands)}
+    tops = sorted(d for d in tested if not any(a in tested for a in _ancestors(d) if a))
+    project = next((m for m in matches.get("", ()) if not m.detector.stop), None)
+    if project is None or not tops:
+        return None
+    shown = ", ".join(f"{d}/" for d in tops[:3]) + (" and more" if len(tops) > 3 else "")
+    reason = (
+        f"a project ({project.marker}) with no test command found: a change to it "
+        f"would run only the tests in {shown}"
+    )
+    return project.detector.model_copy(update={"stop": True, "reason": reason})
+
+
 def _corroborate(by_dir: dict[str, list[Candidate]], ci: list[Candidate]) -> None:
     """Fold `ci` into `by_dir`. CI running what a runner or toolchain already
     proposes is corroboration, said on that candidate, not a second one."""
@@ -1169,6 +1272,13 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
     runs after cloning, so a nested toolchain's install is not added beside it.
     """
     index = _Index(root)
+    try:
+        return _propose(index, table, test_command)
+    finally:
+        index.close()
+
+
+def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
     ci = _ci_candidates(index)
     devenv = _devcontainer_candidate(index)
 
@@ -1182,6 +1292,7 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
     matches: dict[str, list[_Match]] = {}
     for d in sorted(dirs, key=lambda x: (_depth(x), x)):
         by_dir[d], matches[d] = _detect(index, d, table)
+    _in_env(index, by_dir, matches)
     _corroborate(by_dir, ci)
     if devenv is not None:
         by_dir[""].append(devenv)
@@ -1189,6 +1300,10 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
     # is its scope, whatever is found below it.
     by_dir = {d: cands for d, cands in by_dir.items() if cands or matches[d] or not d}
     stopped = _covered(_stop(by_dir, matches, table), by_dir, table, test_command)
+    if not stopped and test_command is None:
+        root = _untested_root(by_dir, matches)
+        if root is not None:
+            stopped[""] = root
 
     # A workspace root covers its family's members: their setup always (the
     # root's install is what installs them), their tests when it has a test.
@@ -1224,7 +1339,8 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
             test = None  # a suite Kraft cannot run would pass on the others'
         else:
             test = _first_by_tier([c for c in cands if c.role == "test"], TEST_TIERS)
-        setup = _setups([c for c in cands if c.role == "setup"], covering & families)
+        family = test.family if test is not None and test.tier == "toolchain" else None
+        setup = _setups([c for c in cands if c.role == "setup"], covering & families, family)
         named = recipe_text is not None and _names_dir(recipe_text, d)
         if named:
             setup = [c for c in setup if c.tier == "runner"]

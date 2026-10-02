@@ -190,6 +190,21 @@ def test_a_number_with_no_option_is_asked_again_not_saved(app, capsys, repo, mon
     assert entry["test_command"] == "go test ./..."
 
 
+def test_a_yes_keeps_the_proposal_and_a_no_asks_again(app, capsys, repo, monkeypatch):
+    """A yes or no answers the prompt; neither is saved as the command."""
+    (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
+    (repo / "go.mod").write_text("module x\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["n", "y"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert "pick one by its number" in capsys.readouterr().out
+    [entry] = asyncio.run(client.repos())
+    assert entry["test_command"] == "make test"
+
+
 def test_connect_names_origins_branch_whole(capsys):
     from kraft.cli import repo as repo_cli
 

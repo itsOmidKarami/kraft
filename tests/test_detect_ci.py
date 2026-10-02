@@ -20,11 +20,19 @@ def _workflow(steps: str) -> dict[str, str]:
     return {_WORKFLOW: f"on: push\njobs:\n  test:\n    runs-on: x\n    steps:\n{steps}"}
 
 
-def test_what_ci_runs_beats_a_toolchain_default(tmp_path):
-    files = {"go.mod": "module x\n", **_workflow("      - run: go test -race ./...\n")}
+def test_a_toolchains_test_beats_what_ci_runs_and_ci_fills_in_without_one(tmp_path):
+    """A CI job is one slice of a matrix or a lint that says "test"; the
+    toolchain's command is the repo's whole suite. jest's CI ran `yarn
+    typecheck:tests`."""
+    steps = "      - run: yarn typecheck:tests\n      - run: go test -race ./...\n"
+    files = {"go.mod": "module x\n", **_workflow(steps)}
     p = _propose(_repo(tmp_path, files))
-    assert p.test_command == "go test -race ./..."
-    assert _chosen(p, "test")["source"] == _WORKFLOW
+    assert p.test_command == "go test ./..."
+    alone = _propose(_repo(tmp_path / "alone", _workflow(steps)))
+    assert (alone.test_command, _chosen(alone, "test")["source"]) == (
+        "go test -race ./...",
+        _WORKFLOW,
+    )
 
 
 def test_a_runners_task_beats_what_ci_runs(tmp_path):
@@ -53,6 +61,7 @@ def test_ci_running_the_proposal_corroborates_it_and_outranks_a_ci_only_line(tmp
         "echo running tests",
         "ruff check .",
         "x) npm test ;;",
+        "./gradlew check -x jvmTest -x test",
     ],
     ids=[
         "a-variable",
@@ -62,6 +71,7 @@ def test_ci_running_the_proposal_corroborates_it_and_outranks_a_ci_only_line(tmp
         "echo",
         "a-linter",
         "a-case-arm",
+        "gradles-x-excludes-the-tests",
     ],  # noqa: E501
 )
 def test_a_ci_line_that_only_means_something_in_its_script_is_ignored(tmp_path, line):
@@ -109,6 +119,22 @@ def test_the_repos_test_workflow_is_read_before_its_e2e_one(tmp_path):
         ".github/workflows/unit.yml": "jobs:\n  u:\n    steps:\n      - run: go test -race ./...\n",
     }
     assert _propose(_repo(tmp_path, files)).test_command == "go test -race ./..."
+
+
+def test_a_command_the_e2e_workflow_also_runs_is_the_test_workflows(tmp_path):
+    """pallets/click: a nightly workflow, listed first, claimed the command
+    its test workflow runs first, then sank to the end with it."""
+    files = {
+        ".github/workflows/nightly.yml": "jobs:\n  n:\n    steps:\n      - run: make test\n",
+        ".github/workflows/unit.yml": (
+            "jobs:\n  u:\n    steps:\n      - run: make test\n      - run: make check\n"
+        ),
+    }
+    p = _propose(_repo(tmp_path, files))
+    assert (p.test_command, _chosen(p, "test")["source"]) == (
+        "make test",
+        ".github/workflows/unit.yml",
+    )
 
 
 _CIRCLE = (

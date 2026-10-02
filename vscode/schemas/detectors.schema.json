@@ -165,6 +165,19 @@
           },
           "title": "Workspace",
           "type": "array"
+        },
+        "wrap": {
+          "anyOf": [
+            {
+              "pattern": "\\{command\\}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wrap"
         }
       },
       "required": [

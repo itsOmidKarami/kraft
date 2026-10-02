@@ -24,8 +24,8 @@ zero exit code says the command ran, not that what it did was right.
    evidence first:
    - a task runner's `test`/`setup` task (justfile, Makefile, Taskfile, mise,
      `script/test`)
-   - what CI runs
    - the toolchain its lockfile names (pnpm, Poetry, Gradle, Cargo, ...)
+   - what CI runs, where neither of those has a test command
 
    It returns each command's source and every other candidate it saw. Compare
    them with what the repo's docs say. When the docs say something else (a

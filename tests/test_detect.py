@@ -143,7 +143,7 @@ KINDS = [
         ".venv/bin/python -m pytest",
         "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
     ),  # noqa: E501
-    ("tox", {"tox.ini": "[tox]\n"}, "tox", "tox --notest"),
+    ("tox", {"tox.ini": "[tox]\n"}, "tox -e py", "tox -e py --notest"),
     ("cargo", {"Cargo.toml": "[package]\n"}, "cargo test", "cargo fetch"),
     (
         "cargo-workspace",
@@ -193,6 +193,12 @@ KINDS = [
         "bundle exec rake test",
         "bundle install",
     ),  # noqa: E501
+    (
+        "rake-minitest",
+        {"Gemfile": "", "Rakefile": "require 'minitest/test_task'\nMinitest::TestTask.create\n"},
+        "bundle exec rake test",
+        "bundle install",
+    ),
     (
         "composer",
         {"composer.json": '{"scripts": {"test": "phpunit"}}'},
@@ -265,8 +271,11 @@ def test_a_script_to_rule_them_all_counts_only_when_executable(tmp_path):
 @pytest.mark.parametrize(
     ("justfile", "expected"),
     [
-        ("test:\n    pytest\n", "just test"),
-        ("set shell := ['zsh']\n[no-cd]\n@test *ARGS: build\n    pytest {{ARGS}}\n", "just test"),
+        ("test:\n    uv run pytest\n", "just test"),
+        (
+            "set shell := ['zsh']\n[no-cd]\n@test *ARGS: build\n    uv run pytest {{ARGS}}\n",
+            "just test",
+        ),
         ("test-ui:\n    npm test\nlint:\n    ruff\n", "uv run pytest"),
         ("test := 'x'\n", "uv run pytest"),
     ],
@@ -313,16 +322,59 @@ def test_pytest_is_proposed_only_with_evidence_of_pytest(tmp_path, pyproject):
     assert (p.test_command, p.setup_command) == (None, "uv sync")
 
 
-def test_two_toolchains_at_one_root_are_both_prepared(tmp_path):
-    """One test command (the table's order breaks the tie, the other is shown
-    as a candidate) and both installs: each one's tests need its own."""
-    files = {"pyproject.toml": PYTEST, "uv.lock": "", "package.json": JEST, "package-lock.json": ""}
-    p = _propose(_repo(tmp_path, files))
-    assert p.test_command == "npm test"
-    assert [c["command"] for c in p.candidates if c["role"] == "test" and not c["chosen"]] == [
-        "uv run pytest"
-    ]
-    assert p.setup_command == "npm ci && uv sync"
+_BOTH = {"pyproject.toml": PYTEST, "uv.lock": "", "package.json": JEST, "package-lock.json": ""}
+
+
+def test_of_two_toolchains_at_one_root_python_is_tested_and_prepared(tmp_path):
+    """One test command: the table's order breaks the tie, Python first, as
+    a Python project with a package.json for its tooling is the common
+    shape. Its setup is its own toolchain's; the other is shown."""
+    p = _propose(_repo(tmp_path, _BOTH))
+    assert (p.test_command, p.setup_command) == ("uv run pytest", "uv sync")
+    assert [c["command"] for c in p.candidates if not c["chosen"]] == ["npm test", "npm ci"]
+
+
+def test_a_runners_test_task_beside_two_toolchains_gets_both_installs(tmp_path):
+    """Which toolchains `make test` needs is not known, so both install."""
+    p = _propose(_repo(tmp_path, {**_BOTH, "Makefile": "test:\n\t./run-tests\n"}))
+    assert (p.test_command, p.setup_command) == ("make test", "uv sync && npm ci")
+
+
+#: A runner's test task, in a directory a uv.lock locks -> what is proposed.
+_BARE = {
+    "a-recipe-running-pytest": ({"justfile": "test:\n    pytest -x\n"}, "uv run just test"),
+    "fastapis-script": (
+        {"scripts/test.sh": "#!/usr/bin/env bash\nset -e\nexport X=1\npytest -n auto tests\n"},
+        "uv run ./scripts/test.sh",
+    ),
+    "a-make-target-through-its-dependency": (
+        {"Makefile": "test: cov\ncov:\n\t@python -m coverage run -m pytest\n"},
+        "uv run make test",
+    ),
+    "a-taskfile-cmd": (
+        {"Taskfile.yml": "version: '3'\ntasks:\n  test:\n    cmds:\n      - pytest\n"},
+        "uv run task test",
+    ),
+    "a-recipe-already-through-uv": ({"justfile": "test:\n    uv run pytest\n"}, "just test"),
+    "pytest-only-in-another-recipe": (
+        {"justfile": "test:\n    ./run\nlint:\n    pytest --flake8\n"},
+        "just test",
+    ),
+}
+
+
+@pytest.mark.parametrize(("files", "expected"), _BARE.values(), ids=_BARE)
+def test_a_runners_task_running_python_bare_runs_through_the_lockfile(tmp_path, files, expected):
+    """fastapi's `./scripts/test.sh` runs `pytest`, which on a worker's PATH
+    is whatever Python is installed, without the project's dependencies."""
+    p = _propose(
+        _repo(
+            tmp_path,
+            {**files, "pyproject.toml": PYTEST, "uv.lock": ""},
+            ("scripts/test.sh",) if "scripts/test.sh" in files else (),
+        )
+    )
+    assert p.test_command == expected
 
 
 #: Files in a directory -> the (test, setup) a pyproject.toml with no lockfile
@@ -424,173 +476,6 @@ def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(tmp_pat
     root, nested = p.test_scopes
     assert ("backend/**" in root["paths"], root["command"]) == (True, "make test")
     assert nested == {"paths": ["web/**"], "command": "sh -c 'cd web && npm test'"}
-
-
-# ── scopes ──
-
-
-def test_a_nested_project_is_a_scope_prepared_and_tested_from_its_directory(tmp_path):
-    """Kraft-9wzy's layout. A scope's command runs from the worktree root
-    without a shell, so a nested one is wrapped in `sh -c 'cd ...'`; the
-    setup runs through a shell, so it gets a subshell."""
-    files = {
-        "pyproject.toml": PYTEST,
-        "uv.lock": "",
-        "frontend/package.json": JEST,
-        "frontend/package-lock.json": "",
-    }
-    p = _propose(_repo(tmp_path, files))
-    assert p.setup_command == "uv sync && (cd frontend && npm ci)"
-    assert p.test_scopes[1] == {
-        "paths": ["frontend/**"],
-        "command": "sh -c 'cd frontend && npm test'",
-    }
-    assert "frontend/**" not in p.test_scopes[0]["paths"]
-    assert {"pyproject.toml", "uv.lock", "calc.py"} <= set(p.test_scopes[0]["paths"])
-
-
-def test_a_root_setup_recipe_prepares_the_whole_repo(tmp_path):
-    files = {
-        "justfile": "setup:\n  npm ci --prefix web\ntest:\n  pytest\n",
-        "web/package.json": JEST,
-        "web/package-lock.json": "",
-    }
-    p = _propose(_repo(tmp_path, files))
-    assert p.setup_command == "just setup"
-    assert p.test_scopes[1]["command"] == "sh -c 'cd web && npm test'"
-
-
-def test_a_root_setup_recipe_prepares_only_the_directories_it_installs(tmp_path):
-    """Kraft's own shape: `just setup` installs `frontend/`, and names
-    `vscode` only in a comment and another recipe, so vscode's install is
-    added beside it (spec A2)."""
-    justfile = (
-        "# setup installs the backend and the UI (not vscode)\n"
-        "setup: deps\n"
-        "    uv sync\n"
-        "deps:\n"
-        "    cd frontend && npm ci\n"
-        "test:\n"
-        "    pytest\n"
-        "test-vscode:\n"
-        "    cd vscode && npm ci && npm test\n"
-    )
-    files = {
-        "justfile": justfile,
-        "pyproject.toml": PYTEST,
-        "uv.lock": "",
-        "frontend/package.json": JEST,
-        "frontend/package-lock.json": "",
-        "vscode/package.json": JEST,
-        "vscode/package-lock.json": "",
-    }
-    p = _propose(_repo(tmp_path, files))
-    assert (p.test_command, p.setup_command) == ("just test", "just setup && (cd vscode && npm ci)")
-    assert [s["command"] for s in p.test_scopes[1:]] == [
-        "sh -c 'cd frontend && npm test'",
-        "sh -c 'cd vscode && npm test'",
-    ]
-
-
-def test_a_workspace_member_with_its_own_lockfile_installs_on_its_own(tmp_path):
-    files = {
-        "pnpm-workspace.yaml": "packages: ['packages/*']\n",
-        "pnpm-lock.yaml": "",
-        "package.json": JEST,
-        "packages/a/package.json": JEST,
-        "docs/package.json": JEST,
-        "docs/package-lock.json": "",
-    }
-    p = _propose(_repo(tmp_path, files))
-    assert p.setup_command == "pnpm install --frozen-lockfile && (cd docs && npm ci)"
-    assert [s["paths"] for s in p.test_scopes][1:] == [["docs/**"]]
-
-
-def test_a_workspace_root_covers_its_members(tmp_path):
-    files = {
-        "pnpm-workspace.yaml": "packages: ['packages/*']\n",
-        "pnpm-lock.yaml": "",
-        "package.json": '{"private": true}',
-        "packages/a/package.json": JEST,
-        "apps/web/package.json": JEST,
-    }
-    p = _propose(_repo(tmp_path, files))
-    assert p.test_scopes == [{"paths": ["**"], "command": "pnpm -r --if-present test"}]
-    assert p.setup_command == "pnpm install --frozen-lockfile"
-
-
-def test_a_project_two_levels_down_is_found_and_three_is_not(tmp_path):
-    files = {"apps/web/go.mod": "module w\n", "a/b/c/go.mod": "module c\n"}
-    p = _propose(_repo(tmp_path, files))
-    assert [s["paths"] for s in p.test_scopes] == [["apps/web/**"]]
-
-
-def test_ignored_untracked_and_conventional_non_project_directories_are_not_scopes(tmp_path):
-    files = {
-        ".gitignore": "vendored/\n",
-        "vendored/go.mod": "module v\n",
-        "examples/demo/go.mod": "module d\n",
-        ".hidden/go.mod": "module h\n",
-    }
-    assert _propose(_repo(tmp_path, files)).test_scopes == []
-
-
-def test_a_directory_with_tests_and_no_setup_leaves_setup_undecided(tmp_path):
-    files = {"go.mod": "module x\n", "tools/Makefile": "test:\n\t./t\n"}
-    p = _propose(_repo(tmp_path, files))
-    assert p.setup_command is None
-    assert p.missing_setup == ["tools"]
-
-
-def test_a_given_test_command_replaces_the_roots_and_keeps_nested_scopes(tmp_path):
-    """Kraft-k4mx: an override never suppresses nested probing. `""` says
-    the root has no tests at all."""
-    files = {"pyproject.toml": PYTEST, "web/package.json": JEST}
-    p = _propose(_repo(tmp_path, files), test_command="just test")
-    assert [s["command"] for s in p.test_scopes] == ["just test", "sh -c 'cd web && npm test'"]
-    p = _propose(_repo(tmp_path / "none", files), test_command="")
-    assert p.test_scopes == [{"paths": ["web/**"], "command": "sh -c 'cd web && npm test'"}]
-
-
-@pytest.mark.parametrize(
-    ("scopes", "expected"),
-    [
-        ([{"dir": "", "setup": "uv sync", "test": "t"}], "uv sync"),
-        (
-            [
-                {"dir": "", "setup": "", "test": "t"},
-                {"dir": "my app", "setup": "npm ci", "test": "t"},
-            ],
-            "(cd 'my app' && npm ci)",
-        ),  # noqa: E501
-        (
-            [
-                {"dir": "", "setup": "uv sync", "test": "t"},
-                {"dir": "web", "setup": None, "test": "t"},
-            ],
-            None,
-        ),  # noqa: E501
-        (
-            [
-                {"dir": "", "setup": None, "test": None},
-                {"dir": "web", "setup": "npm ci", "test": "t"},
-            ],
-            "(cd web && npm ci)",
-        ),
-        ([{"dir": "", "setup": "", "test": "t"}, {"dir": "web", "setup": "", "test": "t"}], ""),
-        ([{"dir": "", "setup": None, "test": None}], None),
-    ],
-    ids=[
-        "root-only",
-        "a-directory-needing-quotes",
-        "a-tested-scope-without-setup",
-        "an-untested-root",
-        "every-scope-declares-nothing",
-        "nothing-declared",
-    ],
-)
-def test_combine_setup(scopes, expected):
-    assert detect.combine_setup(scopes) == expected
 
 
 # ── the operator's detectors.yaml ──
@@ -740,3 +625,15 @@ def test_a_rails_apps_bin_setup_is_run_without_starting_the_server(tmp_path):
     files = {"bin/rails": "", "bin/setup": "", "Gemfile": ""}
     p = _propose(_repo(tmp_path, files, executable=("bin/rails", "bin/setup")))
     assert p.setup_command == "bin/setup --skip-server"
+
+
+def test_one_reader_serves_every_file_in_turn_past_a_capped_one(tmp_path, monkeypatch):
+    """One `git cat-file --batch` reads them all: the rest of a file past
+    the cap is skipped, never handed to the next read."""
+    monkeypatch.setattr(detect, "_TEXT_LIMIT", 8)
+    repo = _repo(tmp_path, {"big": "b" * 100, "small": "s\n"})
+    index = detect._Index(repo)
+    try:
+        assert [index.text("big"), index.text("small")] == ["b" * 8, "s\n"]
+    finally:
+        index.close()

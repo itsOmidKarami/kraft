@@ -71,7 +71,9 @@ _ALSO_SHOWN = 4
 def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None:
     """Ask which of the root's `role` candidates to use, when there is a
     choice to make. Enter keeps the proposal; a number picks one; `-` says
-    there is none; anything else is the command itself."""
+    there is none; `y` keeps the proposal and `n` asks again, since a yes or
+    no is an answer to the prompt, never a command; anything else is the
+    command itself."""
     options: list[dict] = []
     for c in candidates:
         if (
@@ -94,6 +96,11 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
             return proposed
         if answer == "-":
             return ""
+        if answer.lower() in ("y", "yes") and proposed is not None:
+            return proposed
+        if answer.lower() in ("y", "yes", "n", "no"):
+            print("  pick one by its number, - for none, or type the command to use")
+            continue
         if not answer.isdigit():
             return answer
         if 1 <= int(answer) <= len(options):
@@ -183,8 +190,8 @@ def _say_connected(result: dict) -> None:
         print(f"  no test command proposed: {stop['dir']} is {stop['reason']}")
     if result.get("enabled") is False:
         print(
-            "saved disabled: no test command found in its task runners, CI or toolchain "
-            "files; pass --test-command (--no-tests for a repo with none) or set "
+            "saved disabled: no test command found in its task runners, toolchain files or CI; "
+            "pass --test-command (--no-tests for a repo with none) or set "
             "`test_command` in its repos.yaml entry, then `enabled: true`"
         )
 

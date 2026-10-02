@@ -23,6 +23,22 @@ def _verify(entry, **kw) -> tuple[bool, str]:
     return verify.verify(entry, say=lines.append, **kw), "\n".join(lines)
 
 
+def _gone(pid: str) -> bool:
+    """Whether process `pid` is dead or a zombie within a few seconds: a
+    SIGKILL is delivered, not instantly done, on a loaded machine."""
+    status = Path(f"/proc/{pid}/status")
+    for _ in range(500):
+        try:
+            lines = status.read_text().splitlines()
+            state = next(line for line in lines if line.startswith("State:"))
+        except (OSError, StopIteration):
+            return True
+        if "zombie" in state or "dead" in state:
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def _repo(tmp_path, files: dict[str, str] | None = None, name: str = "sample") -> Path:
     repo = make_repo(tmp_path, name=name)
     for rel, text in (files or {}).items():
@@ -138,8 +154,7 @@ def test_a_step_that_does_not_finish_is_killed_with_its_children(tmp_path):
     ok, said = _verify(_entry(repo, test_command=command), timeout_minutes=0.02)
     assert not ok
     assert "TIMED OUT" in said and "watch mode" in said
-    status = Path(f"/proc/{pidfile.read_text().strip()}/status")
-    assert not status.exists() or "zombie" in status.read_text(), "the child was left running"
+    assert _gone(pidfile.read_text().strip()), "the child was left running"
 
 
 def test_it_rehearses_the_commit_a_work_item_starts_from(tmp_path):
@@ -183,5 +198,4 @@ def test_an_interrupted_step_is_killed_with_its_children(tmp_path, monkeypatch):
     argv = ["sh", "-c", f"sleep 60 & echo $! > {pidfile}; wait"]
     with pytest.raises(KeyboardInterrupt):
         verify._run(argv, tmp_path, dict(os.environ), tmp_path / "log", 60)
-    status = Path(f"/proc/{pidfile.read_text().strip()}/status")
-    assert not status.exists() or "zombie" in status.read_text(), "the child was left running"
+    assert _gone(pidfile.read_text().strip()), "the child was left running"
