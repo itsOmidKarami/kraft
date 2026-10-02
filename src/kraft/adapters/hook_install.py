@@ -153,7 +153,8 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     text = exclude.read_text() if exclude.exists() else ""
     lines = text.splitlines()
     if _EXCLUDE_LINE in lines:
-        # The 1.5.0 release candidates wrote the note with a tracker id after it.
+        # Kraft 1.1 through the 1.5.0 release candidates wrote the note with a
+        # tracker id after it.
         legacy = [n for n, line in enumerate(lines) if line.startswith(f"{_EXCLUDE_NOTE} (")]
         for n in legacy:
             lines[n] = _EXCLUDE_NOTE

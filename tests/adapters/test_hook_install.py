@@ -76,7 +76,7 @@ def test_installed_once_and_never_seen_by_git(tmp_path):
 
 
 def test_an_exclude_note_written_with_a_tracker_id_is_rewritten_not_repeated(tmp_path):
-    """The 1.5.0 release candidates wrote the note with a tracker id after it:
+    """Kraft 1.1 through the 1.5.0 release candidates wrote the note with a tracker id:
     that install's exclude keeps its one entry, and the note loses the id."""
     main, wt = _worktree(tmp_path)
     exclude = main / ".git/info/exclude"
