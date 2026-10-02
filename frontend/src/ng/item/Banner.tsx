@@ -39,7 +39,7 @@ export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail
           ? <Button variant="primary" onClick={() => setRaising(true)}>Raise cap</Button>
           : stop.kind === "cap" ? <Button variant="primary" onClick={onRaise}>Open config</Button>
           : budgetRaise(item) && <Button variant="primary" onClick={onRaise}>Raise cap</Button>}
-        {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}
+        {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} override={item.policy_override} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}
       </div>
     );
   return null;

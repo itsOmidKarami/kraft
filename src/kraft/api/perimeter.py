@@ -2,8 +2,9 @@
 middleware. Applied to `app` by `kraft.api.__init__` (an `app.middleware`
 decorator needs `app`, which does not exist until the package `__init__`
 builds it) -- registration order there must stay `_spa_navigation`,
-`_authenticate`, `_perimeter` (rule 9: Starlette runs the last-declared
-middleware first, so `_perimeter` must be declared last)."""
+`_authenticate`, `_perimeter`, `_frame_guard` (rule 9: Starlette runs the
+last-declared middleware first, so `_perimeter` must come after the other two,
+and `_frame_guard` after it so a refusal carries its headers too)."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
+from kraft.api import apidocs
 
 
 def _is_api_path(path: str) -> bool:
@@ -28,10 +30,10 @@ def _is_api_path(path: str) -> bool:
 
 
 def _is_fastapi_docs_path(app: FastAPI, path: str) -> bool:
-    """FastAPI's own pages: Swagger UI (and its OAuth redirect), ReDoc and the
-    schema. Their JS and CSS come from a CDN, so these paths are all a browser
-    fetches from us for them."""
-    own = {app.docs_url, app.redoc_url, app.openapi_url, app.swagger_ui_oauth2_redirect_url}
+    """FastAPI's own pages: Swagger UI, ReDoc and the schema. Their JS and CSS
+    come from a CDN, so these paths are all a browser fetches from us for
+    them."""
+    own = {apidocs.SWAGGER_PATH, apidocs.REDOC_PATH, app.openapi_url}
     return path in own - {None}
 
 
@@ -83,8 +85,9 @@ def _is_static_asset(app: FastAPI, path: str) -> bool:
     return dist.resolve() in candidate.parents and candidate.is_file()
 
 
-#: Hostnames that can only mean this machine. `urlsplit().hostname` strips the
-#: brackets off an IPv6 literal, so "::1" covers "[::1]" as well.
+#: Hostnames that can only mean this machine. `config.host_name` keeps an IPv6
+#: literal's brackets and `urlsplit().hostname` (an Origin) strips them, so
+#: both spellings of ::1 are here.
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 
 
@@ -184,6 +187,26 @@ async def _perimeter(request: Request, call_next):
     return await call_next(request)
 
 
+#: No other site may put Kraft in a frame. A loopback board has no login, so
+#: a page that framed it invisibly could turn a click on its own content into
+#: Resume or Approve (clickjacking). `X-Frame-Options` is the older spelling
+#: of the same rule, for a browser that ignores `frame-ancestors`.
+_FRAME_HEADERS = {
+    "content-security-policy": "frame-ancestors 'self'",
+    "x-frame-options": "SAMEORIGIN",
+}
+
+
+async def _frame_guard(request: Request, call_next):
+    """Every response, the SPA shell and the API alike, says only Kraft's own
+    pages may frame it. Declared last, so it is the outermost middleware and
+    a 401 or 403 from the ones inside carries the headers as well."""
+    response = await call_next(request)
+    for name, value in _FRAME_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
     """Why `_perimeter` refuses this request, or None to let it through.
 
@@ -227,7 +250,7 @@ def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
     #    name is always allowed there too: a browser sends one only when it is
     #    on this machine, so the board still opens at 127.0.0.1 on a LAN bind
     #    without listing it, and a rebound page carries its own name instead.
-    hostname = _hostname(request.headers.get("host", ""))
+    hostname = config_mod.host_name(request.headers.get("host", ""))
     bound_host = getattr(st, "bound_host", "127.0.0.1")
     if bound_host in config_mod.LOOPBACK:
         refused = hostname not in _LOCAL_HOSTS
@@ -251,19 +274,6 @@ def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
         return "cross-site request refused"
 
     return None
-
-
-def _hostname(host: str) -> str | None:
-    """The name in a `Host` header, lowercased and without its port. None for
-    one that does not parse (an unclosed IPv6 bracket) or carries userinfo
-    (`evil@127.0.0.1`, which `urlsplit` would read as 127.0.0.1), which no
-    list holds."""
-    if "@" in host:
-        return None
-    try:
-        return urlsplit(f"//{host}").hostname
-    except ValueError:
-        return None
 
 
 def _from_a_browser(request: Request | WebSocket) -> bool:

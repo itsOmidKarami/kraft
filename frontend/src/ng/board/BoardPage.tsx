@@ -7,7 +7,7 @@ import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { openPane } from "../item/Workspace";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
-import { FirstRun } from "../shell/FirstRun";
+import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Menu } from "../ui/Menu";
 import { chainOf, groupOf, groupsOf, type GroupBy, type SortBy } from "./model";
 import { useBoardPrefs } from "./prefs";
@@ -88,7 +88,13 @@ export function BoardPage() {
   }, [last]);
 
   useEffect(() => {
-    api.getRepos().then((r) => setFresh(r.repos.length === 0)).catch(() => {});
+    api.getRepos().then((r) => {
+      // A wizard left part-way through comes back, until its last step is done
+      // or skipped; one whose repo is no longer connected starts over.
+      const saved = savedFirstRun();
+      if (saved && !r.repos.some((x) => x.path === saved.path)) clearFirstRun();
+      setFresh(r.repos.length === 0 || savedFirstRun() != null);
+    }).catch(() => {});
     api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});
   }, []);
 
@@ -176,7 +182,7 @@ export function BoardPage() {
   };
 
   // FirstRun's last step opens the composer, which lives on the board.
-  if (fresh && !query.new) return <FirstRun />;
+  if (fresh && !query.new) return <FirstRun onDone={() => setFresh(false)} />;
 
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));

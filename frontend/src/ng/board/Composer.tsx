@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
 import { useStore } from "../../store";
@@ -31,7 +31,8 @@ const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
  *  preview of what will run from the server's dry run. ⌘↵ creates and starts. */
 export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: string; onClose: () => void; onCreated: (id: string) => void }) {
   const navigate = useNavigate();
-  const [repos, setRepos] = useState<Repo[]>([]);
+  /** The enabled repos, null until read: an empty list is no repo to file to. */
+  const [repos, setRepos] = useState<Repo[] | null>(null);
   const [roots, setRoots] = useState<Set<string>>(new Set());
   const [chains, setChains] = useState<TemplateSummary[]>([]);
   const [d, setD] = useState<Draft>({ title: "", brief: "", repo: "", chain: "", spec: "", plan: "" });
@@ -87,7 +88,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     navigate("/work-items/new", { state: { draft: d, members } });
   };
   const create = async (autostart: boolean) => {
-    if (!d.title.trim() || busy || (preview && "error" in preview)) return;
+    if (!d.title.trim() || !d.repo || busy || (preview && "error" in preview)) return;
     setBusy(true);
     setError(null);
     const r = await request<{ id: string; duplicate_warning?: string }>("/work-items", jsonBody("POST", createBody(d, autostart)));
@@ -103,8 +104,8 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   const off = new Set(run?.skipped.map((s) => s.node) ?? []);
   const ran = run ? run.nodes.length : full.length;
   const gates = run ? run.gates.length : full.filter((n) => n.kind === "gate").length;
-  const repo = repos.find((r) => r.path === d.repo);
-  const ok = !!d.title.trim() && !busy && !(preview && "error" in preview);
+  const repo = repos?.find((r) => r.path === d.repo);
+  const ok = !!d.title.trim() && !!d.repo && !busy && !(preview && "error" in preview);
 
   return (
     <section className="composer" aria-label="New work item" onKeyDown={sendOnModEnter(() => create(true))}>
@@ -121,7 +122,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           label="Repo"
           triggerClass="composer-chip"
           trigger={<>{repo ? repoName(repo.path) : "repo"} <span aria-hidden className="board-caret">▾</span></>}
-          items={repos.map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain_template, onSelect: () => set({ repo: r.path, chain: r.default_chain_template, spec: "", plan: "" }) }))}
+          items={(repos ?? []).map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain_template, onSelect: () => set({ repo: r.path, chain: r.default_chain_template, spec: "", plan: "" }) }))}
         />
         <Menu
           label="Chain"
@@ -150,7 +151,11 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           </>
         ) : (
           <>
-            <span className="composer-note">{error ? <span className="item-error" role="alert">{error}</span> : "Created paused. Nothing spends tokens until you start it."}</span>
+            <span className="composer-note">
+              {error ? <span className="item-error" role="alert">{error}</span>
+                : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/templates/repos" className="item-link">Templates › Repos</Link>.</>
+                : "Created paused. Nothing spends tokens until you start it."}
+            </span>
             <button type="button" className="board-select-all" title="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>
             <button type="button" className="board-select-all" onClick={leave}>Cancel</button>
             <CreateSplit disabled={!ok} onCreate={create} />

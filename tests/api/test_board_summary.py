@@ -53,6 +53,34 @@ def test_budget_cap_daily_counts_only_since_local_midnight(client, repo):
     assert daily["spent_usd"] == 2.0
 
 
+def test_budget_cap_reports_the_items_policy_budget_usd_when_it_is_the_lower_cap(client, repo):
+    """A policy budget_usd stop's Raise cap writes the item's `policy.budget_usd`.
+    The detail reports that cap, marked as the item's own and keyed by the field
+    that changes it, while it is the lower of the two; the item's own cap
+    reports again once it is lower, and an item-wide "none" drops the policy
+    one."""
+    wid = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+    ).json()["id"]
+
+    def cap():
+        got = client.get(f"/api/work-items/{wid}").json()["budget_cap"]
+        return got["cap_usd"], got["source"], got["key"]
+
+    def patch(body):
+        assert client.patch(f"/api/work-items/{wid}", json=body).status_code == 200
+
+    assert cap() == (10.0, "policy", "budget_usd")
+    patch({"policy": {"budget_usd": 1.5}})
+    assert cap() == (1.5, "item", "policy.budget_usd")
+    patch({"budget_usd": 1.0})
+    assert cap() == (1.0, "item", "budget_usd")
+    patch({"budget_usd": 2.0})
+    assert cap() == (1.5, "item", "policy.budget_usd")
+    patch({"budget_usd": None, "policy": {"budget_usd": "none"}})
+    assert cap() == (None, "item", "budget_usd")
+
+
 def test_budget_today_with_and_without_daily_cap(client, repo):
     wid = _paused_item(client, repo)
     _session_with_cost(wid, cost_usd=3.0, created_at=store.local_midnight_utc())

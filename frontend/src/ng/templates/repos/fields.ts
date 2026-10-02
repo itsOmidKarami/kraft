@@ -1,4 +1,4 @@
-import { dollars, list, models, scopes, text, whole, type Parsed } from "./format";
+import { command, dollars, list, models, scopes, text, whole, type Parsed } from "./format";
 import type { RepoView } from "./types";
 
 /** The Config rows of a repo (GAP §2 #33: every field the shipped page edits),
@@ -15,6 +15,8 @@ export interface RepoField {
   source?: "steering" | "deny_tools" | "models";
   /** The value shown when the entry sets none. */
   fallback?: string;
+  /** A checkbox that sets the field to `""`, the command that does nothing. */
+  none?: string;
   placeholder?: string;
 }
 
@@ -24,7 +26,7 @@ export const FIELDS: RepoField[] = [
   { key: "default_chain_template", label: "default chain", choice: "chain", ...text, fallback: "default" },
   { key: "test_command", label: "test command", ...text },
   { key: "test_scopes", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
-  { key: "setup_command", label: "setup command", ...text },
+  { key: "setup_command", label: "setup command", ...command, none: "No setup needed" },
   { key: "intent_dir", label: "intent dir", ...text },
   { key: "steering", label: "steering", ...list, source: "steering", placeholder: "profile, profile" },
   { key: "models", label: "models", ...models, source: "models", placeholder: "profile=model; …" },

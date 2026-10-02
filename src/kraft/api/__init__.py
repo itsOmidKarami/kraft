@@ -4,6 +4,7 @@ see the sibling modules for the actual routes:
 - `deps` -- helpers shared by several route modules
 - `startup` -- `lifespan()` and its background tasks
 - `perimeter` -- SPA navigation shortcut, local-client check, auth middleware
+- `apidocs` -- `/docs` and `/redoc`, with their CDN scripts pinned
 - `routes/*` -- one module per resource, each decorating `api_router` below
 
 Nothing outside this package imports anything from here except `app` --
@@ -18,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from kraft import config as config_mod
 from kraft import update
-from kraft.api import perimeter
+from kraft.api import apidocs, perimeter
 from kraft.api.startup import lifespan
 
 # The title and version are what `/docs`, `/redoc` and `/openapi.json` show,
@@ -26,7 +27,17 @@ from kraft.api.startup import lifespan
 # 0.1.0". Every route's docstring is published there as its description, so
 # a reference only the maintainer can follow goes in a comment above the
 # route instead (tests/api/test_openapi.py).
-app = FastAPI(title="Kraft", version=update.installed(), lifespan=lifespan)
+#
+# FastAPI's own `/docs` and `/redoc` are off: `apidocs` serves the same pages
+# with their scripts pinned to one release and checked by hash.
+app = FastAPI(
+    title="Kraft",
+    version=update.installed(),
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    swagger_ui_oauth2_redirect_url=None,
+)
 
 #: Every JSON endpoint lives under here, so it can never share a path with an
 #: SPA client-side route (e.g. GET /work-items/<id> the page vs. the same path
@@ -36,12 +47,14 @@ api_router = APIRouter(prefix="/api")
 
 # Registration order matters: Starlette runs the *last*-declared middleware
 # first, so `_perimeter` (who may talk to this server at all) has to be
-# declared last, after `_authenticate` (session/bearer), after
-# `_spa_navigation` (the SPA-shell fast path) -- see `perimeter._perimeter`'s
-# own docstring.
+# declared after `_authenticate` (session/bearer), after `_spa_navigation`
+# (the SPA-shell fast path) -- see `perimeter._perimeter`'s own docstring.
+# `_frame_guard` only adds response headers, and goes last so that even a
+# refusal from `_perimeter` carries them.
 app.middleware("http")(perimeter._spa_navigation)
 app.middleware("http")(perimeter._authenticate)
 app.middleware("http")(perimeter._perimeter)
+app.middleware("http")(perimeter._frame_guard)
 
 # Each of these decorates `api_router` (imported above) with its own routes.
 from kraft.api.routes import (  # noqa: E402,F401
@@ -63,6 +76,8 @@ from kraft.api.routes import (  # noqa: E402,F401
 )
 
 app.include_router(api_router)
+app.get(apidocs.SWAGGER_PATH, include_in_schema=False)(apidocs.swagger)
+app.get(apidocs.REDOC_PATH, include_in_schema=False)(apidocs.redoc)
 
 
 @app.get("/{path:path}")

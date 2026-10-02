@@ -52,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe("BoardPage", () => {
@@ -59,6 +60,27 @@ describe("BoardPage", () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     board();
     expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+  });
+
+  it("brings back a first-run left part-way while its repo is connected, and starts over once no repo is", async () => {
+    localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/r", name: "r", disabled: false }));
+    vi.spyOn(api, "getTemplates").mockResolvedValue([]);
+    const { unmount } = board();
+    expect(await screen.findByRole("heading", { name: /register Kraft with Claude Code/ })).toBeInTheDocument();
+    unmount();
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    board();
+    expect(await screen.findByRole("heading", { name: "Connect a repo" })).toBeInTheDocument();
+    expect(localStorage.getItem("kraft.firstRun")).toBeNull();
+  });
+
+  it("drops a kept first-run whose repo is no longer connected, and keeps the board", async () => {
+    localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/elsewhere/other", name: "other", disabled: false }));
+    board();
+    await act(async () => {});
+    expect(screen.queryByRole("heading", { name: "Nothing on the board yet" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Needs you" })).toBeInTheDocument();
+    expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
   it("keeps the board while the repo list is unknown or non-empty", async () => {
