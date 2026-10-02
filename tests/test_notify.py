@@ -336,37 +336,38 @@ async def test_the_url_never_reaches_an_event_payload_or_a_log(tmp_path, caplog,
     assert "t0ken" not in caplog.text
 
 
-def test_a_hanging_endpoint_does_not_block_the_drain_pass(tmp_path):
+async def test_a_hanging_endpoint_does_not_block_the_drain_pass(tmp_path, database):
     """The fan-out is shared with the WebSocket broadcaster and the indexer."""
+    await _seed_item(database)
 
-    async def scenario():
-        database = await _database(tmp_path)
-        await _seed_item(database)
+    async def hang(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(30)
+        return httpx.Response(200)
 
-        async def hang(request: httpx.Request) -> httpx.Response:
-            await asyncio.sleep(30)
-            return httpx.Response(200)
-
-        cfg = tmp_path / "notify.yaml"
-        config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
-        n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765")
-        n._transport = httpx.MockTransport(hang)
-        await n.start()
+    cfg = tmp_path / "notify.yaml"
+    config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
+    n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765")
+    n._transport = httpx.MockTransport(hang)
+    await n.start()
+    try:
         await database.write(
             lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
         )
         n.notify()
         seq = database.read(lambda c: c.execute("SELECT MAX(seq) AS s FROM events").fetchone()["s"])
-        for _ in range(100):
+        # Well inside the endpoint's 30s hang, so a drain that waited on the
+        # POST could not get here in time.
+        deadline = asyncio.get_running_loop().time() + 5
+        while n.cursor != seq:
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError(
+                    f"the drain pass never got past the hanging POST (cursor={n.cursor}, "
+                    f"event seq={seq})"
+                )
             await asyncio.sleep(0.01)
-            if n.cursor == seq:
-                break
-        assert n.cursor == seq  # drained past the event while the POST is still hanging
         assert n._inflight  # and the POST really is still in flight
+    finally:
         await n.stop()
-        await database.close()
-
-    asyncio.run(scenario())
 
 
 async def test_base_url_from_config_wins_over_the_bind_fallback(tmp_path, database):

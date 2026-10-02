@@ -137,11 +137,20 @@ def test_user_scope_installs_the_same_plugin(tmp_path, monkeypatch):
         assert (root / "skills" / skill / "SKILL.md").is_file()
 
 
-def test_a_missing_claude_cli_reports_the_command_instead_of_guessing(tmp_path, monkeypatch):
+def _no_claude_on_path(cmd, **kwargs):
+    raise FileNotFoundError(2, "No such file or directory", cmd[0])
+
+
+@pytest.mark.parametrize(
+    "run", [_Recorder(returncode=1), _no_claude_on_path], ids=["claude-refused", "no-claude"]
+)
+def test_a_missing_claude_cli_reports_the_command_instead_of_guessing(tmp_path, monkeypatch, run):
     monkeypatch.setenv("HOME", str(tmp_path))
     with pytest.raises(SystemExit) as exc:
-        init.install(repo_scope=False, cwd=tmp_path, run=_Recorder(returncode=1))
+        init.install(repo_scope=False, cwd=tmp_path, run=run)
     assert "claude mcp add" in str(exc.value)
+    # Nothing written into the user's own config in its place.
+    assert not (tmp_path / ".claude").exists()
 
 
 def test_the_status_skill_carries_the_phase_line_and_a_bounded_follow(tmp_path):
