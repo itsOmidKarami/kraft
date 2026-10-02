@@ -78,6 +78,13 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         print(f"test command: {result['test_command']}{source}")
     if result.get("setup_command"):
         print(f"setup command: {result['setup_command']}")
+    elif result.get("setup_command") is None:
+        # Undeclared stops the repo's first work item; "" is a declared none.
+        print(
+            "setup command: none found (it looks for an npm, yarn or pnpm lockfile, "
+            "pyproject.toml, Cargo.toml or go.mod); set `setup_command` in its repos.yaml "
+            'entry, `""` if it needs no preparation'
+        )
     if result.get("enabled") is False:
         print(
             "saved disabled: no test command found (it looks for a justfile `test` recipe, "

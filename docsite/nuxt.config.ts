@@ -32,7 +32,8 @@ export default defineNuxtConfig({
     domain: `${origin}${baseURL.replace(/\/$/, '')}`,
   },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
-  // only reads one at the domain root anyway. public/robots.txt is ours.
+  // only reads one at the domain root anyway. server/routes/robots.txt.ts
+  // writes ours, one per channel.
   robots: {
     robotsTxt: false,
   },
@@ -69,12 +70,20 @@ export default defineNuxtConfig({
       { name: 'IBM Plex Sans', weights: [400, 500], styles: ['normal'] },
     ],
   },
-  // The version switch links to the other build's root, which the crawler
-  // would take for one of this build's own pages and fail as a 404. Exactly
-  // that path: a prefix match on /kraft/ would skip every page.
   nitro: {
     prerender: {
-      ignore: channel ? [new RegExp(`^${channel === 'next' ? '/kraft/' : '/kraft/next/'}$`)] : [],
+      routes: ['/robots.txt'],
+      // The version switch links to the other build's root, which the crawler
+      // would take for one of this build's own pages and fail as a 404.
+      // Exactly that path: a prefix match on /kraft/ would skip every page.
+      // And no 200.html: it is the SPA fallback of a host that serves one for
+      // a missing path, which GitHub Pages is not (it serves 404.html). There
+      // it was only a "Page not found" page answering 200 at /kraft/200, open
+      // to indexing.
+      ignore: [
+        '/200.html',
+        ...(channel ? [new RegExp(`^${channel === 'next' ? '/kraft/' : '/kraft/next/'}$`)] : []),
+      ],
     },
   },
 })

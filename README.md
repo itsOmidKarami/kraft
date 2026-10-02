@@ -75,7 +75,8 @@ together is in
 - **macOS or Linux.** CI runs on Linux, and `kraft admin install-service`
   supports launchd and systemd only. Windows is not supported, and WSL is
   untested.
-- **`git`.**
+- **`git`**, with `user.name` and `user.email` set (globally, or in each repo
+  you connect). Kraft commits the agents' work under that identity.
 - **[uv](https://docs.astral.sh/uv/)**, which uses a Python 3.12 or newer
   already on your machine, or fetches one. Or Homebrew on macOS.
 - **[Claude Code](https://code.claude.com/docs)**, installed
@@ -155,11 +156,11 @@ to file your first work item.
 
 ## Analytics
 
-Lead time, cost, and where both go — by node, by repo, over whatever window
-you pick. Built from the same events the board renders live, not a separate
-pipeline.
+Lead time, cost, and where both go — by node and by repo, over the last 8
+weeks (on a phone, the last 7, 30 or 90 days). Built from the same events the
+board renders live, not a separate pipeline.
 
-![The Analytics view: completed count, median lead time, cost; throughput by week; cost share by node; per-repo totals; why items stopped for a person](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
+![The Analytics view over the last 8 weeks: completed count, median lead time and cost; merged items per week; the top of the cost-by-node table](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
 
 ## Where to go next
 

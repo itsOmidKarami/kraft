@@ -525,7 +525,7 @@ def _section(data: object, section: str, path: Path) -> dict[str, object]:
     if not isinstance(raw, dict):
         raise TemplateEnvironmentError(
             f"{path}: {section!r} must be a mapping keyed by id, not "
-            f"{type(raw).__name__} -- V1 keys each entry by the id the rest of "
+            f"{type(raw).__name__} -- each entry is keyed by the id the rest of "
             f"the configuration references it as"
         )
     return raw

@@ -59,9 +59,22 @@ def components(library: TemplateLibrary, issues: list[TemplateIssue]) -> list[di
     return listed
 
 
+class AmbiguousName(LookupError):
+    """A bare name more than one section declares: `ids` are each one's id."""
+
+    def __init__(self, ref: str, ids: list[str]):
+        super().__init__(f"{ref!r} is ambiguous: {', '.join(ids)}")
+        self.ids = ids
+
+
 def find(listed: list[dict], ref: str) -> dict | None:
     """The component `ref` names: its id, or a bare name no other section
-    shares."""
+    shares. `AmbiguousName` for a bare name two sections share, rather than
+    the None that reads as "no such component"."""
     exact = [c for c in listed if c["id"] == ref]
+    if exact:
+        return exact[0]
     by_name = [c for c in listed if c["name"] == ref]
-    return (exact or (by_name if len(by_name) == 1 else [None]))[0]
+    if len(by_name) > 1:
+        raise AmbiguousName(ref, [c["id"] for c in by_name])
+    return by_name[0] if by_name else None

@@ -16,7 +16,7 @@ helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
 | `board-responsive.spec.ts` | the peek opens without reflowing a row: docked at 1440 and 1100, overlaid at 900 (R7) |
 | `attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results. Writes screenshots to `frontend/e2e-shots/` |
 | `phone.visual.spec.ts` | the phone at 390x844: the board, an item at a gate, its reject composer and a real diff, each with nothing scrolling sideways, every tap target at least 44px and the note at 16px (under it mobile Safari zooms on focus and never zooms back). jsdom has no viewport, so this is the only place the phone's media queries are real. Writes screenshots |
-| `addresses.spec.ts` | addresses from before the cutover still open their page: a bookmark from the new UI's old prefix, `/settings/chains`, an item's `#node=` hash |
+| `addresses.spec.ts` | addresses from before the cutover still open their page: a bookmark from the new UI's old prefix, `/settings/chains`, an item's `#node=` hash; and each phone-only address (`/more`, one harness, profile, channel or schedule), and `/archived`, widened from 390px to 1024px in one tab, lands on a desktop page, never Not found |
 
 What the shipped UI's specs drove that has no page in this UI is not driven
 here: the item page's Timeline tab (no V2 equivalent, kickoff §4.4), and the

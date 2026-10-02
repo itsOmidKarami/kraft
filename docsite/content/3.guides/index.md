@@ -18,6 +18,6 @@ Each guide walks through one job from start to finish.
 - [Reviewing a change](/guides/review-a-change): comment on a work item at any point, and see your feedback reach the next agent.
 - [Write your own chain](/guides/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
 - [Switch a task to another harness](/guides/switch-harness): run agent tasks on Codex or another CLI instead of Claude Code.
-- [Upgrading your templates](/guides/upgrading-templates): take new shipped chains and library tasks after an upgrade without losing your edits.
+- [Upgrade your templates](/guides/upgrading-templates): take new shipped chains and library tasks after an upgrade without losing your edits.
 - [Operate a Kraft server](/guides/operations): back up the database, find logs, reclaim disk space, run two instances, and run Kraft as a service.
 - [Build a worker Kit](/guides/worker-kit): build a Docker Sandbox Kit for Claude workers and run a repository's sandbox from it.

@@ -1,30 +1,79 @@
 # kraft
 
 Eleven skills for driving [Kraft](https://github.com/itsOmidKarami/kraft) from a
-Claude Code session, as `/kraft:<name>` slash commands. They call Kraft's MCP
-server, so the `kraft` program must be installed and on your `PATH`. See the
+coding-agent session. Claude Code, Codex, Cursor and Antigravity install this
+plugin. It also registers Kraft's MCP server, which the skills call, so the
+`kraft` program must be installed and on your `PATH`. See the
 [install guide](https://itsomidkarami.github.io/kraft/get-started/install).
 
 ## Install
+
+### Claude Code
 
 ```bash
 claude plugin marketplace add itsOmidKarami/kraft
 claude plugin install kraft@kraft
 ```
 
-Then start Kraft (`kraft`), open a session in your repo, run this, and follow
-what it asks:
+Update with `claude plugin update kraft`. Remove with
+`claude plugin uninstall kraft`.
+
+### Codex
+
+```bash
+codex plugin marketplace add itsOmidKarami/kraft
+codex plugin add kraft@kraft
+```
+
+Start a new Codex session to load the skills. Remove with
+`codex plugin remove kraft@kraft`.
+
+### Cursor
+
+```bash
+agent plugin marketplace add https://github.com/itsOmidKarami/kraft
+```
+
+Then start `agent`, run `/plugins`, open the Marketplace tab, pick `kraft`, and
+install it.
+
+### Antigravity
+
+Antigravity imports the plugin from a local copy of the repo. The import copies
+it, so the clone can go afterwards:
+
+```bash
+clone=$(mktemp -d)
+git clone --depth 1 https://github.com/itsOmidKarami/kraft.git "$clone"
+agy plugin import "$clone/plugins/kraft"
+rm -rf "$clone"
+```
+
+To update, clone again and run the import with `--force`. Remove with
+`agy plugin uninstall kraft`.
+
+### Other agents
+
+OpenCode, Amp and Gemini CLI have no plugin. They register the MCP server by
+hand, and Amp adds these skills with `amp skill add`. The commands are on the
+install guide's [agent tabs](https://itsomidkarami.github.io/kraft/get-started/install#connect-your-agent).
+
+## Get started
+
+Start Kraft (`kraft`), open a session in your repo, run the `onboard` skill,
+and follow what it asks. In Claude Code that is:
 
 ```text
 /kraft:onboard
 ```
 
-To check it worked, run `/kraft:board`.
-
-Update with `claude plugin update kraft`. Remove with
-`claude plugin uninstall kraft`.
+In Codex, type `$` and pick `kraft:onboard`. To check it worked, run the
+`board` skill (`/kraft:board`).
 
 ## The skills
+
+The names are Claude Code's slash commands. Codex lists the same skills
+without the slash (`kraft:board`).
 
 | Skill | Use it to |
 |---|---|

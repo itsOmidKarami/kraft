@@ -23,7 +23,7 @@ body:
     attributes:
       label: Kraft version
       description: The output of `kraft --version`.
-      placeholder: kraft 1.1.0
+      placeholder: kraft 1.5.0
     validations:
       required: true
   - type: textarea
@@ -42,10 +42,16 @@ body:
     validations:
       required: true
   - type: input
+    id: browser
+    attributes:
+      label: Browser and device (for a bug in the web UI)
+      description: The browser and its version, and whether you were on the desktop or the phone layout.
+      placeholder: Safari 18 on an iPhone (phone layout), Chrome 140 on macOS (desktop)
+  - type: input
     id: harness
     attributes:
       label: Agent harness and its version
-      description: The agent CLI that ran the work (claude, codex, gemini, amp, cursor or opencode) and the output of its `--version`.
+      description: The agent CLI that ran the work (claude, codex, cursor, amp, opencode, gemini or agy for Antigravity) and the output of its `--version`.
       placeholder: claude 2.1.0
     validations:
       required: true

@@ -1,12 +1,13 @@
 import { useEffect } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
 /** The shipped UI's addresses that moved, and where each lands (spec §11.2),
  *  so a bookmark made before the cutover still opens its page. The query
- *  string is kept. `/settings`, `/settings/intake` and the pages whose path
- *  did not change are routes of their own. */
+ *  string is kept. `/settings` and the pages whose path did not change are
+ *  routes of their own. */
 export const ALIASES: [from: string, to: string][] = [
   ["/search", "/"],
+  ["/settings/intake", "/settings/auto-intake"],
   ["/settings/repos/*", "/templates/repos"],
   ["/settings/chains/*", "/templates/chains"],
   ["/settings/library/*", "/templates/library"],
@@ -17,9 +18,30 @@ export const ALIASES: [from: string, to: string][] = [
   ["/settings/notify/*", "/settings/notifications"],
 ];
 
+/** The phone's screens the desktop has no page for, and the desktop page each
+ *  lands on. Both shapes share one address space, so widening the window, or
+ *  opening a link sent from a phone, must never end on Not found. A `:param`
+ *  in the target is filled from the address. */
+export const PHONE_ONLY: [from: string, to: string][] = [
+  ["/more", "/"],
+  ["/templates/harnesses/profiles/:name", "/templates/harnesses?profile=:name"],
+  ["/templates/harnesses/:id", "/templates/harnesses?harness=:id"],
+  ["/settings/auto-intake/schedules/:index", "/settings/auto-intake"],
+  ["/settings/notifications/:channel", "/settings/notifications"],
+];
+
+/** Where an alias lands: its target with each `:param` filled from the
+ *  address, then the address's own query, joined onto the target's. */
+export function aliasTarget(to: string, params: Record<string, string | undefined>, search: string): string {
+  const filled = to.replace(/:(\w+)/g, (_, k: string) => encodeURIComponent(params[k] ?? ""));
+  if (search.length < 2) return filled;
+  return filled.includes("?") ? `${filled}&${search.slice(1)}` : filled + search;
+}
+
 export function Alias({ to }: { to: string }) {
   const { search } = useLocation();
-  return <Navigate to={to + search} replace />;
+  const params = useParams();
+  return <Navigate to={aliasTarget(to, params, search)} replace />;
 }
 
 /** The keys the shipped item page kept in its hash (`useItemUrlState`). */

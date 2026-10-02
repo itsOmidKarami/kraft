@@ -20,6 +20,13 @@ export default defineAppConfig({
       primary: 'violet',
       neutral: 'slate',
     },
+    // Nuxt UI cuts a long sidebar label short ("Add a security review or a
+    // g…"). Wrap it instead, so the label can be the page's whole title.
+    contentNavigation: {
+      slots: {
+        linkTitle: 'whitespace-normal!',
+      },
+    },
     prose: {
       // Nuxt UI soft-wraps code blocks, which breaks YAML indentation on a
       // phone. Scroll sideways instead.

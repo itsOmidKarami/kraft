@@ -1,4 +1,4 @@
-import { Bell, Bot, ChartColumn, Download, GitBranch, Info, LibraryBig, Lock, Palette, SlidersHorizontal, Workflow, type LucideIcon } from "lucide-react";
+import { Archive, Bell, Bot, ChartColumn, Download, GitBranch, Info, LibraryBig, Lock, Palette, SlidersHorizontal, Workflow, type LucideIcon } from "lucide-react";
 import { useEffect } from "react";
 import { useDraftCounts } from "../../shell/useDraftCounts";
 import { SELF_RESTART, useApply } from "../../apply/store";
@@ -60,7 +60,7 @@ export function More() {
         )}
         <Group title="Templates" rows={TEMPLATES.map(row)} />
         <Group title="Settings" rows={SETTINGS.map(row)} />
-        <Group rows={[{ to: "/analytics", label: "Analytics", icon: ChartColumn }]} />
+        <Group rows={[{ to: "/analytics", label: "Analytics", icon: ChartColumn }, { to: "/archived", label: "Archived", icon: Archive }]} />
       </div>
       {sheet.is("restart") && (
         <ConfirmSheet

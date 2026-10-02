@@ -55,7 +55,7 @@ kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a 
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
-kraft item raise-budget [ID] --usd N|none   # raise a stopped item's dollar cap and retry it
+kraft item raise-budget [ID] --usd N|none   # raise the item's own dollar cap that stopped it, and retry
 kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
@@ -104,8 +104,9 @@ their worktrees, `admin` is this machine's server. Typing an old flat verb
 (`kraft list`) prints where it moved.
 
 Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
-databases, logs and worktrees, `templates/` for the YAML the Settings screens
-edit, seeded from the packaged defaults on first run and never overwritten after.
+databases, logs and worktrees, `templates/` for the YAML the Templates and
+Settings screens edit, seeded from the packaged defaults on first run and never
+overwritten after.
 
 ## Architecture Overview
 
@@ -161,12 +162,12 @@ layout drifted the first time. A module with no package mirrors nothing and
 stays at `tests/test_<mod>.py`.
 
 **Every `tests/` subdirectory needs an empty `__init__.py`.** This is
-load-bearing, not tidiness. The mirrored tree has duplicate basenames (19 at
-the last count: `test_gates.py` exists under `api/`, `executor/` and the root,
+load-bearing, not tidiness. The mirrored tree has duplicate basenames (about
+twenty: `test_gates.py` exists under `api/`, `executor/` and the root,
 and so on for `test_db`, `test_auth`, `test_review`, `test_run` and more),
 which pytest's default prepend import mode rejects as a hard collection error.
 Packages fix it with no config change, and they keep `tests/` on `sys.path` —
-which the ~150 files doing `from support.harness import ...` depend on. Do not
+which the many files doing `from support.harness import ...` depend on. Do not
 "simplify" this by switching to `--import-mode=importlib`; that drops `tests/`
 off `sys.path` and breaks every one of them.
 

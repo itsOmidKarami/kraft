@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -28,7 +29,10 @@ _REL = ".cursor/hooks.json"
 _EXCLUDE_LINE = f"/{_REL}"
 #: On its own line: gitignore has no trailing comments, a `# ...` after a
 #: pattern would be part of it.
-_EXCLUDE_NOTE = "# kraft: cursor permission hook (Kraft-4in7z)"
+_EXCLUDE_NOTE = "# kraft: cursor permission hook"
+#: The note as Kraft 1.1 through the 1.5.0 release candidates wrote it, with a
+#: tracker id after it; rewritten to `_EXCLUDE_NOTE` on the next install.
+_LEGACY_NOTE = re.compile(rf"{re.escape(_EXCLUDE_NOTE)} \(Kraft-[0-9a-z.]+\)")
 #: What marks an entry as Kraft's, whatever interpreter path or flag it carries.
 _OURS = "kraft admin permission-hook"
 
@@ -151,9 +155,19 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     exclude = Path(out.stdout.strip())
     exclude.parent.mkdir(parents=True, exist_ok=True)
     text = exclude.read_text() if exclude.exists() else ""
-    if _EXCLUDE_LINE not in text.splitlines():
-        sep = "\n" if text and not text.endswith("\n") else ""
-        exclude.write_text(f"{text}{sep}{_EXCLUDE_NOTE}\n{_EXCLUDE_LINE}\n")
+    lines = text.splitlines()
+    renamed = [_EXCLUDE_NOTE if _LEGACY_NOTE.fullmatch(line) else line for line in lines]
+    if _EXCLUDE_LINE in renamed:
+        if renamed != lines:
+            exclude.write_text("\n".join(renamed) + "\n")
+        return
+    if _EXCLUDE_NOTE in renamed:
+        # The entry went and its note stayed: put the entry back under it.
+        at = renamed.index(_EXCLUDE_NOTE) + 1
+        renamed[at:at] = [_EXCLUDE_LINE]
+    else:
+        renamed += [_EXCLUDE_NOTE, _EXCLUDE_LINE]
+    exclude.write_text("\n".join(renamed) + "\n")
 
 
 # -- codex ---------------------------------------------------------------------

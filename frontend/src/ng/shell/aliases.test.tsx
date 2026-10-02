@@ -2,7 +2,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { App } from "../App";
-import { shippedHash } from "./aliases";
+import { SCREENS } from "../phone/screens";
+import { aliasTarget, shippedHash } from "./aliases";
 
 vi.mock("../session", () => ({ resumeSession: vi.fn(async () => {}), startEvents: vi.fn() }));
 
@@ -61,6 +62,48 @@ describe("shipped addresses", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/work-items/abc/nodes/verify"));
     expect(window.location.hash).toBe("");
     expect(window.history.length).toBe(depth);
+  });
+});
+
+// Every phone screen the desktop has no page for, and the page it lands on
+// when the window widens past 767px or a link sent from a phone opens on a
+// laptop: the two shapes share one address space (R3-04).
+const PHONE: [from: string, lands: string][] = [
+  ["/more", "/"],
+  ["/more?x=1", "/?x=1"],
+  ["/templates/harnesses/claude", "/templates/harnesses?harness=claude"],
+  ["/templates/harnesses/profiles/deep", "/templates/harnesses?profile=deep"],
+  ["/templates/harnesses/profiles/deep?yaml=1", "/templates/harnesses?profile=deep&yaml=1"],
+  ["/settings/notifications/webhook", "/settings/notifications"],
+  ["/settings/auto-intake/schedules/0", "/settings/auto-intake"],
+];
+
+describe("phone addresses at desktop width", () => {
+  it.each(PHONE)("%s lands on %s, never on Not found", async (from, lands) => {
+    window.history.pushState({}, "", from);
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe(lands));
+    expect(screen.queryByRole("heading", { name: "Not found" })).toBeNull();
+  });
+
+  // The guard for the next phone screen: its address must answer here too.
+  it.each([...new Set(SCREENS.map((s) => s.route))])("the phone's %s is a desktop page as well", async (route) => {
+    vi.spyOn(api, "getWorkItem").mockResolvedValue({ id: "abc", title: "Cache embeddings", repo: "/r/x", worker_sessions: [], chain_definition: { nodes: [] } } as never);
+    window.history.pushState({}, "", route.replace(/:[^/]+/g, "abc"));
+    render(<App />);
+    expect(screen.queryByRole("heading", { name: "Not found" })).toBeNull();
+  });
+});
+
+describe("aliasTarget", () => {
+  it.each([
+    ["/templates/harnesses?harness=:id", { id: "claude" }, "", "/templates/harnesses?harness=claude"],
+    ["/templates/harnesses?harness=:id", { id: "a b/c" }, "", "/templates/harnesses?harness=a%20b%2Fc"],
+    ["/templates/harnesses?harness=:id", { id: "x" }, "?lane=y", "/templates/harnesses?harness=x&lane=y"],
+    ["/settings/notifications", { channel: "webhook" }, "?x=1", "/settings/notifications?x=1"],
+    ["/", {}, "?", "/"],
+  ])("%s with %o and %s → %s", (to, params, search, out) => {
+    expect(aliasTarget(to, params, search)).toBe(out);
   });
 });
 

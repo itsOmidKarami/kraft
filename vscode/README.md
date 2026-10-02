@@ -13,7 +13,7 @@ is doing, approve or reject a gate, review a branch's diff with the review
 agents' findings on the lines they name, and edit Kraft's config with errors
 flagged as you type.
 
-![Kraft's gate document open in VS Code, with Approve and Reject in the tab's title bar and the board in the sidebar](https://github.com/itsOmidKarami/kraft/raw/HEAD/vscode/media/screenshot-gate.png)
+![Kraft's gate document open in VS Code, with Approve and Reject in the tab's title bar and the board in the sidebar](media/screenshot-gate.png)
 
 ## Get started
 
@@ -37,7 +37,7 @@ runs `kraft admin start` in a terminal.
 
 ## Board
 
-![The Kraft board in the sidebar: items that need you, and done items](https://github.com/itsOmidKarami/kraft/raw/HEAD/vscode/media/screenshot-board.png)
+![The Kraft board in the sidebar: items that need you, and done items](media/screenshot-board.png)
 
 The Kraft view in the activity bar lists every work item, grouped as in the web
 UI, with a badge counting the ones waiting on you. It shows the repos open in
@@ -47,7 +47,7 @@ window, or open it in the web UI.
 
 ## Gates
 
-![A notification that a work item is waiting at its spec approval gate, with Open, Approve and Reject](https://github.com/itsOmidKarami/kraft/raw/HEAD/vscode/media/screenshot-gate-notification.png)
+![A notification that a work item is waiting at its spec approval gate, with Open, Approve and Reject](media/screenshot-gate-notification.png)
 
 When a gate opens, a notification offers **Open**, **Approve** and **Reject**.
 Open shows the gate's document in a tab, with Approve and Reject in its title
@@ -55,7 +55,7 @@ bar. A reject asks for a reason, which goes to the agent.
 
 ## Review
 
-![A work item's branch in the multi-file diff editor, with review findings marked on their lines and listed in the Problems panel](https://github.com/itsOmidKarami/kraft/raw/HEAD/vscode/media/screenshot-review.png)
+![A work item's branch in the multi-file diff editor, with review findings marked on their lines and listed in the Problems panel](media/screenshot-review.png)
 
 Run **Review Changes** from an item's menu on the board, or from a gate
 document's title bar, to open its branch in the multi-file diff editor. Findings from the review agents show on the lines they
@@ -66,7 +66,7 @@ your comments.
 
 ## Config
 
-![policy.yaml with an unknown severity flagged by the running Kraft](https://github.com/itsOmidKarami/kraft/raw/HEAD/vscode/media/screenshot-config.png)
+![policy.yaml with an unknown severity flagged by the running Kraft](media/screenshot-config.png)
 
 Kraft's config files under `$KRAFT_HOME/templates` (`policy.yaml`,
 `harnesses.yaml`, `chains/*.yaml` and the rest) are checked by the running

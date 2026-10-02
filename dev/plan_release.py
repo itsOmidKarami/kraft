@@ -13,8 +13,9 @@ Usage:
       prs.json is a list of {number, title, body, labels: [name, ...]}.
   python3 dev/plan_release.py pre <tag> <alpha|beta|rc>  < tag-list
       Prints <tag> as its next pre-release, numbered past the tags on stdin.
-  python3 dev/plan_release.py changelog <version> <notes-file>
-      Writes the notes into CHANGELOG.md as the `## <version>` section.
+  python3 dev/plan_release.py changelog <version> <notes-file> [<changelog-file>]
+      Writes the notes into CHANGELOG.md as the `## <version>` section, or into
+      the changelog file named (the VS Code extension keeps its own).
 """
 
 from __future__ import annotations
@@ -121,10 +122,12 @@ def write_changelog(version: str, notes: str, path: Path = CHANGELOG) -> None:
     text = path.read_text()
     if re.search(rf"^## {re.escape(version)}$", text, re.MULTILINE):
         raise ValueError(f"{path.name} already has a ## {version} section")
-    section = f"## {version}\n\n{notes.strip()}\n\n"
     first = re.search(r"^## ", text, re.MULTILINE)
     at = first.start() if first else len(text)
-    path.write_text(text[:at] + section + text[at:])
+    head, rest = text[:at].rstrip("\n"), text[at:]
+    section = f"## {version}\n\n{notes.strip()}\n"
+    # A changelog with no section yet (a new one's preamble) ends with this one.
+    path.write_text(f"{head}\n\n{section}\n{rest}" if rest else f"{head}\n\n{section}")
 
 
 def main(argv: list[str]) -> None:
@@ -136,8 +139,8 @@ def main(argv: list[str]) -> None:
             print(tag)
     elif len(argv) == 3 and argv[0] == "pre":
         print(pre_tag(argv[1], argv[2], sys.stdin.read().split()))
-    elif len(argv) == 3 and argv[0] == "changelog":
-        write_changelog(argv[1], Path(argv[2]).read_text())
+    elif len(argv) in (3, 4) and argv[0] == "changelog":
+        write_changelog(argv[1], Path(argv[2]).read_text(), *map(Path, argv[3:]))
     else:
         raise SystemExit(__doc__)
 
