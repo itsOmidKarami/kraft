@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
-import type { ProxyOptions } from "vite";
+import type { Plugin, ProxyOptions } from "vite";
 import { defineConfig } from "vitest/config";
+import { thirdPartyLicenses } from "../dev/third_party_licenses.mjs";
 
 // Kraft-y0g2: the fallback is the *dev* instance's port (justfile's `dev_port`),
 // not 8765. `just ui` and `just dev` both export KRAFT_PORT, so this only applies
@@ -26,8 +27,25 @@ const execArgv = process.allowedNodeEnvironmentFlags.has("--experimental-webstor
   ? ["--no-experimental-webstorage"]
   : [];
 
+// The bundle carries react, lucide-react, the Inter font and the rest, minified
+// past their license comments. Their notices ship beside it instead, in
+// THIRD_PARTY_LICENSES.txt, which `just bundle` copies into the wheel with the
+// rest of dist/. Every module in the graph counts, so a package that is only a
+// re-export (react-router-dom) is listed with the one it re-exports.
+const licenses: Plugin = {
+  name: "kraft:third-party-licenses",
+  apply: "build",
+  generateBundle() {
+    this.emitFile({
+      type: "asset",
+      fileName: "THIRD_PARTY_LICENSES.txt",
+      source: thirdPartyLicenses(this.getModuleIds(), "Kraft's web UI"),
+    });
+  },
+};
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), licenses],
   base: "/",
   build: { outDir: "dist" },
   server: { port: 5173, proxy },

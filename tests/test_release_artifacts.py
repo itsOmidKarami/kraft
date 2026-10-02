@@ -284,6 +284,65 @@ def test_the_smoke_test_wants_the_wheel_to_report_exactly_the_tag(tag, says, ok)
     assert (run.returncode == 0) is ok, run.stdout + run.stderr
 
 
+def _notice_check(step: str, artifact: str) -> str:
+    """The `if ! unzip -l ... fi` in `step` that checks `artifact` for its notices."""
+    text = RELEASE_YML.read_text()
+    start = text.index(f"- name: {step}")
+    body = text[start : text.index("\n      - ", start + 1)]
+    check = rf"^ *(if ! unzip -l \"{re.escape(artifact)}\" .*?^ *fi\n)"
+    match = re.search(check, body, re.M | re.S)
+    assert match, f"{step!r} no longer checks {artifact} for THIRD_PARTY_LICENSES.txt"
+    return match.group(1)
+
+
+def _zip(path: Path, names: list[str]) -> None:
+    with zipfile.ZipFile(path, "w") as z:
+        for name in names:
+            z.writestr(name, "x")
+
+
+@pytest.mark.parametrize(
+    ("step", "artifact", "notice", "other"),
+    [
+        (
+            "smoke test the wheel",
+            "$WHEEL",
+            "kraft/_bundled/web/THIRD_PARTY_LICENSES.txt",
+            "kraft/_bundled/web/index.html",
+        ),
+        (
+            "build the VS Code extension",
+            "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix",
+            "extension/dist/THIRD_PARTY_LICENSES.txt",
+            "extension/dist/extension.js",
+        ),
+    ],
+    ids=["wheel", "vsix"],
+)
+@pytest.mark.parametrize("shipped", [True, False], ids=["with-notices", "without"])
+def test_a_release_artifact_without_its_third_party_licenses_fails_the_run(
+    tmp_path, step, artifact, notice, other, shipped
+):
+    """The web UI and the extension bundle MIT, ISC and OFL code whose licenses
+    ask for their notices to go with every copy. The build writes them; this is
+    the check that a wheel or a .vsix that lost them is never published."""
+    (tmp_path / "vsix").mkdir()
+    env = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path), "TAG": "v1.5.0"}
+    env["WHEEL"] = str(tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl")
+    path = env["WHEEL"] if artifact == "$WHEEL" else str(tmp_path / "vsix" / "kraft-1.5.0.vsix")
+    _zip(Path(path), [other, notice] if shipped else [other])
+    run = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", _notice_check(step, artifact)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert (run.returncode == 0) is shipped, run.stdout + run.stderr
+    if not shipped:
+        kind = "wheel" if artifact == "$WHEEL" else ".vsix"
+        assert f"::error::the {kind} has no {notice}" in run.stdout
+
+
 def test_the_extension_is_packed_with_the_release_tags_version_images_and_changelog():
     text = RELEASE_YML.read_text()
     step = text[

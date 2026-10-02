@@ -222,6 +222,12 @@ jobs:
           # a site-packages path that a python version bump would invalidate.
           /tmp/smoke/bin/python -c \
             "from kraft.paths import BUNDLED; import sys; sys.exit(0 if (BUNDLED / 'web' / 'index.html').is_file() else 1)"
+          # The web UI bundles react, lucide-react, the Inter font and more, and
+          # their licenses ask for their notices to go wherever their code does.
+          if ! unzip -l "$WHEEL" kraft/_bundled/web/THIRD_PARTY_LICENSES.txt >/dev/null; then
+            echo "::error::the wheel has no kraft/_bundled/web/THIRD_PARTY_LICENSES.txt"
+            exit 1
+          fi
           # And a description that still hot-links `main` would show main's UI
           # on this version's PyPI page for as long as the version exists.
           if unzip -p "$WHEEL" '*.dist-info/METADATA' \
@@ -259,6 +265,12 @@ jobs:
             --baseImagesUrl "https://github.com/$GITHUB_REPOSITORY/raw/$TAG/vscode/" \
             --out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
           git checkout -- CHANGELOG.md
+          # The extension bundles `ws`, whose license asks for its notice to go
+          # wherever its code does.
+          if ! unzip -l "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix" extension/dist/THIRD_PARTY_LICENSES.txt >/dev/null; then
+            echo "::error::the .vsix has no extension/dist/THIRD_PARTY_LICENSES.txt"
+            exit 1
+          fi
 
       - name: push the tag and create the release
         if: steps.impact.outputs.tag != ''
