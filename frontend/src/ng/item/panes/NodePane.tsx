@@ -48,8 +48,9 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
 }
 
 /** A node's values as the item froze them, read-only (✎ is the item draft's, W11). */
-export function NodeConfig({ item, node, onReset }: { item: ItemDetail; node: ChainNode; onReset: () => void }) {
-  const o = item.node_overrides?.[node.id];
+export function NodeConfig({ item, node, onReset, controls }: { item: ItemDetail; node: ChainNode; onReset: () => void; controls?: boolean }) {
+  // With `controls` the node's overrides have rows of their own, each with its reset.
+  const o = controls ? undefined : item.node_overrides?.[node.id];
   const rows: [string, string | null | undefined][] = [
     ["kind", node.kind ?? "exec"],
     ["fix loop", node.fix_loop],
