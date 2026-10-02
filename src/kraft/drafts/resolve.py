@@ -42,6 +42,7 @@ from kraft.templates.models import (
     ExecNode,
     GateNode,
     ResolvedChain,
+    TaskBase,
     _scoped,
 )
 
@@ -369,8 +370,10 @@ def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) 
     def put(model, path: str) -> None:
         layers = _layers(chain, library, path)
         dumped = model.model_dump(mode="json")
-        # A task kind's unread fields (`TaskBase.UNREAD`) are left out unless set.
-        unread = getattr(model, "UNREAD", frozenset())
+        # What a task accepts but nothing reads is left out unless set; a cap
+        # only its recovery runs under says so (`TaskBase.unread`).
+        unread = model.unread() if isinstance(model, TaskBase) else frozenset()
+        recovery = model.for_recovery() if isinstance(model, TaskBase) else frozenset()
         own = model.policy if "policy" in type(model).model_fields else None
         fields = {}
         for name in type(model).model_fields:
@@ -397,6 +400,8 @@ def _sources(chain: Mapping, library: Mapping, resolved: ResolvedChain, policy) 
                 value = to_jsonable_python(getattr(effective, cap, None))
                 source = "default" if value in (None, []) else "policy"
                 fields[key] = {"value": value, "source": source}
+            for key in recovery & fields.keys():
+                fields[key]["recovery"] = True
         if fields:
             out[path] = fields
 

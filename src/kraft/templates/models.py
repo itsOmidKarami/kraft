@@ -395,13 +395,12 @@ class TaskBase(BaseModel):
     skippable: StrictBool = True
     icon: Icon | None = None
 
-    #: What this kind accepts but never reads, as `sources` names it (a policy
-    #: cap as `policy.<cap>`). Steering is text for an agent's prompt, and the
+    #: What only an agent launch reads, as `sources` names it (a policy cap as
+    #: `policy.<cap>`). Steering is text for an agent's prompt, and the
     #: harness allowlist, the spend caps, the tool lists and the grants bound
     #: an agent launch: a subprocess, builtin or forge task runs none
-    #: (`executor.dispatch`). The chain editor's Config tab lists only the
-    #: rest, plus any of these a file sets anyway.
-    UNREAD: ClassVar[frozenset[str]] = frozenset(
+    #: (`executor.dispatch`). Empty for an agent task.
+    AGENT_ONLY: ClassVar[frozenset[str]] = frozenset(
         {
             "steering",
             "policy.allowed_harnesses",
@@ -412,6 +411,19 @@ class TaskBase(BaseModel):
             "policy.grants",
         }
     )
+
+    def unread(self) -> frozenset[str]:
+        """What this task accepts but nothing reads: its kind's `AGENT_ONLY`.
+        An `on_failure` recovery runs under this task's policy scope
+        (`_handler_steps`), so with one the caps bound its repair agent and
+        only `steering` goes unread. The chain editor's Config tab leaves
+        these out unless the file sets one."""
+        return self.AGENT_ONLY & {"steering"} if self.on_failure is not None else self.AGENT_ONLY
+
+    def for_recovery(self) -> frozenset[str]:
+        """The caps this task does not read but its `on_failure` recovery runs
+        under: the Config tab says so on their rows."""
+        return self.AGENT_ONLY - self.unread() - {"steering"}
 
     @model_validator(mode="before")
     @classmethod
@@ -432,7 +444,7 @@ class BuiltinTask(TaskBase):
 
 
 class AgentTask(TaskBase):
-    UNREAD: ClassVar[frozenset[str]] = frozenset()
+    AGENT_ONLY: ClassVar[frozenset[str]] = frozenset()
 
     kind: Literal[TaskKind.AGENT]
     harness: Identifier
