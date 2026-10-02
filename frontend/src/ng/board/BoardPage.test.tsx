@@ -253,7 +253,7 @@ describe("BoardPage", () => {
   });
 
   it("opens a budget stop's peek on Overview, whose Raise cap opens Config with the budget editor", async () => {
-    const b = item("b1", "needs_you", { status: "needs_human", stop: { kind: "budget", node: "verification", reason: "Spend cap reached", resume_at: null } as WorkItem["stop"], budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as WorkItem["budget_cap"] });
+    const b = item("b1", "needs_you", { status: "needs_human", stop: { kind: "budget", node: "verification", reason: "Spend cap reached", resume_at: null, scope: "work_item" } as WorkItem["stop"], budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as WorkItem["budget_cap"] });
     put(b);
     stubFetch({ "GET /work-items/b1": [200, { ...b, worker_sessions: [] }], "GET /work-items/b1/events": [200, []], "GET /policy": [200, {}] });
     board();

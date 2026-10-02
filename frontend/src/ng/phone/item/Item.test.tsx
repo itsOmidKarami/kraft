@@ -206,7 +206,7 @@ describe("the other composers (C.7)", () => {
 });
 
 describe("Raise budget (C.6)", () => {
-  const stopped = () => item("needs_you", stop("budget", { reason: "The budget ran out." }));
+  const stopped = () => item("needs_you", stop("budget", { reason: "The budget ran out.", scope: "work_item" }));
   it("ends the reason with one full stop, not two (Kraft-9d8b2.55)", async () => {
     mount(stopped());
     await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
@@ -378,7 +378,7 @@ describe("raising the cap that stopped the item (R73)", () => {
 
 describe("a budget stop the item cannot raise", () => {
   // The daily cap: the item is under its own $10, so /budget/raise would answer 409.
-  const daily = () => item("needs_you", stop("budget", { reason: "budget cap reached: $50.00 spent on today, across every work item, cap $50.00." }), { budget_cap: { cap_usd: 10, source: "policy", spent_usd: 2 } });
+  const daily = () => item("needs_you", stop("budget", { reason: "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", scope: "daily" }), { budget_cap: { cap_usd: 10, source: "policy", spent_usd: 2 } });
 
   it("offers Retry, not Raise budget, and says where the cap is raised", async () => {
     const calls = mount(daily());

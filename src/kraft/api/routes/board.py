@@ -767,6 +767,9 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
     if kind == "rate_limit":
         facts.update(_rate_limit_facts(st, row, task))
     limit = _stop_limit(row, stop_payload)
+    # Which cap stopped a budget stop (`caps.Breach.scope`): `work_item`, the
+    # item's own, is the one `/budget/raise` takes; it refuses the rest.
+    scope = ((stop_payload or {}).get("budget") or {}).get("scope") if kind == "budget" else None
     return {
         "kind": kind,
         "node": node,
@@ -776,6 +779,7 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
         "reason": stop_payload["reason"] if stop_payload else None,
         "facts": facts,
         **({"limit": limit} if limit else {}),
+        **({"scope": scope} if scope else {}),
     }
 
 
