@@ -243,7 +243,7 @@ def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:
+    with TestClient(api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1") as client:
         body = client.get("/api/analytics?range=30d").json()
         assert set(body) == {
             "totals",

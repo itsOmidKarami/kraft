@@ -509,7 +509,9 @@ def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as client:  # must not raise
+    with TestClient(
+        api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1"
+    ) as client:  # must not raise
         assert client.get("/api/health").status_code == 200
 
 

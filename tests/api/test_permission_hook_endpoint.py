@@ -80,6 +80,16 @@ def test_a_sandboxed_hook_reaches_the_gate_through_the_worker_api(client, monkey
     monkeypatch.setattr(
         client.app.state, "access", {**client.app.state.access, "password_hash": "x"}
     )
+    _hook_through_the_channel(client)
+
+
+def test_a_sandboxed_hook_reaches_a_loopback_bound_daemon(client):
+    """The default bind, where the daemon answers to a loopback Host only:
+    the worker's `kraft` is the proxy's name, not the daemon's."""
+    _hook_through_the_channel(client)
+
+
+def _hook_through_the_channel(client):
     seed_session(policy={"deny_tools": ["Bash"]})
     proxy = client.app.state.egress_channels.proxy
     form = urlencode({"harness": "cursor", "stdin": json.dumps(_CURSOR_SHELL)}).encode()

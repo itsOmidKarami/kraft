@@ -200,22 +200,30 @@ async def _perimeter(request: Request, call_next):
     #    -- there is no bound address to compare against there, so without an
     #    allowlist this fails closed rather than skipping the check.
     #
-    #    Keyed on `sec-fetch-site` because only a browser can be rebound, and
-    #    every other client — the CLI, MCP, httpx, curl — would otherwise need a
-    #    Host allowlist for no gain. Browsers older than the Fetch Metadata
-    #    rollout (pre-2020) do not send it and are not covered.
-    if request.headers.get("sec-fetch-site"):
-        hostname = urlsplit(f"//{request.headers.get('host', '')}").hostname
-        bound_host = getattr(st, "bound_host", "127.0.0.1")
-        if bound_host in config_mod.LOOPBACK:
-            allowed = _LOCAL_HOSTS
-        else:
-            allowed = set((getattr(st, "access", None) or {}).get("allowed_hosts") or [])
-        if hostname not in allowed:
-            return JSONResponse(
-                {"detail": f"unexpected Host for a server bound to {bound_host}"},
-                status_code=403,
-            )
+    #    Only a browser can be rebound, but a browser cannot be told apart by
+    #    `sec-fetch-site` alone: Chromium sends no Sec-Fetch-* headers to a
+    #    plain-http origin on any name but localhost, which is exactly the
+    #    origin a rebinding page has. Nor by Origin or Referer: a same-origin
+    #    GET carries no Origin, and the page picks its own referrer policy.
+    #    So on a loopback bind the Host is checked on every request. Every
+    #    client of its own -- the CLI, MCP, the VS Code extension, the dev
+    #    proxy, a worker's in-process calls -- already dials 127.0.0.1 or
+    #    localhost. Off loopback, auth is on, and a rebound page has no
+    #    session cookie for its own name (and its login POST carries an
+    #    Origin), so the allowlist is held to requests that look like a
+    #    browser's, and the CLI, MCP and curl need no entry in it.
+    hostname = _hostname(request.headers.get("host", ""))
+    bound_host = getattr(st, "bound_host", "127.0.0.1")
+    if bound_host in config_mod.LOOPBACK:
+        refused = hostname not in _LOCAL_HOSTS
+    else:
+        allowed = set((getattr(st, "access", None) or {}).get("allowed_hosts") or [])
+        refused = _from_a_browser(request) and hostname not in allowed
+    if refused:
+        return JSONResponse(
+            {"detail": f"unexpected Host for a server bound to {bound_host}"},
+            status_code=403,
+        )
 
     # 3. Cross-site write. `_origin_ok` plus one clause, so that a LAN instance
     #    serving its own SPA (Origin and Host both 192.168.1.5:8765) is not
@@ -231,6 +239,28 @@ async def _perimeter(request: Request, call_next):
         return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
 
     return await call_next(request)
+
+
+def _hostname(host: str) -> str | None:
+    """The name in a `Host` header, lowercased and without its port. None for
+    one that does not parse (an unclosed IPv6 bracket), which no list holds."""
+    try:
+        return urlsplit(f"//{host}").hostname
+    except ValueError:
+        return None
+
+
+def _from_a_browser(request: Request) -> bool:
+    """Whether a request carries anything a browser adds on its own: Fetch
+    metadata, an Origin, a Referer, or the Accept of a page navigation. The
+    CLI, MCP and curl send none of these."""
+    headers = request.headers
+    return bool(
+        headers.get("sec-fetch-site")
+        or headers.get("origin")
+        or headers.get("referer")
+        or "text/html" in headers.get("accept", "")
+    )
 
 
 def _origin_ok(origin: str | None) -> bool:

@@ -83,7 +83,10 @@ def _client(
 
         monkeypatch.setattr(deps, "_connected", _connected_or_default)
 
-    return TestClient(api.app, client=peer)
+    # A loopback Host, as every real client sends: a loopback-bound server
+    # refuses any other name (`perimeter._perimeter`, rule 2), and starlette's
+    # default is "testserver".
+    return TestClient(api.app, client=peer, base_url="http://127.0.0.1")
 
 
 def _poll_events(client, wid, want, timeout=30, count=1):

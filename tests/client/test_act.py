@@ -32,7 +32,7 @@ def wired(tmp_path, monkeypatch):
         client.transport,
         "http",
         lambda: httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"
+            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
         ),
     )
     return api

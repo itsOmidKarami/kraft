@@ -183,10 +183,6 @@ def test_a_rebound_host_is_refused_for_a_browser_request(client):
     assert client.get("/api/work-items", headers=browser).status_code == 403
     assert client.post("/api/index/rescan", headers=browser).status_code == 403
 
-    # ...and a non-browser client keeps working. Only a browser can be
-    # rebound, so curl, the CLI and MCP need no Host allowlist entry.
-    assert client.get("/api/work-items", headers={"host": "kraft.internal"}).status_code == 200
-
     # this is also the ordering guarantee for /api/ itself: _perimeter has
     # to run before _authenticate/_spa_navigation even consider the
     # request, or a forged nav header on a rebound host could slip past it
@@ -194,6 +190,90 @@ def test_a_rebound_host_is_refused_for_a_browser_request(client):
     # checks for a client-side route.
     nav = {**browser, "sec-fetch-dest": "document"}
     assert client.get("/api/work-items", headers=nav).status_code == 403
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"host": "evil.example:8765"},
+        {"host": "evil.example:8765", "origin": "http://evil.example:8765"},
+        {"host": "[::1"},
+    ],
+    ids=["no-browser-headers", "origin-matches-host", "unparseable-host"],
+)
+def test_a_loopback_bind_refuses_a_foreign_host_with_no_fetch_metadata(client, method, headers):
+    """Chromium sends no Sec-Fetch-* headers to a plain-http origin on any name
+    but localhost, so a rebound page's GET carries a Host and nothing else, and
+    its POST an Origin that matches that Host. A loopback bind answers to
+    loopback names only, whatever else the request carries."""
+    path = "/api/work-items" if method == "GET" else "/api/index/rescan"
+    r = client.request(method, path, headers=headers)
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "unexpected Host for a server bound to 127.0.0.1"
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1:8765", "localhost:8765", "[::1]:8765", "LOCALHOST", "127.0.0.1"],
+    ids=["v4-port", "localhost-port", "v6-port", "case", "no-port"],
+)
+def test_a_loopback_bind_answers_to_every_loopback_name(client, host):
+    """The CLI, MCP, the VS Code extension and the dev proxy all dial one of
+    these, browser or not."""
+    for headers in ({"host": host}, {"host": host, "sec-fetch-site": "same-origin"}):
+        assert client.get("/api/work-items", headers=headers).status_code == 200
+
+
+_BROWSER_SHAPED = [
+    {"sec-fetch-site": "same-origin"},
+    {"origin": "http://{host}"},
+    {"referer": "http://{host}/work-items"},
+    {"accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
+]
+_BROWSER_IDS = ["fetch-metadata", "origin", "referer", "page-navigation"]
+
+
+def _browser(host, shape):
+    return {"host": host, **{k: v.format(host=host) for k, v in shape.items()}}
+
+
+@pytest.fixture
+def lan_bind(client):
+    """A `0.0.0.0` bind listing kraft.example.com, signed in."""
+    saved = client.put(
+        "/api/access",
+        json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["kraft.example.com"]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+    return client
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+@pytest.mark.parametrize("shape", _BROWSER_SHAPED, ids=_BROWSER_IDS)
+def test_a_non_loopback_bind_checks_every_browser_shaped_request(lan_bind, shape):
+    """Off loopback the allowlist applies to anything a browser adds on its own,
+    not to Sec-Fetch-Site alone: a browser on plain http sends none of that."""
+    listed = _browser("kraft.example.com:8765", shape)
+    assert lan_bind.get("/api/work-items", headers=listed).status_code == 200
+    unlisted = _browser("evil.example:8765", shape)
+    r = lan_bind.get("/api/work-items", headers=unlisted)
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "unexpected Host for a server bound to 0.0.0.0"
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+def test_a_non_loopback_bind_needs_no_allowlist_entry_for_a_non_browser_client(lan_bind, tmp_path):
+    """The CLI, MCP and curl carry none of a browser's headers, so they reach a
+    LAN bind by whatever address they dialled, and the auth gate decides."""
+    bare = {"host": "100.101.102.103:8765"}
+    assert lan_bind.get("/api/work-items", headers=bare).status_code == 200
+    lan_bind.cookies.clear()
+    assert lan_bind.get("/api/work-items", headers=bare).status_code == 401
+    token = auth.read_mcp_token(tmp_path / "run")
+    bearer = {**bare, "authorization": f"Bearer {token}"}
+    assert lan_bind.get("/api/work-items", headers=bearer).status_code == 200
 
 
 def test_the_perimeter_runs_before_the_spa_shell_middleware(client, dist):
@@ -278,8 +358,10 @@ def test_the_event_stream_needs_a_session_too(client, tmp_path):
             ws.receive_text()
 
     client.post("/api/login", json={"password": "hunter2"})
-    # a fresh item's events arrive on the stream once the session is real
-    with client.websocket_connect("/api/ws/events") as ws:
+    # a fresh item's events arrive on the stream once the session is real.
+    # The URL is absolute because starlette joins a relative one onto
+    # ws://testserver, which is not the host the login cookie was set for.
+    with client.websocket_connect("ws://127.0.0.1/api/ws/events") as ws:
         client.post(
             "/api/work-items", json={"autostart": True, "title": "hello", "repo": str(tmp_path)}
         )
