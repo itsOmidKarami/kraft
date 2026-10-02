@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -362,6 +363,25 @@ def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsy
         cli.main(["repo", "connect", str(plain)])
     assert caught.value.code == 1
     assert "not a git repository" in capsys.readouterr().err
+
+
+def test_a_repo_with_no_commit_is_refused_until_it_has_one(app, tmp_path, capsys):
+    """Connected enabled from its working copy, its items ran on an empty
+    orphan branch, without the Makefile its `make test` was read from. MCP's
+    `ensure_repo` and the web's first-run connect reach the same refusal."""
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=fresh, check=True)
+    (fresh / "Makefile").write_text("test:\n\ttrue\n")
+    with pytest.raises(SystemExit):
+        cli.main(["repo", "connect", str(fresh)])
+    assert "has no commit yet" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="commit its files, then connect it"):
+        asyncio.run(client.ensure_repo(str(fresh)))
+    assert asyncio.run(client.repos()) == []
+    commit_all(fresh)
+    cli.main(["repo", "connect", str(fresh)])
+    assert "test command: make test" in capsys.readouterr().out
 
 
 def test_path_prints_exactly_one_line(app, capsys, make_item, repo):

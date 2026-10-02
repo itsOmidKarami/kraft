@@ -186,6 +186,18 @@ describe("Repos page: connecting", () => {
     expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });
   });
 
+  it("says a repo with no commit cannot be connected yet, and sends nothing", async () => {
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ read_from: null })) : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("the repo has no commit yet, and a work item's branch starts from one");
+    expect(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" })).toBeDisabled();
+    expect(d.postOps).not.toHaveBeenCalled();
+  });
+
   it("shows a probe's refusal inline and sends nothing", async () => {
     vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok({ detail: "/nowhere is not a git repository" }, 400) : ok([{ id: "default" }]))) as never);
     mount();

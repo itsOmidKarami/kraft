@@ -280,6 +280,15 @@ def source_ref(root: Path) -> str | None:
     return None
 
 
+def no_commit(path: str | Path) -> str:
+    """Why a repository with no commit (`source_ref` None) is not connected:
+    a work item's branch would be an empty orphan."""
+    return (
+        f"{path} has no commit yet, and a work item's branch starts from one: "
+        "commit its files, then connect it"
+    )
+
+
 #: A partial clone's missing blob is fetched on demand; a probe must not
 #: reach the network, let alone prompt for credentials.
 _GIT_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}

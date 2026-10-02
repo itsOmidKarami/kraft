@@ -397,6 +397,19 @@ async def test_a_failed_setup_leaves_no_worktree_so_retry_reruns_it(database, ru
     assert (wt / "recovered.txt").exists()
 
 
+async def test_a_repo_with_no_commit_gets_no_worktree(tmp_path, database, run_dirs):
+    """git would make the item's branch an empty orphan, and the agent and
+    the tests would run without one of the repository's files."""
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "Makefile").write_text("test:\n\ttrue\n")
+    await wtree.make_item(database, repo)
+    with pytest.raises(RuntimeError, match="has no commit to branch from"):
+        await wtree.ensure(database, run_dirs, repo, repo_entry=entry_of({"setup_command": ""}))
+    assert not (run_dirs.worktrees / "w1").exists()
+
+
 async def test_ensure_worktree_pins_commit_identity_into_the_worktree(database, run_dirs, repo):
     """Kraft-cppp. A linked worktree must carry its own explicit identity, not
     rely on inheriting the repo's -- that is what left submodule commits

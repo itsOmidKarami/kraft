@@ -121,14 +121,18 @@ def _no_repo_message(cwd: Path | None = None) -> str:
 CONNECT_TIMEOUT_S = 300.0
 
 
-async def probe_repo(path: str | None = None, *, detect: bool = True) -> dict:
+async def probe_repo(
+    path: str | None = None, *, detect: bool = True, test_command: str | None = None
+) -> dict:
     """What connecting `path` would propose, changing nothing: its setup and
     test commands, and every candidate the evidence supports. `detect=False`:
-    only the resolved path and the facts that need no detector table."""
+    only the resolved path and the facts that need no detector table.
+    `test_command`: the root's, as connecting with it would save it."""
     path = context.absolute_path(path or os.getcwd())
-    status, body = await transport._post(
-        "/repos/probe", {"path": path, "detect": detect}, timeout=CONNECT_TIMEOUT_S
-    )
+    payload = {"path": path, "detect": detect}
+    if test_command is not None:
+        payload["test_command"] = test_command
+    status, body = await transport._post("/repos/probe", payload, timeout=CONNECT_TIMEOUT_S)
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     return body
@@ -185,6 +189,15 @@ async def ensure_repo(
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     return {**body, "already_connected": False}
+
+
+async def update_repo(path: str, fields: dict) -> dict:
+    """Change a connected repo's `fields` (`PATCH /repos`); the entry as saved."""
+    response = await transport._send("PATCH", "/repos", params={"path": path}, json=fields)
+    body = response.json() if response.content else {}
+    if response.status_code >= 400:
+        raise ValueError(f"kraft {response.status_code}: {body.get('detail', body)}")
+    return body
 
 
 async def disconnect_repo(path: str | None = None) -> dict:

@@ -59,7 +59,7 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
     else setError(detailOf(a.body));
   };
   const connect = async () => {
-    if (!probe) return;
+    if (!probe || probe.read_from === null) return;
     if (known.has(probe.path)) return setError(`${probe.path} is already in the list.`);
     setBusy(true);
     const a = await draft.ops([{ op: "add_repo", path: probe.path, fields: fieldsFrom(probe) }], { quiet: true });
@@ -78,7 +78,7 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
       <label className="rp-connect-label" htmlFor="rp-connect-path">Path to a git repository</label>
       <div className="rp-connect-line">
         <input id="rp-connect-path" className="rp-search" autoFocus spellCheck={false} placeholder="~/src/product" value={path} onChange={(e) => { setPath(e.target.value); setProbe(null); setError(null); }} />
-        <Button type="submit" disabled={busy || !path.trim()}>{probe ? "Connect" : "Check"}</Button>
+        <Button type="submit" disabled={busy || !path.trim() || probe?.read_from === null}>{probe ? "Connect" : "Check"}</Button>
       </div>
       {error && <p className="rp-err" role="alert">{error}</p>}
       {probe && (

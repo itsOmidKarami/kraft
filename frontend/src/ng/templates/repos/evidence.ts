@@ -60,10 +60,15 @@ export function missingLine(tools: MissingTool[] | undefined): string | null {
   return `${named.join(", ")}: not installed here, so a work item would fail on it`;
 }
 
+/** Why a repo with no commit (a probe's `read_from: null`) cannot be connected yet:
+ *  `POST /repos` and `add_repo` refuse it, as a work item's branch would be an empty orphan. */
+export const NO_COMMIT = "its working copy: the repo has no commit yet, and a work item's branch starts from one. Commit its files, then check it again.";
+
 /** The commit the probe read, as a person names it: `origin/main`, or the
  *  checkout's HEAD when the clone has no origin branch. Edits not committed
- *  and pushed there are not read, so it is said. */
+ *  and pushed there are not read, so it is said. `null` is a repo with no commit. */
 export function readFrom(ref: string | null | undefined): string | null {
+  if (ref === null) return NO_COMMIT;
   if (!ref) return null;
   const named = ref.replace(/^refs\/remotes\//, "");
   return named === "HEAD"

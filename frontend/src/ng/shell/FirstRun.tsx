@@ -172,7 +172,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     }
   };
   const doAdd = async () => {
-    if (!probe || adding) return;
+    if (!probe || adding || probe.read_from === null) return;
     setAdding(true);
     setError(null);
     // As Templates › Repos' Connect does: a probe's lone root `["**"]` scope only repeats
@@ -257,7 +257,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 {added ? (
                   <Button variant="primary" onClick={() => go(2)}>Continue</Button>
                 ) : probe ? (
-                  <Button variant="primary" disabled={!probed || adding} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
+                  <Button variant="primary" disabled={!probed || adding || probe.read_from === null} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
                 ) : (
                   <Button variant="primary" disabled={!path.trim() || probing} onClick={doProbe}>{probing ? "Probing…" : "+ Add repo"}</Button>
                 )}

@@ -56,6 +56,16 @@ describe("FirstRun", () => {
     expect(await screen.findByText("127.0.0.1:4317")).toBeInTheDocument();
   });
 
+  it("says a repo with no commit cannot be added yet", async () => {
+    vi.mocked(api.probeRepo).mockResolvedValue({ ...PROBE, read_from: null });
+    const user = userEvent.setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    expect(await screen.findByText(/the repo has no commit yet/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
+  });
+
   it("probes first, reveals one row at a time, then adds with the probed values", async () => {
     const user = userEvent.setup();
     mount();
