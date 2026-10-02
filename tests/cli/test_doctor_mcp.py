@@ -8,6 +8,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+import yaml
 from support.harness import make_repo
 
 from kraft import client, doctor
@@ -71,3 +73,49 @@ def test_mcp_check_still_only_warns_when_one_repo_registers_it_and_another_does_
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
     assert check["ok"] is True and check["warn"] is True
     assert str(bare) in check["detail"] and str(registered) not in check["detail"]
+
+
+def _templates() -> Path:
+    import os
+
+    return Path(os.environ["KRAFT_TEMPLATES_DIR"])
+
+
+@pytest.mark.parametrize("connected", [True, False], ids=["a-repo-connected", "no-repo"])
+def test_mcp_check_only_warns_when_no_chain_launches_a_harness_that_asks_through_it(
+    app, tmp_path, connected
+):
+    """A Codex-only setup: every profile runs on a provider whose launch never
+    names the permission tool, so nothing registered refuses no worker. The
+    launch refuses only an unsandboxed task on a harness asking through the
+    direct tool (`adapters.agent`), so doctor must be able to pass here."""
+    (Path.home() / ".claude.json").unlink()
+    harnesses = _templates() / "harnesses.yaml"
+    table = yaml.safe_load(harnesses.read_text())
+    # Every profile on codex: the suite puts them on `fake`, which is claude.
+    for profile in table["harnesses"].values():
+        profile["provider"] = "codex"
+        profile.pop("defaults", None)
+    harnesses.write_text(yaml.safe_dump(table))
+    if connected:
+        asyncio.run(client.ensure_repo(str(make_repo(tmp_path))))
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
+    assert check["ok"] is True and check["warn"] is True
+    assert "kraft MCP server registered" in check["detail"]
+
+
+def test_mcp_check_only_warns_when_every_connected_repo_is_sandboxed(app, tmp_path):
+    """A sandboxed launch never reads the host's registration (its MCP server,
+    if any, is the session's own), so a machine whose every repo is sandboxed
+    needs none."""
+    (Path.home() / ".claude.json").unlink()
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    repos = _templates() / "repos.yaml"
+    data = yaml.safe_load(repos.read_text())
+    entries = data["repos"] if isinstance(data, dict) else data
+    for entry in entries:
+        entry["sandbox"] = {"kind": "docker", "image": "kraft-worker:py"}
+    repos.write_text(yaml.safe_dump(data))
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
+    assert check["ok"] is True and check["warn"] is True

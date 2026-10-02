@@ -436,8 +436,8 @@ def test_path_check_fails_when_no_kraft_is_on_path(monkeypatch, tmp_path):
     `.mcp.json` and hooks launch `kraft` by name, so they start nothing."""
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     row = doctor._path_check()
-    assert row["ok"] is False
-    assert "not on PATH" in row["detail"] and "uv tool update-shell" in row["detail"]
+    assert row["ok"] is False and "not on PATH" in row["detail"]
+    assert "uv tool update-shell" in row["detail"] and "install-service" in row["detail"]
 
 
 # ── _agent_checks: per selected harness profile, not a hardcoded claude ─────
