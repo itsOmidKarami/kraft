@@ -37,7 +37,7 @@ describe("Review & publish pane", () => {
     const { draft, onDone, onHighlight } = mount({ result: { changes: CHANGES, impact: { running: 2, repos: ["/code/kraft"] } } });
     expect(screen.getByRole("heading", { name: "Draft · 2 changes" })).toBeInTheDocument();
     expect(screen.getByText("✓ resolves · ready to publish")).toBeInTheDocument();
-    expect(screen.getByText("2 items keep the version they started on")).toBeInTheDocument();
+    expect(screen.getByText("2 items keep the version they were filed with")).toBeInTheDocument();
     expect(screen.getByText("/code/kraft default to it")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /security_approval/ }));
     expect(onHighlight).toHaveBeenCalledWith("security_approval");

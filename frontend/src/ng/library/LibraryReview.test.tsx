@@ -35,7 +35,7 @@ describe("Library: Review & publish", () => {
     expect(screen.getByRole("button", { name: /steering.project-standards/ })).toHaveTextContent("reaches 1 chain");
     expect(screen.getByText("default · 2 changes, quick-task · 1 change")).toBeInTheDocument();
     expect(screen.getByText("kraft name a changed profile")).toBeInTheDocument();
-    expect(screen.getByText("items keep the version they started on")).toBeInTheDocument();
+    expect(screen.getByText("items keep the version they were filed with")).toBeInTheDocument();
     await u.click(screen.getByRole("button", { name: /steering.project-standards/ }));
     expect(where()).toBe("/templates/library/steering.project-standards");
     expect(screen.queryByRole("heading", { name: /Draft ·/ })).toBeNull();

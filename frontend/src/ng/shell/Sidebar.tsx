@@ -10,6 +10,7 @@ import { isTextField } from "../keys";
 import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
+import { useGroupCount } from "../board/counts";
 
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
@@ -32,8 +33,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   // pointer is still over it; the pointer moving in or out, or focus coming back, lifts it.
   const [dismissed, setDismissed] = useState(false);
   const connection = useStore((s) => s.connection);
-  // The server's badge (R16): the board's own Needs you count, failed included.
-  const needsYou = useStore((s) => Object.values(s.workItems).filter((i) => i.display_status === "needs_you" || i.display_status === "failed").length);
+  // The board's own Needs you count: failed and paused mid-chain included.
+  const needsYou = useGroupCount("needs");
   const health = useHealth();
   const drafts = useDraftCounts();
   const location = useLocation();

@@ -26,6 +26,18 @@ describe("ItemHeader", () => {
     expect(screen.queryByText(/need you/)).toBeNull();
   });
 
+  it("counts the others as the board's Needs you group does: failed and paused mid-chain too, never started not", () => {
+    useStore.setState({ workItems: {
+      w1: item({ id: "w1", display_status: "needs_you" }),
+      a: item({ id: "a", display_status: "needs_you" }),
+      f: item({ id: "f", display_status: "failed" }),
+      p: item({ id: "p", status: "paused", display_status: "paused", current_node_id: "implementation" }),
+      n: item({ id: "n", status: "paused", display_status: "paused", current_node_id: null }),
+    } });
+    show({ display_status: "needs_you" });
+    expect(screen.getByRole("link", { name: /3 others need you/ })).toBeInTheDocument();
+  });
+
   it("shows the server's badge and retries a failed item from the stopped task's path", async () => {
     const calls = stubFetch();
     const reload = vi.fn();

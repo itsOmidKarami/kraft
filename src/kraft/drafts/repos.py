@@ -1,6 +1,6 @@
 """The `repos` draft area (W13 E): `repos.yaml`.
 
-`DELETE /repos` refuses a repo with running items with a 409; the draft
+`DELETE /repos` refuses a repo with open (not ended) items with a 409; the draft
 reports the same as a problem."""
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def resolve(st, key, raw, files, published) -> dict:
     gone = sorted(before - {e.path for e in entries})
     for path in gone:
         if running.get(path):
-            msg = f"{path} has {running[path]} running item(s); finish them first"
+            msg = f"{path} has {running[path]} open item(s); finish or cancel them first"
             out["problems"].append(_problem(path, None, msg))
     out["resolved"] = {
         "repos": [v for v in views if v["managed"]],

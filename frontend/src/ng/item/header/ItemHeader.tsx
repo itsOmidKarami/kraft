@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { elapsedBetween } from "../../../format";
-import { useStore } from "../../../store";
+import { useGroupCount } from "../../board/counts";
 import { Clock, EllipsisVertical } from "../../icons";
 import { HeaderActions } from "../../shell/HeaderActions";
 import { Menu, type MenuItem } from "../../ui/Menu";
@@ -48,7 +48,8 @@ type Props = {
 export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
   const group = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const others = useStore((s) => Object.values(s.workItems).filter((w) => w.display_status === "needs_you" && w.id !== item.id).length);
+  // The board's Needs you count, this item left out.
+  const others = useGroupCount("needs", item.id);
   const hs = headerState(item);
   const [pausing, setPausing] = useState(false);
   const [completing, setCompleting] = useState(false);

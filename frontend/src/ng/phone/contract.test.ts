@@ -29,6 +29,7 @@ const ALLOWED = [
   "item/nodeGraph",
   "item/graph",
   "board/model",
+  "board/counts", // the board's counts, one definition for every screen that shows one
   "board/rowText",
   "board/bulk",
   "board/prefs",
@@ -45,6 +46,7 @@ const ALLOWED = [
   "templates/draft/view", // counts(), the pure helpers
   "templates/problems", // problemText
   "review/prefs", // DEFAULT_PREFS and the DiffPrefs type: the diff choices Appearance saves
+  "settings/accessWords", // what Access says, on both layouts
   "settings/policy/ctx", // the policy sections' shared context type and problemAt
   "settings/policy/keys", // the set_value keys the Policy page sends
   "settings/policy/sections", // which section a key or a problem belongs to

@@ -9,6 +9,7 @@ import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 import { SIDEBAR_KEY } from "./sidebarPref";
 import * as drafts from "../templates/draft/draftApi";
+import { countIn } from "../board/counts";
 
 const ITEM: WorkItem = {
   id: "wi_1",
@@ -185,6 +186,16 @@ describe("ng Sidebar", () => {
     await userEvent.tab();
     await userEvent.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
+  });
+
+  it("counts what the board's Needs you group holds, a paused mid-chain item included and a never-started one not", () => {
+    const midChain = { ...ITEM, id: "wi_5", status: "paused" as const, display_status: "paused" as const, current_node_id: "implementation" };
+    const fresh = { ...ITEM, id: "wi_6", status: "paused" as const, display_status: "paused" as const, current_node_id: null };
+    const items = { [ITEM.id]: ITEM, wi_5: midChain, wi_6: fresh };
+    useStore.setState({ workItems: items } as never);
+    mount();
+    expect(countIn(Object.values(items) as never, "needs")).toBe(2);
+    expect(screen.getByRole("link", { name: "Board, 2 need you" })).toBeInTheDocument();
   });
 
   it("marks the Board when an item needs you or failed, from the server's display_status", () => {

@@ -28,7 +28,8 @@ export function ReposPage() {
   return <Editor draft={draft} />;
 }
 
-const STATE_WORD = (r: RepoView, running: number) => `${r.entry.enabled === false ? "disabled" : "enabled"}${running ? ` · ${running} running` : ""}`;
+// `impact.running` counts open items (not ended), as the board's groups do not: say "open".
+const STATE_WORD = (r: RepoView, open: number) => `${r.entry.enabled === false ? "disabled" : "enabled"}${open ? ` · ${open} open` : ""}`;
 
 function Editor({ draft }: { draft: ConfigDraft }) {
   const { repo: param } = useParams();
@@ -81,7 +82,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
       return (
         <>
           <Kv k="new items" v="use the published values from now on" />
-          <Kv k="running" v={`${n} ${n === 1 ? "item keeps" : "items keep"} the values they started with`} />
+          <Kv k="open" v={`${n} ${n === 1 ? "item keeps" : "items keep"} the values they started with`} />
         </>
       );
     },
@@ -221,7 +222,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
 
   const toggle = () => void draft.ops([{ op: "set_repo", path: repo.path, patch: { enabled: !enabled } }]);
   const disconnect = () => {
-    if (running > 0) return setNote(`${name} has ${running} running ${running === 1 ? "item" : "items"}. Disconnect is refused until ${running === 1 ? "it finishes" : "they finish"}.`);
+    if (running > 0) return setNote(`${name} has ${running} open ${running === 1 ? "item" : "items"}. Disconnect is refused until ${running === 1 ? "it finishes or is cancelled" : "they finish or are cancelled"}.`);
     setNote(null);
     void draft.ops([{ op: "remove_repo", path: repo.path }]).then((a) => { if (a.status === 200) onGone(neighbour ? neighbour.name ?? neighbour.path : undefined); });
   };
@@ -234,7 +235,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
       crumbs={[{ label: "Repos" }]}
       icon="git-branch"
       title={name}
-      sub={`${repo.path}${forge ? ` · ${forge}` : ""} · ${running} running`}
+      sub={`${repo.path}${forge ? ` · ${forge}` : ""} · ${running} open`}
       prob={own[0] ? { msg: own[0].message } : undefined}
       tabs={[{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }, { value: "yaml", label: "YAML" }]}
       tab={tab}
@@ -255,7 +256,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
         <>
           <Kv k="path" v={repo.path} mono />
           <Kv k="default chain" v={String(repo.entry.default_chain_template ?? "default")} mono />
-          <Kv k="running items" v={String(running)} />
+          <Kv k="open items" v={String(running)} />
           <Kv k="state" v={enabled ? "enabled" : "disabled"} />
           <Kv k="steering" v={repo.resolved.steering.join(", ") || "—"} mono muted={!repo.resolved.steering.length} />
           <Kv k="steering from" v={repo.sources.steering === "repo" ? "this repo" : "the chain's library"} />

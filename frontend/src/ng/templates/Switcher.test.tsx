@@ -47,14 +47,14 @@ beforeEach(() => {
 });
 
 describe("chain switcher", () => {
-  it("lists every chain with its size and running items, ✓ on the current one, a dot on a draft; search filters", async () => {
+  it("lists every chain with its size and open items, ✓ on the current one, a dot on a draft; search filters", async () => {
     mount();
     await userEvent.click(await crumb());
     const list = await screen.findByRole("listbox", { name: "Chains" });
     await within(list).findByRole("option", { name: /quick-task/ });
     const def = within(list).getByRole("option", { name: /^default/ });
     expect(def).toHaveAttribute("aria-selected", "true");
-    expect(def).toHaveTextContent("19 nodes · 1 running");
+    expect(def).toHaveTextContent("19 nodes · 1 open");
     expect(within(list).getByRole("option", { name: /quick-task/ }).querySelector(".sw-dot")).not.toBeNull();
     expect(def.querySelector(".sw-dot")).toBeNull();
     await userEvent.type(screen.getByRole("textbox", { name: "Search chains" }), "quick");
