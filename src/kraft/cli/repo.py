@@ -68,6 +68,14 @@ def _cmd_repos(ns: argparse.Namespace) -> None:
 _ALSO_SHOWN = 4
 
 
+def _print(line: str) -> None:
+    """`print`, with every character a terminal would act on written out as
+    its escape: a command or a path read from a repository is shown as it
+    is, never obeyed (an ANSI sequence in a CI line could otherwise show
+    one command while another is saved)."""
+    print("".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in line))
+
+
 def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None:
     """Ask which of the root's `role` candidates to use, when there is a
     choice to make. Enter keeps the proposal; a number picks one; `-` says
@@ -84,11 +92,11 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
             options.append(c)
     if len(options) < 2 and proposed is not None:
         return proposed
-    print(f"{role} command for the repo root:")
+    _print(f"{role} command for the repo root:")
     default = next((i for i, o in enumerate(options, 1) if o["command"] == proposed), None)
     for i, o in enumerate(options, 1):
         mark = "  [proposed]" if i == default else ""
-        print(f"  {i}) {o['command']}    from {o['source']}{mark}")
+        _print(f"  {i}) {o['command']}    from {o['source']}{mark}")
     keep = f"Enter keeps {default}, " if default else ""
     none = "- for no tests" if role == "test" else "- for none"
     while True:
@@ -110,14 +118,14 @@ def _pick(role: str, candidates: list[dict], proposed: str | None) -> str | None
         if answer.lower() in ("y", "yes") and proposed is not None:
             return proposed
         if answer.lower() in ("y", "yes", "n", "no"):
-            print("  pick one by its number, - for none, or type the command to use")
+            _print("  pick one by its number, - for none, or type the command to use")
             continue
         if not answer.isdigit():
             return answer
         if 1 <= int(answer) <= len(options):
             return options[int(answer) - 1]["command"]
         # A number with no option is a typo, never a command called "7".
-        print(f"  {answer} is not one of the {len(options)} listed")
+        _print(f"  {answer} is not one of the {len(options)} listed")
 
 
 def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
@@ -140,15 +148,15 @@ def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
 
 
 def _say_connected(result: dict) -> None:
-    print(f"connected: {result['path']}")
+    _print(f"connected: {result['path']}")
     ref = result.get("read_from")
     if ref and ref.startswith("refs/remotes/origin/"):
         # Work items start from origin, so a commit not pushed yet is not read.
-        print(f"  read from {ref.removeprefix('refs/remotes/')}, where work items start")
+        _print(f"  read from {ref.removeprefix('refs/remotes/')}, where work items start")
     elif ref:
-        print(f"  read from {ref}")
+        _print(f"  read from {ref}")
     elif "read_from" in result:
-        print("  read from the working copy: the repo has no commit yet")
+        _print("  read from the working copy: the repo has no commit yet")
     by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
     chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
 
@@ -160,25 +168,25 @@ def _say_connected(result: dict) -> None:
 
     root = by_dir.get("", {})
     if result.get("test_command") == "":
-        print('test command: "" (no tests)')
+        _print('test command: "" (no tests)')
     elif root.get("test") and root["test"] == result.get("test_command"):
-        print(f"test command: {root['test']}{source('', 'test', root['test'])}")
+        _print(f"test command: {root['test']}{source('', 'test', root['test'])}")
     elif result.get("test_command"):
-        print(f"test command: {result['test_command']}")
+        _print(f"test command: {result['test_command']}")
     for d, s in by_dir.items():
         if d and s.get("test"):
-            print(f"  {d}/: {s['test']}{source(d, 'test', s['test'])}")
+            _print(f"  {d}/: {s['test']}{source(d, 'test', s['test'])}")
     setup = result.get("setup_command")
     if setup:
         root_setup = root.get("setup")
         told = source("", "setup", root_setup) if setup == root_setup else ""
-        print(f"setup command: {setup}{told}")
+        _print(f"setup command: {setup}{told}")
     elif setup == "":
-        print('setup command: "" (nothing to prepare)')
+        _print('setup command: "" (nothing to prepare)')
     else:
         missing = ", ".join(result.get("missing_setup") or []) or "the repo"
         # Undeclared stops the repo's first work item; "" is a declared none.
-        print(
+        _print(
             f"setup command: none found for {missing} (it reads task runners, CI and "
             "lockfiles); pass --setup-command or set `setup_command` in its repos.yaml "
             'entry, `""` if it needs no preparation'
@@ -196,11 +204,13 @@ def _say_connected(result: dict) -> None:
             more = (
                 f" and {len(rest) - _ALSO_SHOWN} more (--json)" if len(rest) > _ALSO_SHOWN else ""
             )
-            print(f"  also found for {role}: {shown}{more}")
+            _print(f"  also found for {role}: {shown}{more}")
+    if result.get("probe_failed"):
+        _print(f"  saved with the commands given; the probe failed: {result['probe_failed']}")
     for stop in result.get("stopped") or ():
-        print(f"  no test command proposed: {stop['dir']} is {stop['reason']}")
+        _print(f"  no test command proposed: {stop['dir']} is {stop['reason']}")
     if result.get("enabled") is False:
-        print(
+        _print(
             "saved disabled: no test command found in its task runners, toolchain files or CI; "
             "pass --test-command (--no-tests for a repo with none) or set "
             "`test_command` in its repos.yaml entry, then `enabled: true`"

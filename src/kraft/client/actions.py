@@ -116,12 +116,20 @@ def _no_repo_message(cwd: Path | None = None) -> str:
     )
 
 
+#: How long a connect may take: the probe's two minutes, its submodules' two
+#: more, and room to save. The server finishes a connect the client gave up
+#: on, so a shorter wait reports a failure for a repo that was connected.
+CONNECT_TIMEOUT_S = 300.0
+
+
 async def probe_repo(path: str | None = None, *, detect: bool = True) -> dict:
     """What connecting `path` would propose, changing nothing: its setup and
     test commands, and every candidate the evidence supports. `detect=False`:
     only the resolved path and the facts that need no detector table."""
     path = context.absolute_path(path or os.getcwd())
-    status, body = await transport._post("/repos/probe", {"path": path, "detect": detect})
+    status, body = await transport._post(
+        "/repos/probe", {"path": path, "detect": detect}, timeout=CONNECT_TIMEOUT_S
+    )
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     return body
@@ -145,7 +153,15 @@ async def ensure_repo(
     path = context.absolute_path(path or os.getcwd())
     fields = {"test_command": test_command, "setup_command": setup_command, "enabled": enabled}
     payload = {"path": path, **{k: v for k, v in fields.items() if v is not None}}
-    status, body = await transport._post("/repos", payload)
+    try:
+        status, body = await transport._post("/repos", payload, timeout=CONNECT_TIMEOUT_S)
+    except ValueError as exc:
+        if "in time" not in str(exc):
+            raise
+        raise ValueError(
+            f"connecting {path} is taking longer than {CONNECT_TIMEOUT_S}s; the server may "
+            "still save it, so check `kraft repo list` before connecting again"
+        ) from exc
     if status == 409:
         # The probe still runs, and still first: it is what resolves the given
         # path to the connected one, which is how `kraft repo list` marks the

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import tempfile
+import time
 from itertools import count
 from pathlib import Path
 from typing import Annotated
@@ -57,6 +58,10 @@ class ProbeBody(BaseModel):
     detect: bool = True
 
 
+#: How long probing all of a connect's submodules may take, together.
+_CHILDREN_BUDGET_S = 120.0
+
+
 def _probe_children(
     parent: str, submodule_paths: list[str], templates_dir: Path
 ) -> dict[str, dict]:
@@ -65,11 +70,25 @@ def _probe_children(
     connect must not await, or a PATCH or DELETE in between is overwritten.
     An uninitialized submodule is an empty directory, not a repo: it is left
     out, and reappears as a candidate the next time the parent is connected,
-    so skipping is the whole recovery."""
-    out = {}
+    so skipping is the whole recovery.
+
+    `.gitmodules` is the repository's to write: a path that resolves to the
+    parent itself (`path = .`), outside it (`..`), or to one already probed
+    is skipped, and all of them together get `_CHILDREN_BUDGET_S`."""
+    out: dict[str, dict] = {}
+    root = Path(parent).resolve()
+    seen: set[Path] = set()
+    deadline = time.monotonic() + _CHILDREN_BUDGET_S
     for rel in submodule_paths:
+        where = (root / rel).resolve()
+        if where == root or not where.is_relative_to(root) or where in seen:
+            continue
+        seen.add(where)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
         try:
-            out[rel] = config_mod.probe_repo(Path(parent) / rel, templates_dir=templates_dir)
+            out[rel] = config_mod.probe_repo(where, templates_dir=templates_dir, timeout=left)
         except config_mod.ConfigError:
             continue
     return out
@@ -236,13 +255,28 @@ async def list_repos(request: Request):
 async def probe_repo(body: ProbeBody, request: Request):
     """Read-only inspection of a candidate repo — Kraft never edits repo files.
     Off the event loop: it reads the whole tree's listing through git."""
-    templates_dir = request.app.state.templates_dir
-    try:
-        return await asyncio.to_thread(
-            config_mod.probe_repo, body.path, templates_dir=templates_dir, detect=body.detect
-        )
-    except config_mod.ConfigError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    st = request.app.state
+    if not body.detect:  # what needs no detector table is quick, and never queued
+        try:
+            return await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
+        except config_mod.ConfigError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    # Each probe is a process of up to 2 GB for up to two minutes: a few at
+    # once, and a caller past that is told so rather than queued.
+    if getattr(st, "probing", None) is None:
+        st.probing = asyncio.Semaphore(_PROBES_AT_ONCE)
+    if st.probing.locked():
+        raise HTTPException(429, "Kraft is already probing other repositories; try again shortly")
+    async with st.probing:
+        try:
+            return await asyncio.to_thread(
+                config_mod.probe_repo, body.path, templates_dir=st.templates_dir
+            )
+        except config_mod.ConfigError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+
+_PROBES_AT_ONCE = 2
 
 
 @api_router.post("/repos", status_code=201)
@@ -264,15 +298,32 @@ async def _add_repo(body: RepoBody, st) -> dict:
         # "Already connected" first, from what needs no detector table: a
         # reconnect (`ensure_repo` on every handoff) must not pay for the probe,
         # or fail on an operator's broken detectors.yaml.
-        facts = config_mod.probe_repo(body.path, detect=False)
+        # In a thread: it reads the working copy's .gitmodules and beads config.
+        facts = await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
         if any(r["path"] == facts["path"] for r in _editable_repos(st)[0]):
             raise HTTPException(409, f"{facts['path']} is already connected")
-        probed = await asyncio.to_thread(
-            config_mod.probe_repo,
-            body.path,
-            test_command=body.test_command,
-            templates_dir=templates_dir,
-        )
+        try:
+            probed = await asyncio.to_thread(
+                config_mod.probe_repo,
+                body.path,
+                test_command=body.test_command,
+                templates_dir=templates_dir,
+            )
+        except config_mod.ConfigError as exc:
+            if body.test_command is None or body.setup_command is None:
+                raise
+            # Both commands given: the proposal they replace is not needed, so
+            # a repository the probe cannot read still connects with them.
+            probed = {
+                **facts,
+                "test_command": body.test_command,
+                "setup_command": body.setup_command,
+                "test_scopes": None,
+                **{k: [] for k in ("test_markers", "candidates", "scopes", "missing_setup")},
+                "stopped": [],
+                "read_from": None,
+                "probe_failed": str(exc),
+            }
         child_probes = await asyncio.to_thread(
             _probe_children, probed["path"], probed["submodules"], templates_dir
         )
@@ -336,7 +387,12 @@ async def _add_repo(body: RepoBody, st) -> dict:
     # Told, not stored: which marker files the proposed commands came from,
     # every command the evidence supported, and what is still undecided.
     told = ("test_markers", "candidates", "scopes", "missing_setup", "read_from", "stopped")
-    return {**entry, **{k: probed[k] for k in told}}
+    return {**entry, **{k: probed[k] for k in told}, **_failed(probed)}
+
+
+def _failed(probed: dict) -> dict:
+    """Why the probe failed, when the commands were given and saved anyway."""
+    return {"probe_failed": probed["probe_failed"]} if "probe_failed" in probed else {}
 
 
 class RepoPatch(BaseModel):

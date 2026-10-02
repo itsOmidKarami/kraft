@@ -221,6 +221,20 @@ def test_no_tests_at_the_prompt_is_confirmed_before_it_is_saved(app, capsys, rep
     assert entry["test_command"] == ""
 
 
+def test_what_connect_prints_from_a_repo_is_shown_never_obeyed(capsys):
+    """An ANSI sequence in a path or command could show a person one thing
+    while another is saved."""
+    from kraft.cli import repo as repo_cli
+
+    repo_cli._say_connected(
+        {"path": "/r\x1b[2K", "test_command": "npm test", "probe_failed": "boom\u202e"}
+    )
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\u202e" not in out
+    assert "connected: /r\\x1b[2K" in out
+    assert "the probe failed: boom\\u202e" in out
+
+
 def test_connect_names_origins_branch_whole(capsys):
     from kraft.cli import repo as repo_cli
 

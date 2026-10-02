@@ -83,6 +83,65 @@ def test_the_probe_runs_off_the_event_loop(tmp_path, client, monkeypatch):
     client.post("/api/repos", json={"path": str(repo), "enabled": False})
     assert ("probe_repo", True) in ran
     assert ran.count(("probe_repo", True)) == 2, ran
+    # "Already connected" too: it reads the working copy's .gitmodules and
+    # beads config, which a FIFO or a YAML bomb would hold the loop on.
+    assert ("probe_repo", False) in ran, ran
+
+
+def test_a_probe_that_fails_still_connects_a_repo_given_both_commands(
+    tmp_path, client, monkeypatch
+):
+    """The error said to pass --test-command and --setup-command, to someone
+    who had: with both given, the proposal they replace is not needed."""
+    from kraft import detect
+
+    monkeypatch.setattr(detect, "_PROBE_TIMEOUT_S", 0.001)
+    repo = make_repo(tmp_path)
+    r = client.post("/api/repos", json={"path": str(repo), "test_command": "make check"})
+    assert r.status_code == 400, r.text
+    both = {"path": str(repo), "test_command": "make check", "setup_command": ""}
+    r = client.post("/api/repos", json=both)
+    assert r.status_code == 201, r.text
+    assert (r.json()["test_command"], r.json()["setup_command"]) == ("make check", "")
+    assert "took more than" in r.json()["probe_failed"]
+
+
+def test_a_probe_past_the_few_at_once_is_told_to_wait(tmp_path, client, monkeypatch):
+    """Each probe is a process of up to 2 GB for up to two minutes."""
+    import asyncio
+
+    monkeypatch.setattr(client.app.state, "probing", asyncio.Semaphore(0), raising=False)
+    repo = make_repo(tmp_path)
+    assert client.post("/api/repos/probe", json={"path": str(repo)}).status_code == 429
+    quick = client.post("/api/repos/probe", json={"path": str(repo), "detect": False})
+    assert quick.status_code == 200, "what needs no detector table is never queued"
+
+
+def test_a_gitmodules_path_at_or_above_the_parent_or_twice_is_not_probed(tmp_path, monkeypatch):
+    """`path = .` probed the parent again, four times over, holding the
+    connect lock; `..` probed outside it."""
+    from kraft.api.routes import repos as routes
+
+    probed = []
+    monkeypatch.setattr(
+        routes.config_mod, "probe_repo", lambda where, **kw: probed.append(where) or {}
+    )
+    parent = tmp_path / "parent"
+    (parent / "libs" / "x").mkdir(parents=True)
+    paths = [".", "./", "..", "../other", "libs/x", "libs/../libs/x", "libs/x/"]
+    assert list(routes._probe_children(str(parent), paths, tmp_path)) == ["libs/x"]
+    assert probed == [(parent / "libs" / "x").resolve()]
+
+
+def test_submodules_share_one_time_budget(tmp_path, monkeypatch):
+    from kraft.api.routes import repos as routes
+
+    given = []
+    monkeypatch.setattr(routes, "_CHILDREN_BUDGET_S", 0.0)
+    monkeypatch.setattr(routes.config_mod, "probe_repo", lambda w, **kw: given.append(kw) or {})
+    (tmp_path / "a").mkdir()
+    assert routes._probe_children(str(tmp_path), ["a"], tmp_path) == {}
+    assert given == []
 
 
 @pytest.mark.parametrize(

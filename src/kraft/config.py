@@ -15,6 +15,7 @@ import ipaddress
 import logging
 import os
 import re
+import stat
 import subprocess
 import tempfile
 from collections.abc import Iterator, Mapping
@@ -103,6 +104,64 @@ def read_yaml(path: str | Path, default: dict | None = None) -> dict:
     if not isinstance(data, dict):
         raise ConfigError(f"{path.name}: expected a mapping at the top level")
     return data
+
+
+class YamlTooLarge(ValueError):
+    """A YAML document past its node budget: refused before it is built."""
+
+
+def bounded_yaml(text: str, budget: list[int]) -> object:
+    """`yaml.safe_load`, for a file whoever committed it wrote. The node
+    graph is composed (linear in the text: an alias is a shared node) and
+    walked first, every use of an alias counting again, spending
+    `budget[0]`; past it, `YamlTooLarge`, and nothing is constructed. A
+    merge key over nested aliases (`<<: [*a, *a, ...]`) would otherwise
+    build in time exponential in its depth, from a few hundred bytes."""
+    loader = yaml.SafeLoader(text)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None
+        stack = [node]
+        while stack:
+            budget[0] -= 1
+            if budget[0] < 0:
+                raise YamlTooLarge("more YAML nodes than a repository's config holds")
+            n = stack.pop()
+            if isinstance(n, yaml.MappingNode):
+                for key, value in n.value:
+                    stack += (key, value)
+            elif isinstance(n, yaml.SequenceNode):
+                stack.extend(n.value)
+        return loader.construct_document(node)
+    finally:
+        loader.dispose()
+
+
+def _small_text(path: Path, cap: int = 1 << 20) -> str | None:
+    """A repository's own file, read from its working copy: a regular file
+    only (not a symlink to a FIFO, whose read would block forever), of at
+    most `cap` bytes. None otherwise: the facts a probe reports from it are
+    never a reason to fail."""
+    try:
+        st = path.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap:
+            return None
+        with open(path, "rb") as f:
+            return f.read(cap).decode("utf-8")
+    except (OSError, ValueError):  # not UTF-8 is unreadable too
+        return None
+
+
+def _small_yaml(path: Path) -> dict:
+    """`_small_text`'s YAML, bounded as `bounded_yaml` bounds it; empty when
+    it is not a small regular file or not a mapping."""
+    text = _small_text(path)
+    try:
+        data = bounded_yaml(text, [20_000]) if text is not None else None
+    except (ValueError, RecursionError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_text(path: str | Path, text: str) -> None:
@@ -583,7 +642,9 @@ def git_read(
     diff body ending in a blank context line loses that line to the strip, and
     git_read is a diff transport now as well as a `rev-parse` reader.
     """
-    cmd = ["git", "--no-optional-locks", *args]
+    # `core.fsmonitor` names a program git runs on a status-like read: from
+    # a repository's own .git/config, that is the repository running code.
+    cmd = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", *args]
     try:
         out = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -734,6 +795,7 @@ def probe_repo(
     test_command: str | None = None,
     templates_dir: Path | None = None,
     detect: bool = True,
+    timeout: float | None = None,
 ) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 
@@ -762,15 +824,14 @@ def probe_repo(
         raise ConfigError(f"{p} is not a git repository")
 
     submodules: list[str] = []
-    gitmodules = root / ".gitmodules"
-    if gitmodules.is_file():
+    gitmodules = _small_text(root / ".gitmodules")
+    if gitmodules is not None:
         parser = ConfigParser()
         try:
             # .gitmodules is INI-shaped: [submodule "libs/x"] with a path key.
-            # ValueError covers read_text()'s UnicodeDecodeError: this read is
-            # best-effort, so a .gitmodules that is not UTF-8 degrades to no
-            # submodules rather than failing the whole probe.
-            parser.read_string(gitmodules.read_text())
+            # This read is best-effort: one that does not parse degrades to
+            # no submodules rather than failing the whole probe.
+            parser.read_string(gitmodules)
             submodules = sorted(
                 parser.get(s, "path") for s in parser.sections() if parser.has_option(s, "path")
             )
@@ -778,7 +839,7 @@ def probe_repo(
             submodules = []
 
     beads = root / ".beads"
-    beads_config = read_yaml(beads / "config.yaml", {}) if beads.is_dir() else {}
+    beads_config = _small_yaml(beads / "config.yaml") if beads.is_dir() else {}
     export = beads_config.get("export") or {}
 
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
@@ -798,7 +859,7 @@ def probe_repo(
     }
     if not detect:
         return facts
-    proposal = detect_mod.probe(root, templates_dir, test_command=test_command)
+    proposal = detect_mod.probe(root, templates_dir, test_command=test_command, timeout=timeout)
     return {
         **facts,
         "test_command": proposal.test_command,

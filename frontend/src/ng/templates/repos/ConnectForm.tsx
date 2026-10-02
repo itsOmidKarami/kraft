@@ -82,6 +82,10 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           <Kv k="forge" v={probe.forge ? `${probe.forge}${probe.project ? ` · ${probe.project}` : ""}` : "no forge remote"} muted={!probe.forge} />
           <Kv k="tests" v={probe.test_command ? withSource(probe.test_command, chosenSource(probe.candidates, "test")) : "none found"} mono muted={!probe.test_command} />
           <Kv k="test scopes" v={probe.test_scopes ? `${probe.test_scopes.length} found` : "—"} muted={!probe.test_scopes} />
+          {/* Every command Connect saves is shown: a nested scope's is not the test command above. */}
+          {(probe.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => (
+            <Kv key={s.paths[0]} k={s.paths[0]} v={s.command} mono />
+          ))}
           <Kv k="setup" v={probe.setup_command ? withSource(probe.setup_command, chosenSource(probe.candidates, "setup")) : "none found"} mono muted={!probe.setup_command} />
           {others(probe.candidates) && <Kv k="also found" v={others(probe.candidates)!} mono muted />}
           {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={`${s.dir} is ${s.reason}`} muted />)}

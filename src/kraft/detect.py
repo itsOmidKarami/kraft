@@ -45,6 +45,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -54,7 +55,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from kraft.config import ConfigError, first_error, git_read, read_yaml
+from kraft.config import ConfigError, bounded_yaml, first_error, git_read, read_yaml
 
 #: The packaged table. An operator's file of the same name under the
 #: templates directory layers on top of it, never replaces it wholesale, so a
@@ -70,6 +71,14 @@ SETUP_TIERS: tuple[Tier, ...] = ("runner", "toolchain")
 
 _ID = r"^[a-z][a-z0-9_-]*$"
 _TEXT_LIMIT = 4_000_000
+#: Bytes one probe reads in all, across every file.
+_READ_BUDGET = 64_000_000
+#: YAML nodes and CI script lines one probe walks in all, across every
+#: file, and in any one file. YAML aliases are shared when composed but
+#: walked once per use, so a few hundred bytes of nested aliases would
+#: otherwise walk billions of nodes.
+_YAML_BUDGET = 200_000
+_CI_FILE_BUDGET = 50_000
 
 
 # ── the table ────────────────────────────────────────────────────────────────
@@ -271,7 +280,7 @@ def _git(root: Path, *args: str) -> bytes:
     reason, never an empty answer that reads as an empty repository."""
     try:
         done = subprocess.run(
-            ["git", "--no-optional-locks", *args],
+            ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", *args],
             cwd=root,
             capture_output=True,
             timeout=_LIST_TIMEOUT_S,
@@ -298,13 +307,20 @@ class _Blobs:
         self.root = root
         self._proc: subprocess.Popen | None = None
 
-    def read(self, oid: str) -> bytes:
-        """At most `_TEXT_LIMIT` bytes of a blob, however large it is; empty
-        when git cannot give it (a partial clone's missing blob)."""
+    def read(self, oid: str, limit: int = _TEXT_LIMIT) -> bytes:
+        """At most `limit` bytes of a blob, however large it is; empty when
+        git cannot give it (a partial clone's missing blob)."""
         try:
             if self._proc is None:
                 self._proc = subprocess.Popen(
-                    ["git", "--no-optional-locks", "cat-file", "--batch"],
+                    [
+                        "git",
+                        "--no-optional-locks",
+                        "-c",
+                        "core.fsmonitor=false",
+                        "cat-file",
+                        "--batch",
+                    ],
                     cwd=self.root,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -321,7 +337,7 @@ class _Blobs:
                     self.close()
                 return b""
             size = int(header[2])
-            raw = stdout.read(min(size, _TEXT_LIMIT))
+            raw = stdout.read(min(size, limit)) if limit > 0 else b""
             left = size - len(raw) + 1  # and the newline after it
             while left > 0 and (chunk := stdout.read(min(left, 1 << 20))):
                 left -= len(chunk)
@@ -382,6 +398,13 @@ class _Index:
                 parent = up
         self._text: dict[str, str] = {}
         self.tomls: dict[str, dict] = {}
+        #: Bytes left to read in this probe, across every file: thousands of
+        #: directories each holding a 4 MB file would otherwise be read, and
+        #: kept, whole.
+        self.read_left = _READ_BUDGET
+        #: YAML nodes and CI script lines left in this probe, across every
+        #: file, so a hundred large workflows cost what one may.
+        self.yaml_left = [_YAML_BUDGET]
 
     @property
     def dirs(self) -> set[str]:
@@ -402,20 +425,33 @@ class _Index:
         )
 
     def text(self, rel: str) -> str:
-        """`rel`'s content, at most `_TEXT_LIMIT` bytes of it, as text."""
+        """`rel`'s content, at most `_TEXT_LIMIT` bytes of it, as text, and
+        nothing once the probe has read `_READ_BUDGET` bytes in all."""
         if rel not in self._text:
+            limit = max(0, min(_TEXT_LIMIT, self.read_left))
             if rel in self._blobs:
-                raw = self._reader.read(self._blobs[rel][0])
-            elif rel in self.files:
+                raw = self._reader.read(self._blobs[rel][0], limit)
+            elif rel in self.files and limit:
                 try:
                     with open(self.root / rel, "rb") as f:
-                        raw = f.read(_TEXT_LIMIT)
+                        raw = f.read(limit)
                 except OSError:
                     raw = b""
             else:
                 raw = b""
-            self._text[rel] = raw[:_TEXT_LIMIT].decode("utf-8", "replace")
+            self.read_left -= len(raw)
+            self._text[rel] = raw[:limit].decode("utf-8", "replace")
         return self._text[rel]
+
+    def yaml(self, rel: str, budget: list[int] | None = None) -> object:
+        """`rel` as YAML, bounded by `budget` (a `share` of the probe's):
+        past it, a `ValueError`, and nothing is built."""
+        return bounded_yaml(self.text(rel), budget if budget is not None else self.share())
+
+    def share(self, cap: int = _CI_FILE_BUDGET) -> list[int]:
+        """A budget of at most `cap` for one file, drawn from `yaml_left`,
+        which is charged as it is spent."""
+        return _Share(self.yaml_left, cap)
 
     def close(self) -> None:
         self._reader.close()
@@ -424,6 +460,24 @@ class _Index:
         if rel in self._blobs:
             return self._blobs[rel][1]
         return rel in self.files and os.access(self.root / rel, os.X_OK)
+
+
+class _Share(list):
+    """A one-file budget, `[n]` like the rest, that is also spent from the
+    probe's pool: `share[0]` is the lesser of the two, and spending it
+    spends both."""
+
+    def __init__(self, pool: list[int], cap: int):
+        super().__init__([0])
+        self.pool, self.cap = pool, cap
+
+    def __getitem__(self, i):  # type: ignore[override]
+        return min(self.cap, self.pool[0])
+
+    def __setitem__(self, i, value) -> None:  # type: ignore[override]
+        spent = self[0] - value
+        self.cap -= spent
+        self.pool[0] -= spent
 
 
 def _join(d: str, rel: str) -> str:
@@ -466,10 +520,10 @@ def _contains(index: _Index, d: str, glob: str, pattern: str) -> bool:
 # No pattern here may span lines or nest a quantifier: a committed file is
 # attacker-sized (up to `_TEXT_LIMIT`), and a regex that backtracks over it
 # holds the GIL, freezing the whole server, not just the probe's thread.
-_JUST_RECIPE = re.compile(r"^@?([A-Za-z_][\w-]*)(?:[ \t][^:\n]*)?:(?!=)", re.MULTILINE)
+_JUST_RECIPE = re.compile(r"^@?([A-Za-z_][\w-]*+)(?:[ \t][^:\n]*+)?:(?!=)", re.MULTILINE)
 #: The rule's names, and trailing blanks the reader splits off.
-_MAKE_RULE = re.compile(r"^([^\s:#=][^:#=\n]*)::?(?!=)", re.MULTILINE)
-_RAKE_TASK = re.compile(r"""\btask\s*\(?\s*:?["']?([\w:]+)""")
+_MAKE_RULE = re.compile(r"^([^\s:#=][^:#=\n]*+)::?(?!=)", re.MULTILINE)
+_RAKE_TASK = re.compile(r"""\btask\s*+\(?+\s*+:?+["']?+([\w:]++)""")
 #: `npm init`'s placeholder: a `test` script that only ever fails.
 _NPM_STUB = re.compile(r"no test specified", re.IGNORECASE)
 
@@ -505,7 +559,7 @@ def _jsonc(text: str) -> object:
         else:
             out.append(c)
             i += 1
-    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
+    return json.loads(re.sub(r",(\s*+[}\]])", r"\1", "".join(out)))
 
 
 def _keys(value: object) -> set[str]:
@@ -539,7 +593,7 @@ def _read_taskfile(index: _Index, d: str) -> tuple[str, set[str], str] | None:
     if name is None:
         return None
     try:
-        data = yaml.safe_load(index.text(_join(d, name))) or {}
+        data = index.yaml(_join(d, name)) or {}
     except _UNREADABLE:
         return None
     return name, _keys(data.get("tasks") if isinstance(data, dict) else None), "task"
@@ -807,14 +861,8 @@ _CI_GLOBAL_INSTALL = re.compile(
 )
 
 
-#: How many nodes and script lines one CI file may hold. YAML aliases are
-#: shared when loaded but walked once per use, so a few hundred bytes of
-#: nested aliases would otherwise walk billions of nodes.
-_CI_BUDGET = 50_000
-
-
-class _Overrun(Exception):
-    """A CI file past `_CI_BUDGET`: it is skipped, not read in part."""
+class _Overrun(ValueError):
+    """A CI file past its budget: it is skipped, not read in part."""
 
 
 def _spend(budget: list[int], n: int = 1) -> None:
@@ -921,7 +969,7 @@ def _ci_split(wd: str | None, line: str) -> tuple[list[tuple[str | None, str]], 
 #: `npm --prefix web ci`, `pnpm --dir web test`, `yarn --cwd web test`: a
 #: package manager told which directory to run in.
 _PREFIX = re.compile(
-    r"^(?P<tool>npm|pnpm|yarn)\s+(?P<before>.*?)(?:--prefix|--dir|--cwd|-C)[=\s](?P<dir>\S+)(?P<after>.*)$"
+    r"^(?P<tool>npm|pnpm|yarn)\s++(?P<before>.*?)(?:--prefix|--dir|--cwd|-C)[=\s](?P<dir>\S++)(?P<after>.*)$"
 )
 
 
@@ -942,9 +990,13 @@ def _strip_env(command: str) -> str:
     """`CI=true npm test` -> `npm test`: a test command runs without a shell,
     where a leading assignment is a program name."""
     words = command.split(" ")
-    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):
-        words.pop(0)
-    return " ".join(words)
+    n = 0
+    while n < len(words) and _ASSIGNMENT.fullmatch(words[n]):
+        n += 1
+    return " ".join(words[n:])
+
+
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*+=\S*+")
 
 
 def _ci_candidates(index: _Index) -> list[Candidate]:
@@ -956,9 +1008,10 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
     files.sort(key=lambda rel: bool(_CI_LATE.search(posixpath.basename(rel))))
     for rel in files:
         scripts: list[tuple[str, str, list[str]]] = []
+        budget = index.share()
         try:
-            _ci_walk(yaml.safe_load(index.text(rel)), "", scripts, [_CI_BUDGET])
-        except (*_UNREADABLE, _Overrun):
+            _ci_walk(index.yaml(rel, budget), "", scripts, budget)
+        except _UNREADABLE:
             continue
         lines = []
         for wd, key, block in scripts:
@@ -970,7 +1023,11 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
             if d is None:
                 continue
             command = _strip_env(part.strip())
-            if not command or command.startswith("#") or _shell_syntax(command):
+            # A control or bidi character could show a person one command
+            # in a terminal while argv runs another.
+            if not command or command.startswith("#") or not command.isprintable():
+                continue
+            if _shell_syntax(command):
                 continue
             head = command.split()[0]
             if head in _CI_NOT_COMMANDS or "--version" in command or "--help" in command:
@@ -1028,7 +1085,9 @@ def _devcontainer_candidate(index: _Index) -> Candidate | None:
     except _UNREADABLE:
         return None
     # A container's own provisioning is no worktree's to run.
-    if not parts or any(re.search(r"\b(sudo|apt-get|apt|apk|yum|dnf)\b", p) for p in parts):
+    if not parts or not all(p.isprintable() for p in parts):
+        return None
+    if any(re.search(r"\b(sudo|apt-get|apt|apk|yum|dnf)\b", p) for p in parts):
         return None
     source = f"{rel} {', '.join(f'`{k}`' for k in keys)}"
     return Candidate("", "setup", " && ".join(parts), "devenv", source, rel, "devcontainer")
@@ -1215,8 +1274,8 @@ def _names_dir(text: str, d: str) -> bool:
 #: A line of a task that runs Python's tools as whatever is first on PATH:
 #: `pytest -x`, `python -m coverage`, Taskfile's `- pytest`, mise's `run = "pytest"`.
 _BARE_PYTHON = re.compile(
-    r"""(?:^|&&|;|\|\|)[ \t]*(?:cmd:[ \t]*|run[ \t]*=[ \t]*)?["']?[@-]*[ \t]*"""
-    r"(?:[A-Za-z_]\w*=[^\s;&|]*[ \t]+)*(?:python3?|pytest|py\.test|coverage)(?![\w.-])",
+    r"""(?:^|&&|;|\|\|)[ \t]*+(?:cmd:[ \t]*+|run[ \t]*+=[ \t]*+)?+["']?+[@-]*+[ \t]*+"""
+    r"(?:[A-Za-z_]\w*+=[^\s;&|]*+[ \t]++)*+(?:python3?|pytest|py\.test|coverage)(?![\w.-])",
     re.MULTILINE,
 )
 
@@ -1316,11 +1375,12 @@ def _untested_root(
 def _corroborate(by_dir: dict[str, list[Candidate]], ci: list[Candidate]) -> None:
     """Fold `ci` into `by_dir`. CI running what a runner or toolchain already
     proposes is corroboration, said on that candidate, not a second one."""
+    proposed: dict[tuple[str, str, str], Candidate] = {}
+    for cands in by_dir.values():
+        for o in cands:
+            proposed.setdefault((o.dir, o.role, o.command), o)
     for c in ci:
-        same = next(
-            (o for o in by_dir.get(c.dir, ()) if (o.role, o.command) == (c.role, c.command)),
-            None,
-        )
+        same = proposed.get((c.dir, c.role, c.command))
         if same is not None:
             same.corroborated = True
             if c.marker not in same.source:
@@ -1336,37 +1396,64 @@ _PROBE_MEMORY = 2 << 30
 
 
 def probe(
-    root: Path, templates_dir: Path | None = None, *, test_command: str | None = None
+    root: Path,
+    templates_dir: Path | None = None,
+    *,
+    test_command: str | None = None,
+    timeout: float | None = None,
 ) -> Proposal:
-    """`propose`, in a child process with a wall-clock limit. What it reads
-    is the repository's, whoever committed it: a file that sends a regex or
-    a parser into the weeds holds the GIL, which no thread can time out, and
-    would freeze the whole server and every connect queued behind it. A
-    child that runs too long is killed, and one that fails for any reason
-    is a `ConfigError` naming why, which every caller already answers."""
+    """`propose`, in a child process with a wall-clock limit (`timeout`,
+    else `_PROBE_TIMEOUT_S`). What it reads is the repository's, whoever
+    committed it: a file that sends a regex or a parser into the weeds holds
+    the GIL, which no thread can time out, and would freeze the whole server
+    and every connect queued behind it. A child that runs too long is
+    killed, and one that fails for any reason is a `ConfigError` naming why,
+    which every caller already answers.
+
+    The child is given no more than it needs: `-P` keeps the working
+    directory off its import path (a `fnmatch.py` there would run), it runs
+    from `/`, its environment is `_CHILD_ENV` and not the server's secrets,
+    and what it writes is capped at `_PROBE_OUTPUT`."""
+    limit = _PROBE_TIMEOUT_S if timeout is None else timeout
     request = {"root": str(root), "templates_dir": templates_dir, "test_command": test_command}
-    here = str(Path(__file__).resolve().parents[1])
-    path = os.pathsep.join(p for p in (here, os.environ.get("PYTHONPATH")) if p)
-    try:
-        done = subprocess.run(
-            [sys.executable, "-c", "from kraft.detect import _child; _child()"],
-            input=json.dumps(request, default=str),
-            capture_output=True,
-            text=True,
-            timeout=_PROBE_TIMEOUT_S,
-            env={**os.environ, "PYTHONPATH": path},
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ConfigError(
-            f"probing {root} took more than {_PROBE_TIMEOUT_S}s; "
-            "connect it with --test-command and --setup-command instead"
-        ) from exc
+    env = {k: v for k, v in os.environ.items() if k in _CHILD_ENV}
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            done = subprocess.run(
+                [sys.executable, "-P", "-c", "from kraft.detect import _child; _child()"],
+                input=json.dumps(request, default=str).encode(),
+                stdout=out,
+                stderr=err,
+                timeout=limit,
+                env=env,
+                cwd=os.sep,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ConfigError(
+                f"probing {root} took more than {limit:g}s; "
+                "connect it with --test-command and --setup-command instead"
+            ) from exc
+        out.seek(0)
+        raw = out.read(_PROBE_OUTPUT + 1)
+        err.seek(0)
+        said = err.read(64_000).decode("utf-8", "replace")
     if done.returncode != 0:
-        lines = done.stderr.strip().splitlines()
+        lines = said.strip().splitlines()
         why = lines[-1] if lines else f"exit {done.returncode}"
         raise ConfigError(why if done.returncode == 2 else f"probing {root} failed: {why}")
-    return Proposal(**json.loads(done.stdout))
+    if len(raw) > _PROBE_OUTPUT:
+        raise ConfigError(f"probing {root} answered more than {_PROBE_OUTPUT} bytes")
+    return Proposal(**json.loads(raw))
+
+
+#: What the probe's process inherits of the server's environment: git and
+#: Python need these, and nothing else of the server's (its API keys, its
+#: tokens) is any business of a process reading someone's repository.
+_CHILD_ENV = frozenset({"PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "SYSTEMROOT"})
+#: The most the probe's process may write, its answer included.
+_PROBE_OUTPUT = 64 << 20
 
 
 def _child() -> None:
@@ -1375,6 +1462,7 @@ def _child() -> None:
     try:
         import resource
 
+        resource.setrlimit(resource.RLIMIT_FSIZE, (_PROBE_OUTPUT + 1, _PROBE_OUTPUT + 1))
         resource.setrlimit(resource.RLIMIT_AS, (_PROBE_MEMORY, _PROBE_MEMORY))
     except (ImportError, ValueError, OSError):
         pass  # no such limit here (Windows; macOS refuses RLIMIT_AS)
