@@ -131,6 +131,11 @@ describe("FinishDialog", () => {
     expect(body()).toEqual({ outcome: "request_changes" });
   });
 
+  it("names each thread's lines as its composer does: the whole range, across sides too", () => {
+    routed(<Finish threads={[th({ start_line: 3, end_line: 5 }), th({ id: "t2", start_side: "old", start_line: 2, end_line: 2, comments: [c({ id: "c2" })] }), th({ id: "t3", side: null, start_line: null, end_line: null, comments: [c({ id: "c3" })] })]} />);
+    expect([...screen.getByRole("list", { name: "To send" }).querySelectorAll(".rv-mono")].map((e) => e.textContent)).toEqual(["a.py · lines +3 to +5", "a.py · lines −2 to +2", "a.py"]);
+  });
+
   it("counts your draft replies as things to send", () => {
     routed(<Finish threads={[th({ draft: false, comments: [c({ draft: false, review_id: "r" }), c({ id: "c2", body: "and the TTL?" })] })]} />);
     expect(screen.getByRole("list", { name: "To send" })).toHaveTextContent("and the TTL?");

@@ -1,8 +1,10 @@
 """`kraft item`'s own parser: what `kraft item --help` and `kraft item create
---help` say, where a reviewer could not tell what a verb or argument was, and
-what `create`'s flags default to."""
+--help` say, where a reviewer could not tell what a verb or argument was, what
+`create`'s flags default to, and what `kraft item create` prints."""
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -78,6 +80,27 @@ def test_abandon_refusal_still_works_when_the_item_cannot_be_read(monkeypatch, c
     with pytest.raises(SystemExit):
         cli.main(["item", "abandon", "w1"])
     assert "To keep them, cancel the item instead." in capsys.readouterr().err
+
+
+def test_create_autostart_at_the_slot_limit_says_why_it_was_filed_paused(
+    tmp_path, monkeypatch, capsys
+):
+    """The board's composer says so; the CLI dropped the server's `slots`,
+    and printed `status paused` with no reason."""
+    from kraft.client import transport
+
+    async def post(path, payload=None, **kw):
+        assert payload["autostart"] is True
+        return 201, {"id": "w1", "status": "paused", "slots": {"busy": 3, "limit": 3}}
+
+    monkeypatch.setattr(transport, "_post", post)
+    cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart"])
+    out = capsys.readouterr().out
+    assert (
+        "filed paused: 3 of 3 slots are busy. Start it when one frees: kraft item resume w1" in out
+    )
+    cli.main(["item", "create", "t", "--repo", str(tmp_path), "--autostart", "--json"])
+    assert json.loads(capsys.readouterr().out)["slots"] == {"busy": 3, "limit": 3}
 
 
 @pytest.mark.parametrize(

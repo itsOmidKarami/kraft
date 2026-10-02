@@ -7,7 +7,7 @@ import * as http from "../http";
 import { useStore } from "../../store";
 import { Shell } from "../shell/Shell";
 import * as d from "./draft/draftApi";
-import { fieldsFrom, type Probe } from "./repos/ConnectForm";
+import { fieldsFrom, gainsFrom, type Probe } from "./repos/ConnectForm";
 import { DETECTED, problemAt, repo, REPOS, reposView } from "./repos/fixture";
 import { ReposPage } from "./ReposPage";
 
@@ -169,8 +169,9 @@ describe("Repos page: connecting", () => {
     expect(found).toHaveTextContent("the root is a project (Gemfile) with no test command found");
     expect(found).toHaveTextContent("uv sync found, but web/ has nothing to prepare it");
     expect(found).toHaveTextContent("origin/main, where work items start");
-    // Stopped, not missing: the form says which.
-    expect(found).toHaveTextContent("Tests stopped: connected disabled");
+    // None proposed, not none found: the form says which, without the detector's word "stopped".
+    expect(found).toHaveTextContent("No test command proposed: connects disabled until you set a test command in Templates › Repos.");
+    expect(found).not.toHaveTextContent(/stopped/i);
   });
 
   it("says a repo with no tests connects disabled, as add_repo sends it, though the probe answers an empty scope list", async () => {
@@ -180,10 +181,45 @@ describe("Repos page: connecting", () => {
     await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
     await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
-    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connected disabled until you set a test command.");
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connects disabled until you set a test command in Templates › Repos.");
     await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalled());
     expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });
+  });
+
+  it("checks a connected repo again and offers to save what its entry leaves undecided", async () => {
+    // "Commit one (uv lock) and connect again" led to "already in the list", and nothing changed.
+    const pyproj = repo("pyproj", { test_command: null, setup_command: null, enabled: false });
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos: [...REPOS, pyproj], detected: DETECTED } as never })));
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe"
+      ? ok(probe({ path: "/src/pyproj", test_command: "uv run pytest", setup_command: "uv sync" }))
+      : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/pyproj");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("Already connected: Update saves its test command and setup command, and enables it.");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(d.postOps).toHaveBeenCalled());
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/pyproj", patch: { test_command: "uv run pytest", setup_command: "uv sync", enabled: true } }]);
+  });
+
+  it("leaves what a connected repo already has as it is", () => {
+    expect(gainsFrom({ test_command: "make test", setup_command: "", enabled: false }, probe())).toEqual({});
+    expect(gainsFrom({ test_command: "make test" }, probe())).toEqual({ setup_command: "uv sync" });
+  });
+
+  it("says a repo with no commit cannot be connected yet, and sends nothing", async () => {
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ read_from: null })) : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("the repo has no commit yet, and a work item's branch starts from one");
+    expect(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" })).toBeDisabled();
+    expect(d.postOps).not.toHaveBeenCalled();
   });
 
   it("shows a probe's refusal inline and sends nothing", async () => {

@@ -6,9 +6,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CompareFile } from "../../types";
-import { DiffView, pickRange, type DiffViewProps, type Pick } from "./DiffView";
+import { DiffView, pickRange, rangeOfPick, type DiffViewProps, type Pick } from "./DiffView";
 import { parsePatch } from "./patch";
 import { DEFAULT_PREFS, type DiffPrefs } from "./prefs";
+import { lineIndex } from "./range";
 import { anchorsOf, buildRows, spans } from "./rows";
 
 const PATCH = `diff --git a/search/cache.py b/search/cache.py
@@ -184,7 +185,7 @@ describe("DiffView", () => {
   it("+ in the gutter comments on its own line, and is not drawn on an ended item", () => {
     const onCompose = vi.fn();
     const { unmount } = render(<View onCompose={onCompose} />);
-    fireEvent.click(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line 6" }));
+    fireEvent.click(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line +6" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 6, head: 6 });
     expect(row(/self.max_items = max_items/)).toHaveClass("is-picked");
     unmount();
@@ -195,7 +196,7 @@ describe("DiffView", () => {
   it("a drag from + sweeps a range, a frame at a time, and opens the composer on it when released", async () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
-    fireEvent.mouseDown(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line 5" }));
+    fireEvent.mouseDown(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line +5" }));
     // Over the removed line: it has no new side, so the pick stays put.
     fireEvent.mouseOver(row(/max_items=None/).querySelector(".rv-code")!);
     fireEvent.mouseOver(row(/self._store/).querySelector(".rv-code")!);
@@ -218,7 +219,7 @@ describe("DiffView", () => {
     expect(row(/max_items=50_000/)).toHaveClass("is-picked");
     expect(row(/self._store/)).toHaveClass("is-picked");
     expect(row(/def get/)).not.toHaveClass("is-picked");
-    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on lines 5–7" });
+    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on lines +5 to +7" });
     fireEvent.mouseDown(plus);
     fireEvent.mouseUp(plus);
     fireEvent.click(plus);
@@ -229,7 +230,7 @@ describe("DiffView", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
     fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Pick new line 5" }));
-    const plus = within(row(/def get/)).getByRole("button", { name: "Comment on line 8" });
+    const plus = within(row(/def get/)).getByRole("button", { name: "Comment on line +8" });
     fireEvent.mouseDown(plus, { shiftKey: true });
     fireEvent.mouseUp(plus, { shiftKey: true });
     fireEvent.click(plus, { shiftKey: true });
@@ -241,16 +242,16 @@ describe("DiffView", () => {
     const { unmount } = render(<View onCompose={onCompose} />);
     const ctx = row(/class EmbeddingCache:$/);
     fireEvent.click(within(ctx).getByRole("button", { name: "Pick old line 4" }));
-    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on old line 4" }));
+    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on line −4" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 4, head: 4 });
     fireEvent.click(within(ctx).getByRole("button", { name: "Pick new line 4" }));
-    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on line 4" }));
+    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on line +4" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 4, head: 4 });
     unmount();
     render(<View onCompose={onCompose} prefs={{ layout: "split" }} />);
-    fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Comment on old line 5" }));
+    fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Comment on line −5" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 5, head: 5 });
-    fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line 5" }));
+    fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line +5" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 5, head: 5 });
   });
 
@@ -259,7 +260,7 @@ describe("DiffView", () => {
     render(<View onCompose={onCompose} />);
     fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Pick new line 5" }));
     fireEvent.click(within(row(/def get/)).getByRole("button", { name: "Pick new line 8" }), { shiftKey: true });
-    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on lines 5–8" }));
+    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on lines +5 to +8" }));
     fireEvent.mouseOver(row(/def get/));
     fireEvent.mouseUp(window);
     expect(onCompose).toHaveBeenCalledExactlyOnceWith({ path: "search/cache.py", side: "new", anchor: 7, head: 8 });
@@ -269,7 +270,7 @@ describe("DiffView", () => {
   it("a release back on the row it started on, off the +, is a click on its +", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
-    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on line 7" }));
+    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on line +7" }));
     fireEvent.mouseOver(row(/def get/));
     fireEvent.mouseOver(row(/self._store/));
     fireEvent.mouseUp(row(/self._store/).querySelector(".rv-code")!);
@@ -291,7 +292,7 @@ describe("DiffView", () => {
 `);
     const onCompose = vi.fn();
     render(<View files={[{ path: "a.py", insertions: 2, deletions: 2, touched_by: [], viewed: false }]} patch={new Map(two.map((f) => [f.path, f]))} onCompose={onCompose} />);
-    fireEvent.mouseDown(within(row(/^a$/)).getByRole("button", { name: "Comment on line 1" }));
+    fireEvent.mouseDown(within(row(/^a$/)).getByRole("button", { name: "Comment on line +1" }));
     fireEvent.mouseOver(row(/^B$/));
     fireEvent.mouseOver(row(/^y$/));
     fireEvent.mouseOver(row(/^Z$/));
@@ -309,11 +310,68 @@ describe("DiffView", () => {
     expect(tabbable()).toEqual([]);
     lines.focus();
     await userEvent.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
-    expect(tabbable().map((b) => b.getAttribute("aria-label"))).toEqual(["Comment on line 5"]);
+    expect(tabbable().map((b) => b.getAttribute("aria-label"))).toEqual(["Comment on line +5"]);
     await userEvent.tab();
-    expect(screen.getByRole("button", { name: "Comment on line 5" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Comment on line +5" })).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     expect(onCompose).toHaveBeenCalledExactlyOnceWith({ path: "search/cache.py", side: "new", anchor: 5, head: 5 });
+  });
+
+  it("a drag from + on a removed line down to its replacement picks across sides, shaded as it goes", async () => {
+    for (const layout of ["unified", "split"] as const) {
+      const onCompose = vi.fn();
+      const { unmount } = render(<View onCompose={onCompose} prefs={{ layout }} />);
+      fireEvent.mouseDown(within(row(/max_items=None/)).getByRole("button", { name: "Comment on line −5" }));
+      fireEvent.mouseOver(row(/max_items=50_000/).querySelector(".rv-code")!);
+      await frame();
+      expect(row(/max_items=None/)).toHaveClass("is-picked");
+      expect(row(/max_items=50_000/)).toHaveClass("is-picked");
+      expect(document.querySelectorAll(".is-picked")).toHaveLength(2);
+      fireEvent.mouseUp(window);
+      expect(onCompose).toHaveBeenCalledExactlyOnceWith({ path: "search/cache.py", anchorSide: "old", anchor: 5, side: "new", head: 5 });
+      unmount();
+    }
+  });
+
+  it("Shift-click on a line the other side only has extends the pick across sides; a context line past added ones ends it on the new side", () => {
+    const onCompose = vi.fn();
+    render(<View onCompose={onCompose} />);
+    fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Pick old line 5" }));
+    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line +6" });
+    fireEvent.mouseDown(plus, { shiftKey: true });
+    fireEvent.mouseUp(plus, { shiftKey: true });
+    fireEvent.click(plus, { shiftKey: true });
+    expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", anchorSide: "old", anchor: 5, side: "new", head: 6 });
+    expect([/max_items=None/, /max_items=50_000/, /self.max_items = max_items/].map((r) => row(r).classList.contains("is-picked"))).toEqual([true, true, true]);
+    expect(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on lines −5 to +6" })).toBeInTheDocument();
+    // The context line after them is old 6 and new 7: on the old side the range would drop the added lines.
+    fireEvent.click(within(row(/self._store/)).getByRole("button", { name: "Pick old line 6" }), { shiftKey: true });
+    fireEvent.keyDown(screen.getByRole("group", { name: /^Lines of search/ }), { key: "Enter" });
+    expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", anchorSide: "old", anchor: 5, side: "new", head: 7 });
+  });
+
+  it("in split, Shift-click on the right half of a removed line's row picks it and its replacement", () => {
+    const onCompose = vi.fn();
+    render(<View onCompose={onCompose} prefs={{ layout: "split" }} />);
+    fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Pick old line 5" }));
+    fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Pick new line 5" }), { shiftKey: true });
+    fireEvent.keyDown(screen.getByRole("group", { name: /^Lines of search/ }), { key: "Enter" });
+    expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", anchorSide: "old", anchor: 5, side: "new", head: 5 });
+  });
+
+  it("orders a pick across sides by the diff, whichever end it started from", () => {
+    const pf = parsePatch(PATCH)[0];
+    const ix = lineIndex(pf);
+    expect(rangeOfPick({ path: "p", anchorSide: "new", anchor: 6, side: "old", head: 5 }, ix)).toEqual({ startSide: "old", start: 5, side: "new", end: 6 });
+    expect(rangeOfPick({ path: "p", side: "new", anchor: 7, head: 5 }, ix)).toEqual({ side: "new", start: 5, end: 7 });
+  });
+
+  it("shades the lines of the open threads' ranges, across sides too, in both layouts", () => {
+    for (const layout of ["unified", "split"] as const) {
+      const { unmount } = render(<View prefs={{ layout }} commented={(path) => (path === "search/cache.py" ? [{ startSide: "old", start: 5, side: "new", end: 5 }] : [])} />);
+      expect([...document.querySelectorAll(".is-commented")].map((e) => e.querySelector(".rv-code")!.textContent)).toEqual(["    def __init__(self, max_items=None):", "    def __init__(self, max_items=50_000):"]);
+      unmount();
+    }
   });
 
   it("collapses to the header, with the open thread count", () => {

@@ -158,3 +158,97 @@ def test_post_triggers_requires_auth(client, repo, monkeypatch):
     monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
     r = client.post("/api/triggers", json={"repo": str(repo), "title": "t"})
     assert r.status_code == 401
+
+
+class _Clock:
+    """The auth routes' `time` module with `monotonic` moved by hand; every
+    other name (`time.time`, ...) is the real module's."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@pytest.fixture
+def login_clock(client, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(routes_auth, "time", clock)
+    return clock
+
+
+def _fail_logins(client, n=routes_auth.LOGIN_MAX_FAILURES):
+    for _ in range(n):
+        assert client.post("/api/login", json={"password": "wrong"}).status_code == 401
+
+
+@pytest.mark.api_client(peer=("10.0.0.5", 54321))
+def test_a_lockout_ends_once_the_window_has_passed(client, monkeypatch, login_clock):
+    _set_password(client, monkeypatch)
+    _fail_logins(client)
+    login_clock.now += routes_auth.LOGIN_WINDOW_S - 1
+    resp = client.post("/api/login", json={"password": "hunter2"})
+    assert resp.status_code == 429
+    assert resp.headers["retry-after"] == "1"
+    login_clock.now += 1
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+
+
+@pytest.mark.api_client(peer=("10.0.0.5", 54321))
+def test_failures_older_than_the_window_do_not_count_toward_a_lockout(
+    client, monkeypatch, login_clock
+):
+    _set_password(client, monkeypatch)
+    _fail_logins(client, routes_auth.LOGIN_MAX_FAILURES - 1)
+    login_clock.now += routes_auth.LOGIN_WINDOW_S
+    _fail_logins(client, 1)
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+
+
+@pytest.mark.api_client(peer=("10.0.0.5", 54321))
+def test_one_addresss_failures_do_not_lock_out_another(client, monkeypatch):
+    """Keyed per peer address, so a stranger guessing at the password cannot
+    lock the owner out from their own machine."""
+    _set_password(client, monkeypatch)
+    _fail_logins(client)
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 429
+    # Starlette's test transport holds the peer address the app sees.
+    monkeypatch.setattr(client._transport, "client", ("10.0.0.6", 54321))
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+
+
+@pytest.mark.api_client(peer=("10.0.0.5", 54321))
+def test_logout_revokes_the_session_and_clears_its_cookie(client, monkeypatch):
+    _set_password(client, monkeypatch)
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+    token = client.cookies[auth_mod.COOKIE]
+    assert client.get("/api/work-items").status_code == 200
+
+    resp = client.post("/api/logout")
+
+    assert resp.status_code == 204
+    cleared = resp.headers["set-cookie"]
+    assert cleared.startswith(f'{auth_mod.COOKIE}=""') and "Max-Age=0" in cleared
+    assert auth_mod.COOKIE not in client.cookies
+    # The token is dead server-side, not only forgotten by this browser.
+    client.cookies.set(auth_mod.COOKIE, token)
+    assert client.get("/api/work-items").status_code == 401
+
+
+def test_logout_without_a_session_cookie_revokes_nothing(client):
+    """A loopback caller needs no session, so it can reach logout holding
+    none; nothing is revoked and other devices stay signed in."""
+
+    def phone(c):
+        auth_mod.create_session(c, "a-phone", label="phone", ip="10.0.0.9", expiry_days=1)
+
+    client.portal.call(client.app.state.db.write, phone)
+
+    assert client.post("/api/logout").status_code == 204
+
+    sessions = client.get("/api/sessions").json()["sessions"]
+    assert [s["label"] for s in sessions] == ["phone"]

@@ -14,7 +14,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -309,8 +309,12 @@ CREATE TABLE review_threads (
   node_id      TEXT,
   file_path    TEXT,
   side         TEXT CHECK (side IN ('old', 'new')),
+  -- start_side: `start_line`'s, when not `side` (a range across sides). NULL: `side`
+  start_side   TEXT CHECK (start_side IN ('old', 'new')),
   start_line   INTEGER,
   end_line     INTEGER,
+  -- quote: the range's lines as the diff showed them, each led by its diff mark
+  quote        TEXT,
   anchor_sha   TEXT NOT NULL,
   label        TEXT CHECK (label IN ('must_fix', 'question', 'nit')),
   state        TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'claimed', 'resolved')),
@@ -1097,6 +1101,13 @@ FROM worker_sessions""",
   -- [{bead, reason}]
   skipped TEXT NOT NULL DEFAULT '[]'
 )"""
+    ],
+    # Review comments across sides, and the lines they quote. Additive: an older
+    # thread reads as one on a single side, with nothing quoted.
+    50: [
+        "ALTER TABLE review_threads ADD COLUMN start_side TEXT "
+        "CHECK (start_side IN ('old', 'new'))",
+        "ALTER TABLE review_threads ADD COLUMN quote TEXT",
     ],
 }
 

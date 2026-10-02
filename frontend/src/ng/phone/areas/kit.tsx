@@ -2,7 +2,8 @@ import { ChevronRight, Pencil, Plus, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { showToast } from "../../ui/Toast";
-import { ChoiceSheet, EditSheet, useSheet, type Option } from "../nav/Sheet";
+import { notListed, unlisted } from "../../ui/Combobox";
+import { ChoiceSheet, EditSheet, useSheet, type Listed, type Option } from "../nav/Sheet";
 import "./areas.css";
 
 /** One row of an area (the prototype's row): a label with a sub line, a value, and what a tap does. */
@@ -95,7 +96,7 @@ export function Group({ title, add, note, rows, foot, children }: { title?: stri
 export type Edit =
   | { kind: "menu"; title: string; help?: string; options: Option[]; pick: (v: string) => Edit | Promise<string | null> }
   | { kind: "choice"; title: string; help?: string; options: Option[]; value: string | null; set: (v: string) => Promise<string | null> }
-  | { kind: "text"; title: string; help?: string; value: string; placeholder?: string; secret?: boolean; multiline?: boolean; submit?: string; set: (v: string) => Promise<string | null> };
+  | { kind: "text"; title: string; help?: string; value: string; placeholder?: string; secret?: boolean; multiline?: boolean; submit?: string; set: (v: string) => Promise<string | null>; listed?: Listed };
 
 /** The one edit sheet of an area: `edit(spec)` opens it, a refusal stays inside it, a taken value closes it. */
 export function useEditor() {
@@ -110,6 +111,9 @@ export function useEditor() {
   }, [sheet]);
   const submit = async (v: string) => {
     if (!spec || spec.kind === "menu") return;
+    const l = spec.kind === "text" ? spec.listed : undefined;
+    const stray = l?.closed && l.choices.length ? notListed(unlisted(v, l.choices, l.multiple), l.noun) : null;
+    if (stray) return setError(stray);
     setBusy(true);
     setError(null);
     const err = await spec.set(v);
@@ -139,7 +143,7 @@ export function useEditor() {
       ) : spec.kind === "choice" ? (
         <ChoiceSheet title={spec.title} text={spec.help} options={spec.options} value={spec.value} onPick={(v) => void submit(v)} onClose={sheet.close} />
       ) : (
-        <EditSheet title={spec.title} text={spec.help} initial={spec.value} placeholder={spec.placeholder} secret={spec.secret} multiline={spec.multiline} submitLabel={spec.submit ?? "Set"} error={error} busy={busy} onSubmit={(v) => void submit(v)} onClose={sheet.close} />
+        <EditSheet title={spec.title} text={spec.help} initial={spec.value} placeholder={spec.placeholder} secret={spec.secret} multiline={spec.multiline} listed={spec.listed?.choices.length ? spec.listed : undefined} submitLabel={spec.submit ?? "Set"} error={error} busy={busy} onSubmit={(v) => void submit(v)} onClose={sheet.close} />
       )
     ) : null;
   return { edit, node, sheet };

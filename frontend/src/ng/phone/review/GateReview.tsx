@@ -32,7 +32,7 @@ export function GateReviewRoute() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
   const loaded = useItem(id);
-  const events = useEvents(id, loaded.state === "ready" ? loaded.item.updated_at : "");
+  const events = useEvents(id, loaded.state === "ready" ? loaded.version : "");
   if (params.get("doc")) return <Doc id={params.get("doc")!} />;
   if (loaded.state === "loading")
     return (

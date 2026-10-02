@@ -14,14 +14,27 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   scratch. Unit tests cover every combination the code branches on, and are
   fast and deterministic. `tests/conftest.py`'s `fake_beads` autouse fixture
   installs the in-memory `FakeBeads` for every test and refuses a real `bd`
-  reached through `kraft.adapters.beads`; the `_no_real_agent_binary`
-  autouse fixture does the same for a real agent binary. Both fail loudly
-  rather than swallow the mistake.
+  reached through `kraft.adapters.beads`. The `_no_real_agent_binary`
+  autouse fixture (`tests/support/real_binaries.py`) does the same for every
+  agent CLI and for `gh`/`glab`, by whatever road: it puts a refusing stub for
+  each name first on `PATH`, so `subprocess`, `asyncio`, `os.system`,
+  `sh -c "claude ..."`, `env claude` and a `python -m kraft` child all reach
+  the stub; it checks `subprocess.Popen` for an installed real binary reached
+  by its path; and `run_task` refuses one by name in the test itself. A
+  server child (`support.server.child_env`) gets the same stubs, plus a stub
+  `bd`. Every one of them fails the test, at the call or at teardown, rather
+  than swallow the mistake: Kraft degrades on a failed CLI, so a refusal it
+  turned into a warning still counts. A test marked `e2e("<cli>")` gets that
+  CLI back; `@pytest.mark.real_executor` turns the agent guard off, for a
+  test that drives the real executor on purpose. A test that proves the
+  guard fires takes `real_binary_guard` and calls `.take()` on what it
+  refused.
 - **E2E (`@pytest.mark.e2e("<cli>")`).** A real CLI, used only to prove the
   contract Kraft assumes: args, subcommands and output shape. Keep it small:
   one or two tests per contract, never behaviour sweeps. If the binary is
-  missing the test skips and names the binary; CI sets `KRAFT_E2E_REQUIRE`
-  so that skip becomes a failure. Every `e2e` marker must name at least one
+  missing the test skips and names the binary; CI's e2e job sets
+  `KRAFT_E2E_REQUIRE=bd,docker,podman`, so for those three that skip
+  becomes a failure. Every `e2e` marker must name at least one
   CLI (`pytest_collection_modifyitems` in `tests/conftest.py` raises
   `UsageError` if it doesn't) — `dev/check_tests.py` catches the same defect
   statically, before collection. A test naming a real agent (`claude`)
@@ -191,7 +204,11 @@ per line with the reason after it:
 
 A renamed test counts as removed plus added, so list its old id. A deleted
 file may be listed by its path; a file that only loses some tests may not.
-The failure prints the missing block ready to paste. Edit the body, then
+A parametrize case the PR drops counts as a removal too
+(`tests/test_x.py::test_y[refused]`, with ids read off the source where it
+spells them out), and so does a test it newly marks `@pytest.mark.skip`,
+listed by its own id; a test removed whole is declared by its id, cases and
+all. The heading may end in a colon. The failure prints the missing block ready to paste. Edit the body, then
 re-run the job: it reads the body fresh, not from the push that triggered
 it. This exists because a PR once silently reverted two merged PRs with CI
 green — their tests left with them (Kraft-79382).
@@ -204,6 +221,19 @@ parametrizing a pinned test means repointing it in the same change. Run
 
 - `just test <paths>` (testmon), never raw pytest. `just test-ui` for the
   frontend.
+- Testmon follows Python execution only, so it cannot see a change to a
+  file a test reads or runs as a subprocess: a harness YAML, a skill's
+  `.md`, `fixtures/fake-claude.sh`, `tests/support/` (the sample repo, the
+  fake agents), `templates/`, `docs/intent/`. When one of those differs from
+  the merge base with `origin/main` (committed on the branch or not),
+  `just test <paths>` names the files and runs the paths with `--no-testmon`;
+  a bare `just test` only warns, since its fallback would be the whole suite.
+  `src/kraft/_bundled` is built from `templates/` and `plugins/kraft/skills`,
+  which are watched in its place. Environment variables are the same blind
+  spot and are not watched.
+- `just test <paths>` fails when nothing ran: a path that collects nothing,
+  and a run testmon (or `-k`/`-m`) deselected to `0 selected`. Pass
+  `--no-testmon` to run the paths regardless.
 - The full suite runs in CI, so push and read CI rather than running it
   locally. CI runs the unit tier on every supported Python (3.12, 3.13, 3.14);
   `just test-py 3.12` reproduces one version's failure locally, in its own
@@ -217,20 +247,30 @@ parametrizing a pinned test means repointing it in the same change. Run
   hung, and the `Timeout` stack dump above says where. Its teardown never
   runs, so what it started outside the process stays. The sandbox e2e
   fixture (`tests/worker/test_egress_docker.py`) removes the relays, volume
-  and worker a killed run left at the next run.
+  and worker a killed run left at the next run. So a test's own wait must
+  end well inside that timeout, or the test must raise its own with
+  `@pytest.mark.timeout(N)`: a wait the timeout cuts short never gets to
+  fail with its own message.
 
 ## Enforced mechanically
 
 `dev/check_tests.py`, run in CI's `lint` job, next to
 `dev/check_docs_coverage.py`. It checks what can be checked statically —
 not "did you prove a mutation," which needs a human or an agent, but the
-shape rules that don't:
+shape rules that don't — over both testpaths, `tests/` and
+`plugins/kraft-lite/tests/`:
 
 - **(a)** every `pytest.mark.e2e` names at least one CLI.
-- **(b)** no test file outside the e2e tier calls a real `bd`/`claude`/
-  `gh`/`glab` binary via `subprocess`. This is a static belt-and-braces
-  check; the runtime guard (`tests/conftest.py`'s autouse fixtures) is what
-  actually stops it at test time.
+- **(b)** no test file outside the e2e tier launches a real `bd`, agent CLI
+  or `gh`/`glab`: an argv list (positional or `args=`), a shell string, a
+  `sh -c` or `env` wrapper, a variable or helper bound to such an argv,
+  `asyncio.create_subprocess_exec`/`_shell`, `os.system`/`exec*`, and
+  `run_git(repo, [...])`. Module-level code counts too. A file whose hits are
+  on purpose (`tests/test_no_real_agent.py`, which probes the runtime guard)
+  is in `REAL_CLI_ALLOWLIST` with its reason, and an entry that no longer
+  has a hit fails the check. This is a static belt-and-braces check; the
+  runtime guard (`tests/conftest.py`'s autouse fixtures) is what actually
+  stops it at test time.
 - **(c)** a per-file line budget for `tests/**`, with an explicit allowlist
   (`LINE_BUDGET_ALLOWLIST`, a dict at the top of `dev/check_tests.py` —
   there is no separate allowlist file) naming today's over-budget files and
@@ -241,7 +281,11 @@ shape rules that don't:
   margin above the file's real size, fails the check until it's tightened
   or removed.
 - **(d)** every `def test_` has an assert, a `pytest.raises`/`pytest.warns`,
-  or delegates to a same-module helper that does. A handful of tests where
+  or delegates to a same-module helper that does. One that cannot fail does
+  not count: `assert True` (or `x or True`, or a tuple), a bare
+  `pytest.raises(Exception)` with no `match=`, an assert under
+  `if False:`, or one only inside a nested function nothing calls or passes
+  on. A handful of tests where
   "did not raise" is genuinely the only honest assertion are named in
   `EXPECTATION_ALLOWLIST` (same file), each with an inline reason; an entry
   for a test id that no longer exists fails the check.

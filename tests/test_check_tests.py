@@ -105,6 +105,94 @@ class TestNoRealCliOutsideE2e:
         assert len(violations) == 1
         assert "bd" in violations[0]
 
+    @pytest.mark.parametrize(
+        ("flagged", "clean"),
+        [
+            (
+                'subprocess.run(args=["claude", "-p"])',
+                'subprocess.run(args=["git", "status"])',
+            ),
+            (
+                'subprocess.run("claude -p hi", shell=True)',
+                'subprocess.run("git log && echo claude", shell=True)',
+            ),
+            (
+                'subprocess.run(["sh", "-c", "cd x && codex exec"])',
+                'subprocess.run(["sh", "-c", "echo codex > out"])',
+            ),
+            (
+                'subprocess.run(["/usr/bin/env", "FOO=1", "gemini"])',
+                'subprocess.run(["/usr/bin/env", "python3", "gemini.py"])',
+            ),
+            (
+                'cmd = ["opencode", "run"]\n    subprocess.run(cmd)',
+                'cmd = ["git", "log"]\n    subprocess.run(cmd)',
+            ),
+            (
+                'def _argv():\n        return ["amp", "-x"]\n    subprocess.Popen(_argv())',
+                'def _argv():\n        return ["git", "-x"]\n    subprocess.Popen(_argv())',
+            ),
+            (
+                'asyncio.create_subprocess_exec("agy", "--version")',
+                'asyncio.create_subprocess_exec("git", "agy")',
+            ),
+            (
+                'asyncio.create_subprocess_exec(*["cursor-agent", "-p"])',
+                'asyncio.create_subprocess_exec(*["git", "cursor-agent"])',
+            ),
+            ('os.system("glab mr list 2>/dev/null")', 'os.system("git log > glab")'),
+            ('forge.run_git(repo, ["gh", "pr", "view"])', 'forge.run_git(repo, ["git", "log"])'),
+        ],
+        ids=[
+            "args-keyword",
+            "shell-string",
+            "sh-c",
+            "env-wrapper",
+            "variable-argv",
+            "helper-return",
+            "create-subprocess-exec",
+            "starred-exec",
+            "os-system",
+            "run-git",
+        ],
+    )
+    def test_an_evasion_shape_is_flagged_and_its_lookalike_is_not(self, ct, flagged, clean):
+        """Each road to a guarded CLI the checker once let through, beside the
+        same call aimed at `git` or naming the CLI only as an argument."""
+        for body, expected in ((flagged, 1), (clean, 0)):
+            tree = _tree(f"def test_x(repo):\n    {body}\n")
+            violations = ct.check_no_real_cli_outside_e2e(tree, "test_bad.py")
+            assert len(violations) == expected, (body, violations)
+
+    @pytest.mark.parametrize("binary", sorted({"bd", "codex", "gemini", "opencode", "amp"}))
+    def test_every_guarded_cli_is_named(self, ct, binary):
+        tree = _tree(f'def test_x():\n    subprocess.run(["{binary}", "x"])\n')
+        assert len(ct.check_no_real_cli_outside_e2e(tree, "test_bad.py")) == 1
+
+    def test_the_names_match_the_runtime_guard(self, ct):
+        """The static list and the stubs the runtime puts on PATH are one set,
+        plus `bd`, which the runtime fakes at its adapter instead."""
+        from support.real_binaries import GUARDED_BINARIES
+
+        assert ct.GUARDED_BINARIES == {"bd"} | GUARDED_BINARIES
+
+    def test_module_level_code_is_checked(self, ct):
+        """A table of lambdas runs for whichever test reads it."""
+        tree = _tree('PROBES = {"x": lambda: subprocess.run(["claude", "-v"])}\n')
+        assert len(ct.check_no_real_cli_outside_e2e(tree, "test_bad.py")) == 1
+        tree = _tree('PROBES = {"x": lambda: subprocess.run(["git", "-v"])}\n')
+        assert ct.check_no_real_cli_outside_e2e(tree, "test_ok.py") == []
+
+    def test_an_allowlisted_file_is_exempt_until_it_has_nothing_to_exempt(self, ct):
+        relpath = next(iter(ct.REAL_CLI_ALLOWLIST))
+        tree = _tree('def test_x():\n    subprocess.run(["claude", "-v"])\n')
+        assert ct.check_no_real_cli_outside_e2e(tree, relpath) == []
+        assert ct.check_real_cli_allowlist_is_current({relpath: 1}) == []
+        (stale,) = ct.check_real_cli_allowlist_is_current({relpath: 0})
+        assert "reaches no guarded CLI" in stale
+        (gone,) = ct.check_real_cli_allowlist_is_current({})
+        assert "no longer exists" in gone
+
     def test_support_helpers_are_out_of_scope_by_filename(self, ct):
         """tests/support/** is fixture infrastructure, not a collected test
         module -- the real-CLI half of a dual-tier fixture (like
@@ -214,6 +302,58 @@ class TestEveryTestHasAnExpectation:
         tree = _tree("def _helper():\n    assert 1 + 1 == 2\n\n\ndef test_x():\n    _helper()\n")
         assert ct.check_every_test_has_an_expectation(tree, "test_ok.py") == []
 
+    @pytest.mark.parametrize(
+        ("vacuous", "real"),
+        [
+            ("assert True", "assert ok"),
+            ("assert ok or True", "assert ok or other"),
+            ('assert (ok, "message")', 'assert ok, "message"'),
+            (
+                "with pytest.raises(Exception):\n        go()",
+                'with pytest.raises(Exception, match="refused"):\n        go()',
+            ),
+            (
+                "with pytest.raises(BaseException):\n        go()",
+                "with pytest.raises(ValueError):\n        go()",
+            ),
+            ("if False:\n        assert ok", "if ok:\n        assert other"),
+            ("if True:\n        pass\n    else:\n        assert ok", "if True:\n        assert ok"),
+            (
+                "def never():\n        assert ok\n    go()",
+                "def check():\n        assert ok\n    check()",
+            ),
+        ],
+        ids=[
+            "assert-true",
+            "or-true",
+            "assert-tuple",
+            "raises-exception",
+            "raises-baseexception",
+            "if-false",
+            "dead-else",
+            "nested-def-never-called",
+        ],
+    )
+    def test_a_vacuous_expectation_does_not_count(self, ct, vacuous, real):
+        """Each passes whatever the code does; beside it, the same shape that
+        can fail does count."""
+        for body, expected in ((vacuous, 1), (real, 0)):
+            tree = _tree(f"def test_x(ok, other):\n    {body}\n")
+            violations = ct.check_every_test_has_an_expectation(tree, "test_x.py")
+            assert len(violations) == expected, (body, violations)
+
+    def test_a_nested_def_handed_on_as_a_callback_counts(self, ct):
+        """A fake that asserts on what the code calls it with runs when the
+        code does, so a test that passes it on has an expectation."""
+        tree = _tree(
+            "def test_x(monkeypatch):\n"
+            "    def fake(arg):\n"
+            "        assert arg == 1\n"
+            "    monkeypatch.setattr(mod, 'f', fake)\n"
+            "    mod.go()\n"
+        )
+        assert ct.check_every_test_has_an_expectation(tree, "test_x.py") == []
+
     def test_an_allowlisted_test_is_not_flagged_even_with_no_assert(self, ct):
         relpath, name = next(iter(ct.EXPECTATION_ALLOWLIST)).split("::")
         tree = _tree(f"def {name}():\n    1 + 1\n")
@@ -289,6 +429,33 @@ class TestUnreadableFileIsAFailure:
             assert ct.main() == 1
         finally:
             path.chmod(0o644)
+
+
+class TestPluginTestsAreChecked:
+    """`plugins/kraft-lite/tests` is the second testpath, held to the same
+    rules as `tests/`."""
+
+    def _tree_with(self, ct, tmp_path, monkeypatch, body: str) -> None:
+        plugin = tmp_path / ct.PLUGIN_TESTS
+        plugin.mkdir(parents=True)
+        (plugin / "test_lite.py").write_text(body)
+        (tmp_path / "tests").mkdir()
+        monkeypatch.setattr(ct, "ROOT", tmp_path)
+        monkeypatch.setattr(ct, "TESTS", tmp_path / "tests")
+        monkeypatch.setattr(ct, "REAL_CLI_ALLOWLIST", {})
+        monkeypatch.setattr(ct, "EXPECTATION_ALLOWLIST", set())
+        monkeypatch.setattr(ct, "LINE_BUDGET_ALLOWLIST", {})
+
+    def test_a_bad_plugin_test_fails_the_check(self, ct, tmp_path, monkeypatch, capsys):
+        self._tree_with(ct, tmp_path, monkeypatch, "def test_x():\n    1 + 1\n")
+        assert ct.main() == 1
+        assert "plugins/kraft-lite/tests/test_lite.py:1: test_x has no assert" in (
+            capsys.readouterr().out
+        )
+
+    def test_a_good_plugin_test_passes_it(self, ct, tmp_path, monkeypatch):
+        self._tree_with(ct, tmp_path, monkeypatch, "def test_x():\n    assert 1 + 1 == 2\n")
+        assert ct.main() == 0
 
 
 class TestSelfCheck:

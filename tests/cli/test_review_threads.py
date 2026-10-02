@@ -148,6 +148,34 @@ def test_view_threads_renders_a_block_per_thread(app, monkeypatch, capsys):
     assert "t1" in out and "a.py:3-4" in out and "fix this" in out
 
 
+def test_view_threads_names_a_range_across_sides_by_its_marks(app, monkeypatch, capsys):
+    """Old line 2 through new line 2 reads `-2 to +2`; a range on one side, with
+    `start_side` its own `side`, still reads `3-4`."""
+
+    def thread(tid, start_side, side, start, end):
+        return {
+            "id": tid,
+            "file_path": "calc.py",
+            "side": side,
+            "start_side": start_side,
+            "start_line": start,
+            "end_line": end,
+            "label": None,
+            "state": "open",
+            "draft": False,
+            "comments": [],
+        }
+
+    async def fake_threads(work_item_id=None, open_only=False):
+        return [thread("t1", "old", "new", 2, 2), thread("t2", "new", "new", 3, 4)]
+
+    monkeypatch.setattr(client, "threads", fake_threads)
+    cli.main(["view", "threads", "w1"])
+    out = capsys.readouterr().out
+    assert "t1  calc.py:-2 to +2  [open]" in out
+    assert "t2  calc.py:3-4  [open]" in out
+
+
 def test_view_compare_forwards_targets_and_stats_the_files(app, monkeypatch, capsys):
     async def fake_compare(work_item_id=None, from_="base", to="latest", nodes=None):
         assert (work_item_id, from_, to, nodes) == ("w1", "attempt:1", "latest", None)

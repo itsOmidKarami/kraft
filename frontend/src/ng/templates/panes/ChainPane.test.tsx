@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
@@ -198,5 +198,162 @@ describe("pane head", () => {
     expect(crumbs.getAllByRole("button").map((b) => b.textContent)).toEqual(["default", "implementation"]);
     expect(screen.getByRole("alert")).toHaveTextContent("unknown model");
     expect(screen.getByRole("alert")).toHaveTextContent("at model, line 12");
+  });
+});
+
+describe("closed-set fields", () => {
+  const TASK = "verification.tests.test_changed_scopes";
+  /** The fixture's subprocess task, read as a builtin one: `sources` is what the pane reads first. */
+  const builtin = (result: Partial<Result> = {}) => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources[TASK] = { ...sources[TASK], kind: { value: "builtin", source: "chain" }, ref: { value: "kraft.mr_rebase", source: "chain" } };
+    return mount(TASK, { sources, ...result });
+  };
+  const action = () => screen.getByRole("combobox", { name: "action" });
+  const sentRefs = (draft: ConfigDraft) => vi.mocked(draft.field).mock.calls.filter(([, f]) => f === "ref").map(([, , v]) => v);
+
+  it("lists a builtin task's actions as the draft's choices give them, summaries included", async () => {
+    const choices = structuredClone(DEFAULT_VIEW.result.choices!);
+    choices.ref.push({ value: "kraft.from_the_server", summary: "Only the server knows this one" });
+    builtin({ choices });
+    await userEvent.click(action());
+    const list = screen.getByRole("listbox", { name: "Actions" });
+    expect(within(list).getAllByRole("option").map((o) => o.querySelector(".cbx-value")!.textContent)).toEqual(["kraft.verify_changed_test_scopes", "kraft.mr_rebase", "kraft.from_the_server"]);
+    expect(within(list).getByText("Only the server knows this one")).toBeInTheDocument();
+  });
+
+  it("never sends an action that is not listed: it is flagged in place, and a pick from the list goes at once", async () => {
+    const { draft } = builtin();
+    await userEvent.clear(action());
+    await userEvent.type(action(), "sds");
+    expect(action()).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("No action matches “sds”.");
+    await userEvent.tab();
+    expect(screen.getByText("“sds” is not an action. Pick one from the list.")).toHaveClass("is-bad");
+    expect(sentRefs(draft)).toEqual([]);
+    vi.mocked(draft.flush).mockClear();
+    await userEvent.clear(action());
+    await userEvent.type(action(), "verify");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(sentRefs(draft)).toEqual(["kraft.verify_changed_test_scopes"]);
+    expect(draft.flush).toHaveBeenCalled();
+    expect(screen.queryByText(/is not an action/)).toBeNull();
+  });
+
+  it("never sends a required action empty: clearing it on the way to another value saves nothing", async () => {
+    const { draft } = builtin();
+    await userEvent.clear(action());
+    await userEvent.tab();
+    expect(screen.getByText("Pick an action from the list.")).toHaveClass("is-bad");
+    expect(sentRefs(draft)).toEqual([]);
+  });
+
+  it("asks a forge wait for its polling when the draft's choices say its target waits", () => {
+    mount("merge_request_feedback.ci.await_ci");
+    expect(screen.getByRole("combobox", { name: "target" })).toHaveValue("mr.ci");
+    expect(screen.getByRole("textbox", { name: "check every" })).toBeInTheDocument();
+  });
+
+  it("asks a forge task for no polling when its target does not wait", () => {
+    const choices = structuredClone(DEFAULT_VIEW.result.choices!);
+    choices.target.find((t) => t.value === "mr.ci")!.waits = false;
+    mount("merge_request_feedback.ci.await_ci", { choices });
+    expect(screen.queryByRole("textbox", { name: "check every" })).toBeNull();
+  });
+
+  it("refuses an unlisted action on the Config tab, and saves a listed one", async () => {
+    const { draft } = builtin();
+    await configTab();
+    await userEvent.click(within(rowOf("action")).getByRole("button", { name: "Edit action" }));
+    const input = within(rowOf("action")).getByRole("combobox", { name: "action" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("action: “sds” is not an action. Pick one from the list.");
+    expect(draft.field).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "verify");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(draft.field).toHaveBeenCalledWith(TASK, "ref", "kraft.verify_changed_test_scopes");
+  });
+
+  it("completes an agent task's inputs on the Config tab, and refuses one Kraft does not deliver", async () => {
+    const { draft } = mount("verification.review.code_review");
+    await configTab();
+    await userEvent.click(within(rowOf("inputs")).getByRole("button", { name: "Edit inputs" }));
+    const input = within(rowOf("inputs")).getByRole("combobox", { name: "inputs" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "review_package, ");
+    expect(within(screen.getByRole("listbox", { name: "inputs" })).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "carried_findingsThe findings the node's last measurement reported",
+      "previous_reviewThis task's previous result and summary",
+    ]);
+    await userEvent.type(input, "sds{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("inputs: “sds” is not an input.");
+    expect(draft.field).not.toHaveBeenCalled();
+    await userEvent.clear(input);
+    await userEvent.type(input, "review_package, prev");
+    await userEvent.keyboard("{ArrowDown}{Enter}{Enter}");
+    expect(draft.field).toHaveBeenCalledWith("verification.review.code_review", "inputs", ["review_package", "previous_review"]);
+  });
+});
+
+describe("an agent task's fallback list", () => {
+  const TASK = "implementation.main.implement";
+  const withFallback = (value: unknown) => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources[TASK] = { ...sources[TASK], fallback: { value, source: "chain" } };
+    return mount(TASK, { sources });
+  };
+  const ENTRIES = [{ harness: "codex", profile: "strong" }, { harness: "claude", model: "opus", effort: "high" }];
+  /** As the resolved chain reports them: every key, unset ones null. */
+  const RESOLVED = ENTRIES.map((e) => ({ profile: null, model: null, effort: null, ...e }));
+  const pick = (name: string) => screen.findByRole("combobox", { name });
+
+  it("shows each entry with its harness and route, never as text", async () => {
+    withFallback(ENTRIES);
+    expect(await pick("Fallback 1 harness")).toHaveValue("codex");
+    expect(await pick("Fallback 1 profile")).toHaveValue("strong");
+    expect(await pick("Fallback 2 harness")).toHaveValue("claude");
+    expect(within(await pick("Fallback 2 profile")).getByRole("option", { selected: true })).toHaveTextContent("model opus · effort high");
+    expect(screen.queryByText(/object Object/)).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "fallback" })).toBeNull();
+  });
+
+  it("sends the list as entry mappings, only what each sets: a harness keeps the route, a profile replaces a model and effort", async () => {
+    const { draft } = withFallback(RESOLVED);
+    await userEvent.selectOptions(await pick("Fallback 1 harness"), "claude");
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [{ harness: "claude", profile: "strong" }, ENTRIES[1]]);
+    await userEvent.selectOptions(await pick("Fallback 2 profile"), "fast");
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [ENTRIES[0], { harness: "claude", profile: "fast" }]);
+    await userEvent.click(screen.getByRole("button", { name: "Remove fallback 1" }));
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [ENTRIES[1]]);
+  });
+
+  it("adds an entry on another harness than the task's", async () => {
+    const { draft } = mount(TASK);
+    const add = await screen.findByRole("button", { name: "+ Add a fallback" });
+    await waitFor(() => expect(add).toBeEnabled());
+    await userEvent.click(add);
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [{ harness: "codex" }]);
+  });
+
+  it("unsets the list when its last entry is removed, so an agent profile's own list applies", async () => {
+    const { draft } = withFallback([{ harness: "codex" }]);
+    await userEvent.click(await screen.findByRole("button", { name: "Remove fallback 1" }));
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", null);
+  });
+
+  it("reads a bare name a draft wrote as the harness it meant, so a change writes the schema's shape", async () => {
+    const { draft } = withFallback(["codex"]);
+    await userEvent.selectOptions(await pick("Fallback 1 profile"), "strong");
+    expect(draft.field).toHaveBeenLastCalledWith(TASK, "fallback", [{ harness: "codex", profile: "strong" }]);
+  });
+
+  it("on the Config tab, shows the entries and sends the edit to the Overview", async () => {
+    withFallback(ENTRIES);
+    await configTab();
+    expect(rowOf("fallback")).toHaveTextContent("codex · strong, claude · model opus · effort high");
+    expect(within(rowOf("fallback")).queryByRole("button", { name: "Edit fallback" })).toBeNull();
+    expect(within(rowOf("fallback")).getByText("on Overview")).toBeInTheDocument();
   });
 });

@@ -107,14 +107,18 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
 export function useDiffFiles(id: string, version: string): DiffFile[] | null {
   const [files, setFiles] = useState<DiffFile[] | null>(null);
   useEffect(() => {
+    // Read again on every read of the item: only the newest read may land.
+    let live = true;
     api.getWorkItemDiff(id).then((d) => {
+      if (!live) return;
       const by = new Map<string, DiffFile>();
       for (const f of [...(d.landed?.files ?? []), ...d.files]) {
         const was = by.get(f.path);
         by.set(f.path, was ? { ...f, insertions: was.insertions + f.insertions, deletions: was.deletions + f.deletions } : f);
       }
       setFiles([...by.values()]);
-    }, () => setFiles(null));
+    }, () => live && setFiles(null));
+    return () => { live = false; };
   }, [id, version]);
   return files;
 }

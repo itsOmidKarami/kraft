@@ -97,8 +97,12 @@ async def test_a_new_thread_is_a_draft_until_submitted(database):
 
 
 def _comment(database, cid):
+    """`(body, suggestion)` of comment `cid`, the suggestion decoded; None
+    once the comment is gone."""
     row = database.read(lambda c: store.comment_row(c, cid))
-    return None if row is None else (row["body"], row["suggestion"])
+    if row is None:
+        return None
+    return row["body"], None if row["suggestion"] is None else json.loads(row["suggestion"])
 
 
 async def test_editing_a_draft_reply_rewrites_its_body_and_suggestion(database):
@@ -115,7 +119,7 @@ async def test_editing_a_draft_reply_rewrites_its_body_and_suggestion(database):
     await database.write(
         lambda c: store.update_draft_comment(c, cid, body="second try", suggestion=edited)
     )
-    assert _comment(database, cid) == ("second try", json.dumps(edited))
+    assert _comment(database, cid) == ("second try", edited)
 
     await database.write(lambda c: store.update_draft_comment(c, cid, body="plain", suggestion={}))
     assert _comment(database, cid) == ("plain", None)
@@ -289,3 +293,33 @@ def test_render_note_lists_unresolved_threads_with_suggestions_and_replies():
     assert "kraft item reply t1" not in note  # the footer names the verb once, generically
     assert "kraft item reply <thread-id>" in note
     assert "t2" not in note
+
+
+def test_render_threads_names_a_range_across_sides_and_quotes_its_lines():
+    """What a worker reads: a removed line through its replacement is `-2 to +2`,
+    with the lines as the reviewer saw them ahead of the comment. A thread with
+    no `start_side` or quote, as every older one, reads as before."""
+
+    def thread(tid, **kw):
+        t = {
+            "id": tid,
+            "file_path": "calc.py",
+            "side": "new",
+            "start_line": 2,
+            "end_line": 2,
+            "label": "must_fix",
+            "state": "open",
+            "comments": [{"author": "you", "body": "keep the sign", "suggestion": None}],
+        }
+        return t | kw
+
+    across = thread("t1", start_side="old", quote="-    return a - b\n+    return a + b")
+    older = thread("t2", start_line=3, end_line=4)
+    out = store.render_threads([across, older])
+    assert (
+        "[t1] calc.py:-2 to +2 (must_fix)\n"
+        "    | -    return a - b\n"
+        "    | +    return a + b\n"
+        "keep the sign"
+    ) in out
+    assert "[t2] calc.py:3-4 (must_fix)\nkeep the sign" in out

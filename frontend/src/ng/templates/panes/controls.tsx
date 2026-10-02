@@ -1,8 +1,12 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
 
 /** A text field that sends on a pause (Decided 3): the page's `field(…, pause)`
- *  debounces, blur flushes. It follows the server's value while not focused. */
-export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeholder, required, autoFocus, sub, bad, mono }: {
+ *  debounces, blur flushes. It follows the server's value while not focused.
+ *  With `choices` it lists the values it takes as you type; a `closed` set
+ *  sends only a listed value (or an empty one, unless it is required), and
+ *  flags any other where it is typed instead of saving it. */
+export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeholder, required, autoFocus, sub, bad, mono, choices, closed, noun = label, listLabel }: {
   label: string;
   value: string;
   onText: (text: string) => void;
@@ -15,13 +19,26 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
   sub?: ReactNode;
   bad?: boolean;
   mono?: boolean;
+  choices?: Choice[];
+  closed?: boolean;
+  noun?: string;
+  listLabel?: string;
 }) {
   const [text, setText] = useState(value);
-  const focused = useRef(false);
+  const [focused, setFocused] = useState(false);
   const id = useId();
   useEffect(() => {
-    if (!focused.current) setText(value);
+    if (!focused) setText(value);
   }, [value]);
+  // A closed set's typed value that is not listed is kept here, never sent.
+  const listed = choices?.length ? choices : null;
+  // A required one is not sent empty either: clearing it on the way to
+  // typing a new value would save it unset and break the draft.
+  const empty = (t: string) => !!required && !t.trim();
+  const stray = closed && listed ? (empty(text) ? `Pick ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun} from the list.` : notListed(unlisted(text, listed), noun)) : null;
+  const send = (t: string) => {
+    if (!closed || !listed || (!empty(t) && !unlisted(t, listed).length)) onText(t);
+  };
   const props = {
     id,
     value: text,
@@ -29,22 +46,38 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
     autoFocus,
     "aria-required": required || undefined,
     "aria-invalid": bad || undefined,
-    className: `tpl-pf-input${long ? " is-long" : ""}${mono ? " is-mono" : ""}${bad ? " is-bad" : ""}`,
-    onFocus: () => void (focused.current = true),
+    className: `tpl-pf-input${long ? " is-long" : ""}${mono ? " is-mono" : ""}${bad || (stray && !focused) ? " is-bad" : ""}`,
+    onFocus: () => setFocused(true),
     onBlur: () => {
-      focused.current = false;
+      setFocused(false);
       onBlur?.();
     },
     onChange: (e: { target: { value: string } }) => {
       setText(e.target.value);
-      onText(e.target.value);
+      send(e.target.value);
     },
   };
+  const note = stray && !focused ? stray : sub;
   return (
     <div className="tpl-pf">
       <label htmlFor={id} className="tpl-pf-label">{label}</label>
-      {long ? <textarea rows={rows} {...props} /> : <input spellCheck={false} {...props} />}
-      {sub && <p className={`tpl-pf-sub${bad ? " is-bad" : ""}`}>{sub}</p>}
+      {long ? <textarea rows={rows} {...props} /> : listed ? (
+        <Combobox
+          {...props}
+          choices={listed}
+          closed={closed}
+          noun={noun}
+          listLabel={listLabel}
+          invalid={bad}
+          onChange={(t) => {
+            setText(t);
+            send(t);
+          }}
+          // A pick is a decision: it goes now, not after the pause.
+          onPick={() => onBlur?.()}
+        />
+      ) : <input spellCheck={false} {...props} />}
+      {note && <p className={`tpl-pf-sub${bad || (stray && !focused) ? " is-bad" : ""}`}>{note}</p>}
     </div>
   );
 }

@@ -17,7 +17,7 @@ import pytest
 import uvicorn
 import yaml
 from support.harness import fake_templates_dir
-from support.server import child_env
+from support.server import child_env, output_of
 
 from kraft import cli, client
 from kraft.paths import RunDirs
@@ -597,19 +597,23 @@ def _wait_for(predicate, timeout=10.0, interval=0.05) -> bool:
     return False
 
 
+def _answers(port: int) -> bool:
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
     """Kraft-9oab: reproduce against the current build before concluding
     anything (the bead's own last line, and the spec's). A mock cannot tell
     us whether a real process actually exits — this spawns `kraft admin
     start` for real, sends a real SIGTERM, and times the real exit.
 
-    `_isolated_kraft_home` (autouse, conftest.py) already points KRAFT_HOME
-    and KRAFT_PORT at an isolated tmp dir and a free ephemeral port; this
-    only adds KRAFT_RUN_DIR/KRAFT_TEMPLATES_DIR on top, same as every other
-    test in this file.
-    """
+    `_isolated_kraft_home` (autouse) already gives it KRAFT_HOME and a free
+    KRAFT_PORT; this only adds KRAFT_RUN_DIR/KRAFT_TEMPLATES_DIR on top."""
     run_dir = tmp_path / "run"
     templates = fake_templates_dir(tmp_path, "true")
+    port = int(os.environ["KRAFT_PORT"])
+    spawned_at = time.monotonic()
     proc = subprocess.Popen(
         [sys.executable, "-m", "kraft", "admin", "start"],
         env=child_env({"KRAFT_RUN_DIR": str(run_dir), "KRAFT_TEMPLATES_DIR": str(templates)}),
@@ -618,25 +622,21 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
         text=True,
     )
     try:
-        pid_path = RunDirs(run_dir).pid
-        started = _wait_for(pid_path.is_file, timeout=10.0)
-        assert started, f"server never wrote a pidfile:\n{proc.stdout.read()}"
+        # Serving, not only past its pidfile: a SIGTERM during startup would time that too.
+        served = _wait_for(lambda: _answers(port) or proc.poll() is not None, timeout=30.0)
+        assert served and proc.poll() is None, f"server never served:\n{output_of(proc)}"
+        # A clean exit costs less than the startup just took (both 1.2s on 2026-09-12), capped
+        # under uvicorn's 10s backstop: past the cap a regression into the backstop would pass.
+        budget = min(max(5.0, 2 * (time.monotonic() - spawned_at)), 9.0)
         started_at = time.monotonic()
         proc.send_signal(signal.SIGTERM)
-        stopped = _wait_for(lambda: proc.poll() is not None, timeout=14.0)
+        stopped = _wait_for(lambda: proc.poll() is not None, timeout=budget + 10.0)
         elapsed = time.monotonic() - started_at
-        assert stopped, (
-            f"kraft admin start did not exit within 14s of SIGTERM (Kraft-9oab): "
-            f"{proc.stdout.read()}"
-        )
-        # A clean exit is near-instant (measured 1.2s on 2026-09-12); anything
-        # past ~8s means uvicorn's own 10s timeout_graceful_shutdown backstop
-        # ended the process instead of a graceful return. Assert the bound
-        # instead of printing it, so a regression back to the backstop path
-        # fails the test instead of a number nobody reads (Kraft-o8vs).
-        assert elapsed < 5.0, (
-            f"kraft-9oab: exited {elapsed:.1f}s after SIGTERM -- past the "
-            "graceful shutdown path, into uvicorn's backstop"
+        assert stopped, f"no exit {elapsed:.0f}s after SIGTERM (Kraft-9oab): {output_of(proc)}"
+        # Asserted, not printed: a regression back to the backstop fails the test (Kraft-o8vs).
+        assert elapsed < budget, (
+            f"kraft-9oab: exited {elapsed:.1f}s after SIGTERM (budget {budget:.1f}s) -- "
+            "past the graceful shutdown path, into uvicorn's backstop"
         )
     finally:
         if proc.poll() is None:

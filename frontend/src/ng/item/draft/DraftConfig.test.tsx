@@ -132,8 +132,8 @@ describe("DraftConfig", () => {
     expect(await screen.findByText("opus-4 · strong")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Override command" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Override model" }));
-    const input = screen.getByRole("combobox", { name: "model" });
-    const options = [...document.getElementById(input.getAttribute("list")!)!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
+    expect(screen.getByRole("combobox", { name: "model" })).toHaveFocus();
+    const options = within(screen.getByRole("listbox", { name: "Known models" })).getAllByRole("option").map((o) => o.textContent);
     expect(options).toEqual(["claude-x", "opus-4", "sonnet"]);
   });
 

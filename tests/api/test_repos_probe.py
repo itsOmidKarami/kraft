@@ -26,6 +26,7 @@ def test_add_repo_tells_the_candidates_and_does_not_store_them(tmp_path, client,
     repo = make_repo(tmp_path)
     (repo / "Makefile").write_text("test:\n\tctest\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
     assert body["test_command"] == "make test"
@@ -86,6 +87,90 @@ def test_the_probe_runs_off_the_event_loop(tmp_path, client, monkeypatch):
     # "Already connected" too: it reads the working copy's .gitmodules and
     # beads config, which a FIFO or a YAML bomb would hold the loop on.
     assert ("probe_repo", False) in ran, ran
+
+
+_SUBMODULE = '[submodule "x"]\n\tpath = libs/x\n\turl = ../x\n'
+
+
+@pytest.mark.parametrize(
+    "crafted",
+    [
+        # A quadratic backtrack in Python's INI option regex, holding the GIL.
+        _SUBMODULE + "a" + " " * 30_000 + "b\n",
+        # Python's INI interpolation: 400 bytes that expand to 10 MB, slowly.
+        _SUBMODULE.replace("libs/x", "%(v0)s" * 6)
+        + "".join(f"\tv{i} = {f'%(v{i + 1})s' * 6}\n" for i in range(8))
+        + "\tv8 = x\n",
+    ],
+    ids=["long-run-of-spaces", "interpolation-bomb"],
+)
+def test_a_crafted_gitmodules_does_not_stop_the_server_answering(tmp_path, client, crafted):
+    """`.gitmodules` is the repository's to write, and the "already connected"
+    check reads it on every connect and every `ensure_repo`. Python's INI
+    parser took seconds to hours on a crafted one, and on a long run of
+    spaces held the GIL throughout: in its thread or not, `/api/health`
+    waited for it."""
+    import threading
+    import time
+
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text(crafted)
+    done = threading.Event()
+    probe = threading.Thread(
+        target=lambda: (
+            client.post("/api/repos/probe", json={"path": str(repo), "detect": False}),
+            done.set(),
+        )
+    )
+    began = time.monotonic()
+    probe.start()
+    slowest = 0.0
+    while not done.is_set():
+        started = time.monotonic()
+        assert client.get("/api/health").status_code == 200
+        slowest = max(slowest, time.monotonic() - started)
+    probe.join()
+    assert slowest < 1.0, f"/api/health took {slowest:.1f}s while the probe read .gitmodules"
+    assert time.monotonic() - began < 5.0, "reading .gitmodules took seconds"
+
+
+def test_submodules_are_the_paths_git_reads_from_gitmodules(tmp_path):
+    """git's own reading, quoting and all; a file git cannot parse lists none."""
+    from kraft import config
+
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text(
+        '[submodule "b"]\n\tpath = libs/b\n[submodule "a"]\n\tPath = "with space"\n'
+        '[submodule "c"]\n\turl = ../c\n[other "d"]\n\tpath = not/a/submodule\n'
+    )
+    assert config.probe_repo(repo, detect=False)["submodules"] == ["libs/b", "with space"]
+    (repo / ".gitmodules").write_text('[submodule "b"]\n\tpath = libs/b\nnot config\n')
+    assert config.probe_repo(repo, detect=False)["submodules"] == []
+
+
+@pytest.mark.parametrize("target", ["file", "fifo"])
+def test_a_gitmodules_include_is_never_followed(tmp_path, target):
+    """git follows `[include]` in a config it reads from stdin: the
+    repository could have the server open any path, and a FIFO held the
+    probe until git's timeout."""
+    import os
+    import time
+
+    from kraft import config
+
+    included = tmp_path / "included"
+    if target == "fifo":
+        os.mkfifo(included)
+    else:
+        included.write_text('[submodule "b"]\n\tpath = included-path\n')
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text(
+        f'[include]\n\tpath = {included}\n[includeIf "gitdir:/"]\n\tpath = {included}\n'
+        '[submodule "a"]\n\tpath = a\n'
+    )
+    started = time.monotonic()
+    assert config.probe_repo(repo, detect=False)["submodules"] == ["a"]
+    assert time.monotonic() - started < 5.0
 
 
 def test_a_probe_that_fails_still_connects_a_repo_given_both_commands(
@@ -185,7 +270,11 @@ def _workspace_with_tested_submodule(tmp_path):
     files are committed to the submodule's origin and fetched: the probe
     reads origin's branch, as a work item's worktree is cut from it."""
     root, sub = make_repo_with_submodule(tmp_path)
-    for rel, text in {"api/go.mod": "module a\n", "web/package.json": JEST}.items():
+    for rel, text in {
+        "api/go.mod": "module a\n",
+        "api/a_test.go": "",
+        "web/package.json": JEST,
+    }.items():
         (sub / rel).parent.mkdir(parents=True, exist_ok=True)
         (sub / rel).write_text(text)
     commit_all(sub)

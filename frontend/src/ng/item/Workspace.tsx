@@ -24,7 +24,7 @@ import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
-import type { ItemDetail } from "./useItem";
+import { runVersion, type ItemDetail } from "./useItem";
 import { chainName } from "./chainName";
 
 const PAGE = "item";
@@ -43,7 +43,7 @@ export const openPane = () => usePaneMemory.getState().setPane({ open: true, use
 /** The canvas and its side pane. The URL holds where the person is (node
  *  view, selection, tab, attempt: spec §6.2); this keeps only whether the pane
  *  is open, which survives moving between items within a session. */
-export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () => void }) {
+export function Workspace({ item: raw, version, reload }: { item: ItemDetail; version: string; reload: () => void }) {
   const draft = useDraft();
   const item = draft?.shown ?? raw;
   const navigate = useNavigate();
@@ -51,12 +51,12 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const [search] = useSearchParams();
   const nodes = item.chain_definition.nodes ?? [];
   const place = readPlace(nodeParam, search, nodes);
-  const applied = useApplied(item.id, item.updated_at, place.tab === "config");
+  const applied = useApplied(item.id, version, place.tab === "config");
   const { pane: pane_, setPane } = usePaneMemory();
   const [frame, canvasW] = useWidth();
   const size = useResizable(PAGE, canvasW);
-  const events = useEvents(item.id, item.updated_at);
-  const docs = useDocuments(item.id, item.updated_at);
+  const events = useEvents(item.id, version);
+  const docs = useDocuments(item.id, runVersion(raw));
   const [artifact, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
@@ -114,7 +114,7 @@ export function Workspace({ item: raw, reload }: { item: ItemDetail; reload: () 
   const pick = (to: Sel) => dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
   const tab = place.tab ?? "";
   const pane = paneContent({
-    item, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,
+    item, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs,
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),

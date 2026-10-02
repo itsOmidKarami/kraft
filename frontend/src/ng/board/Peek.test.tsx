@@ -2,12 +2,16 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../../store";
 import type { KraftEvent } from "../../types";
 import { useResizable } from "../graph/useResizable";
-import { detail, stubFetch } from "../item/testkit";
+import { acceptWrites, detail, stubFetch } from "../item/testkit";
 import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
 import { Peek, type PeekTab } from "./Peek";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/archive", "POST /work-items/w1/resume");
 
 const Where = () => <span data-testid="where">{useLocation().pathname + useLocation().search}</span>;
 
@@ -21,7 +25,7 @@ function Harness({ start = "overview", budget = false }: { start?: PeekTab; budg
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
 
 const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[] } = {}) => {
-  const calls = stubFetch({ "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}] });
+  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}] });
   render(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
@@ -92,14 +96,33 @@ describe("Peek", () => {
   it("lists Activity newest first and pages back with before_seq; a node's line opens the item there", async () => {
     const page = Array.from({ length: 50 }, (_, k) => ev(51 + k, "node_started", k === 49 ? "verification" : null));
     mount({}, { start: "activity", events: page });
+    // The list is drawn empty before its events answer: wait for the rows, not the list.
     const list = await screen.findByRole("list");
-    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("verification");
+    expect((await within(list).findAllByRole("listitem"))[0]).toHaveTextContent("verification");
     fireEvent.click(screen.getByRole("button", { name: "Show earlier" }));
     await act(async () => {});
     const urls = vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/events?"));
     expect(urls.at(-1)).toContain("before_seq=51&limit=50");
     fireEvent.click(within(list).getAllByRole("button")[0]);
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=verification");
+  });
+
+  it("adds a new event to Activity live, though the item's updated_at stays put", async () => {
+    useStore.setState({ eventsByItem: {} });
+    mount({}, { start: "activity", events: [ev(1, "node_started", "plan")] });
+    expect(within(await screen.findByRole("list")).getAllByRole("listitem")).toHaveLength(1);
+    stubFetch({ "GET /work-items/w1": [200, detail({})], "GET /work-items/w1/events": [200, [ev(1, "node_started", "plan"), ev(2, "node_started", "verification")]] });
+    act(() => useStore.getState().applyEvent(ev(2, "worker_session_created")));
+    expect(await within(screen.getByRole("list")).findByText(/verification/)).toBeInTheDocument();
+  });
+
+  it("adds a new event to the Overview's Recent live", async () => {
+    useStore.setState({ eventsByItem: {} });
+    mount({}, { events: [ev(1, "node_started", "plan")] });
+    expect(await screen.findByText("plan started")).toBeInTheDocument();
+    stubFetch({ "GET /work-items/w1": [200, detail({})], "GET /work-items/w1/events": [200, [ev(1, "node_started", "plan"), ev(2, "node_started", "verification")]], "GET /policy": [200, {}] });
+    act(() => useStore.getState().applyEvent(ev(2, "worker_session_created")));
+    expect(await screen.findByText("verification started")).toBeInTheDocument();
   });
 
   it("says so when the item is gone", async () => {

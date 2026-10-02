@@ -43,6 +43,63 @@ _MAX_HOOKS_BYTES = 1 << 20
 _OURS = "kraft admin permission-hook"
 
 
+#: Kraft tool names that write or remove a file, and where a hook call's
+#: input names it.
+_WRITES = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", "Delete"})
+_PATH_KEYS = ("path", "file_path", "target_file", "filePath")
+#: Why the gate denies a call that `touches_hook_file`.
+HOOK_FILE_REASON = f"{_REL} holds Kraft's permission hook, which a worker may not change"
+
+
+def _folded(text: str) -> str:
+    """`text` as a case-insensitive file system reads it: APFS takes
+    `.Cursor` for `.cursor`, and Unicode case folding, as it does, takes a
+    Kelvin sign for a `k` and a long `ſ` for an `s`. Not NFKC: a fullwidth letter names another file
+    on every file system Kraft runs on."""
+    return text.casefold()
+
+
+def _names_hook_file(path: str, worktree: Path | None) -> bool:
+    path = path.replace("\\", "/")
+    seen = [os.path.normpath(path)]
+    if worktree is not None:
+        # Through any symlink the worktree holds: a committed `cfg -> .cursor`
+        # names the file without saying so.
+        seen.append(os.path.realpath(os.path.join(worktree, path)))
+    for where in seen:
+        parts = [_folded(p) for p in Path(where).parts]
+        if parts[-1:] == [".cursor"] or parts[-2:] == [".cursor", "hooks.json"]:
+            return True
+    return False
+
+
+def touches_hook_file(names: tuple[str, ...], input: dict, worktree: Path | None = None) -> bool:
+    """Whether a Cursor worker's call would change or remove `.cursor/
+    hooks.json`, where Kraft's entry sits beside the repository's own: a
+    write, edit or delete of that file or of its `.cursor` directory, or a
+    shell command naming either. Cursor would run the rest of the session
+    without the gate. Names are compared case-folded, and a path is also
+    resolved against `worktree`, the session's, through its symlinks.
+
+    Text only. A shell reaches the file in ways no reading of its command
+    sees (a script, a variable, `git clean -x`), so this stops the plain
+    attempt, and the next launch with policy writes the entry back. A policy
+    that must hold denies `Shell`, or leaves it off an allowlist."""
+    if "Bash" in names:
+        command = input.get("command")
+        if not isinstance(command, str):
+            return False
+        # Quotes and backslashes split a word for the eye only: `.cur''sor`.
+        text = re.sub(r"[\"'\\]", "", _folded(command))
+        return ".cursor" in text or "hooks.json" in text
+    if not _WRITES.intersection(names):
+        return False
+    return any(
+        isinstance(path := input.get(key), str) and _names_hook_file(path, worktree)
+        for key in _PATH_KEYS
+    )
+
+
 class HookFileError(ValueError):
     """The worktree's hooks file is not one Kraft can add its entry to."""
 

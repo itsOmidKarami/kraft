@@ -20,7 +20,7 @@ const mount = (path: string, it = item, events: unknown[] = []) => {
   ] }] });
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes><Route path="/work-items/:id/nodes/:node" element={<><Workspace item={it} reload={() => {}} /><Where /></>} /></Routes>
+      <Routes><Route path="/work-items/:id/nodes/:node" element={<><Workspace item={it} version="1" reload={() => {}} /><Where /></>} /></Routes>
     </MemoryRouter>,
   );
 };
@@ -34,6 +34,13 @@ describe("task pane", () => {
     await userEvent.click(screen.getByRole("button", { name: "Earlier attempt" }));
     expect(screen.getByTestId("where").textContent).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
     expect(within(pane("code_review")).getByText(/attempt 1 of 2/)).toBeInTheDocument();
+  });
+
+  it("drops the pin when › reaches the newest attempt, so the pane follows the next one", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
+    await userEvent.click(screen.getByRole("button", { name: "Later attempt" }));
+    expect(screen.getByTestId("where").textContent).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    expect(within(pane("code_review")).getByText(/attempt 2 of 2/)).toBeInTheDocument();
   });
 
   it("puts the attempt switcher above the tabs, outside every tab's panel", async () => {

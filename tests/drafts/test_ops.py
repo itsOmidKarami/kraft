@@ -247,6 +247,16 @@ async def test_new_chain_starts_empty_or_copies_another_under_its_own_id(st):
     assert "already exists" in refused(st, ("new_chain", {}))
 
 
+async def test_new_chain_copies_only_a_chain_in_the_library(st):
+    """`from` was joined onto `chains/` as written, so `../..` previewed any
+    YAML file the server could read."""
+    (st.templates_dir.parent / "outside.yaml").write_text("description: a secret\n")
+    origin = "../../outside"
+    assert (st.templates_dir / f"chains/{origin}.yaml").is_file()
+    with pytest.raises(ops.OpError, match="there is no chain"):
+        apply(st, ("new_chain", {"from": origin}), key="copy")
+
+
 async def test_delete_chain_is_a_problem_only_while_a_repo_defaults_to_it(st):
     (st.templates_dir / "repos.yaml").write_text("repos:\n  - {path: /b}\n")
     r = apply(st, ("delete_chain", {}))

@@ -208,7 +208,7 @@ function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: Intak
         <Segmented label="priority at or below" value={String(i.priority_ceiling)} options={PRIORITIES} onChange={(v) => void set({ priority_ceiling: Number(v) })} />
       </Row>
       <Row k="repos" changed={changed("intake.yaml", "repos")}>
-        <ValueCell label="repos" value={i.repos.join(", ")} display={i.repos.length ? i.repos.join(", ") : "every enabled repo"} muted={!i.repos.length} placeholder={repos.map((r) => r.path).join(", ") || "every enabled repo"} onCommit={(t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) })} />
+        <ValueCell label="repos" value={i.repos.join(", ")} display={i.repos.length ? i.repos.join(", ") : "every enabled repo"} muted={!i.repos.length} placeholder={repos.map((r) => r.path).join(", ") || "every enabled repo"} choices={repos.map((r) => ({ value: r.path, summary: r.name ?? undefined }))} multiple onCommit={(t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) })} />
       </Row>
     </div>
   );

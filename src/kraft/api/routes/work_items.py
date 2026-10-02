@@ -249,6 +249,31 @@ def _dry_run_response(
     }
 
 
+def repo_warning(entry) -> str | None:
+    """What will stop an item filed on `entry`, said when it is filed rather
+    than found once it has run: no setup command declared stops it before
+    its first task, and no test command (nor test scopes) stops it at
+    verification, after its agent tasks have run. Warned, not refused: a
+    disabled repo still takes items filed by hand."""
+    stops = []
+    if entry.setup_command is None:
+        stops.append(
+            "declares no setup command, so this item stops before its first task, when "
+            'its worktree is made (set one, or "" for none)'
+        )
+    if entry.test_command is None and not entry.test_scopes:
+        stops.append(
+            "has no test command, so this item runs its agent tasks, then stops at "
+            'verification (set one, or "" for a repo with no tests)'
+        )
+    if not stops:
+        return None
+    return (
+        f"{entry.path} " + "; and it ".join(stops) + ". Set it in Templates › Repos, "
+        "or run `kraft repo connect` there again, before you start this item"
+    )
+
+
 @api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
     st = request.app.state
@@ -327,6 +352,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         # 200, not this route's default 201: nothing was created.
         content = _dry_run_response(st, body, chain, materialized, attachment_kinds)
         return JSONResponse(status_code=200, content=content)
+    # Before intake: a lookup after it could answer 422 for an item filed.
+    repo_entry = deps.connected_or_422(st, body.repo)
     # Read before this item exists, so it cannot find itself. Warned, not
     # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
     # the usual reason to re-file, a revised spec, now has its own door.
@@ -392,6 +419,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             + ". To revise its spec or plan, use `kraft item set-attachments` on it "
             "rather than filing again; abandon whichever of the two is not wanted"
         )
+    if cannot_run := repo_warning(repo_entry):
+        extra["repo_warning"] = cannot_run
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL

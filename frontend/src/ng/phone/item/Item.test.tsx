@@ -3,9 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DisplayStatus, WorkItemStop } from "../../../types";
-import { detail, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { Item } from "./Item";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/budget/raise", "POST /work-items/w1/cancel", "POST /work-items/w1/gates/plan_approval/reject", "POST /work-items/w1/pause", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
 const SESSION = { id: "s1", work_item_id: "w1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, thread: 1, round: 0, created_at: "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", exited_at: null };
@@ -16,7 +19,7 @@ function Where() {
   return <output aria-label="where">{l.pathname + l.search}</output>;
 }
 function mount(it: ReturnType<typeof detail>, path: string | { pathname: string; state: unknown } = "/work-items/w1", answers: Record<string, [number, unknown]> = {}) {
-  const calls = stubFetch({
+  const calls = stubFetch({ ...WRITES,
     "GET /work-items/w1": [200, it],
     "GET /work-items/w1/compare": [200, { files: [] }],
     "GET /worker-sessions/s1/log": [200, { lines: [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }] }],

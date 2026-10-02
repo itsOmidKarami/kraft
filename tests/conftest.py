@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import socket
+import tempfile
 import threading
 from pathlib import Path
 
 import httpx
 import pytest
 from support import api as api_support
-from support import harness
+from support import harness, real_binaries
 from support.fake_beads import Bd, FakeBeads
 from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
+from support.real_binaries import GUARDED_BINARIES as _GUARDED_BINARIES
 
 from kraft import client as kraft_client
 from kraft import db
@@ -79,23 +82,32 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_real_agent_binary(request, monkeypatch):
-    """Fail loudly rather than spend tokens: a test that reaches a real agent CLI
-    gets an `AssertionError` naming itself and the command.
+    """Fail loudly rather than spend tokens or touch a real forge: a test that
+    reaches a real agent CLI, `gh` or `glab` fails, naming itself and the
+    command. Yields the test's `support.real_binaries.Guard`
+    (`real_binary_guard`).
 
-    At `adapters.subprocess.run_task`, where the argv is final -- not at
-    `resolve_invocation`, because the whole class of defect here is a *resolved*
-    launch whose command nobody expected. The check is on the command's basename
-    only, so every fixture agent (`fixtures/fake-claude.sh`,
-    `tests/support/fake_agent.py`, `sys.executable`) passes untouched, and so
-    does every non-agent subprocess a node runs (`pytest`, `just`, `git`).
+    Three layers. `support.real_binaries.install` puts a refusing stub for
+    every guarded name first on `PATH` and checks `subprocess.Popen` for an
+    installed real binary reached by path; whatever either refused fails the
+    test at teardown, so a launch Kraft swallowed into a failed task still
+    counts. On top, `adapters.subprocess.run_task` refuses a guarded basename
+    in the argv it is about to launch, in the test itself, so a walk sees an
+    `AssertionError` rather than a stub's exit 127. Every fixture agent
+    (`fixtures/fake-claude.sh`, `tests/support/fake_agent.py`,
+    `sys.executable`) and every other subprocess (`pytest`, `just`, `git`)
+    passes untouched.
 
-    `real_executor` is the opt-out, the same marker `_no_agent_launch` already
-    uses in `tests/test_intake_poller.py` -- and even then this only lets the
-    launch through; `KRAFT_E2E` still gates the tests that mean to reach a real
-    agent.
+    A test marked `e2e("<cli>")` gets that CLI back. `real_executor` turns the
+    whole guard off, for a test that drives the real executor on purpose;
+    `KRAFT_E2E` still gates the tests that mean to reach a real agent.
     """
-    if "real_executor" in request.keywords or _REAL_AGENT_BINARIES & _e2e_binaries(request.node):
+    if "real_executor" in request.keywords:
+        yield None
         return
+    allowed = _GUARDED_BINARIES & _e2e_binaries(request.node)
+    guard = real_binaries.install(monkeypatch, request.node.nodeid, allowed)
+    refused = _REAL_AGENT_BINARIES - allowed
 
     import kraft.adapters.subprocess as sp_mod
 
@@ -103,7 +115,7 @@ def _no_real_agent_binary(request, monkeypatch):
 
     async def guarded(*args, cmd=None, **kwargs):
         first = (cmd[0] if isinstance(cmd, list | tuple) and cmd else cmd) or ""
-        if Path(str(first)).name in _REAL_AGENT_BINARIES:
+        if Path(str(first)).name in refused:
             raise AssertionError(
                 f"{request.node.nodeid} tried to launch the real agent binary {first!r} "
                 f"(argv {list(cmd)!r}). Point it at a fixture agent, or mark the test "
@@ -123,7 +135,18 @@ def _no_real_agent_binary(request, monkeypatch):
             f"{session_id}`. Stub `kraft.usage._export_opencode` in the test."
         )
 
-    monkeypatch.setattr(usage_mod, "_export_opencode", no_export)
+    if not allowed & _REAL_AGENT_BINARIES:
+        monkeypatch.setattr(usage_mod, "_export_opencode", no_export)
+    yield guard
+    guard.check()
+
+
+@pytest.fixture
+def real_binary_guard(_no_real_agent_binary):
+    """The running test's `support.real_binaries.Guard` (None under
+    `real_executor`): `.take()` reads and forgets what it refused, for a test
+    proving the guard fires; `.stubs` is the stub directory on `PATH`."""
+    return _no_real_agent_binary
 
 
 @pytest.fixture(autouse=True)
@@ -158,8 +181,8 @@ def pytest_collection_modifyitems(config, items):
     """An e2e test runs only where every CLI it names is installed, and one
     naming a real agent also needs KRAFT_E2E=1, since it spends tokens. Each
     skip names what is missing. A CLI listed in KRAFT_E2E_REQUIRE (CI's e2e
-    job sets `bd`) makes that skip an error, so the job cannot go green having
-    run nothing."""
+    job sets `bd,docker,podman`) makes that skip an error, so the job cannot
+    go green having run nothing."""
     required = set(filter(None, os.environ.get("KRAFT_E2E_REQUIRE", "").split(",")))
     for item in items:
         if "e2e" not in item.keywords:
@@ -241,9 +264,27 @@ def _contain_hardened_git_env():
     Under pytest the "server process" is the test process, so any test that
     starts a lifespan would otherwise leave those vars set for every test
     after it, silently disabling hooks in suites that assert on them."""
-    before = {k: v for k, v in os.environ.items() if k.startswith("GIT_CONFIG_")}
+    yield from _restoring_env("GIT_CONFIG_")
+
+
+@pytest.fixture(autouse=True)
+def _contain_kraft_env():
+    """Every `KRAFT_*` variable is as it was before the test, whoever wrote it.
+
+    Subject code writes some straight into `os.environ` -- `_serve()` exports
+    `KRAFT_DAEMON_PID`/`KRAFT_DAEMON_PORT` for the workers it launches, and
+    `worker_env` copies both names into every later worker env -- and
+    monkeypatch only undoes what a test set through it. Restoring the whole
+    set makes such a leak impossible rather than avoided test by test."""
+    yield from _restoring_env("KRAFT_")
+
+
+def _restoring_env(prefix: str):
+    """Snapshot every `os.environ` key starting with `prefix`, yield, then put
+    back exactly that set: values reset, keys added since removed."""
+    before = {k: v for k, v in os.environ.items() if k.startswith(prefix)}
     yield
-    for key in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+    for key in [k for k in os.environ if k.startswith(prefix)]:
         del os.environ[key]
     os.environ.update(before)
 
@@ -293,6 +334,43 @@ def _no_daemon_ca(monkeypatch):
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
 
 
+#: Both spellings of every proxy variable `egress._upstream`, `worker_env` and
+#: `docker_forward` read.
+_PROXY_ENV = tuple(
+    name
+    for base in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY")
+    for name in (base, base.lower())
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_host_proxy(request, monkeypatch):
+    """No unit test inherits this machine's proxy, which an agent sandbox or a
+    corporate dev box sets: anything that defaults to the live environment
+    (`EgressProxy(environ=os.environ)`) would dial it instead of the test's
+    own upstream. A test of proxy handling sets its own. An e2e test keeps the
+    host's, since the real CLI it runs may have no other route out."""
+    if request.node.get_closest_marker("e2e") is not None:
+        return
+    for name in _PROXY_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _per_test_tempdir(tmp_path_factory, monkeypatch):
+    """`tempfile`'s default directory is one of this test's own, so what code
+    under test leaves there on purpose (a failed `verify` keeps its logs for
+    the operator, `cli/verify.py`) goes with pytest's temp dirs instead of
+    piling up in the machine's `/tmp`. Beside `tmp_path`, not in it, as `HOME`
+    is below: several tests list `tmp_path`. The per-process caches in
+    `support` keep the real one (`harness.PROCESS_TMP`). `TMPDIR` too, so a
+    child Kraft (`support.server.child_env` copies this environment, and
+    `worker_env.BASELINE` forwards the name) writes there as well."""
+    tmp = str(tmp_path_factory.mktemp("tmp"))
+    monkeypatch.setattr(tempfile, "tempdir", tmp)
+    monkeypatch.setenv("TMPDIR", tmp)
+
+
 @pytest.fixture(autouse=True)
 def _rootful_docker(monkeypatch):
     """Every test launches as rootful docker on a host without SELinux, the
@@ -304,6 +382,37 @@ def _rootful_docker(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_process_state(monkeypatch):
+    """What the product keeps for the life of the process starts empty in
+    every test, and is put back after: the once-per-process deprecation
+    warnings, the dev `FakeForge`'s remembered MRs, docker's re-ask timer and
+    in-flight detection, codex's cached hook flags, and the `httpx` logger
+    level a notifier's start turns down. Otherwise whichever test ran first
+    on a worker decides what a later one sees."""
+    from kraft import policy
+    from kraft.adapters import hook_install
+    from kraft.adapters.forge import run as forge_run
+    from kraft.worker.backends import docker
+
+    monkeypatch.setattr(policy, "_DEPRECATIONS_SAID", set())
+    monkeypatch.setattr(forge_run, "_DEV_FAKE", forge_run.FakeForge())
+    monkeypatch.setattr(docker, "_UNSURE_UNTIL", 0.0)
+    monkeypatch.setattr(docker, "_DETECTING", None)
+    monkeypatch.setattr(docker, "_REASK", None)
+    monkeypatch.setattr(hook_install, "_codex_flags", {})
+    httpx_logger = logging.getLogger("httpx")
+    level = httpx_logger.level
+    yield
+    httpx_logger.setLevel(level)
+
+
+#: The `KRAFT_*` read once, at collection or import, which a per-test scrub
+#: cannot touch and must not hide: `pytest_collection_modifyitems` reads the
+#: first two, `support.fake_beads` and the `fake_beads` fixture the third.
+_SUITE_SWITCHES = frozenset({"KRAFT_E2E", "KRAFT_E2E_REQUIRE", "KRAFT_TEST_REAL_BD"})
+
+
+@pytest.fixture(autouse=True)
 def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 
@@ -312,7 +421,18 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     check that reads its env var lazily — resolved against the real home, which
     exists on a developer machine and not in a CI container. Autouse rather than
     part of `app`, so a test cannot reach the home by not opting in.
+
+    Nor inherit any `KRAFT_*` from the shell or worker pytest was started in:
+    the lifespan reads `KRAFT_HOST` and `KRAFT_SKILLS_DIR` itself
+    (`api/startup.py`), so an inherited `KRAFT_HOST=0.0.0.0` turns every
+    `client` into the locked-down posture, and the fake agent, `worker_env`
+    and the rest read their own names lazily. Every one but the suite's own
+    switches goes, rather than a list that reopens the leak one name at a
+    time. Scrubbed at the start of the test, so a value a test or its own
+    fixture sets on purpose (`api_client(host=...)`) still applies.
     """
+    for name in [k for k in os.environ if k.startswith("KRAFT_") and k not in _SUITE_SWITCHES]:
+        monkeypatch.delenv(name)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
     # Nor a real `kraft admin start` on the default port 8765: a test that
     # doesn't opt into the `app` fixture's ASGI transport falls through to a

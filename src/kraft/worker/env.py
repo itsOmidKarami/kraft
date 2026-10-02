@@ -77,6 +77,15 @@ BASELINE = frozenset(
 )
 
 
+#: What a test command runs with on top of `worker_env`. The fix loop re-runs
+#: the tests after an agent edits source in the same worktree, and a .pyc
+#: written on an earlier cycle has the same second-resolution mtime and
+#: (often) size as the fixed source, so CPython would import the stale
+#: bytecode and the re-measure would never see the fix. Never writing
+#: bytecode keeps every cycle honest.
+TEST_ENV = {"PYTHONDONTWRITEBYTECODE": "1"}
+
+
 def worker_env(repo_entry: RepoEntry | None, extra: dict | None = None) -> dict[str, str]:
     """The environment for one worker process.
 

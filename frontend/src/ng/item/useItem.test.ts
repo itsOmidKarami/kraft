@@ -30,4 +30,21 @@ describe("useItem", () => {
     await act(async () => void vi.advanceTimersByTime(COALESCE_MS + 1));
     expect(api.getWorkItem).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps the version when a read brings nothing new, and moves it on a new session status or event", async () => {
+    const at = (status: string) => ({ id: "w1", updated_at: "u1", worker_sessions: [{ id: "s1", status }] }) as never;
+    vi.mocked(api.getWorkItem).mockResolvedValue(at("running"));
+    const { result } = renderHook(() => useItem("w1"));
+    await act(async () => {});
+    const first = result.current.state === "ready" ? result.current.version : "";
+    await act(async () => result.current.reload());
+    expect(result.current.state === "ready" && result.current.version).toBe(first);
+    vi.mocked(api.getWorkItem).mockResolvedValue(at("failed"));
+    await act(async () => result.current.reload());
+    const failed = result.current.state === "ready" ? result.current.version : "";
+    expect(failed).not.toBe(first);
+    act(() => useStore.getState().applyEvent(ev("w1", 7)));
+    await act(async () => void vi.advanceTimersByTime(COALESCE_MS + 1));
+    expect(result.current.state === "ready" && result.current.version).not.toBe(failed);
+  });
 });

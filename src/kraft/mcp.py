@@ -176,8 +176,9 @@ def build() -> MCPServer:
         (`""` declares none). Show the person what it proposes before relying
         on it. `test_command=""` (no tests) saves the repo disabled: work items
         on it would pass verification without running a test, which is the
-        person's to decide, by enabling it. An already-connected repo is left
-        as it is."""
+        person's to decide, by enabling it. A repository with no commit yet is
+        refused: a work item's branch starts from one. An already-connected
+        repo is left as it is."""
         return await client.ensure_repo(
             path,
             test_command=test_command,

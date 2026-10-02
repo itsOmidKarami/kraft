@@ -5,7 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
-import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, withSource } from "../templates/repos/evidence";
+import { missingLine, others, readFrom, setupLine, stopLine, testsLine } from "../templates/repos/evidence";
 import "./first-run.css";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
@@ -80,7 +80,7 @@ function probeRows(p: RepoProbe): [string, string][] {
   return [
     [".gitmodules", p.submodules.length ? `${p.submodules.length} submodule${p.submodules.length === 1 ? "" : "s"}` : "none"],
     [".beads/", p.has_beads ? "found" : "not found"],
-    ["Test command", p.test_command ? withSource(p.test_command, chosenSource(p.candidates, "test")) : p.stopped?.length ? "stopped" : "not detected"],
+    ["Test command", testsLine(p)],
     // A monorepo's other scopes: without them the one command above reads as the repo's whole suite.
     ...(p.test_scopes ?? []).filter((s) => s.paths.length === 1 && s.paths[0] !== "**").map((s) => [`Tests in ${s.paths[0]}`, s.command] as [string, string]),
     ["Setup command", setupLine(p)],
@@ -172,7 +172,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     }
   };
   const doAdd = async () => {
-    if (!probe || adding) return;
+    if (!probe || adding || probe.read_from === null) return;
     setAdding(true);
     setError(null);
     // As Templates › Repos' Connect does: a probe's lone root `["**"]` scope only repeats
@@ -257,7 +257,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 {added ? (
                   <Button variant="primary" onClick={() => go(2)}>Continue</Button>
                 ) : probe ? (
-                  <Button variant="primary" disabled={!probed || adding} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
+                  <Button variant="primary" disabled={!probed || adding || probe.read_from === null} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
                 ) : (
                   <Button variant="primary" disabled={!path.trim() || probing} onClick={doProbe}>{probing ? "Probing…" : "+ Add repo"}</Button>
                 )}

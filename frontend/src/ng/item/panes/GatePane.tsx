@@ -7,7 +7,7 @@ import { request } from "../../http";
 import { act } from "../actions";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
-import type { ItemDetail } from "../useItem";
+import { runVersion, type ItemDetail } from "../useItem";
 import { sendOnModEnter } from "../../keys";
 
 type ThreadRow = { id: string; state: string; gate: string | null; node_id: string | null; file_path: string | null; comments?: { body: string }[] };
@@ -20,12 +20,14 @@ export function gateDecision(events: KraftEvent[], gate: string) {
 
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
  *  on, open threads, what it decides on, where reject goes, its status. */
-export function GateBody({ item, gate, events }: { item: ItemDetail; gate: ChainNode; events: KraftEvent[] }) {
-  const files = useDiffFiles(item.id, item.updated_at);
+export function GateBody({ item, version, gate, events }: { item: ItemDetail; version: string; gate: ChainNode; events: KraftEvent[] }) {
+  const files = useDiffFiles(item.id, runVersion(item));
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   useEffect(() => {
-    request<ThreadRow[]>(`/work-items/${encodeURIComponent(item.id)}/threads`).then((r) => setThreads(r.status === 200 && Array.isArray(r.body) ? r.body : []));
-  }, [item.id, item.updated_at]);
+    let live = true;
+    request<ThreadRow[]>(`/work-items/${encodeURIComponent(item.id)}/threads`).then((r) => live && setThreads(r.status === 200 && Array.isArray(r.body) ? r.body : []));
+    return () => { live = false; };
+  }, [item.id, version]);
   const open = threads.filter((t) => t.state !== "resolved");
   const pending = item.pending_gate === gate.id;
   const decided = gateDecision(events, gate.id);

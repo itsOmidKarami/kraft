@@ -18,16 +18,25 @@ from support.fake_docker import fake_docker_bin  # noqa: F401 -- re-exported
 _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: Where what is built once per process lives: the machine's temp dir, read
+#: at import, not the per-test one `conftest._per_test_tempdir` points
+#: `tempfile` at -- a cache that outlives its test outlives that test's dir.
+PROCESS_TMP = tempfile.gettempdir()
+
 
 #: Agent CLIs this suite must never actually launch (tests/conftest.py refuses
-#: them). Kraft-jxu39: the only reason a stray real launch has been cheap so far
-#: is that `_isolated_kraft_home` redirects `HOME` to an empty temp dir and this
-#: machine has no `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary
-#: resolves and exits in milliseconds. On a developer machine with a key set the
-#: same call is a real agent turn: network, tokens, tens of seconds. Here, not in
-#: the conftest, so a test can import it without `import conftest`, which is
+#: them, with `support.real_binaries`). `cursor` is no harness's command, but
+#: Cursor's own launcher can start its agent. Kraft-jxu39: the only reason a
+#: stray real launch has been cheap so far is that `_isolated_kraft_home`
+#: redirects `HOME` to an empty temp dir and this machine has no
+#: `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary resolves and
+#: exits in milliseconds. On a developer machine with a key set the same call
+#: is a real agent turn: network, tokens, tens of seconds. Here, not in the
+#: conftest, so a test can import it without `import conftest`, which is
 #: ambiguous now the repo root has a conftest.py too.
-REAL_AGENT_BINARIES = frozenset("claude codex gemini opencode amp agent cursor-agent agy".split())
+REAL_AGENT_BINARIES = frozenset(
+    "claude codex gemini opencode amp agent cursor-agent cursor agy".split()
+)
 
 
 def entry_of(fields: dict) -> Any:
@@ -68,7 +77,7 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     SHAs a fresh build would, and its index is refreshed, so it reads clean."""
     global _repo_template
     if _repo_template is None:
-        tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-")) / "sample"
+        tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-", dir=PROCESS_TMP)) / "sample"
         shutil.copytree(_SUPPORT / "sample_repo", tpl)
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
@@ -170,7 +179,7 @@ def _bd_template(real: bool) -> Path:
     which is all Kraft itself looks for (search's repo filter, doctor).
     """
     if real not in _bd_templates:
-        tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-"))
+        tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-", dir=PROCESS_TMP))
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
         _git(tpl, "config", "user.name", "t")

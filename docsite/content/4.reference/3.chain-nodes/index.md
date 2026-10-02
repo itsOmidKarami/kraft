@@ -129,6 +129,13 @@ A task takes no `read_only`. Set it on the step or node instead.
 | `forge` | `target` | A merge-request action on GitHub or GitLab, resolved from the `forge` in the repo's `repos.yaml` entry: `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |
 | `forge` | `wait` | For a wait, `{polling: {initial_interval: 30s, max_interval: 5m}}`. Set the timeout with the task's `policy: {total_time_cap_minutes: 90}`. |
 
+In Templates › Chains and Library, `ref`, `target` and `inputs` list the
+values above as you type, each with a line on what it does. So do `steering`,
+and a policy's `grants` and `allowed_harnesses`. A value that is not on the
+list is marked where you typed it and is not saved.
+An agent task's `fallback` is edited there as its list of entries, a harness
+and a profile picked for each; an entry's `model` and `effort` are set in YAML.
+
 ## read_only
 
 `read_only` goes on a step or an exec node, never on a task. A task that sets it

@@ -71,6 +71,10 @@ def test_each_settings_file_loads_and_saves_through_its_own_model(tmp_path, name
         ("[fd00:0::5]:8765", "[fd00::5]"),
         ("café.local", "xn--caf-dma.local"),
         ("faß.de", "xn--fa-hia.de"),
+        ("127.1", "127.0.0.1"),
+        ("0x7f.1:8765", "127.0.0.1"),
+        ("2130706433", "127.0.0.1"),
+        ("0300.0250.1.5", "192.168.1.5"),
     ],
     ids=[
         "case",
@@ -82,6 +86,10 @@ def test_each_settings_file_loads_and_saves_through_its_own_model(tmp_path, name
         "ipv6-port",
         "unicode",
         "unicode-uts46",
+        "ipv4-short",
+        "ipv4-hex",
+        "ipv4-one-number",
+        "ipv4-octal",
     ],
 )
 def test_an_allowed_host_is_kept_as_a_host_header_compares_it(tmp_path, typed, kept):
@@ -98,7 +106,21 @@ def test_an_allowed_host_is_kept_as_a_host_header_compares_it(tmp_path, typed, k
 
 @pytest.mark.parametrize(
     "typed",
-    ["*.ts.net", "*", "evil@kraft.local", "two words", "kraft.local:http", "a..b", "-a.local", ""],
+    [
+        "*.ts.net",
+        "*",
+        "evil@kraft.local",
+        "two words",
+        "kraft.local:http",
+        "a..b",
+        "-a.local",
+        "",
+        "256.1.1.1",
+        "1.2.3.4.5",
+        "08.1",
+        "v1.2",
+        "4294967296",
+    ],
     ids=[
         "wildcard",
         "star",
@@ -108,6 +130,11 @@ def test_an_allowed_host_is_kept_as_a_host_header_compares_it(tmp_path, typed, k
         "empty-label",
         "leading-hyphen",
         "empty",
+        "ipv4-label-past-255",
+        "ipv4-five-labels",
+        "ipv4-bad-octal",
+        "a-name-ending-in-a-number",
+        "ipv4-past-32-bits",
     ],
 )
 def test_an_entry_that_is_not_one_host_does_not_normalize(tmp_path, typed):

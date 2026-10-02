@@ -3,8 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import { item } from "../../../testFixtures";
-import { detail, inShell, stubFetch } from "../testkit";
+import { acceptWrites, detail, inShell, stubFetch } from "../testkit";
 import { ItemHeader } from "./ItemHeader";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/open-worktree", "POST /work-items/w1/pause", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 /** The shell reads health and drafts itself; only the item's writes matter here. */
 const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !== "GET");
@@ -39,7 +42,7 @@ describe("ItemHeader", () => {
   });
 
   it("shows the server's badge and retries a failed item from the stopped task's path", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     show({ display_status: "failed", stop: { kind: "failed", node: "merge_request", task: "merge_request.open.open_draft", attempt: 3, resume_at: null, reason: "403" } }, { reload });
     expect(screen.getByText("FAILED")).toBeInTheDocument();
@@ -49,7 +52,7 @@ describe("ItemHeader", () => {
   });
 
   it("calls a never-started item NOT STARTED with Start, which resumes it from the first node", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     show({ status: "paused", display_status: "paused", current_node_id: null }, { reload });
     expect(screen.getByText("NOT STARTED")).toBeInTheDocument();
@@ -61,7 +64,7 @@ describe("ItemHeader", () => {
   });
 
   it("asks before pausing, then pauses", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     show();
     await userEvent.click(screen.getByRole("button", { name: /^Pause$/ }));
     const card = screen.getByRole("dialog", { name: "Pause this item?" });
@@ -80,7 +83,7 @@ describe("ItemHeader", () => {
   });
 
   it("puts every ⋮ item on its route, the copied link on the shipped path, and Cancel… in ⋮ too", async () => {
-    const calls = stubFetch({ "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "b", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }] });
+    const calls = stubFetch({ ...WRITES, "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "b", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }] });
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
     const onSettings = vi.fn();

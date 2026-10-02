@@ -9,7 +9,7 @@ import { useItem, type ItemDetail } from "../item/useItem";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
-import { DiffView, type Pick } from "./DiffView";
+import { DiffView, pickOf, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
 import { GateReview } from "./GateReview";
 import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
@@ -75,6 +75,8 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
       setPicked(null);
       [...document.querySelectorAll<HTMLElement>(".rv-file")].find((f) => f.dataset.file === t.path)?.querySelector<HTMLElement>(".rv-lines")?.focus({ preventScroll: true });
     },
+    // A new start line from the composer's header: the pick follows, so the diff shades the new range.
+    onRetarget: (t) => t.range && setPicked(pickOf(t.path, { side: t.range.startSide ?? t.range.side, line: t.range.start }, { side: t.range.side, line: t.range.end })),
   });
   const artifact = useArtifact(item);
   const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null);
@@ -151,6 +153,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
                 comments.openFile(path);
               }}
               after={comments.after}
+              commented={comments.commented}
               top={comments.top}
               truncated={compare.data.truncated ? { bytes: compare.data.diff_max_bytes, files: notShown.size } : null}
               readOnly={ended}

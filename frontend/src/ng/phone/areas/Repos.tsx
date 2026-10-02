@@ -5,6 +5,9 @@ import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfi
 import { problemText } from "../../templates/problems";
 import { FIELDS, FORGES, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
 import { setRepo } from "../../templates/repos/RepoConfig";
+import { harnessChoices, steeringChoices } from "../../templates/choices";
+import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
+import { useLibrary } from "../../templates/useLibrary";
 import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "../../templates/repos/types";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
@@ -65,6 +68,8 @@ export function RepoView() {
   const draft = useConfigDraft("repos", "repos");
   const { edit, node } = useEditor();
   const sheet = useSheet();
+  const library = useLibrary();
+  const opts = useHarnessOptions();
   const [chains, setChains] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -84,7 +89,9 @@ export function RepoView() {
       const options = (f.choice === "chain" ? chains : FORGES).map((x) => ({ value: x, label: x }));
       return { ...base, onEdit: () => edit({ kind: "choice", title: f.label, value: typeof v === "string" ? v : null, options, set: (x) => sendTo(draft, repo!, f)(x) }) };
     }
-    return { ...base, mono: f.key.includes("command"), onEdit: () => edit({ kind: "text", title: f.label, help: "Leave empty to clear it, which falls back to the default.", value: f.show(f.key === "steering" ? repo!.resolved.steering : v), placeholder: f.placeholder, set: sendTo(draft, repo!, f) }) };
+    const choices = f.choices === "steering" ? steeringChoices(library) : f.choices === "harnesses" ? harnessChoices(typeof opts === "string" ? null : opts.harnesses) : [];
+    const listed = choices.length ? { choices, closed: true, multiple: true, noun: f.choices === "steering" ? "steering profile" : "harness" } : undefined;
+    return { ...base, mono: f.key.includes("command"), onEdit: () => edit({ kind: "text", title: f.label, help: "Leave empty to clear it, which falls back to the default.", value: f.show(f.key === "steering" ? repo!.resolved.steering : v), placeholder: f.placeholder, listed, set: sendTo(draft, repo!, f) }) };
   };
 
   const disconnect = async () => {
