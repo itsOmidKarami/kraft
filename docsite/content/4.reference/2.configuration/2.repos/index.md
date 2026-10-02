@@ -259,41 +259,21 @@ worktree; `--test-command`, `--setup-command` and `--no-tests` replace it; in a
 terminal, connect asks which candidate to use. `kraft admin doctor` reports any
 connected repo still missing a `setup_command`.
 
-It proposes each command from the first of these files it finds. The setup
-command is read from the repo's root only. The test command is read from the
-root and from each directory one level down, and a match there becomes a test
-scope for that directory:
+Some repos get no proposal, on purpose. A `pyproject.toml` declaring a project,
+with no lockfile beside it (`uv.lock`, `poetry.lock`, `pdm.lock`, a Pipfile),
+gets neither command. `uv sync` and `uv run` both write a `uv.lock` when there
+is none, and the worker would commit it on the item's branch. Kraft does not
+fall back to a `go.mod` or `package.json` beside it either. A lockfile-based
+install still stands (`npm ci` beside a `package-lock.json`), and so does a
+task runner's `test` recipe in that directory, which comes first.
 
-| File | Proposed `setup_command` |
-|---|---|
-| `package-lock.json` | `npm ci` |
-| `yarn.lock` | `yarn install --frozen-lockfile` |
-| `pnpm-lock.yaml` | `pnpm install --frozen-lockfile` |
-| `uv.lock` | `uv sync` |
-| `Cargo.toml` | `cargo fetch` |
-| `go.mod` | `go mod download` |
-
-| File | Proposed `test_command` |
-|---|---|
-| A `justfile` with a `test` recipe | `just test` |
-| `uv.lock` | `uv run pytest -q` |
-| `package.json` | `npm test` |
-| `Cargo.toml` | `cargo test` |
-| `go.mod` | `go test ./...` |
-
-A `pyproject.toml` with no `uv.lock` beside it gets neither command. `uv sync`
-and `uv run` both write a `uv.lock` when there is none, and the worker would
-commit it on the item's branch. Kraft does not fall back to a `package.json`,
-`Cargo.toml` or `go.mod` beside it either. An npm, yarn or pnpm lockfile still
-wins the setup guess, and a justfile `test` recipe the test guess, since each
-comes first. A `package.json` with no lockfile gets no `setup_command` for the
-same reason: `npm install` would write one.
-
-For tests, one such `pyproject.toml` anywhere Kraft looks means no test command
-for the whole repo. Say `backend/` has one and `frontend/` has a
-`package.json`. A change to `backend/` matches no scope, and a change that
-matches none runs every scope, so a `frontend/**` scope alone would pass it on
-`npm test` with the Python tests never run. Kraft proposes nothing instead.
+For tests, one such directory anywhere Kraft looks means no test command for
+the whole repo. Say `backend/` has one and `frontend/` has a `package.json`. A
+change to `backend/` matches no scope, and a change that matches none runs
+every scope, so a `frontend/**` scope alone would pass it on `npm test` with the
+Python tests never run. Kraft proposes nothing instead, and connect says which
+directory stopped it. A `--test-command` you give is kept: the stopped directory
+gets no scope of its own, and the root scope, running your command, covers it.
 
 Connect says when it found no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` if the repo needs no
