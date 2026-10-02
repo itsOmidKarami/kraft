@@ -267,13 +267,16 @@ fall back to a `go.mod` or `package.json` beside it either. A lockfile-based
 install still stands (`npm ci` beside a `package-lock.json`), and so does a
 task runner's `test` recipe in that directory, which comes first.
 
-For tests, one such directory anywhere Kraft looks means no test command for
-the whole repo. Say `backend/` has one and `frontend/` has a `package.json`. A
+For tests, such a directory at the root means no test command for the whole
+repo. One below the root means the same, unless the root's command runs its
+tests anyway. Say `backend/` has one and `frontend/` has a `package.json`. A
 change to `backend/` matches no scope, and a change that matches none runs
 every scope, so a `frontend/**` scope alone would pass it on `npm test` with the
 Python tests never run. Kraft proposes nothing instead, and connect says which
-directory stopped it. A `--test-command` you give is kept: the stopped directory
-gets no scope of its own, and the root scope, running your command, covers it.
+directory stopped it. The root covers the directory when its command is one you
+give with `--test-command`, its task runner's `test` recipe, or a root
+`uv.lock`'s (a uv workspace): the stopped directory then gets no scope of its
+own, and the root scope, running that command, covers it.
 
 Connect says when it found no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` if the repo needs no

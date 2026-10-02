@@ -1112,6 +1112,35 @@ def _stop(
     return out
 
 
+def _covered(
+    stopped: dict[str, Detector],
+    by_dir: dict[str, list[Candidate]],
+    table: Table,
+    test_command: str | None,
+) -> dict[str, Detector]:
+    """The stops that still stop the repo. A stopped subdirectory is covered
+    by the root -- its changes match the root scope, whose command runs its
+    tests -- when the root's command is given, comes from the repo's own task
+    runner (a justfile `test` recipe), or from a lockfile install of the
+    stopped project's family (a uv workspace's root `uv.lock`). Then it just
+    gets no scope of its own. A stop at the root itself always stands."""
+    if "" in stopped:
+        return stopped
+    root_test = _first_by_tier([c for c in by_dir.get("", []) if c.role == "test"], TEST_TIERS)
+    locked = {d.id for d in table.detectors if d.lockfile}
+
+    def covers(stop: Detector) -> bool:
+        if test_command:
+            return True
+        if root_test is None:
+            return False
+        return root_test.tier == "runner" or (
+            root_test.detector in locked and root_test.family == stop.family
+        )
+
+    return {d: stop for d, stop in stopped.items() if not covers(stop)}
+
+
 def _corroborate(by_dir: dict[str, list[Candidate]], ci: list[Candidate]) -> None:
     """Fold `ci` into `by_dir`. CI running what a runner or toolchain already
     proposes is corroboration, said on that candidate, not a second one."""
@@ -1159,7 +1188,7 @@ def propose(root: Path, table: Table, *, test_command: str | None = None) -> Pro
     # The root stays even with no evidence of its own: a given test command
     # is its scope, whatever is found below it.
     by_dir = {d: cands for d, cands in by_dir.items() if cands or matches[d] or not d}
-    stopped = _stop(by_dir, matches, table)
+    stopped = _covered(_stop(by_dir, matches, table), by_dir, table, test_command)
 
     # A workspace root covers its family's members: their setup always (the
     # root's install is what installs them), their tests when it has a test.

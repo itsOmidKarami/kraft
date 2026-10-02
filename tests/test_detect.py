@@ -357,6 +357,58 @@ def test_a_lockless_pyproject_anywhere_probed_proposes_no_test_scope(tmp_path, l
     assert p.stopped[0]["dir"] == (layout[0].rpartition("/")[0] or ".")
 
 
+_UV_WORKSPACE = PYTEST + "[tool.uv.workspace]\nmembers = ['pkgs/*']\n"
+
+
+@pytest.mark.parametrize(
+    ("files", "test", "scopes"),
+    [
+        (
+            {"pyproject.toml": _UV_WORKSPACE, "uv.lock": "", "pkgs/a/pyproject.toml": PYTEST},
+            "uv run pytest",
+            [["**"]],
+        ),
+        (
+            {"justfile": "test:\n  pytest\n", "backend/pyproject.toml": PYTEST},
+            "just test",
+            [["**"]],
+        ),
+        (
+            {"pyproject.toml": PYTEST, "uv.lock": "", "backend/pyproject.toml": PYTEST},
+            "uv run pytest",
+            [["**"]],
+        ),
+        (
+            {"package.json": JEST, "package-lock.json": "", "backend/pyproject.toml": PYTEST},
+            None,
+            [],
+        ),
+        (
+            {"justfile": "test:\n  pytest\n", "pyproject.toml": PYTEST, "x/go.mod": "m"},
+            "just test",
+            None,
+        ),
+    ],
+    ids=[
+        "a-uv-workspaces-root-lock-covers-its-members",
+        "a-root-justfile-recipe-covers-it",
+        "a-root-uv-lock-covers-it",
+        "a-root-npm-test-does-not",
+        "a-root-stop-beside-a-runner-recipe-is-no-stop",
+    ],
+)
+def test_a_stopped_subdirectory_is_covered_by_a_root_command_that_runs_it(
+    tmp_path, files, test, scopes
+):
+    """#446: a lockless pyproject.toml one level down stops the proposal only
+    when nothing at the root would run its tests. Covered, it gets no scope of
+    its own, and the root scope is what its changes match."""
+    p = _propose(_repo(tmp_path, files))
+    assert p.test_command == test
+    if scopes is not None:
+        assert [s["paths"] for s in p.test_scopes] == scopes
+
+
 def test_a_given_test_command_covers_a_lockless_pyproject_one_level_down(tmp_path):
     files = {"backend/pyproject.toml": PYTEST, "web/package.json": JEST}
     p = _propose(_repo(tmp_path, files), test_command="make test")
