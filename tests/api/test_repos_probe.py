@@ -88,6 +88,65 @@ def test_the_probe_runs_off_the_event_loop(tmp_path, client, monkeypatch):
     assert ("probe_repo", False) in ran, ran
 
 
+_SUBMODULE = '[submodule "x"]\n\tpath = libs/x\n\turl = ../x\n'
+
+
+@pytest.mark.parametrize(
+    "crafted",
+    [
+        # A quadratic backtrack in Python's INI option regex, holding the GIL.
+        _SUBMODULE + "a" + " " * 30_000 + "b\n",
+        # Python's INI interpolation: 400 bytes that expand to 10 MB, slowly.
+        _SUBMODULE.replace("libs/x", "%(v0)s" * 6)
+        + "".join(f"\tv{i} = {f'%(v{i + 1})s' * 6}\n" for i in range(8))
+        + "\tv8 = x\n",
+    ],
+    ids=["long-run-of-spaces", "interpolation-bomb"],
+)
+def test_a_crafted_gitmodules_does_not_stop_the_server_answering(tmp_path, client, crafted):
+    """`.gitmodules` is the repository's to write, and the "already connected"
+    check reads it on every connect and every `ensure_repo`. Python's INI
+    parser took seconds to hours on a crafted one, and on a long run of
+    spaces held the GIL throughout: in its thread or not, `/api/health`
+    waited for it."""
+    import threading
+    import time
+
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text(crafted)
+    done = threading.Event()
+    probe = threading.Thread(
+        target=lambda: (
+            client.post("/api/repos/probe", json={"path": str(repo), "detect": False}),
+            done.set(),
+        )
+    )
+    began = time.monotonic()
+    probe.start()
+    slowest = 0.0
+    while not done.is_set():
+        started = time.monotonic()
+        assert client.get("/api/health").status_code == 200
+        slowest = max(slowest, time.monotonic() - started)
+    probe.join()
+    assert slowest < 1.0, f"/api/health took {slowest:.1f}s while the probe read .gitmodules"
+    assert time.monotonic() - began < 5.0, "reading .gitmodules took seconds"
+
+
+def test_submodules_are_the_paths_git_reads_from_gitmodules(tmp_path):
+    """git's own reading, quoting and all; a file git cannot parse lists none."""
+    from kraft import config
+
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text(
+        '[submodule "b"]\n\tpath = libs/b\n[submodule "a"]\n\tPath = "with space"\n'
+        '[submodule "c"]\n\turl = ../c\n[other "d"]\n\tpath = not/a/submodule\n'
+    )
+    assert config.probe_repo(repo, detect=False)["submodules"] == ["libs/b", "with space"]
+    (repo / ".gitmodules").write_text('[submodule "b"]\n\tpath = libs/b\nnot config\n')
+    assert config.probe_repo(repo, detect=False)["submodules"] == []
+
+
 def test_a_probe_that_fails_still_connects_a_repo_given_both_commands(
     tmp_path, client, monkeypatch
 ):

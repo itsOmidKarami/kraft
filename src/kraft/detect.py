@@ -57,7 +57,14 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from kraft.config import ConfigError, bounded_yaml, first_error, git_read, read_yaml
+from kraft.config import (
+    GIT_READ_ENV,
+    ConfigError,
+    bounded_yaml,
+    first_error,
+    git_read,
+    read_yaml,
+)
 
 #: The packaged table. An operator's file of the same name under the
 #: templates directory layers on top of it, never replaces it wholesale, so a
@@ -272,11 +279,6 @@ def source_ref(root: Path) -> str | None:
     return None
 
 
-#: A partial clone's missing blob is fetched on demand; a probe must not
-#: reach the network, let alone prompt for credentials.
-_GIT_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
-
-
 def _git(root: Path, *args: str) -> bytes:
     """A read the probe cannot do without: a failure is an error naming git's
     reason, never an empty answer that reads as an empty repository."""
@@ -287,7 +289,7 @@ def _git(root: Path, *args: str) -> bytes:
             capture_output=True,
             timeout=_LIST_TIMEOUT_S,
             check=False,
-            env={**os.environ, **_GIT_ENV},
+            env={**os.environ, **GIT_READ_ENV},
         )
     except subprocess.TimeoutExpired as exc:
         raise ConfigError(
@@ -327,7 +329,7 @@ class _Blobs:
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, **_GIT_ENV},
+                    env={**os.environ, **GIT_READ_ENV},
                 )
             stdin, stdout = self._proc.stdin, self._proc.stdout
             assert stdin is not None and stdout is not None

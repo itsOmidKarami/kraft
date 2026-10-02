@@ -19,8 +19,6 @@ import stat
 import subprocess
 import tempfile
 from collections.abc import Iterator, Mapping
-from configparser import ConfigParser
-from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
@@ -153,10 +151,10 @@ def _small_text(path: Path, cap: int = 1 << 20) -> str | None:
         return None
 
 
-def _small_yaml(path: Path) -> dict:
+def _small_yaml(path: Path, cap: int = 1 << 20) -> dict:
     """`_small_text`'s YAML, bounded as `bounded_yaml` bounds it; empty when
     it is not a small regular file or not a mapping."""
-    text = _small_text(path)
+    text = _small_text(path, cap)
     try:
         data = bounded_yaml(text, [20_000]) if text is not None else None
     except (ValueError, RecursionError, yaml.YAMLError):
@@ -789,6 +787,55 @@ def same_repository(a: tuple[str, str], b: tuple[str, str]) -> bool:
     return bool(origin_a) and origin_a in (origin_b, path_b)
 
 
+#: A partial clone's missing blob is fetched on demand; a read of a
+#: repository's files must not reach the network, let alone prompt for
+#: credentials.
+GIT_READ_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+
+def _submodule_paths(gitmodules: str) -> list[str]:
+    """Every `submodule.<name>.path` in a `.gitmodules`'s text, as git reads
+    it; empty when git cannot.
+
+    Parsed by git, not by Python: the file is the repository's to write, and
+    `configparser` took seconds to hours on a crafted one. Its option regex
+    backtracks quadratically on a long run of spaces, holding the GIL, so one
+    line froze the whole server; its `%(name)s` interpolation expands a few
+    hundred bytes to gigabytes. git's own parser is linear and expands
+    nothing. It reads the text from stdin, with no repository around it, so
+    neither a `.git/config` nor an `include.path` in the file is read."""
+    try:
+        done = subprocess.run(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "config",
+                "--file",
+                "-",
+                "--null",
+                "--get-regexp",
+                r"^submodule\..*\.path$",
+            ],
+            input=gitmodules.encode("utf-8"),
+            cwd="/",
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env={**os.environ, **GIT_READ_ENV},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if done.returncode != 0:  # 1 is no submodule at all, 128 a file git cannot parse
+        return []
+    paths = set()
+    for entry in done.stdout.decode("utf-8", "replace").split("\0"):
+        _key, newline, path = entry.partition("\n")
+        if newline and path:
+            paths.add(path)
+    return sorted(paths)
+
+
 def probe_repo(
     path: str | Path,
     *,
@@ -823,23 +870,13 @@ def probe_repo(
     if root is None:
         raise ConfigError(f"{p} is not a git repository")
 
-    submodules: list[str] = []
     gitmodules = _small_text(root / ".gitmodules")
-    if gitmodules is not None:
-        parser = ConfigParser()
-        try:
-            # .gitmodules is INI-shaped: [submodule "libs/x"] with a path key.
-            # This read is best-effort: one that does not parse degrades to
-            # no submodules rather than failing the whole probe.
-            parser.read_string(gitmodules)
-            submodules = sorted(
-                parser.get(s, "path") for s in parser.sections() if parser.has_option(s, "path")
-            )
-        except (ConfigParserError, OSError, ValueError):
-            submodules = []
+    submodules = _submodule_paths(gitmodules) if gitmodules is not None else []
 
     beads = root / ".beads"
-    beads_config = _small_yaml(beads / "config.yaml") if beads.is_dir() else {}
+    # Parsed here, in the server, so held to what a beads config needs: a
+    # megabyte of YAML is seconds of the server's CPU on every connect.
+    beads_config = _small_yaml(beads / "config.yaml", 64 << 10) if beads.is_dir() else {}
     export = beads_config.get("export") or {}
 
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
