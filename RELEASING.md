@@ -116,6 +116,24 @@ also the safe order for users. VS Code updates the extension on its own, and an
 extension newer than the Kraft it talks to is read-only. It shouldn't arrive
 before that Kraft can be installed.
 
+The cost of that order: any failure before it leaves the extension unpublished.
+That covers minting the stamp token, the stamp pull request, Homebrew, and the
+PyPI check, which fails when PyPI hasn't served the version within 10 minutes,
+even if it does a minute later. A rerun can't recover it, because the tag
+exists and the run plans nothing. Fix the step that failed, then publish the
+extension by hand from the GitHub Release:
+
+```bash
+gh release download vX.Y.Z -p '*.vsix'
+npx --prefix vscode vsce publish --packagePath kraft-X.Y.Z.vsix -p "$VSCE_PAT"
+npx --prefix vscode ovsx publish kraft-X.Y.Z.vsix -p <token>
+```
+
+The Open VSX publish by hand can't use trusted publishing, which works only
+inside the workflow. It needs an access token from
+<https://open-vsx.org/user-settings/tokens>, made by an owner of the
+`kraft-sdlc` namespace.
+
 1. **GitHub Release** `vX.Y.Z`, with the wheel and `kraft-X.Y.Z.vsix` attached.
    Needs nothing: the workflow's own `GITHUB_TOKEN`. Check:
    `gh release view vX.Y.Z --json assets --jq '.assets[].name'` lists both files.
@@ -223,8 +241,9 @@ pre-release (`rc`, which reaches PyPI and the GitHub Release and nothing else).
 A stable run checks its own publishing. It fails if PyPI doesn't serve the new
 version within 10 minutes, before it publishes the extension. As its last step,
 it warns if the Marketplace hasn't listed the extension within 5 minutes; check
-that by hand, since the Marketplace can be slow to index. It dispatches the docs rebuild without waiting for it, so open the
-**docs** run on the Actions tab and confirm it passed.
+that by hand, since the Marketplace can be slow to index. It dispatches the
+docs rebuild without waiting for it, so open the **docs** run on the Actions tab
+and confirm it passed.
 
 If the run stops on an unlabeled pull request, label it (labels can be changed
 after merge) and run the workflow again. A failed build leaves no tag behind, so
