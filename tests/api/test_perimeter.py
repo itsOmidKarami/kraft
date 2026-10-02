@@ -329,8 +329,9 @@ def test_a_non_loopback_bind_streams_events_to_a_non_browser_client_on_any_host(
     [
         ("ws://kraft.example.com:8765/api/ws/events", "http://evil.example"),
         ("ws://evil.example:8765/api/ws/events", "http://evil.example:8765"),
+        ("ws://kraft.example.com:8765/api/ws/events", "http://kraft.example.com:9999"),
     ],
-    ids=["cross-site-origin", "unlisted-host"],
+    ids=["cross-site-origin", "unlisted-host", "listed-name-other-port"],
 )
 def test_a_non_loopback_bind_refuses_the_event_stream_to_any_other_page(lan_bind, url, origin):
     """The session cookie is valid in every case, so the perimeter is what
