@@ -192,11 +192,15 @@ jobs:
           xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
 
   test-gate:
-    # One check named exactly `test`, for branch protection to require. It
-    # stands for every job below that checks the code, not just the Python
-    # matrix: a red lint, frontend, playwright, vscode or e2e job turns it red.
-    # Naming this one job in the rule, rather than each check, means the
-    # supported Python range and the job list can change without a ruleset edit.
+    # One check named exactly `test` that stands for every job below that
+    # checks the code, not just the Python matrix: a red lint, frontend,
+    # playwright, vscode or e2e job turns it red. The matrix reports as
+    # `test (python 3.12)`, ... so a rule naming legs would need an edit
+    # whenever the supported range changes; one naming this job never does.
+    # Branch protection requires `test` today alongside each of those jobs by
+    # name; once the ruleset names only `test` (with the kraft-lite checks and
+    # the two pull-request-body checks), jobs can be added to or renamed in
+    # this gate without a ruleset edit.
     #
     # `e2e (real CLIs)` is in it too. The release workflow already refuses a
     # main whose whole test run isn't green, so leaving it out would only move
@@ -232,7 +236,14 @@ jobs:
     steps:
       - run: |
           # Job ids, not check names: `e2e` is playwright, `e2e-cli` is
-          # e2e (real CLIs), and `test` is the whole python matrix.
+          # e2e (real CLIs), and `test` is the whole python matrix. Read into
+          # a variable first, so a jq error fails the step instead of
+          # vanishing inside a process substitution.
+          results=$(jq -er 'to_entries[] | "\(.key) \(.value.result)"' <<<"$NEEDS")
+          if [ -z "$results" ]; then
+            echo "::error::no job results to check"
+            exit 1
+          fi
           status=0
           fail() { echo "::error::$job finished '$result', not 'success'"; status=1; }
           while read -r job result; do
@@ -241,20 +252,22 @@ jobs:
               *:success:*) ;;
               docs-tests:skipped:false) fail ;;  # docs-only: it stands in for the matrix
               docs-tests:skipped:*) ;;           # a code change skips it
-              *:skipped:false) ;;                # docs-only: the path-gated jobs skip
+              # docs-only: the path-gated jobs skip, and only they may
+              test:skipped:false | e2e-cli:skipped:false | frontend:skipped:false) ;;
+              vscode:skipped:false | e2e:skipped:false) ;;
               *) fail ;;
             esac
-          done < <(jq -r 'to_entries[] | "\(.key) \(.value.result)"' <<<"$NEEDS")
+          done <<<"$results"
           exit "$status"
 
   e2e-cli:
     # The e2e tier (Ruling 153): tests that run a real external CLI to check
     # its contract -- today bd's argv, subcommands and --json shape, and the
-    # bead behaviour Kraft relies on. A failure fails the required `test`
-    # check (see test-gate). KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd, docker or
-    # podman an error instead of a green job that skipped everything; the
-    # runner's own docker daemon and its rootless podman run the sandbox's
-    # ref-store test against a real container each. The paid
+    # bead behaviour Kraft relies on. A failure fails the `test` check (see
+    # test-gate). KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd,
+    # docker or podman an error instead of a green job that skipped
+    # everything; the runner's own docker daemon and its rootless podman run
+    # the sandbox's ref-store test against a real container each. The paid
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
     needs: changes
@@ -271,8 +284,11 @@ jobs:
       - name: install bd
         run: |
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL --retry 5 --retry-all-errors "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin bd
+          # To a file, not a pipe: a retry after a partial body would append
+          # to what tar already read.
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/bd.tar.gz" \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz"
+          sudo tar -xzf "$RUNNER_TEMP/bd.tar.gz" -C /usr/local/bin bd
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
           bd version
@@ -385,8 +401,9 @@ jobs:
         run: |
           apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL --retry 5 --retry-all-errors "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
-            | tar -xz -C /usr/local/bin bd
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/bd.tar.gz" \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz"
+          tar -xzf "$RUNNER_TEMP/bd.tar.gz" -C /usr/local/bin bd
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           git config --global user.email ci@kraft.invalid
