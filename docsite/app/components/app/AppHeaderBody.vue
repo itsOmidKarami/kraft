@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Docus's own AppHeaderBody.vue (docus 5.13.0), the phone nav drawer, with
 // exact link matching: see utils/exactNavigation.ts.
+// package.json pins docus to exactly 5.13.0 for this copy: on a bump, copy the
+// new release's file again and reapply the exactNavigation() wrap.
 import type { ContentNavigationItem } from '@nuxt/content'
 import { getFirstPagePath } from 'docus/app/composables/useSubNavigation'
 
