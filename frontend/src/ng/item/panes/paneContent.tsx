@@ -20,6 +20,8 @@ import { PathFooter } from "./PathFooter";
 import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
 import { chainName } from "../chainName";
+import { notStarted } from "../chainValues";
+import { NodeOverrideRows } from "./ItemOverrides";
 
 export type PaneArgs = {
   item: ItemDetail;
@@ -105,6 +107,8 @@ export function paneContent(a: PaneArgs): PaneContent {
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
   const live = drawn?.state === "current" && drawn.running;
+  // Before the item starts, an exec node's own overrides are set in place.
+  const fresh = notStarted(item) && node.kind !== "gate";
   return {
     crumbs: [toChain],
     icon: (node.steps?.length ?? 0) > 1 ? "layers" : undefined,
@@ -117,7 +121,7 @@ export function paneContent(a: PaneArgs): PaneContent {
       <>
         <DraftNotes node={node.id} />
         {a.tab === "config"
-          ? <><NodeConfig item={item} node={node} onReset={async () => { const r = await act.patch(item.id, { node_overrides: { [node.id]: {} } }); if (r.ok) a.reload(); }} /><AppliedRows applied={a.applied} path={node.id} /><DraftConfig path={node.id} /></>
+          ? <><NodeConfig item={item} node={node} controls={fresh} onReset={async () => { const r = await act.patch(item.id, { node_overrides: { [node.id]: {} } }); if (r.ok) a.reload(); }} />{fresh && <NodeOverrideRows item={item} node={node} policy={a.policy} reload={a.reload} />}<AppliedRows applied={a.applied} path={node.id} /><DraftConfig path={node.id} /></>
           : <NodeOverview item={item} node={node} onStep={(step) => a.pick({ kind: "step", node: node.id, step })} onNode={(n) => a.pick({ kind: "node", node: n })} />}
       </>
     ),

@@ -51,6 +51,11 @@ export type NodeOverrides = Record<
     auto_escalate_delay_s?: number;
     attempts?: number;
     wall_clock_s?: number;
+    model?: string | null;
+    escalate_model?: string | null;
+    effort?: string;
+    /** Added after each agent task's own prompt in the node. */
+    extra_prompt?: string | null;
   }
 >;
 
@@ -337,6 +342,11 @@ export interface WorkItem {
   /** This item's own per-node field overrides, `{}` when there are none.
    *  Only on the detail endpoint. */
   node_overrides?: NodeOverrides;
+  /** This item's own model and effort for every agent task, null when it sets none. */
+  agent_overrides?: { model?: string | null; escalate_model?: string | null; effort?: string } | null;
+  /** The chain intake froze for this item, as one JSON document
+   *  (`MaterializedChain.to_json`). Only on the detail endpoint. */
+  materialized_chain?: string | null;
   /** `Object.keys(node_overrides).length` -- the Config tab's "default + N
    *  overrides" count. Only on the detail endpoint. */
   node_overrides_count?: number;

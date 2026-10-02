@@ -426,7 +426,9 @@ async def set_agent_overrides(
     (Kraft-4k6l), read fresh at every dispatch rather than baked into the
     chain. `clear` sends `{}`, resetting every field to the template's own
     binding; naming any of `model`/`escalate_model`/`effort` *replaces* the
-    whole stored override, it does not merge with what is already there.
+    whole stored override, as it did in 1.4: the PATCH route merges field by
+    field (the item page sets one field at a time), so a field not named is
+    sent as `null`, which drops it.
     `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): a running
     worker dialing its own model/effort mid-run is exactly the kind of
     self-action the other verbs already refuse.
@@ -435,16 +437,8 @@ async def set_agent_overrides(
     if clear:
         overrides: dict = {}
     else:
-        overrides = {
-            k: v
-            for k, v in {
-                "model": model,
-                "escalate_model": escalate_model,
-                "effort": effort,
-            }.items()
-            if v is not None
-        }
-        if not overrides:
+        overrides = {"model": model, "escalate_model": escalate_model, "effort": effort}
+        if all(v is None for v in overrides.values()):
             raise ValueError(
                 "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear"
             )
@@ -472,8 +466,9 @@ async def set_node_overrides(
     the `model`/`effort` its agent tasks launch with and an `extra_prompt`
     appended to each of their instructions (Kraft-a7ers). `clear`
     sends `{}` for this node, dropping its overrides back to the template;
-    naming a field *replaces* that node's whole stored override, it does not
-    merge with what is already there. 409s once the node has started.
+    naming a field sets it and keeps the node's other fields, as it always
+    has (the PATCH route merges a node's fields). 409s once the node has
+    started.
     `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): same
     self-action door every other mutating verb here already goes through.
     """

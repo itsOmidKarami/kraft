@@ -45,3 +45,62 @@ def test_an_item_wide_agent_override_the_chain_harness_refuses_is_refused(
     else:
         assert r.status_code == 422, r.text
         assert refused in r.json()["detail"] and "codex" in r.json()["detail"]
+
+
+def test_the_detail_reports_the_item_wide_override_as_an_object_and_patches_merge(client, repo):
+    """The column is JSON text; the detail decodes it, as it does
+    `policy_override`. Two partial PATCHes (the item page's model row, then
+    its effort row) keep each other's field, and `null` drops one."""
+    wid = _paused_item(client, repo)
+    assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] is None
+
+    client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "opus"}})
+    client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"effort": "low"}})
+    assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] == {
+        "model": "opus",
+        "effort": "low",
+    }
+
+    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": None}})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["agent_overrides"] == {"effort": "low"}
+
+
+def test_a_model_that_is_no_model_id_is_refused(client, repo):
+    wid = _paused_item(client, repo)
+    r = client.patch(
+        f"/api/work-items/{wid}", json={"agent_overrides": {"model": "not a model; rm -rf"}}
+    )
+    assert r.status_code == 422 and "is not a model id" in r.json()["detail"]
+    r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": "a b"}}})
+    assert r.status_code == 422 and "is not a model id" in r.json()["detail"]
+
+
+def test_a_null_node_field_drops_only_that_field(client, repo):
+    wid = _paused_item(client, repo)
+    client.patch(
+        f"/api/work-items/{wid}",
+        json={"node_overrides": {"plan": {"model": "opus", "effort": "high"}}},
+    )
+    r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": None}}})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["node_overrides"] == {
+        "plan": {"effort": "high"}
+    }
+
+
+def test_the_patch_echoes_the_overrides_as_stored_after_the_merge(client, repo):
+    """A field the request left out is still stored, so the echo says so."""
+    wid = _paused_item(client, repo)
+    client.patch(
+        f"/api/work-items/{wid}",
+        json={"agent_overrides": {"model": "opus"}, "node_overrides": {"plan": {"model": "opus"}}},
+    )
+    r = client.patch(
+        f"/api/work-items/{wid}",
+        json={"agent_overrides": {"effort": "low"}, "node_overrides": {"plan": {"effort": "high"}}},
+    )
+    assert r.json()["agent_overrides"] == {"model": "opus", "effort": "low"}
+    assert r.json()["node_overrides"] == {"plan": {"model": "opus", "effort": "high"}}
+    cleared = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
+    assert cleared.json()["agent_overrides"] is None
