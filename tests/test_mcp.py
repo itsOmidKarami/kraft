@@ -413,3 +413,14 @@ def test_a_crash_is_still_a_crash_with_its_traceback_in_the_log(monkeypatch, cap
     assert asyncio.run(scenario()) == "Error executing tool get_work_item"
     logged = [r for r in caplog.records if r.levelname == "ERROR" and r.exc_info]
     assert logged and isinstance(logged[0].exc_info[1].__cause__, RuntimeError)
+
+
+def test_a_sync_tool_is_refused_when_it_is_registered():
+    """The refusal wrapper awaits the tool, so a sync one would fail on every
+    call; it fails here instead, where its author sees it."""
+
+    def sync_tool() -> dict:
+        return {}
+
+    with pytest.raises(TypeError, match="sync_tool must be `async def`"):
+        mcp._Server("kraft").tool()(sync_tool)

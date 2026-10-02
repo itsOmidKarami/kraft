@@ -11,6 +11,7 @@ something, so they are written for that reader, not for a maintainer.
 from __future__ import annotations
 
 import functools
+import inspect
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -50,7 +51,15 @@ class _Server(MCPServer):
 
     def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
         register = super().tool(*args, **kwargs)
-        return lambda fn: register(_refusals_reach_the_agent(fn))
+
+        def wrap(fn: Callable) -> Callable:
+            # The wrapper awaits `fn`, so a sync tool would fail on every call
+            # rather than here, where its author sees it.
+            if not inspect.iscoroutinefunction(fn):
+                raise TypeError(f"MCP tool {fn.__name__} must be `async def`")
+            return register(_refusals_reach_the_agent(fn))
+
+        return wrap
 
 
 def build() -> MCPServer:
