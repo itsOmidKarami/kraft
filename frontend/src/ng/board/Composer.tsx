@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { repoName } from "../../format";
@@ -11,6 +11,7 @@ import { Menu } from "../ui/Menu";
 import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
 import { Ticks } from "./Ticks";
+import { sendOnModEnter } from "../keys";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -97,12 +98,6 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
     await useStore.getState().bootstrap().catch(() => {});
     onCreated(r.body.id);
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      void create(true);
-    }
-  };
 
   const full = chains.find((c) => c.id === d.chain)?.nodes ?? [];
   const run = preview && "run" in preview ? preview.run : null;
@@ -113,7 +108,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   const ok = !!d.title.trim() && !!d.repo && !busy && !(preview && "error" in preview);
 
   return (
-    <section className="composer" aria-label="New work item" onKeyDown={onKey}>
+    <section className="composer" aria-label="New work item" onKeyDown={sendOnModEnter(() => create(true), !busy)}>
       <div className="composer-row">
         <NodeGlyph kind="slot" size="sm" mark="add" />
         <input className="composer-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />

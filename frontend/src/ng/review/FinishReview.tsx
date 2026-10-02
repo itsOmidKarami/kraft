@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { showToast } from "../ui/Toast";
 import { approveBlock, barText, drafts, outcomes } from "./finish";
+import { sendOnModEnter } from "../keys";
 
 type Item = Pick<WorkItem, "id" | "pending_gate" | "display_status" | "fix_target">;
 const ACTION = { retried: "retried", rerun: "running again", queued: "queued" } as const;
@@ -128,7 +129,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
           ))}
           {!toSend.length && <li className="rv-muted">No threads yet. Add a comment on a line or a file first.</li>}
         </ul>
-        <textarea className="rv-textarea" aria-label="Overall note" placeholder="Overall note for the agent (optional), markdown supported" value={note} onChange={(e) => setNote(e.target.value)} />
+        <textarea className="rv-textarea" aria-label="Overall note" placeholder="Overall note for the agent (optional), markdown supported" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(go, canSend && !busy)} />
         <fieldset className="rv-outcomes">
           <legend className="review-visually-hidden">Outcome</legend>
           {rows.map((r) => (

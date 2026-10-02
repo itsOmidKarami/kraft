@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pencil, RotateCcw } from "lucide-react";
 import { IconButton } from "../../ui/IconButton";
+import { Switch } from "../../ui/Switch";
 import { authoredAt, authoredNodes, kindOf, resolvedAt, sourceRows, sourceWord } from "../draft/view";
 import { fieldMeta, parse, show, type FieldMeta } from "../fields";
 import { Head, Note } from "./controls";
@@ -9,7 +10,7 @@ import type { PaneCtx } from "./Overview";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
 
 /** A row's `source` is absent where there is none to name (a library component's own keys): no chip, no dot, and ↺ removes the key. */
-export type Row = { field: string; value: unknown; source?: string; locked?: string };
+export type Row = { field: string; value: unknown; source?: string; locked?: string; recovery?: boolean };
 
 /** "on base change" restarts from this node or an earlier exec node. */
 function restartTargets(ctx: PaneCtx): string[] {
@@ -72,14 +73,16 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
     ctx.draft.field(ctx.path, target, p.value);
   };
   const start = () => {
-    if (meta.kind === "bool") return ctx.draft.field(ctx.path, row.field, !row.value);
     const v = row.field === "on_base_changed" ? (row.value as { restart_from?: string } | null)?.restart_from : row.value;
     setEditing(Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v));
   };
   return (
     <div className={`cfg-row${own ? " is-own" : ""}`}>
       <span className="cfg-k">{label}</span>
-      {editing === null ? (
+      {meta.kind === "bool" ? (
+        // A yes/no field is a switch: one click sets it.
+        <span className="cfg-v"><Switch label={label} checked={!!row.value} disabled={!!row.locked} onChange={(on) => ctx.draft.field(ctx.path, row.field, on)} /></span>
+      ) : editing === null ? (
         <span className={`cfg-v${meta.kind === "long" ? " is-prose" : ""}${row.value == null || row.value === "" ? " is-unset" : ""}`}>{show(row.value, meta.kind)}</span>
       ) : (
         <Editor meta={meta} field={row.field} value={editing} ctx={ctx} onSave={save} onCancel={() => { setEditing(null); setErr(null); }} label={label} />
@@ -91,11 +94,12 @@ export function ConfigRow({ row, ctx }: { row: Row; ctx: PaneCtx }) {
       ) : (
         editing === null && (
           <>
-            <IconButton label={meta.kind === "bool" ? `Turn ${label} ${row.value ? "off" : "on"}` : `Edit ${label}`} onClick={start}><Pencil size={12} aria-hidden /></IconButton>
+            {meta.kind === "bool" ? <span className="cfg-gap" /> : <IconButton label={`Edit ${label}`} onClick={start}><Pencil size={12} aria-hidden /></IconButton>}
             {own ? <IconButton label={`Reset ${label}`} onClick={() => ctx.draft.ops([{ op: "reset_field", path: ctx.path, field: row.field }])}><RotateCcw size={12} aria-hidden /></IconButton> : <span className="cfg-gap" />}
           </>
         )
       )}
+      {row.recovery && <p className="cfg-note">applies to its on-failure recovery</p>}
       {err && <p className="cfg-err" role="alert">{err}</p>}
     </div>
   );

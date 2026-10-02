@@ -4,6 +4,7 @@ import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import type { Side } from "./rows";
 import { LABELS, codeBlock } from "./Thread";
+import { sendOnModEnter } from "../keys";
 
 /** Where a comment goes: a line range on one side of a file, or the whole file. */
 export interface Target {
@@ -55,6 +56,7 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
     onCancel();
   };
   const dirty = !!(d.body.trim() || d.suggest !== null);
+  const send = sendOnModEnter(() => submit(), !!d.body.trim() && !busy);
   const submit = async () => {
     setBusy(true);
     const e = await onSubmit(d);
@@ -89,13 +91,13 @@ export function Composer({ target, lines, drafts, editing, onSubmit, onCancel }:
       {preview ? (
         <div className="rv-preview"><Markdown text={d.body || "Nothing to preview"} code={codeBlock} /></div>
       ) : (
-        <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
+        <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} onKeyDown={send} />
       )}
       {d.suggest !== null && r?.side === "new" && (
         <div className="rv-suggest">
           <div className="rv-suggest-head">Suggested change · {where.toLowerCase()}</div>
           {lines.map((l, i) => <div key={i} className="rv-suggest-line is-del"><span aria-hidden="true">−</span>{l}</div>)}
-          <textarea className="rv-textarea rv-mono" aria-label="Suggested change" value={d.suggest} onChange={(e) => set({ suggest: e.target.value })} />
+          <textarea className="rv-textarea rv-mono" aria-label="Suggested change" value={d.suggest} onChange={(e) => set({ suggest: e.target.value })} onKeyDown={send} />
         </div>
       )}
       {asking ? (
