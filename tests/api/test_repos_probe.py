@@ -147,6 +147,31 @@ def test_submodules_are_the_paths_git_reads_from_gitmodules(tmp_path):
     assert config.probe_repo(repo, detect=False)["submodules"] == []
 
 
+@pytest.mark.parametrize("target", ["file", "fifo"])
+def test_a_gitmodules_include_is_never_followed(tmp_path, target):
+    """git follows `[include]` in a config it reads from stdin: the
+    repository could have the server open any path, and a FIFO held the
+    probe until git's timeout."""
+    import os
+    import time
+
+    from kraft import config
+
+    included = tmp_path / "included"
+    if target == "fifo":
+        os.mkfifo(included)
+    else:
+        included.write_text('[submodule "b"]\n\tpath = included-path\n')
+    repo = make_repo(tmp_path)
+    (repo / ".gitmodules").write_text(
+        f'[include]\n\tpath = {included}\n[includeIf "gitdir:/"]\n\tpath = {included}\n'
+        '[submodule "a"]\n\tpath = a\n'
+    )
+    started = time.monotonic()
+    assert config.probe_repo(repo, detect=False)["submodules"] == ["a"]
+    assert time.monotonic() - started < 5.0
+
+
 def test_a_probe_that_fails_still_connects_a_repo_given_both_commands(
     tmp_path, client, monkeypatch
 ):

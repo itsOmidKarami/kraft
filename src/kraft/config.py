@@ -803,7 +803,9 @@ def _submodule_paths(gitmodules: str) -> list[str]:
     line froze the whole server; its `%(name)s` interpolation expands a few
     hundred bytes to gigabytes. git's own parser is linear and expands
     nothing. It reads the text from stdin, with no repository around it, so
-    neither a `.git/config` nor an `include.path` in the file is read."""
+    no `.git/config` is read. `--no-includes`: git follows `[include]` and
+    `[includeIf]` in a config read from stdin, which let the repository
+    have the server open any path, a FIFO among them."""
     try:
         done = subprocess.run(
             [
@@ -811,6 +813,7 @@ def _submodule_paths(gitmodules: str) -> list[str]:
                 "-c",
                 "core.fsmonitor=false",
                 "config",
+                "--no-includes",
                 "--file",
                 "-",
                 "--null",
