@@ -95,8 +95,9 @@ describe("Peek", () => {
   it("lists Activity newest first and pages back with before_seq; a node's line opens the item there", async () => {
     const page = Array.from({ length: 50 }, (_, k) => ev(51 + k, "node_started", k === 49 ? "verification" : null));
     mount({}, { start: "activity", events: page });
+    // The list is drawn empty before its events answer: wait for the rows, not the list.
     const list = await screen.findByRole("list");
-    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("verification");
+    expect((await within(list).findAllByRole("listitem"))[0]).toHaveTextContent("verification");
     fireEvent.click(screen.getByRole("button", { name: "Show earlier" }));
     await act(async () => {});
     const urls = vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/events?"));
