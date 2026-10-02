@@ -84,8 +84,9 @@ def _is_static_asset(app: FastAPI, path: str) -> bool:
     return dist.resolve() in candidate.parents and candidate.is_file()
 
 
-#: Hostnames that can only mean this machine. `urlsplit().hostname` strips the
-#: brackets off an IPv6 literal, so "::1" covers "[::1]" as well.
+#: Hostnames that can only mean this machine. `config.host_name` keeps an IPv6
+#: literal's brackets and `urlsplit().hostname` (an Origin) strips them, so
+#: both spellings of ::1 are here.
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 
 
@@ -248,7 +249,7 @@ def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
     #    name is always allowed there too: a browser sends one only when it is
     #    on this machine, so the board still opens at 127.0.0.1 on a LAN bind
     #    without listing it, and a rebound page carries its own name instead.
-    hostname = _hostname(request.headers.get("host", ""))
+    hostname = config_mod.host_name(request.headers.get("host", ""))
     bound_host = getattr(st, "bound_host", "127.0.0.1")
     if bound_host in config_mod.LOOPBACK:
         refused = hostname not in _LOCAL_HOSTS
@@ -272,19 +273,6 @@ def _refusal(request: Request | WebSocket, *, check_origin: bool) -> str | None:
         return "cross-site request refused"
 
     return None
-
-
-def _hostname(host: str) -> str | None:
-    """The name in a `Host` header, lowercased and without its port. None for
-    one that does not parse (an unclosed IPv6 bracket) or carries userinfo
-    (`evil@127.0.0.1`, which `urlsplit` would read as 127.0.0.1), which no
-    list holds."""
-    if "@" in host:
-        return None
-    try:
-        return urlsplit(f"//{host}").hostname
-    except ValueError:
-        return None
 
 
 def _from_a_browser(request: Request | WebSocket) -> bool:

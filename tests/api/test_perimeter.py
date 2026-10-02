@@ -176,6 +176,37 @@ def test_get_access_reports_allowed_hosts(client):
     assert r.json()["allowed_hosts"] == ["a.example.com"]
 
 
+@pytest.mark.api_client(host="0.0.0.0")
+def test_an_allowed_host_typed_with_a_port_case_or_scheme_still_matches(client):
+    """A Host header carries the port, so `kraft.test:8765` is a natural thing
+    to type into the list. Saved as typed, it never matched the lowercased,
+    portless name the perimeter compares, and the browser got a 403 on its own
+    board. Saved normalized, the list reads back the way it is compared."""
+    typed = ["Kraft.Test:8765", "http://phone.test/", "[FD00::5]:8765", "tab.test.", "kraft.test"]
+    saved = client.put(
+        "/api/access", json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": typed}
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["allowed_hosts"] == ["kraft.test", "phone.test", "[fd00::5]", "tab.test"]
+    assert client.post("/api/login", json={"password": "hunter2"}).status_code == 200
+    for host in ("kraft.test:8765", "Phone.Test:8765", "[fd00::5]:8765", "tab.test.:8765"):
+        browser = {"host": host, "sec-fetch-site": "same-origin"}
+        assert client.get("/api/work-items", headers=browser).status_code == 200, host
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+def test_an_allowed_host_that_is_not_one_name_is_refused_by_name(client):
+    """Wildcards are not supported. Saved, `*.ts.net` would be a name no
+    browser sends; refused, the 422 says which entry and what form works."""
+    r = client.put(
+        "/api/access",
+        json={"bind": "0.0.0.0", "password": "hunter2", "allowed_hosts": ["ok.test", "*.ts.net"]},
+    )
+    assert r.status_code == 422, r.text
+    assert "'*.ts.net' is not a host name or IP address" in r.json()["detail"]
+    assert client.get("/api/access").json()["allowed_hosts"] == []
+
+
 def test_a_rebound_host_is_refused_for_a_browser_request(client):
     """DNS rebinding: a page on evil.com whose name flips to 127.0.0.1 becomes
     same-origin with the local board and can read every response and drive every

@@ -598,6 +598,20 @@ class AccessBody(BaseModel):
     allowed_hosts: list[str] | None = None
 
 
+def _checked_host(entry: str) -> str:
+    """`entry` as the perimeter compares it (`config.normalize_host`), or a 422
+    naming it. Wildcards are not supported, so `*.example.com` is refused
+    rather than saved as a name no browser sends."""
+    if name := config_mod.normalize_host(entry):
+        return name
+    raise HTTPException(
+        422,
+        f"allowed_hosts: {entry!r} is not a host name or IP address. "
+        "Enter one name, such as kraft.local, 192.168.1.5 or [fd00::5], "
+        "with no wildcard or user@",
+    )
+
+
 @api_router.get("/access")
 async def get_access(request: Request):
     access = request.app.state.access
@@ -622,13 +636,14 @@ async def put_access(body: AccessBody, request: Request):
     if body.session_expiry_days is not None:
         access["session_expiry_days"] = body.session_expiry_days
     if body.allowed_hosts is not None:
-        access["allowed_hosts"] = body.allowed_hosts
+        access["allowed_hosts"] = [_checked_host(h) for h in body.allowed_hosts]
     if body.password:
         access["password_hash"] = auth_mod.hash_password(body.password)
     if why := config_check.access_problem(access):
         raise HTTPException(422, why)
-    config_mod.Access.model_validate(access).save(st.templates_dir / "access.yaml")
-    st.access = access
+    saved = config_mod.Access.model_validate(access)
+    saved.save(st.templates_dir / "access.yaml")
+    st.access = saved.model_dump()
     apply_mod.notify(request.app)
     # Only once the new hash is durable: revoking first and then failing to write
     # would sign everyone out while leaving the *old* password live.
