@@ -67,7 +67,9 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
 
   const submit = async (target: Target, editing: ReviewThread | null, d: Draft): Promise<string | null> => {
     const r = target.range;
-    const suggestion = d.suggest !== null && r && !isMixed(r) ? { start_line: r.start, end_line: r.end, replacement: d.suggest } : null;
+    // A suggestion left as the lines it was filled from changes nothing: it is not sent.
+    const changes = r && d.suggest !== null && d.suggest !== newLines(patch.get(target.path), r.start, r.end).join("\n");
+    const suggestion = changes && !isMixed(r) ? { start_line: r.start, end_line: r.end, replacement: d.suggest! } : null;
     const quote = r ? quoteOf(r, indexOf(target.path)) : [];
     let res;
     if (editing) res = await request(`/threads/${editing.id}`, jsonBody("PATCH", { body: d.body.trim(), label: d.label, suggestion }));

@@ -202,6 +202,24 @@ describe("useComments", () => {
     expect(quotes).toEqual([["−y was", "+z was"], [" x", "+z"]]);
   });
 
+  it("sends a suggested change only once it differs from the lines it was filled from", async () => {
+    const req = vi.spyOn(http, "request").mockResolvedValue({ status: 201, body: {} });
+    const { result } = hook([], { target: "latest", sha: null });
+    const send = async (suggest: string | null) => {
+      act(() => result.current.openPick({ path: "a.py", side: "new", anchor: 2, head: 2 }));
+      const view = render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
+      fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "why z" } });
+      fireEvent.click(screen.getByRole("button", { name: "± Suggest change" }));
+      expect(screen.getByRole("textbox", { name: "Suggested change" })).toHaveValue("z");
+      if (suggest !== null) fireEvent.change(screen.getByRole("textbox", { name: "Suggested change" }), { target: { value: suggest } });
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
+      view.unmount();
+      return JSON.parse(req.mock.calls.at(-1)![1]!.body as string);
+    };
+    expect(await send(null)).not.toHaveProperty("suggestion");
+    expect((await send("zz")).suggestion).toEqual({ start_line: 2, end_line: 2, replacement: "zz" });
+  });
+
   it("leaves the node out with two touchers, and the anchor on latest", async () => {
     const req = vi.spyOn(http, "request").mockResolvedValue({ status: 201, body: {} });
     const { result } = hook(["implementation", "verify"], { target: "latest", sha: null });
