@@ -53,6 +53,11 @@ async function restartAddress(): Promise<string> {
   return `${location.protocol}//${location.hostname}${port ? `:${port}` : ""}`;
 }
 
+/** What to do when no service manager started Kraft: `kraft admin restart`
+ *  brings a detached server back, but only stops one attached to a terminal
+ *  (`cli/admin.py` `_cmd_restart`), which that terminal starts again. */
+export const SELF_RESTART = "Kraft was not started as a service, so it cannot restart itself. Run kraft admin restart; if it runs attached to a terminal, that only stops it: stop it there with Ctrl-C and start it again the same way.";
+
 export const useApply = create<ApplyState>((set, get) => ({
   restart: [],
   reload: [],
@@ -93,7 +98,7 @@ export const useApply = create<ApplyState>((set, get) => ({
     const { address } = get();
     const r = await request("/apply/restart", jsonBody("POST"));
     if (r.status === 409) {
-      set({ managed: false, error: "Started from a terminal: restart it yourself (kraft admin restart)." });
+      set({ managed: false, error: SELF_RESTART });
       return;
     }
     if (r.status !== 202) {

@@ -3,7 +3,7 @@ import * as api from "../../../api";
 import { ago, until } from "../../../format";
 import type { Access, AuthSession, Health } from "../../../types";
 import { parseUserAgent } from "../../../ua";
-import { useApply } from "../../apply/store";
+import { SELF_RESTART, useApply } from "../../apply/store";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
@@ -97,7 +97,7 @@ export function AccessScreen() {
       {items.length > 0 && (
         <Group
           title="Restart needed"
-          note={`Kraft comes back at ${address} and this screen follows. Until then it keeps running as it is.${managed ? "" : " Started in a terminal, so Kraft cannot restart itself: run kraft admin restart there."}`}
+          note={`Kraft comes back at ${address} and this screen follows. Until then it keeps running as it is.${managed ? "" : ` ${SELF_RESTART}`}`}
           rows={[
             ...items.map((i): RowSpec => ({ key: i.id, label: i.text, chips: [{ label: "pending", tone: "warn" }] })),
             { label: "Undo", sub: "Save the running values back.", onClick: () => void undo() },

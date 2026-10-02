@@ -118,7 +118,7 @@ describe("Access (O.3)", () => {
     useApply.setState({ restart: [PORT_ITEM], managed: false });
     const group = await screen.findByRole("region", { name: "Restart needed" });
     expect(within(group).queryByRole("button", { name: /Restart Kraft/ })).toBeNull();
-    expect(group).toHaveTextContent("kraft admin restart");
+    expect(group).toHaveTextContent(/kraft admin restart; .*stop it there with Ctrl-C and start it again the same way/);
     const run = vi.fn();
     useApply.setState({ managed: true, askRestart: async () => {}, runRestart: run as never });
     await userEvent.click(await within(group).findByRole("button", { name: /Restart Kraft/ }));

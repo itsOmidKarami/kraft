@@ -4,7 +4,7 @@ import * as api from "../../api";
 import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
-import { useApply } from "../apply/store";
+import { SELF_RESTART, useApply } from "../apply/store";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
@@ -80,14 +80,17 @@ export function AccessPage() {
   const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
   const host = (h: string) => (h === "0.0.0.0" ? location.hostname : h);
   const address = `${location.protocol}//${host(access.bind)}:${access.port}`;
+  // Local network's password prompt reports under the Reach cards, as the bind it saves with.
+  const errKey = (what: "port" | "password" | "host" | "lan") => (what === "lan" ? "bind" : what);
   const closeEdit = () => {
+    if (editing) err(errKey(editing), null);
     setEditing(null);
     setDraft("");
   };
   const edit = (what: "port" | "password" | "host" | "lan", initial = "") => {
     setEditing(what);
     setDraft(initial);
-    err(what, null);
+    err(errKey(what), null);
   };
   const savePort = async () => {
     const problem = portProblem(draft);
@@ -164,7 +167,7 @@ export function AccessPage() {
               <strong>Restart to apply</strong>
               {items.map((i) => <span key={i.id}>{i.text}</span>)}
               <span className="set-hint">{`Kraft comes back at ${address} and this page follows. Until then it keeps running as it is.`}</span>
-              {!managed && <span className="set-hint">Started in a terminal, so Kraft cannot restart itself. Run <code>kraft admin restart</code> there.</span>}
+              {!managed && <span className="set-hint">{SELF_RESTART}</span>}
             </div>
             <div className="set-pending-actions">
               <button type="button" className="set-btn" onClick={() => void undo()}>Undo</button>

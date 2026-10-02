@@ -362,9 +362,10 @@ def _bind(templates_dir: Path) -> tuple[str, int]:
         # What sets one on a server still on loopback: the Access screen asks for
         # it when Local network is picked, and PUT /api/access takes it alone.
         raise SystemExit(
-            f"refusing to bind {host}: no password is set. Start Kraft on 127.0.0.1 "
-            "and pick Local network in Settings → Access, which asks for one, or set "
-            f"one with `curl -X PUT http://127.0.0.1:{port}/api/access "
+            f"refusing to bind {host}: no password is set. Start Kraft on loopback with "
+            "`kraft admin start --host 127.0.0.1`, then set one in Settings → Access "
+            "(picking Local network asks for it), or with "
+            f"`curl -X PUT http://127.0.0.1:{port}/api/access "
             "-H 'Content-Type: application/json' -d '{\"password\": \"...\"}'`. "
             "See https://itsomidkarami.github.io/kraft/guides/remote-access"
         )
