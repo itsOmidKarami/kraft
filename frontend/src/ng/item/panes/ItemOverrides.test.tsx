@@ -119,7 +119,7 @@ describe("NodeOverrideRows", () => {
     usePaneMemory.setState({ pane: { open: true, userCollapsed: false } });
     const mount = (item: ItemDetail) => render(
       <MemoryRouter initialEntries={["/work-items/w1?sel=verification&tab=config"]}>
-        <Routes><Route path="/work-items/:id" element={<Workspace item={item} reload={() => {}} />} /></Routes>
+        <Routes><Route path="/work-items/:id" element={<Workspace item={item} version="1" reload={() => {}} />} /></Routes>
       </MemoryRouter>,
     );
     const first = mount(fresh());

@@ -1,10 +1,11 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, holdFetch, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -177,6 +178,9 @@ describe("the task screen (E)", () => {
     expect(where()).toContain("attempt=1");
     expect(await screen.findByText(/attempt 1 of 2/)).toBeInTheDocument();
     expect(screen.getByText("1m")).toBeInTheDocument();
+    // Back on the newest, the pin drops: the screen follows the next attempt.
+    await userEvent.click(screen.getByRole("button", { name: /#2/ }));
+    expect(where()).not.toContain("attempt=");
   });
 
   it("has no Thread tab on an ordinary task, and Thread first on the escalation", async () => {
@@ -213,6 +217,53 @@ describe("the task screen (E)", () => {
     expect(screen.getByText("check the lock order too")).toBeInTheDocument();
     expect(screen.queryByText("start over on the lock")).toBeNull();
     expect(screen.getByText("1 later message after this thread.")).toBeInTheDocument();
+  });
+
+  it("shows a new thread on the latest without a reload, though the item's updated_at stays put", async () => {
+    const esc = (id: string, thread: number, created_at: string) => session({ id, hook_point: "verification.escalation.escalation", status: "failed", thread, attempt: thread, created_at });
+    const msg = (seq: number, thread: number, message: string, session_id: string) => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread, turn: 1, message, session_id }, node_id: "verification", created_at: "2026-09-13T09:00:00Z" });
+    const one = item("failed", stop("failed"), { worker_sessions: [esc("e1", 1, "2026-09-13T09:00:00Z")] });
+    useStore.setState({ eventsByItem: {} });
+    mount(one, "/work-items/w1/nodes/verification?sel=verification.escalation.escalation", { "GET /work-items/w1/events": [200, [msg(1, 1, "decide if the race is real", "e1")]] });
+    expect(await screen.findByText("decide if the race is real")).toBeInTheDocument();
+    stubFetch({
+      "GET /work-items/w1": [200, { ...one, worker_sessions: [...one.worker_sessions, esc("e2", 2, "2026-09-13T09:05:00Z")] }],
+      "GET /work-items/w1/events": [200, [msg(1, 1, "decide if the race is real", "e1"), msg(2, 2, "start over on the lock", "e2")]],
+    });
+    act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
+    expect(await screen.findByText("start over on the lock")).toBeInTheDocument();
+    expect(screen.getByText(/attempt 2 of 2/)).toBeInTheDocument();
+  });
+
+  it("keeps the newest read of the thread when an older one answers late", async () => {
+    const esc = (id: string, thread: number) => session({ id, hook_point: "verification.escalation.escalation", status: "failed", thread, attempt: thread });
+    const msg = (seq: number, thread: number, message: string, session_id: string) => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread, turn: 1, message, session_id }, node_id: "verification", created_at: "2026-09-13T09:00:00Z" });
+    const one = item("failed", stop("failed"), { worker_sessions: [esc("e1", 1)] });
+    const answers: Record<string, [number, unknown]> = { "GET /work-items/w1": [200, one] };
+    useStore.setState({ eventsByItem: {} });
+    const reads = holdFetch(/\/work-items\/w1\/events\?after_seq=/, answers);
+    render(<MemoryRouter initialEntries={["/work-items/w1/nodes/verification?sel=verification.escalation.escalation"]}><Routes><Route path="/work-items/:id/nodes/:node" element={<NodeRoute />} /></Routes></MemoryRouter>);
+    await waitFor(() => expect(reads).toHaveLength(1));
+    answers["GET /work-items/w1"] = [200, { ...one, worker_sessions: [esc("e1", 1), esc("e2", 2)] }];
+    act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => reads[1]([msg(1, 1, "decide if the race is real", "e1"), msg(2, 2, "start over on the lock", "e2")]));
+    expect(await screen.findByText("start over on the lock")).toBeInTheDocument();
+    await act(async () => reads[0]([msg(1, 1, "decide if the race is real", "e1")]));
+    expect(screen.getByText("start over on the lock")).toBeInTheDocument();
+  });
+
+  it("lists a new attempt's documents without a reload", async () => {
+    const one = item("running", null, { worker_sessions: [session({ id: "s1", attempt: 1, status: "failed" })] });
+    useStore.setState({ eventsByItem: {} });
+    mount(one, TASK);
+    expect(await screen.findByRole("heading", { level: 1, name: "code_review" })).toBeInTheDocument();
+    stubFetch({
+      "GET /work-items/w1": [200, { ...one, worker_sessions: [session({ id: "s1", attempt: 1, status: "failed" }), session({ id: "s2", attempt: 2, status: "done" })] }],
+      "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [{ document_id: "d2", title: "Review notes", path: "a.md", kind: "reviews", worker_session_id: "s2", hook_point: "verification.review.code_review", attempt: 2 }] }],
+    });
+    act(() => useStore.getState().applyEvent({ seq: 2, work_item_id: "w1", type: "worker_session_created", payload: {}, created_at: "t" }));
+    expect(await screen.findByText(/Review notes/)).toBeInTheDocument();
   });
 
   it("says what a task that has not started waits for", async () => {

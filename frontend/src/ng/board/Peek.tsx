@@ -71,21 +71,21 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       onFocus={open}
       footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} />}
     >
-      {tab === "overview" && <Overview item={item} reload={loaded.reload} onRaise={raise} />}
-      {tab === "activity" && <Activity id={item.id} version={item.updated_at} />}
+      {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} />}
+      {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
       {tab === "config" && <Config item={item} reload={loaded.reload} budget={budget} onBudget={onBudget} />}
     </Inspector>
   );
 }
 
-function Overview({ item, reload, onRaise }: { item: ItemDetail; reload: () => void; onRaise: () => void }) {
+function Overview({ item, version, reload, onRaise }: { item: ItemDetail; version: string; reload: () => void; onRaise: () => void }) {
   const navigate = useNavigate();
   const anchor = useRef<HTMLDivElement>(null);
   const [cancelling, setCancelling] = useState(false);
   const [escalating, setEscalating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const duplicate = useDuplicate(item.id, setError);
-  const events = useEvents(item.id, item.updated_at);
+  const events = useEvents(item.id, version);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
   const openGate = useSelect(item.id);
   return (

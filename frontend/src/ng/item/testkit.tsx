@@ -90,6 +90,25 @@ export function stubFetch(answers: Record<string, [number, unknown]> = {}) {
  *  expected to send, so that `stubFetch` answers them instead of refusing. */
 export const acceptWrites = (...routes: string[]): Record<string, [number, unknown]> => Object.fromEntries(routes.map((r) => [r, [200, {}]]));
 
+/** `stubFetch`, but every GET whose URL (query included, no /api) matches
+ *  `held` waits until the test answers it, in any order: `calls[k](body)`
+ *  answers the k-th, so a test can let an older read land after a newer one.
+ *  `answers` is read at call time. */
+export function holdFetch(held: RegExp, answers: Record<string, [number, unknown]> = {}) {
+  const calls: ((body: unknown) => void)[] = [];
+  vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+    const full = String(url).replace(/^\/api/, "");
+    const path = full.split("?")[0];
+    const method = init?.method ?? "GET";
+    if (method === "GET" && held.test(full)) return new Promise<Response>((done) => calls.push((body) => done(new Response(JSON.stringify(body), { status: 200 }))));
+    const routed = answers[`${method} ${path}`];
+    if (!routed && method !== "GET") return Promise.reject(new TypeError(`holdFetch: no route for ${method} ${full}`));
+    const [status, body] = routed ?? emptyAnswer(path);
+    return Promise.resolve(new Response(JSON.stringify(body), { status }));
+  }));
+  return calls;
+}
+
 export const inShell = (ui: ReactElement, path = "/work-items/w1") =>
   render(
     <MemoryRouter initialEntries={[path]}>

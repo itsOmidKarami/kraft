@@ -22,7 +22,8 @@ export function Log({ sessionId, running, title }: { sessionId: string; running:
     const read = () =>
       request<{ lines: LogLine[] }>(`/worker-sessions/${encodeURIComponent(sessionId)}/log?format=jsonl`).then((r) => {
         if (!live) return;
-        if (r.status === 200) setLines(r.body.lines);
+        // A pending attempt has no log yet: once it runs, a read that succeeds clears the note.
+        if (r.status === 200) { setLines(r.body.lines); setError(null); }
         else setError(r.status === 404 ? "No log for this attempt yet." : "The log could not be read.");
       });
     read();

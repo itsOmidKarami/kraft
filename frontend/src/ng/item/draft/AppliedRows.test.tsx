@@ -17,7 +17,7 @@ const lint = { id: "s1", node_id: "verification", hook_point: "verification.chec
 let calls: Call[];
 const mount = (path: string, evs: KraftEvent[] = events, item = detail()) => {
   calls = stubFetch({ "GET /work-items/w1/events": [200, evs] });
-  render(<MemoryRouter initialEntries={[path]}><Routes><Route path="/work-items/:id" element={<Workspace item={item} reload={() => {}} />} /></Routes></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[path]}><Routes><Route path="/work-items/:id" element={<Workspace item={item} version="1" reload={() => {}} />} /></Routes></MemoryRouter>);
 };
 const eventReads = () => calls.filter((c) => c.path === "/work-items/w1/events").length;
 
