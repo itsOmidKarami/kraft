@@ -10,14 +10,20 @@ type Row = Pick<WorkItem, "display_status" | "stop" | "current_node_id" | "progr
 
 const nodeOf = (i: Row) => i.stop?.node ?? i.current_node_id ?? "";
 
+/** A node id as words for a row's tail: `merge_request` or `merge-request` reads "merge request". */
+const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
+
+/** A gate id as what it decides: `spec_approval` reads "spec", so the row says "approve spec". */
+const gateWords = (id: string) => nodeWords(id.replace(/[_-]approval$/, ""));
+
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
-  const node = nodeOf(i);
+  const node = nodeWords(nodeOf(i));
   const tail = (() => {
     switch (i.display_status) {
       case "needs_you":
         switch (i.stop?.kind) {
-          case "gate": return `approve ${i.pending_gate ?? node}`;
+          case "gate": return `approve ${gateWords(i.pending_gate ?? nodeOf(i))}`;
           case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
           default: return i.stop?.reason ?? `waiting for you at ${node}`;
         }

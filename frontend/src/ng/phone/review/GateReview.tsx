@@ -150,7 +150,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
       </div>
       {block && <p className="ph-block-reason" role="status">{block}</p>}
       <ActionBar>
-        <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>{hasDoc ? "Reject…" : "Request changes"}</Button>
+        <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>
         <Button className="ph-btn ph-btn-primary" variant="primary" onClick={approve} disabled={busy || !!block}>Approve</Button>
       </ActionBar>
     </>
@@ -193,7 +193,7 @@ function ReviewComposer({ target, submit }: { target: string | null; submit: Ret
       <div className="ph-content">
         <p className="ph-help">{`The item goes back to ${target ?? "the previous node"} with your note as the first thing the agent reads.`}</p>
         <textarea className="ph-input ph-input-area" aria-label="Your note" placeholder="What needs to change?" value={text} onChange={(e) => setText(e.target.value)} />
-        <p className="ph-target">Reject target: {target ?? "the previous node"}</p>
+        <p className="ph-target">Goes back to: {target ?? "the previous node"}</p>
         {error && <p className="ph-error" role="alert">{error}</p>}
       </div>
       <div className="ph-actionbar">

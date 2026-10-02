@@ -61,11 +61,11 @@ orientation: horizontal
 ::u-page-section
 ---
 title: Analytics
-description: Lead time, cost, and where both go — by node, by repo, over whatever window you pick. Built from the same events the board renders live, not a separate pipeline.
+description: Lead time, cost, and where both go — by node and by repo, over the last 8 weeks (on a phone, the last 7, 30 or 90 days). Built from the same events the board renders live, not a separate pipeline.
 orientation: horizontal
 reverse: true
 ---
-![The Analytics view: completed count, median lead time, cost; throughput by week; cost share by node; per-repo totals](/assets/analytics.png)
+![The Analytics view over the last 8 weeks: completed count, median lead time and cost; merged items per week; the top of the cost-by-node table](/assets/analytics.png)
 ::
 
 ::u-page-section
