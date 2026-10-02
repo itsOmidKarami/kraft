@@ -10,17 +10,21 @@ const row = (display_status: DisplayStatus, over: Partial<WorkItem> = {}) => det
 describe("reasonTail", () => {
   it("says one short thing per status and stop kind", () => {
     const cases: [WorkItem, string][] = [
-      [row("needs_you", { stop: stop("gate"), pending_gate: "final_review" }), "approve final_review"],
+      [row("needs_you", { stop: stop("gate"), pending_gate: "final_review" }), "approve final review"],
+      [row("needs_you", { stop: stop("gate"), pending_gate: "spec_approval" }), "approve spec"],
+      [row("needs_you", { stop: stop("gate", { node: "chain_revision_approval" }), pending_gate: null }), "approve chain revision"],
       [row("needs_you", { stop: stop("question", { reason: "needs_context: keep the legacy header?" }) }), "agent asks: keep the legacy header?"],
       [row("needs_you", { stop: stop("cap", { reason: "Running time hit its 8h cap" }) }), "Running time hit its 8h cap"],
       [row("needs_you", { stop: stop("conflict") }), "waiting for you at verification"],
-      [row("failed", { stop: stop("failed", { node: "merge_request" }) }), "failed at merge_request"],
+      [row("failed", { stop: stop("failed", { node: "merge_request" }) }), "failed at merge request"],
       [row("paused"), "paused at verification"],
+      [row("paused", { current_node_id: "draft_merge_request" }), "paused at draft merge request"],
       [row("paused", { current_node_id: null }), "created paused"],
       [row("running"), "verification"],
       [row("running", { progress: { current: 2, total: 3, title: "x" } as WorkItem["progress"] }), "verification · task 2 of 3"],
       [row("running", { step: { index: 2, count: 3, name: "review", task: "code_review" }, progress: { current: 2, total: 3, title: "x" } as WorkItem["progress"] }), "2 of 3 · review › code_review"],
       [row("running", { step: { index: 2, count: 3 } }), "verification · step 2 of 3"],
+      [row("running", { current_node_id: "post_merge_ci" }), "post merge ci"],
       [row("waiting", { stop: stop("rate_limit", { resume_at: "2026-09-13T10:04:00Z" }) }), "retry in 4m"],
       [row("waiting", { stop: stop("wait") }), "waiting at verification"],
       [row("escalated"), "escalation running"],
