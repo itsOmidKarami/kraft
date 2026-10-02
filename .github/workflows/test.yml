@@ -192,52 +192,82 @@ jobs:
           xargs uv run pytest -m "not e2e" -n auto < "$RUNNER_TEMP/docs-tests.txt"
 
   test-gate:
-    # One check named exactly `test`, for branch protection to require. The matrix
-    # above reports as `test (python 3.12)`, `test (python 3.13)`, ... so a rule
-    # naming each leg has to be edited whenever the supported range changes; a
-    # rule naming this job never does.
+    # One check named exactly `test` that stands for every job below that
+    # checks the code, not just the Python matrix: a red lint, frontend,
+    # playwright, vscode or e2e job turns it red. The matrix reports as
+    # `test (python 3.12)`, ... so a rule naming legs would need an edit
+    # whenever the supported range changes; one naming this job never does.
+    # Branch protection requires `test` today alongside each of those jobs by
+    # name; once the ruleset names only `test` (with the kraft-lite checks and
+    # the two pull-request-body checks), jobs can be added to or renamed in
+    # this gate without a ruleset edit.
+    #
+    # `e2e (real CLIs)` is in it too. The release workflow already refuses a
+    # main whose whole test run isn't green, so leaving it out would only move
+    # its failure from the pull request that caused it to release day. Its one
+    # infrastructure failure so far, a 504 fetching bd, is why both bd
+    # downloads retry. "Re-run failed jobs" re-runs this gate with them.
+    # `kraft-lite`, `removals declared` and the docs jobs are not: each is its
+    # own check, and `removals declared` is re-run on its own after a body edit.
     #
     # `if: ${{ !cancelled() }}` is load-bearing. A job skipped because its
     # `needs` failed reports "skipped", and a skipped required check passes --
-    # so a bare `needs` would leave this check green on a red matrix. Unlike
+    # so a bare `needs` would leave this check green on a red job. Unlike
     # `always()`, `!cancelled()` is false once the whole run is cancelled, which
     # concurrency does to the first run when a push follows another on the same
     # pull request. That run's gate is then skipped instead of failed. Cancelled
     # runs sit on an older head sha, so they no longer count against the merge;
     # what once made a duplicate run on the *same* sha (a `labeled` event after
     # `opened`) is gone with the `labeled` trigger. Cost: a run cancelled by
-    # hand also leaves a skipped gate, not a red one. The shell test below turns a failed matrix into a
-    # failed check. A skipped matrix passes only when `changes` said docs-only
-    # and `docs-tests` passed.
+    # hand also leaves a skipped gate, not a red one.
+    #
+    # The shell below reads every `needs` result. Each must be `success`, with
+    # two exceptions that follow `changes`: on a docs-only pull request the
+    # path-gated jobs report `skipped`, which passes, and `docs tests` must then
+    # succeed; on any other change `docs tests` is the one job expected to skip.
+    # Anything else -- failure, cancelled, or a skip nobody asked for -- fails.
     name: test
-    needs: [changes, test, docs-tests]
+    needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       CODE: ${{ needs.changes.outputs.code }}
-      MATRIX_RESULT: ${{ needs.test.result }}
-      DOCS_RESULT: ${{ needs.docs-tests.result }}
+      NEEDS: ${{ toJSON(needs) }}
     steps:
       - run: |
-          if [ "$CODE" = false ] && [ "$MATRIX_RESULT" = skipped ]; then
-            if [ "$DOCS_RESULT" != success ]; then
-              echo "::error::docs-only change: docs tests finished '$DOCS_RESULT', not 'success'"
-              exit 1
-            fi
-            echo "docs-only change: test matrix skipped, docs tests passed"
-          elif [ "$MATRIX_RESULT" != "success" ]; then
-            echo "::error::the test matrix finished '$MATRIX_RESULT', not 'success'"
+          # Job ids, not check names: `e2e` is playwright, `e2e-cli` is
+          # e2e (real CLIs), and `test` is the whole python matrix. Read into
+          # a variable first, so a jq error fails the step instead of
+          # vanishing inside a process substitution.
+          results=$(jq -er 'to_entries[] | "\(.key) \(.value.result)"' <<<"$NEEDS")
+          if [ -z "$results" ]; then
+            echo "::error::no job results to check"
             exit 1
           fi
+          status=0
+          fail() { echo "::error::$job finished '$result', not 'success'"; status=1; }
+          while read -r job result; do
+            echo "$job: $result"
+            case "$job:$result:$CODE" in
+              *:success:*) ;;
+              docs-tests:skipped:false) fail ;;  # docs-only: it stands in for the matrix
+              docs-tests:skipped:*) ;;           # a code change skips it
+              # docs-only: the path-gated jobs skip, and only they may
+              test:skipped:false | e2e-cli:skipped:false | frontend:skipped:false) ;;
+              vscode:skipped:false | e2e:skipped:false) ;;
+              *) fail ;;
+            esac
+          done <<<"$results"
+          exit "$status"
 
   e2e-cli:
     # The e2e tier (Ruling 153): tests that run a real external CLI to check
     # its contract -- today bd's argv, subcommands and --json shape, and the
-    # bead behaviour Kraft relies on. Not a required check yet; that is Omid's
-    # call. KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd, docker or
-    # podman an error instead of a green job that skipped everything; the
-    # runner's own docker daemon and its rootless podman run the sandbox's
-    # ref-store test against a real container each. The paid
+    # bead behaviour Kraft relies on. A failure fails the `test` check (see
+    # test-gate). KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd,
+    # docker or podman an error instead of a green job that skipped
+    # everything; the runner's own docker daemon and its rootless podman run
+    # the sandbox's ref-store test against a real container each. The paid
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
     needs: changes
@@ -254,8 +284,11 @@ jobs:
       - name: install bd
         run: |
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin bd
+          # To a file, not a pipe: a retry after a partial body would append
+          # to what tar already read.
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/bd.tar.gz" \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz"
+          sudo tar -xzf "$RUNNER_TEMP/bd.tar.gz" -C /usr/local/bin bd
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
           bd version
@@ -368,8 +401,9 @@ jobs:
         run: |
           apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl python3
           case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
-          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
-            | tar -xz -C /usr/local/bin bd
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/bd.tar.gz" \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz"
+          tar -xzf "$RUNNER_TEMP/bd.tar.gz" -C /usr/local/bin bd
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           git config --global user.email ci@kraft.invalid
