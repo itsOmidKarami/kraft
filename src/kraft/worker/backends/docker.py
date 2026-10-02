@@ -162,6 +162,12 @@ class Runtime:
     #: The daemon (docker) or the CLI (podman) runs as the operator, so
     #: container uids map into the operator's subordinate range.
     rootless: bool = False
+    #: False when the runtime did not say whether it is rootless or labels
+    #: its containers (its `info` timed out or did not parse): `rootless` and
+    #: `selinux` are then guesses, and a container run as a guessed user
+    #: cannot write the worktree, so `refusal` refuses every launch and
+    #: `runtime()` asks again instead of keeping it.
+    identity_known: bool = True
     #: None unless SELinux enforces; then `sandbox.yaml`'s `relabel` or
     #: `disable`, or `refuse` when it says neither.
     selinux: str | None = None
@@ -266,6 +272,13 @@ class Runtime:
         return (self.engine or self.cli) == "podman"
 
     def refusal(self) -> str | None:
+        if not self.identity_known:
+            return (
+                f"could not tell whether {self.cli} runs rootless: `{self.cli} info` gave no "
+                "answer Kraft reads in time (the runtime is missing, its daemon is down, or "
+                "it is busy), and a container run as the wrong user cannot write the "
+                "worktree. Check that the runtime answers (`kraft admin doctor`)"
+            )
         if self.selinux != "refuse":
             return None
         return (
@@ -306,16 +319,21 @@ def _run(*argv: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def _ask(cli: str) -> tuple[str, bool, bool]:
+def _ask(cli: str) -> tuple[str, bool | None, bool | None]:
     """`(engine, rootless, labels)`, asked of the runtime itself: what it
     really is, whether it runs as the operator, and whether it applies
     SELinux labels to containers (docker does only when its daemon was
-    started with SELinux support). Anything inconclusive (no daemon, an old
-    CLI) reads as a rootful, unlabelled docker, which is what every launch
-    assumed before."""
+    started with SELinux support). A `--version` that does not say podman
+    reads as docker. An `info` that gives no answer (no daemon, or one
+    slower than `_run`'s timeout: a rootless podman's first `info` on a
+    busy host took over ten seconds) is `None` for both, never "rootful":
+    that guess ran a rootless podman's container without `keep-id`, as a
+    user who could not write the worktree."""
     engine = "podman" if "podman" in (_run(cli, "--version") or "").lower() else "docker"
     if engine == "docker":
-        options = _run(cli, "info", "--format", "{{json .SecurityOptions}}") or ""
+        options = _run(cli, "info", "--format", "{{json .SecurityOptions}}")
+        if options is None:
+            return engine, None, None
         return engine, "name=rootless" in options, "name=selinux" in options
     security = (
         _run(
@@ -323,7 +341,9 @@ def _ask(cli: str) -> tuple[str, bool, bool]:
         )
         or ""
     ).split()
-    return engine, security[:1] == ["true"], security[1:2] == ["true"]
+    if len(security) != 2 or not set(security) <= {"true", "false"}:
+        return engine, None, None
+    return engine, security[0] == "true", security[1] == "true"
 
 
 def _ask_limits(cli: str, engine: str) -> frozenset[str] | None:
@@ -376,7 +396,8 @@ def detect_runtime() -> Runtime:
     return Runtime(
         cli=cli,
         engine=engine,
-        rootless=rootless,
+        rootless=bool(rootless),
+        identity_known=rootless is not None,
         selinux=selinux,
         limits=limits if limits is not None else frozenset(),
         limits_known=limits is not None,
@@ -395,18 +416,31 @@ def runtime(*, refresh: bool = False) -> Runtime:
     """This machine's `Runtime`, detected on first use and kept for the
     process: `docker info` is a round trip every launch would otherwise pay.
     Doctor refreshes it, so a changed `sandbox.yaml` is picked up there. A
-    runtime that did not say what limits it enforces is kept only
-    `UNSURE_TTL` seconds: a launch after that asks again rather than refusing
-    every limit until a restart, and a hung daemon is not asked on every call."""
+    runtime that did not say whether it is rootless, or what limits it
+    enforces, is kept only `UNSURE_TTL` seconds: a launch after that asks
+    again rather than refusing until a restart, and a hung daemon is not
+    asked on every call."""
     global _RUNTIME, _UNSURE_UNTIL
     if (
         refresh
         or _RUNTIME is None
-        or (not _RUNTIME.limits_known and time.monotonic() >= _UNSURE_UNTIL)
+        or (
+            not (_RUNTIME.identity_known and _RUNTIME.limits_known)
+            and time.monotonic() >= _UNSURE_UNTIL
+        )
     ):
         _RUNTIME = detect_runtime()
         _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
     return _RUNTIME
+
+
+def _launch_runtime() -> Runtime:
+    """`runtime()` for a launch about to start: one that did not say whether
+    it is rootless is asked again at once rather than after `UNSURE_TTL`,
+    since one slow answer is no reason to stop a task. Still no answer, and
+    `Runtime.refusal` stops it."""
+    host = runtime()
+    return host if host.identity_known else runtime(refresh=True)
 
 
 def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
@@ -1367,7 +1401,7 @@ class DockerBackend:
         members: Mapping[str, tuple[Path, Path] | None] = {},
     ) -> str | None:
         try:
-            host = await asyncio.to_thread(runtime)
+            host = await asyncio.to_thread(_launch_runtime)
         except ConfigError:
             return None  # `probe` says why
         if not host.rootless:
@@ -1380,7 +1414,7 @@ class DockerBackend:
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
-            host = await asyncio.to_thread(runtime)
+            host = await asyncio.to_thread(_launch_runtime)
         except ConfigError as exc:
             return str(exc)
         if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
@@ -1597,7 +1631,11 @@ class DockerBackend:
             host = await asyncio.to_thread(runtime, refresh=True)
         except ConfigError as exc:
             return False, str(exc)
-        if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
+        # A runtime that did not say whether it is rootless is named below,
+        # once a missing one, a daemon that is down or an image that is not
+        # pulled has had its say: each of those also leaves `info` silent.
+        refusal = host.refusal() if host.identity_known else None
+        if problem := refusal or host.limits_refusal(sandbox.get("resources")):
             return False, problem
         try:
             extra = await asyncio.to_thread(_forward.extra_ca)
@@ -1610,6 +1648,8 @@ class DockerBackend:
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+        if problem := host.refusal():
+            return False, problem
         egress = ""
         if sandbox.get("network"):
             # A launch never pulls it (`--pull=never` in the probe), and the
