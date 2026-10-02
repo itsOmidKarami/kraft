@@ -4,7 +4,7 @@ import * as api from "../../api";
 import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
-import { SELF_RESTART, useApply } from "../apply/store";
+import { SELF_RESTART, bindHost, useApply } from "../apply/store";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
@@ -78,8 +78,7 @@ export function AccessPage() {
   const items = restart.filter((i) => i.id.startsWith("access."));
   // The server drops its restart item when KRAFT_HOST / KRAFT_PORT wins over the file.
   const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
-  const host = (h: string) => (h === "0.0.0.0" ? location.hostname : h);
-  const address = `${location.protocol}//${host(access.bind)}:${access.port}`;
+  const address = `${location.protocol}//${bindHost(access.bind)}:${access.port}`;
   // Local network's password prompt reports under the Reach cards, as the bind it saves with.
   const errKey = (what: "port" | "password" | "host" | "lan") => (what === "lan" ? "bind" : what);
   const closeEdit = () => {

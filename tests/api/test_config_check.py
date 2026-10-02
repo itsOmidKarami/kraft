@@ -88,6 +88,13 @@ def test_access_off_localhost_without_a_password(ctx):
     assert issue.message == "set a password before binding off localhost"
 
 
+def test_access_names_an_allowed_host_that_never_matches(ctx):
+    """`Access` loads such an entry as written, so this is where it shows."""
+    [issue] = config_check.check("access.yaml", "allowed_hosts: [kraft.local, '*.ts.net']\n", ctx)
+    assert issue.loc == ("allowed_hosts", 1)
+    assert issue.message.startswith("allowed_hosts: '*.ts.net' is not a host name or IP address")
+
+
 def test_notify_enabled_without_a_url(ctx):
     [issue] = config_check.check("notify.yaml", "enabled: true\n", ctx)
     assert issue.message == "set a webhook URL before enabling notifications"

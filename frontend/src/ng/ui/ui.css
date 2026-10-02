@@ -76,6 +76,8 @@
 .md :is(h1, h2, h3, h4) { margin: 16px 0 6px; font-size: 14px; font-weight: 600; }
 .md :is(p, ul, ol) { margin: 0 0 10px; }
 .md a { color: var(--text); text-decoration: underline; }
+.md img { max-width: 100%; }
+.md-img-link { font: 12px ui-monospace, Menlo, monospace; }
 .md code { font: 12px ui-monospace, Menlo, monospace; }
 .md-pre { padding: 8px 10px; border-radius: 6px; background: var(--bg); overflow: auto; }
 .md table { border-collapse: collapse; margin: 0 0 10px; font-size: 12px; }

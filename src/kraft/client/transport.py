@@ -34,7 +34,7 @@ def base_url() -> str:
     port = int(os.environ.get("KRAFT_PORT") or access.port)
     if host in ("0.0.0.0", "::"):
         host = "127.0.0.1"
-    return f"http://{host}:{port}"
+    return f"http://{config.url_host(host)}:{port}"
 
 
 def http() -> httpx.AsyncClient:
