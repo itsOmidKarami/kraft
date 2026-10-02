@@ -16,6 +16,8 @@ set -eu
 # /releases/latest, not /releases: this endpoint already excludes drafts and
 # prereleases, so there is no feed to filter here the way kraft.update has to.
 API="https://api.github.com/repos/itsOmidKarami/kraft/releases/latest"
+# The caller's PATH, before this script adds uv's own directory to it.
+user_path=$PATH
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "installing uv (kraft needs it to fetch a Python 3.12 or newer)..."
@@ -40,8 +42,23 @@ curl -fsSL "$wheel" > "$wheel_file"
 
 uv tool install --force --from "$wheel_file" kraft-sdlc
 
+# Where uv put the command, which a first uv install has not added to the
+# caller's PATH yet: run it from there rather than trust `kraft` to resolve.
+bin_dir=$(uv tool dir --bin 2>/dev/null) || bin_dir="$HOME/.local/bin"
+
 echo
-echo "$(kraft --version) installed."
+if [ -x "$bin_dir/kraft" ]; then
+    echo "$("$bin_dir/kraft" --version) installed in $bin_dir."
+else
+    echo "kraft installed."
+fi
+case ":$user_path:" in
+    *":$bin_dir:"*) ;;
+    *)
+        echo "$bin_dir is not on your PATH: run  uv tool update-shell  and open a new"
+        echo "terminal, or call kraft as $bin_dir/kraft"
+        ;;
+esac
 echo "next: kraft              # start the server"
 echo "then, in Claude Code:  /plugin marketplace add itsOmidKarami/kraft"
 echo "                       /plugin install kraft@kraft, then /kraft:onboard in your repo"
