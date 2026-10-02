@@ -66,7 +66,7 @@ export function changeAt(r: Result, path: string): Change | undefined {
 /** Config rows in the server's order (brief Decided 11). `id`, `kind` and `icon` have their own controls. */
 const NOT_ROWS = new Set(["id", "kind", "icon"]);
 export const sourceRows = (r: Result, path: string) =>
-  Object.entries(r.sources[path] ?? {}).filter(([f]) => !NOT_ROWS.has(f)).map(([field, s]) => ({ field, value: s.value, source: s.source }));
+  Object.entries(r.sources[path] ?? {}).filter(([f]) => !NOT_ROWS.has(f)).map(([field, s]) => ({ field, value: s.value, source: s.source, recovery: s.recovery }));
 
 /** The header's two numbers. A YAML syntax error counts as a problem. */
 export const counts = (r: Result) => ({ changes: r.changes.length, problems: r.problems.length + (r.yaml_error ? 1 : 0) });

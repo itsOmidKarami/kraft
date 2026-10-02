@@ -96,11 +96,32 @@ describe("Config tab", () => {
     expect(draft.field).toHaveBeenCalledWith("verification", "on_base_changed.restart_from", "implementation");
   });
 
-  it("toggles a boolean with one click", async () => {
+  it("shows a yes/no field as a switch that sets it with one click", async () => {
     const { draft } = mount("verification");
     await configTab();
-    await userEvent.click(within(rowOf("skippable")).getByRole("button", { name: "Turn skippable off" }));
+    const sw = within(rowOf("skippable")).getByRole("switch", { name: "skippable" });
+    expect(sw).toHaveAttribute("aria-checked", "true");
+    expect(within(rowOf("skippable")).queryByRole("button", { name: /Edit skippable/ })).toBeNull();
+    await userEvent.click(sw);
     expect(draft.field).toHaveBeenCalledWith("verification", "skippable", false);
+  });
+
+  it("says which caps apply only to a task's on-failure recovery", async () => {
+    const sources = structuredClone(DEFAULT_VIEW.result.sources);
+    sources["implementation.main.implement"]["policy.budget_usd"] = { value: 2, source: "chain", recovery: true };
+    mount("implementation.main.implement", { sources });
+    await configTab();
+    expect(rowOf("budget ($)")).toHaveTextContent("applies to its on-failure recovery");
+    expect(rowOf("running cap")).not.toHaveTextContent("applies to its on-failure recovery");
+  });
+
+  it("disables a locked yes/no field's switch", async () => {
+    const { draft } = mount("verification");
+    await configTab();
+    const sw = within(rowOf("read only")).getByRole("switch", { name: "read only" });
+    expect(sw).toBeDisabled();
+    await userEvent.click(sw);
+    expect(draft.field).not.toHaveBeenCalled();
   });
 });
 

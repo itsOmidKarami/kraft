@@ -47,6 +47,20 @@ describe("Library: rename", () => {
   });
 });
 
+describe("Library: rename, then another pick", () => {
+  it("a click on another component while renaming commits the rename and keeps the new pick", async () => {
+    const u = userEvent.setup();
+    const post = vi.spyOn(d, "postOps").mockImplementation(() => opsAnswer([{ op: "rename", result: { updated: [] } }]));
+    await select("tasks.implementer");
+    await u.click(screen.getByRole("button", { name: "implementer" }));
+    await u.type(await screen.findByRole("textbox", { name: "Rename task" }), "x");
+    await u.click(screen.getByRole("option", { name: /^code_review/ }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "rename", path: "tasks.implementer", id: "implementerx" }], undefined));
+    expect(await screen.findByText(/Renamed implementer → implementerx/)).toBeInTheDocument();
+    expect(where()).toBe("/templates/library/tasks.code_review");
+  });
+});
+
 describe("Library: remove", () => {
   it("lists the chains that use it first, removes with one op, says how many uses it left broken, and opens the next row", async () => {
     const u = userEvent.setup();

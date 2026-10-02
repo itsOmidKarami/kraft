@@ -96,9 +96,9 @@ Every task takes these keys, then the keys of its kind.
 | `kind` | string | `agent`, `subprocess`, `builtin` or `forge`. |
 | `extends` | string | The library task this one builds on. |
 | `scope` | string | `each_repository` runs the task once per selected repository of a workspace item. `once` (default) runs it once. |
-| `steering` | list | Names from the library's `steering` section. |
+| `steering` | list | Names from the library's `steering` section. Only an agent task reads it. |
 | `on_failure` | mapping | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
-| `policy` | mapping | This task's own policy layer. |
+| `policy` | mapping | This task's own policy layer. A subprocess, builtin or forge task reads only `time_cap_minutes`, `total_time_cap_minutes` and `sandbox` itself. Its harness, budget, tool and grant caps bound the agent of its `on_failure` recovery, which runs under this layer. |
 | `skippable` | boolean | `false` refuses an operator's skip. Default `true`. |
 | `icon` | string | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
 

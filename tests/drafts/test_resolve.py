@@ -154,6 +154,78 @@ async def test_sources_name_the_layer_each_value_comes_from(st):
     assert sources["verification.fix_loop.judge"]["skill"]["source"] == "library:tasks.strict_judge"
 
 
+AGENT_ONLY = {
+    "steering",
+    "policy.allowed_harnesses",
+    "policy.token_budget",
+    "policy.budget_usd",
+    "policy.allowed_tools",
+    "policy.deny_tools",
+    "policy.grants",
+}
+
+
+@pytest.mark.parametrize(
+    ("task", "own"),
+    [
+        ('kind: subprocess, command: "true"', {"command"}),
+        ("kind: builtin, ref: kraft.mr_rebase", {"ref", "execution"}),
+        ("kind: forge, target: mr.sync", {"target", "wait"}),
+    ],
+    ids=["subprocess", "builtin", "forge"],
+)
+async def test_a_task_that_runs_no_agent_lists_no_agent_only_field(st, task, own):
+    text = SCRATCH.replace('kind: subprocess, command: "true"', task)
+    fields = scratch(st, text)["sources"]["run.main.t"]
+    assert set(fields) == {
+        "id",
+        "kind",
+        "scope",
+        "skippable",
+        "icon",
+        *own,
+        "policy.sandbox",
+        "policy.time_cap_minutes",
+        "policy.total_time_cap_minutes",
+    }
+
+
+async def test_an_agent_only_field_a_task_sets_anyway_is_still_listed(st):
+    text = SCRATCH.replace('command: "true"}', 'command: "true", policy: {budget_usd: 3}}')
+    fields = scratch(st, text)["sources"]["run.main.t"]
+    assert fields["policy.budget_usd"] == {"value": 3, "source": "chain"}
+    assert AGENT_ONLY - set(fields) == AGENT_ONLY - {"policy.budget_usd"}
+
+
+async def test_a_steering_a_task_sets_anyway_is_still_listed(st):
+    text = SCRATCH.replace('command: "true"}', 'command: "true", steering: [project-standards]}')
+    fields = scratch(st, text)["sources"]["run.main.t"]
+    assert fields["steering"] == {"value": ["project-standards"], "source": "chain"}
+
+
+async def test_a_task_with_a_recovery_lists_the_caps_its_repair_agent_runs_under(st):
+    # The recovery runs under the task's own policy scope, so its caps bind
+    # the repair agent: listed, and marked as the recovery's. Steering is not.
+    recovery = "on_failure: {tasks: [{id: fix, kind: agent, harness: claude, prompt: Fix.}]}"
+    text = SCRATCH.replace('command: "true"}', f'command: "true", {recovery}}}')
+    result = scratch(st, text)
+    assert result["problems"] == []
+    fields = result["sources"]["run.main.t"]
+    assert "steering" not in fields
+    caps = AGENT_ONLY - {"steering"}
+    assert caps <= set(fields)
+    assert {k for k, v in fields.items() if v.get("recovery")} == caps
+
+
+async def test_an_agent_task_lists_every_agent_only_field(st):
+    text = SCRATCH.replace(
+        'kind: subprocess, command: "true"', "kind: agent, harness: claude, prompt: Go."
+    )
+    fields = scratch(st, text)["sources"]["run.main.t"]
+    assert AGENT_ONLY <= set(fields)
+    assert not any(v.get("recovery") for v in fields.values())
+
+
 @pytest.mark.parametrize(
     ("policy", "values"),
     [
