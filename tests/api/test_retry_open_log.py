@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from support.api import _completed_item
+from support.api import WALK_TIMEOUT, _completed_item
 from support.harness import (
     _git,
     make_repo_with_engineering,
@@ -420,7 +420,7 @@ def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(client, repo):
         },
     ).json()["id"]
 
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + WALK_TIMEOUT
     while time.monotonic() < deadline:
         item = client.get(f"/api/work-items/{wid}").json()
         if item["status"] == "needs_human":
@@ -550,7 +550,7 @@ def test_retry_rebases_the_worktree_onto_a_moved_head(client, repo):
         },
     ).json()["id"]
 
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + WALK_TIMEOUT
     item = None
     while time.monotonic() < deadline:
         item = client.get(f"/api/work-items/{wid}").json()

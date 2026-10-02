@@ -32,6 +32,15 @@ _IMPLEMENT = "implementation.main.implement"
 # if it still times out. The seeded library's verification builtin is an
 # inert `true` in the test library (`seed_v1_library`), so the verify node
 # is not what these waits are paying for.
+#
+# Each test that waits so carries `_PAST_THE_RESUME_WAIT`: pyproject's 120s
+# per-test timeout would otherwise kill it long before its own 300s wait ran
+# out, so the bump changed nothing and a slow run read as a killed worker
+# instead of "timed out waiting for the resumed item to complete". 480s
+# covers that wait and the two 60s ones before it.
+_PAST_THE_RESUME_WAIT = pytest.mark.timeout(480)
+
+
 def _wait(fn, what, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -53,6 +62,7 @@ def _running_agent(client, wid):
     return _wait(check, "a running agent session")
 
 
+@_PAST_THE_RESUME_WAIT
 @pytest.mark.parametrize("provider_session", [None, "cli-7"], ids=["restarts", "resumes"])
 def test_pause_then_resume_with_a_steer_relaunches_the_task(
     tmp_path, monkeypatch, repo, client, provider_session
@@ -218,6 +228,7 @@ async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
     assert database.read(lambda c: store.session_status(c, "s1")) == "paused"
 
 
+@_PAST_THE_RESUME_WAIT
 def test_resume_rebases_the_worktree_onto_a_moved_head(monkeypatch, repo, client):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
@@ -313,6 +324,7 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(monkeypatc
     )
 
 
+@_PAST_THE_RESUME_WAIT
 def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
@@ -444,6 +456,7 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
     assert not dirty, dirty
 
 
+@_PAST_THE_RESUME_WAIT
 def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, repo, client):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")

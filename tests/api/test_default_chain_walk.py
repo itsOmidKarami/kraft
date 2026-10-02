@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from functools import partial
 
-from support.api import _approve_gate, _post_default
+from support.api import WALK_TIMEOUT, _approve_gate, _post_default
 from support.harness import entry_of
 
 from kraft import waits
@@ -18,7 +18,7 @@ from kraft.api import deps
 LATER = "2999-01-01T00:00:00+00:00"
 
 
-def _walk_to_the_end(client, wid, timeout=120):
+def _walk_to_the_end(client, wid, timeout=WALK_TIMEOUT):
     """Approve each gate as it opens and tick the scheduler whenever the item
     parks, until it completes. Returns (gates approved, nodes parked on)."""
     approved, parked = [], []

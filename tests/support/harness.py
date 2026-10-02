@@ -18,6 +18,11 @@ from support.fake_docker import fake_docker_bin  # noqa: F401 -- re-exported
 _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: Where what is built once per process lives: the machine's temp dir, read
+#: at import, not the per-test one `conftest._per_test_tempdir` points
+#: `tempfile` at -- a cache that outlives its test outlives that test's dir.
+PROCESS_TMP = tempfile.gettempdir()
+
 
 #: Agent CLIs this suite must never actually launch (tests/conftest.py refuses
 #: them, with `support.real_binaries`). `cursor` is no harness's command, but
@@ -72,7 +77,7 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     SHAs a fresh build would, and its index is refreshed, so it reads clean."""
     global _repo_template
     if _repo_template is None:
-        tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-")) / "sample"
+        tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-", dir=PROCESS_TMP)) / "sample"
         shutil.copytree(_SUPPORT / "sample_repo", tpl)
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
@@ -174,7 +179,7 @@ def _bd_template(real: bool) -> Path:
     which is all Kraft itself looks for (search's repo filter, doctor).
     """
     if real not in _bd_templates:
-        tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-"))
+        tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-", dir=PROCESS_TMP))
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
         _git(tpl, "config", "user.name", "t")

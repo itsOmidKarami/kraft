@@ -25,6 +25,12 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: test_gates.py's wall time spent waiting on work already done (Kraft-qmhfc).
 _POLL = 0.02
 
+#: How long a test waits for a whole chain to walk on the fake agent (a few
+#: seconds when healthy). Well under pyproject's 120s per-test timeout, which
+#: also covers the client's lifespan and the rest of the test: a wait at the
+#: ceiling can never fail with its own message, only as a killed worker.
+WALK_TIMEOUT = 90
+
 
 class _LoopbackClient(TestClient):
     """A websocket on the same loopback Host as every HTTP call. Starlette
@@ -238,7 +244,7 @@ def _held_at(client, repo, node_id, monkeypatch, *, delay="5", **body) -> str:
     return wid
 
 
-def _completed_item(client, repo, *, timeout=120) -> str:
+def _completed_item(client, repo, *, timeout=WALK_TIMEOUT) -> str:
     """A `quick-task` item (no gate on any node) started and walked to
     `work_item_completed`; its id. Quick-task rather than the default chain:
     a `gate_requested` left open by force-writing status past it reads to

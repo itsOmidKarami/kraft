@@ -56,7 +56,7 @@ def _bd_stub_dir() -> Path:
     the test at teardown (`support.real_binaries`)."""
     global _bd_stub
     if _bd_stub is None:
-        d = Path(tempfile.mkdtemp(prefix="kraft-bd-stub-"))
+        d = Path(tempfile.mkdtemp(prefix="kraft-bd-stub-", dir=harness.PROCESS_TMP))
         guard_log = shlex.quote(str(real_binaries.log_path()))
         (d / "bd").write_text(
             "#!/bin/sh\n"
@@ -103,6 +103,15 @@ def child_env(env: dict | None = None, *, bd: bool = True) -> dict:
         path = os.pathsep.join([str(_bd_stub_dir()), path])
     child["PATH"] = real_binaries.stubbed_path(path)
     return child
+
+
+def output_of(proc: subprocess.Popen) -> str:
+    """Everything `proc` printed to its captured stdout, once it is dead. A
+    live child never sends EOF on its pipe, so reading it first would block
+    for as long as the child runs; `kill` is a no-op on one already gone."""
+    proc.kill()
+    out, _ = proc.communicate()
+    return out if isinstance(out, str) else (out or b"").decode(errors="replace")
 
 
 def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path | None, env: dict | None):
