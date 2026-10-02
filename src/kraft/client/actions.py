@@ -86,7 +86,7 @@ async def create_work_item(
         },
     )
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
     # `slots`: an --autostart filed paused because every slot was busy says so.
     for told in ("slots", "repo_warning", "bead_warning", "duplicate_warning"):
@@ -135,7 +135,7 @@ async def probe_repo(
         payload["test_command"] = test_command
     status, body = await transport._post("/repos/probe", payload, timeout=CONNECT_TIMEOUT_S)
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     return body
 
 
@@ -178,7 +178,7 @@ async def ensure_repo(
             "/repos/probe", {"path": path, "detect": False}
         )
         if probe_status >= 400:
-            raise ValueError(f"kraft {probe_status}: {probed.get('detail', probed)}")
+            raise ValueError(f"kraft {probe_status}: {transport.detail_of(probed)}")
         listing = await transport._get("/repos")
         stored = next(
             (r for r in listing.get("repos", []) if r.get("path") == probed.get("path")),
@@ -188,7 +188,7 @@ async def ensure_repo(
         # a stale read must degrade to the old behaviour, not raise.
         return {**(stored or probed), "already_connected": True}
     if status >= 400:
-        raise ValueError(f"kraft {status}: {body.get('detail', body)}")
+        raise ValueError(f"kraft {status}: {transport.detail_of(body)}")
     return {**body, "already_connected": False}
 
 
@@ -480,9 +480,7 @@ async def set_agent_overrides(
     (Kraft-4k6l), read fresh at every dispatch rather than baked into the
     chain. `clear` sends `{}`, resetting every field to the template's own
     binding; naming any of `model`/`escalate_model`/`effort` *replaces* the
-    whole stored override, as it did in 1.4: the PATCH route merges field by
-    field (the item page sets one field at a time), so a field not named is
-    sent as `null`, which drops it.
+    whole stored override, it does not merge with what is already there.
     `_forbid_self_action`, not `resolve_work_item` (Kraft-g1ebw): a running
     worker dialing its own model/effort mid-run is exactly the kind of
     self-action the other verbs already refuse.
@@ -491,8 +489,16 @@ async def set_agent_overrides(
     if clear:
         overrides: dict = {}
     else:
-        overrides = {"model": model, "escalate_model": escalate_model, "effort": effort}
-        if all(v is None for v in overrides.values()):
+        overrides = {
+            k: v
+            for k, v in {
+                "model": model,
+                "escalate_model": escalate_model,
+                "effort": effort,
+            }.items()
+            if v is not None
+        }
+        if not overrides:
             raise ValueError(
                 "kraft: set-overrides needs --model, --escalate-model, --effort, or --clear"
             )

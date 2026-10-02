@@ -126,9 +126,8 @@ def test_a_relative_path_reaches_the_server_absolute(call, tmp_path, monkeypatch
 
 
 def test_set_agent_overrides_replaces_the_whole_override_as_in_1_4(wired, tmp_path):
-    """The PATCH route merges field by field for the item page; the CLI's
-    `set-overrides` and the MCP tool still replace, by sending `null` for every
-    field they don't name. The echo is what is stored."""
+    """`set-overrides` and the MCP tool replace the whole override: a field
+    they don't name is gone. The echo is what is stored."""
     repo = connected_repo(tmp_path)
 
     async def scenario():
@@ -138,3 +137,20 @@ def test_set_agent_overrides_replaces_the_whole_override_as_in_1_4(wired, tmp_pa
 
     # The PATCH echoes the override as stored (`update_work_item`).
     assert run_with_app(wired, scenario)["agent_overrides"] == {"model": "gpt-big"}
+
+
+def test_set_agent_overrides_sends_only_the_fields_named(tmp_path, monkeypatch):
+    """A field not named is left out, never sent as `null`: a 1.4 server,
+    still running between `kraft admin update` and the restart, refuses a
+    `null` field with a 422 (`agent_overrides 'effort' must be one of ...`),
+    where it takes the named fields alone and replaces the override."""
+    monkeypatch.chdir(tmp_path)
+    sent = []
+
+    async def send(method, path, **kwargs):
+        sent.append((method, path, kwargs.get("json")))
+        return httpx.Response(200, json={"id": "w1"})
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    asyncio.run(client.set_agent_overrides(model="gpt-big", work_item_id="w1"))
+    assert sent == [("PATCH", "/work-items/w1", {"agent_overrides": {"model": "gpt-big"}})]

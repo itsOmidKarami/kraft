@@ -231,6 +231,27 @@ def test_an_api_refusal_reaches_the_agent_as_the_line_the_cli_prints(app, repo):
     assert again.endswith(": kraft: 409: work item is paused, not running"), again
 
 
+def test_a_body_the_api_cannot_read_reaches_the_agent_as_one_line(app, repo):
+    """FastAPI's own 422 is a list of pydantic errors, which reached the agent
+    as a Python repr (`[{'type': 'literal_error', 'loc': [...`). It reads as
+    the field and what is wrong with it, like every other refusal."""
+
+    async def scenario():
+        async with Client(mcp.build()) as session:
+            await session.call_tool("ensure_repo", {"path": str(repo)})
+            created = await session.call_tool("create_work_item", {"title": "t", "repo": str(repo)})
+            wid = json.loads(created.content[0].text)["id"]
+            return await _agent_reads(
+                session,
+                "add_review_comment",
+                {"body": "b", "work_item_id": wid, "label": "must-fix"},
+            )
+
+    text = asyncio.run(scenario())
+    assert text.endswith(": kraft: 422: label: Input should be 'must_fix', 'question' or 'nit'")
+    assert "{'type'" not in text
+
+
 def test_an_agent_cannot_file_an_item_with_a_blank_title(app, repo):
     """The board would show it as a bare dash. The CLI reaches the same
     route, so `kraft item create "   "` is refused the same way."""

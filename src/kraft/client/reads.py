@@ -314,11 +314,15 @@ async def permission_request(
         )
     # `_send` raises ValueError for a server that is not there; httpx's own
     # errors (a timeout) are the same answer.
+    # Both failures read as the one line a refused call reads as everywhere
+    # (`transport.refusal`): `kraft: 404: unknown session`, never `kraft 404:`.
     except (ValueError, httpx.HTTPError) as exc:
-        return {"behavior": failure, "message": str(exc)}
+        return {"behavior": failure, "message": transport.refusal(exc)}
     if status >= 400 or not isinstance(body, dict) or "behavior" not in body:
-        detail = body.get("detail") if isinstance(body, dict) else body
-        return {"behavior": failure, "message": f"kraft {status}: {detail}"}
+        return {
+            "behavior": failure,
+            "message": f"kraft: {status}: {transport.detail_of(body)}",
+        }
     return body
 
 

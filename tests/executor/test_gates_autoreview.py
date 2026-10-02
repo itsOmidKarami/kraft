@@ -362,6 +362,33 @@ async def test_a_published_must_fix_thread_downgrades_an_approve_to_undecided(
     assert it.events("chain_revised") == []
     [skipped] = it.events("gate_auto_review_skipped")
     assert skipped["payload"]["reason"] == "undecided"
+    # The approval's own note ("looks right") is not why it went to a person.
+    assert "note" not in skipped["payload"]
+
+
+async def test_a_review_that_refused_to_launch_says_why_in_its_skipped_event(
+    item_on, tmp_path, monkeypatch
+):
+    """A gate review that never ran (here a model 1.4 stored that is no model
+    id) leaves the gate to a person. The event the board and `kraft view
+    events` show must say why, not only `undecided`."""
+    from kraft import store
+
+    it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
+    launch = REVISION_LAUNCH
+    fake_harness_home(tmp_path, ["true"])
+    _approving_agent(it, monkeypatch)
+    assert await _walk(it, launch) == "awaiting_gate"
+    await it.database.write(
+        lambda c: store.set_agent_overrides(c, it.id, json.dumps({"model": "sonnet 4"}))
+    )
+
+    await _review_and_approve(it, launch)
+
+    assert it.events("chain_revised") == []
+    [skipped] = it.events("gate_auto_review_skipped")
+    assert skipped["payload"]["reason"] == "undecided"
+    assert f"kraft item set-overrides {it.id} --clear" in skipped["payload"]["note"]
 
 
 async def test_review_gates_stops_config_when_on_approve_refuses(item_on, monkeypatch):

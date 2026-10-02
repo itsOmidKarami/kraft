@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -238,6 +239,36 @@ async def test_a_failure_before_the_launch_is_recorded_not_escalated(
     assert it.events("work_item_needs_human") == []
     [event] = it.events("reply_agent_failed")
     assert "no such profile" in event["payload"]["error"]
+
+
+async def test_an_item_model_stored_before_model_ids_were_checked_never_reaches_the_reply_agent(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    """1.4 stored any text as the item's model (`--model "sonnet 4"`). The
+    reply agent holds it to the model-id rule before its launch, and records
+    why as `reply_agent_failed` instead of putting it on a command line."""
+    _, argv = _seed(tmp_path, monkeypatch)
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    it = await _item(item_on, run_dirs)
+    await _published_unanswered_thread(it)
+    await it.database.write(
+        lambda c: store.set_agent_overrides(c, it.id, json.dumps({"model": "sonnet 4"}))
+    )
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "failed"
+    [event] = it.events("reply_agent_failed")
+    assert "stored model override is not a model id" in event["payload"]["error"]
+    assert f"kraft item set-overrides {it.id} --clear" in event["payload"]["error"]
+    assert not argv.exists() or argv.read_text() == ""
 
 
 async def test_the_comment_reviews_summary_reaches_the_reply_agent(

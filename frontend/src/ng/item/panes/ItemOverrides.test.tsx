@@ -34,22 +34,74 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ItemAgentRows", () => {
-  it("shows what the chain's agents run on, and sets the item's model alone, the server keeping its effort", async () => {
+  it("shows what the chain's agents run on, and sets the item's model in one PATCH that keeps its effort", async () => {
     const reload = vi.fn();
     render(<ItemAgentRows item={fresh({ agent_overrides: { effort: "high" } })} reload={reload} />);
     expect(await screen.findByText("each task's own")).toBeInTheDocument();
     expect(row("effort")).toHaveTextContent("highthis item");
     await userEvent.click(screen.getByRole("button", { name: "Override model" }));
     await userEvent.type(screen.getByRole("combobox", { name: "model" }), "opus-4{Enter}");
-    await waitFor(() => expect(patches()).toEqual([{ agent_overrides: { model: "opus-4" } }]));
+    await waitFor(() => expect(patches()).toEqual([{ agent_overrides: { effort: "high", model: "opus-4" } }]));
     expect(reload).toHaveBeenCalled();
   });
 
-  it("drops one field on ↺ with a null, and says why the server refused on that row", async () => {
+  it("builds a second save on the first one's field before the item reloads", async () => {
+    render(<ItemAgentRows item={fresh()} reload={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Override model" }));
+    await userEvent.type(screen.getByRole("combobox", { name: "model" }), "opus-4{Enter}");
+    await userEvent.click(screen.getByRole("button", { name: "Override effort" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "effort" }), "low");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(patches()).toEqual([{ agent_overrides: { model: "opus-4" } }, { agent_overrides: { model: "opus-4", effort: "low" } }]));
+  });
+
+  it("sends a second save only once the first is answered, so the two never land out of order", async () => {
+    // Each PATCH waits until the test answers it; `sent` is what reached the server.
+    const sent: unknown[] = [];
+    const held: (() => void)[] = [];
+    const inner = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return inner(url, init);
+      sent.push(JSON.parse(String(init.body)));
+      return new Promise<Response>((done) => held.push(() => done(new Response("{}", { status: 200 }))));
+    }));
+    render(<ItemAgentRows item={fresh()} reload={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Override model" }));
+    await userEvent.type(screen.getByRole("combobox", { name: "model" }), "opus-4{Enter}");
+    await userEvent.click(screen.getByRole("button", { name: "Override effort" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "effort" }), "low");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sent).toEqual([{ agent_overrides: { model: "opus-4" } }]);
+    held[0]();
+    await waitFor(() => expect(sent).toEqual([{ agent_overrides: { model: "opus-4" } }, { agent_overrides: { model: "opus-4", effort: "low" } }]));
+  });
+
+  it("builds the next save on what the server last took, not on a refused one", async () => {
+    let n = 0;
+    const inner = globalThis.fetch;
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return inner(url, init);
+      sent.push(JSON.parse(String(init.body)));
+      return n++ === 0 ? new Response(JSON.stringify({ detail: "'bad one' is not a model id" }), { status: 422 }) : new Response("{}", { status: 200 });
+    }));
+    render(<ItemAgentRows item={fresh({ agent_overrides: { effort: "high" } })} reload={() => {}} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Override model" }));
+    await userEvent.type(screen.getByRole("combobox", { name: "model" }), "bad one{Enter}");
+    await userEvent.click(screen.getByRole("button", { name: "Override effort" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "effort" }), "low");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(sent).toEqual([{ agent_overrides: { effort: "high", model: "bad one" } }, { agent_overrides: { effort: "low" } }]));
+    expect(within(row("model")).getByRole("alert")).toHaveTextContent("is not a model id");
+  });
+
+  it("drops one field on ↺ by sending the rest, and says why the server refused on that row", async () => {
     calls = stubFetch({ ...answers, "PATCH /work-items/w1": [422, { detail: "agent_overrides 'effort' must be one of [...]" }] });
     render(<ItemAgentRows item={fresh({ agent_overrides: { model: "opus", effort: "high" } })} reload={() => {}} />);
     await userEvent.click(await screen.findByRole("button", { name: "Reset effort" }));
-    await waitFor(() => expect(patches()).toEqual([{ agent_overrides: { effort: null } }]));
+    await waitFor(() => expect(patches()).toEqual([{ agent_overrides: { model: "opus" } }]));
     expect(within(row("effort")).getByRole("alert")).toHaveTextContent("must be one of");
     expect(within(row("model")).queryByRole("alert")).toBeNull();
   });

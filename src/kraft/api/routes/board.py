@@ -912,23 +912,19 @@ async def get_work_item(wid: str, request: Request):
     # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
     # merely not crashing. `steerable` below reads the frozen snapshot directly.
     chain = store.chain_view(row)
-    node_overrides = store.node_overrides_of(row)
+    payload = store.work_item_payload(row)
+    node_overrides = payload["node_overrides"]
     progress = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid)
     return {
-        **{k: row[k] for k in row.keys()},
+        # The override columns decoded, as every action and gate echo has them.
+        **payload,
         "chain_definition": chain,
         # The Config tab's "effective chain" (UI v2 · 04 point 3): node
         # overrides folded over the template-shaped chain, plus the raw
         # override layer itself and its count, so the tab can both render the
         # merged YAML and mark which lines are `# override`.
         "effective_chain": store.effective_chain(chain, node_overrides),
-        "node_overrides": node_overrides,
         "node_overrides_count": len(node_overrides),
-        # The item's own policy override (Kraft-ab1bh), decoded from its column.
-        "policy_override": json.loads(row["policy_override"] or "null"),
-        # Its own model/effort override, decoded the same way: the raw column
-        # is JSON text, which a client would read as a string.
-        "agent_overrides": json.loads(row["agent_overrides"] or "null"),
         # The Config tab's "$5.00 · $2.41 used" and "policy default" / "item"
         # source line (point 4). Deliberately not `budget` -- that key is
         # `item.budget` client-side, `{scope, spent_usd, cap_usd} | null`,

@@ -144,7 +144,10 @@ async def answer(
         behavior, reason = "unavailable", str(exc)
     if behavior in ("allow", "deny", "no_opinion"):
         return t.render(behavior, reason)
-    print(f"kraft permission-hook: {behavior}: {reason}", file=sys.stderr)
+    from kraft.client.transport import reason_of
+
+    # The reason already reads `kraft: 404: ...`; one lead is enough.
+    print(f"kraft permission-hook: {behavior}: {reason_of(str(reason))}", file=sys.stderr)
     # The gate already turned `unresolved` into a deny if we asked fail_closed.
     return t.render(
         "no_opinion" if behavior == "unresolved" else failed,

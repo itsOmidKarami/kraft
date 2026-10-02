@@ -145,6 +145,21 @@ def test_server_down_mid_run_through_the_real_client(monkeypatch, fail_closed, e
     assert (json.loads(out).get("permission"), code) == (expected, 0)
 
 
+def test_a_refused_ask_reads_as_one_kraft_line(monkeypatch, capsys):
+    """The hook's stderr said `unavailable: kraft 404: unknown session`, the
+    lead every other refusal dropped: it reads as the one line they all do."""
+    monkeypatch.setenv("KRAFT_SESSION_ID", "gone")
+
+    async def refused(*_a, **_k):
+        return 404, {"detail": "unknown session"}
+
+    monkeypatch.setattr(reads.transport, "_post", refused)
+    got = asyncio.run(reads.permission_request("Bash", {}, mode="enforce"))
+    assert got == {"behavior": "unavailable", "message": "kraft: 404: unknown session"}
+    ph.answer_hook("cursor", CURSOR_SHELL, NAMES, fail_closed=False)
+    assert capsys.readouterr().err == "kraft permission-hook: unavailable: 404: unknown session\n"
+
+
 @pytest.mark.parametrize(("mode", "timeout"), [("enforce", 5), ("prompt", None)])
 def test_an_enforce_ask_times_out_inside_cursors_hook_timeout(monkeypatch, mode, timeout):
     """Cursor kills a hook after 10 s; an enforce ask gives up at 5 s so the

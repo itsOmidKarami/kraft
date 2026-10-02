@@ -33,8 +33,16 @@ def json_flag() -> argparse.ArgumentParser:
 
 
 def _render_action(result: dict) -> str:
-    """An act response is small and shapeless; a kv block beats inventing a table."""
-    return render.kv([(key, str(value)) for key, value in result.items()]) or "ok"
+    """An act response is small and shapeless; a kv block beats inventing a table.
+    An object or a list reads as the JSON `--json` prints, and nothing as "-",
+    never Python's `None` or `{'a': 1}`."""
+    return render.kv([(key, _action_value(value)) for key, value in result.items()]) or "ok"
+
+
+def _action_value(value) -> str:
+    if isinstance(value, dict | list):
+        return json.dumps(value)
+    return "-" if value is None else str(value)
 
 
 def repo_scope(ns: argparse.Namespace) -> str | None:

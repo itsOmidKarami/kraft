@@ -288,7 +288,7 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        return deps.work_item_answer(st, wid)
 
 
 # Backward motion: 02 §7.2. Every gate on this path: Kraft-ko7j.
@@ -367,7 +367,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             raise HTTPException(400, str(exc)) from exc
         if target is None:
             # A spent reject loop goes to a human, not an agent (Ruling 176).
-            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            return deps.work_item_answer(st, wid)
 
         try:
             deps.spawn(
@@ -391,4 +391,4 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        return deps.work_item_answer(st, wid)

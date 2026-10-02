@@ -958,6 +958,11 @@ async def _dispatch_task(
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )
     node_override = store.node_overrides_of(work_item_row).get(node.id, {})
+    refusal = _overrides.stored_model_refusal(
+        work_item_row["id"], item_override, node_override, node.id
+    )
+    if refusal is not None:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {refusal}\n")
     instruction += _overrides.extra_prompt_note(node_override.get("extra_prompt"))
     keys = ("model", "escalate_model", "effort")
     merged_override = {**item_override, **{k: v for k, v in node_override.items() if k in keys}}
