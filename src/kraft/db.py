@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -1121,6 +1122,61 @@ def _connect(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _backup_before_migrating(conn: sqlite3.Connection, version: int) -> None:
+    """Copy the database to `<name>.pre-v<SCHEMA_VERSION>-<time>` before a
+    migration raises its schema, so going back to the release that wrote it
+    needs no backup of the operator's own: a migration is one way, and the
+    older code refuses the result ("newer than code").
+
+    Every migration writes a fresh copy, never reusing an earlier one: after
+    an upgrade, a rollback that restored a copy, more work and a second
+    upgrade, only the second copy holds that work. The timestamp matches the
+    templates' `pre-v1-<time>` backup.
+
+    `VACUUM INTO` writes a consistent snapshot through this connection,
+    whatever the WAL holds, and the copy is a single file with nothing to
+    checkpoint. It goes to a temporary name first, so a crash part way never
+    leaves a half-written file under the real one. A failed copy stops the
+    migration, which leaves the database as it was."""
+    path = conn.execute("PRAGMA database_list").fetchone()["file"]
+    if not path:
+        return  # an in-memory database has nothing to copy
+    path = Path(path)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name(f"{path.name}.pre-v{SCHEMA_VERSION}-{stamp}")
+    n = 1
+    while backup.exists():  # two migrations in one second: never overwrite
+        n += 1
+        backup = path.with_name(f"{path.name}.pre-v{SCHEMA_VERSION}-{stamp}-{n}")
+    partial = backup.with_name(backup.name + ".partial")
+    try:
+        partial.unlink(missing_ok=True)
+        # 0600 like the database itself; VACUUM INTO accepts an empty file.
+        partial.touch(mode=0o600)
+        conn.execute("VACUUM INTO ?", (str(partial),))
+        partial.replace(backup)
+    except (OSError, sqlite3.Error) as exc:
+        partial.unlink(missing_ok=True)
+        size = sum(
+            f.stat().st_size for f in (path, path.with_name(path.name + "-wal")) if f.exists()
+        )
+        raise RuntimeError(
+            f"could not back up the database to {backup} before migrating it from schema "
+            f"v{version} to v{SCHEMA_VERSION}: {exc}. The database is unchanged. The copy "
+            f"needs about {max(1, -(-size // 1_000_000))} MB free beside it; free that and "
+            "start again"
+        ) from exc
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    logger.warning(
+        "database schema v%d -> v%d: backed up the old database to %s",
+        version,
+        SCHEMA_VERSION,
+        backup,
+    )
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     (version,) = conn.execute("PRAGMA user_version").fetchone()
     if version == SCHEMA_VERSION:
@@ -1128,6 +1184,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     if version > SCHEMA_VERSION:
         raise RuntimeError(f"database schema v{version} is newer than code v{SCHEMA_VERSION}")
     if version != 0:
+        _backup_before_migrating(conn, version)
         # Forward-only migration: apply each version step's statements, bump
         # user_version after each, all-or-nothing.
         #

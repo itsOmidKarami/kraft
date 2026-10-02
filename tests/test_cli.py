@@ -339,6 +339,66 @@ def test_detach_reports_a_child_that_exits_before_binding(monkeypatch, tmp_path,
     assert "detached start failed" in capsys.readouterr().err
 
 
+# A failed lifespan's traceback, then the one uvicorn's own exit adds: on
+# Python 3.14 the second, with its `~~~^^^` marker lines, outgrows the tail.
+_REFUSED_START = (
+    "ERROR:    Traceback (most recent call last):\n"
+    '  File "/venv/lib/python3.14/site-packages/kraft/db.py", line 1173, in migrate\n'
+    "RuntimeError: database schema v50 is newer than code v44\n\n"
+    "ERROR:    Application startup failed. Exiting.\n"
+    "kraft: shutdown - unhandled exception:\n"
+    "Traceback (most recent call last):\n"
+    + '  File "/usr/lib/python3.14/asyncio/base_events.py", line 683, in run_forever\n'
+    "    self._run_once()\n"
+    "    ~~~~~~~~~~~~~~^^\n" * 30 + "SystemExit: 3\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("output", "first_line", "tail"),
+    [
+        (
+            _REFUSED_START,
+            "kraft: detached start failed: "
+            "RuntimeError: database schema v50 is newer than code v44",
+            "SystemExit: 3",
+        ),
+        (
+            "kraft: refusing to bind 0.0.0.0 without a password\n",
+            "kraft: detached start failed:",
+            "refusing to bind",
+        ),
+    ],
+    ids=["traceback-past-the-tail", "no-traceback"],
+)
+def test_detach_failure_names_this_starts_error(
+    monkeypatch, tmp_path, capsys, output, first_line, tail
+):
+    """The error line first, then the tail: on Python 3.14 the tail alone
+    held only uvicorn's exit. Only this start's output counts: an earlier
+    run's error in the same log is not why this one failed."""
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    run_dir = tmp_path / "run"
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
+    log_path = paths.RunDirs(run_dir).ensure().logs / "server.log"
+    log_path.write_text("ValueError: an earlier run's own failure\n")
+
+    def fake_popen(*args, stdout, **kwargs):
+        stdout.write(output.encode())
+        stdout.flush()
+        return _FakePopen(exit_code=1)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "start", "--detach"])
+    err = capsys.readouterr().err
+    assert len(_REFUSED_START) > 2000
+    assert err.splitlines()[0] == first_line
+    assert tail in err
+    assert "earlier run" not in err
+    assert err.splitlines()[-1] == f"kraft: the whole log is {log_path}"
+
+
 def test_detach_host_flag_cannot_bypass_the_password_check(monkeypatch, tmp_path, capsys):
     """Same regression as the foreground path: a flag must not be a way around
     a check an env var respects, detached or not."""

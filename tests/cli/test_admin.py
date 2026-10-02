@@ -570,7 +570,7 @@ def test_admin_update_with_restart_flag_restarts(monkeypatch, capsys):
     monkeypatch.setattr(update, "installed", lambda: "0.3.0")
     monkeypatch.setattr(update, "perform", lambda *a, **k: 0)
     called = []
-    monkeypatch.setattr(cli.admin, "_cmd_restart", lambda ns: called.append(True))
+    monkeypatch.setattr(cli.admin, "_restart", lambda ns: called.append(True))
     cli.main(["admin", "update", "--restart"])
     assert called == [True]
 
@@ -582,7 +582,7 @@ def test_admin_update_without_restart_flag_just_prints_the_hint(monkeypatch, cap
     monkeypatch.setattr(update, "installed", lambda: "0.3.0")
     monkeypatch.setattr(update, "perform", lambda *a, **k: 0)
     monkeypatch.setattr(
-        cli.admin, "_cmd_restart", lambda ns: pytest.fail("restarted without being asked")
+        cli.admin, "_restart", lambda ns: pytest.fail("restarted without being asked")
     )
     cli.main(["admin", "update"])
     assert "kraft admin restart" in capsys.readouterr().out
