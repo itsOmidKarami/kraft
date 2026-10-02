@@ -135,8 +135,10 @@ class SandboxBackend(Protocol):
         """Forget what the item kept beside its worktree. A no-op for an
         item this backend never ran."""
 
-    async def health(self, sandbox: dict) -> tuple[bool, str]:
-        """Doctor's row: can a sandbox like this run here at all?"""
+    async def health(self, sandbox: dict, *, refresh: bool = True) -> tuple[bool, str]:
+        """Doctor's row: can a sandbox like this run here at all? `refresh`
+        asks the machine again rather than reading what it last said; doctor
+        asks once per run."""
 
 
 _BACKENDS: dict[str, SandboxBackend] = {b.kind: b for b in (DockerBackend(),)}
