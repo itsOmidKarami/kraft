@@ -43,6 +43,19 @@ describe("GateFooter", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "Add the invalidation story." } }]));
   });
 
+  it("rejects on ⌘↵ from the note, and not before there is one", async () => {
+    const calls = stubFetch();
+    render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    const note = screen.getByLabelText("Why (the next agent reads it)");
+    await userEvent.click(note);
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    await userEvent.type(note, "Add the invalidation story.");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "Add the invalidation story." } }]));
+  });
+
   it("opens the gate's document from Read", async () => {
     const onRead = vi.fn();
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={onRead} />);

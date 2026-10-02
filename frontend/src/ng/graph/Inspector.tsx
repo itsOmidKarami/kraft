@@ -30,14 +30,16 @@ type Props = {
   /** The editor's icon picker (Decisions §9 Icons): the glyph becomes "icon ▾". */
   onIcon?: (el: HTMLElement) => void;
   /** A click on the title (the editor's rename, Decisions §9 Rename); the title is then a button. */
-  onTitle?: (el: HTMLElement) => void;
+  onTitle?: () => void;
+  /** The title's in-place editor while it is open, in the title's place. */
+  titleEdit?: ReactNode;
   footer?: ReactNode;
   children?: ReactNode;
 };
 
 /** The side pane over a canvas (Inspector.dc.html): crumb, icon and title,
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
-export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, bar, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, onIcon, footer, children }: Props) {
+export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, bar, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, titleEdit, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
@@ -59,7 +61,9 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
     );
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
+    // A dialog or popover opened from the pane is portaled out of it, but React
+    // still bubbles its keys here: its Escape is its own, not the pane's.
+    if (e.key !== "Escape" || !e.currentTarget.contains(e.target as Node)) return;
     e.preventDefault();
     e.stopPropagation();
     fromKeys.current = true;
@@ -86,7 +90,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
               {glyph}<ChevronDown size={10} aria-hidden />
             </button>
           ) : <span className="pane-glyph">{glyph}</span>}
-          <h2 className="pane-title">{onTitle ? <button type="button" className="pane-title-btn" title="Rename" onClick={(e) => onTitle(e.currentTarget)}>{title}</button> : title}</h2>
+          {titleEdit ?? <h2 className="pane-title">{onTitle ? <button type="button" className="pane-title-btn" title="Rename" onClick={onTitle}>{title}</button> : title}</h2>}
           {onFocus && <button type="button" className="pane-focus" title="Open the node view (double-click)" onClick={onFocus}>Focus <Maximize2 size={12} /></button>}
         </div>
         {sub && <p className="pane-sub">{sub}</p>}

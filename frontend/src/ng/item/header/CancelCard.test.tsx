@@ -33,6 +33,18 @@ describe("CancelCard", () => {
     expect(writes).toEqual([{ method: "POST", path: "/work-items/w1/cancel", body: { reason: "superseded", close_mr: close } }]);
   });
 
+  it("cancels on ⌘↵ from the reason once it has one", async () => {
+    const { calls, onDone } = open({ "GET /work-items/w1/cancel-preview": [200, preview(null)] });
+    await screen.findByText(/code_review, attempt 2/);
+    await userEvent.click(screen.getByLabelText("Reason"));
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    await userEvent.type(screen.getByLabelText("Reason"), "superseded");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/cancel", body: { reason: "superseded", close_mr: false } }]);
+  });
+
   it("says the worktree goes at archive, and an unpushed branch does not", async () => {
     open({ "GET /work-items/w1/cancel-preview": [200, preview(null)] });
     expect(await screen.findByText(/branch kraft\/cb59, the worktree until it is archived/)).toBeInTheDocument();

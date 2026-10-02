@@ -38,7 +38,8 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
     const it = item(id);
     const name = it?.bead_id || shortId(id);
     const out: Crumb[] = [mid("Board", { to: "/" })];
-    if (it) out.push({ text: repoName(it.repo), kind: "repo", title: it.repo });
+    // The repo, like the draft page's, is the board filtered to it.
+    if (it) out.push({ text: repoName(it.repo), kind: "repo", title: it.repo, to: `/?repo=${encodeURIComponent(it.repo)}` });
     out.push(node ? mid(name, { to: `/work-items/${encodeURIComponent(id)}`, title: id }) : { text: name, kind: "current", title: id });
     if (node) out.push(current(node));
     if (it?.mr_ref) out.push({ text: `!${it.mr_ref.number}${it.display_status === "done" || it.display_status === "archived" ? " merged" : ""} ↗`, kind: "ext", href: it.mr_ref.url, title: it.mr_ref.url });

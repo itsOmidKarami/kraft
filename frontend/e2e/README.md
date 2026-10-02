@@ -13,7 +13,7 @@ helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
 | `lifecycle.spec.ts` | pause a running agent (`KRAFT_SLOW`), resume it with a steer, see it finish; a deep link to an item loads it |
 | `regression.spec.ts` | each area's write path: connect a repo and publish, publish a chain change, a library component's and a harness's links into Chains, publish a policy cap and the intake interval, Access's port, Notifications' "Send a test", Appearance's density and open-in after a reload |
 | `search.spec.ts` | Ctrl-K finds an indexed document and opens it; the kind filter narrows documents |
-| `board-responsive.spec.ts` | the peek opens without reflowing a row: docked at 1440 and 1100, overlaid at 900 (R7) |
+| `board-responsive.spec.ts` | the peek opens over the list without moving or reflowing a row, at 1440, 1100 and 900 |
 | `attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results. Writes screenshots to `frontend/e2e-shots/` |
 | `phone.visual.spec.ts` | the phone at 390x844: the board, an item at a gate, its reject composer and a real diff, each with nothing scrolling sideways, every tap target at least 44px and the note at 16px (under it mobile Safari zooms on focus and never zooms back). jsdom has no viewport, so this is the only place the phone's media queries are real. Writes screenshots |
 | `addresses.spec.ts` | addresses from before the cutover still open their page: a bookmark from the new UI's old prefix, `/settings/chains`, an item's `#node=` hash; and each phone-only address (`/more`, one harness, profile, channel or schedule), and `/archived`, widened from 390px to 1024px in one tab, lands on a desktop page, never Not found |

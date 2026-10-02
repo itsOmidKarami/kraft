@@ -143,6 +143,17 @@ describe("PausedCard", () => {
     expect(posts(calls).map((c) => c.body)).toEqual([{ steer: "look at reindex first" }, { steer: null }]);
   });
 
+  it("resumes with the steer on ⌘↵, and not with an empty one", async () => {
+    const calls = stubFetch();
+    render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")] })} reload={() => {}} />);
+    await userEvent.click(screen.getByLabelText("Steer"));
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    expect(posts(calls)).toEqual([]);
+    await userEvent.type(screen.getByLabelText("Steer"), "look at reindex first");
+    await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
+    await waitFor(() => expect(posts(calls).map((c) => c.body)).toEqual([{ steer: "look at reindex first" }]));
+  });
+
   it("offers plain Resume only when the item is not steerable, since the server refuses a steer then", async () => {
     const calls = stubFetch();
     const reload = vi.fn();

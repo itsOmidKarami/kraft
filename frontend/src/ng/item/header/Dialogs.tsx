@@ -4,6 +4,7 @@ import { Dialog } from "../../ui/Dialog";
 import { Field } from "../../ui/Field";
 import { act, type Done } from "../actions";
 import { useFocusSoon } from "../useFocusSoon";
+import { sendOnModEnter } from "../../keys";
 
 function useSubmit(send: () => Promise<Done>, onDone: () => void) {
   const [busy, setBusy] = useState(false);
@@ -28,7 +29,7 @@ export function EscalateDialog({ id, onClose, onDone }: { id: string; onClose: (
     <Dialog title="Escalate this item" onClose={onClose} dirty={!!message.trim()} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || !message.trim()} onClick={go}>Escalate</Button></>}>
       <p className="item-muted">The escalation agent reads the whole item: every node, round, finding and earlier turn. It either decides and resumes, or comes back to you with a question. The run keeps going meanwhile.</p>
       <Field label="Message" error={error}>
-        <textarea className="item-input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} />
+        <textarea className="item-input" rows={3} value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!message.trim())} />
       </Field>
       <label className="item-check"><input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> Start a new thread</label>
     </Dialog>
@@ -44,7 +45,7 @@ export function CompleteDialog({ id, onClose, onDone }: { id: string; onClose: (
     <Dialog title="Mark this item complete?" onClose={onClose} dirty={!!reason.trim()} footer={<><Button onClick={onClose}>Keep it going</Button><Button variant="primary" disabled={busy || !reason.trim()} onClick={go}>Mark complete</Button></>}>
       <p className="item-muted">For work that landed somewhere else, or no longer needs the chain. It stops whatever is running and skips the remaining nodes.</p>
       <Field label="Reason" hint="Goes in the run log." error={error}>
-        <textarea className="item-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <textarea className="item-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!reason.trim())} />
       </Field>
       <label className="item-check"><input type="checkbox" checked={beads} onChange={(e) => setBeads(e.target.checked)} /> Also close its beads</label>
     </Dialog>

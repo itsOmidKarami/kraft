@@ -4,6 +4,7 @@ import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { Banner, QuestionCard } from "./Banner";
 import { ItemDraftProvider } from "./draft/context";
+import { useSelect } from "./draft/select";
 import { LeaveGuard } from "./draft/LeaveDialog";
 import { ReviewDialog } from "./draft/ReviewDialog";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
@@ -44,6 +45,7 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const [escalating, setEscalating] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
   const duplicate = useDuplicate(item.id, setCardError);
+  const openGate = useSelect(item.id);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
   const runLog = () => {
@@ -61,7 +63,7 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
         <DiffLine id={item.id} version={item.updated_at} />
       </div>
-      <Banner item={item} onOpenGate={(gate) => navigate(placeUrl(item.id, { sel: { kind: "node", node: gate } }))} onRaise={settings} reload={reload} />
+      <Banner item={item} onOpenGate={openGate} onRaise={settings} reload={reload} />
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />

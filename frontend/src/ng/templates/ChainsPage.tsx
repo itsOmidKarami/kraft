@@ -40,6 +40,10 @@ export function useBox() {
   return [setEl, box.w, box.h] as const;
 }
 
+/** How long a click waits to be sure it isn't the first of a double-click (the
+ *  common system default; a slower pair still ends the rename it began). */
+export const DOUBLE_CLICK_MS = 500;
+
 export const chainUrl = (chain: string) => `/templates/chains/${encodeURIComponent(chain)}`;
 export const nodeUrl = (chain: string, node: string) => `${chainUrl(chain)}/nodes/${encodeURIComponent(node)}`;
 
@@ -84,7 +88,13 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   // The nodes an open remove card lists, marked red on the canvas (Decisions §9 Remove).
   const [marked, setMarked] = useState<string[]>([]);
   const [strip, setStrip] = useState<{ ok: boolean; text: string } | null>(null);
-  const [renameNow, setRenameNow] = useState<{ el: HTMLElement; tick: number } | null>(null);
+  // A click on the selected node's name renames it once no second click makes it a double-click.
+  // The path whose title the pane edits in place, held here so a remount (after
+  // Review & publish) starts without it.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const renameTimer = useRef<number | undefined>(undefined);
+  const stopRenameTimer = () => window.clearTimeout(renameTimer.current);
+  useEffect(() => stopRenameTimer, []);
   // The chain's YAML is a second view of the same draft (Decisions §9 YAML).
   const [surface, setSurface] = useState<"canvas" | "yaml">("canvas");
   const taskPaths = r.resolved?.task_paths;
@@ -112,6 +122,11 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.node]);
 
+  // Another selection ends an in-place rename.
+  useEffect(() => {
+    setRenaming((p) => (p === selPathNow ? p : null));
+  }, [selPathNow]);
+
   // ⌘Z undoes the last request, outside a text field (brief Decided 4).
   const undo = draft.undo;
   useEffect(() => {
@@ -137,6 +152,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   }, []);
 
   const focusNode = useCallback((id: string, sel?: TSel) => {
+    // A double-click opens the node view: the click before it renames nothing.
+    stopRenameTimer();
+    setRenaming(null);
     dispatch({ type: "focus", node: id, sel });
     navigate(nodeUrl(chain, id));
   }, [chain, navigate, dispatch]);
@@ -165,6 +183,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     api.getLibrary().then((l) => setLibText(l.text)).catch(() => setLibText(null));
   }, [chain]);
   const startReview = () => {
+    stopRenameTimer();
+    setRenaming(null);
     if (s.level === "node") {
       dispatch({ type: "back" });
       navigate(chainUrl(chain));
@@ -206,6 +226,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const neverPublished = view.base[chainFile(chain)] === null;
 
   const onEscape = () => {
+    stopRenameTimer();
     if (review) return endReview();
     if (!s.open && s.level === "node") {
       dispatch({ type: "back" });
@@ -253,6 +274,9 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
   const sel = s.sel as TSel;
   const selPath = pathOf(sel);
+  // The selection as it is now, for a timer or a request that ends after a pick.
+  const latest = useRef({ selPath, level: s.level, node: s.node });
+  latest.current = { selPath, level: s.level, node: s.node };
   const nodes = authoredNodes(r, scope);
   const selNode = sel.kind === "chain" ? null : nodes.find((x) => x.id === sel.node);
   const isGate = !!selNode && sel.kind === "node" && kindOf(r, selNode) === "gate";
@@ -311,15 +335,24 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             refused={refused}
             onSelect={(id) => {
               if (review) return setHighlight(id);
-              // A click on the selected node's name while its pane is open renames it (Decisions §9 Rename).
-              const btn = document.querySelector<HTMLElement>(`.graph-node[aria-label^="${id}, "]`);
-              if (sel.kind === "node" && sel.node === id && s.open && btn) return setRenameNow((p) => ({ el: btn, tick: (p?.tick ?? 0) + 1 }));
+              // A click on the selected node's name while its pane is open renames it in the pane
+              // (Decisions §9 Rename), unless a second click makes it a double-click, which opens it.
+              stopRenameTimer();
+              if (sel.kind === "node" && sel.node === id && s.open) {
+                // Only if the node is still what the pane shows when it fires.
+                renameTimer.current = window.setTimeout(() => latest.current.selPath === id && setRenaming(id), DOUBLE_CLICK_MS);
+                return;
+              }
               dispatch({ type: "pick", sel: selOf(id) });
             }}
             onOpen={(id) => (review ? setHighlight(id) : dispatch({ type: "expand", sel: selOf(id) }))}
             onFocusNode={(id) => !review && focusNode(id)}
             onEscape={onEscape}
-            onBackground={() => (review ? setHighlight(undefined) : dispatch({ type: "background" }))}
+            onBackground={() => {
+              stopRenameTimer();
+              if (review) setHighlight(undefined);
+              else dispatch({ type: "background" });
+            }}
             onAdd={add}
             review={review ? { published: published?.nodes ?? [], highlight } : undefined}
             marked={marked}
@@ -409,7 +442,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             onDuplicate={() => setDupTick((k) => k + 1)}
             onDeleted={startReview}
             onMarking={setMarked}
-            renameNow={renameNow}
+            renaming={renaming}
+            onRenaming={setRenaming}
             onRemoved={() => {
               if (s.level === "node" && pathOf(s.sel as TSel) === s.node) {
                 // Removing the node you're in returns to the chain's rail (Decisions §9 Removing).
@@ -418,11 +452,15 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
               } else dispatch({ type: "removed" });
             }}
             onRenamed={(from, to) => {
-              const sel2 = selOf(to, taskPaths);
-              if (s.level === "node" && from === s.node) {
+              // What is selected once the rename lands: a pick made since (a click
+              // elsewhere committed it) wins; a selection in what was renamed follows it.
+              const now = latest.current;
+              if (!from || (now.selPath !== from && !now.selPath.startsWith(`${from}.`))) return;
+              const sel2 = selOf(to + now.selPath.slice(from.length), taskPaths);
+              if (now.level === "node" && now.node === from) {
                 dispatch({ type: "focus", node: to, sel: sel2 });
                 navigate(nodeUrl(chain, to));
-              } else if (from) dispatch({ type: "pick", sel: sel2 });
+              } else dispatch({ type: "pick", sel: sel2 });
             }}
           />
         )}
