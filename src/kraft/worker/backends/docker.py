@@ -23,6 +23,7 @@ import socket
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -274,10 +275,11 @@ class Runtime:
     def refusal(self) -> str | None:
         if not self.identity_known:
             return (
-                f"could not tell whether {self.cli} runs rootless: `{self.cli} info` gave no "
-                "answer Kraft reads in time (the runtime is missing, its daemon is down, or "
-                "it is busy), and a container run as the wrong user cannot write the "
-                "worktree. Check that the runtime answers (`kraft admin doctor`)"
+                f"could not tell whether {self.cli} runs rootless: `{self.cli} info` did not "
+                f"answer within {REASK_TIMEOUT_S:g} s (the runtime is missing, its daemon is "
+                "down, or it is busy), and a container run as the wrong user cannot write "
+                f"the worktree. See how long it takes with `time {self.cli} info`, or run "
+                "`kraft admin doctor`"
             )
         if self.selinux != "refuse":
             return None
@@ -311,15 +313,15 @@ def _selinux_enforcing() -> bool:
         return False
 
 
-def _run(*argv: str) -> str | None:
+def _run(*argv: str, timeout: float = 10) -> str | None:
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout if done.returncode == 0 else None
 
 
-def _ask(cli: str) -> tuple[str, bool | None, bool | None]:
+def _ask(cli: str, timeout: float = 10) -> tuple[str, bool | None, bool | None]:
     """`(engine, rootless, labels)`, asked of the runtime itself: what it
     really is, whether it runs as the operator, and whether it applies
     SELinux labels to containers (docker does only when its daemon was
@@ -328,16 +330,29 @@ def _ask(cli: str) -> tuple[str, bool | None, bool | None]:
     slower than `_run`'s timeout: a rootless podman's first `info` on a
     busy host took over ten seconds) is `None` for both, never "rootful":
     that guess ran a rootless podman's container without `keep-id`, as a
-    user who could not write the worktree."""
-    engine = "podman" if "podman" in (_run(cli, "--version") or "").lower() else "docker"
+    user who could not write the worktree. Docker's answer must be the JSON
+    list of options it always prints, podman's two booleans."""
+    version = _run(cli, "--version", timeout=timeout) or ""
+    engine = "podman" if "podman" in version.lower() else "docker"
     if engine == "docker":
-        options = _run(cli, "info", "--format", "{{json .SecurityOptions}}")
-        if options is None:
+        try:
+            options = json.loads(
+                _run(cli, "info", "--format", "{{json .SecurityOptions}}", timeout=timeout) or ""
+            )
+        except ValueError:
+            options = None
+        if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
             return engine, None, None
-        return engine, "name=rootless" in options, "name=selinux" in options
+        # Each is `name=<option>`, then its settings: `name=seccomp,profile=builtin`.
+        names = {o.split(",")[0] for o in options}
+        return engine, "name=rootless" in names, "name=selinux" in names
     security = (
         _run(
-            cli, "info", "--format", "{{.Host.Security.Rootless}} {{.Host.Security.SELinuxEnabled}}"
+            cli,
+            "info",
+            "--format",
+            "{{.Host.Security.Rootless}} {{.Host.Security.SELinuxEnabled}}",
+            timeout=timeout,
         )
         or ""
     ).split()
@@ -376,22 +391,34 @@ def _ask_limits(cli: str, engine: str) -> frozenset[str] | None:
     return frozenset(n for c in controllers if c in enforces for n in enforces[c])
 
 
-def detect_runtime() -> Runtime:
-    """Read `sandbox.yaml` and ask the runtime. Raises `ConfigError` for a
-    `sandbox.yaml` that does not parse."""
+def _sandbox_yaml():
+    """This machine's `sandbox.yaml`. Raises `ConfigError` for one that does
+    not parse."""
     from kraft import config
 
     templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    host = config.SandboxHost.load(templates / config.SandboxHost.FILE)
+    return config.SandboxHost.load(templates / config.SandboxHost.FILE)
+
+
+def _selinux(configured: str, labels: bool | None) -> str | None:
+    """`Runtime.selinux` for `sandbox.yaml`'s `selinux` and a runtime that
+    does, or does not, label its containers. Both: a permissive host denies
+    nothing, and a runtime that applies no labels leaves its containers
+    unconfined, so its mounts work as they are."""
+    if labels and _selinux_enforcing():
+        return "refuse" if configured == "auto" else configured
+    return None
+
+
+def detect_runtime() -> Runtime:
+    """Read `sandbox.yaml` and ask the runtime. Raises `ConfigError` for a
+    `sandbox.yaml` that does not parse."""
+    host = _sandbox_yaml()
     cli = host.cli or (
         "docker" if shutil.which("docker") else "podman" if shutil.which("podman") else "docker"
     )
     engine, rootless, labels = _ask(cli)
-    selinux = None
-    # Both: a permissive host denies nothing, and a runtime that applies no
-    # labels leaves its containers unconfined, so its mounts work as they are.
-    if labels and _selinux_enforcing():
-        selinux = "refuse" if host.selinux == "auto" else host.selinux
+    selinux = _selinux(host.selinux, labels)
     limits = _ask_limits(cli, engine)
     return Runtime(
         cli=cli,
@@ -407,8 +434,19 @@ def detect_runtime() -> Runtime:
 _RUNTIME: Runtime | None = None
 #: Until when (`time.monotonic`) an inconclusive `_RUNTIME` is kept.
 _UNSURE_UNTIL = 0.0
-#: ponytail: fixed; a hung daemon costs one ~30s `info` per this many seconds
-#: instead of one per `docker_call`. Make it a sandbox.yaml knob if it bites.
+#: Whether a launch has already asked again about the `_RUNTIME` that did
+#: not say whether it is rootless (`_launch_runtime`): once per detection.
+_REASKED = False
+#: `runtime()` and `_launch_runtime` run in `asyncio.to_thread` workers, a
+#: launch's and doctor's at once: one detection at a time, and each sees the
+#: last one's answer instead of racing it.
+_LOCK = threading.RLock()
+#: How long the one launch that asks again gives `info`: the slow first
+#: answer that timed out at `_run`'s ten seconds came back in under five.
+REASK_TIMEOUT_S = 30.0
+#: ponytail: fixed; a hung daemon costs one ~30s detection per this many
+#: seconds, and one launch's `REASK_TIMEOUT_S` ask, instead of one per
+#: `docker_call`. Make it a sandbox.yaml knob if it bites.
 UNSURE_TTL = 30.0
 
 
@@ -417,30 +455,64 @@ def runtime(*, refresh: bool = False) -> Runtime:
     process: `docker info` is a round trip every launch would otherwise pay.
     Doctor refreshes it, so a changed `sandbox.yaml` is picked up there. A
     runtime that did not say whether it is rootless, or what limits it
-    enforces, is kept only `UNSURE_TTL` seconds: a launch after that asks
+    enforces, is kept only `UNSURE_TTL` seconds: a call after that asks
     again rather than refusing until a restart, and a hung daemon is not
-    asked on every call."""
-    global _RUNTIME, _UNSURE_UNTIL
-    if (
-        refresh
-        or _RUNTIME is None
-        or (
-            not (_RUNTIME.identity_known and _RUNTIME.limits_known)
-            and time.monotonic() >= _UNSURE_UNTIL
-        )
-    ):
-        _RUNTIME = detect_runtime()
-        _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
-    return _RUNTIME
+    asked on every call (`_launch_runtime` asks once more, once). A
+    detection that gets no answer about rootless never replaces one that
+    did for the same CLI: a launch between its probe and its `docker run`
+    keeps the identity it was probed with."""
+    global _RUNTIME, _UNSURE_UNTIL, _REASKED
+    with _LOCK:
+        if (
+            refresh
+            or _RUNTIME is None
+            or (
+                not (_RUNTIME.identity_known and _RUNTIME.limits_known)
+                and time.monotonic() >= _UNSURE_UNTIL
+            )
+        ):
+            known, _RUNTIME = _RUNTIME, detect_runtime()
+            if (
+                not _RUNTIME.identity_known
+                and known is not None
+                and known.identity_known
+                and known.cli == _RUNTIME.cli
+            ):
+                _RUNTIME = replace(
+                    _RUNTIME,
+                    engine=known.engine,
+                    rootless=known.rootless,
+                    selinux=known.selinux,
+                    identity_known=True,
+                )
+            _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+            _REASKED = False
+        return _RUNTIME
 
 
 def _launch_runtime() -> Runtime:
-    """`runtime()` for a launch about to start: one that did not say whether
-    it is rootless is asked again at once rather than after `UNSURE_TTL`,
-    since one slow answer is no reason to stop a task. Still no answer, and
-    `Runtime.refusal` stops it."""
-    host = runtime()
-    return host if host.identity_known else runtime(refresh=True)
+    """`runtime()` for a launch about to start. One that did not say whether
+    it is rootless is asked again by the first launch that meets it, at
+    once and with `REASK_TIMEOUT_S`, since one slow answer is no reason to
+    stop a task; later launches wait out `UNSURE_TTL` like every other call.
+    Still no answer, and `Runtime.refusal` stops the launch."""
+    global _RUNTIME, _REASKED
+    with _LOCK:
+        host = runtime()
+        if host.identity_known or _REASKED:
+            return host
+        _REASKED = True
+        engine, rootless, labels = _ask(host.cli, REASK_TIMEOUT_S)
+        if rootless is None:
+            return host
+        _RUNTIME = replace(
+            host,
+            engine=engine,
+            rootless=rootless,
+            selinux=_selinux(_sandbox_yaml().selinux, labels),
+            identity_known=True,
+        )
+        return _RUNTIME
 
 
 def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
@@ -862,7 +934,7 @@ def oneshot(sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
     """`Oneshot` for `sandbox`; `SandboxRefused` where the runtime cannot
     run one or enforce its limits."""
     try:
-        host = runtime()
+        host = _launch_runtime()
     except ConfigError as exc:
         raise SandboxRefused(str(exc)) from exc
     if problem := host.refusal():
@@ -1404,6 +1476,9 @@ class DockerBackend:
             host = await asyncio.to_thread(_launch_runtime)
         except ConfigError:
             return None  # `probe` says why
+        if not host.identity_known:
+            # Not "rootful": the owner check it would skip is the rootless one.
+            return host.refusal()
         if not host.rootless:
             return None
         dirs = linked_gitdirs(Path(cwd))
@@ -1430,8 +1505,13 @@ class DockerBackend:
     async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """The image's combined CA bundle, built when there is an extra CA
         or a `kraft_ca` (`docker_forward.prepare`), for `wrap`'s
-        `ca_bundle`."""
+        `ca_bundle`. Every launch prepares, a setup command's too, so this is
+        where one that has not been probed still asks an unsure runtime again
+        (`_launch_runtime`) before `wrap` builds its argv."""
         try:
+            host = await asyncio.to_thread(_launch_runtime)
+            if problem := host.refusal():
+                raise SandboxNotReady(problem)
             return await _forward.prepare(sandbox["image"], kraft_ca=kraft_ca)
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
@@ -1628,7 +1708,9 @@ class DockerBackend:
         that session's time cap: both are better learned from doctor.
         Re-detects, so an edited `sandbox.yaml` shows here first."""
         try:
-            host = await asyncio.to_thread(runtime, refresh=True)
+            await asyncio.to_thread(runtime, refresh=True)
+            # Asked again as a launch would, so doctor fails what a launch would.
+            host = await asyncio.to_thread(_launch_runtime)
         except ConfigError as exc:
             return False, str(exc)
         # A runtime that did not say whether it is rootless is named below,

@@ -3,10 +3,12 @@ does not answer in time."""
 
 import os
 import time
+from pathlib import Path
 
 import pytest
 
 from kraft.worker.backends import docker
+from kraft.worker.sandbox import SandboxNotReady
 
 _SANDBOX = {"kind": "docker", "image": "img"}
 
@@ -28,11 +30,22 @@ def _cli(tmp_path, monkeypatch, name, version, info):
     ("name", "version", "info"),
     [
         ("docker", "Docker version 29.3.1", None),
+        ("docker", "Docker version 29.3.1", ""),
+        ("docker", "Docker version 29.3.1", "null"),
+        ("docker", "Docker version 29.3.1", '{"name": "rootless"}'),
         ("podman", "podman version 4.9.3", None),
         ("podman", "podman version 4.9.3", ""),
         ("podman", "podman version 4.9.3", "Error: database is locked"),
     ],
-    ids=["docker-no-answer", "podman-no-answer", "podman-empty", "podman-garbled"],
+    ids=[
+        "docker-no-answer",
+        "docker-empty",
+        "docker-null",
+        "docker-not-a-list",
+        "podman-no-answer",
+        "podman-empty",
+        "podman-garbled",
+    ],
 )
 def test_a_runtime_that_does_not_answer_is_not_read_as_rootful(
     tmp_path, monkeypatch, name, version, info
@@ -47,9 +60,10 @@ def test_a_runtime_that_does_not_answer_is_not_read_as_rootful(
 
 @pytest.fixture
 def slow_podman(tmp_path, monkeypatch):
-    """`slow_podman(*answers)`: a podman whose `info` answers each detection
-    in turn, None for one that timed out; detected once now, with
-    `UNSURE_TTL` far from over."""
+    """`slow_podman(*answers)`: a podman whose `info` answers each ask in
+    turn, None for one that timed out; detected once now, with `UNSURE_TTL`
+    far from over. Returns the detection, and the list of each ask's
+    timeout so far."""
     templates = tmp_path / "templates"
     templates.mkdir()
     (templates / "sandbox.yaml").write_text("cli: podman\n")
@@ -59,13 +73,20 @@ def slow_podman(tmp_path, monkeypatch):
     monkeypatch.setattr(docker, "_RUNTIME", None)
     # Recorded first, so the value `runtime()` writes is undone too.
     monkeypatch.setattr(docker, "_UNSURE_UNTIL", docker._UNSURE_UNTIL)
+    monkeypatch.setattr(docker, "_REASKED", docker._REASKED)
 
     def go(*answers):
-        asked = iter(answers)
-        monkeypatch.setattr(docker, "_ask", lambda cli: ("podman", next(asked), False))
+        left = iter(answers)
+        timeouts = []
+
+        def ask(cli, timeout=10):
+            timeouts.append(timeout)
+            return "podman", next(left), False
+
+        monkeypatch.setattr(docker, "_ask", ask)
         unsure = docker.runtime()
         monkeypatch.setattr(docker, "_UNSURE_UNTIL", time.monotonic() + 3600)
-        return unsure
+        return unsure, timeouts
 
     return go
 
@@ -78,7 +99,7 @@ async def test_a_launch_asks_a_runtime_that_did_not_answer_again_at_once(slow_po
     """The e2e walk's flake: the first `info` timed out and the cached guess
     stopped the task. Now that guess refuses every launch, and the launch
     itself asks again rather than waiting out `UNSURE_TTL`."""
-    unsure = slow_podman(None, True)
+    unsure, timeouts = slow_podman(None, True)
     assert unsure.refusal() is not None
     with pytest.raises(docker.SandboxRefused, match="could not tell whether podman runs rootless"):
         docker.docker_argv(["true"], "/work", _SANDBOX, None)
@@ -87,6 +108,43 @@ async def test_a_launch_asks_a_runtime_that_did_not_answer_again_at_once(slow_po
     assert await docker.DockerBackend().probe(_SANDBOX, "sh", None) is None
     argv = docker.docker_argv(["true"], "/work", _SANDBOX, None)
     assert "--userns=keep-id" in argv
+    # The second ask waits longer than the first: that slow answer took 4.7s.
+    assert timeouts == [10, docker.REASK_TIMEOUT_S]
+
+
+async def test_a_launch_asks_again_once_however_many_checks_it_makes(slow_podman):
+    """The owner check would skip itself on "rootful", and the probe after
+    it would then launch on the answer it got: the owner check refuses
+    instead, and a launch costs one more ask, not one per check."""
+    _, timeouts = slow_podman(None, None, True)
+    backend = docker.DockerBackend()
+    owner = await backend.owner_refusal(None, Path("/work"), "item", Path("/r.json"))
+    assert owner is not None and "could not tell whether podman runs rootless" in owner
+    reason = await backend.probe(_SANDBOX, "sh", None)
+    assert reason is not None and "could not tell whether podman runs rootless" in reason
+    assert len(timeouts) == 2
+
+
+def test_a_tool_container_asks_again_too(slow_podman, tmp_path):
+    """A harness's version check and codex's hook trust run in a one-shot
+    container before the session's own checks: it asks again as they do."""
+    slow_podman(None, True)
+    assert "--userns=keep-id" in docker.oneshot(_SANDBOX, tmp_path, tmp_path).flags
+
+
+async def test_a_setup_command_asks_again_before_it_runs(slow_podman, monkeypatch):
+    """A repository's setup command is never probed; its `prepare` asks."""
+    slow_podman(None, None)
+    with pytest.raises(SandboxNotReady, match="could not tell whether podman runs rootless"):
+        await docker.DockerBackend().prepare(_SANDBOX)
+
+
+def test_no_answer_never_replaces_an_answer(slow_podman):
+    """Doctor's refresh, or another launch's, getting no answer between one
+    launch's probe and its `docker run` would refuse that `docker run`."""
+    slow_podman(True, None)
+    again = docker.runtime(refresh=True)
+    assert again.identity_known and again.rootless is True
 
 
 def test_a_runtime_that_did_not_answer_is_asked_again_after_a_while(slow_podman, monkeypatch):
@@ -111,7 +169,7 @@ async def test_doctor_names_a_daemon_that_is_down_before_a_runtime_that_did_not_
 ):
     """A runtime that is not there gives no `info` either: doctor says the
     plainer of the two first."""
-    slow_podman(None, None)
+    slow_podman(None, None, None)
 
     async def call(*args, **_):
         return version
@@ -119,3 +177,16 @@ async def test_doctor_names_a_daemon_that_is_down_before_a_runtime_that_did_not_
     monkeypatch.setattr(docker, "docker_call", call)
     ok, detail = await docker.DockerBackend().health(_SANDBOX)
     assert not ok and said in detail
+
+
+async def test_doctor_asks_again_as_a_launch_would(slow_podman, monkeypatch):
+    """Doctor's own refresh times out, its second ask answers: it passes
+    the row a launch would start under."""
+    slow_podman(None, None, True)
+
+    async def call(*args, **_):
+        return 0, "4.9.3\n"
+
+    monkeypatch.setattr(docker, "docker_call", call)
+    ok, detail = await docker.DockerBackend().health(_SANDBOX)
+    assert ok, detail

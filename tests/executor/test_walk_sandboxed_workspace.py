@@ -55,7 +55,7 @@ def _stopped(database, row) -> str:
     """Why the walk stopped, and what the worker said: a real runtime's
     failure is in its session's log, not in the status."""
     seen = database.read(lambda c: events.read_after(c, 0, row["id"]))
-    stops = [e["payload"]["reason"] for e in seen if e["type"] == "work_item_needs_human"]
+    stops = [e["payload"].get("reason") for e in seen if e["type"] == "work_item_needs_human"]
     logs = database.read(
         lambda c: [
             r["log_path"]
