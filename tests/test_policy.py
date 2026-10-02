@@ -338,7 +338,7 @@ def test_load_policy_falls_back_to_legacy_intake_max_concurrent(tmp_path):
 def test_a_cap_rejects_a_zero_attempt_count():
     """`load_policy` checked this; it is now a field constraint that cannot be
     bypassed by constructing a Cap directly, which the dataclass allowed."""
-    with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
+    with pytest.raises(ValidationError, match=r"attempts\n  Input should be greater than 0"):
         policy.Cap(attempts=0, wall_clock_s=60)
 
 
@@ -565,7 +565,9 @@ def test_work_item_policy_may_exceed_default_within_admin_maximum():
 def test_policy_override_rejects_unknown_fields_field_specifically():
     """Overrides are validated field by field, not merged as an unrestricted
     generic dict (`policy-override-rules-are-field-specific`)."""
-    with pytest.raises(Exception):  # noqa: B017 -- pydantic's ValidationError
+    with pytest.raises(
+        ValidationError, match=r"not_a_real_field\n  Extra inputs are not permitted"
+    ):
         policy.TemplatePolicyOverride.model_validate({"not_a_real_field": 1})
 
 
