@@ -515,24 +515,28 @@ async def _mcp_check(server_up: bool) -> dict:
     would make Kraft write the operator's agent config.
     """
     found = registration.permission_tool(None)
+    asking = sorted(_direct_askers(harness.load(None)))
+    needed = True
     if server_up:
         # Each connected repo on its own: its committed settings can switch
         # the plugin off for its workers, and its local scope or `.mcp.json`
         # can register the server where the user scope does not.
-        repos = [Path(r["path"]) for r in await client.repos()]
-        per_repo = {repo: registration.permission_tool(repo) for repo in repos}
+        entries = [
+            config.RepoEntry.model_validate(r, context={"unrecognised_keys_reported": True})
+            for r in await client.repos()
+        ]
+        per_repo = {Path(e.path): registration.permission_tool(Path(e.path)) for e in entries}
         refused = [str(repo) for repo, tool in per_repo.items() if tool is None]
-        if refused:
+        needed = _launches_direct_asker(entries)
+        # Every repo refused and nothing at user scope is no registration at
+        # all: it falls through to the same failure as no repo connected,
+        # since the first such worker anywhere is refused -- when the chains
+        # launch one at all.
+        if refused and (found or len(refused) < len(per_repo) or not needed):
             # A warning, not a failure (Kraft-9efnk.31): the launch refuses
             # only an unsandboxed task on a harness asking through the direct
             # tool, and whether a repo's items ever launch one depends on
             # chain, sandbox and item overrides doctor does not resolve.
-            asking = sorted(
-                h.id
-                for h in harness.load(None).valid.values()
-                if (c := h.capabilities.get("approval_channel")) is not None
-                and c.always == registration.DIRECT
-            )
             return _check(
                 "mcp server",
                 True,
@@ -548,6 +552,15 @@ async def _mcp_check(server_up: bool) -> dict:
         return _check("mcp server", True, "skipped: no server", skipped=True)
     if found:
         return _check("mcp server", True, f"{found[0]}, registered in {found[1]} ({_MCP_SCOPE})")
+    if not needed:
+        return _check(
+            "mcp server",
+            True,
+            f"no kraft MCP server registered: no chain launches an unsandboxed task on harness "
+            f"{' or '.join(asking)} here, which is the launch that needs it; {registration.FIX} "
+            f"before one does ({_MCP_SCOPE})",
+            warn=True,
+        )
     return _check(
         "mcp server",
         False,
@@ -556,16 +569,69 @@ async def _mcp_check(server_up: bool) -> dict:
     )
 
 
+def _direct_askers(harnesses) -> set[str]:
+    """The providers whose launch asks Kraft's permission gate through the
+    host's registered `kraft` MCP server (`approval_channel.always`)."""
+    return {
+        hid
+        for hid, h in harnesses.valid.items()
+        if (c := h.capabilities.get("approval_channel")) is not None
+        and c.always == registration.DIRECT
+    }
+
+
+def _launches_direct_asker(entries: list[config.RepoEntry]) -> bool:
+    """Can a worker here need the registered server? The launch refuses only
+    `not sandbox and asks.always == DIRECT` (`adapters.agent`): so no when
+    every connected repo is sandboxed, or when no task of the live library,
+    fallbacks included, runs on a profile whose provider asks that way (a
+    Codex-only setup). A harness table that does not load answers yes: its
+    own row fails, and this one must not pass on a guess."""
+    if entries and all(e.effective_sandbox is not None for e in entries):
+        return False
+    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    harnesses = harness.load(None)
+    direct = _direct_askers(harnesses)
+    try:
+        table = HarnessProfileTable.from_yaml(live / "harnesses.yaml", harnesses=harnesses.valid)
+    except TemplateEnvironmentError:
+        return True
+    for chain in _resolved_chains(live):
+        for node in chain.nodes:
+            for t in node.tasks():
+                if not isinstance(t.task, AgentTask):
+                    continue
+                entries_, _source = fallback.fallback_list(t.task, table)
+                for task in [t.task, *(fallback.apply(t.task, e) for e in entries_)]:
+                    profile = table.profiles.get(task.harness)
+                    if profile is None or profile.provider in direct:
+                        return True
+    return False
+
+
 def _path_check() -> dict:
     """Is the `kraft` on PATH this one? Every MCP registration runs it by name,
     so an older install ahead of this one on PATH answers every agent's tool
     call with that install's code, whatever `kraft admin update` installed.
+    No `kraft` on PATH at all fails too: those same registrations then start
+    nothing, the usual fresh `uv tool install` whose bin dir is not on PATH yet.
     `ok=False` for the same reason as `_mcp_check`: it breaks silently."""
     from kraft import update
 
+    found = shutil.which("kraft")
+    if found is None:
+        return _check(
+            "kraft on PATH",
+            False,
+            "not on PATH -- MCP servers and hooks run `kraft` by name; add its directory to "
+            "PATH (`uv tool update-shell` for a uv install), then restart Kraft from a new "
+            "shell. Under a service, reinstall it from that shell (`kraft admin "
+            "uninstall-service`, then `kraft admin install-service`): the unit keeps the PATH "
+            "it was installed with",
+        )
     other = update.shadowing_kraft()
     if other is None:
-        return _check("kraft on PATH", True, shutil.which("kraft") or "not on PATH")
+        return _check("kraft on PATH", True, found)
     return _check(
         "kraft on PATH",
         False,

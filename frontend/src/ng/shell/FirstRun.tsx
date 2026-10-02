@@ -7,11 +7,13 @@ import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import "./first-run.css";
 
-/** The gap between the four probe rows appearing, so a person can read what Kraft found. */
+/** The gap between the probe rows appearing, so a person can read what Kraft found. */
 export const PROBE_STEP_MS = 450;
 
 const STEPS = ["Connect a repo", "Chain and policy", "First work item"] as const;
-const ADD_REPO_COMMAND = "kraft admin init";
+/** What `docsite/content/1.get-started/1.install.md` gives for Claude Code: the
+ *  plugin, which registers the MCP server every Claude worker needs. */
+const PLUGIN_COMMANDS = "claude plugin marketplace add itsOmidKarami/kraft\nclaude plugin install kraft@kraft";
 
 type Load<T> = { state: "loading" } | { state: "error" } | { state: "ready"; value: T };
 
@@ -42,6 +44,7 @@ function probeRows(p: RepoProbe): [string, string][] {
     [".gitmodules", p.submodules.length ? `${p.submodules.length} submodule${p.submodules.length === 1 ? "" : "s"}` : "none"],
     [".beads/", p.has_beads ? "found" : "not found"],
     ["Test command", p.test_command ?? "not detected"],
+    ["Setup command", p.setup_command ?? "none found"],
     ["Forge remote", p.forge ? `${p.forge}${p.project ? ` · ${p.project}` : ""}` : "none"],
   ];
 }
@@ -66,7 +69,7 @@ export function FirstRun() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!probe || shown >= 4) return;
+    if (!probe || shown >= probeRows(probe).length) return;
     const t = setTimeout(() => setShown((s) => s + 1), PROBE_STEP_MS);
     return () => clearTimeout(t);
   }, [probe, shown]);
@@ -112,7 +115,7 @@ export function FirstRun() {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(ADD_REPO_COMMAND);
+      await navigator.clipboard.writeText(PLUGIN_COMMANDS);
       setCopied(true);
     } catch {
       setCopied(false);
@@ -120,6 +123,7 @@ export function FirstRun() {
   };
 
   const rows = probe ? probeRows(probe) : [];
+  const probed = probe != null && shown >= rows.length;
   const circle = (n: number) => (
     <StepCircle key={n} n={n} state={n === step ? "current" : n < step || (n === 1 && added) ? "done" : "todo"} onClick={n <= reached ? () => setStep(n) : undefined} />
   );
@@ -147,7 +151,7 @@ export function FirstRun() {
               <Field label="Path to a local git checkout" error={error}>
                 <input value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
-                  onKeyDown={(e) => e.key === "Enter" && (probe ? shown >= 4 && !added && doAdd() : doProbe())} />
+                  onKeyDown={(e) => e.key === "Enter" && (probe ? probed && !added && doAdd() : doProbe())} />
               </Field>
               {probe && (
                 <ul className="fr-probes" aria-label="Probe results">
@@ -160,7 +164,7 @@ export function FirstRun() {
                 {added ? (
                   <Button variant="primary" onClick={() => go(2)}>Continue</Button>
                 ) : probe ? (
-                  <Button variant="primary" disabled={shown < 4 || adding} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
+                  <Button variant="primary" disabled={!probed || adding} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
                 ) : (
                   <Button variant="primary" disabled={!path.trim() || probing} onClick={doProbe}>{probing ? "Probing…" : "+ Add repo"}</Button>
                 )}
@@ -190,15 +194,18 @@ export function FirstRun() {
               <div className="fr-actions">
                 <Link className="btn btn-primary" to="/?new=1">+ New work item</Link>
               </div>
-              <h3>Or drive it from an agent session</h3>
-              <p><code>{ADD_REPO_COMMAND}</code> registers the MCP server and the /kraft:* skills.</p>
-              <Button onClick={copy}><Copy size={14} aria-hidden />{copied ? "Copied" : "Copy command"}</Button>
+              <h3>Before you start it: register Kraft with Claude Code</h3>
+              <p>Claude workers need Kraft's MCP server, or Kraft refuses to launch them. Install the Kraft plugin, which also adds the /kraft:* skills:</p>
+              <pre className="fr-cmd">{PLUGIN_COMMANDS}</pre>
+              <Button onClick={copy}><Copy size={14} aria-hidden />{copied ? "Copied" : "Copy commands"}</Button>
+              <p>Then open a Claude Code session in your repo and run <code>/kraft:onboard</code>. It connects the repo and checks its setup and test commands.</p>
+              <p>Or, without the plugin, run <code>kraft admin init</code>. Not both.</p>
             </>
           )}
         </div>
         <aside className="fr-aside">
-          {step === 1 && <><h3>Kraft probes</h3><p>a local git checkout · .gitmodules, .beads/, the test command and the forge remote</p></>}
-          {step === 2 && <><h3>Defaults</h3><p>Every item uses the default chain and the policy below unless it names another. Everything Settings writes is YAML in ~/.kraft/templates.</p></>}
+          {step === 1 && <><h3>Kraft probes</h3><p>a local git checkout · .gitmodules, .beads/, the test and setup commands and the forge remote</p></>}
+          {step === 2 && <><h3>Defaults</h3><p>Every item uses the default chain and the policy below unless it names another. Everything Settings writes is YAML in $KRAFT_HOME/templates (~/.kraft/templates by default).</p></>}
           {step === 3 && <><h3>On create</h3><p>Filed from a title, or from an existing spec or plan. It waits for you to start it.</p></>}
         </aside>
       </section>

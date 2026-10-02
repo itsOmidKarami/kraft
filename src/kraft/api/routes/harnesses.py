@@ -181,12 +181,13 @@ def _provider_view(h: harness_mod.Harness) -> dict:
     }
 
 
+# No `version`: Kraft-ewd5x.
 @api_router.get("/harnesses")
 async def harness_status():
     """One entry per provider, in the table's order, with whether its CLI is on
     the daemon's PATH. A worker's PATH is an allowlist, so a worker that cannot
     find the CLI is a launch problem and not this flag. No `version`: the probe's
-    output is not cached anywhere this route can read (Kraft-ewd5x)."""
+    output is not cached anywhere this route can read."""
     return [
         {
             "id": h.id,

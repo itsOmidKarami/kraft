@@ -67,7 +67,6 @@ describe("crumbsFor", () => {
 
   it("says Not found for a path it does not know", () => {
     expect(texts("/nope")).toEqual(["Not found"]);
-    expect(texts("/_tokens")).toEqual(["Tokens"]);
   });
 
   it("gives a chain's page Templates and a link back to Chains; the page adds the rest", () => {

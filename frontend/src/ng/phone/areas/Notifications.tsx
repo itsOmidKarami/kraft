@@ -94,7 +94,7 @@ function Preview({ link }: { link: string }) {
         <span className="ph-notice-text">
           <span className="ph-notice-title">{sample.title}</span>
           <span className="ph-notice-body">{sample.body}</span>
-          <span className="ph-notice-link">{(link || "192.168.1.20:8765").replace(/\/$/, "")}/work-items/wi_01HX3M2</span>
+          <span className="ph-notice-link">{(link || "192.168.1.20:8765").replace(/\/$/, "")}/work-items/07eb05f8c9d14b2e8a6f13d5b7e3042a</span>
         </span>
       </div>
       {node}

@@ -16,7 +16,7 @@ export function ThemeCard({ surface, accent, amount, mode }: { surface: Surface;
         </div>
         <div className="tc-main">
           <div className="tc-top">
-            <span className="tc-crumb">Board › kraft-cb59</span>
+            <span className="tc-crumb">Board › 07eb05f8…3042a</span>
             <span className="tc-chip tc-ok">running</span>
           </div>
           <span className="tc-title">Add retry budget</span>

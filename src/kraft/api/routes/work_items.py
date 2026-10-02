@@ -507,9 +507,10 @@ def _duplicate_attachments(row) -> list[dict]:
     return out
 
 
+# B3.
 @api_router.post("/work-items/{wid}/duplicate", status_code=201)
 async def duplicate_work_item(wid: str, request: Request):
-    """B3: a fresh, paused item from `wid`'s own title, description, repo,
+    """A fresh, paused item from `wid`'s own title, description, repo,
     chain template, workspace selection and attachments -- any source status
     accepted, archived and cancelled included. No run state, override,
     policy override, budget or bead link carries over; this is a fresh
@@ -588,9 +589,10 @@ class TriggerBody(BaseModel):
     chain_template: str | None = None
 
 
+# Kraft-859.
 @api_router.post("/triggers", status_code=201)
 async def fire_trigger(body: TriggerBody, request: Request):
-    """The HTTP twin of a policy.yaml cron trigger (Kraft-859) -- always
+    """The HTTP twin of a policy.yaml cron trigger -- always
     paused, for the same reason: an agent cannot start work here any more
     than it can from manual intake or a cron tick."""
     st = request.app.state

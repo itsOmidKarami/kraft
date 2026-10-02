@@ -78,7 +78,7 @@ describe("apply store", () => {
     routes["POST /apply/restart"] = () => reply(409, { detail: "started from a terminal: restart it there" });
     await useApply.getState().runRestart();
     expect(useApply.getState()).toMatchObject({ managed: false, phase: "idle" });
-    expect(useApply.getState().error).toMatch(/restart it yourself/);
+    expect(useApply.getState().error).toMatch(/cannot restart itself\. Run kraft admin restart; .*Ctrl-C/);
   });
 
   it("waits for the server to go down and come back, then refetches", async () => {

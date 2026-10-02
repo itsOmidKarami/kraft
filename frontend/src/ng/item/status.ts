@@ -28,14 +28,33 @@ const TONE: Record<DisplayStatus, Tone> = {
   archived: "muted",
 };
 
+/** How the cap behind a budget stop is raised, or null when the item cannot
+ *  raise it, so neither layout offers a raise the server would refuse (409):
+ *  - `limit`: the stop names an item-wide policy `budget_usd`, raised in the
+ *    item's policy and retried (the stop's Raise cap);
+ *  - `item`: the stop's `scope` is `work_item`, the item's own dollar cap,
+ *    raised through `/budget/raise`, the one scope that route takes;
+ *  - null: a daily or token cap, a node's, or spend no harness reported,
+ *    which the policy or the chain raises, then Retry. */
+export function budgetRaise(item: Pick<WorkItem, "stop">): "limit" | "item" | null {
+  if (item.stop?.kind !== "budget") return null;
+  if (item.stop.limit) return "limit";
+  return item.stop.scope === "work_item" ? "item" : null;
+}
+
+/** What a budget stop the item cannot raise says instead of offering a raise. */
+export const NOT_RAISABLE = "The item can't raise this cap: the policy or the chain sets it. Retry once it is raised there, or after local midnight for the daily cap.";
+
 /** GAP §1.4a, Decisions §1 and §14. `raise` is the capped Resume: it opens the
- *  chain's Config at the limit that stopped the item. */
+ *  chain's Config at the limit that stopped the item. A budget stop the item
+ *  cannot raise (`budgetRaise`) has Retry instead. */
 export function headerState(item: Pick<WorkItem, "display_status" | "stop">): HeaderState {
   const status = item.display_status ?? "running";
   const kind = item.stop?.kind;
   const main: Main =
     status === "paused" ? "resume"
-    : status === "needs_you" && (kind === "cap" || kind === "budget") ? "raise"
+    : status === "needs_you" && kind === "budget" ? (budgetRaise(item) ? "raise" : "retry")
+    : status === "needs_you" && kind === "cap" ? "raise"
     : status === "failed" ? "retry"
     : status === "done" || status === "cancelled" ? "archive"
     : status === "archived" ? "restore"

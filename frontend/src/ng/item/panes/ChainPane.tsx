@@ -2,6 +2,7 @@ import { useState } from "react";
 import { repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
+import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
 import type { Applied } from "../draft/applied";
 import { appliedRows } from "../draft/AppliedRows";
@@ -9,6 +10,7 @@ import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { raiseBody } from "../RaiseLimit";
+import { budgetRaise } from "../status";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -92,8 +94,11 @@ function Meter({ label, used, of, ratio, max, onEdit }: { label: string; used: s
 
 /** Raise the budget: quick picks and a typed value (GAP §2 #16). A budget stop
  *  on the item's own cap goes through /budget/raise, which also retries; one
- *  on a policy cap (`stop.limit`) patches that policy and retries; otherwise
- *  PATCH budget_usd. */
+ *  on a policy cap (`stop.limit`) patches that policy and retries; otherwise,
+ *  a daily or token stop among them, PATCH budget_usd, which /budget/raise
+ *  would refuse there. */
+export const STILL_STOPPED = "Saved the item's cap. It is still stopped: another cap stopped it, so Retry once that one is raised.";
+
 function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: () => void; onCancel: () => void }) {
   const limit = item.stop?.kind === "budget" ? item.stop.limit : undefined;
   const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
@@ -104,9 +109,11 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
     if (limit && usdCap != null) {
       r = await act.patch(item.id, raiseBody(limit, usdCap));
       if (r.ok) r = await act.retry(item.id);
-    } else r = item.stop?.kind === "budget" ? await act.raiseBudget(item.id, usdCap) : await act.patch(item.id, { budget_usd: usdCap });
-    if (r.ok) onDone();
-    else setError(r.error);
+    } else r = budgetRaise(item) === "item" ? await act.raiseBudget(item.id, usdCap) : await act.patch(item.id, { budget_usd: usdCap });
+    if (!r.ok) return setError(r.error);
+    // A budget stop this cap did not make: saving it retries nothing.
+    if (item.stop?.kind === "budget" && !budgetRaise(item)) showToast(STILL_STOPPED);
+    onDone();
   };
   return (
     <div className="meter-editor">

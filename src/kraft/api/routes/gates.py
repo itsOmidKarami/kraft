@@ -291,14 +291,15 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
+# Backward motion: 02 §7.2. Every gate on this path: Kraft-ko7j.
 @api_router.post("/work-items/{wid}/gates/{gate:path}/reject")
 async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
-    """Reject a gate and put the chain back to work (02 §7.2, backward motion).
+    """Reject a gate and put the chain back to work.
 
     Every gate takes this one path now. `human_review_approval` used to be
     terminal: the note landed in an event nothing read, no node was re-run, and
     the only exits left were approving the thing just rejected or abandoning
-    the item (Kraft-ko7j). The single thing that may park an item at a rejected
+    the item. The single thing that may park an item at a rejected
     gate is the reject loop's own cap.
     """
     st = request.app.state

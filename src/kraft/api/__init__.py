@@ -17,10 +17,16 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from kraft import config as config_mod
+from kraft import update
 from kraft.api import perimeter
 from kraft.api.startup import lifespan
 
-app = FastAPI(lifespan=lifespan)
+# The title and version are what `/docs`, `/redoc` and `/openapi.json` show,
+# all three reachable without a login: FastAPI's own defaults read "FastAPI
+# 0.1.0". Every route's docstring is published there as its description, so
+# a reference only the maintainer can follow goes in a comment above the
+# route instead (tests/api/test_openapi.py).
+app = FastAPI(title="Kraft", version=update.installed(), lifespan=lifespan)
 
 #: Every JSON endpoint lives under here, so it can never share a path with an
 #: SPA client-side route (e.g. GET /work-items/<id> the page vs. the same path

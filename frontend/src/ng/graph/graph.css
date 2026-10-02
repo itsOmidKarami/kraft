@@ -39,13 +39,6 @@
 .glyph-paused { position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--text-muted); font: 700 8px/13px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
 .glyph-running { position: absolute; bottom: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); border: 2px solid var(--bg); }
 
-/* Gallery (/_gallery) */
-.gallery { max-width: 1400px; margin: 0 auto; padding: 22px 24px 60px; }
-.gallery h1 { margin: 0; font-size: 16px; font-weight: 500; }
-.gallery > section > h2 { margin: 28px 0 12px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
-.gallery-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px 22px; margin-bottom: 18px; }
-.gallery-cell { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 56px; font-size: 11px; color: var(--text-muted); }
-
 /* ZoomControls */
 .zoom { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
 .zoom-btn { display: flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); cursor: pointer; }
@@ -102,7 +95,6 @@
 .seam { position: absolute; z-index: 2; width: 20px; height: 20px; box-sizing: border-box; margin: 0; padding: 0; border-radius: 50%; border: 1.5px dashed var(--ok); background: var(--bg); color: var(--ok); font: 600 13px/17px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; transition: opacity .12s; }
 .seam:is(:hover, :focus-visible), .seam.is-open, .seam.is-always { opacity: 1; }
 .seam:hover, .seam.is-open { background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
-.gallery-frame { position: relative; height: 320px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 
 /* NodeGraph */
 .step-frame { position: absolute; box-sizing: border-box; border-radius: 12px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 25%, transparent); cursor: pointer; transition: border-color .12s, background .12s; }
@@ -127,7 +119,6 @@
 .seam.is-node { opacity: .6; }
 .seam.is-node:is(:hover, :focus-visible) { opacity: 1; }
 .node-footer { position: absolute; padding: 0 4px; background: var(--bg); font-size: 11px; white-space: nowrap; color: var(--text-muted); }
-.gallery-frame.is-tall { height: 460px; }
 
 /* ChainStrip */
 .strip { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
@@ -170,8 +161,6 @@
 .gateview-target { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--bad); background: var(--bg); font: 11px ui-monospace, Menlo, monospace; color: var(--text-sub); cursor: pointer; }
 .gateview-target:is(:hover, :focus-visible) { background: var(--surface-2); }
 .gateview-note { max-width: 380px; margin: 0; padding: 0 4px; background: var(--bg); text-align: center; font-size: 11px; line-height: 1.55; color: var(--text-muted); text-wrap: pretty; }
-.gallery-frame.is-stack { display: flex; flex-direction: column; }
-.gallery-area { position: relative; flex: 1; min-height: 0; }
 
 /* Inspector: docked over the canvas, square-edged, one border, one soft shadow (Decisions §9 Panes). */
 .pane, .pane-rail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; box-sizing: border-box; border-left: 1px solid var(--border); background: var(--surface); box-shadow: -12px 0 28px color-mix(in srgb, var(--bg) 60%, transparent); }

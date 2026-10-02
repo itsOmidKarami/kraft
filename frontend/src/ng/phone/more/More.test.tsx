@@ -61,7 +61,7 @@ describe("More (K.1)", () => {
 
   it("does not offer Restart when Kraft was started from a terminal, and says so", async () => {
     open({ "GET /apply": [200, { restart: [{ id: "access.bind", file: "access.yaml", text: "bind changed" }], reload: [], managed: false }] });
-    expect(await screen.findByText(/Started from a terminal: restart it there/)).toBeInTheDocument();
+    expect(await screen.findByText(/cannot restart itself\. Run kraft admin restart; .*Ctrl-C and start it again the same way/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Restart Kraft" })).toBeNull();
   });
 });

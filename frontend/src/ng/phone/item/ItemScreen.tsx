@@ -6,7 +6,7 @@ import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
 import { act } from "../../item/actions";
 import { isEscalation } from "../../item/nodeGraph";
-import { headerState } from "../../item/status";
+import { budgetRaise, headerState } from "../../item/status";
 import { pathSel, placeUrl } from "../../item/url";
 import type { ItemDetail } from "../../item/useItem";
 import { useCompare } from "../../review/useReview";
@@ -177,8 +177,10 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
       />
     );
   // A policy budget_usd stopped it, not the item's own cap: /budget/raise would refuse, so raise the policy like any cap.
-  if (sheet.is("raise") && stopLimitOf(item)) return <RaiseCapSheet item={item} sheet={sheet} reload={reload} />;
-  if (sheet.is("raise"))
+  // A cap the item cannot raise opens no sheet: the bar offers Retry instead.
+  const raise = budgetRaise(item);
+  if (sheet.is("raise") && raise === "limit") return <RaiseCapSheet item={item} sheet={sheet} reload={reload} />;
+  if (sheet.is("raise") && raise === "item")
     return (
       <ChoiceSheet
         title="Raise budget"

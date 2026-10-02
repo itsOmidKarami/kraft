@@ -35,7 +35,7 @@ export function ReposList() {
       </label>
       {draft.status === "error" && <p className="ph-error" role="alert">The repos could not be read.</p>}
       {error && <p className="ph-error" role="alert">{error}</p>}
-      {data && data.repos.length === 0 && <p className="ph-empty">No repository is connected. Connect one from a computer, or run <code>kraft admin init</code> on the machine.</p>}
+      {data && data.repos.length === 0 && <p className="ph-empty">No repository is connected. Run <code>kraft repo connect</code> in a repo on the machine, or connect one from a computer.</p>}
       {data && data.repos.length > 0 && (
         <Group
           title="Connected"

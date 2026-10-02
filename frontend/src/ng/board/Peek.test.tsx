@@ -57,7 +57,7 @@ describe("Peek", () => {
   });
 
   it("opens Config with the budget editor from a budget stop's Raise cap", async () => {
-    mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
     fireEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();

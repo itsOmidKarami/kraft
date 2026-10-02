@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Dialog } from "../ui/Dialog";
 import { Popover } from "../ui/Popover";
 import { RefreshCw, RotateCw, TriangleAlert, ExternalLink } from "../icons";
-import { useApply } from "./store";
+import { SELF_RESTART, useApply } from "./store";
 import "./apply.css";
 
 /** Waiting to apply (UX V2 W16 A): config saved but not yet running. Reload
@@ -41,7 +41,7 @@ export function ApplyChip() {
                 {managed ? (
                   <button type="button" className="apply-btn is-primary" onClick={() => { setOpen(false); void askRestart(); }}><RotateCw size={14} aria-hidden />Restart Kraft</button>
                 ) : (
-                  <span className="apply-muted">Started in a terminal, so Kraft cannot restart itself. Run kraft admin restart there.</span>
+                  <span className="apply-muted">{SELF_RESTART}</span>
                 )}
                 {managed && nL > 0 && <span className="apply-muted">Also applies the reload below.</span>}
               </div>

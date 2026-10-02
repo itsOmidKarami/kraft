@@ -1,10 +1,9 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactElement } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AnalyticsPage } from "./analytics/AnalyticsPage";
 import { ArchivedPage } from "./board/ArchivedPage";
 import { BoardPage } from "./board/BoardPage";
 import { DraftItemPage } from "./board/draft/DraftItemPage";
-import { Gallery } from "./graph/Gallery";
 import { LibraryPage } from "./library/LibraryPage";
 import { HarnessesPage } from "./harnesses/HarnessesPage";
 import { PhoneApp } from "./phone/PhoneApp";
@@ -27,8 +26,16 @@ import { ChainsPage } from "./templates/ChainsPage";
 import { ReposPage } from "./templates/ReposPage";
 import { IntakePage } from "./settings/IntakePage";
 import { PolicyPage } from "./settings/PolicyPage";
-import { TokenSheet } from "./theme/TokenSheet";
 import { Toaster } from "./ui/Toast";
+
+/** `/_gallery` and `/_tokens`, the component and token sheets, are for building
+ *  the UI: the dev server has them, and so does a build the screenshot sweep
+ *  makes with `VITE_DEV_PAGES=1` (sweep/playwright.sweep.config.ts). A release
+ *  build has neither, nor their code: the constant is false there, so the
+ *  bundler drops the imports. */
+const DEV_PAGES = import.meta.env.DEV || import.meta.env.VITE_DEV_PAGES === "1";
+const Gallery = DEV_PAGES ? lazy(() => import("./graph/Gallery").then((m) => ({ default: m.Gallery }))) : null;
+const TokenSheet = DEV_PAGES ? lazy(() => import("./theme/TokenSheet").then((m) => ({ default: m.TokenSheet }))) : null;
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
 const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/templates/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/templates/harnesses": <HarnessesPage /> };
@@ -50,7 +57,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
     <BrowserRouter>
       <ShippedHash />
       <Routes>
-        <Route path="/_gallery" element={<Gallery />} />
+        {Gallery && <Route path="/_gallery" element={<Suspense fallback={null}><Gallery /></Suspense>} />}
         <Route element={<Shell />}>
           {ROUTES.map((r) => (
             <Route key={r.path} path={r.path} element={r.built && BUILT[r.path] ? BUILT[r.path] : <Placeholder label={r.label} />} />
@@ -67,7 +74,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           <Route path="/settings/intake" element={<Navigate to="/settings/auto-intake" replace />} />
           <Route path="/templates/chains/:chain" element={<ChainsPage />} />
           <Route path="/templates/chains/:chain/nodes/:node" element={<ChainsPage />} />
-          <Route path="/_tokens" element={<TokenSheet />} />
+          {TokenSheet && <Route path="/_tokens" element={<Suspense fallback={null}><TokenSheet /></Suspense>} />}
           {ALIASES.map(([from, to]) => (
             <Route key={from} path={from} element={<Alias to={to} />} />
           ))}

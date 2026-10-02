@@ -116,8 +116,12 @@ describe("the phone board (B)", () => {
     expect(await screen.findByText("Nothing here. Tap + to file one.")).toBeInTheDocument();
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     mount();
-    expect(await screen.findByText(/No repository is connected/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "More › Repos" })).toHaveAttribute("href", "/templates/repos");
+    // `kraft repo connect` connects one; `kraft admin init` never does, and
+    // More › Repos on a phone cannot connect a path either.
+    expect(await screen.findByText(/No repository is connected/)).toHaveTextContent(
+      "No repository is connected. Run kraft repo connect in a repo on the machine, or connect one from a computer.",
+    );
+    expect(screen.queryByRole("link", { name: "More › Repos" })).toBeNull();
   });
 
   it("says offline beside the title when the list read fails, and keeps the rows", async () => {
@@ -170,15 +174,16 @@ describe("a card's inline actions (B.4)", () => {
     await screen.findByText("Item c1");
     const card = (id: string) => within(document.querySelector(`[data-row="${id}"]`) as HTMLElement);
     expect(card("c1").getByRole("button", { name: "Open" })).toBeInTheDocument();
-    expect(card("b2").getByRole("button", { name: "Raise budget…" })).toBeInTheDocument();
+    // A list row cannot tell the item's own cap from a daily or token one, which the server will not raise: the item screen can.
+    expect(card("b2").getByRole("button", { name: "Open" })).toBeInTheDocument();
+    expect(card("b2").queryByRole("button", { name: /Raise/ })).toBeNull();
     expect(card("q3").getByRole("button", { name: "Answer…" })).toBeInTheDocument();
     expect(card("f4").getByRole("button", { name: "Retry…" })).toBeInTheDocument();
     // A running card has its tap target and nothing inline.
     expect(card("r6").getAllByRole("button")).toHaveLength(1);
 
-    await userEvent.click(card("b2").getByRole("button", { name: "Raise budget…" }));
+    await userEvent.click(card("b2").getByRole("button", { name: "Open" }));
     expect(where()).toContain("/work-items/b2");
-    expect(where()).toContain('"phSheet":"raise"');
     expect(calls).toEqual([]);
   });
 

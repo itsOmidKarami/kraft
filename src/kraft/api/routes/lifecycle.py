@@ -282,15 +282,16 @@ def _connected_members(st, row) -> list[Path]:
     return [m for m in connected.values() if m is not None]
 
 
+# Kraft-x85; reaping what else ran in the worktree: Kraft-ugm6.
 @api_router.post("/work-items/{wid}/abandon")
 async def abandon_work_item(wid: str, request: Request):
-    """Terminal state plus worktree and branch reclaim (Kraft-x85).
+    """Terminal state plus worktree and branch reclaim.
 
     Refuses while the item is active rather than killing its sessions itself:
     `pause` already owns stopping an attempt, and doing both here would leave
     two places that know how to terminate an agent. That only covers sessions
     Kraft itself launched, though, so anything else started from inside the
-    worktree is reaped separately, right before the worktree goes (Kraft-ugm6).
+    worktree is reaped separately, right before the worktree goes.
     """
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
@@ -339,9 +340,10 @@ async def _archive_one(app, row, by: str) -> bool:
     return removed
 
 
+# UI v2 · 03.
 @api_router.post("/work-items/{wid}/archive")
 async def archive_work_item(wid: str, request: Request):
-    """Archive a completed/abandoned item (UI v2 · 03): "Ended as" keeps
+    """Archive a completed/abandoned item: "Ended as" keeps
     reading completed/abandoned -- only `archived_at`/`archived_by` change."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
@@ -353,9 +355,10 @@ async def archive_work_item(wid: str, request: Request):
     return {"id": wid, "archived_by": "you", "worktree_removed": removed}
 
 
+# UI v2 · 03.
 @api_router.post("/work-items/{wid}/restore")
 async def restore_work_item(wid: str, request: Request):
-    """Put an archived item back under Done (UI v2 · 03)."""
+    """Put an archived item back under Done."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
     if not row["archived_at"]:
@@ -372,9 +375,10 @@ class Bulk(BaseModel):
     reason: str | None = None
 
 
+# B9.
 @api_router.post("/work-items/bulk")
 async def bulk_work_items(body: Bulk, request: Request):
-    """B9: the single-item route each action already has, called once per id,
+    """The single-item route each action already has, called once per id,
     in `ids` order, each in its own write -- a `/retry`-style all-or-nothing
     claim would need a new one of those per action, and nothing here asks for
     one. An id's `HTTPException` becomes a result rather than aborting the
@@ -414,9 +418,10 @@ async def _bulk_one(request: Request, wid: str, action: str, reason: str | None)
     return {"id": wid, "ok": True, "status": row["status"] if row is not None else None}
 
 
+# 02 §10.2.
 @api_router.post("/work-items/{wid}/pause")
 async def pause_work_item(wid: str, request: Request):
-    """Stop the current node's running sessions (02 §10.2).
+    """Stop the current node's running sessions.
 
     There is no stdin channel into a one-shot agent CLI, so pause and steer are
     one mechanism: kill this attempt, carry new context into the next one.
@@ -787,9 +792,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         }
 
 
+# Design 4b, handoff spec §8.
 @api_router.post("/work-items/{wid}/open-worktree")
 async def open_worktree(wid: str, body: OpenDocument, request: Request):
-    """Open the item's worktree in an editor (design 4b, handoff spec §8).
+    """Open the item's worktree in an editor.
 
     Local-only by nature: the path means nothing to a browser on another
     machine, which is why the UI only offers this when the server can act on it.
@@ -802,16 +808,17 @@ async def open_worktree(wid: str, body: OpenDocument, request: Request):
     return search._launch_editor(request, body.editor, path)
 
 
+# Design 4b. No route back without it: Kraft-bzwi. reopen-mr: B8.
 @api_router.post("/work-items/{wid}/retry")
 async def retry_work_item(wid: str, body: Retry, request: Request):
-    """Re-run the stopped node, steer text in hand (4b), clearing a breached
+    """Re-run the stopped node, steer text in hand, clearing a breached
     loop cap if there was one.
 
     This is the only door back onto an item stopped by a task failure. It used
     to refuse a node with no fix loop, on the grounds that only a capped node
     can be capped — true, and beside the point: resume wants `paused`, pause
     wants `running`, and approve/reject want a pending gate, so refusing here
-    stranded the item with no route at all (Kraft-bzwi). A missing fix loop now
+    stranded the item with no route at all. A missing fix loop now
     just means there is no counter to clear.
 
     An escalated agent calling this on itself (its own `X-Kraft-Session-Id`
@@ -820,7 +827,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     branch below.
 
     The body of this route is `_retry`, so `POST /work-items/{id}/reopen-mr`
-    (B8) can retry the same stopped node through the exact same function
+    can retry the same stopped node through the exact same function
     after it reopens the merge request, instead of a second copy of this
     logic that could drift from it.
     """
@@ -1204,11 +1211,12 @@ _UNKNOWN_SPEND = (
 )
 
 
+# Point 5. The escalation refusal: Kraft-9efnk.29; another cap's stop: Kraft-9efnk.28.
 @api_router.post("/work-items/{wid}/budget/raise")
 async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     """Raise a work item's spend cap and continue it from wherever its budget
     stopped it -- the composed action the "Raise budget" button in a `budget`
-    `needs_human` card takes (point 5). Sets the item's own cap
+    `needs_human` card takes. Sets the item's own cap
     (`store.raise_budget`, its own `budget_raised` event so the timeline
     reads "raised the cap", not a generic PATCH) and retries the stopped node
     the same way `POST .../retry` does.
@@ -1216,10 +1224,10 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     Refuses a worker's own item before the write: the retry below would
     refuse it anyway, but only after the cap had already moved. An
     escalation turn is refused too: a spending cap is a person's call,
-    like a gate (Kraft-9efnk.29).
+    like a gate.
 
-    Refuses, before the write, a stop that was not the item's own cap
-    (Kraft-9efnk.28): a per-scope `budget_usd` or `token_budget`, or
+    Refuses, before the write, a stop that was not the item's own cap: a
+    per-scope `budget_usd` or `token_budget`, or
     `budget.daily_usd`, would stop the item again right after.
     """
     st = request.app.state
@@ -1240,10 +1248,11 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     return await retry_work_item(wid, Retry(steer=None), request)
 
 
+# Spec: docs/superpowers/specs/2026-09-11-skip-step-design.md.
 @api_router.post("/work-items/{wid}/skip")
 async def skip_work_item(wid: str, body: Skip, request: Request):
     """Advance past the current node or pending gate without running or
-    approving it (docs/superpowers/specs/2026-09-11-skip-step-design.md).
+    approving it.
 
     Works from any status the other doors cover between them — active/waiting
     (kills the running session first, same ordering as pause), paused, or
@@ -1475,10 +1484,11 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
+# Beads stay open: Ruling 167.
 @api_router.post("/work-items/{wid}/complete")
 async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request):
     """Mark the item complete by hand, with a reason. Its beads stay open
-    unless `close_beads` says otherwise (Ruling 167): work completed by hand
+    unless `close_beads` says otherwise: work completed by hand
     may have landed somewhere else, or not at all."""
     row = await _end_work_item(request, wid, "complete", body.reason)
     if body.close_beads:
@@ -1488,12 +1498,13 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
     return deps._work_item_row(request.app.state, wid)
 
 
+# close_mr: B4.
 @api_router.post("/work-items/{wid}/cancel")
 async def cancel_work_item(wid: str, body: CancelWorkItem, request: Request):
     """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
     archiving reclaims it later, the same as for any ended item.
 
-    `body.close_mr` (B4) closes the item's open merge request once the cancel
+    `body.close_mr` closes the item's open merge request once the cancel
     itself has landed -- a forge failure never undoes it, it only shows up in
     the response's `close_mr`.
     """
@@ -1539,9 +1550,10 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
     return {"ok": True}
 
 
+# B8.
 @api_router.post("/work-items/{wid}/reopen-mr")
 async def reopen_mr(wid: str, request: Request):
-    """B8: undo the MR-closed stop the poller wrote (`mr_poller.py`) by
+    """Undo the MR-closed stop the poller wrote (`mr_poller.py`) by
     reopening the merge request on the forge, then retrying the stopped node
     the way `POST /retry` with no `path` does -- the same `_retry` function,
     not a copy, so the two can never answer a retry differently.
@@ -1602,12 +1614,12 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     return row
 
 
+# Spec: docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md.
 @api_router.post("/work-items/{wid}/escalate")
 async def escalate_work_item(wid: str, body: Escalate, request: Request):
     """Send a message into this item's escalation thread, starting one if
     none exists yet. Only door onto a `needs_human` stop meant for
-    back-and-forth with an agent rather than a one-shot retry (spec:
-    docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
+    back-and-forth with an agent rather than a one-shot retry.
     """
     st = request.app.state
     deps.forbid_self_action(st, request, wid)
@@ -1681,9 +1693,10 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     return {"id": wid, "status": "escalating"}
 
 
+# UI v2 · 06, "Stop agent".
 @api_router.post("/work-items/{wid}/escalate/stop")
 async def stop_escalation(wid: str, request: Request):
-    """Kill the running escalation turn (06 'Stop agent'). The item stays
+    """Kill the running escalation turn. The item stays
     needs_human at whatever it was stopped for -- only the turn ends."""
     st = request.app.state
     deps._work_item_row(st, wid)
@@ -1698,16 +1711,16 @@ async def stop_escalation(wid: str, request: Request):
     return {"id": wid, "session_id": running, "status": "paused"}
 
 
+# Kraft-xh0q layer 3. The human-gate model: design §6 rule 2.
 @api_router.post("/work-items/{wid}/mr-labels")
 async def set_mr_labels(wid: str, body: MrLabels, request: Request):
-    """Label this item's merge request and re-create its pipeline (Kraft-xh0q
-    layer 3).
+    """Label this item's merge request and re-create its pipeline.
 
     The mechanism, not the policy: this is the thing an `on_failure` repair
     agent calls once it has read a red `on.ci.poll` and decided which labels
     the trace is asking for. No `_forbid_self_action` here on purpose — that
     guard exists for gates, where a worker deciding for itself would collapse
-    the human-gate model (design §6 rule 2). This is the opposite shape: the
+    the human-gate model. This is the opposite shape: the
     chain fixing metadata on its own merge request is exactly what `open_mr`
     and `ci_poll` already do from inside the same worktree, just triggered by
     an agent's judgement call instead of the executor's own dispatch.

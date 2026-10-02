@@ -193,10 +193,11 @@ def _gate_artifact(st, row, gate: str | None) -> str | None:
     return executor.gate_artifact(st.run_dirs, row, gate)
 
 
+# B10.
 @api_router.get("/budget/today")
 async def budget_today(request: Request):
-    """The instance's spend since local midnight against `policy.budget.daily_usd`
-    (B10) -- the same window and cap the daily budget stop already uses
+    """The instance's spend since local midnight against `policy.budget.daily_usd`,
+    the same window and cap the daily budget stop already uses
     (`intake.py`, `executor/stops.py`), surfaced for a UI with no single work
     item in view."""
     st = request.app.state
@@ -573,9 +574,10 @@ def _open_thread_count(st, wid: str) -> int:
     return sum(1 for t in threads if t["state"] != "resolved")
 
 
+# B4.
 @api_router.get("/work-items/{wid}/cancel-preview")
 async def cancel_preview(wid: str, request: Request):
-    """What `/cancel` would do (B4): read-only, so the UI can show it before
+    """What `/cancel` would do: read-only, so the UI can show it before
     the person commits. Refuses the same way `/cancel` itself does, once the
     item has already ended (`_live_work_item_row`)."""
     st = request.app.state
@@ -765,6 +767,9 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
     if kind == "rate_limit":
         facts.update(_rate_limit_facts(st, row, task))
     limit = _stop_limit(row, stop_payload)
+    # Which cap stopped a budget stop (`caps.Breach.scope`): `work_item`, the
+    # item's own, is the one `/budget/raise` takes; it refuses the rest.
+    scope = ((stop_payload or {}).get("budget") or {}).get("scope") if kind == "budget" else None
     return {
         "kind": kind,
         "node": node,
@@ -774,6 +779,7 @@ def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None
         "reason": stop_payload["reason"] if stop_payload else None,
         "facts": facts,
         **({"limit": limit} if limit else {}),
+        **({"scope": scope} if scope else {}),
     }
 
 

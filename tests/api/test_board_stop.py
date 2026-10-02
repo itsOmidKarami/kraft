@@ -547,3 +547,33 @@ def test_a_cap_stop_names_the_limit_that_raises_it_with_the_administrator_maximu
 
 def test_a_cap_stop_with_no_raisable_limit_has_no_limit_key(client, repo):
     assert "limit" not in _capped_item(client, repo, {}, None)
+
+
+@pytest.mark.parametrize(
+    "budget",
+    [
+        {"scope": "work_item", "spent_usd": 5.0, "cap_usd": 5.0},
+        {"scope": "daily", "spent_usd": 50.0, "cap_usd": 50.0},
+        {
+            "scope": "usd",
+            "path": "implement",
+            "spent_usd": 2.0,
+            "cap_usd": 1.0,
+            "unknown_launches": 0,
+        },
+        {"scope": "tokens", "path": "", "spent_tokens": 9, "cap_tokens": 8},
+    ],
+    ids=lambda b: b["scope"],
+)
+def test_a_budget_stop_names_the_cap_that_stopped_it(client, repo, budget):
+    """`stop.scope` on the detail: `/budget/raise` takes only `work_item`, so a
+    client offers that raise by it, not by guessing from the item's spend -- a
+    node's `budget_usd` can stop an item that has also reached its own cap."""
+    wid = _paused_item(client, repo)
+    _run(lambda c: store.load_chain(c, wid, "implement"))
+    _run(
+        lambda c: store.mark_needs_human(
+            c, wid, "implement", "budget", kind="budget", budget=budget
+        )
+    )
+    assert client.get(f"/api/work-items/{wid}").json()["stop"]["scope"] == budget["scope"]

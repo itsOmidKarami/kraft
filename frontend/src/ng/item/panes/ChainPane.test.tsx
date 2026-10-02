@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { detail, stubFetch } from "../testkit";
-import { ChainConfig, ChainOverview } from "./ChainPane";
+import * as toast from "../../ui/Toast";
+import { ChainConfig, ChainOverview, STILL_STOPPED } from "./ChainPane";
 
 afterEach(() => vi.unstubAllGlobals());
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -66,9 +67,20 @@ describe("ChainConfig", () => {
 
   it("on a budget stop raises and retries in one call", async () => {
     const calls = stubFetch();
-    show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null } }, true);
+    show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null, scope: "work_item" } }, true);
     await userEvent.click(screen.getByRole("button", { name: "No cap" }));
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: null } }]));
+  });
+
+  it("on a budget stop the item's own cap did not make, sets that cap without /budget/raise, which would refuse it", async () => {
+    const calls = stubFetch();
+    const said = vi.spyOn(toast, "showToast");
+    // The daily cap stopped it: the item's own is not the one in the way.
+    show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null, scope: "daily" } }, true);
+    await userEvent.click(screen.getByRole("button", { name: "+$5" }));
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: 10 } }]));
+    expect(said).toHaveBeenCalledWith(STILL_STOPPED);
+    said.mockRestore();
   });
 
   it("on a policy budget stop raises that policy and retries, with no No-cap pick", async () => {

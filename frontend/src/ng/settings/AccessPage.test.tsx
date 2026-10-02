@@ -112,7 +112,7 @@ describe("ng AccessPage", () => {
     setup({ port: 9000 }, { port: 8765 });
     await screen.findByText("port changes from 8765 to 9000");
     expect(screen.queryByRole("button", { name: "Restart Kraft" })).toBeNull();
-    expect(screen.getByText(/Run/)).toHaveTextContent("kraft admin restart");
+    expect(screen.getByText(/cannot restart itself/)).toHaveTextContent(/kraft admin restart; .*stop it there with Ctrl-C and start it again the same way/);
   });
 
   it("says an environment setting wins when the saved port differs from the running one and no item is pending", async () => {
@@ -189,6 +189,47 @@ describe("ng AccessPage", () => {
     expect(machine).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("radio", { name: /Local network/ })).toHaveAttribute("aria-checked", "true");
     expect(await screen.findByRole("button", { name: /Sign out Mac/ })).toHaveTextContent("Sign out here");
+  });
+
+  it("says 0.0.0.0 listens on every network and points to Remote access, never that Kraft cannot bind publicly", async () => {
+    setup();
+    const reach = await screen.findByRole("radiogroup", { name: "Reach" });
+    const hint = reach.parentElement!;
+    expect(hint).toHaveTextContent("0.0.0.0 listens on every network this machine is on.");
+    expect(within(hint).getByRole("link", { name: "Remote access" })).toHaveAttribute("href", "https://itsomidkarami.github.io/kraft/guides/remote-access");
+    expect(hint).not.toHaveTextContent(/never binds publicly/);
+  });
+
+  it("on loopback with no password, Local network asks for one and sends it with the bind in one save", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: false, auth_required: false });
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
+    expect(put).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Set and switch" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("enter a password");
+    expect(put).not.toHaveBeenCalled();
+    await userEvent.type(screen.getByLabelText("Password for the local network"), "hunter2{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", password: "hunter2" }));
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("Password for the local network")).toBeNull();
+  });
+
+  it("drops the password prompt's refusal when the prompt is cancelled or closed with Escape", async () => {
+    setup({ bind: "127.0.0.1", password_set: false, auth_required: false });
+    for (const close of [() => userEvent.click(screen.getByRole("button", { name: "Cancel" })), () => userEvent.type(screen.getByLabelText("Password for the local network"), "{Escape}")]) {
+      await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Set and switch" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("enter a password");
+      await close();
+      expect(screen.queryByLabelText("Password for the local network")).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+    }
+  });
+
+  it("on loopback with a password set, Local network switches at once", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: true, auth_required: false });
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0" }));
+    expect(screen.queryByLabelText("Password for the local network")).toBeNull();
   });
 
   it("keeps what loopback does not use in a dashed card of its own", async () => {

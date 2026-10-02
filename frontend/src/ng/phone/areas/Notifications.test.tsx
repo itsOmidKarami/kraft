@@ -59,7 +59,7 @@ describe("Webhook channel (O.2)", () => {
     channel("webhook");
     expect(await screen.findByRole("tab", { name: "Overview", selected: true })).toBeInTheDocument();
     expect(screen.getByText(/delivered 2m ago · 200 · 184 ms/)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Preview: Add retry budget to the intake poller\. a decision is waiting/ })).toHaveTextContent("http://192.168.1.20:8765/work-items/");
+    expect(screen.getByRole("img", { name: /^Preview: Add retry budget to the intake poller\. a decision is waiting/ })).toHaveTextContent(/http:\/\/192\.168\.1\.20:8765\/work-items\/[0-9a-f]{32}$/);
   });
 
   it("each control sends only its own key", async () => {

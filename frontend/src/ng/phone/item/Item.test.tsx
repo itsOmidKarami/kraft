@@ -206,7 +206,7 @@ describe("the other composers (C.7)", () => {
 });
 
 describe("Raise budget (C.6)", () => {
-  const stopped = () => item("needs_you", stop("budget", { reason: "The budget ran out." }));
+  const stopped = () => item("needs_you", stop("budget", { reason: "The budget ran out.", scope: "work_item" }));
   it("ends the reason with one full stop, not two (Kraft-9d8b2.55)", async () => {
     mount(stopped());
     await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
@@ -376,6 +376,26 @@ describe("raising the cap that stopped the item (R73)", () => {
   });
 });
 
+describe("a budget stop the item cannot raise", () => {
+  // The daily cap: the item is under its own $10, so /budget/raise would answer 409.
+  const daily = () => item("needs_you", stop("budget", { reason: "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", scope: "daily" }), { budget_cap: { cap_usd: 10, source: "policy", spent_usd: 2 } });
+
+  it("offers Retry, not Raise budget, and says where the cap is raised", async () => {
+    const calls = mount(daily());
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Raise/ })).toBeNull();
+    expect(screen.getByText(/The item can't raise this cap/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/retry"]));
+  });
+
+  it("opens no raise sheet when one is asked for anyway", async () => {
+    mount(daily(), { pathname: "/work-items/w1", state: { phSheet: "raise" } });
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("raising a policy budget_usd that stopped the item (Kraft-9d8b2.59)", () => {
   const policyStop = () => item("needs_you", { ...stop("budget", { reason: "budget_usd reached: $10.00 spent in the work item, cap $10.00." }), limit: { path: "", key: "budget_usd", value: 10, maximum: 25 } } as WorkItemStop);
   const sent = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
@@ -405,7 +425,7 @@ describe("raising a policy budget_usd that stopped the item (Kraft-9d8b2.59)", (
     expect(sent(calls)).toEqual([]);
   });
 
-  it("the board card's Raise budget lands on the same sheet", async () => {
+  it("a raise asked for on arrival lands on the same sheet", async () => {
     mount(policyStop(), { pathname: "/work-items/w1", state: { phSheet: "raise" } });
     expect(await screen.findByRole("dialog", { name: "Raise the budget cap" })).toBeInTheDocument();
   });

@@ -58,5 +58,5 @@ export function crumbsFor(pathname: string, item: ItemLookup): Crumb[] {
   if (route?.group === "templates" || route?.group === "settings" || pathname === "/settings/about")
     return [mid(GROUP_HEAD[pathname.startsWith("/templates") ? "templates" : "settings"]), current(route!.label)];
   if (route) return [current(route.label)];
-  return [current(pathname === "/_tokens" ? "Tokens" : "Not found")];
+  return [current("Not found")];
 }

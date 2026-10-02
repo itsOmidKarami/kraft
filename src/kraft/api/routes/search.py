@@ -49,9 +49,10 @@ async def search(
     return {"query": q, "mode": served, "results": results}
 
 
+# Design 1h.
 @api_router.get("/beads/search")
 async def beads_search(request: Request, q: str = "", limit: int = 5):
-    """The live strip under the search results (design 1h)."""
+    """The live strip under the search results."""
     if not q.strip():
         return {"query": q, "beads": []}
     return {"query": q, "beads": await _beads_search(request.app.state, q, limit)}
@@ -193,6 +194,7 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
     return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}
 
 
+# Design 6b.
 @api_router.get("/analytics")
 async def get_analytics(
     request: Request,
@@ -200,7 +202,7 @@ async def get_analytics(
     repo: str | None = None,
     template: str | None = None,
 ):
-    """Totals, throughput and cost for the board's Analytics view (design 6b)."""
+    """Totals, throughput and cost for the board's Analytics view."""
     if range not in analytics_mod.RANGES:
         raise HTTPException(400, f"unknown range {range!r}")
     st = request.app.state

@@ -170,6 +170,9 @@ export interface WorkItemStop {
   reason: string | null;
   facts?: Record<string, unknown>;
   limit?: StopLimit;
+  /** A `budget` stop on the detail: which cap stopped it. `work_item`, the
+   *  item's own, is the one `POST /work-items/{id}/budget/raise` takes. */
+  scope?: BudgetStop["scope"];
 }
 
 /** `GET /work-items/{id}/cancel-preview` (B4): what `POST .../cancel` would

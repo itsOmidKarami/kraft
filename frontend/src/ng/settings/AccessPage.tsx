@@ -4,7 +4,7 @@ import * as api from "../../api";
 import { ago, until } from "../../format";
 import type { Access, AuthSession, Health } from "../../types";
 import { parseUserAgent } from "../../ua";
-import { useApply } from "../apply/store";
+import { SELF_RESTART, useApply } from "../apply/store";
 import { Dialog } from "../ui/Dialog";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
@@ -13,6 +13,7 @@ import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
 
 const LOOPBACK = "127.0.0.1";
+const REMOTE_ACCESS = "https://itsomidkarami.github.io/kraft/guides/remote-access";
 const EXPIRIES = [1, 7, 30].map((d) => ({ value: String(d), label: `${d}d` }));
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -34,7 +35,7 @@ export function AccessPage() {
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [notifyHost, setNotifyHost] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string | null>>({});
-  const [editing, setEditing] = useState<"port" | "password" | "host" | null>(null);
+  const [editing, setEditing] = useState<"port" | "password" | "host" | "lan" | null>(null);
   const [draft, setDraft] = useState("");
   const [revoking, setRevoking] = useState<AuthSession | null>(null);
   const { restart, managed, loaded } = useApply();
@@ -79,14 +80,17 @@ export function AccessPage() {
   const overridden = (key: "bind" | "port") => loaded && health?.[key] != null && health[key] !== access[key] && !items.some((i) => i.id === `access.${key}`);
   const host = (h: string) => (h === "0.0.0.0" ? location.hostname : h);
   const address = `${location.protocol}//${host(access.bind)}:${access.port}`;
+  // Local network's password prompt reports under the Reach cards, as the bind it saves with.
+  const errKey = (what: "port" | "password" | "host" | "lan") => (what === "lan" ? "bind" : what);
   const closeEdit = () => {
+    if (editing) err(errKey(editing), null);
     setEditing(null);
     setDraft("");
   };
-  const edit = (what: "port" | "password" | "host", initial = "") => {
+  const edit = (what: "port" | "password" | "host" | "lan", initial = "") => {
     setEditing(what);
     setDraft(initial);
-    err(what, null);
+    err(errKey(what), null);
   };
   const savePort = async () => {
     const problem = portProblem(draft);
@@ -97,6 +101,13 @@ export function AccessPage() {
   const savePassword = async () => {
     if (!draft) return closeEdit();
     if (await put("password", { password: draft })) closeEdit();
+  };
+  // The server refuses a bind off loopback with no password, so Local network
+  // asks for one first and sends both in one save.
+  const pickBind = (bind: string) => (bind !== LOOPBACK && !access.password_set ? edit("lan") : void put("bind", { bind }));
+  const saveLan = async () => {
+    if (!draft) return err("bind", "enter a password");
+    if (await put("bind", { bind: "0.0.0.0", password: draft })) closeEdit();
   };
   const addHost = async () => {
     const h = draft.trim().replace(/,$/, "");
@@ -156,7 +167,7 @@ export function AccessPage() {
               <strong>Restart to apply</strong>
               {items.map((i) => <span key={i.id}>{i.text}</span>)}
               <span className="set-hint">{`Kraft comes back at ${address} and this page follows. Until then it keeps running as it is.`}</span>
-              {!managed && <span className="set-hint">Started in a terminal, so Kraft cannot restart itself. Run <code>kraft admin restart</code> there.</span>}
+              {!managed && <span className="set-hint">{SELF_RESTART}</span>}
             </div>
             <div className="set-pending-actions">
               <button type="button" className="set-btn" onClick={() => void undo()}>Undo</button>
@@ -172,7 +183,7 @@ export function AccessPage() {
               { bind: LOOPBACK, icon: <Laptop size={15} />, title: "This machine only", note: "No password. Only loopback names are accepted." },
               { bind: "0.0.0.0", icon: <Wifi size={15} />, title: "Local network", note: "Password required. For the phone view." },
             ].map((m) => (
-              <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode is-card" onClick={() => void put("bind", { bind: m.bind })}>
+              <button key={m.bind} type="button" role="radio" aria-checked={(m.bind === LOOPBACK) === !lan} className="set-mode is-card" onClick={() => pickBind(m.bind)}>
                 <span className="set-mode-icon" aria-hidden>{m.icon}</span>
                 <span className="set-mode-text">
                   <span className="set-mode-title">{m.title}</span>
@@ -183,9 +194,18 @@ export function AccessPage() {
               </button>
             ))}
           </div>
+          {editing === "lan" && (
+            <SetRow label="password" hint="Off this machine, Kraft asks for a password. Set one to switch to the local network.">
+              <span className="set-inline">
+                <input ref={field} className="set-input" type="password" aria-label="Password for the local network" placeholder="new password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={keys(() => void saveLan())} />
+                <button type="button" className="set-btn is-primary" onClick={() => void saveLan()}>Set and switch</button>
+                <button type="button" className="set-btn" onClick={closeEdit}>Cancel</button>
+              </span>
+            </SetRow>
+          )}
           {errors.bind && <span className="set-error" role="alert">{errors.bind}</span>}
           {overridden("bind") && <span className="set-hint">Running on {health?.bind}: the KRAFT_HOST environment setting wins over this.</span>}
-          <span className="set-hint">Takes effect on restart. Kraft never binds publicly; use a tunnel if you need remote access.</span>
+          <span className="set-hint">Takes effect on restart. 0.0.0.0 listens on every network this machine is on. To reach Kraft from your phone, prefer a Tailscale address (see <a href={REMOTE_ACCESS} target="_blank" rel="noopener noreferrer">Remote access</a>).</span>
         </section>
 
         <Block id="set-port" title="Port" card aside={items.some((i) => i.id === "access.port") ? "waits for a restart" : "saved on change"}>
@@ -259,7 +279,7 @@ export function AccessPage() {
           </>
         ) : (
           <Block id="set-unused" title="Not used on 127.0.0.1" card="dashed">
-            {[["allowed hosts", "Only loopback names are accepted."], ["password", "Needed once Kraft is reachable from the network."], ["sessions", "None: there is nothing to sign in to."]].map(([k, v]) => (
+            {[["allowed hosts", "Only loopback names are accepted."], ["password", "Asked for when you pick Local network."], ["sessions", "None: there is nothing to sign in to."]].map(([k, v]) => (
               <div key={k} className="set-unused"><span className="set-row-label">{k}</span><span className="set-hint">{v}</span></div>
             ))}
           </Block>

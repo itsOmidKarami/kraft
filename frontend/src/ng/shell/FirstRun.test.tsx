@@ -9,7 +9,7 @@ import { FirstRun, PROBE_STEP_MS } from "./FirstRun";
 const PROBE: RepoProbe = {
   path: "/code/acme", name: "acme", branch: "main", submodules: ["vendor/a", "vendor/b"], has_beads: true,
   beads_export_auto: false, beads_export_git_add: false, has_engineering: false,
-  test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/acme",
+  test_command: "uv run pytest -q", test_scopes: null, setup_command: "uv sync", forge: "gitlab", project: "acme/acme",
 };
 const CHAIN = { id: "default", nodes: [...new Array(6).fill({}), { fix_loop: "verification.fix_loop" }], gates: 2 } as unknown as TemplateSummary;
 const POLICY = { loops: { "verification.fix_loop": { attempts: 4, wall_clock_s: 60 } }, default: { attempts: 9, wall_clock_s: 60 }, max_concurrent: 1, budget: { work_item_usd: 25, daily_usd: null } } as Policy;
@@ -51,13 +51,14 @@ describe("FirstRun", () => {
     mount();
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
-    expect(await screen.findAllByText("checking…")).toHaveLength(4);
+    expect(await screen.findAllByText("checking…")).toHaveLength(5);
     expect(api.addRepo).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
-    await waitFor(() => expect(screen.getAllByText("checking…")).toHaveLength(3), { timeout: PROBE_STEP_MS * 3 });
+    await waitFor(() => expect(screen.getAllByText("checking…")).toHaveLength(4), { timeout: PROBE_STEP_MS * 3 });
     await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
     expect(screen.getByText("2 submodules")).toBeInTheDocument();
     expect(screen.getByText("uv run pytest -q")).toBeInTheDocument();
+    expect(screen.getByText("uv sync")).toBeInTheDocument();
     expect(screen.getByText("gitlab · acme/acme")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add repo" }));
     await waitFor(() => expect(api.addRepo).toHaveBeenCalledTimes(1));
@@ -101,15 +102,37 @@ describe("FirstRun", () => {
     expect(screen.queryByText(/fix attempts/)).toBeNull();
   });
 
-  it("step 3 opens the board's composer and copies the agent command", async () => {
+  it("says when the probe found no setup command", async () => {
+    vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, setup_command: null });
+    const user = userEvent.setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
+    expect(screen.getByText("Setup command").nextSibling).toHaveTextContent("none found");
+  });
+
+  it("step 2 names where Settings writes without assuming the default home", async () => {
+    const user = userEvent.setup();
+    mount();
+    await probeAndAdd(user);
+    expect(screen.getByText(/YAML in \$KRAFT_HOME\/templates/)).toBeInTheDocument();
+  });
+
+  it("step 3 opens the board's composer and says Claude workers need the plugin, or admin init", async () => {
     const user = userEvent.setup();
     mount();
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
     expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
-    await user.click(screen.getByRole("button", { name: /Copy command/ }));
+    expect(screen.getByText(/Claude workers need Kraft's MCP server, or Kraft refuses to launch them/)).toBeInTheDocument();
+    expect(screen.getByText(/without the plugin, run/)).toHaveTextContent("kraft admin init");
+    expect(screen.getByText(/open a Claude Code session in your repo and run/)).toHaveTextContent("/kraft:onboard");
+    await user.click(screen.getByRole("button", { name: /Copy commands/ }));
     expect(await screen.findByRole("button", { name: /Copied/ })).toBeInTheDocument();
-    expect(await navigator.clipboard.readText()).toBe("kraft admin init");
+    expect(await navigator.clipboard.readText()).toBe(
+      "claude plugin marketplace add itsOmidKarami/kraft\nclaude plugin install kraft@kraft",
+    );
   });
 
   it("makes only reached steps focusable", async () => {

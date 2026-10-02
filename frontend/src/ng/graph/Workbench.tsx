@@ -19,7 +19,7 @@ export function Workbench({ page, open = true, width }: { page: string; open?: b
   const sel = s.sel;
   const node = sel.kind === "chain" ? null : CHAIN_15.find((n) => n.id === sel.node);
   const title = s.sel.kind === "chain" ? "default" : s.sel.kind === "node" ? s.sel.node : s.sel.kind === "step" ? s.sel.step : s.sel.task;
-  const crumbs = s.sel.kind === "chain" ? [{ label: "kraft-cb59" }] : [{ label: "default", onClick: () => dispatch({ type: "pick", sel: { kind: "chain" } }) }, ...(s.sel.kind === "task" ? [{ label: s.sel.node, onClick: () => dispatch({ type: "pick", sel: floor(s) }) }, { label: s.sel.step }] : [])];
+  const crumbs = s.sel.kind === "chain" ? [{ label: "07eb05f8…3042a" }] : [{ label: "default", onClick: () => dispatch({ type: "pick", sel: { kind: "chain" } }) }, ...(s.sel.kind === "task" ? [{ label: s.sel.node, onClick: () => dispatch({ type: "pick", sel: floor(s) }) }, { label: s.sel.step }] : [])];
   const pick = (sel: Sel) => dispatch({ type: "pick", sel });
   const at = s.level === "node" && s.node ? s.node : null;
   const facts = PANE_FACTS[s.sel.kind];

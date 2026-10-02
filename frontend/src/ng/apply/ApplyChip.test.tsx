@@ -73,7 +73,8 @@ describe("ApplyChip", () => {
     show({ restart: [PORT], managed: false });
     await userEvent.click(screen.getByRole("button", { name: "Restart needed, 1" }));
     expect(screen.queryByRole("button", { name: /Restart/, hidden: false })?.textContent ?? "").not.toMatch(/Restart Kraft/);
-    expect(screen.getByText(/Run kraft admin restart there/)).toBeInTheDocument();
+    // `kraft admin restart` only stops a server attached to a terminal: say what starts it again.
+    expect(screen.getByText(/Run kraft admin restart; .*stop it there with Ctrl-C and start it again the same way/)).toBeInTheDocument();
   });
 
   it("opens with Enter and closes with Escape, handing focus back", async () => {

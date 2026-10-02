@@ -252,13 +252,16 @@ describe("BoardPage", () => {
     expect(localStorage.getItem("kraft.ng.pane.board")).toBe(handle.getAttribute("aria-valuenow"));
   });
 
-  it("opens the peek on Config with the budget editor from a row's Raise budget", async () => {
-    const b = item("b1", "needs_you", { status: "needs_human", stop: { kind: "budget", node: "verification", reason: "Spend cap reached", resume_at: null } as WorkItem["stop"], budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as WorkItem["budget_cap"] });
+  it("opens a budget stop's peek on Overview, whose Raise cap opens Config with the budget editor", async () => {
+    const b = item("b1", "needs_you", { status: "needs_human", stop: { kind: "budget", node: "verification", reason: "Spend cap reached", resume_at: null, scope: "work_item" } as WorkItem["stop"], budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as WorkItem["budget_cap"] });
     put(b);
     stubFetch({ "GET /work-items/b1": [200, { ...b, worker_sessions: [] }], "GET /work-items/b1/events": [200, []], "GET /policy": [200, {}] });
     board();
-    await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
+    expect(screen.queryByRole("button", { name: "Raise budget" })).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "Open" }));
     expect(where()).toBe("/?sel=b1");
+    expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     expect(await screen.findByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
   });

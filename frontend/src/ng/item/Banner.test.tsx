@@ -18,10 +18,17 @@ describe("Banner", () => {
 
   it("shows a budget stop with Raise cap, which opens the budget editor in Config", async () => {
     const onRaise = vi.fn();
-    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "Running time hit its 8h cap" }) })} onOpenGate={() => {}} onRaise={onRaise} reload={() => {}} />);
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "Running time hit its 8h cap", scope: "work_item" }) })} onOpenGate={() => {}} onRaise={onRaise} reload={() => {}} />);
     expect(screen.getByRole("status")).toHaveTextContent("Running time hit its 8h cap at verification.");
     await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
     expect(onRaise).toHaveBeenCalled();
+  });
+
+  it("offers no raise for a budget stop the item cannot raise, and says where it is raised", () => {
+    // The daily cap, though the item is at its own $5 too: /budget/raise would answer 409.
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", scope: "daily" }), budget_cap: { cap_usd: 5, source: "item", spent_usd: 5 } })} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("The item can't raise this cap: the policy or the chain sets it.");
   });
 
   it("opens Config, labelled so, for a cap stop that names no limit to raise", async () => {

@@ -3,7 +3,7 @@ import * as api from "../../../api";
 import { ago, until } from "../../../format";
 import type { Access, AuthSession, Health } from "../../../types";
 import { parseUserAgent } from "../../../ua";
-import { useApply } from "../../apply/store";
+import { SELF_RESTART, useApply } from "../../apply/store";
 import { showToast } from "../../ui/Toast";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
@@ -77,6 +77,12 @@ export function AccessScreen() {
       },
     });
 
+  // The server refuses a bind off loopback with no password, so Local network asks for one first and sends both in one save.
+  const toLan = () =>
+    access.password_set
+      ? void put("bind", { bind: "0.0.0.0" })
+      : edit({ kind: "text", title: "Set a password", help: "Off this machine, Kraft asks for a password. Saving it switches to the local network.", value: "", secret: true, set: async (v) => (v ? put("bind", { bind: "0.0.0.0", password: v }) : "Enter a password.") });
+
   const revoke = async (s: AuthSession) => {
     const err = await run("sessions", async () => {
       await api.revokeSession(s.id);
@@ -91,7 +97,7 @@ export function AccessScreen() {
       {items.length > 0 && (
         <Group
           title="Restart needed"
-          note={`Kraft comes back at ${address} and this screen follows. Until then it keeps running as it is.${managed ? "" : " Started in a terminal, so Kraft cannot restart itself: run kraft admin restart there."}`}
+          note={`Kraft comes back at ${address} and this screen follows. Until then it keeps running as it is.${managed ? "" : ` ${SELF_RESTART}`}`}
           rows={[
             ...items.map((i): RowSpec => ({ key: i.id, label: i.text, chips: [{ label: "pending", tone: "warn" }] })),
             { label: "Undo", sub: "Save the running values back.", onClick: () => void undo() },
@@ -103,10 +109,10 @@ export function AccessScreen() {
       {applyError && <p className="ph-error" role="alert">{applyError}</p>}
       <Group
         title="Reach"
-        foot="Takes effect on restart. Kraft never binds publicly; use a tunnel if you need remote access."
+        foot="Takes effect on restart. 0.0.0.0 listens on every network this machine is on. To reach Kraft from your phone, prefer a Tailscale address: see Remote access in the docs."
         rows={[
           { key: "loopback", label: "This machine only", sub: `${LOOPBACK}:${access.port} · no password`, sw: !lan, onSwitch: () => !(!lan) && void put("bind", { bind: LOOPBACK }), ...mark("bind") },
-          { key: "lan", label: "Local network", sub: `0.0.0.0:${access.port} · password required. For the phone view.`, sw: lan, onSwitch: () => lan || void put("bind", { bind: "0.0.0.0" }) },
+          { key: "lan", label: "Local network", sub: `0.0.0.0:${access.port} · password required. For the phone view.`, sw: lan, onSwitch: () => lan || toLan() },
         ]}
       />
       {envNote("bind") && <p className="ph-note">{envNote("bind")}</p>}
@@ -139,7 +145,7 @@ export function AccessScreen() {
       ) : (
         <Group title="Not used on 127.0.0.1" rows={[
           { label: "allowed hosts", sub: "Only loopback names are accepted." },
-          { label: "password", sub: "Needed once Kraft is reachable from the network." },
+          { label: "password", sub: "Asked for when you pick Local network." },
           { label: "sessions", sub: "None: there is nothing to sign in to." },
         ]} />
       )}

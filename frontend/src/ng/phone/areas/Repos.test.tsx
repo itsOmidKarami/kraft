@@ -38,9 +38,11 @@ describe("Repos list (M.2)", () => {
     expect(screen.getByRole("link", { name: /^docs-site/ })).toBeInTheDocument();
   });
 
-  it("says connecting by path is done on a computer when none is connected", async () => {
+  it("names the command that connects a repo, or a computer, when none is connected", async () => {
     list(ans({ ...reposView(), result: { ...reposView().result, resolved: { repos: [], detected: [] } as never } }));
-    expect(await screen.findByText(/No repository is connected\. Connect one from a computer/)).toBeInTheDocument();
+    expect(await screen.findByText(/No repository is connected/)).toHaveTextContent(
+      "No repository is connected. Run kraft repo connect in a repo on the machine, or connect one from a computer.",
+    );
   });
 
   it("marks a repo with a problem", async () => {

@@ -7,7 +7,6 @@ import { rowAction } from "../../board/rowText";
 export type CardButton =
   | { kind: "approve"; label: string; gate: string; primary: true }
   | { kind: "reject"; label: string; gate: string }
-  | { kind: "raise"; label: string }
   | { kind: "answer"; label: string }
   | { kind: "open"; label: string }
   | { kind: "resume"; label: string };
@@ -19,9 +18,11 @@ export function cardButtons(item: WorkItem): CardButton[] {
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];
   if (item.display_status === "failed") return [{ kind: "open", label: "Retry…" }];
   switch (item.stop?.kind) {
-    // A running-time or wall-clock cap has no raise the item API can make (Kraft-x8qzu): the card opens the item, where Retry is the way on.
-    case "cap": return [{ kind: "open", label: "Open" }];
-    case "budget": return [{ kind: "raise", label: "Raise budget…" }];
+    // A cap or budget stop opens the item, which offers the raise when the item can make one (`budgetRaise`, the limit on a cap)
+    // and Retry when it cannot: a list row carries neither the stop's limit nor the item's spend, so the card cannot tell a
+    // daily or token cap, which the server refuses to raise, from the item's own.
+    case "cap":
+    case "budget": return [{ kind: "open", label: "Open" }];
     case "question": return [{ kind: "answer", label: "Answer…" }];
     default: return [{ kind: "open", label: a.label }];
   }

@@ -431,6 +431,15 @@ def test_path_check_fails_when_another_kraft_shadows_this_one(monkeypatch):
     assert "/opt/homebrew/bin/kraft" in row["detail"]
 
 
+def test_path_check_fails_when_no_kraft_is_on_path(monkeypatch, tmp_path):
+    """A fresh `uv tool install` run by its full path: the plugin's
+    `.mcp.json` and hooks launch `kraft` by name, so they start nothing."""
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    row = doctor._path_check()
+    assert row["ok"] is False and "not on PATH" in row["detail"]
+    assert "uv tool update-shell" in row["detail"] and "install-service" in row["detail"]
+
+
 # ── _agent_checks: per selected harness profile, not a hardcoded claude ─────
 
 

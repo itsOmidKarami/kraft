@@ -175,7 +175,7 @@ export function NotifyPage() {
         <div className="set-notice-text">
           <span className="set-notice-title">{text.title}</span>
           <span className="set-notice-body">{text.body}</span>
-          <span className="set-notice-link">{(link || "192.168.1.20:8765").replace(/\/$/, "")}/work-items/wi_01HX3M2</span>
+          <span className="set-notice-link">{(link || "192.168.1.20:8765").replace(/\/$/, "")}/work-items/07eb05f8c9d14b2e8a6f13d5b7e3042a</span>
         </div>
       </div>
     );
