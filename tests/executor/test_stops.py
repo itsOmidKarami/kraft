@@ -1,6 +1,7 @@
 """Stopping a work item for a human: `stops.claimed_or_stopped`, the invariant
 that no path may leave an item claimed and unowned, and the cause a
-config-error stop carries on its card."""
+config-error stop carries on its card; and the stops for what is outside the
+code (an infra failure, an external wait)."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kraft import store
+from kraft import events, store
 from kraft.executor import stops, walk
 
 _CHAIN = """
@@ -228,3 +229,42 @@ async def test_any_other_kraft_line_leaves_the_tasks_own_cause(item_on, tmp_path
     reason = await _config_error_reason(item_on, [("s1", log, "config_error", "2026-01-01")])
 
     assert reason.endswith(": the real cause")
+
+
+# -- the stops for what is outside the code ---------------------------------------
+
+
+async def test_an_infra_stop_names_the_newest_infra_cause(item_on):
+    """After a retry the timeline holds an older infra cause too; the card
+    names the one that stopped the item this time."""
+    it = await item_on(_CHAIN, "implementation", repo="/r")
+    for kind, reason in [
+        ("ci_infra_exhausted", "the runner died twice"),
+        ("automated_review_errored", "the reviewer errored"),
+    ]:
+        await it.database.write(
+            lambda c, kind=kind, reason=reason: events.append(c, it.id, kind, {"reason": reason})
+        )
+
+    status = await stops.stop_for_infra(it.database, it.id, SimpleNamespace(id="implementation"))
+
+    assert (status, it.status()) == ("needs_human", "needs_human")
+    assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == "the reviewer errored"
+
+
+async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_interval(
+    item_on, monkeypatch
+):
+    """A waiting task that recorded no next observation still parks the item
+    with a time to look again, the default initial interval from now, rather
+    than leaving it where no scheduler wakes it."""
+    it = await item_on(_CHAIN, "implementation", repo="/r")
+    monkeypatch.setattr(stops, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    waiting = [SimpleNamespace(path="implementation.main.build")]
+
+    status = await stops.stop_for_waiting(
+        it.database, it.id, SimpleNamespace(id="implementation"), waiting
+    )
+
+    assert status == "waiting"
+    assert (it.status(), it.row()["retry_at"]) == ("waiting", "2026-01-01T00:00:30+00:00")

@@ -8,7 +8,6 @@ import threading
 import pytest
 from support.harness import make_repo_with_engineering
 
-from kraft.index import db as index_db
 from kraft.index import ingest
 
 
@@ -191,13 +190,6 @@ def test_reconcile_tolerates_non_json_front_matter(conn, tmp_path):
 
 
 # ---- reconcile ----
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = index_db.open_index(tmp_path / "index.db")
-    yield c
-    c.close()
 
 
 def _rows(conn, repo):
@@ -461,11 +453,17 @@ def test_changed_content_replaces_chunks(conn):
     assert "first" in rows[0]["chunk_text"]
 
 
+class _FakeEmbedder:
+    """One constant 384-wide vector per chunk: enough for vec0 to hold a row."""
+
+    def try_encode(self, texts):
+        return [[0.1] * 384 for _ in texts]
+
+
 def test_deleting_a_document_leaves_no_chunks_or_vectors(conn):
-    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")])
-    doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
-    chunk_id = _chunk_rows(conn, doc_id)[0]["chunk_index"] is not None
-    assert chunk_id
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=_FakeEmbedder())
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM document_vectors").fetchone()[0] == 1
     _reconcile(conn, "/r", [])
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 0
@@ -479,11 +477,7 @@ def test_chunks_written_without_an_embedder_and_no_vectors(conn):
 
 
 def test_vectors_written_when_an_embedder_is_supplied(conn):
-    class FakeEmbedder:
-        def try_encode(self, texts):
-            return [[0.1] * 384 for _ in texts]
-
-    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=FakeEmbedder())
+    _reconcile(conn, "/r", [_artifact(".engineering/specs/a.md", "h1")], embedder=_FakeEmbedder())
     doc_id = _all_docs(conn)[".engineering/specs/a.md"]["id"]
     n = conn.execute(
         "SELECT COUNT(*) FROM document_vectors WHERE chunk_id IN "

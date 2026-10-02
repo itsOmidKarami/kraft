@@ -1,5 +1,6 @@
-"""`kraft item`'s own help: what `kraft item --help` and `kraft item create
---help` say, where a reviewer could not tell what a verb or argument was."""
+"""`kraft item`'s own parser: what `kraft item --help` and `kraft item create
+--help` say, where a reviewer could not tell what a verb or argument was, and
+what `create`'s flags default to."""
 
 from __future__ import annotations
 
@@ -64,3 +65,20 @@ def test_abandon_refusal_still_works_when_the_item_cannot_be_read(monkeypatch, c
     with pytest.raises(SystemExit):
         cli.main(["item", "abandon", "w1"])
     assert "To keep them, cancel the item instead." in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("flag", "auto_gate"),
+    [([], True), (["--auto-gate"], True), (["--no-auto-gate"], False)],
+    ids=["on-by-default", "on", "off"],
+)
+def test_item_create_passes_auto_gate(monkeypatch, flag, auto_gate):
+    seen = {}
+
+    async def fake_create(title, repo, chain, description, attachments, *, auto_gate, **_rest):
+        seen["auto_gate"] = auto_gate
+        return {"id": "w1"}
+
+    monkeypatch.setattr("kraft.client.create_work_item", fake_create)
+    cli.main(["item", "create", "t", "--repo", "/r", *flag])
+    assert seen["auto_gate"] is auto_gate
