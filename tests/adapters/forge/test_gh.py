@@ -25,11 +25,11 @@ GH_RUN_LIST = (
 )
 
 
-def _gh(cli, view: str, **routes: str) -> None:
+def _gh(cli, view: str, routes: dict[str, str] | None = None) -> None:
     """`gh` answering `gh pr view` with `view`, each of `routes` (keyed on the
-    subcommand, `**{"run list": ...}`) with its own shape, and failing any
+    subcommand, `{"run list": ...}`) with its own shape, and failing any
     other call."""
-    cli.stub("gh", routes={"pr view": view, **routes}, default=FAIL)
+    cli.stub("gh", routes={"pr view": view, **(routes or {})}, default=FAIL)
 
 
 def _rollup(*checks: str) -> str:
@@ -208,7 +208,7 @@ _TWO_RUNS = _rollup(
     ],
 )
 async def test_gh_ci_status_sha_is_the_checks_own(cli, tmp_path, view, run_list, sha):
-    _gh(cli, view, **{"run list": run_list})
+    _gh(cli, view, {"run list": run_list})
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 

@@ -5,8 +5,10 @@ and hands its whole scenario, one `async def`, to `support.api.run_with_app`.
 `httpx.ASGITransport` does not run the app's lifespan the way `TestClient`
 does, so `run_with_app` enters it, and runs the scenario in the same event
 loop, because the Database the lifespan opens is bound to the loop that opened
-it. A test with no app to reach is an `async def test_...` of its own, the
-suite's default shape (`anyio_mode = "auto"`).
+it. The tests here are sync functions for that reason, each handing one
+coroutine to `run_with_app`; the few with no app to reach (`base_url`, a
+`health` answer) call the client directly, or through `asyncio.run` for the
+one coroutine among them.
 """
 
 from __future__ import annotations
