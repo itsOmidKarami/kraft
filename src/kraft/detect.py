@@ -733,6 +733,9 @@ class Candidate:
     #: A CI line whose program is a bare tool rather than a runner, a
     #: toolchain's wrapper or a script of the repo's own.
     bare: bool = False
+    #: A CI line that hands a shell a script (`bash -c "…"`, or shell syntax
+    #: in quotes): shown, and never chosen.
+    script: bool = False
     #: The runner task it runs (`setup`), when it runs one.
     task: str | None = None
     chosen: bool = False
@@ -994,6 +997,24 @@ def _shell_syntax(command: str) -> bool:
     return bool(re.search(r"[|;&<>(){}\\]", bare))
 
 
+#: A shell that runs the script it is given after `-c`.
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+_SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
+
+
+def _a_script(command: str) -> bool:
+    """A line `_shell_syntax` passes only because its shell syntax is in
+    quotes: `bash -c "curl … | sh; pytest"` is a whole script, not a test
+    command. Shown for a person to read, never chosen."""
+    words = command.split()
+    if posixpath.basename(words[0]) in _SHELLS and any(
+        _SHELL_FLAGS.fullmatch(w) for w in words[1:]
+    ):
+        return True
+    quoted = re.findall(r"'[^']*'|\"[^\"]*\"", command)
+    return any(re.search(r"[|;&<>(){}\\]", q) for q in quoted)
+
+
 def _strip_env(command: str) -> str:
     """`CI=true npm test` -> `npm test`: a test command runs without a shell,
     where a leading assignment is a program name."""
@@ -1065,7 +1086,10 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
             bare = role == "test" and not (
                 head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
             )
-            found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
+            script = _a_script(command)
+            found.append(
+                Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare, script=script)
+            )
     return found
 
 
@@ -1166,7 +1190,9 @@ def _ancestors(d: str) -> list[str]:
 def _first_by_tier(cands: list[Candidate], tiers: tuple[Tier, ...]) -> Candidate | None:
     """The first candidate by tier, and within a tier one CI also runs. A CI
     line running a bare tool (`pytest`, `jest`) comes last of all: CI
-    installed that tool on its own PATH, which a worktree's is not."""
+    installed that tool on its own PATH, which a worktree's is not. A CI
+    line that is a shell script is never one."""
+    cands = [c for c in cands if not c.script]
     for tier in tiers:
         pool = [c for c in cands if c.tier == tier and not c.bare]
         hit = next((c for c in pool if c.corroborated), pool[0] if pool else None)

