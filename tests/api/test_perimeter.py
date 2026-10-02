@@ -289,6 +289,72 @@ def test_a_non_loopback_bind_needs_no_allowlist_entry_for_a_non_browser_client(l
     assert lan_bind.get("/api/work-items", headers=bearer).status_code == 200
 
 
+def _session(client):
+    """The signed-in cookie, by hand: the jar holds it for 127.0.0.1, where
+    `lan_bind` logged in, and a browser on the LAN logged in at its own name."""
+    return {"cookie": f"{auth.COOKIE}={client.cookies[auth.COOKIE]}"}
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+def test_a_non_loopback_bind_streams_events_to_a_board_on_an_allowed_host(lan_bind, tmp_path):
+    """A phone or another computer opens the board at a listed name and gets
+    live updates. Its websocket carries an Origin that is neither loopback
+    nor different from the Host: the board's own page, which the HTTP routes
+    already accept by rule 3's Origin-equals-Host clause."""
+    board = {"origin": "http://kraft.example.com:8765", **_session(lan_bind)}
+    with lan_bind.websocket_connect(
+        "ws://kraft.example.com:8765/api/ws/events", headers=board
+    ) as ws:
+        lan_bind.post(
+            "/api/work-items", json={"autostart": False, "title": "hi", "repo": str(tmp_path)}
+        )
+        assert ws.receive_json()["type"] == "work_item_created"
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+def test_a_non_loopback_bind_streams_events_to_a_non_browser_client_on_any_host(lan_bind, tmp_path):
+    """`kraft view watch` against a LAN server sends no Origin, so it needs no
+    allowlist entry for the name it dialled, as on the HTTP routes."""
+    token = auth.read_mcp_token(tmp_path / "run")
+    with lan_bind.websocket_connect(
+        "ws://100.101.102.103:8765/api/ws/events",
+        headers={"authorization": f"Bearer {token}"},
+    ) as ws:
+        assert ws is not None
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+@pytest.mark.parametrize(
+    ("url", "origin"),
+    [
+        ("ws://kraft.example.com:8765/api/ws/events", "http://evil.example"),
+        ("ws://evil.example:8765/api/ws/events", "http://evil.example:8765"),
+    ],
+    ids=["cross-site-origin", "unlisted-host"],
+)
+def test_a_non_loopback_bind_refuses_the_event_stream_to_any_other_page(lan_bind, url, origin):
+    """The session cookie is valid in every case, so the perimeter is what
+    refuses: it wants a listed Host and the board's own Origin."""
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with lan_bind.websocket_connect(url, headers={"origin": origin, **_session(lan_bind)}):
+            pass
+    assert exc.value.code == 1008
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"origin": "http://evil.example:8765"}],
+    ids=["no-origin", "origin-matches-host"],
+)
+def test_a_loopback_bind_refuses_the_event_stream_to_a_rebound_name(client, headers):
+    """A rebound page's Origin matches its own Host, which is what lets a LAN
+    board in. On a loopback bind the Host rule refuses it first."""
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("ws://evil.example:8765/api/ws/events", headers=headers):
+            pass
+    assert exc.value.code == 1008
+
+
 def test_the_perimeter_runs_before_the_spa_shell_middleware(client, dist):
     """Starlette enters the last-added middleware first, so `_perimeter` has to be
     declared *below* `_authenticate` and `_spa_navigation`. Declared above, this
@@ -371,10 +437,8 @@ def test_the_event_stream_needs_a_session_too(client, tmp_path):
             ws.receive_text()
 
     client.post("/api/login", json={"password": "hunter2"})
-    # a fresh item's events arrive on the stream once the session is real.
-    # The URL is absolute because starlette joins a relative one onto
-    # ws://testserver, which is not the host the login cookie was set for.
-    with client.websocket_connect("ws://127.0.0.1/api/ws/events") as ws:
+    # a fresh item's events arrive on the stream once the session is real
+    with client.websocket_connect("/api/ws/events") as ws:
         client.post(
             "/api/work-items", json={"autostart": True, "title": "hello", "repo": str(tmp_path)}
         )

@@ -318,15 +318,11 @@ async def permission_hook(sid: str, body: HookCall, request: Request):
 
 @api_router.websocket("/ws/events")
 async def ws_events(websocket: WebSocket, after_seq: int = 0, live: bool = False):
-    if not perimeter._origin_ok(websocket.headers.get("origin")):
-        await websocket.close(code=1008)
-        return
-    # Rule 1 of `_perimeter`, restated: HTTP middleware does not run for
+    # `_perimeter`'s rules, asked directly: HTTP middleware does not run for
     # websockets, so without this the live event stream is the one route that
-    # still answers a remote peer on a server that has no password to demand.
-    if not perimeter._client_is_local(websocket) and not (
-        (getattr(websocket.app.state, "access", None) or {}).get("password_hash")
-    ):
+    # answers a remote peer on a password-less server, a rebound name, or a
+    # page on another site.
+    if perimeter._refusal(websocket, check_origin=True) is not None:
         await websocket.close(code=1008)
         return
     # HTTP middleware does not run for websockets, so the session check has to be
