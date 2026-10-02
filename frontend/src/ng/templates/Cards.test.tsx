@@ -92,6 +92,8 @@ describe("rename", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Publish" }));
     expect(pub).toHaveBeenCalled();
     await waitFor(() => expect(where).toBe("/templates/chains/mine"));
+    // The new key's draft loads after the move lands, so wait for it before counting.
+    await waitFor(() => expect(d.getDraft).toHaveBeenLastCalledWith("chains", "mine"));
     expect(d.getDraft).toHaveBeenCalledTimes(2); // this key once, then the new one: no reload of the moved key
   });
 });
