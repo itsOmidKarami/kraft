@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewComment, ReviewThread } from "../../types";
 import * as http from "../http";
@@ -72,6 +72,28 @@ describe("Thread", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Edit reply" }), { target: { value: "and the TTL, too?" } });
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit reply" }), { key: "Enter", ctrlKey: true });
     await waitFor(() => expect(calls()[1]).toEqual(["/comments/c9", "PATCH", JSON.stringify({ body: "and the TTL, too?" })]));
+  });
+
+  it("sends a reply, or an edited one, once on a quick second ⌘↵ while the first is in flight", async () => {
+    const request = vi.spyOn(http, "request").mockReturnValue(new Promise(() => {}));
+    show(thread({ comments: [comment(), comment({ id: "c9", review_id: null, draft: true, body: "and the TTL?" })] }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const edit = screen.getByRole("textbox", { name: "Edit reply" });
+    fireEvent.change(edit, { target: { value: "and the TTL, too?" } });
+    fireEvent.keyDown(edit, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(edit, { key: "Enter", metaKey: true });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    request.mockClear();
+    cleanup();
+    show(thread());
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+    const box = screen.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(box, { target: { value: "Why 50k?" } });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Add reply" })).toBeDisabled();
   });
 
   it("deletes your pending reply", async () => {

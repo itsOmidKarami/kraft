@@ -108,7 +108,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
   const ok = !!d.title.trim() && !!d.repo && !busy && !(preview && "error" in preview);
 
   return (
-    <section className="composer" aria-label="New work item" onKeyDown={sendOnModEnter(() => create(true))}>
+    <section className="composer" aria-label="New work item" onKeyDown={sendOnModEnter(() => create(true), !busy)}>
       <div className="composer-row">
         <NodeGlyph kind="slot" size="sm" mark="add" />
         <input className="composer-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />

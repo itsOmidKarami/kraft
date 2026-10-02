@@ -62,6 +62,7 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
   const [text, setText] = useState(brief);
   const [error, setError] = useState<string | null>(null);
   const [long, setLong] = useState(false);
+  const [busy, setBusy] = useState(false);
   const p = useRef<HTMLParagraphElement>(null);
   useEffect(() => setText(brief), [brief]);
   // "more" only when two lines do not hold it.
@@ -70,12 +71,14 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
     if (el && !more) setLong(el.scrollHeight > el.clientHeight + 1);
   }, [brief, more, editing]);
   const save = async () => {
+    setBusy(true);
     const r = await act.patch(id, { description: text });
+    setBusy(false);
     if (!r.ok) return setError(r.error);
     setEditing(false);
     onSaved();
   };
-  const send = sendOnModEnter(save);
+  const send = sendOnModEnter(save, !busy);
   if (editing)
     return (
       <div className="item-brief-edit">
@@ -84,7 +87,7 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
         <div className="item-actions">
           <span className="item-muted">The next agent to launch reads the new brief.</span>
           <Button onClick={() => { setEditing(false); setText(brief); setError(null); }}>Cancel</Button>
-          <Button variant="primary" onClick={save}>Save</Button>
+          <Button variant="primary" disabled={busy} onClick={save}>Save</Button>
         </div>
       </div>
     );

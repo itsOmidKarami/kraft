@@ -54,8 +54,11 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
   const [reply, setReply] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [busy, setBusy] = useState(false);
   const run = async (act: Act) => {
+    setBusy(true);
     const e = await act();
+    setBusy(false);
     setError(e);
     if (!e) onChanged();
     return e;
@@ -92,10 +95,10 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
           </div>
           {editing === c.id ? (
             <div className="rv-reply-edit">
-              <textarea className="rv-textarea" aria-label="Edit reply" value={editText} onChange={(e) => setEditText(e.target.value)} onKeyDown={sendOnModEnter(() => saveEdit(c.id), !!editText.trim())} />
+              <textarea className="rv-textarea" aria-label="Edit reply" value={editText} onChange={(e) => setEditText(e.target.value)} onKeyDown={sendOnModEnter(() => saveEdit(c.id), !busy && !!editText.trim())} />
               <div className="rv-row-actions">
                 <Button onClick={() => setEditing(null)}>Cancel</Button>
-                <Button variant="primary" disabled={!editText.trim()} onClick={() => saveEdit(c.id)}>Save</Button>
+                <Button variant="primary" disabled={busy || !editText.trim()} onClick={() => saveEdit(c.id)}>Save</Button>
               </div>
             </div>
           ) : (
@@ -113,12 +116,12 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
       ))}
       {!thread.draft && replying && (
         <div className="rv-reply-edit">
-          <textarea className="rv-textarea" aria-label="Reply" placeholder="Reply…" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={sendOnModEnter(addReply, !!reply.trim())} autoFocus />
+          <textarea className="rv-textarea" aria-label="Reply" placeholder="Reply…" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={sendOnModEnter(addReply, !busy && !!reply.trim())} autoFocus />
           <div className="rv-row-actions">
             <span className="rv-muted">Sent with your next review</span>
             <span className="rv-spacer" />
             <Button onClick={() => { setReplying(false); setReply(""); }}>Cancel</Button>
-            <Button variant="primary" disabled={!reply.trim()} onClick={addReply}>Add reply</Button>
+            <Button variant="primary" disabled={busy || !reply.trim()} onClick={addReply}>Add reply</Button>
           </div>
         </div>
       )}

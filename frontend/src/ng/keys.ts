@@ -6,8 +6,9 @@ export const isTextField = (t: EventTarget | null) =>
 
 /** ⌘↵, or Ctrl+↵ off a Mac, in a multi-line field sends it, as the button
  *  beside it would; a plain ↵ keeps its newline. `ready` is that button's own
- *  enabled state, so the keys never send what the button would refuse. */
-export const sendOnModEnter = (send: () => unknown, ready = true) => (e: ReactKeyboardEvent) => {
+ *  enabled state, so the keys never send what the button would refuse, and it
+ *  must be false while a send is in flight: a quick second ⌘↵ would send twice. */
+export const sendOnModEnter = (send: () => unknown, ready: boolean) => (e: ReactKeyboardEvent) => {
   if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return;
   e.preventDefault();
   if (ready) void send();

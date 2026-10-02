@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "./testkit";
@@ -51,6 +51,18 @@ describe("Brief", () => {
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(writes(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { description: "Cache embeddings.\nBounded." } }]);
+  });
+
+  it("saves once on a quick second ⌘↵ while the first save is in flight", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => { calls.push(init?.method ?? "GET"); return new Promise(() => {}); }));
+    render(<Brief id="w1" brief="Cache embeddings." onSaved={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "edit" }));
+    const box = screen.getByRole("textbox", { name: "Brief" });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    expect(calls.filter((m) => m === "PATCH")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("Esc leaves the brief as it was, without a write", async () => {
