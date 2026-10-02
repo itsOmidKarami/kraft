@@ -41,20 +41,20 @@ New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraf
 
 *Kraft* is German for force; in English, its cousin *craft* means skill. Your agent brings the craft; Kraft is the force that carries it from spec to pull request.
 
-<table>
-<tr>
-<td width="65%">
-
 **A gate stops the chain where a human decides.** Read what the agent wrote,
 then approve, or reject with a note that re-runs the node that wrote it.
 
 ![A spec an agent wrote, rendered on the item's review page and waiting for your approval, with Request changes and Approve](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
-</td>
-<td width="35%">
+<table>
+<tr>
+<td width="60%">
 
 **Same app, phone-sized.** Below 768 pixels it switches to a phone layout on its own. Reach it from another device through a tunnel; see
 [Remote access](https://itsomidkarami.github.io/kraft/guides/remote-access).
+
+</td>
+<td width="40%">
 
 ![The board at a 390px phone viewport, with bottom tab navigation](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
 
