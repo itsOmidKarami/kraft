@@ -462,7 +462,11 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
     )
     repos.set_defaults(func=_cmd_repos)
 
-    connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")
+    connect = subs.add_parser(
+        "connect",
+        parents=[common],
+        help="connect a repo; again, to fill what it left undecided",
+    )
     connect.add_argument("path", nargs="?", help="default: the current directory")
     tests = connect.add_mutually_exclusive_group()
     tests.add_argument(

@@ -186,3 +186,13 @@ def test_a_repo_with_no_commit_is_refused_until_it_has_one(app, tmp_path, capsys
     commit_all(fresh)
     cli.main(["repo", "connect", str(fresh)])
     assert "test command: make test" in capsys.readouterr().out
+
+
+def test_connect_help_says_connecting_again_saves(capsys):
+    """It said "(idempotent)", from 1.4, when connecting again did nothing;
+    it now saves what the entry left undecided, and can enable the repo."""
+    with pytest.raises(SystemExit):
+        cli.main(["repo", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "connect a repo; again, to fill what it left undecided" in text
+    assert "idempotent" not in text
