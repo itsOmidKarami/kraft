@@ -13,6 +13,9 @@ Usage:
       prs.json is a list of {number, title, body, labels: [name, ...]}.
   python3 dev/plan_release.py pre <tag> <alpha|beta|rc>  < tag-list
       Prints <tag> as its next pre-release, numbered past the tags on stdin.
+  python3 dev/plan_release.py body <tag-or-empty> <notes-file> <body-out>
+      Writes the GitHub Release's text: the notes, opened by how to install
+      <tag> when it is a pre-release. A stable tag's is the notes unchanged.
   python3 dev/plan_release.py changelog <version> <notes-file> [<changelog-file>]
       Writes the notes into CHANGELOG.md as the `## <version>` section, or into
       the changelog file named (the VS Code extension keeps its own).
@@ -25,7 +28,7 @@ import re
 import sys
 from pathlib import Path
 
-from next_tag import IMPACTS, PREFIX, impact_from_labels, next_tag, pre_tag
+from next_tag import IMPACTS, PRE_MARKS, PREFIX, impact_from_labels, next_tag, pre_tag
 
 CHANGELOG = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
 
@@ -42,6 +45,9 @@ _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 #: The attribution line a PR body ends with; with no heading after `## Changelog`
 #: it would otherwise land in the release notes.
 _ATTRIBUTION = re.compile(r"^(?:\U0001f916\s*)?Generated with \[?Claude Code\b.*$", re.MULTILINE)
+#: A pre-release tag such as `v1.5.0rc2`: group 1 is the version PyPI lists it
+#: under (`1.5.0rc2`), group 2 its mark.
+_PRE_TAG = re.compile(rf"v?(\d+\.\d+\.\d+({'|'.join(PRE_MARKS.values())})\d+)")
 
 
 def impact_of(pr: dict) -> str:
@@ -117,6 +123,30 @@ def release_notes(prs: list[dict]) -> str:
     return "\n\n".join(parts) + "\n" if parts else ""
 
 
+def release_body(tag: str | None, notes: str) -> str:
+    """The GitHub Release's text: `notes`, opened by how to install `tag` if it is a pre-release.
+
+    Nothing finds a pre-release unless it asks for one, so its notes say how.
+    The channel is the pre-release's kind, which `kraft admin update --channel`
+    takes by the same name. Only an rc reaches PyPI, so an rc gets the
+    `uv tool install` form from there; a beta or alpha, which neither PyPI nor
+    Homebrew carries, points at the wheel attached to its own release. A stable
+    release's text is `notes`, byte for byte.
+    The changelogs take the plain notes, not this.
+    """
+    match = _PRE_TAG.fullmatch(tag or "")
+    if not match:
+        return notes
+    version, mark = match.groups()
+    channel = next(kind for kind, m in PRE_MARKS.items() if m == mark)
+    line = f"This is a pre-release. Install it with `kraft admin update --channel {channel}`"
+    if channel == "rc":
+        line += f', or `uv tool install --force "kraft-sdlc=={version}"`'
+    else:
+        line += ", or `uv tool install --force` the wheel attached below"
+    return f"{line}.\n\n{notes}" if notes else f"{line}.\n"
+
+
 def write_changelog(version: str, notes: str, path: Path = CHANGELOG) -> None:
     """Insert `## <version>` above the newest section, below the preamble."""
     text = path.read_text()
@@ -139,6 +169,12 @@ def main(argv: list[str]) -> None:
             print(tag)
     elif len(argv) == 3 and argv[0] == "pre":
         print(pre_tag(argv[1], argv[2], sys.stdin.read().split()))
+    elif len(argv) == 4 and argv[0] == "body":
+        # newline="": a PR body's CRLF survives, so a stable body stays the notes' bytes.
+        with open(argv[2], newline="") as f:
+            notes = f.read()
+        with open(argv[3], "w", newline="") as f:
+            f.write(release_body(argv[1] or None, notes))
     elif len(argv) in (3, 4) and argv[0] == "changelog":
         write_changelog(argv[1], Path(argv[2]).read_text(), *map(Path, argv[3:]))
     else:

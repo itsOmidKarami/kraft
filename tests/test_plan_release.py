@@ -142,6 +142,63 @@ def test_a_highlight_lifts_one_real_entry_out_of_new():
     assert after.replace(f"### Highlights\n\n{entry}\n\n", "") == before.replace(f"\n\n{entry}", "")
 
 
+_PRE = "This is a pre-release. Install it with"
+
+
+@pytest.mark.parametrize(
+    ("tag", "line"),
+    [
+        (
+            "v1.5.0rc2",
+            f"{_PRE} `kraft admin update --channel rc`, "
+            'or `uv tool install --force "kraft-sdlc==1.5.0rc2"`.',
+        ),
+        (
+            "v1.5.0b1",
+            f"{_PRE} `kraft admin update --channel beta`, "
+            "or `uv tool install --force` the wheel attached below.",
+        ),
+        (
+            "v1.5.0a3",
+            f"{_PRE} `kraft admin update --channel alpha`, "
+            "or `uv tool install --force` the wheel attached below.",
+        ),
+    ],
+)
+def test_a_pre_release_says_how_to_install_it_above_its_notes(tag, line):
+    """Only an rc is on PyPI; a beta or alpha points at its release's own wheel."""
+    notes = "### Highlights\n\n- the headline (#1)\n\n### Fixes\n\n- a fix (#2)\n"
+    assert plan_release.release_body(tag, notes) == f"{line}\n\n{notes}"
+
+
+def test_every_pre_release_channel_is_one_update_accepts():
+    from kraft.update import CHANNELS
+
+    for kind, mark in plan_release.PRE_MARKS.items():
+        body = plan_release.release_body(f"v1.5.0{mark}1", "- x (#1)\n")
+        assert f"`kraft admin update --channel {kind}`" in body
+        assert kind in CHANNELS
+
+
+@pytest.mark.parametrize("tag", ["v1.5.0", "1.5.0", "", "v1.5.0rc", "v1.5.0.rc1"])
+def test_a_stable_release_body_is_its_notes_byte_for_byte(tmp_path, tag):
+    """The real 1.5.0 notes, through the command release.yml runs."""
+    notes, body = _FIXTURES / "notes-1.5.0.md", tmp_path / "body.md"
+    plan_release.main(["body", tag, str(notes), str(body)])
+    assert body.read_bytes() == notes.read_bytes()
+
+
+def test_the_release_is_created_from_the_body_and_the_changelogs_from_the_notes():
+    text = (_DEV.parent / ".github" / "workflows" / "release.yml").read_text()
+    body = 'plan_release.py" body "$TAG" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/body.md"'
+    # After the pre-release tag is numbered, and before the dry run blanks it.
+    assert text.index('plan_release.py" pre "$TAG"') < text.index(body)
+    assert text.index(body) < text.index('cat "$RUNNER_TEMP/body.md"') < text.index("TAG=\n")
+    assert '--notes-file "$RUNNER_TEMP/body.md"' in text
+    assert text.count('"$RUNNER_TEMP/notes.md" CHANGELOG.md') == 1
+    assert 'changelog "$VERSION" "$RUNNER_TEMP/notes.md"\n' in text
+
+
 def test_changelog_goes_above_the_newest_section(tmp_path):
     path = tmp_path / "CHANGELOG.md"
     path.write_text("# Changelog\n\nPreamble.\n\n## 1.0.0\n\n- old\n")
@@ -186,3 +243,11 @@ def test_the_extension_changelog_takes_the_release_notes_the_way_the_root_one_do
     assert text.startswith("# Changelog\n\nNotable changes to the Kraft VS Code extension")
     assert text.endswith("\n\n## 1.5.0\n\n### New\n\n- new (#4)\n")
     assert "do not\nedit this file by hand" in text
+
+
+def test_a_stable_release_body_keeps_crlf_notes_byte_for_byte(tmp_path):
+    """A PR body written with CRLF line ends reaches the notes as CRLF."""
+    notes, body = tmp_path / "notes.md", tmp_path / "body.md"
+    notes.write_bytes(b"### Fixes\r\n\r\n- a fix (#2)\r\n")
+    plan_release.main(["body", "v1.5.0", str(notes), str(body)])
+    assert body.read_bytes() == notes.read_bytes()
