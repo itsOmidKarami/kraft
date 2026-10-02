@@ -221,6 +221,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- node but does not name it in the payload.",
             "CREATE INDEX idx_events_node",
         )
+    if version < 51:
+        drop_lines = (*drop_lines, "start_side", "quote")
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -771,29 +773,3 @@ def test_migration_41_makes_review_gate_nullable_and_keeps_rows(tmp_path):
     )
     conn.commit()
     assert conn.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()[0] is None
-
-
-def test_migrate_v41_to_v42_keeps_review_gate_rows(tmp_path):
-    """v41 -> v42: `reviews.gate` and `review_threads.gate` were NOT NULL; the
-    rebuild drops that constraint but a pre-existing gated row keeps its value."""
-    path = tmp_path / "orchestrator.db"
-    conn = db._connect(path)
-    _build_old_db(
-        conn,
-        41,
-        replace=(("gate         TEXT,", "gate         TEXT NOT NULL,"),),
-    )
-    schema.insert_item(conn)
-    schema.insert_session(conn)
-    conn.execute(
-        "INSERT INTO review_threads (id, work_item_id, gate, anchor_sha, created_at) "
-        "VALUES ('t1', 'w1', 'g', 'abc', 'now')"
-    )
-    conn.commit()
-    conn.close()
-
-    conn2 = db._connect(path)
-    db.migrate(conn2)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
-    row = conn2.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()
-    assert row["gate"] == "g"

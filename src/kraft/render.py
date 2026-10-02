@@ -323,7 +323,12 @@ def threads(items: list) -> str:
     out = []
     for t in items:
         where = t["file_path"] or "(whole change)"
-        if t["start_line"] is not None:
+        start_side = t.get("start_side") or t.get("side")
+        if t["start_line"] is not None and start_side != t.get("side"):
+            # Across sides: old line 2 through new line 2 reads `-2 to +2`, as the diff marks them.
+            mark = {"old": "-", "new": "+"}
+            where += f":{mark[start_side]}{t['start_line']} to {mark[t['side']]}{t['end_line']}"
+        elif t["start_line"] is not None:
             where += f":{t['start_line']}-{t['end_line']}"
         tags = " ".join(filter(None, [t["label"], t["state"], "draft" if t["draft"] else None]))
         out.append(f"{t['id']}  {where}  [{tags}]")

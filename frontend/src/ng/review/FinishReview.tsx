@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { showToast } from "../ui/Toast";
 import { approveBlock, barText, drafts, outcomes } from "./finish";
+import { rangeName, threadRange } from "./Thread";
 import { sendOnModEnter } from "../keys";
 
 type Item = Pick<WorkItem, "id" | "pending_gate" | "display_status" | "fix_target">;
@@ -15,6 +16,12 @@ const ACTION = { retried: "retried", rerun: "running again", queued: "queued" } 
 /** Sends a review and moves on (G.5, G.6): a refusal comes back as the server's words. */
 /** `digest`: the chain revision's, as GET /artifact returned it; an approval at
  *  a chain-revision gate carries it (Kraft-ec66w, #355). */
+/** A thread's lines as its composer and its card name them: " · lines +3 to +5". */
+const where = (t: ReviewThread) => {
+  const r = threadRange(t);
+  return r ? ` · ${rangeName(r).toLowerCase()}` : "";
+};
+
 export function useSubmit(item: Item, gate: string | null, threads: ReviewThread[], reload: () => void, digest?: string | null) {
   const navigate = useNavigate();
   return async (outcome: ReviewOutcome, summary: string): Promise<string | null> => {
@@ -123,7 +130,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
           {toSend.map(({ thread: t, comment: c }) => (
             <li key={c.id}>
               {t.label && <span className={`rv-tag is-${t.label}`}>{{ must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" }[t.label]}</span>}
-              <span className="rv-mono rv-muted">{t.file_path ?? "item"}{t.end_line !== null ? `:${t.end_line}` : ""}</span>
+              <span className="rv-mono rv-muted">{t.file_path ?? "item"}{where(t)}</span>
               <span className="rv-finish-text">{c.body}</span>
             </li>
           ))}

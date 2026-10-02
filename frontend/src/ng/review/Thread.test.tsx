@@ -23,13 +23,24 @@ const show = (t: ReviewThread) => {
 describe("Thread", () => {
   it("names the lines and the side it sits on; a file thread names none", () => {
     show(thread({ side: "old", start_line: 4, end_line: 6 }));
-    expect(screen.getByText("· Old lines 4–6")).toBeInTheDocument();
+    expect(screen.getByText("· Lines −4 to −6")).toBeInTheDocument();
     cleanup();
     show(thread());
-    expect(screen.getByText("· Line 5")).toBeInTheDocument();
+    expect(screen.getByText("· Line +5")).toBeInTheDocument();
     cleanup();
     show(thread({ side: null, start_line: null, end_line: null }));
     expect(document.querySelector(".rv-thread-head")).not.toHaveTextContent(/line/i);
+  });
+
+  it("names a range across sides from its start side, and quotes its lines above the comment", () => {
+    render(<Thread thread={thread({ side: "new", start_side: "old", start_line: 2, end_line: 2 })} quote={["-    return a - b", "+    return a + b"]} oldLines={() => []} onChanged={() => {}} onEdit={() => {}} />);
+    expect(screen.getByText("· Lines −2 to +2")).toBeInTheDocument();
+    const quoted = screen.getByRole("group", { name: "Lines commented on" });
+    expect([...quoted.querySelectorAll(".rv-suggest-line")].map((l) => [l.className, l.textContent])).toEqual([
+      ["rv-suggest-line is-del", "−    return a - b"],
+      ["rv-suggest-line is-add", "+    return a + b"],
+    ]);
+    expect(quoted.compareDocumentPosition(screen.getByText("No bound on the cache."))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("draws the label, status and body, a suggestion, and an agent's reply with its attempt and claim", () => {
