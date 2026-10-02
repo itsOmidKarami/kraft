@@ -17,9 +17,9 @@ from kraft import events, executor, policy, store
 
 
 def _cap(detail: dict) -> dict:
-    """`budget_cap`'s three original keys, dropping `daily` (W4 G, additive)
-    so a test pinned to the pre-existing shape isn't broken by it."""
-    return {k: v for k, v in detail["budget_cap"].items() if k != "daily"}
+    """`budget_cap`'s three original keys, dropping the additive `daily` and
+    `key` so a test pinned to the pre-existing shape isn't broken by them."""
+    return {k: v for k, v in detail["budget_cap"].items() if k not in ("daily", "key")}
 
 
 def _mark_started(wid: str, node_id: str) -> None:

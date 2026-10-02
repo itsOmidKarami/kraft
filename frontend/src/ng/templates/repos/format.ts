@@ -45,6 +45,14 @@ export const text = {
   parse: (t: string): Parsed => ({ value: t || null }),
 };
 
+/** A command run by a shell (`setup_command`): blank clears it, and `""`
+ *  typed in the field is the empty command, "nothing to run", not a command
+ *  of two quote marks. */
+export const command = {
+  show: (v: unknown) => (v === "" ? '""' : typeof v === "string" ? v : ""),
+  parse: (t: string): Parsed => ({ value: /^\s*(""|'')\s*$/.test(t) ? "" : t || null }),
+};
+
 export const whole = (what: string, positive = true) => ({
   show: (v: unknown) => (v == null ? "" : String(v)),
   parse: (t: string): Parsed => {

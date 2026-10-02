@@ -24,6 +24,7 @@ const ALLOWED = [
   "item/actions",
   "item/url",
   "item/paths",
+  "item/limitPolicy", // the Raise cap PATCH body that keeps the rest of the override, one for both apps
   "item/chainName",
   "item/nodeGraph",
   "item/graph",

@@ -338,6 +338,14 @@ describe("raising the cap that stopped the item (R73)", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ policy: { paths: { verification: { max_attempts: 5 } } } }));
   });
 
+  it("a raise keeps the item's other policy overrides, item-wide and on every path", async () => {
+    const policy_override = { budget_usd: 5, max_attempts: 4, paths: { verification: { timeout_minutes: 30 }, review: { max_attempts: 2 } } };
+    const calls = mount({ ...capped(limit()), policy_override });
+    await openSheet();
+    await type("600");
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ policy: { ...policy_override, time_cap_minutes: 600 } }));
+  });
+
   it("a number that is not above the current value, or above the maximum, is refused before any call", async () => {
     const calls = mount(capped(limit()));
     await openSheet();
