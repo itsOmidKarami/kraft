@@ -271,20 +271,20 @@ async def test_a_limit_hit_on_one_item_is_skipped_by_another_until_reset(
 
 
 @pytest.mark.parametrize(
-    ("harness", "model", "resets_in_s"),
+    ("harness", "model", "after_soon_s"),
     [
-        (None, None, AHEAD_S),  # written before a hit named its harness
-        ("claude", "opus", -60),  # its reset has passed
-        ("codex", "opus", AHEAD_S),  # another harness
-        ("claude", "haiku", AHEAD_S),  # another model
+        (None, None, 0),  # written before a hit named its harness
+        ("claude", "opus", -AHEAD_S - 60),  # its reset has passed: a minute ago
+        ("codex", "opus", 0),  # another harness
+        ("claude", "haiku", 0),  # another model
     ],
     ids=["pre-change-event", "reset-passed", "other-harness", "other-model"],
 )
 async def test_a_hit_that_does_not_match_is_not_remembered(
-    tmp_path, repo, fake_agent, harness, model, resets_in_s
+    tmp_path, repo, fake_agent, harness, model, after_soon_s, soon
 ):
     rd = RunDirs(tmp_path / "run").ensure()
-    await _seed_hit(rd, harness, model, int(time.time()) + resets_in_s)
+    await _seed_hit(rd, harness, model, soon + after_soon_s)
 
     status, evts, _, _ = await _walk(
         tmp_path, repo, _chain(fallback=[{"model": "sonnet"}]), run_dirs=rd

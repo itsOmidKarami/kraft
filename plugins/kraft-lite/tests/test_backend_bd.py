@@ -224,11 +224,21 @@ def test_a_custom_chain_survives_the_verbs_that_follow_start(tmp_path, monkeypat
     assert state["cap"] == 2, "the custom chain's cap, not the default's"
 
 
-def test_write_stamps_a_strictly_newer_updated_at(monkeypatch):
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        # Written this same second: the clock alone would tie it.
+        ("2026-09-07T10:00:00Z", "2026-09-07T10:00:01Z"),
+        # Written by a machine whose clock runs ahead of ours: the clock alone
+        # would go backwards.
+        ("2026-09-07T10:00:05Z", "2026-09-07T10:00:06Z"),
+    ],
+    ids=["same-second", "stored-ahead-of-our-clock"],
+)
+def test_write_stamps_a_strictly_newer_updated_at(monkeypatch, stored, expected):
     """bd's upsert keeps the local row on an `updated_at` tie, and its
     granularity is one second — so gate-then-approve inside one second is
     silently dropped unless the timestamp moves."""
-    # The row was written this same second: the clock alone would tie it.
     monkeypatch.setattr(kl, "_now", lambda: dt.datetime(2026, 9, 7, 10, 0, 0))
     seen = []
 
@@ -237,16 +247,11 @@ def test_write_stamps_a_strictly_newer_updated_at(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     store = kl.BdStore(run=fake_run)
-    record = {
-        "_type": "issue",
-        "id": "kl-1",
-        "status": "open",
-        "updated_at": "2026-09-07T10:00:00Z",
-    }
+    record = {"_type": "issue", "id": "kl-1", "status": "open", "updated_at": stored}
     store.write([record])
 
     written = json.loads(seen[0].strip())
-    assert written["updated_at"] == "2026-09-07T10:00:01Z", "must beat the row already stored"
+    assert written["updated_at"] == expected, "must beat the row already stored"
 
 
 def test_write_stamps_updated_at_even_when_the_record_has_none():

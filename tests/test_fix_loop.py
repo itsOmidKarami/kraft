@@ -1,6 +1,7 @@
 import json
 import shlex
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -115,16 +116,22 @@ async def test_fix_loop_cap_breach(tmp_path, monkeypatch, database, run_dirs, re
     assert stop["limit"] == {"path": "verify", "key": "max_attempts", "value": 1}
 
 
+def _clock_ahead(monkeypatch, **delta) -> None:
+    """Run the breach check's clock (`walk._now`, which `policy.check` is
+    handed) `delta` ahead of the real one. Ahead of the real clock, never a
+    fixed date: a fixed "future" stops being ahead of the counter's start once
+    the calendar passes it."""
+    monkeypatch.setattr(walk, "_now", lambda: (datetime.now(UTC) + timedelta(**delta)).isoformat())
+
+
 async def test_fix_loop_wall_clock_breach_names_timeout_minutes_as_the_limit(
     tmp_path, monkeypatch, database, run_dirs, repo
 ):
     """The loop's clock ran out with attempts to spare: `stop.limit` is the
     node's `timeout_minutes`, not its `max_attempts`."""
-    from datetime import UTC, datetime, timedelta
-
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     # An hour past the counter's own start, whatever the real run took.
-    monkeypatch.setattr(walk, "_now", lambda: (datetime.now(UTC) + timedelta(hours=1)).isoformat())
+    _clock_ahead(monkeypatch, hours=1)
     tracker = isolated_bd(tmp_path)
     pol = loop_policy(tmp_path, "verify.fix_loop", attempts=5, wall_clock_s=60)
     wid = await executor.intake(
@@ -268,17 +275,9 @@ async def test_resume_mid_fix_loop_reenters_and_continues_budget(
 async def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch, database, run_dirs, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     tracker = isolated_bd(tmp_path)
-    # executor.check() reads the current time via kraft.executor.walk's own
-    # `_now` (a seam re-exported from store). Run it a day ahead of the real
-    # clock so the very first breach check trips on elapsed wall-clock,
-    # regardless of the (large) attempts cap. Ahead of the real clock, not a
-    # fixed date: a fixed one stops being ahead of the counter's start once
-    # the calendar passes it.
-    from datetime import UTC, datetime, timedelta
-
-    monkeypatch.setattr(
-        "kraft.executor.walk._now", lambda: (datetime.now(UTC) + timedelta(days=1)).isoformat()
-    )
+    # A day past the counter's own start, so the very first breach check trips
+    # on elapsed wall-clock, regardless of the (large) attempts cap.
+    _clock_ahead(monkeypatch, days=1)
 
     pol = loop_policy(tmp_path, "verify.fix_loop", attempts=99, wall_clock_s=1)
     wid = await executor.intake(

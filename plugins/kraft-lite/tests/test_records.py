@@ -21,13 +21,18 @@ def chain():
     return json.loads((PLUGIN / "chains" / "default.json").read_text())
 
 
+#: Minute 0 of `stamp(minute)`, the stamps the walked records carry.
+STAMPED_FROM = dt.datetime(2026, 9, 7, 10, 0, 0)
+
+
 class Clock:
     """`kl._now`, held still: a gate wait is timed to the second, so a test that
     stamps a block and then banks it against the live clock is off by one
-    whenever a second turns over between the two."""
+    whenever a second turns over between the two. It reads an hour past
+    `STAMPED_FROM`, after every stamp a walk here writes."""
 
     def __init__(self):
-        self.now = dt.datetime(2026, 9, 7, 11, 0, 0)
+        self.now = STAMPED_FROM + dt.timedelta(hours=1)
 
     def __call__(self):
         return self.now
@@ -170,7 +175,7 @@ def walked(chain, stamps, statuses=None):
 
 
 def stamp(minute):
-    return f"2026-09-07T10:{minute:02d}:00Z"
+    return (STAMPED_FROM + dt.timedelta(minutes=minute)).strftime(kl.BD_TIME)
 
 
 def test_summary_times_the_run_from_the_epic_to_the_last_node(chain):
