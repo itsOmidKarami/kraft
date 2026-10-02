@@ -347,6 +347,37 @@ def test_a_non_loopback_bind_always_answers_a_browser_on_this_machine(lan_bind, 
         assert r.status_code == 200, r.text
 
 
+_NAVIGATION = {"accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
+
+
+@pytest.mark.api_client(host="0.0.0.0")
+def test_a_browser_opening_an_unlisted_name_gets_a_page_saying_how_to_allow_it(lan_bind):
+    """1.4 never checked a plain-http browser's Host, so an upgraded LAN user's
+    first sight of `allowed_hosts` is this refusal: a page naming the Host it
+    got and where to add it, not a bare JSON line. The Host is the
+    requester's text, so it is escaped. A script, and the board's own API
+    calls, still get the JSON refusal."""
+    page = lan_bind.get("/", headers={"host": "MyBox.lan:8765", **_NAVIGATION})
+    assert page.status_code == 403
+    assert page.headers["content-type"].startswith("text/html")
+    assert "<code>mybox.lan</code>" in page.text
+    assert "Settings &gt; Access" in page.text and "allowed_hosts" in page.text
+    assert page.headers["x-frame-options"] == "SAMEORIGIN"
+
+    hostile = lan_bind.get("/", headers={"host": "<b>x</b>", **_NAVIGATION})
+    assert hostile.status_code == 403 and "<b>" not in hostile.text
+
+    api = lan_bind.get("/api/work-items", headers={"host": "mybox.lan:8765", **_NAVIGATION})
+    assert api.json()["detail"] == "unexpected Host for a server bound to 0.0.0.0"
+
+
+def test_a_loopback_bind_tells_a_browser_where_it_does_answer(client):
+    page = client.get("/", headers={"host": "mybox.lan:8765", **_NAVIGATION})
+    assert page.status_code == 403
+    assert "<code>mybox.lan</code>" in page.text
+    assert "only at <code>localhost</code> or <code>127.0.0.1</code>" in page.text
+
+
 @pytest.mark.api_client(host="0.0.0.0")
 def test_a_non_loopback_bind_needs_no_allowlist_entry_for_a_non_browser_client(lan_bind, tmp_path):
     """The CLI, MCP and curl carry none of a browser's headers, so they reach a

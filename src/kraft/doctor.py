@@ -164,7 +164,23 @@ def _config_checks() -> list[dict]:
         access = config.Access.load(templates / "access.yaml")
         # Loaded as written, so this is the only place a bad one shows.
         bad = [why for h in access.allowed_hosts if (why := config.host_entry_problem(h))]
-        checks.append(_check("access.yaml", not bad, "; ".join(bad) or "parses"))
+        bind = os.environ.get("KRAFT_HOST") or access.bind
+        if bad:
+            checks.append(_check("access.yaml", False, "; ".join(bad)))
+        elif bind not in config.LOOPBACK and not access.allowed_hosts:
+            # Every browser on another device is refused, and 1.4 let a
+            # plain-http one through: the first an upgraded LAN user hears of it.
+            checks.append(
+                _check(
+                    "access.yaml",
+                    True,
+                    f"bound to {bind} with no allowed_hosts: a browser on another "
+                    "device is refused; add each name it uses on Settings > Access",
+                    warn=True,
+                )
+            )
+        else:
+            checks.append(_check("access.yaml", True, "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_chain_templates_check())

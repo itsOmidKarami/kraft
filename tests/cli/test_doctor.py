@@ -61,6 +61,30 @@ def test_doctor_names_an_allowed_host_that_never_matches(templates_dir, monkeypa
     assert "'*.ts.net' is not a host name or IP address" in row["detail"], row
 
 
+@pytest.mark.parametrize(
+    ("access", "warns"),
+    [
+        ("bind: 0.0.0.0\n", True),
+        ("bind: 0.0.0.0\nallowed_hosts: [kraft.local]\n", False),
+        ("bind: 127.0.0.1\n", False),
+    ],
+    ids=["network-bind-no-hosts", "network-bind-with-hosts", "loopback-bind"],
+)
+def test_doctor_warns_of_a_network_bind_with_no_allowed_hosts(
+    templates_dir, monkeypatch, access, warns
+):
+    """Off loopback with an empty list, every browser on another device gets
+    a 403: say so before a 1.4 user, whose plain-http browser was never
+    checked, upgrades into it."""
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.delenv("KRAFT_HOST", raising=False)
+    (templates_dir / "access.yaml").write_text(access)
+    row = _by_name(doctor._config_checks(), "access.yaml")
+    assert row["ok"]
+    assert row["warn"] is warns
+    assert ("no allowed_hosts" in row["detail"]) is warns, row
+
+
 def test_doctor_flags_a_dead_pidfile(app, tmp_path):
     _prime(tmp_path)
     pid_path = tmp_path / "run" / "kraft.pid"
