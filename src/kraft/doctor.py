@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, detect, harness, registration
+from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration
 from kraft.adapters import forge
 from kraft.executor import fallback
 from kraft.paths import (
@@ -253,26 +253,23 @@ def _detectors_check(templates: Path) -> dict:
 def _pidfile_check() -> dict:
     """A pidfile naming a process that is gone looks, to every other check
     here, exactly like no server ever started -- nothing before this ever
-    said so (Kraft-mqwg)."""
+    said so (Kraft-mqwg). One naming a live process that is not this run
+    dir's server (a reused pid, another user's process) is worse: `kraft
+    admin stop` used to signal it. `kraft.pidfile` decides which it is."""
     pid_path = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).pid
-    if not pid_path.is_file():
+    state = pidfile.read(pid_path)
+    if state.running:
+        return _check("pidfile", True, f"{pid_path} (pid {state.pid})")
+    if state.pid is None and state.why == "no pidfile":
         return _check("pidfile", True, "no pidfile")
-    try:
-        pid = int(pid_path.read_text())
-    except (OSError, ValueError) as exc:
-        return _check("pidfile", False, f"{pid_path}: {exc}")
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return _check(
-            "pidfile",
-            False,
-            f"{pid_path} names pid {pid}, which is not running - stale; "
-            "the next `kraft admin start` clears it",
-        )
-    except PermissionError:
-        pass  # alive, and not ours to signal
-    return _check("pidfile", True, f"{pid_path} (pid {pid})")
+    if state.pid is None:
+        return _check("pidfile", False, f"{pid_path}: {state.why}")
+    return _check(
+        "pidfile",
+        False,
+        f"{pid_path} names pid {state.pid}, which {state.why} - stale; "
+        "the next `kraft admin start` or `stop` clears it",
+    )
 
 
 def _chain_template_files(directory: Path) -> dict[str, set[str]]:

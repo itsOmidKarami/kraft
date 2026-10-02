@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+from support.pidfile import hold_pidfile
 from support.server import child_env
 
 from kraft import cli, paths
@@ -315,13 +316,14 @@ def test_detach_returns_once_the_child_is_up(monkeypatch, tmp_path, capsys):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    # `_read_pid` clears a pidfile naming a dead pid, so the "child" has to
-    # write one that is actually alive — this test process's own.
+    # `_read_pid` clears a pidfile no live server holds, so the "child" has to
+    # hold one, as a real server does (support.pidfile).
     fake_child_pid = str(os.getpid())
+    held = []
 
     def fake_popen(*args, **kwargs):
         return _FakePopen(
-            on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(fake_child_pid)
+            on_start=lambda: held.append(hold_pidfile(paths.RunDirs(run_dir).ensure().pid))
         )
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
@@ -346,12 +348,12 @@ def test_the_detached_child_imports_kraft_not_the_shell_cwd(monkeypatch, tmp_pat
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    argvs = []
+    argvs, held = [], []
 
     def fake_popen(argv, **kwargs):
         argvs.append(argv)
         return _FakePopen(
-            on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(str(os.getpid()))
+            on_start=lambda: held.append(hold_pidfile(paths.RunDirs(run_dir).ensure().pid))
         )
 
     async def healthy():
@@ -382,13 +384,12 @@ def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, caps
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    pid_path = paths.RunDirs(run_dir).pid
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(os.getpid()))
+    held = hold_pidfile(paths.RunDirs(run_dir).pid)
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("spawned a second server"))
     with pytest.raises(SystemExit):
         cli.main(["admin", "start", "--detach"])
     assert "already running" in capsys.readouterr().err
+    held.release()
 
 
 def test_detach_reports_a_child_that_exits_before_binding(monkeypatch, tmp_path, capsys):

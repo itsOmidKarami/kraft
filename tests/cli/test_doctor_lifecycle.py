@@ -38,3 +38,29 @@ def test_a_server_on_the_installed_version_needs_no_restart(monkeypatch):
 
     assert row["ok"] and not row["warn"]
     assert "1.5.1" in row["detail"]
+
+
+def test_a_pidfile_naming_another_program_fails_the_pidfile_row(tmp_path, monkeypatch):
+    """doctor used to read `ok pidfile ... (pid N)` for any live pid, even one
+    `kraft admin stop` would then have signalled."""
+    import os
+    import subprocess
+    import time
+
+    from kraft.paths import RunDirs
+
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    decoy = subprocess.Popen(["sleep", "60"])
+    try:
+        pid_path = RunDirs(tmp_path / "run").pid
+        pid_path.parent.mkdir(parents=True)
+        pid_path.write_text(str(decoy.pid))
+        os.utime(pid_path, (time.time() + 5, time.time() + 5))
+
+        row = doctor._pidfile_check()
+    finally:
+        decoy.kill()
+        decoy.wait()
+
+    assert not row["ok"]
+    assert f"names pid {decoy.pid}, which is sleep, not Kraft" in row["detail"]

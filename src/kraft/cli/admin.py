@@ -23,7 +23,7 @@ import httpx
 import uvicorn
 import yaml
 
-from kraft import client, config, permission_hooks, render
+from kraft import client, config, permission_hooks, pidfile, render
 from kraft.cli import common, templates
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 from kraft.policy import CarriedPolicy
@@ -379,28 +379,25 @@ def _pid_path() -> Path:
 
 
 def _read_pid(path: Path) -> int | None:
-    """The live pid in `path`, or None - clearing the file when it is stale.
+    """The pid of this run dir's live server, or None - clearing a stale file.
 
-    A pidfile that outlived a SIGKILLed server names nothing, so no caller may
-    treat its existence alone as "a server is running".
+    A pidfile that outlived its server names nothing, and its pid may since
+    have gone to another process, so no caller may treat the file alone as
+    "a server is running" (`kraft.pidfile` says how a pid is confirmed).
+    `_refuse_if_addr_taken` closes the common two-run-dirs-one-port case
+    (Kraft-kquf).
     """
-    # ponytail: a pid can be recycled, so a stale file could name an unrelated
-    # process; check the command name too if that ever bites. `_refuse_if_addr_taken`
-    # closes the common two-run-dirs-one-port case (Kraft-kquf); a race between
-    # that check and the actual bind is still possible but is now a window of
-    # milliseconds, not "always collides silently".
-    try:
-        pid = int(path.read_text())
-    except (FileNotFoundError, ValueError):
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        path.unlink(missing_ok=True)
-        return None
-    except PermissionError:
-        pass  # alive, and not ours to signal
-    return pid
+    state = pidfile.read(path)
+    if state.running:
+        return state.pid
+    if state.pid is not None or path.is_file():
+        cleared = pidfile.clear_stale(path, state.pid)
+        if cleared and state.why != "is not running":
+            # A dead pid is the ordinary stale file and needs no word. One
+            # naming somebody else's process is what this check is for.
+            what = f"pid {state.pid} {state.why}" if state.pid is not None else state.why
+            print(f"kraft: removed a stale pidfile: {what}", file=sys.stderr)
+    return None
 
 
 def _update_notice() -> None:
@@ -534,9 +531,8 @@ class _SignalLoggingServer(uvicorn.Server):
     removed at delivery would make `_cmd_stop` print "stopped" while the old
     process is still alive, and would let a second `_serve` past both the
     pidfile check and the address probe (uvicorn closes the listening socket
-    first) onto the same run dir. The pidfile of a process that died
-    signal-killed is stale, not a conflict, and `_read_pid` is what clears
-    it -- it checks the pid is alive on every read.
+    first) onto the same run dir. `_serve`'s `_exit_on_signal` clears it once
+    the drain is over.
     """
 
     def handle_exit(self, sig, frame):
@@ -565,18 +561,30 @@ def _serve() -> None:
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
-    if running is not None:
+    # The lock, not the read, is what keeps a second server out: two starts
+    # racing past the read cannot both take it. It is held until this process
+    # exits, however it exits (`kraft.pidfile`).
+    held = pidfile.hold(pid_path) if running is None else None
+    if held is None:
         # Two servers on one run dir share databases and worktrees, and only
         # collide on the port if they were given the same one.
+        running = running or pidfile.read(pid_path).pid
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
 
-    # A signal landing between here and `server.run()` installing uvicorn's
-    # own handlers kills the process outright: no handler, no `finally`, no
-    # `handle_exit`, and the pidfile outlives it. That file names a dead pid,
-    # which `_read_pid` detects and clears on the next read -- so the gap
-    # needs no handler of its own.
-    pid_path.write_text(str(os.getpid()))
+    def _exit_on_signal(sig, frame):
+        # uvicorn re-raises the SIGTERM it drained on, with this handler put
+        # back, so the `finally` below never runs on the most common way a
+        # server stops (`kraft admin stop`, a service manager, a reboot).
+        # Clear the files here, then die by the signal as before: a service
+        # manager reads that as a clean stop. A SIGTERM before uvicorn's
+        # own handlers are in lands here too.
+        pid_path.unlink(missing_ok=True)
+        RunDirs(pid_path.parent).mode.unlink(missing_ok=True)
+        signal.signal(sig, signal.SIG_DFL)
+        os.kill(os.getpid(), sig)
+
+    previous = signal.signal(signal.SIGTERM, _exit_on_signal)
     # So `kraft admin restart` starts it back up the same way it was running:
     # `_start_detached` marks its child with KRAFT_DETACHED before exec'ing
     # into this same function.
@@ -615,6 +623,8 @@ def _serve() -> None:
     finally:
         pid_path.unlink(missing_ok=True)
         RunDirs(pid_path.parent).mode.unlink(missing_ok=True)
+        os.close(held)
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _cmd_start(ns: argparse.Namespace) -> None:
