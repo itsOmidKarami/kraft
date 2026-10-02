@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/api/routes/settings.py: 92%</title>
+    <title>Coverage for src/kraft/api/routes/settings.py: 93%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_15cffcd0.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>api<span class="sep">/</span>routes<span class="sep">/</span>settings.py</b>:
-            <span class="pc_cov">92%</span>
+            <span class="pc_cov">93%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">442 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">406<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">36<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">412<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">30<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_work_items_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 21:13 +0000
+            created at 2026-10-02 21:32 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -641,12 +641,12 @@
     <p class="run"><span class="n"><a id="t559" href="#t559">559</a></span><span class="t">    <span class="nam">last_picked_up</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="nam">store</span><span class="op">.</span><span class="nam">last_auto_pickup_at</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t560" href="#t560">560</a></span><span class="t">    <span class="nam">repo_pickups</span><span class="op">:</span> <span class="nam">dict</span><span class="op">[</span><span class="nam">str</span><span class="op">,</span> <span class="nam">dict</span><span class="op">]</span> <span class="op">=</span> <span class="op">{</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t561" href="#t561">561</a></span><span class="t">    <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">repos</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t562" href="#t562">562</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t563" href="#t563">563</a></span><span class="t">            <span class="nam">ready</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">beads</span><span class="op">.</span><span class="nam">ready</span><span class="op">(</span><span class="nam">cwd</span><span class="op">=</span><span class="nam">r</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t564" href="#t564">564</a></span><span class="t">            <span class="nam">count</span> <span class="op">=</span> <span class="nam">len</span><span class="op">(</span><span class="nam">ready</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t565" href="#t565">565</a></span><span class="t">        <span class="key">except</span> <span class="nam">Exception</span><span class="op">:</span>  <span class="com"># noqa: BLE001 -- a settings-page read must not 500 on a bad repo</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t566" href="#t566">566</a></span><span class="t">            <span class="nam">count</span> <span class="op">=</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t567" href="#t567">567</a></span><span class="t">        <span class="nam">repo_pickups</span><span class="op">[</span><span class="nam">r</span><span class="op">.</span><span class="nam">path</span><span class="op">]</span> <span class="op">=</span> <span class="op">{</span><span class="str">&quot;items&quot;</span><span class="op">:</span> <span class="nam">count</span><span class="op">,</span> <span class="str">&quot;last_picked_up&quot;</span><span class="op">:</span> <span class="nam">last_picked_up</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="nam">r</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t562" href="#t562">562</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t563" href="#t563">563</a></span><span class="t">            <span class="nam">ready</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">beads</span><span class="op">.</span><span class="nam">ready</span><span class="op">(</span><span class="nam">cwd</span><span class="op">=</span><span class="nam">r</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t564" href="#t564">564</a></span><span class="t">            <span class="nam">count</span> <span class="op">=</span> <span class="nam">len</span><span class="op">(</span><span class="nam">ready</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t565" href="#t565">565</a></span><span class="t">        <span class="key">except</span> <span class="nam">Exception</span><span class="op">:</span>  <span class="com"># noqa: BLE001 -- a settings-page read must not 500 on a bad repo</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t566" href="#t566">566</a></span><span class="t">            <span class="nam">count</span> <span class="op">=</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t567" href="#t567">567</a></span><span class="t">        <span class="nam">repo_pickups</span><span class="op">[</span><span class="nam">r</span><span class="op">.</span><span class="nam">path</span><span class="op">]</span> <span class="op">=</span> <span class="op">{</span><span class="str">&quot;items&quot;</span><span class="op">:</span> <span class="nam">count</span><span class="op">,</span> <span class="str">&quot;last_picked_up&quot;</span><span class="op">:</span> <span class="nam">last_picked_up</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="nam">r</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t568" href="#t568">568</a></span><span class="t">    <span class="nam">data</span><span class="op">[</span><span class="str">&quot;repo_pickups&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="nam">repo_pickups</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t569" href="#t569">569</a></span><span class="t">    <span class="nam">data</span><span class="op">[</span><span class="str">&quot;recent_pickups&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="nam">store</span><span class="op">.</span><span class="nam">recent_auto_pickups</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t570" href="#t570">570</a></span><span class="t">    <span class="key">return</span> <span class="nam">data</span>&nbsp;</span><span class="r"></span></p>
@@ -861,7 +861,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_work_items_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 21:13 +0000
+            created at 2026-10-02 21:32 +0000
         </p>
     </div>
 </footer>

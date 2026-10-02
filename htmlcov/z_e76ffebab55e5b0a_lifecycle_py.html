@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">806 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">758<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">48<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">760<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">46<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_repos_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 21:13 +0000
+            created at 2026-10-02 21:32 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1133,16 +1133,16 @@
     <p class="pln"><span class="n"><a id="t1051" href="#t1051">1051</a></span><span class="t">        <span class="com"># anyway (code-review finding).</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1052" href="#t1052">1052</a></span><span class="t">        <span class="nam">limit</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">policy</span><span class="op">.</span><span class="nam">max_concurrent</span> <span class="key">if</span> <span class="nam">st</span><span class="op">.</span><span class="nam">policy</span> <span class="key">else</span> <span class="num">1</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1053" href="#t1053">1053</a></span><span class="t">        <span class="key">if</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="nam">store</span><span class="op">.</span><span class="nam">active_count</span><span class="op">)</span> <span class="op">&gt;=</span> <span class="nam">limit</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t1054" href="#t1054">1054</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t1055" href="#t1055">1055</a></span><span class="t">                <span class="num">409</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">all </span><span class="op">{</span><span class="nam">limit</span><span class="op">}</span><span class="fst"> slots are busy; pause something or raise max_concurrent</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t1056" href="#t1056">1056</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1054" href="#t1054">1054</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1055" href="#t1055">1055</a></span><span class="t">                <span class="num">409</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">all </span><span class="op">{</span><span class="nam">limit</span><span class="op">}</span><span class="fst"> slots are busy; pause something or raise max_concurrent</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1056" href="#t1056">1056</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1057" href="#t1057">1057</a></span><span class="t">        <span class="nam">precheck_steer</span> <span class="op">=</span> <span class="op">(</span><span class="nam">body</span><span class="op">.</span><span class="nam">steer</span> <span class="key">or</span> <span class="str">&quot;&quot;</span><span class="op">)</span><span class="op">.</span><span class="nam">strip</span><span class="op">(</span><span class="op">)</span> <span class="key">or</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t1058" href="#t1058">1058</a></span><span class="t">        <span class="key">if</span> <span class="nam">precheck_steer</span> <span class="key">is</span> <span class="key">not</span> <span class="key">None</span> <span class="key">and</span> <span class="key">not</span> <span class="nam">steer_reachable</span><span class="op">(</span><span class="nam">row</span><span class="op">,</span> <span class="nam">node_id</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t1059" href="#t1059">1059</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t1060" href="#t1060">1060</a></span><span class="t">                <span class="num">409</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t1061" href="#t1061">1061</a></span><span class="t">                <span class="fst">f&quot;</span><span class="fst">node </span><span class="op">{</span><span class="nam">node_id</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst"> has no agent task downstream to steer; </span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t1062" href="#t1062">1062</a></span><span class="t">                <span class="str">&quot;this text would be dropped&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t1063" href="#t1063">1063</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1059" href="#t1059">1059</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1060" href="#t1060">1060</a></span><span class="t">                <span class="num">409</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1061" href="#t1061">1061</a></span><span class="t">                <span class="fst">f&quot;</span><span class="fst">node </span><span class="op">{</span><span class="nam">node_id</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst"> has no agent task downstream to steer; </span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1062" href="#t1062">1062</a></span><span class="t">                <span class="str">&quot;this text would be dropped&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t1063" href="#t1063">1063</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1064" href="#t1064">1064</a></span><span class="t">        <span class="com"># `running_sessions_for_node` matches an escalation session by</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1065" href="#t1065">1065</a></span><span class="t">        <span class="com"># hook_point, not node, so the session `escalation_running` just</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1066" href="#t1066">1066</a></span><span class="t">        <span class="com"># found above is always among the ones killed here -- including a</span>&nbsp;</span><span class="r"></span></p>
@@ -2096,7 +2096,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_repos_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 21:13 +0000
+            created at 2026-10-02 21:32 +0000
         </p>
     </div>
 </footer>

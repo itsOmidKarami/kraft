@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/api/routes/gates.py: 93%</title>
+    <title>Coverage for src/kraft/api/routes/gates.py: 96%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_15cffcd0.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>api<span class="sep">/</span>routes<span class="sep">/</span>gates.py</b>:
-            <span class="pc_cov">93%</span>
+            <span class="pc_cov">96%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">136 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">127<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">9<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">130<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">6<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_harnesses_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 21:13 +0000
+            created at 2026-10-02 21:32 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -390,7 +390,7 @@
     <p class="run"><span class="n"><a id="t308" href="#t308">308</a></span><span class="t">    <span class="nam">nodes</span> <span class="op">=</span> <span class="nam">gate_nodes</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">row</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t309" href="#t309">309</a></span><span class="t">    <span class="nam">_gate_or_404</span><span class="op">(</span><span class="nam">nodes</span><span class="op">,</span> <span class="nam">gate</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t310" href="#t310">310</a></span><span class="t">    <span class="key">if</span> <span class="nam">board</span><span class="op">.</span><span class="nam">_pending_gate</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span> <span class="op">!=</span> <span class="nam">gate</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t311" href="#t311">311</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">gate </span><span class="op">{</span><span class="nam">gate</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst"> is not pending</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t311" href="#t311">311</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">gate </span><span class="op">{</span><span class="nam">gate</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst"> is not pending</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t312" href="#t312">312</a></span><span class="t">    <span class="key">if</span> <span class="nam">st</span><span class="op">.</span><span class="nam">invalid_policy</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t313" href="#t313">313</a></span><span class="t">        <span class="com"># Same posture as intake (&#167;9): a re-run we cannot bound is not started.</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t314" href="#t314">314</a></span><span class="t">        <span class="com"># Before the kill below, not after: this bail-out changes nothing,</span>&nbsp;</span><span class="r"></span></p>
@@ -471,8 +471,8 @@
     <p class="run run2"><span class="n"><a id="t389" href="#t389">389</a></span><span class="t">                    <span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t390" href="#t390">390</a></span><span class="t">                <span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t391" href="#t391">391</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t392" href="#t392">392</a></span><span class="t">        <span class="key">except</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">AlreadyRunning</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t393" href="#t393">393</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;a walk is already running for this work item&quot;</span><span class="op">)</span> <span class="key">from</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t392" href="#t392">392</a></span><span class="t">        <span class="key">except</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">AlreadyRunning</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t393" href="#t393">393</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;a walk is already running for this work item&quot;</span><span class="op">)</span> <span class="key">from</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t394" href="#t394">394</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="nam">k</span><span class="op">:</span> <span class="nam">v</span> <span class="key">for</span> <span class="nam">k</span><span class="op">,</span> <span class="nam">v</span> <span class="key">in</span> <span class="nam">dict</span><span class="op">(</span><span class="nam">deps</span><span class="op">.</span><span class="nam">_work_item_row</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span><span class="op">)</span><span class="op">.</span><span class="nam">items</span><span class="op">(</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
@@ -483,7 +483,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_harnesses_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 21:13 +0000
+            created at 2026-10-02 21:32 +0000
         </p>
     </div>
 </footer>
