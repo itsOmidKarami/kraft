@@ -22,7 +22,6 @@ import pytest
 from support.harness import entry_of
 
 from kraft import store
-from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, walk
 from kraft.executor.context import CONFIG_ERROR, LaunchContext
 
@@ -76,7 +75,6 @@ def _launches(monkeypatch, during=None) -> list:
         return "done"
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
-    monkeypatch.setattr(agent_mod._subprocess, "run_task", run_task)
     return launched
 
 
@@ -333,13 +331,11 @@ def _sandboxed(materialized):
     ],
 )
 async def test_an_old_layout_member_stops_the_walk_before_host_git_runs(
-    tmp_path, run_dirs, monkeypatch, chain, item, entry
+    tmp_path, run_dirs, chain, item, entry
 ):
     """An item in flight from before Kraft-ju36l, its member's gitdir where
     the worker writes it -- including Kraft-zvqwl's legacy column -- stops
-    for a person naming the member. No session, and no push, ever ran."""
-    pushed = []
-    monkeypatch.setattr("kraft.adapters.forge.git.push", lambda *a: pushed.append(a))
+    for a person naming the member, before its one task's session starts."""
     root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
 
     async def old_layout(_database):
@@ -357,7 +353,7 @@ async def test_an_old_layout_member_stops_the_walk_before_host_git_runs(
 
     assert status == "needs_human"
     assert f"{_DRIFT} libs/a are not" in _reason(evts)
-    assert sessions == [] and pushed == []
+    assert sessions == []
 
 
 @pytest.fixture

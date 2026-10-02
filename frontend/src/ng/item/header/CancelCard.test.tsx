@@ -2,8 +2,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { stubFetch } from "../testkit";
+import { acceptWrites, stubFetch } from "../testkit";
 import { CancelCard } from "./CancelCard";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/cancel");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -14,7 +17,7 @@ const preview = (mr: "open" | "merged" | null) => ({
   spend: { spent_usd: 2.41, cap_usd: 5 },
 });
 const open = (answers: Parameters<typeof stubFetch>[0]) => {
-  const calls = stubFetch(answers);
+  const calls = stubFetch({ ...WRITES, ...answers });
   const anchor = createRef<HTMLDivElement>();
   const onDone = vi.fn();
   render(<><div ref={anchor} /><CancelCard id="w1" anchor={anchor} onClose={() => {}} onDone={onDone} /></>);

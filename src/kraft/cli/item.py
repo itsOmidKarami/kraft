@@ -564,6 +564,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         parents=[common],
         help="per-item model/effort override, without changing the chain; "
         "replaces the whole override",
+        epilog="Each call replaces the item-wide override: a flag you leave out goes back "
+        "to the template's own binding. To change one node alone, use set-node-override.",
     )
     set_overrides.add_argument("id", nargs="?")
     set_overrides.add_argument("--model", help="plain model override")
@@ -581,6 +583,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         parents=[common],
         help="per-item override for one node (auto-escalate, model, effort, extra prompt), "
         "without touching the template",
+        epilog="Each call changes only the flags you give and keeps the node's other "
+        "overrides; --clear resets the node. Unlike set-overrides, it merges.",
     )
     set_node_override.add_argument("id", nargs="?")
     set_node_override.add_argument("--node", required=True, help="a node id in the item's chain")

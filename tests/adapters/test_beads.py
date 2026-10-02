@@ -69,19 +69,81 @@ def test_ready_projects_the_description(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.fixture
+def bd_answers(monkeypatch):
+    """`bd_answers(stdout, returncode=0, stderr="")` makes every `bd` the
+    adapter runs answer that, and returns the `(argv, cwd)` of each call, so a
+    test pins the command as well as how its output is read.
+
+        calls = bd_answers('[{"id": "X-1", "title": "t"}]')
+        await beads.ready(cwd="/r")
+        assert calls == [(["bd", "ready", "--json"], "/r")]
+    """
+
+    def answer(stdout: str, returncode: int = 0, stderr: str = "") -> list:
+        calls: list = []
+
+        def run(argv, *_a, cwd=None, **_k):
+            calls.append((list(argv), cwd))
+            return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+        monkeypatch.setattr(beads.subprocess, "run", run)
+        return calls
+
+    return answer
+
+
 @pytest.mark.beads_adapter
-def test_ready_tolerates_a_bead_with_no_description(monkeypatch):
+async def test_ready_tolerates_a_bead_with_no_description(bd_answers):
     """`ready` is best-effort by contract; a row without the key must not raise."""
-
-    class _Proc:
-        returncode = 0
-        stdout = '[{"id": "X-1", "title": "t", "priority": 1}]'
-
-    monkeypatch.setattr(beads.subprocess, "run", lambda *a, **k: _Proc())
-    rows = asyncio.run(beads.ready(cwd="/tmp"))
+    calls = bd_answers('[{"id": "X-1", "title": "t", "priority": 1}]')
+    rows = await beads.ready(cwd="/tmp")
     assert rows == [
         {"id": "X-1", "title": "t", "priority": 1, "issue_type": None, "description": None}
     ]
+    assert calls == [(["bd", "ready", "--json"], "/tmp")]
+
+
+@pytest.mark.beads_adapter
+async def test_ready_drops_a_row_without_an_id_or_a_title(bd_answers):
+    """The poller files a work item per row: one with no id cannot be tracked,
+    and one with no title has nothing to file it under."""
+    rows = [
+        {"id": "X-1", "title": "kept"},
+        {"title": "no id"},
+        {"id": "X-2"},
+        {"id": "X-3", "title": ""},
+    ]
+    bd_answers(json.dumps([*rows, "not a row"]))
+    assert [r["id"] for r in await beads.ready(cwd="/tmp")] == ["X-1"]
+
+
+@pytest.mark.beads_adapter
+async def test_intake_reads_the_id_past_an_advisory_line(bd_answers):
+    """bd may print a notice (an upgrade, a migration) before the issue
+    object; the id is still the object's."""
+    calls = bd_answers('Note: a newer bd is available\n{"id": "X-9", "title": "t"}\n')
+    assert await beads.intake("wire it", cwd="/r") == "X-9"
+    argv = [
+        "bd",
+        "create",
+        "--json",
+        "--title",
+        "wire it",
+        "-d",
+        "Created by the Kraft orchestrator.",
+    ]
+    assert calls == [([*argv, "--type", "task"], "/r")]
+
+
+@pytest.mark.beads_adapter
+async def test_intake_refuses_output_with_no_issue_object(bd_answers):
+    """A bd that exits 0 but prints no object has filed nothing Kraft can
+    track: a failed intake that says what bd printed, not a bead id."""
+    bd_answers("created\n", stderr="warning: flushed")
+    with pytest.raises(RuntimeError) as excinfo:
+        await beads.intake("wire it", cwd="/r")
+    assert str(excinfo.value) == "bd create emitted no JSON: 'created\\n' stderr='warning: flushed'"
 
 
 @pytest.mark.beads_adapter
@@ -226,13 +288,14 @@ def test_blocked_by_is_best_effort_when_bd_is_missing(tmp_path, monkeypatch):
 
 
 @pytest.mark.beads_adapter
-def test_blocked_by_tolerates_unparsable_output(monkeypatch):
-    class _Proc:
-        returncode = 0
-        stdout = "not json"
-
-    monkeypatch.setattr(beads.subprocess, "run", lambda *a, **k: _Proc())
-    assert asyncio.run(beads.blocked_by(["X-1"], cwd="/tmp")) == []
+@pytest.mark.parametrize(
+    "stdout", ["not json", "[not json", 'Note: x\n[{"id": "X-1",'], ids=["no-list", "bad", "cut"]
+)
+async def test_blocked_by_tolerates_unparsable_output(bd_answers, stdout):
+    """No list at all, and a list that does not parse, both answer `[]`."""
+    calls = bd_answers(stdout)
+    assert await beads.blocked_by(["X-1"], cwd="/tmp") == []
+    assert calls == [(["bd", "blocked", "--json"], "/tmp")]
 
 
 @pytest.mark.beads_adapter

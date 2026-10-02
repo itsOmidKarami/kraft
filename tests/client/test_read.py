@@ -4,47 +4,21 @@ Async tests follow the suite's existing shape: a sync test function wrapping an
 inner coroutine with `asyncio.run` (see tests/test_adapters_subprocess.py).
 
 `httpx.ASGITransport` does not run the app's lifespan the way `TestClient` does,
-so `run_with_app` enters it explicitly. Everything a test does lives in one
-coroutine, and therefore one event loop, because the Database opened by the
-lifespan is bound to the loop that opened it.
+so `support.api.run_with_app` enters it explicitly. Everything a test does
+lives in one coroutine, and therefore one event loop, because the Database
+opened by the lifespan is bound to the loop that opened it.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
-from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import connected_repo, fake_templates_dir, isolated_bd
+from support.api import run_with_app
+from support.harness import connected_repo
 
 from kraft import client
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
-
-
-@pytest.fixture
-def wired(tmp_path, monkeypatch):
-    """The app, with client.transport.http() pointed at it in-process."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    import kraft.api as api
-
-    monkeypatch.setattr(
-        client.transport,
-        "http",
-        lambda: httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
-        ),
-    )
-    return api
 
 
 def test_base_url_prefers_loopback_over_a_wildcard_bind(monkeypatch, tmp_path):
@@ -68,16 +42,6 @@ def test_base_url_brackets_an_ipv6_bind(monkeypatch, tmp_path):
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     assert client.base_url() == "http://[::1]:9999"
     assert httpx.URL(client.base_url()).port == 9999
-
-
-def run_with_app(api, scenario):
-    """Run one coroutine with the app's lifespan active."""
-
-    async def wrapper():
-        async with api.app.router.lifespan_context(api.app):
-            return await scenario()
-
-    return asyncio.run(wrapper())
 
 
 async def _create(repo, title="read me") -> str:

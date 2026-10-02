@@ -25,11 +25,15 @@ function setup(access: Partial<Access> = {}, running: { bind?: string; port?: nu
   return put;
 }
 
+// A case may swap a store action for a stub; each case gets the store, actions included, back as it found it.
+let saved: ReturnType<typeof useApply.getState>;
 beforeEach(() => {
+  saved = useApply.getState();
   vi.stubGlobal("fetch", () => Promise.reject(new TypeError("down")));
   useApply.setState({ restart: [], reload: [], managed: true, loaded: true, phase: "idle", confirming: false, error: null });
 });
 afterEach(() => {
+  useApply.setState(saved, true);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
