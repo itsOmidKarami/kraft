@@ -112,6 +112,19 @@ describe("Repos page: connecting", () => {
     expect(ops[0]).toMatchObject({ op: "add_repo", path: "/src/new", fields: { name: "new", test_command: "pytest", forge: "gitlab", enabled: true } });
   });
 
+  it("says a repo with no tests connects disabled, as add_repo sends it, though the probe answers an empty scope list", async () => {
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe({ test_command: null, test_scopes: [] })) : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connected disabled until you set a test command.");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(d.postOps).toHaveBeenCalled());
+    expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });
+  });
+
   it("shows a probe's refusal inline and sends nothing", async () => {
     vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok({ detail: "/nowhere is not a git repository" }, 400) : ok([{ id: "default" }]))) as never);
     mount();
