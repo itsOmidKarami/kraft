@@ -81,7 +81,7 @@ reverse: true
 ::u-page-section
 ---
 title: On your phone
-description: The same board at the same address, laid out for a phone. Approve or reject a gate, answer a question, or retry a stopped item from the card itself.
+description: The same board at the same address, laid out for a phone. Approve or reject a gate from the card itself, and answer a question or retry a stopped item from its page.
 orientation: horizontal
 links:
   - label: The phone layout
