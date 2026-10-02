@@ -56,10 +56,11 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     return {**listed, "nodes": nodes, "gates": gates, "error": None, "uses": uses}
 
 
+# Kraft-pplyo.
 @api_router.get("/templates/chains")
 async def list_templates(request: Request):
     """Every saved V1 chain -- the chains intake materializes, so the intake
-    preview and intake agree (Kraft-pplyo)."""
+    preview and intake agree."""
     library = deps.library_or_503(request.app.state)
     return [_chain_summary(library, id) for id in sorted(library.chain_ids)]
 
@@ -403,13 +404,14 @@ async def parse_template_yaml(body: ParseBody):
     return {"chain": data, "error": None}
 
 
+# Refusing a policy that does not validate: Kraft-m86uq.
 @api_router.post("/templates/reload")
 async def reload_templates_endpoint(request: Request):
     """Reread the V1 library from disk into the running server. A library that
     does not load is reported, not raised: the daemon keeps running degraded,
     exactly as it would have started. `policy.yaml` is reread first, since a
     chain past a `maxima:` ceiling is a lint issue; a policy that does not
-    validate is refused and the running one kept (Kraft-m86uq)."""
+    validate is refused and the running one kept."""
     st = request.app.state
     refused_policy = await apply_mod.reload(request.app)
     ids = st.library.chain_ids if st.library is not None else ()
@@ -454,12 +456,13 @@ async def get_policy(request: Request):
     return data
 
 
+# The snapshot: `02` §2.C. The merge: Kraft-xh2x8.
 @api_router.put("/policy")
 async def put_policy(body: PolicyBody, request: Request):
     """Caps apply to loops that start after the save — a counter already running
-    keeps the cap it snapshotted at first fire (`02` §2.C).
+    keeps the cap it snapshotted at first fire.
 
-    The body is merged over the file on disk, top-level key by key (Kraft-xh2x8):
+    The body is merged over the file on disk, top-level key by key:
     a key the request doesn't send is kept, and a key it sends as `null` is
     removed. A save never drops what it didn't edit. The V1 instance policy
     (`defaults:`/`maxima:`) is refreshed with the legacy `Policy`, so the

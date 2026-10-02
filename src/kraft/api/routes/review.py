@@ -435,10 +435,11 @@ async def _request_changes_now(st, request, row, body, head, base):
     }
 
 
+# The review flow plan's Task 4.
 @api_router.post("/work-items/{wid}/review")
 async def submit_item_review(wid: str, body: ReviewIn, request: Request):
     """The review submission route that acts on whatever gate is pending, if
-    any -- the item-level door Task 4 adds beside the gate-keyed one below, now
+    any -- the item-level door beside the gate-keyed one below, now
     that a review or a thread belongs to the item rather than to a gate."""
     _refuse_agents(request)
     st = request.app.state

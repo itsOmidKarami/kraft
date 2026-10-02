@@ -64,10 +64,11 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
     yield "event: end\ndata: {}\n\n"
 
 
+# The jsonl view: design 6c.
 @api_router.get("/worker-sessions/{sid}/log")
 async def get_log(sid: str, request: Request, format: str | None = None, follow: bool = False):
     """Plain text by default (the modal's copy button); `format=jsonl` for the
-    filterable, followable view (design 6c).
+    filterable, followable view.
 
     The jsonl views are bounded (`logs.MAX_LOG_BYTES`, with a marker row when
     they had to be); plain text is the whole file, streamed from disk, which is
@@ -97,10 +98,11 @@ async def get_log(sid: str, request: Request, format: str | None = None, follow:
     return FileResponse(path, media_type="text/plain")
 
 
+# The before-every-call hook: Kraft-4in7z.
 class PermissionAsk(BaseModel):
     """What `--permission-prompt-tool` hands over: the tool the agent wants to
     use, the arguments it wants to use it with, and the CLI's own id for the
-    call. A before-every-call hook (Kraft-4in7z) asks in `enforce` mode."""
+    call. A before-every-call hook asks in `enforce` mode."""
 
     tool_name: str
     input: dict = {}
@@ -172,9 +174,10 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
     return inv.allowed_tools, inv.deny_tools, inv.grants
 
 
+# Kraft-oor; `enforce` mode is Kraft-4in7z.
 @api_router.post("/worker-sessions/{sid}/permission")
 async def permission_request(sid: str, body: PermissionAsk, request: Request):
-    """Answer a worker's permission prompt from its task's grant (Kraft-oor).
+    """Answer a worker's permission prompt from its task's grant.
 
     The grant is the task's resolved policy, as its launch resolved it
     (`_resolved_tools`): a tool in `deny_tools` is denied; otherwise, when no
@@ -185,7 +188,7 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     whatever the allowlist. A grant that cannot be resolved at all -- the task
     or its profile gone -- is denied: not knowing is not a grant.
 
-    `enforce` mode (a before-every-call hook, Kraft-4in7z) differs twice:
+    `enforce` mode (a before-every-call hook) differs twice:
     unbounded is `no_opinion`, so the CLI's own classifier decides, and an
     unresolvable policy is `unresolved` -- unless the hook says its
     session is `fail_closed`, when it is a deny like prompt mode's. Neither
@@ -270,11 +273,12 @@ class HookCall(BaseModel):
     stdin: str
 
 
+# Sandbox part 2, P5.
 @api_router.post("/worker-sessions/{sid}/permission-hook")
 async def permission_hook(sid: str, body: HookCall, request: Request):
     """`kraft admin permission-hook`, run by the daemon for a session whose
     hook cannot run Kraft itself: a sandboxed one, through the worker API's
-    `kraft` shim (sandbox part 2, P5). The same `permission_hooks.answer`
+    `kraft` shim. The same `permission_hooks.answer`
     the host's hook runs, asking this server's gate in-process; the reply
     is its `(body, code)` pair.
 

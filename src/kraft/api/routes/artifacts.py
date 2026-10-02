@@ -48,11 +48,12 @@ def _truncate_at_file_boundary(diff: str, limit: int) -> tuple[str, bool]:
     return result, True
 
 
+# The two ranges: Kraft-nceo.
 @api_router.get("/work-items/{wid}/diff")
 async def get_work_item_diff(wid: str, request: Request, ignore_whitespace: bool = False):
     """The changes an agent made, for a reviewer with no filesystem access.
 
-    Two ranges, kept apart (Kraft-nceo). `landed` is `base_ref..HEAD` -- what
+    Two ranges, kept apart. `landed` is `base_ref..HEAD` -- what
     earlier nodes committed, the chain's own spec and plan documents among it.
     The top level is `HEAD`..working tree, the change actually under review:
     one combined range spent the viewer's open-line budget on paperwork before
@@ -199,11 +200,12 @@ async def unmark_viewed(wid: str, request: Request):
     return await _set_viewed(wid, request, False)
 
 
+# The review flow spec, §2.
 @api_router.get("/work-items/{wid}/compare")
 async def compare_work_item(
     wid: str, request: Request, nodes: str | None = None, ignore_whitespace: bool = False
 ):
-    """Any two review targets of the pending gate, diffed (spec §2)."""
+    """Any two review targets of the pending gate, diffed."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
     q = request.query_params
