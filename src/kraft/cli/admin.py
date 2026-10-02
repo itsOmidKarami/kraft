@@ -1033,12 +1033,15 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if is_pre_v1(templates_dir):
         _accept_major_update(templates_dir, ns.yes)
 
-    if ns.channel != "stable" and update._is_homebrew_install():
+    # An install follows its own channel unless told otherwise: a release
+    # candidate compared with the stable feed would be told v1.4.0 is the newest.
+    channel = ns.channel or update.channel_of(update.installed())
+    if channel != "stable" and update._is_homebrew_install():
         raise SystemExit(
             "kraft admin update: the Homebrew formula only tracks stable releases; "
-            f"install --channel {ns.channel} with `uv tool` instead."
+            f"install --channel {channel} with `uv tool` instead."
         )
-    release = update.latest(force=True, channel=ns.channel)
+    release = update.latest(force=True, channel=channel)
     if release is None:
         print(
             "kraft admin update: could not reach the release feed. Try again, "
@@ -1048,7 +1051,10 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
     here = update.installed()
     if not update.is_behind(release) and not ns.force:
-        print(f"kraft {here} is up to date ({release.tag} is the newest release)")
+        newest = "the newest release" + (
+            "" if channel == "stable" else f" on the {channel} channel"
+        )
+        print(f"kraft {here} is up to date ({release.tag} is {newest})")
         return
     if ns.restart:
         # Before installing, so answering no leaves nothing half done.
@@ -1135,8 +1141,11 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     update_p.add_argument(
         "--channel",
         choices=list(CHANNELS),
-        default="stable",
-        help="stable (default), or a pre-release channel: rc, beta (beta and rc), alpha (any)",
+        default=None,
+        help=(
+            "stable, or a pre-release channel: rc, beta (beta and rc), alpha (any). "
+            "Default: the channel of the version you have installed"
+        ),
     )
     update_p.add_argument(
         "-y",

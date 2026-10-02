@@ -1,4 +1,5 @@
-"""`kraft admin update -y` on a pre-V1 home: the guts of it is
+"""`kraft admin update`: which channel it compares against, and `-y` on a
+pre-V1 home, the guts of which is
 `replace_pre_v1_config` (`src/kraft/cli/admin.py`) -- a split-off sibling of
 `tests/cli/test_admin.py`, the same pattern as `test_admin_harnesses.py` and
 `test_admin_templates_library.py`, kept under the repo's line budget."""
@@ -7,8 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
+from kraft import cli, update
 from kraft import harness as _harness
 from kraft.adapters import agent as _agent
 from kraft.templates.environment import HarnessProfileTable
@@ -144,3 +147,38 @@ def test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses(
     for name, original in carried.items():
         assert (backup / Path(name)).read_bytes() == original, name
     assert (backup / "policy.yaml").is_file()
+
+
+@pytest.mark.parametrize(
+    ("have", "argv", "channel", "said"),
+    [
+        ("1.4.0", [], "stable", "kraft 1.4.0 is up to date (v1.4.0 is the newest release)"),
+        (
+            "1.5.0rc12",
+            [],
+            "rc",
+            "kraft 1.5.0rc12 is up to date (v1.5.0rc12 is the newest release on the rc channel)",
+        ),
+        ("1.5.0rc12", ["--channel", "stable"], "stable", "(v1.4.0 is the newest release)"),
+    ],
+    ids=["stable-install", "rc-install", "rc-install-asks-stable"],
+)
+def test_update_follows_the_installed_versions_channel_unless_told_otherwise(
+    monkeypatch, tmp_path, capsys, have, argv, channel, said
+):
+    """An rc install used to compare against the stable feed and be told v1.4.0
+    was the newest release, while doctor (which uses its own channel) said rc12."""
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    asked = []
+
+    def latest(**kwargs):
+        asked.append(kwargs["channel"])
+        return update.Release("v1.4.0" if kwargs["channel"] == "stable" else "v1.5.0rc12", "u")
+
+    monkeypatch.setattr(update, "latest", latest)
+    monkeypatch.setattr(update, "installed", lambda: have)
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "perform", lambda *_a, **_k: pytest.fail("installed"))
+    cli.main(["admin", "update", *argv])
+    assert asked == [channel]
+    assert said in capsys.readouterr().out
