@@ -4,10 +4,13 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../types";
 import { useResizable } from "../graph/useResizable";
-import { detail, stubFetch } from "../item/testkit";
+import { acceptWrites, detail, stubFetch } from "../item/testkit";
 import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
 import { Peek, type PeekTab } from "./Peek";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/archive", "POST /work-items/w1/resume");
 
 const Where = () => <span data-testid="where">{useLocation().pathname + useLocation().search}</span>;
 
@@ -21,7 +24,7 @@ function Harness({ start = "overview", budget = false }: { start?: PeekTab; budg
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
 
 const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[] } = {}) => {
-  const calls = stubFetch({ "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}] });
+  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}] });
   render(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>

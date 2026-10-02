@@ -76,6 +76,7 @@ describe("Analytics (J): each tile reads one field", () => {
     expect(within(sheet).getAllByRole("radio").map((r) => r.textContent?.replace("✓", ""))).toEqual(["7 days", "30 days", "90 days"]);
     await userEvent.click(within(sheet).getByRole("radio", { name: "30 days" }));
     await waitFor(() => expect(asked(calls)).toHaveLength(2));
+    expect(asked(calls).map((c) => c.query.get("range"))).toEqual(["7d", "30d"]);
     expect(screen.getByRole("button", { name: /30 days/ })).toBeInTheDocument();
   });
 

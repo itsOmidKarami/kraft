@@ -4,8 +4,11 @@ import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../../types";
-import { detail, stubFetch, V1 } from "../testkit";
+import { acceptWrites, detail, stubFetch, V1 } from "../testkit";
 import { GateBody, GateFooter } from "./GatePane";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/gates/plan_approval/approve", "POST /work-items/w1/gates/plan_approval/reject");
 
 afterEach(() => vi.unstubAllGlobals());
 const gate = V1[1];
@@ -23,7 +26,7 @@ const render = (ui: ReactElement) => rtlRender(<MemoryRouter initialEntries={["/
 
 describe("GateFooter", () => {
   it("approves the gate", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<GateFooter item={pending} gate={gate} reload={reload} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
@@ -32,7 +35,7 @@ describe("GateFooter", () => {
   });
 
   it("rejects only with a note, naming where it goes back to", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
     const card = screen.getByRole("group", { name: "Reject plan_approval" });
@@ -44,7 +47,7 @@ describe("GateFooter", () => {
   });
 
   it("rejects on ⌘↵ from the note, and not before there is one", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
     const note = screen.getByLabelText("Why (the next agent reads it)");

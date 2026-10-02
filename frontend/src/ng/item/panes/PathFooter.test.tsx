@@ -1,8 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { detail, stubFetch, type Call } from "../testkit";
+import { acceptWrites, detail, stubFetch, type Call } from "../testkit";
 import { PathFooter } from "./PathFooter";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/retry", "POST /work-items/w1/skip");
 
 afterEach(() => vi.unstubAllGlobals());
 const posts = (c: Call[]) => c.filter((x) => x.method === "POST");
@@ -18,7 +21,7 @@ describe("PathFooter", () => {
   });
 
   it("confirms Skip in the pane before sending it, by path", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<PathFooter item={detail()} path="verification" what="node" state="running" reload={reload} />);
     await userEvent.click(screen.getByRole("button", { name: "Skip node" }));
@@ -30,7 +33,7 @@ describe("PathFooter", () => {
   });
 
   it("retries by path with the steer, and without the steer field when no agent can read it", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const { unmount } = render(<PathFooter item={detail()} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.type(screen.getByLabelText("Steer for the retry"), "check reindex");
@@ -43,7 +46,7 @@ describe("PathFooter", () => {
   });
 
   it("retries on ⌘↵ from the steer", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     render(<PathFooter item={detail()} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.type(screen.getByLabelText("Steer for the retry"), "check reindex");
