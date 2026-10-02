@@ -1,11 +1,11 @@
 """Plan a release from the pull requests merged since the last one.
 
-A release is cut by hand (`just release`), not by a merge. Whatever merged
-since the previous tag goes out together, and the bump is the largest impact
-any of those pull requests declared: two minors and three patches is a minor.
-The notes are each pull request's `## Changelog` section, grouped by impact,
-with any `notes::highlight` pull request lifted into a Highlights section above
-them all.
+A release is cut by hand from the Actions tab (release -> Run workflow), not
+by a merge. Whatever merged since the previous tag goes out together, and the
+bump is the largest impact any of those pull requests declared: two minors and
+three patches is a minor. The notes are each pull request's `## Changelog`
+section, grouped by impact, with any `notes::highlight` pull request lifted
+into a Highlights section above them all.
 
 Usage:
   python3 dev/plan_release.py plan <previous-tag-or-empty> <prs.json> <notes-out>

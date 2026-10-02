@@ -51,6 +51,7 @@ def test_only_a_stable_release_touches_homebrew_the_stamp_and_the_marketplace():
         "mint a token to open the stamp PR",
         "stamp plugin manifests and CHANGELOG.md for this release",
         "publish the VS Code extension",
+        "publish the VS Code extension to Open VSX",
     ]:
         assert "steps.impact.outputs.pre == 'none'" in _step(name), name
 
