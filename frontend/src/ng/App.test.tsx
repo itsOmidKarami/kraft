@@ -48,3 +48,27 @@ describe("ng App", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("the dev pages, /_tokens and /_gallery", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it.each([["/_tokens", "Tokens"], ["/_gallery", "Graph components"]])("the dev server routes %s", async (path, title) => {
+    window.history.pushState({}, "", path);
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: title }, { timeout: 5000 })).toBeInTheDocument();
+  });
+
+  it.each([["/_tokens", "Tokens"], ["/_gallery", "Graph components"]])("a release build has no %s", async (path, title) => {
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_DEV_PAGES", "");
+    vi.resetModules();
+    const { App: Release } = await import("./App");
+    window.history.pushState({}, "", path);
+    render(<Release />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Not found" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: title })).toBeNull();
+  });
+});

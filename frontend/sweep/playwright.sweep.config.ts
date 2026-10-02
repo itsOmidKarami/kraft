@@ -12,6 +12,9 @@ import { defineConfig } from "@playwright/test";
  * building this checkout (used to shoot a baseline from a clean worktree).
  * `--host 127.0.0.1`: without it `vite preview` can bind `::1` only (where
  * `localhost` resolves to IPv6 first) and the wait on 127.0.0.1 times out.
+ * `VITE_DEV_PAGES=1` keeps `/_gallery` and `/_tokens` in the build, which a
+ * release build drops (`ng/App.tsx`); a SWEEP_DIST built without it has
+ * neither, so its `gallery` and `tokens` shots show Not found.
  */
 const PORT = Number(process.env.SWEEP_PORT ?? 4317);
 const DIST = process.env.SWEEP_DIST;
@@ -40,6 +43,7 @@ export default defineConfig({
       ? `npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort --outDir ${JSON.stringify(DIST)}`
       : `npm run build && npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
+    env: { VITE_DEV_PAGES: "1" },
     reuseExistingServer: false,
     timeout: 180_000,
     cwd: "..",

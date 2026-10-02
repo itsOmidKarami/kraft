@@ -44,6 +44,12 @@ describe("ng AppearancePage", () => {
     expect(document.documentElement.dataset).toMatchObject({ surface: "moss", accent: "rose", amount: "full", mode: "light" });
   });
 
+  it("names the preview's item by an id in the board's shortened form", async () => {
+    setup();
+    await screen.findByRole("radiogroup", { name: "Mode" });
+    expect(document.querySelector(".tc-crumb")).toHaveTextContent(/^Board › [0-9a-f]{8}…[0-9a-f]{5}$/);
+  });
+
   it("paints a change before the server answers", async () => {
     setup();
     vi.mocked(api.putTheme).mockReturnValueOnce(new Promise(() => {}));
