@@ -8,6 +8,7 @@ import { act } from "../actions";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import type { ItemDetail } from "../useItem";
+import { sendOnModEnter } from "../../keys";
 
 type ThreadRow = { id: string; state: string; gate: string | null; node_id: string | null; file_path: string | null; comments?: { body: string }[] };
 
@@ -73,14 +74,15 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
     setRejecting(false);
     reload();
   };
+  const reject = () => run(act.reject(item.id, gate.id, note.trim()));
   if (rejecting)
     return (
       <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`}>
         <p className="ip-confirm-q">Reject <code>{gate.id}</code>{to && <> · goes back to <code>{to}</code></>}</p>
-        <textarea aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
+        <textarea aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
-          <Button variant="danger" disabled={busy || !note.trim()} onClick={() => run(act.reject(item.id, gate.id, note.trim()))}>Reject</Button>
+          <Button variant="danger" disabled={busy || !note.trim()} onClick={reject}>Reject</Button>
           <Button onClick={() => setRejecting(false)}>Cancel</Button>
         </div>
       </div>

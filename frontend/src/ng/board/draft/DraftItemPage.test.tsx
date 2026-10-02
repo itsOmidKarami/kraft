@@ -79,6 +79,20 @@ describe("DraftItemPage", () => {
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 
+  it("creates and starts on ⌘↵ from the brief, as the composer does, and not before it has a title", async () => {
+    const calls = stub();
+    mount({ draft: { title: "", brief: "By hash.", repo: "/code/kraft-plugins", chain: "default", spec: "", plan: "" } });
+    await settle();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Brief" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(creates(calls)).toEqual([]);
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Cache it" } });
+    await settle();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Brief" }), { key: "Enter", metaKey: true });
+    await settle();
+    expect(creates(calls).at(-1)?.body).toMatchObject({ title: "Cache it", description: "By hash.", autostart: true });
+  });
+
   it("opens its chain readable, as the Chains editor does: no smaller than 80% (W10's editor fit)", async () => {
     stub();
     mount({ draft: { title: "Cache it", brief: "", repo: "/code/kraft-plugins", chain: "default", spec: "", plan: "" } });

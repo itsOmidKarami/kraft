@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent } from "../../types";
 import { useResizable } from "../graph/useResizable";
 import { detail, stubFetch } from "../item/testkit";
+import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
 import { Peek, type PeekTab } from "./Peek";
 
@@ -13,9 +14,8 @@ const Where = () => <span data-testid="where">{useLocation().pathname + useLocat
 function Harness({ start = "overview", budget = false }: { start?: PeekTab; budget?: boolean }) {
   const [tab, setTab] = useState<PeekTab>(start);
   const [b, setB] = useState(budget);
-  const [open, setOpen] = useState(true);
   const size = useResizable("board", 1400);
-  return <Peek id="w1" tab={tab} onTab={setTab} budget={b} onBudget={setB} offline={false} size={{ ...size, open, onOpen: setOpen }} onClose={() => {}} onRepo={() => {}} />;
+  return <Peek id="w1" tab={tab} onTab={setTab} budget={b} onBudget={setB} offline={false} size={size} onClose={() => {}} onRepo={() => {}} />;
 }
 
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
@@ -41,10 +41,13 @@ afterEach(() => {
 
 describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
+    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open gate" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
+    // The item page's pane, collapsed there before, opens on the gate.
+    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
   });
 
   it.each([

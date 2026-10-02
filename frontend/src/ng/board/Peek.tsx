@@ -12,6 +12,7 @@ import { age, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
 import { EscalateDialog, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
+import { useSelect } from "../item/draft/select";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { PausedCard, StateCard } from "../item/StateCard";
@@ -38,14 +39,15 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
   budget: boolean;
   onBudget: (on: boolean) => void;
   offline: boolean;
-  size: ReturnType<typeof useResizable> & { open: boolean; onOpen: (open: boolean) => void };
+  size: ReturnType<typeof useResizable>;
+  /** The Board crumb, Escape and the collapse button close it: on the board the peek has no rail. */
   onClose: () => void;
   onRepo: (repo: string) => void;
 }) {
   const loaded = useItem(id);
   const navigate = useNavigate();
   const open = () => navigate(`/work-items/${encodeURIComponent(id)}`);
-  const common = { id: "board-peek", open: size.open, size, onCollapse: () => size.onOpen(false), onExpand: () => size.onOpen(true) };
+  const common = { id: "board-peek", open: true, size, onCollapse: onClose, onExpand: () => {} };
   if (loaded.state !== "ready")
     return (
       <Inspector {...common} crumbs={[{ label: "Board", onClick: onClose }]} icon="workflow" title={shortId(id)}>
@@ -85,10 +87,11 @@ function Overview({ item, reload, onRaise }: { item: ItemDetail; reload: () => v
   const duplicate = useDuplicate(item.id, setError);
   const events = useEvents(item.id, item.updated_at);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
+  const openGate = useSelect(item.id);
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
-        <Banner item={item} onOpenGate={openNode} onRaise={onRaise} reload={reload} />
+        <Banner item={item} onOpenGate={openGate} onRaise={onRaise} reload={reload} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />

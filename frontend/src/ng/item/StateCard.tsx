@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { actionPath, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
+import { sendOnModEnter } from "../keys";
 
 type Handlers = {
   reload: () => void;
@@ -221,7 +222,7 @@ export function PausedCard({ item, reload }: { item: ItemDetail; reload: () => v
   return (
     <section className="item-card is-neutral" aria-label="Paused">
       <h2 className="item-card-head"><Pause size={14} aria-hidden /> <span className="item-card-title">Paused</span><span className="item-card-where">{what.trim()}</span></h2>
-      {steerable && <textarea aria-label="Steer" className="item-input" rows={2} placeholder="Steer the next agent (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} />}
+      {steerable && <textarea aria-label="Steer" className="item-input" rows={2} placeholder="Steer the next agent (optional)" value={steer} onChange={(e) => setSteer(e.target.value)} onKeyDown={sendOnModEnter(() => resume(true), !busy && !!steer.trim())} />}
       {steerable && paused.length > 1 && (
         <label className="item-check">
           steer goes to

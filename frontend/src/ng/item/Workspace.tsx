@@ -36,6 +36,10 @@ export const usePaneMemory = create<{ pane: { open: boolean; userCollapsed: bool
   setPane: (pane) => set({ pane }),
 }));
 
+/** Opens the pane for what someone asked to see (Open gate, a problem, a new
+ *  node): an earlier collapse does not keep it shut. */
+export const openPane = () => usePaneMemory.getState().setPane({ open: true, userCollapsed: false });
+
 /** The canvas and its side pane. The URL holds where the person is (node
  *  view, selection, tab, attempt: spec §6.2); this keeps only whether the pane
  *  is open, which survives moving between items within a session. */
