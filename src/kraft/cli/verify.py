@@ -95,11 +95,13 @@ def _tail(log: Path) -> str:
     return "\n".join(f"    {line}" for line in lines[-_TAIL:])
 
 
-def _changed(worktree: Path) -> set[str]:
-    """What `git add -A` would stage: untracked files git does not ignore,
-    and tracked files changed. Kraft's own roots, and an untracked
-    virtualenv or `node_modules`, are left out, as the worker's commits
-    leave them out (`forge.git.work_product_pathspec`)."""
+def _changed(worktree: Path) -> tuple[set[str], set[str]]:
+    """(what `git add -A` would stage, the installs left out of it). The
+    first: untracked files git does not ignore, and tracked files changed,
+    less Kraft's own roots and an untracked virtualenv or `node_modules`,
+    which Kraft's sweep leaves out (`forge.git.work_product_pathspec`). The
+    second: those installs, by directory. The agent commits on its own too,
+    and a `git add -A` of its takes one the repo does not ignore."""
     from kraft.adapters.forge.git import is_environment
 
     out = subprocess.run(
@@ -112,15 +114,24 @@ def _changed(worktree: Path) -> set[str]:
     entries = [(entry[:2], entry[3:]) for entry in out.split("\0") if len(entry) > 3]
     kraft_roots = tuple(f"{r}/" for r in config_mod.KRAFT_ROOTS)
 
-    def installed(path: str) -> bool:
+    def install(path: str) -> str | None:
         parts = path.split("/")[:-1]
-        return any(is_environment(worktree.joinpath(*parts[:n])) for n in range(1, len(parts) + 1))
+        for n in range(1, len(parts) + 1):
+            if is_environment(worktree.joinpath(*parts[:n])):
+                return "/".join(parts[:n])
+        return None
 
-    return {
-        p
-        for code, p in entries
-        if not p.startswith(kraft_roots) and not (code == "??" and installed(p))
-    }
+    changed: set[str] = set()
+    installs: set[str] = set()
+    for code, p in entries:
+        if p.startswith(kraft_roots):
+            continue
+        where = install(p) if code == "??" else None
+        if where is None:
+            changed.add(p)
+        else:
+            installs.add(where)
+    return changed, installs
 
 
 def _scopes(entry: config_mod.RepoEntry) -> list[tuple[str, str | None, str]]:
@@ -219,7 +230,7 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
     ok = not refused
     for rel in refused:
         say(f"  local_files: {rel} not carried: it is not a file, or the repo does not ignore it")
-    baseline = _changed(worktree)
+    baseline, installed = _changed(worktree)
     steps, declared = _steps(entry, say)
     ok = ok and declared
     for n, (label, argv) in enumerate(steps):
@@ -242,7 +253,16 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
                 'run-once flag, or `env: {CI: "true"}` in the repo\'s repos.yaml entry, which '
                 "workers get too"
             )
-        left = sorted(_changed(worktree) - baseline)
+        changed, installs = _changed(worktree)
+        left = sorted(changed - baseline)
+        for where in sorted(installs - installed):
+            # Not a failure: Kraft's own commits leave it out.
+            say(
+                f"    left {where}/, an install the repo does not ignore: Kraft's commits "
+                "leave it out, but an agent's `git add -A` would commit it. Ignore it "
+                "(.gitignore)"
+            )
+        installed |= installs
         if left:
             ok = False
             more = f" and {len(left) - 8} more" if len(left) > 8 else ""

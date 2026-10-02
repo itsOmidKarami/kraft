@@ -173,6 +173,21 @@ def test_an_unignored_install_is_not_a_file_a_commit_would_take(tmp_path):
     assert "left files every work item would commit: stray.txt." in said
 
 
+def test_an_unignored_install_is_named_though_it_does_not_fail(tmp_path):
+    """Kraft's sweep leaves it out, but the agent commits on its own too,
+    and its `git add -A` takes a `.venv` the repo does not ignore: verify
+    hid that. An ignored one is not named."""
+    repo = _repo(tmp_path)
+    setup = "mkdir -p .venv/lib && touch .venv/pyvenv.cfg .venv/lib/site.py"
+    ok, said = _verify(_entry(repo, setup_command=setup, test_command="true"))
+    assert ok, said
+    assert "left .venv/, an install the repo does not ignore" in said
+    assert "would commit it. Ignore it (.gitignore)" in said
+    ignored = _repo(tmp_path, {".gitignore": ".venv/\n"}, name="ignored")
+    ok, said = _verify(_entry(ignored, setup_command=setup, test_command="true"))
+    assert ok and ".venv" not in said.replace(setup, ""), said
+
+
 def test_a_test_writes_no_bytecode_as_a_work_items_test_does_not(tmp_path):
     """Dispatch runs a test with PYTHONDONTWRITEBYTECODE=1; verify did not,
     and reported `__pycache__/` as files every work item would commit."""
