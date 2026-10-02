@@ -364,7 +364,13 @@ def _check_access(path, data, ctx):
         return [_pydantic_issue(path, exc)]
     if why := access_problem(data):
         return [TemplateIssue(path, None, why, loc=("bind",))]
-    return []
+    # `Access` loads an entry that is not a host as written, so nothing else
+    # would say it never matches.
+    return [
+        TemplateIssue(path, None, why, loc=("allowed_hosts", index))
+        for index, entry in enumerate(data.get("allowed_hosts") or [])
+        if (why := config_mod.host_entry_problem(entry))
+    ]
 
 
 def _check_theme(path, data, ctx):

@@ -436,7 +436,7 @@ def _describe_occupant(host: str, port: int) -> str:
     message (spec: "exit with what answered and how to inspect it")."""
     probe = _probe_host(host)
     try:
-        response = httpx.get(f"http://{probe}:{port}/api/health", timeout=1.0)
+        response = httpx.get(f"http://{config.url_host(probe)}:{port}/api/health", timeout=1.0)
         data = response.json()
         return f"a Kraft server (run_dir {data.get('run_dir')}, pid {data.get('pid')})"
     except Exception:
@@ -456,9 +456,10 @@ def _refuse_if_addr_taken(host: str, port: int) -> None:
     except OSError:
         return
     occupant = _describe_occupant(host, port)
+    where = f"{config.url_host(probe)}:{port}"
     raise SystemExit(
         f"kraft: refusing to start - {occupant} is already answering on "
-        f"{probe}:{port}. curl http://{probe}:{port}/api/health to inspect "
+        f"{where}. curl http://{where}/api/health to inspect "
         "it, or `kraft admin stop` if it's yours."
     )
 
@@ -590,7 +591,7 @@ def _serve() -> None:
     os.environ["KRAFT_DAEMON_PID"] = str(os.getpid())
     os.environ["KRAFT_DAEMON_PORT"] = str(port)
     _update_notice()
-    print(f"kraft: http://{host}:{port}")
+    print(f"kraft: http://{config.url_host(host)}:{port}")
     try:
         server = _SignalLoggingServer(
             uvicorn.Config(
@@ -707,7 +708,10 @@ def _start_detached() -> None:
             except Exception:
                 pass
             else:
-                print(f"kraft: http://{host}:{port} (pid {pid}, detached - kraft admin stop)")
+                print(
+                    f"kraft: http://{config.url_host(host)}:{port} "
+                    f"(pid {pid}, detached - kraft admin stop)"
+                )
                 return
         if proc.poll() is not None:
             print(_detached_failure(log_path, start_offset), file=sys.stderr)
