@@ -414,10 +414,8 @@ def test_delete_repo_is_refused_while_a_live_item_uses_it(
     r = client.delete(f"/api/repos?path={path}")
 
     if refused:
-        detail = r.json()["detail"]
-        assert r.status_code == 409 and "1 open item(s); finish or cancel them first" in detail, (
-            r.text
-        )
+        refusal = "1 open item(s); finish or cancel them first"
+        assert r.status_code == 409 and refusal in r.json()["detail"], r.text
         assert (templates_dir / "repos.yaml").read_text() == before
     else:
         assert r.status_code == 204, r.text
