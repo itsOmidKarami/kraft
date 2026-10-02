@@ -18,6 +18,7 @@ import uuid
 
 from kraft import caps, events, executor
 from kraft import harness as _harness
+from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
@@ -245,6 +246,25 @@ async def review(
         )
         return "undecided", hit.reason
     time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
+    item_override = json.loads(row["agent_overrides"]) if row["agent_overrides"] else None
+    # A model stored before the write doors checked model ids is held to the
+    # same rule here, before it reaches the reviewer's command line.
+    refusal = _overrides.stored_model_refusal(work_item_id, item_override)
+    if refusal is not None:
+        await executor.config_error_session(
+            db,
+            run_dirs,
+            dict(
+                session_id=session_id,
+                work_item_id=work_item_id,
+                node_id=node.id,
+                hook_point=auto_review.path,
+                round=0,
+                head_sha=None,
+            ),
+            f"{auto_review.path}: {refusal}\n",
+        )
+        return "undecided", refusal
     try:
         inv = _agent.resolve_agent_task(
             auto_review.task,
@@ -256,7 +276,7 @@ async def review(
             # the per-node `node_overrides` model/effort dial that
             # `dispatch.dispatch_node` also merges (Kraft-df4tc): a node dialed to
             # a different model does not carry that dial into its own gate review.
-            item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
+            item_override=item_override,
             # The reviewer's and the repository's steering, frozen at intake.
             **executor.frozen_steering(row),
             # The item's own repo as recorded at intake (Kraft-jzdyp): a gate

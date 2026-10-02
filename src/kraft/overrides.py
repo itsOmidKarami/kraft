@@ -39,6 +39,31 @@ def model_id_problem(value: object) -> str | None:
     return None
 
 
+def stored_model_refusal(
+    work_item_id: str, item: dict | None, node: dict | None = None, node_id: str | None = None
+) -> str | None:
+    """Why a stored override's model may not reach an agent's command line,
+    or None. The write doors refuse a model that is no model id, but an
+    override stored before they did (1.4 took any text) never met that check,
+    so a launch holds it to the same rule. A node's field wins over the
+    item's, as at launch, so the one that would be used is the one named."""
+    for key in ("model", "escalate_model"):
+        own = node is not None and node.get(key) is not None
+        why = model_id_problem((node if own else item or {}).get(key))
+        if why is not None:
+            clear = (
+                f"kraft item set-node-override {work_item_id} --node {node_id} --clear"
+                if own
+                else f"kraft item set-overrides {work_item_id} --clear"
+            )
+            where = f"node {node_id}'s" if own else "the item's"
+            return (
+                f"{where} stored {key} override {why}. Set a valid one, or clear it "
+                f"with `{clear}`, then retry"
+            )
+    return None
+
+
 class _ModelEffortOverride(BaseModel):
     """`None` means an explicit reset for the model fields: callers dump with
     `exclude_unset=True`, so an override that was not supplied is absent."""

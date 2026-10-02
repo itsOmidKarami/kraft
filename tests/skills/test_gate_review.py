@@ -156,6 +156,36 @@ async def test_item_override_reaches_the_gate_review_dispatch(monkeypatch, datab
     assert seen["kwargs"]["effort"] == "low"
 
 
+async def test_an_item_model_stored_before_model_ids_were_checked_never_reaches_the_reviewer(
+    monkeypatch, database, run_dirs
+):
+    """1.4 stored any text as the item's model (`--model "sonnet 4"`). The
+    write doors now refuse it; a stored one is refused at launch, and the
+    gate names why no review ran instead of handing it to the agent."""
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+    await _seed(database, run_dirs, "w1")
+    await database.write(
+        lambda c: store.set_agent_overrides(c, "w1", json.dumps({"model": "sonnet 4"}))
+    )
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    verdict, why = await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert verdict == "undecided"
+    assert "'sonnet 4' is not a model id" in why
+    assert "kraft item set-overrides w1 --clear" in why
+    assert seen == {}
+
+
 async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database, run_dirs):
     """Kraft-rki: a repo's `sandbox:` reaches the reviewer's `run_agent_task`,
     through `dispatch.item_sandbox` (Ruling 189), or it silently does nothing
