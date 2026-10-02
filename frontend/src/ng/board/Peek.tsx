@@ -38,14 +38,15 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
   budget: boolean;
   onBudget: (on: boolean) => void;
   offline: boolean;
-  size: ReturnType<typeof useResizable> & { open: boolean; onOpen: (open: boolean) => void };
+  size: ReturnType<typeof useResizable>;
+  /** The Board crumb, Escape and the collapse button close it: on the board the peek has no rail. */
   onClose: () => void;
   onRepo: (repo: string) => void;
 }) {
   const loaded = useItem(id);
   const navigate = useNavigate();
   const open = () => navigate(`/work-items/${encodeURIComponent(id)}`);
-  const common = { id: "board-peek", open: size.open, size, onCollapse: () => size.onOpen(false), onExpand: () => size.onOpen(true) };
+  const common = { id: "board-peek", open: true, size, onCollapse: onClose, onExpand: () => {} };
   if (loaded.state !== "ready")
     return (
       <Inspector {...common} crumbs={[{ label: "Board", onClick: onClose }]} icon="workflow" title={shortId(id)}>

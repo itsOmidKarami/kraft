@@ -13,9 +13,8 @@ const Where = () => <span data-testid="where">{useLocation().pathname + useLocat
 function Harness({ start = "overview", budget = false }: { start?: PeekTab; budget?: boolean }) {
   const [tab, setTab] = useState<PeekTab>(start);
   const [b, setB] = useState(budget);
-  const [open, setOpen] = useState(true);
   const size = useResizable("board", 1400);
-  return <Peek id="w1" tab={tab} onTab={setTab} budget={b} onBudget={setB} offline={false} size={{ ...size, open, onOpen: setOpen }} onClose={() => {}} onRepo={() => {}} />;
+  return <Peek id="w1" tab={tab} onTab={setTab} budget={b} onBudget={setB} offline={false} size={size} onClose={() => {}} onRepo={() => {}} />;
 }
 
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;

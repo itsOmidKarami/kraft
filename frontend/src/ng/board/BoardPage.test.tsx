@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -238,18 +238,62 @@ describe("BoardPage", () => {
     expect(screen.getByRole("checkbox", { name: "Select Item d1" })).not.toBeChecked();
   });
 
-  it("docks the peek for a selected row and remembers its width under kraft.ng.pane.board", async () => {
+  it("lays the peek over the list, which keeps its width and its rows' tick strips, and remembers the peek's width under kraft.ng.pane.board", async () => {
     put(item("r1", "running"));
     stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
     localStorage.removeItem("kraft.ng.pane.board");
-    board("/?sel=r1");
+    board();
+    await screen.findByRole("button", { name: /Item r1/ });
+    const list = document.querySelector<HTMLElement>(".board-list")!;
+    const before = list.getAttribute("style");
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
     const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
-    // Beside the open peek the rows drop their tick strip first.
-    expect(document.querySelectorAll(".board-row .ticks")).toHaveLength(0);
+    expect(list.getAttribute("style")).toBe(before);
+    expect(document.querySelectorAll(".board-row .ticks")).toHaveLength(1);
     const handle = within(pane).getByRole("separator", { name: "Resize pane" });
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
     // jsdom has no layout, so the width sits at the 300px floor; the key is what this pins.
     expect(localStorage.getItem("kraft.ng.pane.board")).toBe(handle.getAttribute("aria-valuenow"));
+  });
+
+  it("closes the peek on a press anywhere outside it, the header and sidebar included, and not on a press inside it or on a row", async () => {
+    put(item("r1", "running"), item("r2", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r2": [200, item("r2", "running")], "GET /work-items/r1/events": [200, []], "GET /work-items/r2/events": [200, []] });
+    board("/?sel=r1");
+    const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    fireEvent.pointerDown(within(pane).getByRole("tab", { name: "Activity" }));
+    expect(where()).toBe("/?sel=r1");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Item r2" }));
+    expect(where()).toBe("/?sel=r1");
+    await userEvent.click(screen.getByRole("button", { name: /Item r2/ }));
+    expect(where()).toBe("/?sel=r2");
+    fireEvent.pointerDown(document.querySelector(".ng-header")!);
+    expect(where()).toBe("/");
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
+    expect(where()).toBe("/?sel=r1");
+    fireEvent.pointerDown(screen.getByRole("complementary", { name: "Sidebar" }));
+    expect(where()).toBe("/");
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
+    fireEvent.pointerDown(document.querySelector(".board-list")!);
+    expect(where()).toBe("/");
+  });
+
+  it("closes the peek completely from its collapse button and from Escape inside it, leaving no rail, focus back on the row", async () => {
+    put(item("r1", "running"));
+    stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });
+    board("/?sel=r1");
+    const pane = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    await userEvent.click(within(pane).getByRole("button", { name: "Collapse pane" }));
+    expect(where()).toBe("/");
+    expect(screen.queryByRole("complementary", { name: /pane/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Item r1/ })).toHaveFocus());
+    await userEvent.click(screen.getByRole("button", { name: /Item r1/ }));
+    const again = await screen.findByRole("complementary", { name: "kraft-r1 pane" });
+    within(again).getByRole("tab", { name: "Overview" }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toBe("/");
+    expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
   });
 
   it("opens a budget stop's peek on Overview, whose Raise cap opens Config with the budget editor", async () => {
