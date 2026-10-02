@@ -37,7 +37,7 @@ from pathlib import Path
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import detect
-from kraft.worker.env import worker_env
+from kraft.worker.env import TEST_ENV, worker_env
 
 #: Lines of a failed command's output shown; the rest is in the log it names.
 _TAIL = 20
@@ -95,10 +95,15 @@ def _tail(log: Path) -> str:
     return "\n".join(f"    {line}" for line in lines[-_TAIL:])
 
 
-def _changed(worktree: Path) -> set[str]:
-    """What `git add -A` would stage: untracked files git does not ignore,
-    and tracked files changed. Kraft's own roots are left out, as the
-    worker's commits leave them out."""
+def _changed(worktree: Path) -> tuple[set[str], set[str]]:
+    """(what `git add -A` would stage, the installs left out of it). The
+    first: untracked files git does not ignore, and tracked files changed,
+    less Kraft's own roots and an untracked virtualenv or `node_modules`,
+    which Kraft's sweep leaves out (`forge.git.work_product_pathspec`). The
+    second: those installs, by directory. The agent commits on its own too,
+    and a `git add -A` of its takes one the repo does not ignore."""
+    from kraft.adapters.forge.git import is_environment
+
     out = subprocess.run(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
         cwd=worktree,
@@ -106,9 +111,27 @@ def _changed(worktree: Path) -> set[str]:
         text=True,
         check=False,
     ).stdout
-    paths = {entry[3:] for entry in out.split("\0") if len(entry) > 3}
+    entries = [(entry[:2], entry[3:]) for entry in out.split("\0") if len(entry) > 3]
     kraft_roots = tuple(f"{r}/" for r in config_mod.KRAFT_ROOTS)
-    return {p for p in paths if not p.startswith(kraft_roots)}
+
+    def install(path: str) -> str | None:
+        parts = path.split("/")[:-1]
+        for n in range(1, len(parts) + 1):
+            if is_environment(worktree.joinpath(*parts[:n])):
+                return "/".join(parts[:n])
+        return None
+
+    changed: set[str] = set()
+    installs: set[str] = set()
+    for code, p in entries:
+        if p.startswith(kraft_roots):
+            continue
+        where = install(p) if code == "??" else None
+        if where is None:
+            changed.add(p)
+        else:
+            installs.add(where)
+    return changed, installs
 
 
 def _scopes(entry: config_mod.RepoEntry) -> list[tuple[str, str | None, str]]:
@@ -207,14 +230,17 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
     ok = not refused
     for rel in refused:
         say(f"  local_files: {rel} not carried: it is not a file, or the repo does not ignore it")
-    baseline = _changed(worktree)
+    baseline, installed = _changed(worktree)
     steps, declared = _steps(entry, say)
     ok = ok and declared
     for n, (label, argv) in enumerate(steps):
         shown = argv if isinstance(argv, str) else shlex.join(argv)
         say(f"  {label}: {shown} ...")
         log = logs / f"{n:02d}.log"
-        outcome, took = _run(argv, worktree, env, log, timeout_minutes * 60)
+        # Dispatch runs an area's setup and a test with `TEST_ENV` on top, so
+        # the bytecode a Python test would write is no file a work item leaves.
+        step_env = env if label == "setup" else {**env, **TEST_ENV}
+        outcome, took = _run(argv, worktree, step_env, log, timeout_minutes * 60)
         say(f"    {outcome if outcome == 'passed' else outcome.upper()} in {took:.1f}s")
         if outcome != "passed":
             ok = False
@@ -227,7 +253,16 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
                 'run-once flag, or `env: {CI: "true"}` in the repo\'s repos.yaml entry, which '
                 "workers get too"
             )
-        left = sorted(_changed(worktree) - baseline)
+        changed, installs = _changed(worktree)
+        left = sorted(changed - baseline)
+        for where in sorted(installs - installed):
+            # Not a failure: Kraft's own commits leave it out.
+            say(
+                f"    left {where}/, an install the repo does not ignore: Kraft's commits "
+                "leave it out, but an agent's `git add -A` would commit it. Ignore it "
+                "(.gitignore)"
+            )
+        installed |= installs
         if left:
             ok = False
             more = f" and {len(left) - 8} more" if len(left) > 8 else ""

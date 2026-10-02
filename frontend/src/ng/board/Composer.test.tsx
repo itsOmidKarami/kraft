@@ -86,6 +86,13 @@ describe("Composer", () => {
     window.removeEventListener("kraft:toast", hear);
   });
 
+  it("says before filing that an item on a repo with no setup command stops before its first task", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/mono", default_chain_template: "default", enabled: true, test_command: "make test", test_scopes: null, setup_command: null }] as never });
+    mount();
+    await settle();
+    expect(screen.getByText(/mono declares no setup command, so an item stops before its first task\./)).toBeInTheDocument();
+  });
+
   it("with no enabled repo, says where to get one and creates nothing, rather than sending an empty repo", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/notests", default_chain_template: "default", enabled: false }] as never });
     const { calls } = mount();

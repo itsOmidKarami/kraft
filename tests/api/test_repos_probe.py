@@ -26,6 +26,7 @@ def test_add_repo_tells_the_candidates_and_does_not_store_them(tmp_path, client,
     repo = make_repo(tmp_path)
     (repo / "Makefile").write_text("test:\n\tctest\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
     assert body["test_command"] == "make test"
@@ -269,7 +270,11 @@ def _workspace_with_tested_submodule(tmp_path):
     files are committed to the submodule's origin and fetched: the probe
     reads origin's branch, as a work item's worktree is cut from it."""
     root, sub = make_repo_with_submodule(tmp_path)
-    for rel, text in {"api/go.mod": "module a\n", "web/package.json": JEST}.items():
+    for rel, text in {
+        "api/go.mod": "module a\n",
+        "api/a_test.go": "",
+        "web/package.json": JEST,
+    }.items():
         (sub / rel).parent.mkdir(parents=True, exist_ok=True)
         (sub / rel).write_text(text)
     commit_all(sub)

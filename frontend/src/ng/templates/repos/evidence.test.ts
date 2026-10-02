@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProbeCandidate } from "../../../types/settings";
-import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, testsCell, testsTitle, withSource } from "./evidence";
+import { chosenSource, missingLine, others, readFrom, setupLine, stopLine, testsCell, testsLine, testsTitle, withSource } from "./evidence";
 
 const c = (over: Partial<ProbeCandidate>): ProbeCandidate => ({
   dir: "", role: "test", command: "just test", tier: "runner", source: "justfile recipe `test`", marker: "justfile",
@@ -41,7 +41,19 @@ describe("probe evidence", () => {
     expect(setupLine({ setup_command: null, candidates: [bootstrap], missing_setup: ["src"] }))
       .toBe("make bootstrap found, but src/ has nothing to prepare it");
     expect(setupLine({ setup_command: null, candidates: [], missing_setup: ["."] })).toBe("none found");
+    // Each from its own directory: `npm ci && npm ci found` read like a command that fails at the root.
+    const web = c({ dir: "web", role: "setup", command: "npm ci" });
+    expect(setupLine({ setup_command: null, candidates: [bootstrap, web], missing_setup: ["."] }))
+      .toBe("make bootstrap && (cd web && npm ci) found, but the root has nothing to prepare it");
     expect(setupLine({ setup_command: "", candidates: [] })).toBe("none needed");
+  });
+
+  it("says a monorepo has no tests at its root rather than heading it with its first scope", () => {
+    const scopes = [{ paths: ["backend/**"], command: "sh -c 'cd backend && uv run pytest'" }, { paths: ["web/**"], command: "sh -c 'cd web && npm test'" }];
+    const backend = c({ dir: "backend", role: "test", command: "uv run pytest" });
+    expect(testsLine({ test_command: scopes[0].command, test_scopes: scopes, candidates: [backend] })).toBe("none at the root: each scope below has its own");
+    expect(testsLine({ test_command: "make test", test_scopes: null, candidates: [c({ command: "make test" })] })).toBe("make test — from justfile recipe `test`");
+    expect(testsLine({ test_command: null, stopped: [{ dir: ".", reason: "r", detector: "pyproject" }] })).toBe("none proposed");
   });
 
   it("says which programs a work item would fail on, by directory", () => {
@@ -66,7 +78,9 @@ describe("probe evidence", () => {
   it("says which commit it read, so an edit not pushed there is not a surprise", () => {
     expect(readFrom("refs/remotes/origin/main")).toBe("origin/main, where work items start: commits not pushed there are not read");
     expect(readFrom("HEAD")).toMatch(/^this checkout's HEAD/);
-    expect(readFrom(null)).toBeNull();
+    // null is a repo with no commit, which cannot be connected yet; no field says nothing.
+    expect(readFrom(null)).toMatch(/the repo has no commit yet/);
+    expect(readFrom(undefined)).toBeNull();
   });
 
   it("has nothing to say about a probe from a server that sends no candidates", () => {

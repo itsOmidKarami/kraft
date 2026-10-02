@@ -259,10 +259,16 @@ worktree; `--test-command`, `--setup-command` and `--no-tests` replace it; in a
 terminal, connect asks which candidate to use. `kraft admin doctor` reports any
 connected repo still missing a `setup_command`.
 
+A repo with no commit yet is refused: a work item's branch starts from a
+commit, and the proposal would be read from files the branch does not have.
+Commit them, then connect it.
+
 Some repos get no proposal, on purpose. A `pyproject.toml` declaring a project,
 with no lockfile beside it (`uv.lock`, `poetry.lock`, `pdm.lock`, a Pipfile),
 gets neither command. `uv sync` and `uv run` both write a `uv.lock` when there
-is none, and the worker would commit it on the item's branch. Kraft does not
+is none, and the worker would commit it on the item's branch. Connect tells a
+Poetry or PDM project to commit its own lock (`poetry lock`, `pdm lock`), and
+any other to set its test command, or commit a `uv.lock`. Kraft does not
 fall back to a `go.mod` or `package.json` beside it either. A lockfile-based
 install still stands (`npm ci` beside a `package-lock.json`), and so does a
 task runner's `test` recipe in that directory, which comes first.
@@ -281,6 +287,13 @@ own, and the root scope, running that command, covers it.
 Connect says when it found no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` (the **No setup needed**
 checkbox in Templates › Repos) if the repo needs no preparation. Set `test_command`, then `enabled: true`.
+Or fix the cause, such as committing the missing lockfile, and run
+`kraft repo connect` again: on a connected repo it fills in only what the entry
+left undecided, and enables a repo that was disabled for want of a test command.
+
+`--no-tests` saves the repo enabled with `test_command: ""`. When nothing in
+the repo needs preparing either (a docs repo), it also saves `setup_command: ""`;
+a setup it found still has to be confirmed or replaced.
 
 ## Repository steering
 

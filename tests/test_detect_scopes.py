@@ -105,7 +105,12 @@ def test_a_workspace_root_covers_its_members(tmp_path):
 
 
 def test_a_project_two_levels_down_is_found_and_three_is_not(tmp_path):
-    files = {"apps/web/go.mod": "module w\n", "a/b/c/go.mod": "module c\n"}
+    files = {
+        "apps/web/go.mod": "module w\n",
+        "apps/web/w_test.go": "",
+        "a/b/c/go.mod": "module c\n",
+        "a/b/c/c_test.go": "",
+    }
     p = _propose(_repo(tmp_path, files))
     assert [s["paths"] for s in p.test_scopes] == [["apps/web/**"]]
 
@@ -114,8 +119,11 @@ def test_ignored_untracked_and_conventional_non_project_directories_are_not_scop
     files = {
         ".gitignore": "vendored/\n",
         "vendored/go.mod": "module v\n",
+        "vendored/v_test.go": "",
         "examples/demo/go.mod": "module d\n",
+        "examples/demo/d_test.go": "",
         ".hidden/go.mod": "module h\n",
+        ".hidden/h_test.go": "",
         "deps/hiredis/Makefile": "test:\n\t./run\n",  # redis vendors its dependencies here
     }
     assert _propose(_repo(tmp_path, files)).test_scopes == []
@@ -128,10 +136,13 @@ def test_a_non_project_directory_is_skipped_whatever_its_case(tmp_path):
     scopes of their own."""
     files = {
         "go.mod": "module x\n",
+        "x_test.go": "",
         "benchmarks/routers-deno/deno.json": "{}",
         "Benchmarks/x/go.mod": "module b\n",
+        "Benchmarks/x/b_test.go": "",
         "support/build.gradle": "",
         "Tests/go.mod": "module t\n",
+        "Tests/t_test.go": "",
         "Sources/CMakeLists.txt": "add_library(x x.c)\n",
         "docs/Makefile": "check:\n\tsphinx-build -W . _build\n",  # django's docs
     }
@@ -148,6 +159,7 @@ def test_a_ci_working_directory_is_held_to_the_scope_rules(tmp_path):
     step = "      - run: npm test\n        working-directory: src/a/test/e2e\n"
     files = {
         "go.mod": "module x\n",
+        "x_test.go": "",
         "src/a/test/e2e/x.js": "",
         ".github/workflows/ci.yml": f"jobs:\n  t:\n    steps:\n{step}",
     }
@@ -206,13 +218,18 @@ def test_a_root_project_with_its_test_found_keeps_the_scopes_below_it(tmp_path):
 
 def test_a_root_with_no_project_of_its_own_is_tested_by_its_scopes(tmp_path):
     """A monorepo of projects side by side: nothing at the root to test."""
-    files = {"README.md": "", "api/go.mod": "module a\n", "web/package.json": JEST}
+    files = {
+        "README.md": "",
+        "api/go.mod": "module a\n",
+        "api/a_test.go": "",
+        "web/package.json": JEST,
+    }
     p = _propose(_repo(tmp_path, files))
     assert ([s["paths"] for s in p.test_scopes], p.stopped) == ([["api/**"], ["web/**"]], [])
 
 
 def test_a_directory_with_tests_and_no_setup_leaves_setup_undecided(tmp_path):
-    files = {"go.mod": "module x\n", "tools/Makefile": "test:\n\t./t\n"}
+    files = {"go.mod": "module x\n", "x_test.go": "", "tools/Makefile": "test:\n\t./t\n"}
     p = _propose(_repo(tmp_path, files))
     assert p.setup_command is None
     assert p.missing_setup == ["tools"]
@@ -279,7 +296,7 @@ _NESTED_PROJECTS = {
         "cd backend && uv run pytest",
     ),
     "cargo": ({"crate/Cargo.toml": ""}, "cd crate && cargo test"),
-    "go": ({"svc/go.mod": "module svc\n"}, "cd svc && go test ./..."),
+    "go": ({"svc/go.mod": "module svc\n", "svc/svc_test.go": ""}, "cd svc && go test ./..."),
     "just": ({"tools/Justfile": "test:\n    true\n"}, "cd tools && just test"),
 }
 
@@ -309,6 +326,6 @@ def test_a_program_this_machine_lacks_is_named_before_an_item_fails_on_it(tmp_pa
         "    test: [{run: \"sh -c 'A=1 zz-not-installed test && go vet'\"}]\n"
         "    setup: [{run: ./zz-setup}]\n"
     )
-    files = {"go.mod": "module x\n", "rt/zz.pkg": ""}
+    files = {"go.mod": "module x\n", "x_test.go": "", "rt/zz.pkg": ""}
     p = _propose(_repo(tmp_path / "repo", files), templates)
     assert p.missing_tools == [{"dir": "rt", "tool": "zz-not-installed"}]

@@ -194,6 +194,24 @@ def test_the_bead_strip_searches_connected_repos_when_no_override(client, tmp_pa
         asyncio.run(beads.intake(title, description="x", cwd=str(repo)))
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
     for repo in (one, two):
+        # A repo connects once it has a commit to branch from.
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@x",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+            check=True,
+        )
         assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
     hits = client.get("/api/beads/search", params={"q": "caulk the", "limit": 10}).json()["beads"]
     assert {h["title"] for h in hits} == {"caulk the alpha transom", "caulk the beta transom"}

@@ -36,6 +36,16 @@ export function sayIfFiledPaused(autostart: boolean, body: Created): void {
   showToast(`Filed paused: ${s ? `${s.busy} of ${s.limit} slots are` : "every slot is"} busy. Start it when one frees.`, 8000);
 }
 
+/** What will stop an item filed on `repo`, said before it is filed (the server's
+ *  `repo_warning` says it after): no setup command declared, or no test command. */
+export function repoStops(repo: Repo): string | null {
+  const stops = [
+    ...(repo.setup_command === null ? ["declares no setup command, so an item stops before its first task"] : []),
+    ...(repo.test_command === null && !repo.test_scopes?.length ? ["has no test command, so an item runs its agent tasks, then stops at verification"] : []),
+  ];
+  return stops.length ? `${repoName(repo.path)} ${stops.join("; and it ")}.` : null;
+}
+
 const looksLikePath = (s: string) => /[/.]/.test(s) && !/\s/.test(s.trim());
 
 /** The composer at the top of the board (Decisions §7b, AreaBoard 37–62):
@@ -155,6 +165,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         <Ticks className="composer-ticks" ticks={(full.length ? full : run?.nodes ?? []).map((n) => ({ gate: n.kind === "gate", state: off.has(n.id) ? "todo" : "run" }))} />
       </div>
       {preview && "error" in preview && <p className="composer-indent item-error" role="alert">{preview.error}</p>}
+      {repo && repoStops(repo) && <p className="composer-indent composer-note">{repoStops(repo)} Set it in <Link to="/templates/repos" className="item-link">Templates › Repos</Link> before you start it.</p>}
       <div className="composer-foot">
         {ask ? (
           <>

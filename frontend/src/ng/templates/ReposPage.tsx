@@ -116,6 +116,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                     <ConnectForm
                       draft={draft}
                       known={new Set([...repos, ...data.detected].map((x) => x.path))}
+                      entries={Object.fromEntries([...repos, ...data.detected].map((x) => [x.path, x.entry]))}
                       chains={chains}
                       onDone={(path) => {
                         setConnecting(false);

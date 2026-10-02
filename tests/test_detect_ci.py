@@ -25,7 +25,7 @@ def test_a_toolchains_test_beats_what_ci_runs_and_ci_fills_in_without_one(tmp_pa
     toolchain's command is the repo's whole suite. jest's CI ran `yarn
     typecheck:tests`."""
     steps = "      - run: yarn typecheck:tests\n      - run: go test -race ./...\n"
-    files = {"go.mod": "module x\n", **_workflow(steps)}
+    files = {"go.mod": "module x\n", "x_test.go": "", **_workflow(steps)}
     p = _propose(_repo(tmp_path, files))
     assert p.test_command == "go test ./..."
     alone = _propose(_repo(tmp_path / "alone", _workflow(steps)))

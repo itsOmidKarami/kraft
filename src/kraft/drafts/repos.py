@@ -10,6 +10,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from kraft import config as config_mod
+from kraft import detect
 from kraft.api import deps
 from kraft.config import RepoEntry
 from kraft.drafts import authored, config, store
@@ -47,6 +48,10 @@ def _entry(d, path: str) -> dict:
 def add_repo(d, path: str, fields: dict | None = None) -> None:
     if any(isinstance(e, dict) and e.get("path") == path for e in _repos(d, write=False)):
         raise OpError(f"{path} is already in the draft")
+    # Refused as `POST /repos` refuses it: its items' branches would be empty orphans.
+    root = config_mod.normalized_repo_root(Path(path)) if Path(path).is_dir() else None
+    if root is not None and detect.source_ref(root) is None:
+        raise OpError(detect.no_commit(path))
     # Not probed: a path that is no git repository is a problem the draft shows.
     _repos(d).append(
         {
