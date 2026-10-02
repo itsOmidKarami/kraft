@@ -35,6 +35,11 @@ ui:
 title: The board
 description: Work items grouped by what needs you, what is running, and what is done — redrawn live as agents work.
 orientation: horizontal
+links:
+  - label: Tour the web UI
+    to: /guides/the-board
+    color: neutral
+    variant: outline
 ---
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](/assets/board.png)
 ::
@@ -45,6 +50,11 @@ title: A gate stops the chain where a human decides
 description: Read what the agent wrote, then approve, or reject with a note that re-runs the node that wrote it.
 orientation: horizontal
 reverse: true
+links:
+  - label: The review page
+    to: /guides/the-board#the-review-page
+    color: neutral
+    variant: outline
 ---
 ![A spec an agent wrote, rendered on the item's review page and waiting for your approval, with Request changes and Approve](/assets/gate.png)
 ::
@@ -66,6 +76,24 @@ orientation: horizontal
 reverse: true
 ---
 ![The Analytics view over the last 8 weeks: completed count, median lead time and cost; merged items per week; the top of the cost-by-node table](/assets/analytics.png)
+::
+
+::u-page-section
+---
+title: On your phone
+description: The same board at the same address, laid out for a phone. Approve or reject a gate from the card itself, and answer a question or retry a stopped item from its page.
+orientation: horizontal
+links:
+  - label: The phone layout
+    to: /guides/the-board#on-a-phone
+    color: neutral
+    variant: outline
+  - label: Reach it from your phone
+    to: /guides/remote-access
+    color: neutral
+    variant: outline
+---
+![The board at a 390px phone viewport: work items under Needs you with Approve and Reject buttons on the card, and a bottom bar with Board, Search, Analytics and More](/assets/mobile.png){width="300"}
 ::
 
 ::u-page-section
