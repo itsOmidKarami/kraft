@@ -744,7 +744,13 @@ def _detached_failure(log_path: Path, start_offset: int, tail_chars: int = 2000)
     return f"{head}\n{output[-tail_chars:]}\nkraft: the whole log is {log_path}"
 
 
-def _confirm_running_agents(ns: argparse.Namespace, doing: str, *, ask: bool) -> None:
+def _confirm_running_agents(
+    ns: argparse.Namespace,
+    doing: str,
+    *,
+    ask: bool,
+    declined: str = "nothing was restarted",
+) -> None:
     """Name the active items before a stop ends their agents, and, with `ask`,
     let a person at a terminal back out.
 
@@ -752,7 +758,9 @@ def _confirm_running_agents(ns: argparse.Namespace, doing: str, *, ask: bool) ->
     process group on the way out, so the next start finds the session dead
     and stops the item (`reattach`). Without a terminal, or with `--yes`,
     this only warns: a script must not hang on a question. A server that does
-    not answer has nothing to list."""
+    not answer has nothing to list.
+
+    Saying no exits 1, so `kraft admin restart && ...` does not carry on."""
     try:
         items = asyncio.run(client.list_work_items("active"))
     except Exception:
@@ -776,7 +784,7 @@ def _confirm_running_agents(ns: argparse.Namespace, doing: str, *, ask: bool) ->
     if not ask or getattr(ns, "yes", False) or not sys.stdin.isatty():
         return
     if input("Go on? [y/N] ").strip().lower() not in ("y", "yes"):
-        print("kraft: nothing stopped", file=sys.stderr)
+        print(f"kraft: {declined}", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -1044,7 +1052,9 @@ def _cmd_update(ns: argparse.Namespace) -> None:
         return
     if ns.restart:
         # Before installing, so answering no leaves nothing half done.
-        _confirm_running_agents(ns, "restarting", ask=True)
+        _confirm_running_agents(
+            ns, "restarting", ask=True, declined="nothing was installed or restarted"
+        )
     print(f"kraft {here} -> {release.tag}")
     code = update.perform(release)
     if code != 0:

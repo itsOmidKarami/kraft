@@ -76,9 +76,12 @@ def test_restart_lists_active_items_and_asks_in_a_terminal(
     if goes_on:
         cli.main(["admin", "restart", *argv])
     else:
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as stopped:
             cli.main(["admin", "restart", *argv])
+        # Non-zero, so `kraft admin restart && ...` does not carry on.
+        assert stopped.value.code == 1
     err = capsys.readouterr().err
+    assert ("nothing was restarted" in err) is not goes_on
     assert "restarting the server ends the agent of any active item (1)" in err
     assert "a1b2  implementation  Add the parser" in err
     assert bool(restarted) is goes_on
@@ -119,7 +122,7 @@ def test_stop_lists_active_items_but_never_asks(board, terminal, tmp_path, monke
 
 @pytest.mark.parametrize(("answer", "installs"), [("n", False), ("y", True)], ids=["no", "yes"])
 def test_update_restart_asks_before_installing(
-    board, terminal, restarted, tmp_path, monkeypatch, answer, installs
+    board, terminal, restarted, tmp_path, monkeypatch, capsys, answer, installs
 ):
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
     release = SimpleNamespace(tag="v9.9.9")
@@ -133,8 +136,10 @@ def test_update_restart_asks_before_installing(
     if installs:
         cli.main(["admin", "update", "--restart"])
     else:
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as stopped:
             cli.main(["admin", "update", "--restart"])
+        assert stopped.value.code == 1
+        assert "nothing was installed or restarted" in capsys.readouterr().err
     assert terminal.asked == ["Go on? [y/N] "]
     assert bool(performed) is installs
     assert bool(restarted) is installs
