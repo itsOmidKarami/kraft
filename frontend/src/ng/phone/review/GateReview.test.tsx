@@ -134,7 +134,7 @@ describe("Request changes (F.3)", () => {
     const calls = mount(gateItem(), "/work-items/w1/review", { "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "request_changes", gate: "plan_approval" }] });
     await userEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(where()).toBe("/work-items/w1/review?compose=reject");
-    expect(screen.getByText("Reject target: plan")).toBeInTheDocument();
+    expect(screen.getByText("Goes back to: plan")).toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Request changes" });
     expect(send).toBeDisabled();
     await userEvent.type(screen.getByRole("textbox", { name: "Your note" }), "bound the cache");

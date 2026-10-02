@@ -17,6 +17,8 @@ describe("reasonTail", () => {
       [row("needs_you", { stop: stop("cap", { reason: "Running time hit its 8h cap" }) }), "Running time hit its 8h cap"],
       [row("needs_you", { stop: stop("conflict") }), "waiting for you at verification"],
       [row("failed", { stop: stop("failed", { node: "merge_request" }) }), "failed at merge request"],
+      [row("needs_you", { stop: stop("gate"), pending_gate: "spec-approval" }), "approve spec"],
+      [row("failed", { stop: stop("failed", { node: "post-merge-ci2" }) }), "failed at post merge ci2"],
       [row("paused"), "paused at verification"],
       [row("paused", { current_node_id: "draft_merge_request" }), "paused at draft merge request"],
       [row("paused", { current_node_id: null }), "created paused"],
