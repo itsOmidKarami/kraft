@@ -81,10 +81,21 @@ export function AccessScreen() {
     });
 
   // The server refuses a bind off loopback with no password, so Local network asks for one first and sends both in one save.
+  // And, as the desktop's Set and switch does, the host the phone will use
+  // when the list is empty: asked for with a password already set, and with
+  // none, this machine's LAN address saved with the password (one field per
+  // sheet), named in the sheet and changed under Allowed hosts.
+  const noHosts = access.allowed_hosts.length === 0;
+  const withHost = (h: string | null) => {
+    const host = h?.trim().replace(/,$/, "");
+    return noHosts && host ? { allowed_hosts: [host] } : {};
+  };
   const toLan = () =>
     access.password_set
-      ? void put("bind", { bind: "0.0.0.0" })
-      : edit({ kind: "text", title: "Set a password", help: "On the network, Kraft asks every browser for a password, this machine's too. Saving it switches to the local network.", value: "", secret: true, set: async (v) => (v ? put("bind", { bind: "0.0.0.0", password: v }) : "Enter a password.") });
+      ? noHosts
+        ? edit({ kind: "text", title: "Phone's host", help: `The name or address your phone will type: it goes on Allowed hosts, and any other is refused (403).${access.lan_hosts?.length ? ` This machine is ${access.lan_hosts.join(" or ")} on the network.` : ""} Leave it empty to add one later.`, value: suggested ?? "", placeholder: "host or IP", submit: "Switch", set: async (v) => put("bind", { bind: "0.0.0.0", ...withHost(v) }) })
+        : void put("bind", { bind: "0.0.0.0" })
+      : edit({ kind: "text", title: "Set a password", help: `On the network, Kraft asks every browser for a password, this machine's too. Saving it switches to the local network.${noHosts && suggested ? ` ${suggested}, this machine's address, goes on Allowed hosts for the phone; change it there.` : ""}`, value: "", secret: true, set: async (v) => (v ? put("bind", { bind: "0.0.0.0", password: v, ...withHost(suggested) }) : "Enter a password.") });
 
   const revoke = async (s: AuthSession) => {
     const err = await run("sessions", async () => {

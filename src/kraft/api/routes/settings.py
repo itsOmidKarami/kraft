@@ -629,9 +629,11 @@ def _outbound_address() -> str | None:
 
 def lan_hosts() -> list[str]:
     """Names another device might reach this machine by: its LAN address, then
-    its host name. Settings > Access offers them for `allowed_hosts` when it
-    switches to a network bind, so the first phone visit is not a 403. A
-    suggestion only: nothing is saved, and a loopback name is never offered."""
+    its mDNS name. A bare host name is offered as `<name>.local`, the form a
+    phone on the same network can resolve; a dotted one is kept. Settings >
+    Access offers them for `allowed_hosts` when it switches to a network bind,
+    so the first phone visit is not a 403. A suggestion only: nothing is
+    saved, and a loopback name is never offered."""
     out: list[str] = []
     address = _outbound_address()
     try:
@@ -640,6 +642,8 @@ def lan_hosts() -> list[str]:
     except ValueError:
         pass
     name = (socket.gethostname() or "").lower().rstrip(".")
+    if name and name not in config_mod.LOOPBACK and "." not in name:
+        name = f"{name}.local"
     if name and name not in config_mod.LOOPBACK and name not in out:
         out.append(name)
     return out

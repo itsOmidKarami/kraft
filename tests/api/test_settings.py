@@ -166,7 +166,10 @@ def test_access_suggests_this_machines_lan_names_for_allowed_hosts(client, monke
 
     monkeypatch.setattr(settings_routes, "_outbound_address", lambda: "192.0.2.7")
     monkeypatch.setattr(settings_routes.socket, "gethostname", lambda: "MyBox.")
-    assert client.get("/api/access").json()["lan_hosts"] == ["192.0.2.7", "mybox"]
+    # A bare host name is offered as its mDNS form, which a phone can resolve.
+    assert client.get("/api/access").json()["lan_hosts"] == ["192.0.2.7", "mybox.local"]
+    monkeypatch.setattr(settings_routes.socket, "gethostname", lambda: "mybox.example.com")
+    assert client.get("/api/access").json()["lan_hosts"] == ["192.0.2.7", "mybox.example.com"]
     # Off the network, or named localhost: nothing a phone could use is offered.
     monkeypatch.setattr(settings_routes, "_outbound_address", lambda: "127.0.0.1")
     monkeypatch.setattr(settings_routes.socket, "gethostname", lambda: "localhost")

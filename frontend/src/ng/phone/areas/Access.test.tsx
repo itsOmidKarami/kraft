@@ -67,6 +67,24 @@ describe("Access (O.3)", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0" }));
   });
 
+  it("on loopback with a password set and no hosts, Local network asks for the phone's host first, pre-filled with this machine's address", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: true, auth_required: false, allowed_hosts: [], lan_hosts: ["192.168.1.20", "mybox.local"] });
+    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    expect(put).not.toHaveBeenCalled();
+    const box = screen.getByLabelText("Phone's host", { selector: "input" });
+    expect(box).toHaveValue("192.168.1.20");
+    await userEvent.type(box, "{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", allowed_hosts: ["192.168.1.20"] }));
+  });
+
+  it("on loopback with no password and no hosts, saves this machine's address with the password and the bind", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: false, auth_required: false, allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
+    await userEvent.click(await screen.findByRole("switch", { name: /Local network/ }));
+    expect(screen.getByText(/192\.168\.1\.20, this machine's address, goes on Allowed hosts/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Set a password", { selector: "input" }), "hunter2{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", password: "hunter2", allowed_hosts: ["192.168.1.20"] }));
+  });
+
   it("on loopback says the hosts, password and sessions are not used", async () => {
     setup({ bind: "127.0.0.1", auth_required: false });
     expect(await screen.findByRole("region", { name: "Not used on 127.0.0.1" })).toBeInTheDocument();
