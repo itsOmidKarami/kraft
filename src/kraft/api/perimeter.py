@@ -205,16 +205,29 @@ def _is_page_navigation(request: Request) -> bool:
     )
 
 
+def _raw_host(request: Request) -> str:
+    """The `Host` header as the browser sent it, UTF-8 with replacement."""
+    for key, value in request.scope.get("headers", []):
+        if key == b"host":
+            return value.decode("utf-8", "replace")
+    return ""
+
+
 def _unexpected_host_page(request: Request, bound_host: str) -> str:
     """What a browser shows for a name this server does not answer to: the
     name it got and how to allow it, not a bare JSON line. A 1.4 server never
     checked the Host of a plain-http browser, so after an upgrade this is the
     first a LAN user hears of `allowed_hosts`. The Host is the requester's
-    own text, so it is escaped."""
-    raw = request.headers.get("host", "")
+    own text, so it is escaped, after decoding it as UTF-8: Starlette's
+    latin-1 turns a non-ASCII name into mojibake.
+
+    The link back is the bound address, or 127.0.0.1 for a wildcard bind,
+    which listens there too."""
+    raw = _raw_host(request)
     name = html.escape(config_mod.host_name(raw) or raw or "(none)")
     port = getattr(request.app.state, "bound_port", None) or request.url.port or 8765
-    local = f"http://127.0.0.1:{port}/"
+    here = "127.0.0.1" if bound_host in ("0.0.0.0", "::") else bound_host
+    local = html.escape(f"http://{config_mod.url_host(here)}:{port}/")
     if bound_host in config_mod.LOOPBACK:
         how = (
             f"<p>It is bound to {html.escape(bound_host)}, so it answers only at "

@@ -11,6 +11,7 @@ from support.api import _poll_events, _post_default, _set_status
 from support.harness import _git
 
 from kraft.adapters.forge.git import PUSHED_REFS
+from kraft.api.routes import lifecycle
 from kraft.config import git_read
 
 
@@ -141,6 +142,18 @@ def test_a_moved_repository_still_lets_the_worktree_go(client, repo, action):
     assert not worktree.exists()
     # The branch was in the repository, and moved with it.
     assert git_read(moved, "branch", "--list", branch)
+
+
+def test_the_rescue_skips_a_repository_that_is_gone(repo, tmp_path):
+    """The rescue names commits in the item's repository, so with that
+    directory gone there is nothing to name them in, and no directory to run
+    git from: it must not raise out of archive. The worktree here still
+    reads (its git lives elsewhere), so the rescue gets as far as git."""
+    worktree = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "--detach", str(worktree))
+    _git(worktree, "commit", "--allow-empty", "-m", "detached work")
+
+    assert lifecycle._rescue_detached_head(tmp_path / "gone", worktree, "w1") == {}
 
 
 def test_archive_refuses_an_active_item(client, repo):

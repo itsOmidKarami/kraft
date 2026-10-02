@@ -376,6 +376,24 @@ def test_a_loopback_bind_tells_a_browser_where_it_does_answer(client):
     assert page.status_code == 403
     assert "<code>mybox.lan</code>" in page.text
     assert "only at <code>localhost</code> or <code>127.0.0.1</code>" in page.text
+    assert 'href="http://127.0.0.1:' in page.text
+
+
+@pytest.mark.api_client(host="::1")
+def test_the_page_links_back_to_the_address_the_server_is_bound_to(client):
+    """127.0.0.1 is only right for a wildcard bind, which listens there too: a
+    server bound to ::1 does not answer at 127.0.0.1."""
+    page = client.get("/", headers={"host": "mybox.lan:8765", **_NAVIGATION})
+    assert page.status_code == 403
+    assert 'href="http://[::1]:' in page.text
+    assert "127.0.0.1:" not in page.text
+
+
+def test_the_page_shows_a_non_ascii_host_as_the_browser_sent_it(client):
+    """Starlette decodes headers as latin-1, which turns UTF-8 into mojibake."""
+    page = client.get("/", headers={"host": "bücher.lan:8765".encode(), **_NAVIGATION})
+    assert page.status_code == 403
+    assert "<code>bücher.lan</code>" in page.text
 
 
 @pytest.mark.api_client(host="0.0.0.0")

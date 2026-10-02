@@ -7,6 +7,7 @@ The item's own cap, and the stops the route refuses, are in
 from __future__ import annotations
 
 import dataclasses
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -45,6 +46,33 @@ def test_raise_budget_merges_the_policy_budget_and_keeps_every_other_field(
     assert detail["budget_cap"]["key"] == "policy.budget_usd"
     assert detail["budget_cap"]["cap_usd"] == 1.0
     assert _raised(client, wid) == [{"budget_usd": 1.0, "key": "policy.budget_usd"}]
+
+
+def test_a_policy_edit_queued_before_the_raise_survives_it(monkeypatch, client, repo):
+    """The raise merges into the override as it stands when its write runs,
+    not as the route first read it: an edit that lands in between is kept."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    wid = _budget_stopped_item(client, repo, ITEM_WIDE, policy={"budget_usd": 0.05})
+    db = client.app.state.db
+    real = db.write
+
+    async def an_edit_lands_first(fn):
+        monkeypatch.setattr(db, "write", real)
+        edited = json.dumps({"budget_usd": 0.05, "total_time_cap_minutes": 90})
+        await real(
+            lambda c: c.execute(
+                "UPDATE work_items SET policy_override = ? WHERE id = ?", (edited, wid)
+            )
+        )
+        return await real(fn)
+
+    monkeypatch.setattr(db, "write", an_edit_lands_first)
+
+    r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 1.0})
+
+    assert r.status_code == 200, r.text
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert detail["policy_override"] == {"budget_usd": 1.0, "total_time_cap_minutes": 90}
 
 
 @pytest.mark.parametrize(

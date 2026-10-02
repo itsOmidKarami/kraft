@@ -254,8 +254,11 @@ def _rescue_detached_head(repo: Path, worktree: Path, wid: str) -> dict:
 
     A rescue git refuses (a sandboxed item's repository may not have the
     commits at all) returns `worktree_kept` with the reason instead: the
-    worktree is then the only copy, and archive must leave it."""
-    if not worktree.is_dir():
+    worktree is then the only copy, and archive must leave it.
+
+    A repository moved or deleted since has no commits to name here, and no
+    directory to run git in: nothing to rescue."""
+    if not worktree.is_dir() or not repo.is_dir():
         return {}
     if git_read(worktree, "symbolic-ref", "-q", "HEAD", expected_failure=True):
         return {}
@@ -1426,7 +1429,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
             else _NOT_ITEM_CAP.get(scope, "work item was not stopped by a spend cap"),
         )
     write = (
-        _raise_policy_budget(row, body.budget_usd)
+        _raise_policy_budget(wid, body.budget_usd)
         if item_wide
         else (lambda c: store.raise_budget(c, wid, body.budget_usd))
     )
@@ -1446,26 +1449,33 @@ def _usd(value: float | None) -> str:
     return "no cap" if value is None else f"${value:g}"
 
 
-def _raise_policy_budget(row, budget_usd: float | None):
-    """The write that sets the item-wide `budget_usd` in `row`'s own policy
-    override, keeping every other field it sets: `set-policy` and a `PATCH`
-    replace the whole override, so the caller would otherwise have to resend
-    it. 422 when the merged override is refused (a maxima bound, say)."""
-    stored = store.policy_override_of(row)
-    merged = stored.model_dump(exclude_none=True, exclude_defaults=True) if stored else {}
-    merged["budget_usd"] = NO_CAP if budget_usd is None else budget_usd
-    chain = store.materialized_chain_of(row)
-    if chain is None:
-        raise HTTPException(409, "this work item has no chain snapshot to hold a policy override")
-    try:
-        override = chain.with_item_policy(merged).item_policy
-    except PolicyError as exc:
-        raise HTTPException(422, str(exc)) from exc
+def _raise_policy_budget(wid: str, budget_usd: float | None):
+    """The write that sets the item-wide `budget_usd` in the item's own
+    policy override, keeping every other field it sets: `set-policy` and a
+    `PATCH` replace the whole override, so the caller would otherwise have to
+    resend it. 422 when the merged override is refused (a maxima bound, say).
+
+    The override is read inside the write, not from the row the route read
+    first: a `PATCH` of `policy` queued in between would otherwise land and
+    then be overwritten by a merge of the older override."""
 
     def write(c):
-        store.set_policy_override(c, row["id"], override)
+        row = c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+        stored = store.policy_override_of(row)
+        merged = stored.model_dump(exclude_none=True, exclude_defaults=True) if stored else {}
+        merged["budget_usd"] = NO_CAP if budget_usd is None else budget_usd
+        chain = store.materialized_chain_of(row)
+        if chain is None:
+            raise HTTPException(
+                409, "this work item has no chain snapshot to hold a policy override"
+            )
+        try:
+            override = chain.with_item_policy(merged).item_policy
+        except PolicyError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        store.set_policy_override(c, wid, override)
         events.append(
-            c, row["id"], "budget_raised", {"budget_usd": budget_usd, "key": "policy.budget_usd"}
+            c, wid, "budget_raised", {"budget_usd": budget_usd, "key": "policy.budget_usd"}
         )
 
     return write
