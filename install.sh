@@ -11,6 +11,9 @@
 #
 # `uv tool install kraft-sdlc` from PyPI is the other supported door, and needs
 # none of this.
+#
+# No `pipefail`: dash, the sh on Debian and Ubuntu, refuses it and would stop
+# here. Nothing below lets a pipeline's failure through unchecked instead.
 set -eu
 
 # /releases/latest, not /releases: this endpoint already excludes drafts and
@@ -19,11 +22,30 @@ API="https://api.github.com/repos/itsOmidKarami/kraft/releases/latest"
 # The caller's PATH, before this script adds uv's own directory to it.
 user_path=$PATH
 
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+uv_help="install uv yourself (https://docs.astral.sh/uv/getting-started/installation/), then run this again"
 if ! command -v uv >/dev/null 2>&1; then
     echo "installing uv (kraft needs it to fetch a Python 3.12 or newer)..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    # Saved, then run: piped straight into sh, a failed download is an empty
+    # script that sh runs happily, and this one went on to "uv: not found".
+    if ! curl -LsSf https://astral.sh/uv/install.sh > "$tmpdir/uv-install.sh"; then
+        echo "could not download the uv installer from https://astral.sh/uv/install.sh" >&2
+        echo "$uv_help" >&2
+        exit 1
+    fi
+    if ! sh "$tmpdir/uv-install.sh"; then
+        echo "the uv installer failed; $uv_help" >&2
+        exit 1
+    fi
     PATH="$HOME/.local/bin:$PATH"
     export PATH
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "the uv installer ran, but uv is not in $HOME/.local/bin or on your PATH" >&2
+        echo "$uv_help" >&2
+        exit 1
+    fi
 fi
 
 wheel=$(curl -fsSL "$API" | grep -o 'https://[^"]*\.whl' | head -n 1)
@@ -35,8 +57,6 @@ fi
 
 # uv can fetch $wheel itself, but pulling it here keeps one download path and
 # one error message for both this script and `kraft admin update`.
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT
 wheel_file="$tmpdir/$(basename "$wheel")"
 curl -fsSL "$wheel" > "$wheel_file"
 
