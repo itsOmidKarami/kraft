@@ -71,7 +71,7 @@ export function GateReview({ item, gate, doc, files, threads, isViewed, approve,
           </div>
           <FileTree files={files} untracked={[]} notShown={new Set()} threads={threads} selected={null} isViewed={isViewed} onSelect={(f) => onReviewChanges(f)} error={null} />
           <div className="rv-gate-side-foot">
-            <Button variant="primary" onClick={() => onReviewChanges()}>Review Changes</Button>
+            <Button variant="primary" onClick={() => onReviewChanges()}>Review changes</Button>
           </div>
         </aside>
       </div>

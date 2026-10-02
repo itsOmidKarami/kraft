@@ -132,7 +132,7 @@ describe("Approve (F.3)", () => {
 describe("Request changes (F.3)", () => {
   it("opens a composer with the fix target and sends the review with the note", async () => {
     const calls = mount(gateItem(), "/work-items/w1/review", { "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "request_changes", gate: "plan_approval" }] });
-    await userEvent.click(await screen.findByRole("button", { name: "Reject…" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Request changes" }));
     expect(where()).toBe("/work-items/w1/review?compose=reject");
     expect(screen.getByText("Reject target: plan")).toBeInTheDocument();
     const send = screen.getByRole("button", { name: "Request changes" });

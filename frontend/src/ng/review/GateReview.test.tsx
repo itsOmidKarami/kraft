@@ -43,7 +43,7 @@ describe("GateReview", () => {
     expect(p.onRequestChanges).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "cache.py" }));
     expect(p.onReviewChanges).toHaveBeenLastCalledWith("search/cache.py");
-    fireEvent.click(screen.getByRole("button", { name: "Review Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
     expect(p.onReviewChanges).toHaveBeenLastCalledWith();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(p.onClose).toHaveBeenCalled();

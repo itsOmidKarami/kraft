@@ -150,7 +150,7 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
       </div>
       {block && <p className="ph-block-reason" role="status">{block}</p>}
       <ActionBar>
-        <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>{hasDoc ? "Reject…" : "Request changes"}</Button>
+        <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>
         <Button className="ph-btn ph-btn-primary" variant="primary" onClick={approve} disabled={busy || !!block}>Approve</Button>
       </ActionBar>
     </>
