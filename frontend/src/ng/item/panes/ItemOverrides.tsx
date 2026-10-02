@@ -29,7 +29,8 @@ function useChoices(item: ItemDetail, node?: string) {
   };
 }
 
-/** Sends one field's PATCH and keeps the server's refusal on that field's row. */
+/** Sends one field's PATCH and keeps the server's refusal on that field's row.
+ *  Says whether the server took it. */
 function useSave(item: ItemDetail, reload: () => void) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const send = async (key: string, body: Record<string, unknown>) => {
@@ -37,6 +38,7 @@ function useSave(item: ItemDetail, reload: () => void) {
     const r = await act.patch(item.id, body);
     if (!r.ok) setErrors((e) => ({ ...e, [key]: r.error }));
     reload();
+    return r.ok;
   };
   return { errors, send };
 }
@@ -48,18 +50,26 @@ function useSave(item: ItemDetail, reload: () => void) {
 export function ItemAgentRows({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const c = useChoices(item);
   const { errors, send } = useSave(item, reload);
-  // What this pane last sent, until the reload brings the item back: a second
-  // row saved before then builds on the first one's field, not on a copy
-  // that never had it.
-  const sent = useRef<{ over: ItemDetail["agent_overrides"]; next: Agent } | null>(null);
+  // One save at a time, each built when it goes: two in flight at once could
+  // land in either order, and the older one would undo the newer.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const latest = useRef(item);
+  latest.current = item;
+  // What the server last took from this pane, until a read of the item
+  // brings it back: a save before then builds on it, not on a copy that
+  // never had it. A refused save leaves it as it was.
+  const took = useRef<{ over: ItemDetail["agent_overrides"]; stored: Agent } | null>(null);
   const own: Agent = item.agent_overrides ?? {};
   if (!c.tasks.length) return null;
   const put = (key: keyof Agent, value: unknown) => {
-    const last = sent.current;
-    const { [key]: _old, ...rest } = last && last.over === item.agent_overrides ? last.next : own;
-    const next: Agent = value == null ? rest : { ...rest, [key]: value };
-    sent.current = { over: item.agent_overrides, next };
-    void send(key, { agent_overrides: next });
+    // A save that threw (no server) must not hold back the ones after it.
+    queue.current = queue.current.catch(() => {}).then(async () => {
+      const now = latest.current.agent_overrides;
+      const last = took.current;
+      const { [key]: _old, ...rest } = last && last.over === now ? last.stored : (now ?? {});
+      const next: Agent = value == null ? rest : { ...rest, [key]: value };
+      if (await send(key, { agent_overrides: next })) took.current = { over: latest.current.agent_overrides, stored: next };
+    });
   };
   return (
     <>
