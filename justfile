@@ -73,11 +73,14 @@ dev: _dev-home
     # being edited. Once the API answers, say which one is the UI. The answer has
     # to name this checkout's run dir: a backend that refused a taken port leaves
     # somebody else's server answering there. Vite moves past a taken 5173 on its
-    # own, so its Local line, not this one, has the final say on the port.
+    # own, so its Local line, not this one, has the final say on the port. The
+    # server reports its run dir symlink-resolved; `just -f` through a symlink
+    # does not, so resolve ours the same way.
+    run_dir="$(cd "{{justfile_directory()}}/.dev" && pwd -P)/run"
     for _ in $(seq 150); do
         kill -0 "$api" 2>/dev/null || break
         if curl -sf http://127.0.0.1:{{dev_port}}/api/health 2>/dev/null \
-            | grep -F '"run_dir":"{{justfile_directory()}}/.dev/run"' >/dev/null; then
+            | grep -F "\"run_dir\":\"$run_dir\"" >/dev/null; then
             echo "just dev: the UI is vite's Local URL above (:5173 unless taken). :{{dev_port}} is the API, not the UI."
             break
         fi
