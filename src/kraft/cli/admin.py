@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import os
 import plistlib
+import re
 import shutil
 import signal
 import socket
@@ -680,6 +681,8 @@ def _start_detached() -> None:
     log_path = run_dirs.logs / "server.log"
     _rotate_if_large(log_path)
     with open(log_path, "ab") as log_file:
+        # Where this start's output begins: anything before it is an earlier run's.
+        start_offset = log_file.tell()
         proc = subprocess.Popen(
             [sys.executable, "-m", "kraft", "admin", "start"],
             stdin=subprocess.DEVNULL,
@@ -707,12 +710,34 @@ def _start_detached() -> None:
                 print(f"kraft: http://{host}:{port} (pid {pid}, detached - kraft admin stop)")
                 return
         if proc.poll() is not None:
-            tail = log_path.read_text()[-2000:]
-            print(f"kraft: detached start failed:\n{tail}", file=sys.stderr)
+            print(_detached_failure(log_path, start_offset), file=sys.stderr)
             raise SystemExit(1)
         time.sleep(0.1)
     print(f"kraft: detached start did not come up within 10s - check {log_path}", file=sys.stderr)
     raise SystemExit(1)
+
+
+#: An exception's last line in a traceback: `RuntimeError: ...`,
+#: `sqlite3.OperationalError: ...`. Not `SystemExit`, which only says that
+#: uvicorn gave up after the error that matters.
+_EXCEPTION_LINE = re.compile(r"^(?:\w+\.)*\w*(?:Error|Exception): .")
+
+
+def _detached_failure(log_path: Path, start_offset: int, tail_chars: int = 2000) -> str:
+    """What a detached start that exited prints: the error first, then the
+    end of its output, then where the rest is.
+
+    The error has to be found, not left to the tail: a failed lifespan logs
+    its traceback, then uvicorn's own exit adds a second one, and with
+    Python 3.13's and 3.14's `~~~^^^` marker lines that second traceback alone
+    fills the tail, so `database schema vN is newer than code vM` scrolled
+    out of it."""
+    with open(log_path, "rb") as f:
+        f.seek(start_offset)
+        output = f.read().decode(errors="replace")
+    errors = [ln for ln in output.splitlines() if _EXCEPTION_LINE.match(ln)]
+    head = "kraft: detached start failed" + (f": {errors[-1]}" if errors else ":")
+    return f"{head}\n{output[-tail_chars:]}\nkraft: the whole log is {log_path}"
 
 
 def _cmd_stop(ns: argparse.Namespace) -> None:
