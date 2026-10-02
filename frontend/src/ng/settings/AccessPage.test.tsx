@@ -147,6 +147,46 @@ describe("ng AccessPage", () => {
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("s2"));
   });
 
+  it("asks for the phone's host with the password when switching to Local network, pre-filled with this machine's address, and saves all three at once", async () => {
+    const put = setup({ bind: "127.0.0.1", password_set: false, allowed_hosts: [], lan_hosts: ["192.168.1.20", "mybox"] });
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
+    const host = screen.getByRole("textbox", { name: "Host or IP the phone will use" });
+    expect(host).toHaveValue("192.168.1.20");
+    expect(screen.getByText(/This machine is 192.168.1.20 or mybox on the network/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Password for the local network"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: "Set and switch" }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", password: "hunter2", allowed_hosts: ["192.168.1.20"] }));
+  });
+
+  it("asks for the host alone when a password is set but the list is empty, and switches at once when both are there", async () => {
+    const put = setup({ bind: "127.0.0.1", allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
+    await userEvent.click(await screen.findByRole("radio", { name: /Local network/ }));
+    expect(screen.queryByLabelText("Password for the local network")).toBeNull();
+    await userEvent.clear(screen.getByRole("textbox", { name: "Host or IP the phone will use" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Host or IP the phone will use" }), "kraft.lan{Enter}");
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", allowed_hosts: ["kraft.lan"] }));
+  });
+
+  it("warns that an empty list refuses every other device, not this machine, and offers this machine's address", async () => {
+    const put = setup({ allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
+    expect(await screen.findByText(/An empty list refuses every other device \(403\)\. This machine still gets in at 127\.0\.0\.1\./)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "add 192.168.1.20" }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ allowed_hosts: ["192.168.1.20"] }));
+  });
+
+  it("says auth is off only on a 127.0.0.1 bind, not for this machine's browser everywhere", async () => {
+    setup();
+    expect(await screen.findByText("Auth is off on a 127.0.0.1 bind. Once Kraft listens on the network, every browser signs in, this machine's too.")).toBeInTheDocument();
+    expect(screen.queryByText(/Auth is off on localhost/)).toBeNull();
+  });
+
+  it("names the port an environment setting keeps, not the saved one, where a restart brings Kraft back", async () => {
+    useApply.setState({ restart: [{ id: "access.bind", file: "access.yaml", text: "bind changes from 127.0.0.1 to 0.0.0.0" }] });
+    setup({ port: 8765 }, { bind: "127.0.0.1", port: 8771 });
+    expect(await screen.findByText(/^Kraft comes back at/)).toHaveTextContent(`Kraft comes back at ${location.protocol}//${location.hostname}:8771 and`);
+    expect(screen.getByRole("radio", { name: /This machine only/ })).toHaveTextContent("127.0.0.1:8771");
+  });
+
   it("on a loopback bind says what is not used, and lists no sessions", async () => {
     setup({ bind: "127.0.0.1" });
     expect(await screen.findByText("Not used on 127.0.0.1")).toBeInTheDocument();

@@ -39,6 +39,11 @@ describe("SignIn", () => {
     expect(field()).toHaveFocus();
   });
 
+  it("says every browser signs in on a network bind, this machine's too, rather than only off localhost", async () => {
+    render(<SignIn onSignedIn={async () => {}} />);
+    expect(await screen.findByText("Kraft listens on the network, so every browser signs in, this machine's too.")).toBeInTheDocument();
+  });
+
   it("posts the password and the stay-signed-in choice with the cookie, then runs the probe", async () => {
     const onSignedIn = vi.fn(async () => {});
     render(<SignIn onSignedIn={onSignedIn} />);

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
+import socket
 from pathlib import Path
 
 import yaml
@@ -614,6 +616,35 @@ def _checked_hosts(entries: list[str], stored: list[str]) -> list[str]:
     return out
 
 
+def _outbound_address() -> str | None:
+    """The address this machine's default route leaves from, or None. A UDP
+    `connect` picks the route and sends nothing; 192.0.2.1 is TEST-NET-1."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def lan_hosts() -> list[str]:
+    """Names another device might reach this machine by: its LAN address, then
+    its host name. Settings > Access offers them for `allowed_hosts` when it
+    switches to a network bind, so the first phone visit is not a 403. A
+    suggestion only: nothing is saved, and a loopback name is never offered."""
+    out: list[str] = []
+    address = _outbound_address()
+    try:
+        if address and not ipaddress.ip_address(address).is_loopback:
+            out.append(address)
+    except ValueError:
+        pass
+    name = (socket.gethostname() or "").lower().rstrip(".")
+    if name and name not in config_mod.LOOPBACK and name not in out:
+        out.append(name)
+    return out
+
+
 @api_router.get("/access")
 async def get_access(request: Request):
     access = request.app.state.access
@@ -624,6 +655,7 @@ async def get_access(request: Request):
         "password_set": bool(access["password_hash"]),
         "allowed_hosts": access["allowed_hosts"],
         "auth_required": perimeter._requires_auth(request.app, request),
+        "lan_hosts": lan_hosts(),
     }
 
 

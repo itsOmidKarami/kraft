@@ -90,7 +90,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
       <form className="ng-signin-card" onSubmit={submit}>
         <div className="ng-signin-brand"><span>Kraft</span>{where && <span className="ng-signin-where">{where}</span>}</div>
         <h1>Sign in</h1>
-        <p className="ng-signin-lead">This instance asks for a password off localhost.</p>
+        <p className="ng-signin-lead">Kraft listens on the network, so every browser signs in, this machine's too.</p>
         <Field label="Password" error={locked ? null : error}>
           <input
             ref={input}

@@ -168,6 +168,17 @@ describe("Access (O.3)", () => {
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ allowed_hosts: ["localhost", "nas.lan"] }));
   });
 
+  it("with no hosts, says only other devices are refused and pre-fills Add a host with this machine's address", async () => {
+    const put = setup({ allowed_hosts: [], lan_hosts: ["192.168.1.20"] });
+    expect(await screen.findByText(/An empty list refuses every other device \(403\)\. This machine still gets in at 127\.0\.0\.1\. Add 192\.168\.1\.20/)).toBeInTheDocument();
+    expect(screen.getByText("Auth is off on a 127.0.0.1 bind. Once Kraft listens on the network, every browser signs in, this machine's too.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^hosts/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Add a host/ }));
+    expect(screen.getByLabelText("Add a host", { selector: "input" })).toHaveValue("192.168.1.20");
+    await userEvent.type(screen.getByLabelText("Add a host", { selector: "input" }), "{Enter}");
+    await waitFor(() => expect(put).toHaveBeenLastCalledWith({ allowed_hosts: ["192.168.1.20"] }));
+  });
+
   it("the password is typed into a masked field, saved by the sheet, and warns that sessions end", async () => {
     const put = setup();
     await userEvent.click(await screen.findByRole("button", { name: /^password/ }));
