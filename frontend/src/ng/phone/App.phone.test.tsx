@@ -133,6 +133,8 @@ describe("one address space across a resize", () => {
   it.each([
     ["/templates/harnesses?harness=claude", "/templates/harnesses/claude"],
     ["/templates/harnesses?profile=deep", "/templates/harnesses/profiles/deep"],
+    ["/templates/harnesses?harness=claude&lane=y", "/templates/harnesses/claude?lane=y"],
+    ["/templates/harnesses?yaml=1&profile=deep", "/templates/harnesses/profiles/deep?yaml=1"],
   ])("narrowing on %s opens the phone's %s", async (from, lands) => {
     const set = width(false);
     window.history.pushState({}, "", from);

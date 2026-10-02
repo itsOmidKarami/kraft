@@ -16,17 +16,21 @@ const send = async (draft: ConfigDraft, op: Op) => {
 const problemRows = (ps: HProblem[]): RowSpec[] => ps.map((p, i) => ({ key: `p${i}`, label: problemText(p), sub: [p.chain, p.path].filter(Boolean).join(" · ") || undefined, chips: [{ label: "problem", tone: "bad" as const }] }));
 const changedAt = (draft: ConfigDraft, needle: string) => !!draft.view?.result.changes.some((c) => c.path.includes(needle));
 
-/** `/templates/harnesses`. The desktop keeps its selection in the query (`?harness=` / `?profile=`); that address opens the phone's own page for it, so a resize keeps the place. */
+/** `/templates/harnesses`. The desktop keeps its selection in the query (`?harness=` / `?profile=`); that address opens the phone's own page for it, with the rest of the query, so a resize keeps the place. */
 export function HarnessesList() {
   const [params] = useSearchParams();
   const harness = params.get("harness");
   const profile = params.get("profile");
-  if (harness) return <Navigate to={`/templates/harnesses/${encodeURIComponent(harness)}`} replace />;
-  if (profile) return <Navigate to={`/templates/harnesses/profiles/${encodeURIComponent(profile)}`} replace />;
+  const rest = new URLSearchParams(params);
+  rest.delete("harness");
+  rest.delete("profile");
+  const query = rest.size ? `?${rest}` : "";
+  if (harness) return <Navigate to={`/templates/harnesses/${encodeURIComponent(harness)}${query}`} replace />;
+  if (profile) return <Navigate to={`/templates/harnesses/profiles/${encodeURIComponent(profile)}${query}`} replace />;
   return <HarnessesIndex />;
 }
 
-/** Harnesses, Profiles, the agent tasks and the defaults (W17 brief M.1). A harness page edits its Access only (R65); a profile page edits its entries' model and effort; the defaults edit as the desktop's Config tab does. */
+/** Harnesses, Profiles, the agent tasks and the defaults. A harness page edits its Access only; a profile page edits its entries' model and effort; the defaults edit as the desktop's Config tab does. */
 function HarnessesIndex() {
   const draft = useConfigDraft("harnesses", "harnesses");
   const { edit, node } = useEditor();
