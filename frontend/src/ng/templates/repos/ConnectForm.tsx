@@ -41,8 +41,33 @@ export function fieldsFrom(p: Probe): Record<string, unknown> {
   };
 }
 
-/** Connect repo's popover: a path, Check (read-only probe), Connect (`add_repo`). */
-export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; known: Set<string>; chains: string[]; onDone: (path: string) => void }) {
+/** What checking a connected repo again saves (`set_repo`), as `kraft repo connect`
+ *  does: only what its entry leaves undecided, a test command where it has neither one
+ *  nor test scopes and a setup command where none is declared. A repo disabled for want
+ *  of a test command is enabled once it has one; nothing it already has is changed. */
+export function gainsFrom(entry: Record<string, unknown>, p: Probe): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  const scopes = Array.isArray(entry.test_scopes) ? entry.test_scopes : [];
+  if (entry.test_command == null && !scopes.length && p.test_command != null) {
+    patch.test_command = p.test_command;
+    if ((p.test_scopes ?? []).some((s) => s.paths.join() !== "**")) patch.test_scopes = p.test_scopes;
+  }
+  if (entry.setup_command == null && p.setup_command != null) patch.setup_command = p.setup_command;
+  if ("test_command" in patch && entry.enabled === false) patch.enabled = true;
+  return patch;
+}
+
+const GAINED: Record<string, string> = { test_command: "test command", test_scopes: "test scopes", setup_command: "setup command" };
+
+/** "its test command and setup command, and enables it". */
+function gainedLine(patch: Record<string, unknown>): string {
+  const named = Object.keys(patch).filter((k) => k in GAINED).map((k) => GAINED[k]);
+  return `its ${named.join(" and ")}${patch.enabled ? ", and enables it" : ""}`;
+}
+
+/** Connect repo's popover: a path, Check (read-only probe), Connect (`add_repo`), or
+ *  Update (`set_repo`) for a repo already connected that leaves something undecided. */
+export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: ConfigDraft; known: Set<string>; entries?: Record<string, Record<string, unknown>>; chains: string[]; onDone: (path: string) => void }) {
   const [path, setPath] = useState("");
   const [probe, setProbe] = useState<Probe | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,11 +83,15 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
     if (a.status === 200) setProbe(a.body);
     else setError(detailOf(a.body));
   };
+  const entry = probe ? entries[probe.path] : undefined;
+  const gains = probe && entry ? gainsFrom(entry, probe) : null;
   const connect = async () => {
     if (!probe || probe.read_from === null) return;
-    if (known.has(probe.path)) return setError(`${probe.path} is already in the list.`);
+    if (gains && !Object.keys(gains).length) return setError(`${probe.path} is already connected, and nothing it leaves undecided was found.`);
+    if (!gains && known.has(probe.path)) return setError(`${probe.path} is already in the list.`);
     setBusy(true);
-    const a = await draft.ops([{ op: "add_repo", path: probe.path, fields: fieldsFrom(probe) }], { quiet: true });
+    const op = gains ? { op: "set_repo", path: probe.path, patch: gains } : { op: "add_repo", path: probe.path, fields: fieldsFrom(probe) };
+    const a = await draft.ops([op], { quiet: true });
     setBusy(false);
     if (a.status === 200) onDone(probe.path);
     else setError(detailOf(a.body));
@@ -78,7 +107,7 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
       <label className="rp-connect-label" htmlFor="rp-connect-path">Path to a git repository</label>
       <div className="rp-connect-line">
         <input id="rp-connect-path" className="rp-search" autoFocus spellCheck={false} placeholder="~/src/product" value={path} onChange={(e) => { setPath(e.target.value); setProbe(null); setError(null); }} />
-        <Button type="submit" disabled={busy || !path.trim() || probe?.read_from === null}>{probe ? "Connect" : "Check"}</Button>
+        <Button type="submit" disabled={busy || !path.trim() || probe?.read_from === null || (!!gains && !Object.keys(gains).length)}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
       </div>
       {error && <p className="rp-err" role="alert">{error}</p>}
       {probe && (
@@ -99,7 +128,8 @@ export function ConnectForm({ draft, known, onDone }: { draft: ConfigDraft; know
           {readFrom(probe.read_from) && <Kv k="read from" v={readFrom(probe.read_from)!} muted />}
           {alsoTest && <p className="rp-connect-note">Also found for tests: {alsoTest}</p>}
           {alsoSetup && <p className="rp-connect-note">Also found for setup: {alsoSetup}</p>}
-          <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : stopped ? "Tests stopped: connected disabled until you set a test command." : "No tests found: connected disabled until you set a test command."}</p>
+          {gains && <p className="rp-connect-note">{Object.keys(gains).length ? `Already connected: Update saves ${gainedLine(gains)}.` : "Already connected, and nothing it leaves undecided was found."}</p>}
+          {!gains && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connected enabled." : stopped ? "Tests stopped: connected disabled until you set a test command." : "No tests found: connected disabled until you set a test command."}</p>}
         </div>
       )}
     </form>

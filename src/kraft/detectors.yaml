@@ -210,19 +210,38 @@ detectors:
     setup:
       - run: "hatch env create"
 
+  # A `[project]` table: a pyproject.toml holding only tool settings (ruff,
+  # black) is no evidence this is a Python project. With no lockfile there
+  # is no safe guess: `uv sync` and `uv run` both write a uv.lock into the
+  # worktree, which the worker then commits, and Poetry and PDM write their
+  # own. So it stops: no test command for the repo unless one is given, and
+  # no fallback to a go.mod beside it. Its reason names the tool's own lock.
+  - id: pyproject-poetry
+    tier: toolchain
+    family: python
+    files: [pyproject.toml]
+    contains: {pyproject.toml: '(?m)^\[tool\.poetry\]'}
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    stop: true
+    reason: "a Poetry project with no poetry.lock: poetry install would write one into every work item's worktree. Commit one (poetry lock) and connect again, or set its test command yourself"
+
+  - id: pyproject-pdm
+    tier: toolchain
+    family: python
+    files: [pyproject.toml]
+    contains: {pyproject.toml: '(?m)^\[tool\.pdm[].]'}
+    unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
+    stop: true
+    reason: "a PDM project with no pdm.lock: pdm install would write one into every work item's worktree. Commit one (pdm lock) and connect again, or set its test command yourself"
+
   - id: pyproject
     tier: toolchain
     family: python
-    # A `[project]` table: a pyproject.toml holding only tool settings (ruff,
-    # black) is no evidence this is a Python project. With no lockfile there
-    # is no safe guess: `uv sync` and `uv run` both write a uv.lock into the
-    # worktree, which the worker then commits. So it stops: no test command
-    # for the repo unless one is given, and no fallback to a go.mod beside it.
     files: [pyproject.toml]
     contains: {pyproject.toml: '(?m)^\[(project|tool\.poetry|build-system)\]'}
     unless: [uv.lock, poetry.lock, pdm.lock, Pipfile]
     stop: true
-    reason: "a pyproject.toml with no lockfile: uv sync and uv run would write a uv.lock into every work item's worktree. Commit one (uv lock) and connect again, or pass --test-command"
+    reason: "a pyproject.toml with no lockfile: uv sync and uv run would write a uv.lock into every work item's worktree. Set its test command yourself, or commit a uv.lock (uv lock) and connect again"
 
   - id: tox
     tier: toolchain

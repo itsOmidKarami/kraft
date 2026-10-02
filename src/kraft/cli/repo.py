@@ -142,6 +142,8 @@ def _choose_interactively(path: str | None) -> tuple[str | None, str | None]:
     if resolved in {r["path"] for r in asyncio.run(client.repos())}:
         return None, None  # connect says so; there is nothing to choose
     probed = asyncio.run(client.probe_repo(path))
+    if probed.get("read_from") is None:
+        return None, None  # no commit: connect refuses it, so there is nothing to choose
     root = next((s for s in probed.get("scopes") or () if s["dir"] == ""), None)
     cands = probed.get("candidates") or []
     test = _pick("test", cands, root["test"] if root else None)
@@ -171,27 +173,43 @@ def _say_connected(result: dict) -> None:
         _print(f"  read from {ref.removeprefix('refs/remotes/')}, where work items start")
     elif ref:
         _print(f"  read from {ref}")
-    elif "read_from" in result:
-        _print("  read from the working copy: the repo has no commit yet")
-    by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
-    chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
-
-    def source(d: str, role: str, command: str | None) -> str:
-        hit = next(
-            (c for c in chosen if (c["dir"], c["role"], c["command"]) == (d, role, command)), None
+    _say_tests(result)
+    _say_setup(result)
+    _say_rest(result)
+    if result.get("enabled") is False:
+        _print(
+            "saved disabled: no test command found in its task runners, toolchain files or CI; "
+            "pass --test-command (--no-tests for a repo with none) or set "
+            "`test_command` in its repos.yaml entry, then `enabled: true`"
         )
-        return f" (from {hit['source']})" if hit else ""
 
+
+def _source(result: dict, d: str, role: str, command: str | None) -> str:
+    chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
+    hit = next(
+        (c for c in chosen if (c["dir"], c["role"], c["command"]) == (d, role, command)), None
+    )
+    return f" (from {hit['source']})" if hit else ""
+
+
+def _say_tests(result: dict) -> None:
+    by_dir = {s["dir"]: s for s in result.get("scopes") or ()}
     root = by_dir.get("", {})
     if result.get("test_command") == "":
         _print('test command: "" (no tests)')
+        if result.get("enabled"):
+            _print("  saved enabled: its work items pass verification without running a test")
     elif root.get("test") and root["test"] == result.get("test_command"):
-        _print(f"test command: {root['test']}{source('', 'test', root['test'])}")
+        _print(f"test command: {root['test']}{_source(result, '', 'test', root['test'])}")
     elif result.get("test_command"):
         _print(f"test command: {result['test_command']}")
     for d, s in by_dir.items():
         if d and s.get("test"):
-            _print(f"  {d}/: {s['test']}{source(d, 'test', s['test'])}")
+            _print(f"  {d}/: {s['test']}{_source(result, d, 'test', s['test'])}")
+
+
+def _say_setup(result: dict) -> None:
+    chosen = [c for c in result.get("candidates") or () if c.get("chosen")]
     setup = result.get("setup_command")
     if setup:
         sources = [
@@ -217,7 +235,12 @@ def _say_connected(result: dict) -> None:
             'repos.yaml entry, `""` if it needs no preparation, or tick No setup needed '
             "under Templates › Repos"
         )
-    saved = [result.get("test_command") or "", setup or ""]
+
+
+def _say_rest(result: dict) -> None:
+    """What else the evidence held: the commands not proposed, the programs
+    missing here, and why a directory proposes no test command."""
+    saved = [result.get("test_command") or "", result.get("setup_command") or ""]
     saved += [s["command"] for s in result.get("test_scopes") or ()]
     others = [
         c
@@ -249,12 +272,92 @@ def _say_connected(result: dict) -> None:
     for stop in result.get("stopped") or ():
         where = "the root" if stop["dir"] == "." else f"{stop['dir']}/"
         _print(f"  no test command proposed: {where} is {stop['reason']}")
-    if result.get("enabled") is False:
-        _print(
-            "saved disabled: no test command found in its task runners, toolchain files or CI; "
-            "pass --test-command (--no-tests for a repo with none) or set "
-            "`test_command` in its repos.yaml entry, then `enabled: true`"
+
+
+def _gains(stored: dict, probed: dict, test_command: str | None, setup: str | None) -> dict:
+    """What connecting a connected repo again saves: only what its entry
+    leaves undecided -- a test command where it has neither one nor test
+    scopes, a setup command where none is declared -- from the commands
+    given, else from the probe. A repo saved disabled for want of a test
+    command is enabled once it has one. Anything decided stays as it is."""
+    patch: dict = {}
+    if stored.get("test_command") is None and not stored.get("test_scopes"):
+        test = test_command if test_command is not None else probed.get("test_command")
+        if test is not None:
+            patch["test_command"] = test
+            scopes = probed.get("test_scopes") or []
+            if any(s.get("paths") != ["**"] for s in scopes):
+                patch["test_scopes"] = scopes
+    if stored.get("setup_command") is None:
+        found = setup if setup is not None else probed.get("setup_command")
+        if found is not None:
+            patch["setup_command"] = found
+    if "test_command" in patch and stored.get("enabled") is False:
+        patch["enabled"] = True
+    return patch
+
+
+def _connect_again(
+    stored: dict, test_command: str | None, setup_command: str | None, *, ask: bool, say: bool
+) -> dict:
+    """Connect an already-connected repo again: probe it for what its entry
+    leaves undecided (`_gains`), say what that would save, and save it --
+    after a yes, when `ask`. A lockless project told to commit a lockfile
+    and connect again gets its commands this way."""
+    out = _print if say else (lambda _line: None)
+    path = stored["path"]
+    needs_tests = stored.get("test_command") is None and not stored.get("test_scopes")
+    needs_setup = stored.get("setup_command") is None
+    out(f"already connected: {path}")
+    if (test_command is not None and not needs_tests) or (
+        setup_command is not None and not needs_setup
+    ):
+        out(
+            "  its commands are unchanged: edit its repos.yaml entry "
+            "(Templates › Repos) to change them"
         )
+    if not needs_tests and not needs_setup:
+        if stored.get("enabled") is False:
+            out(
+                "  it is disabled: enable it under Templates › Repos "
+                "(`enabled: true` in repos.yaml)"
+            )
+        return stored
+    try:
+        probed = asyncio.run(
+            client.probe_repo(path, test_command=test_command if needs_tests else None)
+        )
+    except ValueError as exc:
+        out(f"  could not probe it again: {exc}")
+        return stored
+    patch = _gains(stored, probed, test_command, setup_command)
+    if say:
+        _print("  probed again, for what its entry leaves undecided:")
+        if needs_tests:
+            _say_tests({**probed, "enabled": patch.get("enabled", stored.get("enabled"))})
+        if needs_setup:
+            _say_setup(probed)
+        _say_rest(probed)
+    if not patch:
+        out("  nothing new to save")
+        return stored
+    if ask:
+        answer = input(f"  save {', '.join(_FIELDS[k] for k in patch)}? [Y/n] ")
+        if answer.strip().lower() not in ("", "y", "yes"):
+            out("  nothing saved")
+            return stored
+    saved = asyncio.run(client.update_repo(path, patch))
+    out(f"saved {', '.join(_FIELDS[k] for k in patch)}")
+    return {**saved, "already_connected": True, "updated": sorted(patch)}
+
+
+#: How `_connect_again` names a field it saves.
+_FIELDS = {
+    "test_command": "the test command",
+    "test_scopes": "its test scopes",
+    "setup_command": "the setup command",
+    "enabled": "enabled",
+}
 
 
 def _cmd_connect(ns: argparse.Namespace) -> None:
@@ -266,17 +369,14 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
     result = asyncio.run(
         client.ensure_repo(ns.path, test_command=test_command, setup_command=setup_command)
     )
+    if result.get("already_connected"):
+        result = _connect_again(
+            result, test_command, setup_command, ask=interactive, say=not ns.json
+        )
+    elif not ns.json:
+        _say_connected(result)
     if ns.json:
         common.emit(result, str, True)
-    elif result.get("already_connected"):
-        print(f"already connected: {result['path']}")
-        if test_command is not None or setup_command is not None:
-            print(
-                "  its commands are unchanged: edit its repos.yaml entry "
-                "(Templates › Repos) to change them"
-            )
-    else:
-        _say_connected(result)
     if not ns.verify:
         return
     # Imported here, not at the top: it reaches `kraft.builtins`, and every
@@ -322,7 +422,8 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
 
     connect = subs.add_parser("connect", parents=[common], help="connect a repo (idempotent)")
     connect.add_argument("path", nargs="?", help="default: the current directory")
-    connect.add_argument(
+    tests = connect.add_mutually_exclusive_group()
+    tests.add_argument(
         "--test-command", metavar="CMD", help="the repo's test command, instead of the proposal"
     )
     connect.add_argument(
@@ -330,10 +431,10 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
         metavar="CMD",
         help='the command that prepares a fresh checkout, instead of the proposal ("" for none)',
     )
-    connect.add_argument(
+    tests.add_argument(
         "--no-tests",
         action="store_true",
-        help='the repo has no tests to run (saves test_command: "")',
+        help='the repo has no tests to run (saves test_command: "", and the repo enabled)',
     )
     connect.add_argument(
         "-y",

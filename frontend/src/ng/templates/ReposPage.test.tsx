@@ -7,7 +7,7 @@ import * as http from "../http";
 import { useStore } from "../../store";
 import { Shell } from "../shell/Shell";
 import * as d from "./draft/draftApi";
-import { fieldsFrom, type Probe } from "./repos/ConnectForm";
+import { fieldsFrom, gainsFrom, type Probe } from "./repos/ConnectForm";
 import { DETECTED, problemAt, repo, REPOS, reposView } from "./repos/fixture";
 import { ReposPage } from "./ReposPage";
 
@@ -184,6 +184,29 @@ describe("Repos page: connecting", () => {
     await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalled());
     expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });
+  });
+
+  it("checks a connected repo again and offers to save what its entry leaves undecided", async () => {
+    // "Commit one (uv lock) and connect again" led to "already in the list", and nothing changed.
+    const pyproj = repo("pyproj", { test_command: null, setup_command: null, enabled: false });
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos: [...REPOS, pyproj], detected: DETECTED } as never })));
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe"
+      ? ok(probe({ path: "/src/pyproj", test_command: "uv run pytest", setup_command: "uv sync" }))
+      : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/pyproj");
+    await userEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("Already connected: Update saves its test command and setup command, and enables it.");
+    await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(d.postOps).toHaveBeenCalled());
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/pyproj", patch: { test_command: "uv run pytest", setup_command: "uv sync", enabled: true } }]);
+  });
+
+  it("leaves what a connected repo already has as it is", () => {
+    expect(gainsFrom({ test_command: "make test", setup_command: "", enabled: false }, probe())).toEqual({});
+    expect(gainsFrom({ test_command: "make test" }, probe())).toEqual({ setup_command: "uv sync" });
   });
 
   it("says a repo with no commit cannot be connected yet, and sends nothing", async () => {

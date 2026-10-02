@@ -141,18 +141,87 @@ def test_connect_takes_the_commands_given_on_the_command_line(app, capsys, repo)
 
 
 def test_connect_no_tests_declares_a_repo_with_none(app, capsys, repo):
+    """Saved enabled, which connect says, and with nothing found to prepare
+    a repo with no tests needs no preparation either: `--no-tests` alone left
+    its setup undeclared, so its first item stopped before it started."""
     cli.main(["repo", "connect", str(repo), "--no-tests"])
-    assert 'test command: "" (no tests)' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'test command: "" (no tests)' in out
+    assert "saved enabled: its work items pass verification without running a test" in out
+    assert 'setup command: "" (nothing to prepare)' in out
     [entry] = asyncio.run(client.repos())
-    assert (entry["test_command"], entry["enabled"]) == ("", True)
+    assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == ("", "", True)
+
+
+def test_no_tests_leaves_a_setup_found_undecided(app, capsys, repo):
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text(
+        "on: push\njobs:\n  t:\n    steps:\n      - run: npm ci\n"
+    )
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo), "--no-tests"])
+    assert asyncio.run(client.repos())[0]["setup_command"] is None
 
 
 def test_connect_flags_on_a_connected_repo_change_nothing_and_say_so(app, capsys, repo):
-    cli.main(["repo", "connect", str(repo)])
+    cli.main(["repo", "connect", str(repo), "--test-command", "make test", "--setup-command", ""])
     cli.main(["repo", "connect", str(repo), "--test-command", "make check"])
     assert "its commands are unchanged" in capsys.readouterr().out
     [entry] = asyncio.run(client.repos())
-    assert entry["test_command"] is None
+    assert entry["test_command"] == "make test"
+
+
+def test_connecting_again_saves_what_a_lockfile_committed_since_proposes(app, capsys, repo):
+    """ "Commit one (uv lock) and connect again" led nowhere: connecting
+    again said "already connected" and saved nothing, so the repo stayed
+    disabled with no commands until it was disconnected first."""
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n[tool.pytest.ini_options]\n")
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo)])
+    assert "commit a uv.lock (uv lock) and connect again" in capsys.readouterr().out
+    (repo / "uv.lock").write_text("version = 1\n")
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "already connected" in out
+    assert "test command: uv run pytest (from uv.lock)" in out
+    assert "saved the test command, the setup command, enabled" in out
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == (
+        "uv run pytest",
+        "uv sync",
+        True,
+    )
+
+
+def test_connecting_again_fills_only_what_is_undecided_and_asks_first(
+    app, capsys, repo, monkeypatch
+):
+    """A test command given at the first connect stays; the setup command it
+    left undeclared is proposed, and in a terminal saved only after a yes."""
+    (repo / "Makefile").write_text("test:\n\tctest\n")
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo), "--test-command", "ctest -j4", "-y"])
+    (repo / "Makefile").write_text("setup:\n\tcmake -B build\ntest:\n\tctest\n")
+    commit_all(repo)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    answers = iter(["n", "y"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    cli.main(["repo", "connect", str(repo)])
+    assert "nothing saved" in capsys.readouterr().out
+    assert asyncio.run(client.repos())[0]["setup_command"] is None
+    cli.main(["repo", "connect", str(repo)])
+    [entry] = asyncio.run(client.repos())
+    assert (entry["test_command"], entry["setup_command"]) == ("ctest -j4", "make setup")
+
+
+def test_no_tests_with_a_test_command_is_refused(app, capsys, repo):
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["repo", "connect", str(repo), "--no-tests", "--test-command", "make test"])
+    assert caught.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+    assert asyncio.run(client.repos()) == []
 
 
 def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):

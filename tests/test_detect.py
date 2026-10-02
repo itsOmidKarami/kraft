@@ -130,6 +130,8 @@ KINDS = [
         "hatch env create",
     ),  # noqa: E501
     ("pyproject-alone-stops", {"pyproject.toml": PYTEST}, None, None),
+    ("poetry-without-a-lockfile-stops", {"pyproject.toml": "[tool.poetry]\n"}, None, None),
+    ("pdm-without-a-lockfile-stops", {"pyproject.toml": "[project]\n[tool.pdm]\n"}, None, None),
     (
         "poe-task",
         {
@@ -452,7 +454,24 @@ def test_a_pyproject_with_no_lockfile_stops(tmp_path, files, test, setup):
     assert (p.test_command, p.setup_command) == (test, setup)
     assert bool(p.stopped) == (test is None)
     # R8a-04: what to do about it, not only why.
-    assert all("Commit one (uv lock)" in s["reason"] for s in p.stopped)
+    assert all("commit a uv.lock (uv lock)" in s["reason"] for s in p.stopped)
+
+
+@pytest.mark.parametrize(
+    ("pyproject", "lock"),
+    [
+        ("[tool.poetry]\nname = 'x'\n", "Commit one (poetry lock)"),
+        ("[project]\nname = 'x'\n[tool.pdm.dev-dependencies]\n", "Commit one (pdm lock)"),
+        ("[project]\nname = 'x'\n[build-system]\n", "commit a uv.lock (uv lock)"),
+    ],
+    ids=["poetry", "pdm", "pip"],
+)
+def test_a_lockless_pyproject_is_told_to_commit_its_own_tools_lock(tmp_path, pyproject, lock):
+    """A Poetry project told to `uv lock` would be read as a uv one from then
+    on, which does not read Poetry's tables."""
+    [stop] = _propose(_repo(tmp_path, {"pyproject.toml": pyproject})).stopped
+    assert lock in stop["reason"]
+    assert "--test-command" not in stop["reason"]  # the web shows it too
 
 
 #: Layouts whose lockless pyproject.toml no root command can run (#442, #446):

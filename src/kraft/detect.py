@@ -1788,11 +1788,21 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         {"dir": s.dir, "test": s.test.command if s.test else None, "setup": s.setup_command}
         for s in scopes
     ]
+    setup_command = combine_setup(shaped)
+    if (
+        setup_command is None
+        and test_command == ""
+        and not nested
+        and not any(c.role == "setup" for cands in by_dir.values() for c in cands)
+    ):
+        # Said to have no tests, and nothing anywhere to prepare (a docs
+        # repo): nothing is what it needs, rather than a second flag to say so.
+        setup_command = ""
     return Proposal(
         test_command=test_scopes[0]["command"] if test_scopes else None,
         test_scopes=test_scopes,
         test_markers=[c.marker for s in tested for c in s.parts if c.marker],
-        setup_command=combine_setup(shaped),
+        setup_command=setup_command,
         missing_setup=[s.dir or "." for s in tested if s.setup_command is None],
         scopes=shaped,
         candidates=[asdict(c) for cands in by_dir.values() for c in cands],
