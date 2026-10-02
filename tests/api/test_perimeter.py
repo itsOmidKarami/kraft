@@ -361,7 +361,7 @@ def test_a_browser_opening_an_unlisted_name_gets_a_page_saying_how_to_allow_it(l
     assert page.status_code == 403
     assert page.headers["content-type"].startswith("text/html")
     assert "<code>mybox.lan</code>" in page.text
-    assert "Settings &gt; Access" in page.text and "allowed_hosts" in page.text
+    assert "Settings &rsaquo; Access" in page.text and "allowed_hosts" in page.text
     assert page.headers["x-frame-options"] == "SAMEORIGIN"
 
     hostile = lan_bind.get("/", headers={"host": "<b>x</b>", **_NAVIGATION})

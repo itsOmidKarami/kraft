@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,8 @@ const POLICY = { loops: { "verification.fix_loop": { attempts: 4, wall_clock_s: 
 
 let calls: string[];
 beforeEach(() => {
+  // The probe reveals its rows on a clock; the tests play it out instead of waiting for it.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   calls = [];
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", bind: "127.0.0.1", port: 4317 } as never);
   vi.spyOn(api, "getTemplates").mockResolvedValue([CHAIN]);
@@ -31,12 +33,21 @@ afterEach(() => {
 
 const mount = (onDone?: () => void) => render(<MemoryRouter><FirstRun onDone={onDone} /></MemoryRouter>);
 const stepButton = (n: number) => screen.queryByRole("button", { name: new RegExp(`^Step ${n}:`) });
+const setup = () => userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+/** Waits for the probe's answer, then plays its reveal out, one row per step. */
+async function reveal() {
+  await screen.findByRole("list", { name: "Probe results" });
+  for (let i = 0; i < 10 && screen.queryAllByText("checking…").length; i++) await tick(PROBE_STEP_MS);
+  expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled();
+}
 
 /** Probe and add, staying on the step that says what was added. */
 async function add(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
   await user.click(screen.getByRole("button", { name: "+ Add repo" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 6000 });
+  await reveal();
   await user.click(screen.getByRole("button", { name: "Add repo" }));
   await screen.findByText("Added acme");
 }
@@ -44,8 +55,7 @@ async function add(user: ReturnType<typeof userEvent.setup>) {
 async function probeAndAdd(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
   await user.click(screen.getByRole("button", { name: "+ Add repo" }));
-  await screen.findByRole("list", { name: "Probe results" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
+  await reveal();
   await user.click(screen.getByRole("button", { name: "Add repo" }));
   await user.click(await screen.findByRole("button", { name: "Continue" }));
 }
@@ -57,15 +67,19 @@ describe("FirstRun", () => {
   });
 
   it("probes first, reveals one row at a time, then adds with the probed values", async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
     expect(await screen.findAllByText("checking…")).toHaveLength(5);
     expect(api.addRepo).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
-    await waitFor(() => expect(screen.getAllByText("checking…")).toHaveLength(4), { timeout: PROBE_STEP_MS * 3 });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
+    await tick(PROBE_STEP_MS / 3);
+    expect(screen.getAllByText("checking…")).toHaveLength(5);
+    await tick(PROBE_STEP_MS);
+    expect(screen.getAllByText("checking…")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
+    await reveal();
     expect(screen.getByText("2 submodules")).toBeInTheDocument();
     expect(screen.getByText("uv run pytest -q")).toBeInTheDocument();
     expect(screen.getByText("uv sync")).toBeInTheDocument();
@@ -92,28 +106,28 @@ describe("FirstRun", () => {
         { ...cand, role: "test", command: "uv run pytest", source: "uv.lock", tier: "toolchain", chosen: false },
       ],
     });
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 4000 });
+    await reveal();
     expect(screen.getByText("just test — from justfile recipe `test`")).toBeInTheDocument();
     expect(screen.getByText("just setup — from justfile recipe `setup`")).toBeInTheDocument();
     expect(screen.getByText("uv run pytest (uv.lock)")).toBeInTheDocument();
   });
 
   it("sends no root scope for a single-stack repo: it would shadow later test command edits", async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
   });
 
-  it("shows a monorepo's nested scopes, and for its unprepared ones no 'No setup needed'", { timeout: 15000 }, async () => {
+  it("shows a monorepo's nested scopes, and for its unprepared ones no 'No setup needed'", async () => {
     const scopes = [{ paths: ["pyproject.toml", "src/**"], command: "uv run pytest -q" }, { paths: ["frontend/**"], command: "sh -c 'cd frontend && npm test'" }];
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_scopes: scopes, setup_command: null, missing_setup: ["frontend"] });
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true, setup_command: null } as never);
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await add(user);
     expect(screen.getByText("sh -c 'cd frontend && npm test'")).toBeInTheDocument();
@@ -121,10 +135,10 @@ describe("FirstRun", () => {
     expect(said).not.toHaveTextContent("No setup needed");
   });
 
-  it("reads the repo again when you come back, rather than keep a fixed problem", { timeout: 15000 }, async () => {
+  it("reads the repo again when you come back, rather than keep a fixed problem", async () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_command: null, test_scopes: [], setup_command: null });
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: false, setup_command: null } as never);
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await add(user);
     expect(screen.getByText(/set its test command and Enable it/)).toBeInTheDocument();
@@ -138,7 +152,7 @@ describe("FirstRun", () => {
   it("sends the probe's scopes when it found a nested one", async () => {
     const scopes = [{ paths: ["pyproject.toml", "src/**"], command: "uv run pytest -q" }, { paths: ["frontend/**"], command: "npm test" }];
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_scopes: scopes });
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     expect(api.addRepo).toHaveBeenCalledWith(expect.objectContaining({ test_scopes: scopes }));
@@ -147,11 +161,11 @@ describe("FirstRun", () => {
   it("adds a repo with no detected test command, and says it is disabled until one is set", async () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_command: null, test_scopes: [] });
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: false } as never);
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
+    await reveal();
     await user.click(screen.getByRole("button", { name: "Add repo" }));
     expect(await screen.findByText("Added acme")).toBeInTheDocument();
     expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
@@ -166,7 +180,7 @@ describe("FirstRun", () => {
 
   it("says nothing about a disabled repo when the server enabled it", async () => {
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true } as never);
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
@@ -175,7 +189,7 @@ describe("FirstRun", () => {
 
   it("keeps step 1 and says why when the probe fails", async () => {
     vi.spyOn(api, "probeRepo").mockRejectedValue(new Error("Not a git repository: /nope"));
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/nope");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
@@ -186,7 +200,7 @@ describe("FirstRun", () => {
   });
 
   it("step 2 shows the numbers the server has, and reads…/errors without inventing any", async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     expect(await screen.findByText("default · 7 nodes, 2 gates")).toBeInTheDocument();
@@ -197,7 +211,7 @@ describe("FirstRun", () => {
   it("step 2 says reading… while loading and gives no number on failure", async () => {
     vi.spyOn(api, "getTemplates").mockReturnValue(new Promise(() => {}));
     vi.spyOn(api, "getPolicy").mockRejectedValue(new Error("down"));
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     expect(await screen.findByText("reading…")).toBeInTheDocument();
@@ -207,18 +221,18 @@ describe("FirstRun", () => {
 
   it("says when the probe found no setup command", async () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, setup_command: null });
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Add repo" })).toBeEnabled(), { timeout: 3000 });
+    await reveal();
     expect(screen.getByText("Setup command").nextSibling).toHaveTextContent("none found");
   });
 
   it("says the first item stops until a setup command is set when the server saved none", async () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, setup_command: null });
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true, setup_command: null } as never);
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     await user.click(stepButton(1)!);
@@ -228,7 +242,7 @@ describe("FirstRun", () => {
 
   it("says nothing about setup when the server saved a setup command", async () => {
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: true, setup_command: "uv sync" } as never);
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     await user.click(stepButton(1)!);
@@ -237,14 +251,14 @@ describe("FirstRun", () => {
   });
 
   it("step 2 names where Settings writes without assuming the default home", async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     expect(screen.getByText(/YAML in \$KRAFT_HOME\/templates/)).toBeInTheDocument();
   });
 
   it("step 3 opens the board's composer and says Claude workers need the plugin, or admin init", async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
@@ -261,7 +275,7 @@ describe("FirstRun", () => {
 
   it("comes back at the step it reached, with the repo it added, until its last step is done or skipped", async () => {
     vi.spyOn(api, "addRepo").mockResolvedValue({ enabled: false } as never);
-    const user = userEvent.setup();
+    const user = setup();
     const first = mount();
     expect(savedFirstRun()).toBeNull();
     await probeAndAdd(user);
@@ -286,7 +300,7 @@ describe("FirstRun", () => {
 
   it("is done once its last step opens the composer", async () => {
     const onDone = vi.fn();
-    const user = userEvent.setup();
+    const user = setup();
     mount(onDone);
     await probeAndAdd(user);
     await user.click(await screen.findByRole("button", { name: "Continue" }));
@@ -297,7 +311,7 @@ describe("FirstRun", () => {
   });
 
   it("makes only reached steps focusable", async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     expect(stepButton(1)).not.toBeNull();
     expect(stepButton(2)).toBeNull();

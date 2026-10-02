@@ -1,9 +1,11 @@
 """Shared test seams for the split `test_api_*.py` files: a TestClient wired
-to a hermetic env, and the polling helpers that wait on the async executor.
+to a hermetic env, and the polling helpers that wait on the async executor;
+and `run_with_app` for the client tests, which reach the app over ASGI.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import time
@@ -282,3 +284,16 @@ def _budget_stopped_item(client, repo, breach: dict, **fields) -> str:
             conn, wid, "implementation", "budget cap reached", None, breach, kind="budget"
         )
     return wid
+
+
+def run_with_app(api, scenario):
+    """Run the coroutine `scenario()` with `api.app`'s lifespan entered, in one
+    event loop: the Database the lifespan opens is bound to the loop that
+    opened it. For the client tests' `wired` fixture (`tests/client/conftest.py`),
+    whose ASGI transport does not run the lifespan itself."""
+
+    async def wrapper():
+        async with api.app.router.lifespan_context(api.app):
+            return await scenario()
+
+    return asyncio.run(wrapper())

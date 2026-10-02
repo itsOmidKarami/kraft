@@ -233,14 +233,14 @@ def _unexpected_host_page(request: Request, bound_host: str) -> str:
             f"<p>It is bound to {html.escape(bound_host)}, so it answers only at "
             f"<code>localhost</code> or <code>127.0.0.1</code>. On this machine, open "
             f'<a href="{local}">{local}</a>. To reach it from another device, bind it to '
-            "the network on Settings &gt; Access first.</p>"
+            "the network on Settings &rsaquo; Access first.</p>"
         )
     else:
         how = (
             "<p>On a network bind, Kraft answers a browser only at a name listed in "
             "<code>allowed_hosts</code>. To allow this one, open Kraft on the machine it "
             f'runs on, at <a href="{local}">{local}</a>, and add <code>{name}</code> on '
-            "Settings &gt; Access, where it applies at once. Or add it to "
+            "Settings &rsaquo; Access, where it applies at once. Or add it to "
             "<code>allowed_hosts</code> in <code>access.yaml</code> and restart Kraft. "
             "Enter the exact name: a wildcard is refused.</p>"
         )

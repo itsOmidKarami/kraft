@@ -200,7 +200,7 @@ area that needs one has a helper module beside its tests, named `testkit.tsx`,
 
 | Module | Provides |
 |---|---|
-| `ng/item/testkit.tsx` | `detail()` (a work item), `V1` (a chain), `stubFetch()` (answers `"METHOD /path"` from a map and records every call), `inShell()` |
+| `ng/item/testkit.tsx` | `detail()` (a work item), `V1` (a chain), `stubFetch()` (answers `"METHOD /path"` from a map, records every call with its `query`, and refuses a write it has no answer for; `acceptWrites()` answers the ones a test expects), `inShell()` |
 | `ng/settings/testkit.tsx` | `WithHeader`, standing in for the shell's header |
 | `ng/library/fixture.ts`, `testSupport.tsx` | a library draft and the page mounted on it |
 | `ng/harnesses/testkit.tsx` | the harnesses draft's tasks, problems and a fake server |

@@ -1,8 +1,9 @@
-"""`kraft view ...` parser rules; the verbs' behaviour is in `test_verbs.py`
-and `test_watching.py`."""
+"""`kraft view ...` parser rules and the search verb; the other verbs'
+behaviour is in `test_verbs.py` and `test_watching.py`."""
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -21,3 +22,33 @@ def test_list_refuses_a_status_typo_instead_of_showing_an_empty_board(capsys):
         cli.main(["view", "list", "--status", "needs-human"])
     assert caught.value.code == 2
     assert "invalid choice: 'needs-human'" in capsys.readouterr().err
+
+
+def test_search_renders_results(monkeypatch, capsys):
+    """One row per hit, with `--limit` passed through to the API."""
+    seen = []
+
+    async def fake_search(q, limit=20):
+        seen.append((q, limit))
+        hits = [
+            {"kind": "spec", "repo": "/r", "path": "specs/a.md", "score": 1.0},
+            {"kind": "session", "repo": "/s", "path": "sessions/b.md", "score": 0.5},
+        ]
+        return {"query": q, "results": hits}
+
+    monkeypatch.setattr("kraft.client.search", fake_search)
+    cli.main(["view", "search", "anything", "--limit", "3"])
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    assert rows == [
+        ["KIND", "REPO", "PATH"],
+        ["spec", "/r", "specs/a.md"],
+        ["session", "/s", "sessions/b.md"],
+    ]
+    cli.main(["view", "search", "anything"])
+    assert seen == [("anything", 3), ("anything", 20)]
+
+
+def test_search_json_is_the_api_payload(app, capsys):
+    cli.main(["view", "search", "anything", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["query"] == "anything"

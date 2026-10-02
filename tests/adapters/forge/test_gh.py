@@ -8,6 +8,7 @@ import pytest
 
 from kraft.adapters import forge
 
+from .nodes import FAIL
 from .outputs import GH_PR_VIEW, GH_PR_VIEW_CONFLICT, GH_PR_VIEW_NEEDS_APPROVAL
 
 PR = forge.MR(7, "http://x/7")
@@ -59,7 +60,7 @@ def _rollup(*checks: str) -> str:
     ids=["any-failed-check-fails", "latest-run-of-a-relabeled-check-wins", "skipped-is-settled"],
 )
 async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, jobs):
-    cli.stub("gh", view)
+    cli.stub("gh", routes={"pr view": view}, default=FAIL)
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
@@ -113,7 +114,7 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
 async def test_gh_ci_status_never_reads_a_cancelled_check_as_a_verdict(
     cli, tmp_path, checks, state, failed, cancelled_at
 ):
-    cli.stub("gh", _rollup(*checks))
+    cli.stub("gh", routes={"pr view": _rollup(*checks)}, default=FAIL)
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
@@ -129,7 +130,7 @@ async def test_gh_ci_status_reads_the_merge_state_from_the_same_pr_view(cli, tmp
     """No extra process on GitHub: `mergeable`, `mergeStateStatus` and
     `reviewDecision` -- the field that tells a pending-approval BLOCKED from any
     other -- ride on the `gh pr view` call the node already makes."""
-    cli.stub("gh", view)
+    cli.stub("gh", routes={"pr view": view}, default=FAIL)
 
     await forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""))
 
@@ -140,7 +141,7 @@ async def test_gh_ci_status_reads_the_merge_state_from_the_same_pr_view(cli, tmp
 
 
 async def test_gh_ci_status_names_the_conflict_detail(cli, tmp_path):
-    cli.stub("gh", GH_PR_VIEW_CONFLICT)
+    cli.stub("gh", routes={"pr view": GH_PR_VIEW_CONFLICT}, default=FAIL)
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=forge.MR(0, ""))
 
@@ -148,26 +149,59 @@ async def test_gh_ci_status_names_the_conflict_detail(cli, tmp_path):
 
 
 async def test_gh_ci_status_maps_timed_out_to_the_infra_reason(cli, tmp_path):
-    cli.stub("gh", GH_PR_VIEW_TIMED_OUT)
+    cli.stub("gh", routes={"pr view": GH_PR_VIEW_TIMED_OUT}, default=FAIL)
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 
     assert status.failed_jobs[0].failure_reason == "job_execution_timeout"
 
 
+#: Two checks, each from its own Actions run (111 and 222).
+_TWO_RUNS = _rollup(
+    '{"name":"build","conclusion":"SUCCESS",'
+    '"detailsUrl":"https://github.com/o/r/actions/runs/111/job/1"}',
+    '{"name":"lint","conclusion":"SUCCESS",'
+    '"detailsUrl":"https://github.com/o/r/actions/runs/222/job/2"}',
+)
+
+
 @pytest.mark.parametrize(
-    "run_list, sha",
+    "view, run_list, sha",
     [
         # `sha = headRefOid` made render_ci's freshness guard compare the branch
         # head to itself, so it could never fire on GitHub.
-        ('[{"databaseId":123456,"headSha":"oldsha"}]', "oldsha"),
+        (GH_PR_VIEW_TIMED_OUT, '[{"databaseId":123456,"headSha":"oldsha"}]', "oldsha"),
+        # `gh run list` lists every recent run of the repository; only the ones
+        # the rollup names say what the checks were built from.
+        (
+            GH_PR_VIEW_TIMED_OUT,
+            '[{"databaseId":999,"headSha":"newer"},{"databaseId":123456,"headSha":"oldsha"}]',
+            "oldsha",
+        ),
+        (
+            _TWO_RUNS,
+            '[{"databaseId":111,"headSha":"s1"},{"databaseId":222,"headSha":"s1"}]',
+            "s1",
+        ),
+        # A rollup mixing two heads has no one sha to hand the freshness guard.
+        (
+            _TWO_RUNS,
+            '[{"databaseId":111,"headSha":"s1"},{"databaseId":222,"headSha":"s2"}]',
+            "",
+        ),
         # The guard stays inert rather than guess.
-        ("{}", ""),
+        (GH_PR_VIEW_TIMED_OUT, "{}", ""),
     ],
-    ids=["the-checks-sha-not-the-pr-head", "empty-when-it-cannot-be-told"],
+    ids=[
+        "the-checks-sha-not-the-pr-head",
+        "only-the-rollups-runs-count",
+        "several-runs-of-one-sha",
+        "empty-when-the-checks-span-shas",
+        "empty-when-it-cannot-be-told",
+    ],
 )
-async def test_gh_ci_status_sha_is_the_checks_own(cli, tmp_path, run_list, sha):
-    cli.stub("gh", routes={"run list": run_list}, default=GH_PR_VIEW_TIMED_OUT)
+async def test_gh_ci_status_sha_is_the_checks_own(cli, tmp_path, view, run_list, sha):
+    cli.stub("gh", routes={"run list": run_list, "pr view": view}, default=FAIL)
 
     status = await forge.GhCli().ci_status(repo=tmp_path, mr=PR)
 

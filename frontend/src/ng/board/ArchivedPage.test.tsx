@@ -3,9 +3,12 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { WorkItem } from "../../types";
-import { detail, stubFetch } from "../item/testkit";
+import { acceptWrites, detail, stubFetch } from "../item/testkit";
 import { ArchivedPage } from "./ArchivedPage";
 import { useBulk } from "./bulk";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/b2/restore");
 
 const arch = (id: string, title: string, archived_at: string, created_at: string): WorkItem =>
   detail({ id, title, status: "completed", display_status: "archived", archived_at, archived_by: "auto", created_at, bead_id: null });
@@ -50,7 +53,7 @@ describe("ArchivedPage", () => {
   });
 
   it("restores one item from its row, and checked ones in bulk", async () => {
-    const calls = stubFetch({ "POST /work-items/bulk": [200, { results: [{ id: "a1", ok: true }, { id: "b2", ok: true }] }] });
+    const calls = stubFetch({ ...WRITES, "POST /work-items/bulk": [200, { results: [{ id: "a1", ok: true }, { id: "b2", ok: true }] }] });
     mount();
     await act(async () => {});
     fireEvent.click(screen.getAllByRole("button", { name: "Restore" })[0]);

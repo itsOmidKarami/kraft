@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocViewer, EDITORS, type DocSource } from "./DocViewer";
-import { stubFetch } from "./testkit";
+import { acceptWrites, stubFetch } from "./testkit";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /documents/d1/open");
 
 afterEach(() => vi.unstubAllGlobals());
 const doc = { id: "d1", title: "Review notes", path: "/code/kraft/.engineering/reviews/r.md", content: "# Review notes\n\nThe cache has **no size bound**.", repo: "/code/kraft" };
@@ -15,7 +18,7 @@ function Harness({ source }: { source: DocSource }) {
 
 describe("DocViewer", () => {
   it.each(EDITORS)("opens an indexed document in $name", async (e) => {
-    const calls = stubFetch({ "GET /documents/d1": [200, doc] });
+    const calls = stubFetch({ ...WRITES, "GET /documents/d1": [200, doc] });
     render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={() => {}} />);
     expect(await screen.findByText("no size bound")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: e.name }));
