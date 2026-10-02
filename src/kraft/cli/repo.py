@@ -8,7 +8,6 @@ import sys
 
 from kraft import client, detect, render
 from kraft.cli import common
-from kraft.cli import verify as verify_mod
 
 _REPO_COLUMNS = [
     ("", "here"),
@@ -204,10 +203,15 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
             )
     else:
         _say_connected(result)
+    if not ns.verify:
+        return
+    # Imported here, not at the top: it reaches `kraft.builtins`, and every
+    # `kraft` invocation imports this module -- the permission hook a worker
+    # runs before each tool call included, which must not load the server.
+    from kraft.cli import verify as verify_mod
+
     say = (lambda _line: None) if ns.json else print
-    if ns.verify and not verify_mod.verify(
-        result, say=say, timeout_minutes=ns.timeout, on_host=ns.on_host
-    ):
+    if not verify_mod.verify(result, say=say, timeout_minutes=ns.timeout, on_host=ns.on_host):
         raise SystemExit(1)
 
 
