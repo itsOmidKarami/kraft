@@ -198,8 +198,26 @@ def test_a_call_that_is_two_tools_needs_both(client, policy, behavior):
         ("Delete", [], {"path": "./.cursor"}),
         ("Bash", [], {"command": "rm -f .cursor/hooks.json"}),
         ("Bash", [], {"command": "echo '{}' > hooks.json"}),
+        ("Write", ["Edit"], {"path": ".Cursor/hooks.json"}),
+        ("Write", ["Edit"], {"path": ".cursor/HOOKS.json"}),
+        ("Write", ["Edit"], {"path": ".cursor/hoo\u212as.json"}),
+        ("Write", ["Edit"], {"path": ".cursor/hook\u017f.json"}),
+        ("Bash", [], {"command": "rm -f .CURSOR/x"}),
+        ("Bash", [], {"command": "rm -f .cur''sor/ho\\oks.json"}),
     ],
-    ids=["write", "write-through-dotdot", "delete-the-directory", "shell", "shell-in-place"],
+    ids=[
+        "write",
+        "write-through-dotdot",
+        "delete-the-directory",
+        "shell",
+        "shell-in-place",
+        "another-case",
+        "another-case-file",
+        "a-kelvin-sign",
+        "a-long-s",
+        "shell-another-case",
+        "shell-split-by-quotes",
+    ],
 )
 @pytest.mark.parametrize(
     "policy", [{"grants": ["git-push"]}, {"allowed_tools": ["Bash", "Write", "Edit", "Delete"]}]
@@ -229,3 +247,16 @@ def test_a_cursor_worker_still_writes_and_reads_its_other_files(client):
     # Another harness's worker has no Cursor hook to lose.
     r = ask(client, "Bash", input={"command": "rm .cursor/hooks.json"}, mode="enforce")
     assert r.json()["behavior"] == "allow"
+
+
+@pytest.mark.parametrize("path", ["cfg/hooks.json", "link"], ids=["through-a-dir", "a-file-link"])
+def test_a_cursor_worker_may_not_reach_its_hook_through_a_symlink(client, path):
+    """A repository can commit `cfg -> .cursor`, or a link to the file."""
+    worktree = client.app.state.run_dirs.worktrees / "w1"
+    (worktree / ".cursor").mkdir(parents=True)
+    (worktree / ".cursor" / "hooks.json").write_text("{}")
+    (worktree / "cfg").symlink_to(".cursor")
+    (worktree / "link").symlink_to(".cursor/hooks.json")
+    seed_session(policy={"allowed_tools": ["Write", "Edit"]})
+    r = ask(client, "Write", input={"path": path}, mode="enforce", harness="cursor", also=["Edit"])
+    assert r.json()["behavior"] == "deny"

@@ -229,7 +229,8 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
             ).fetchone()
         )
         grant = matching(grants, body.tool_name, body.input, store.branch_for(item))
-        if body.harness == "cursor" and hook_install.touches_hook_file(names, body.input):
+        worktree = st.run_dirs.worktrees / row["work_item_id"]
+        if body.harness == "cursor" and hook_install.touches_hook_file(names, body.input, worktree):
             decision, reason = "deny", hook_install.HOOK_FILE_REASON
         elif hit := next((n for n in names if n in denied), None):
             decision, reason = "deny", f"{hit} is in {task}'s deny_tools"
