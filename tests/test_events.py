@@ -114,13 +114,18 @@ async def test_append_node_id_ignores_a_non_string_node_payload_value(database):
     assert row["node_id"] is None
 
 
-async def test_append_explicit_node_id_wins_over_the_payload(database):
-    """An emitter that knows its node but names it under a different payload
-    key still gets `node_id` right by passing it explicitly."""
+@pytest.mark.parametrize("key", ["node_id", "node"])
+async def test_append_explicit_node_id_wins_over_the_payload(database, key):
+    """An emitter that knows its node passes it explicitly, and that wins even
+    over a payload key that names a different node."""
     await _seed_work_item(database)
     seq = await database.write(
         lambda c: events.append(
-            c, "w1", "gate_approved", {"gate": "spec_approval"}, node_id="spec_approval"
+            c,
+            "w1",
+            "gate_approved",
+            {"gate": "spec_approval", key: "implementation"},
+            node_id="spec_approval",
         )
     )
     row = database.read(

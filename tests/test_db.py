@@ -254,29 +254,30 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
         def rollback(self):
             raise sqlite3.OperationalError("rollback failed")
 
-    monkeypatch.setattr(
-        db.sqlite3,
-        "connect",
-        lambda p, *a, **k: real_connect(p, *a, factory=_BadRollback, **k),
-    )
-
     async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
+        # Scoped, not `monkeypatch.undo()`: that would also undo the autouse
+        # isolation fixtures' patches for the rest of the test.
+        with monkeypatch.context() as m:
+            m.setattr(
+                db.sqlite3,
+                "connect",
+                lambda p, *a, **k: real_connect(p, *a, factory=_BadRollback, **k),
+            )
+            database = await db.Database.open(tmp_path / "orchestrator.db")
+            try:
 
-            def failing(c):
-                raise RuntimeError("boom")
+                def failing(c):
+                    raise RuntimeError("boom")
 
-            # caller gets its own exception, not a hang
-            with pytest.raises(RuntimeError, match="boom"):
-                await asyncio.wait_for(database.write(failing), timeout=2)
-        finally:
-            # writer task died on the raising rollback; close re-raises it
-            with pytest.raises(sqlite3.OperationalError):
-                await database.close()
+                # caller gets its own exception, not a hang
+                with pytest.raises(RuntimeError, match="boom"):
+                    await asyncio.wait_for(database.write(failing), timeout=2)
+            finally:
+                # writer task died on the raising rollback; close re-raises it
+                with pytest.raises(sqlite3.OperationalError):
+                    await database.close()
 
         # a fresh Database (normal connections) on the same file is functional
-        monkeypatch.undo()
         fresh = await db.Database.open(tmp_path / "orchestrator.db")
         try:
             await fresh.write(lambda c: schema.insert_item(c))

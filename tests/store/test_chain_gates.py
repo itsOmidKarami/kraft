@@ -57,6 +57,30 @@ async def test_row_and_event_are_atomic(database):
     assert types == ["work_item_created"]  # no node_started event
 
 
+async def test_an_unchanged_revision_passes_its_gate_as_kraft(database):
+    """A chain revision that changes nothing clears its gate with no one
+    asked: the rationale on record, then an approval by `kraft` -- neither a
+    person nor an agent -- and the item running again."""
+    gate = "chain_revision_approval"
+    await mk_item(database)
+    await database.write(lambda c: store.request_gate(c, "w1", gate, gate))
+
+    await database.write(
+        lambda c: store.pass_unchanged_revision(c, "w1", gate, "the plan still fits")
+    )
+
+    evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+    assert [(e["type"], e["payload"]) for e in evts[-3:]] == [
+        ("chain_revision_unchanged", {"gate": gate, "rationale": "the plan still fits"}),
+        ("gate_approved", {"gate": gate, "by": "kraft"}),
+        ("node_completed", {"node_id": gate}),
+    ]
+    status = database.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w1'").fetchone()
+    )
+    assert status["status"] == "active"
+
+
 async def test_last_rejection_reads_the_note_and_the_target_back(database):
     await mk_item(database)
     await database.write(

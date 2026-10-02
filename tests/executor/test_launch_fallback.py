@@ -323,17 +323,29 @@ async def test_a_task_without_a_list_parks_on_a_limit_as_before(
     assert "launch_fallback_exhausted" not in [e["type"] for e in evts]
 
 
+class _RecordingConn:
+    """A connection that remembers the statements run through it, so a test can
+    EXPLAIN the subject's own query rather than a copy of its text."""
+
+    def __init__(self, conn):
+        self.conn = conn
+        self.statements: list[tuple[str, tuple]] = []
+
+    def execute(self, sql, params=()):
+        self.statements.append((sql, tuple(params)))
+        return self.conn.execute(sql, params)
+
+
 def test_the_known_limited_lookup_uses_the_events_type_index(tmp_path):
     conn = _db._connect(tmp_path / "k.db")
     _db.migrate(conn)
-    plan = conn.execute(
-        "EXPLAIN QUERY PLAN SELECT payload FROM events WHERE type = 'rate_limit_hit' "
-        "AND json_extract(payload, '$.harness') = ? AND json_extract(payload, '$.model') IS ? "
-        "ORDER BY seq DESC LIMIT 1",
-        ("claude", None),
-    ).fetchall()
+    recording = _RecordingConn(conn)
+
+    assert fallback.known_limited(recording, "claude", None) is None
+
+    [(sql, params)] = recording.statements
+    plan = conn.execute(f"EXPLAIN QUERY PLAN {sql}", params).fetchall()
     assert any("idx_events_type" in row["detail"] for row in plan), [dict(r) for r in plan]
-    assert fallback.known_limited(conn, "claude", None) is None
 
 
 # -- unavailable: skipped, never a stop, when a list exists --------------------

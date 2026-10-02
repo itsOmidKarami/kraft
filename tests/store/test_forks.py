@@ -163,6 +163,19 @@ async def test_a_rerun_node_completes_again_in_its_fork(item_on, database):
     assert len(it.events("node_completed")) == 2
 
 
+async def test_the_current_fork_is_the_newest_and_none_before_a_retry(item_on, database):
+    it = await item_on(CHAIN, "c", status="needs_human")
+    assert database.read(lambda c: store.current_fork(c, it.id)) is None
+
+    await _fork(database, it, "a")
+    newest = await _fork(database, it, "b")
+    other = await item_on(CHAIN, "c", status="needs_human", wid="w2")
+    await _fork(database, other, None)
+
+    current = database.read(lambda c: store.current_fork(c, it.id))
+    assert (current.id, current.path) == (newest.id, "b")
+
+
 async def test_the_fork_boundary_is_where_the_current_run_starts(item_on, database):
     it = await item_on(CHAIN, "c", status="needs_human")
     assert database.read(lambda c: store.fork_boundary(c, it.id)) == 0

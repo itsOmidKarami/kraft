@@ -6,7 +6,6 @@ import pytest
 from support.harness import entry_of
 from support.workspace import repositories, workspace_item
 
-from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, stops
 from kraft.executor.context import LaunchContext
 from kraft.policy import InstancePolicy, InstancePolicyInput, SandboxPolicy, TemplatePolicyOverride
@@ -56,7 +55,6 @@ async def test_every_sandboxed_run_is_handed_the_whole_checkout(
         return "done"
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
-    monkeypatch.setattr(agent_mod._subprocess, "run_task", run_task)
     launch = LaunchContext(
         repo_entry=entry_of({"setup_command": ""}), repositories=repositories(tmp_path, "pkg")
     )
