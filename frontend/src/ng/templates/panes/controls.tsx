@@ -4,8 +4,8 @@ import { Combobox, notListed, unlisted, type Choice } from "../../ui/Combobox";
 /** A text field that sends on a pause (Decided 3): the page's `field(…, pause)`
  *  debounces, blur flushes. It follows the server's value while not focused.
  *  With `choices` it lists the values it takes as you type; a `closed` set
- *  sends only a listed value (or an empty one), and flags any other where it
- *  is typed instead of saving it. */
+ *  sends only a listed value (or an empty one, unless it is required), and
+ *  flags any other where it is typed instead of saving it. */
 export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeholder, required, autoFocus, sub, bad, mono, choices, closed, noun = label, listLabel }: {
   label: string;
   value: string;
@@ -32,9 +32,12 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
   }, [value]);
   // A closed set's typed value that is not listed is kept here, never sent.
   const listed = choices?.length ? choices : null;
-  const stray = closed && listed ? notListed(unlisted(text, listed), noun) : null;
+  // A required one is not sent empty either: clearing it on the way to
+  // typing a new value would save it unset and break the draft.
+  const empty = (t: string) => !!required && !t.trim();
+  const stray = closed && listed ? (empty(text) ? `Pick ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun} from the list.` : notListed(unlisted(text, listed), noun)) : null;
   const send = (t: string) => {
-    if (!closed || !listed || !unlisted(t, listed).length) onText(t);
+    if (!closed || !listed || (!empty(t) && !unlisted(t, listed).length)) onText(t);
   };
   const props = {
     id,

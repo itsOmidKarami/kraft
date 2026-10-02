@@ -140,7 +140,9 @@ export function EditSheet({ title, text, initial = "", placeholder, secret, mult
         ) : (
           <input className="ph-input" aria-label={title} type={secret ? "password" : "text"} value={value} placeholder={placeholder} autoComplete="off" onChange={(e) => setValue(e.target.value)} />
         )}
-        <Button className="ph-btn ph-btn-primary" variant="primary" type="submit" disabled={busy}>{submitLabel}</Button>
+        {/* Pressing Set would blur a listed field first, and its inline list
+            would close and move Set out from under the tap: keep the focus. */}
+        <Button className="ph-btn ph-btn-primary" variant="primary" type="submit" disabled={busy} onMouseDown={listed ? (e) => e.preventDefault() : undefined}>{submitLabel}</Button>
       </form>
       {error && <p className="ph-sheet-error" role="alert">{error}</p>}
     </Frame>

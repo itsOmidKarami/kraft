@@ -230,14 +230,22 @@ describe("closed-set fields", () => {
     expect(screen.getByRole("status")).toHaveTextContent("No action matches “sds”.");
     await userEvent.tab();
     expect(screen.getByText("“sds” is not an action. Pick one from the list.")).toHaveClass("is-bad");
-    expect(sentRefs(draft)).toEqual([null]);
+    expect(sentRefs(draft)).toEqual([]);
     vi.mocked(draft.flush).mockClear();
     await userEvent.clear(action());
     await userEvent.type(action(), "verify");
     await userEvent.keyboard("{ArrowDown}{Enter}");
-    expect(sentRefs(draft)).toEqual([null, null, "kraft.verify_changed_test_scopes"]);
+    expect(sentRefs(draft)).toEqual(["kraft.verify_changed_test_scopes"]);
     expect(draft.flush).toHaveBeenCalled();
     expect(screen.queryByText(/is not an action/)).toBeNull();
+  });
+
+  it("never sends a required action empty: clearing it on the way to another value saves nothing", async () => {
+    const { draft } = builtin();
+    await userEvent.clear(action());
+    await userEvent.tab();
+    expect(screen.getByText("Pick an action from the list.")).toHaveClass("is-bad");
+    expect(sentRefs(draft)).toEqual([]);
   });
 
   it("asks a forge wait for its polling when the draft's choices say its target waits", () => {

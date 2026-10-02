@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +38,19 @@ describe("the three shapes (A.5)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("port is in use");
     await userEvent.type(screen.getByLabelText("Port", { selector: "input" }), "9{Enter}");
     expect(onSubmit).toHaveBeenCalledWith("9");
+  });
+
+  it("keeps a listed field focused when Set is pressed, so its inline list does not close and move Set from under the tap", async () => {
+    const onSubmit = vi.fn();
+    const listed = { choices: [{ value: "kraft.mr_rebase" }], closed: true, noun: "action" };
+    render(<EditSheet title="action" listed={listed} onSubmit={onSubmit} onClose={() => {}} />);
+    const field = screen.getByRole("combobox", { name: "action" });
+    await userEvent.type(field, "kraft.mr_rebase");
+    const set = screen.getByRole("button", { name: "Set" });
+    expect(fireEvent.mouseDown(set)).toBe(false);
+    expect(field).toHaveFocus();
+    fireEvent.click(set);
+    expect(onSubmit).toHaveBeenCalledWith("kraft.mr_rebase");
   });
 
   it("closes on Escape, the scrim and Cancel through one path", async () => {
