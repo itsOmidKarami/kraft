@@ -111,7 +111,7 @@ describe("Auto-intake (N.2)", () => {
   it("lists the schedules as cron, repo, chain and filed paused, and links each to its page", async () => {
     main();
     const row = await screen.findByRole("link", { name: /^Dependency check/ });
-    expect(row).toHaveTextContent("weekdays 09:00 · platform · default · filed paused");
+    expect(row).toHaveTextContent("weekdays 09:00 UTC · platform · default · filed paused");
     expect(row).toHaveAttribute("href", "/settings/auto-intake/schedules/0");
   });
 
@@ -139,7 +139,7 @@ describe("a schedule (N.2)", () => {
     sched();
     expect(await screen.findByRole("heading", { level: 1, name: "Dependency check" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^cron/ })).toHaveTextContent("0 9 * * 1-5");
-    expect(screen.getByRole("button", { name: /^cron/ })).toHaveTextContent("weekdays 09:00");
+    expect(screen.getByRole("button", { name: /^cron/ })).toHaveTextContent("weekdays 09:00 UTC");
     expect(screen.getByRole("button", { name: /^repo/ })).toHaveTextContent("platform");
     expect(screen.getByRole("button", { name: /^chain/ })).toHaveTextContent("default");
     expect(screen.getByRole("button", { name: /^description/ })).toHaveTextContent("Update pinned dependencies.");

@@ -161,7 +161,7 @@ describe("Auto-intake page", () => {
 
   it("describes a schedule's cron in words, and says when there are none", async () => {
     mount();
-    expect(await screen.findByText("weekdays 09:00 · platform · default")).toBeInTheDocument();
+    expect(await screen.findByText("weekdays 09:00 UTC · platform · default")).toBeInTheDocument();
     document.body.innerHTML = "";
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({}, { ...INTAKE, schedules: [] })));
     mount();
