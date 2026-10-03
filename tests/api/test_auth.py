@@ -44,6 +44,69 @@ def test_health_is_degraded_by(client, key, names):
     assert "reattach_summary" in body
 
 
+def _session(wid: str, sid: str | None) -> None:
+    """A session `sid` of item `wid`; `s-ended` is one startup could not
+    confirm, which stops the item. None completes the item instead."""
+    import os
+    import sqlite3
+    from pathlib import Path
+
+    from kraft import store
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        if conn.execute("SELECT 1 FROM work_items WHERE id = ?", (wid,)).fetchone() is None:
+            store.create_work_item(
+                conn,
+                id=wid,
+                bead_id=None,
+                title="t",
+                repo="/r",
+                chain_template="t",
+                chain_definition="{}",
+                status="active",
+            )
+        if sid is None:
+            conn.execute("UPDATE work_items SET status = 'completed' WHERE id = ?", (wid,))
+        else:
+            store.create_session(
+                conn,
+                id=sid,
+                work_item_id=wid,
+                node_id="implementation",
+                hook_point="implementation.main.implement",
+                log_path="/l",
+                result_path="/r",
+            )
+        if sid == "s-ended":
+            store.mark_needs_human(conn, wid, "implementation", "reattach", kind="infra")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("then", "orphaned"),
+    [(None, ["s-ended"]), ("s-retried", []), ("completed", [])],
+    ids=["still-stopped", "retried-since", "completed"],
+)
+def test_health_names_an_orphaned_session_only_while_its_item_stands_on_it(client, then, orphaned):
+    """`kraft admin doctor` failed on "orphaned agent sessions" until the
+    next restart, though the documented retry had run the item to the end:
+    `/health` read the list startup made, never what became of it."""
+    from kraft.worker.reattach import ReattachSummary
+
+    _session("w-o", "s-ended")
+    if then == "completed":
+        _session("w-o", None)
+    elif then:
+        _session("w-o", then)
+    client.app.state.reattach_summary = ReattachSummary(scanned=1, unknown=["s-ended"])
+
+    assert client.get("/api/health").json()["reattach_summary"]["unknown"] == orphaned
+
+
 def test_health_ok_with_valid_policy(client):
     h = client.get("/api/health").json()
     assert h["invalid_policy"] == []

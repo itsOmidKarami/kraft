@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import uuid
 from collections.abc import Mapping
@@ -921,7 +922,7 @@ async def run_setup_command(
     oom = None
     try:
         done = await asyncio.to_thread(
-            subprocess.run,
+            _run_setup,
             **run,
             # A managed credential's value is the egress proxy's alone.
             env={k: v for k, v in client_env.items() if k not in withheld},
@@ -959,6 +960,37 @@ async def run_setup_command(
     return f"$ {cmd}\n{done.stdout}{done.stderr}"
 
 
+#: The process groups of the setup commands running now, by leader pid.
+_RUNNING_SETUPS: set[int] = set()
+
+
+def _run_setup(args, *, capture_output: bool = False, **kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run` for a setup command, run as the leader of its own
+    process group, which `end_running_setups` can end with everything it
+    started. The seam a test replaces to see or stub the setup's spawn."""
+    if capture_output:
+        kwargs |= {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    with subprocess.Popen(args, stdin=subprocess.DEVNULL, start_new_session=True, **kwargs) as proc:
+        _RUNNING_SETUPS.add(proc.pid)
+        try:
+            out, err = proc.communicate()
+        finally:
+            _RUNNING_SETUPS.discard(proc.pid)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def end_running_setups() -> None:
+    """End every setup command still running, its children included: the
+    server is shutting down. One left running outlived `kraft admin stop`
+    and ran beside the next server's own run of the same setup in the same
+    worktree, where two `npm ci` or `pip install` runs can corrupt it."""
+    for pid in list(_RUNNING_SETUPS):
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
 async def _prepare(
     worktree: Path,
     repo: Path,
@@ -976,7 +1008,7 @@ async def _prepare(
         return await run_setup_command(
             worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout
         )
-    before = await git.untracked_lockfiles(worktree)
+    before = await git.lockfile_digests(worktree)
     said = await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout)
     await git.record_setup_writes(worktree, before)
     return said
@@ -1117,12 +1149,17 @@ async def refresh_worktree_base(
     must not leave `base_ref` pointing at a commit the branch has moved past).
     Returns None when there was nothing to do: no worktree yet, `repo`'s HEAD
     unreadable, the branch already has an `origin` remote-tracking
-    ref (unless `force`), or the worktree has uncommitted changes -- all are
-    best-effort skips (logged), same posture as `ensure_worktree`'s other git
-    steps. The dirty-tree case comes from a pause via SIGTERM
-    (`kraft.api.routes.lifecycle._terminate`) catching an agent mid-edit with
-    nothing committed yet, and `git rebase` itself refuses a dirty tree; the
-    pushed-branch case is covered below.
+    ref (unless `force`), or the worktree has uncommitted changes to tracked
+    files -- all are best-effort skips (logged), same posture as
+    `ensure_worktree`'s other git steps. The dirty-tree case comes from a
+    pause via SIGTERM (`kraft.api.routes.lifecycle._terminate`) catching an
+    agent mid-edit with nothing committed yet, and `git rebase` itself
+    refuses a dirty tree; the pushed-branch case is covered below. Untracked
+    files do not skip it: the lockfiles the setup wrote are set aside for the
+    rebase and put back after it (`_set_aside_setup_lockfiles`), and any
+    other untracked file the incoming commits would overwrite makes git
+    refuse to start, which raises `RebaseBlocked` (an `UnsafeWorktree`: a
+    stop for a person, not a conflict).
 
     Raises `RebaseConflict` (a `RuntimeError` subclass), with the rebase
     already aborted (`git rebase --abort`), on a conflict -- the worktree is
@@ -1180,42 +1217,138 @@ async def refresh_worktree_base(
         is not None
     ):
         return head
-    if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
+    # Tracked changes only. An untracked file is always there in a repo that
+    # does not ignore Kraft's own session notes, or the setup's `.venv` and
+    # `uv.lock`, so counting one skipped every rebase in such a repo: the
+    # merge request opened on a stale base and `on_base_changed` never fired
+    # (R10E-01). An untracked file the incoming commits would overwrite
+    # makes `git rebase` refuse to start, which is `RebaseBlocked` below.
+    if git_read(
+        worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain", "--untracked-files=no"
+    ):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
     # Kraft never rebases over, or aborts, an operation it did not start.
     git.assert_on_branch(worktree, branch)
+    aside = await _set_aside_setup_lockfiles(worktree)
     try:
-        done = await asyncio.to_thread(
-            subprocess.run,
-            ["git", "-C", str(worktree), "rebase", head],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=_committer_env(identity),
-        )
-    except subprocess.TimeoutExpired:
-        # `subprocess.run` already killed the `git rebase` process on the
-        # timeout; its abort left mid-operation, the same clean-up a
-        # conflict's abort below does.
-        await _abort_rebase(
-            worktree, RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}")
-        )
-    if done.returncode != 0:
-        # git prints the "CONFLICT (content): Merge conflict in <file>" line to
-        # stdout; stderr only ever carries the generic "could not apply"/"hint:
-        # Resolve all conflicts" text. Join both rather than preferring one, so
-        # the conflicting file's name survives into the raised message and the
-        # needs_human reason a human reads.
-        detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
-        unmerged = git_read(worktree, "diff", "--name-only", "--diff-filter=U") or ""
-        await _abort_rebase(
-            worktree,
-            RebaseConflict(
-                f"git rebase failed for {worktree}: {detail}", tuple(unmerged.splitlines())
-            ),
-        )
+        try:
+            done = await asyncio.to_thread(
+                subprocess.run,
+                ["git", "-C", str(worktree), "rebase", head],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_committer_env(identity),
+            )
+        except subprocess.TimeoutExpired:
+            # `subprocess.run` already killed the `git rebase` process on the
+            # timeout; its abort left mid-operation, the same clean-up a
+            # conflict's abort below does.
+            await _abort_rebase(
+                worktree,
+                RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}"),
+            )
+        if done.returncode != 0:
+            _refuse_unstarted_rebase(worktree, done)
+            # git prints the "CONFLICT (content): Merge conflict in <file>" line to
+            # stdout; stderr only ever carries the generic "could not apply"/"hint:
+            # Resolve all conflicts" text. Join both rather than preferring one, so
+            # the conflicting file's name survives into the raised message and the
+            # needs_human reason a human reads.
+            detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
+            unmerged = git_read(worktree, "diff", "--name-only", "--diff-filter=U") or ""
+            await _abort_rebase(
+                worktree,
+                RebaseConflict(
+                    f"git rebase failed for {worktree}: {detail}", tuple(unmerged.splitlines())
+                ),
+            )
+    except BaseException:
+        # The rebase's own error is the one to report: a put-back that fails
+        # too is logged, never raised in its place.
+        try:
+            _put_back_setup_lockfiles(worktree, aside)
+        except Exception:
+            logger.exception("could not put the setup's lockfiles back in %s", worktree)
+        raise
+    _put_back_setup_lockfiles(worktree, aside)
     return head
+
+
+class RebaseBlocked(git.UnsafeWorktree):
+    """`git rebase` refused to start, so nothing was rebased and there is no
+    conflict for an agent to resolve: most often an untracked file the
+    incoming commits would overwrite. A stop for a person, never a skip."""
+
+
+def _refuse_unstarted_rebase(worktree: Path, done: subprocess.CompletedProcess) -> None:
+    """Raise `RebaseBlocked` when a failed `git rebase` never started one (it
+    left no state behind: `assert_on_branch` saw none before it ran)."""
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None or any(
+        os.path.lexists(Path(gitdir, d)) for d in ("rebase-merge", "rebase-apply")
+    ):
+        return
+    detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
+    # The paths first: a stop reason is read by its first line. git lists
+    # each one tab-indented under its "would be overwritten" line.
+    paths = [line.strip() for line in detail.splitlines() if line.startswith("\t")]
+    first = (
+        f"untracked {', '.join(paths)} would be overwritten by the base branch; "
+        f"move or delete {'it' if len(paths) == 1 else 'them'}, then retry"
+        if paths
+        else "git would not start the rebase onto the base branch; fix what it names, then retry"
+    )
+    raise RebaseBlocked(
+        f"{first}\ngit rebase could not start in {worktree}, so nothing was rebased: {detail}"
+    )
+
+
+#: In the worktree's own git dir: where `_set_aside_setup_lockfiles` keeps
+#: the setup's lockfiles while a rebase runs.
+SET_ASIDE = "kraft-set-aside"
+
+
+async def _set_aside_setup_lockfiles(worktree: Path) -> list[str]:
+    """Move the untouched lockfiles this worktree's setup wrote
+    (`forge.git.setup_lockfiles`) into the git dir, out of the rebase's way:
+    a base that has since committed its own `uv.lock`, as Kraft advises,
+    could not be checked out over the setup's untracked one. Returns what
+    was moved, for `_put_back_setup_lockfiles`."""
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None:
+        return []
+    store_dir = Path(gitdir) / SET_ASIDE
+    # What a server killed mid-rebase left: the setup's next run rewrites it.
+    shutil.rmtree(store_dir, ignore_errors=True)
+    # Only a lockfile known to be as the setup left it: one with no digest (a
+    # record from before them) may hold the agent's edit, and moving it out
+    # of the way of a base's copy would lose that.
+    lockfiles = await git.setup_lockfiles(worktree, unknown=False)
+    moved = []
+    for rel in sorted(lockfiles):
+        (store_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        os.replace(worktree / rel, store_dir / rel)
+        moved.append(rel)
+    return moved
+
+
+def _put_back_setup_lockfiles(worktree: Path, moved: list[str]) -> None:
+    """Undo `_set_aside_setup_lockfiles`. A path the rebase brought a tracked
+    copy to keeps the base's: the setup's is dropped, and its next run (every
+    walk entry runs it) works from the committed one."""
+    if not moved:
+        return
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None:
+        return
+    store_dir = Path(gitdir) / SET_ASIDE
+    for rel in moved:
+        if not os.path.lexists(worktree / rel):
+            (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(store_dir / rel, worktree / rel)
+    shutil.rmtree(store_dir, ignore_errors=True)
 
 
 #: Seconds `git rebase --abort` gets (Kraft-ujep9). Fixed, not the item's time

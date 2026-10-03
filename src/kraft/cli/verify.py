@@ -37,6 +37,7 @@ from pathlib import Path
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import detect
+from kraft.adapters.forge.git import LOCK_COMMANDS
 from kraft.worker.env import TEST_ENV, worker_env
 
 #: Lines of a failed command's output shown; the rest is in the log it names.
@@ -265,7 +266,8 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
                 say(
                     f"    left {where}, a lockfile the repo does not commit: Kraft's commits "
                     "leave it out, but an agent's `git add -A` would commit it. Commit one "
-                    "(uv lock), so every work item installs the same versions"
+                    f"({LOCK_COMMANDS[Path(where).name]}), so every work item installs the "
+                    "same versions"
                 )
                 continue
             say(

@@ -342,8 +342,10 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
     )
     before_base_ref = item["base_ref"]
     worktree = Path(item["worktree_path"])
-    # models a SIGTERM catching the agent mid-edit, nothing committed yet
-    (worktree / "midedit.txt").write_text("uncommitted work\n")
+    # models a SIGTERM catching the agent mid-edit of a tracked file, nothing
+    # committed yet; an untracked file alone no longer skips the rebase
+    edited = (worktree / "test_calc.py").read_text() + "# uncommitted work\n"
+    (worktree / "test_calc.py").write_text(edited)
 
     (repo / "moved.txt").write_text("moved on\n")
     _git(repo, "add", "-A")
@@ -361,7 +363,7 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
         timeout=300,
     )
     # dirty file survived untouched -- rebase was skipped, not stashed
-    assert (worktree / "midedit.txt").read_text() == "uncommitted work\n"
+    assert (worktree / "test_calc.py").read_text() == edited
     assert client.get(f"/api/work-items/{wid}").json()["base_ref"] == before_base_ref
 
 

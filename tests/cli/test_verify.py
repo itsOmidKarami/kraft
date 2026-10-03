@@ -164,7 +164,10 @@ def test_an_unignored_install_is_not_a_file_a_commit_would_take(tmp_path):
     out (`forge.git.work_product_pathspec`), so verify does not count one
     either; a file written beside it still fails."""
     repo = _repo(tmp_path)
-    setup = "mkdir -p .venv/lib node_modules/x && touch .venv/pyvenv.cfg node_modules/x/i.js"
+    setup = (
+        "mkdir -p .venv/lib .venv/bin node_modules/x && touch .venv/pyvenv.cfg .venv/bin/python "
+        "node_modules/.package-lock.json node_modules/x/i.js"
+    )
     ok, said = _verify(_entry(repo, setup_command=setup, test_command="true"))
     assert ok, said
     stray = f"{setup} && touch stray.txt"
@@ -178,7 +181,9 @@ def test_an_unignored_install_is_named_though_it_does_not_fail(tmp_path):
     and its `git add -A` takes a `.venv` the repo does not ignore: verify
     hid that. An ignored one is not named."""
     repo = _repo(tmp_path)
-    setup = "mkdir -p .venv/lib && touch .venv/pyvenv.cfg .venv/lib/site.py"
+    setup = (
+        "mkdir -p .venv/lib .venv/bin && touch .venv/pyvenv.cfg .venv/bin/python .venv/lib/site.py"
+    )
     ok, said = _verify(_entry(repo, setup_command=setup, test_command="true"))
     assert ok, said
     assert "left .venv/, an install the repo does not ignore" in said
@@ -196,6 +201,16 @@ def test_a_uv_lock_the_setup_wrote_is_named_as_a_lockfile_not_a_change(tmp_path)
     assert ok, said
     assert "left uv.lock, a lockfile the repo does not commit" in said
     assert "Commit one (uv lock)" in said
+
+
+def test_a_cargo_lock_the_setup_wrote_is_named_with_cargos_advice(tmp_path):
+    """Connect proposes `cargo fetch` for a crate, which writes a `Cargo.lock`
+    where none is committed, and `--verify` then failed on it."""
+    repo = _repo(tmp_path)
+    ok, said = _verify(_entry(repo, setup_command="echo v1 > Cargo.lock", test_command="true"))
+    assert ok, said
+    assert "left Cargo.lock, a lockfile the repo does not commit" in said
+    assert "Commit one (cargo generate-lockfile)" in said
 
 
 def test_a_test_writes_no_bytecode_as_a_work_items_test_does_not(tmp_path):

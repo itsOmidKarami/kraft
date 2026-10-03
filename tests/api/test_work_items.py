@@ -61,11 +61,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
 @pytest.mark.parametrize(
     ("route", "body", "detail"),
     [
-        (
-            "work-items",
-            {"title": "x", "repo": "/tmp", "chain_template": "nope"},
-            "no chain 'nope'",
-        ),
+        ("work-items", {"title": "x", "repo": "/tmp", "chain_template": "nope"}, "no chain 'nope'"),
         ("work-items", {"title": "x"}, None),
         ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
@@ -77,6 +73,9 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         ("work-items", {"title": "", "repo": "REPO"}, "title cannot be empty"),
         ("work-items", {"title": " \t ", "repo": "REPO"}, "title cannot be empty"),
         ("triggers", {"title": "   ", "repo": "REPO"}, "title cannot be empty"),
+        ("work-items", {"title": "line1\nline2", "repo": "REPO"}, "the title is one line"),
+        ("triggers", {"title": "a\r\nb", "repo": "REPO"}, "the title is one line"),
+        ("work-items", {"title": "one line\n", "repo": "REPO"}, "the title is one line"),
     ],
     ids=[
         "an-unknown-template",
@@ -87,6 +86,9 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         "an-empty-title",
         "a-whitespace-title",
         "trigger-a-whitespace-title",
+        "a-multi-line-title",
+        "trigger-a-multi-line-title",
+        "a-trailing-line-break",
     ],
 )
 def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):
@@ -240,6 +242,10 @@ def test_patch_refuses_an_empty_body_and_a_blank_title(client, repo):
     blank = client.patch(f"/api/work-items/{wid}", json={"title": "   "})
     assert blank.status_code == 422
     assert "title cannot be empty" in blank.json()["detail"]
+
+    two = client.patch(f"/api/work-items/{wid}", json={"title": "line1\u2028line2"})
+    assert two.status_code == 422
+    assert "the title is one line" in two.json()["detail"]
 
     assert client.get(f"/api/work-items/{wid}").json()["title"] == "t"
 

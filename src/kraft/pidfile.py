@@ -81,9 +81,56 @@ def _not_a_kraft_server(pid: int, path: Path) -> str | None:
         return "is not running"
     if created > written + _CLOCK_SLACK_S:
         return "started after the pidfile was written, so the pid was reused"
-    if not any("kraft" in part for part in cmdline):
+    if not runs_the_server(cmdline):
         name = cmdline[0] if cmdline else "another program"
         return f"is {os.path.basename(name)}, not Kraft"
+    return None
+
+
+#: Interpreter options whose value is the next word: `python -X dev -m kraft`.
+_PY_VALUE_OPTIONS = frozenset({"-X", "-W", "--check-hash-based-pycs"})
+
+
+def runs_the_server(cmdline: list[str]) -> bool:
+    """Whether `cmdline` is a Kraft server's: the `kraft` command (as its own
+    program, or the script a Python runs) or `python -m kraft`, with no verb
+    (bare `kraft`, options and all) or `admin start`, which is also what a
+    detached start and the service unit run. Not any argv holding the text
+    "kraft": a shell started in a `kraft-*` directory, `tail -f
+    ~/.kraft/run/kraft.log`, or an editor on `~/src/kraft` all do.
+
+    The interpreter is any `python*` or `pypy*`, matched without case: a
+    macOS framework build runs as `…/Python.app/Contents/MacOS/Python`. Its
+    own options come before the script or `-m` (`-I`, `-s` from a shebang,
+    `-P`, `-X dev`), and are skipped."""
+    entry = _entry(cmdline)
+    if entry is None:
+        return False
+    args = cmdline[entry + 1 :]
+    return not args or args[0].startswith("-") or args[:2] == ["admin", "start"]
+
+
+def _entry(cmdline: list[str]) -> int | None:
+    """The index of `kraft` in `cmdline`: the program, the script its Python
+    runs, or the module after `-m`; None when it is none of those."""
+    if not cmdline:
+        return None
+    if os.path.basename(cmdline[0]) == "kraft":
+        return 0
+    if not os.path.basename(cmdline[0]).lower().startswith(("python", "pypy")):
+        return None
+    i = 1
+    while i < len(cmdline):
+        arg = cmdline[i]
+        if arg in _PY_VALUE_OPTIONS:
+            i += 2
+            continue
+        if arg.startswith("-"):
+            # `-I`, `-sE`, `-Xdev`; `-m` and `-Im` end with the module, read
+            # as the next word just as a script would be.
+            i += 1
+            continue
+        return i if os.path.basename(arg) == "kraft" else None
     return None
 
 

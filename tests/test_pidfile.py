@@ -74,9 +74,80 @@ def test_a_pid_reused_after_the_pidfile_was_written_is_stale(tmp_path, started):
 def test_a_server_from_before_the_lock_is_still_found(tmp_path, started):
     """1.5.0rc13 and older write the pid but take no lock, and `kraft admin
     restart` right after an update is talking to exactly that server."""
-    proc = started(sys.executable, "-c", "import time; time.sleep(60)", "kraft", "admin", "start")
+    script = tmp_path / "bin" / "kraft"  # the console script, as a Python runs it
+    script.parent.mkdir()
+    script.write_text("import time\ntime.sleep(60)\n")
+    proc = started(sys.executable, str(script), "admin", "start")
 
     assert pidfile.read(_pidfile_after(tmp_path, proc)) == pidfile.State(proc.pid, True)
+
+
+def test_a_process_that_only_mentions_kraft_is_stale(tmp_path, started):
+    """Its argv holds the word, but it runs no Kraft: `kraft admin stop`
+    would have signalled it."""
+    proc = started(sys.executable, "-c", "import time; time.sleep(60)", "kraft", "admin", "start")
+
+    state = pidfile.read(_pidfile_after(tmp_path, proc))
+
+    assert not state.running
+    assert state.why.endswith(", not Kraft")
+
+
+@pytest.mark.parametrize(
+    ("cmdline", "server"),
+    [
+        (["/home/u/.local/bin/kraft"], True),
+        (["/home/u/.local/bin/kraft", "--host", "0.0.0.0"], True),
+        (["/venv/bin/python3", "/home/u/.local/bin/kraft", "admin", "start"], True),
+        (["/venv/bin/python", "-P", "-m", "kraft", "admin", "start", "--port", "1"], True),
+        (["python3.13", "-m", "kraft"], True),
+        (
+            [
+                "/Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/"
+                "Contents/MacOS/Python",
+                "/Users/u/.local/bin/kraft",
+                "admin",
+                "start",
+            ],
+            True,
+        ),
+        (["/usr/local/bin/python3", "-I", "/home/u/.local/bin/kraft"], True),
+        (["/usr/bin/python3", "-s", "/home/u/.local/bin/kraft", "admin", "start"], True),
+        (["python3", "-X", "dev", "-m", "kraft", "admin", "start"], True),
+        (["python3", "-Im", "kraft"], True),
+        (["pypy3", "-m", "kraft"], True),
+        (["python3", "-c", "import time", "kraft", "admin", "start"], False),
+        (["/bin/bash", "-c", "cd /tmp/kraft-docs-review && kraft admin restart -y"], False),
+        (["tail", "-f", "/home/u/.kraft/run/kraft.log"], False),
+        (["vim", "/home/u/src/kraft"], False),
+        (["/venv/bin/python", "-I", "-m", "kraft", "admin", "permission-hook", "cursor"], False),
+        (["/home/u/.local/bin/kraft", "view", "list"], False),
+    ],
+    ids=[
+        "bare",
+        "bare-with-options",
+        "script-admin-start",
+        "module-admin-start",
+        "dev-module",
+        "macos-framework-python",
+        "isolated-script",
+        "shebang-dash-s",
+        "x-option-before-module",
+        "combined-flags-module",
+        "pypy",
+        "a-program-string",
+        "a-shell-in-a-kraft-directory",
+        "tail-of-its-log",
+        "an-editor-on-a-checkout",
+        "a-hook",
+        "another-verb",
+    ],
+)
+def test_only_the_servers_own_command_line_counts_as_kraft(cmdline, server):
+    """Any argv holding the text "kraft" passed, so a stale pidfile naming the
+    caller's own shell, started in a `kraft-*` directory, had `kraft admin
+    restart` SIGTERM that shell."""
+    assert pidfile.runs_the_server(cmdline) is server
 
 
 @pytest.mark.parametrize(

@@ -30,17 +30,19 @@ def _spent(wid, sid, tokens_in, write, read, out, cost):
     [
         (
             False,
-            "usage 1,335 tokens · 10 in · 20 cache write · 300 cache read · 1,005 out · $0.60",
+            "usage 1,335 tokens · 10 in · 20 cache write · 300 cache read · 1,005 out · $0.600",
         ),
         (
             True,
             "usage 3,336 tokens · 2,010 in (cache not split on older sessions) · 20 cache "
-            "write · 300 cache read · 1,006 out · $0.70",
+            "write · 300 cache read · 1,006 out · $0.700",
         ),
     ],
     ids=["split", "older-rows-unsplit"],
 )
 def test_show_prints_each_kind_of_token(app, capsys, make_item, repo, older, line):
+    """Dollars as the stop reasons and the web UI's meter print them: a tenth
+    of a cent under a dollar, never rounded to cents."""
     wid = make_item(repo)
     _spent(wid, "s1", 10, 20, 300, 5, 0.5)
     _spent(wid, "s2", 0, 0, 0, 1000, 0.1)

@@ -42,7 +42,7 @@ def _record_run(monkeypatch) -> list[dict]:
         calls.append({"args": args, **kwargs})
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+    monkeypatch.setattr(kraft_builtins, "_run_setup", run)
     return calls
 
 
@@ -240,7 +240,7 @@ async def test_a_setup_command_runs_under_the_limits_and_names_the_one_that_kill
         argvs.append(args)
         return real(args, **kwargs)
 
-    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+    monkeypatch.setattr(kraft_builtins, "_run_setup", run)
     sandbox = {**_SANDBOX, "resources": {"memory": "32m"}}
 
     with pytest.raises(RuntimeError) as failed:
@@ -276,7 +276,7 @@ def _without_docker(tmp_path, monkeypatch, *tools: str) -> list[dict]:
         spawned.append({"args": args, "shell": kwargs.get("shell", False)})
         return real(args, **kwargs)
 
-    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+    monkeypatch.setattr(kraft_builtins, "_run_setup", run)
     return spawned
 
 

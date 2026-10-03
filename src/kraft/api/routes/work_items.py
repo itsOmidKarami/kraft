@@ -18,6 +18,7 @@ from kraft.executor import entry
 from kraft.overrides import (
     harness_refusal,
     item_harness_refusal,
+    model_id_problem,
     validate_agent_overrides,
     validate_node_override_fields,
 )
@@ -628,11 +629,24 @@ def _check_title(title: str) -> None:
     show the item as a bare dash."""
     if not title.strip():
         raise HTTPException(422, "title cannot be empty")
+    _check_one_line(title)
     if len(title) > beads_mod.MAX_TITLE:
         raise HTTPException(
             422,
             f"title is {len(title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
+
+
+#: Every character `str.splitlines` breaks a line at.
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+
+
+def _check_one_line(title: str) -> None:
+    """A title is one line: a line break in it broke `kraft view list`'s
+    table, the row wrapping under the ID column. A trailing one too, as the
+    blank-title refusal refuses rather than strips."""
+    if not _LINE_BREAKS.isdisjoint(title):
+        raise HTTPException(422, "the title is one line: put the rest in the description instead")
 
 
 class TriggerBody(BaseModel):
@@ -816,11 +830,33 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     _check_node_overrides(patch, node_ids, nodes, deps.instance_policy(st).maxima)
 
     def check(c):
-        for node_id in patch:
-            if store.node_started(c, row["id"], node_id):
+        for node_id, fields in patch.items():
+            if store.node_started(c, row["id"], node_id) and not _repairs_refused_model(
+                row, node_id, fields
+            ):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 
     st.db.read(lambda c: check(c))
+
+
+#: What a repair of a refused stored model may touch on a started node.
+_MODEL_FIELDS = frozenset({"model", "escalate_model", "effort"})
+
+
+def _repairs_refused_model(row, node_id: str, fields: dict) -> bool:
+    """Whether `fields` repairs a node the item is stopped at because its
+    stored model override is no model id (`overrides.stored_model_refusal`,
+    the overrides 1.4 stored as any text): a clear (`{}`), or a change to its
+    model fields alone. The node started before the launch was refused, so
+    its lock answered 409 to the very command the stop names, and a retry
+    stopped again. No agent of that node ever ran with that model, so there
+    is nothing the change could misreport."""
+    if row["status"] != "needs_human" or row["current_node_id"] != node_id:
+        return False
+    if not set(fields) <= _MODEL_FIELDS:
+        return False
+    stored = store.node_overrides_of(row).get(node_id) or {}
+    return any(model_id_problem(stored.get(k)) is not None for k in ("model", "escalate_model"))
 
 
 def _item_policy(row, patch: dict | None, new_materialized: str | None):
@@ -911,6 +947,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
+    if body.title is not None:
+        _check_one_line(body.title)
 
     if body.node_overrides is not None:
         _validate_node_overrides(st, row, body.node_overrides)

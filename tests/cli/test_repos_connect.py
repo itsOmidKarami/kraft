@@ -211,3 +211,23 @@ def test_connecting_again_with_no_tests_says_what_it_saved(app, capsys, repo):
     assert "saved enabled: its work items pass verification without running a test" in out
     [entry] = asyncio.run(client.repos())
     assert (entry["test_command"], entry["enabled"]) == ("", True)
+
+
+def test_connect_says_the_commands_it_was_given_not_the_probes_advice(app, capsys, repo):
+    """Connecting again with `--setup-command` printed the probe's "pass
+    --setup-command" advice above "saved the setup command", and a first
+    connect with `--test-command` still said no test command was proposed
+    and to set one yourself."""
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    commit_all(repo)
+    cli.main(["repo", "connect", str(repo), "--test-command", "make check", "-y"])
+    first = capsys.readouterr().out
+    assert "test command: make check" in first
+    assert "no test command proposed: the root" not in first
+
+    cli.main(["repo", "connect", str(repo), "--setup-command", "make deps", "-y"])
+    again = capsys.readouterr().out
+    assert "setup command: make deps (given)" in again
+    assert "pass --setup-command" not in again
+    assert "no test command proposed: the root" not in again
+    assert asyncio.run(client.repos())[0]["setup_command"] == "make deps"

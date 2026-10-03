@@ -274,9 +274,13 @@ def _say_setup(result: dict) -> None:
         )
 
 
-def _say_rest(result: dict) -> None:
+def _say_rest(result: dict, *, tested: bool | None = None) -> None:
     """What else the evidence held: the commands not proposed, the programs
-    missing here, and why a directory proposes no test command."""
+    missing here, and why a directory proposes no test command -- not the
+    root's when it has one anyway (`tested`, by default whether `result`
+    names one): it was given, and there is nothing left to propose."""
+    if tested is None:
+        tested = result.get("test_command") is not None
     saved = [result.get("test_command") or "", result.get("setup_command") or ""]
     saved += [s["command"] for s in result.get("test_scopes") or ()]
     others = [
@@ -307,6 +311,8 @@ def _say_rest(result: dict) -> None:
     if result.get("probe_failed"):
         _print(f"  saved with the commands given; the probe failed: {result['probe_failed']}")
     for stop in result.get("stopped") or ():
+        if stop["dir"] == "." and tested:
+            continue
         where = "the root" if stop["dir"] == "." else f"{stop['dir']}/"
         _print(f"  no test command proposed: {where} is {stop['reason']}")
 
@@ -375,9 +381,16 @@ def _connect_again(
             test = patch.get("test_command", probed.get("test_command"))
             enabled = patch.get("enabled", stored.get("enabled"))
             _say_tests({**probed, "test_command": test, "enabled": enabled})
-        if needs_setup:
+        if needs_setup and setup_command is not None:
+            # What is saved, not the probe's advice about a command it lacks.
+            shown = (
+                f'"{setup_command}" (nothing to prepare)' if setup_command == "" else setup_command
+            )
+            _print(f"setup command: {shown} (given)")
+        elif needs_setup:
             _say_setup(probed)
-        _say_rest(probed)
+        tested = patch.get("test_command", stored.get("test_command")) is not None
+        _say_rest(probed, tested=tested)
     if not patch:
         out("  nothing new to save")
         return stored
