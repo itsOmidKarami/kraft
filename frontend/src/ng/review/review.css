@@ -149,6 +149,7 @@
 .rv-preview { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .rv-suggest { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: 12px/1.6 ui-monospace, Menlo, monospace; }
 .rv-suggest-head { padding: 4px 10px; background: var(--surface-2); color: var(--text-muted); font: 11.5px var(--font-sans); }
+.rv-moved { margin: 0; padding: 4px 10px; font-size: 12px; line-height: 1.45; color: var(--warn); }
 .rv-suggest-line { display: flex; gap: 8px; padding: 0 10px; white-space: pre-wrap; }
 .rv-suggest-line.is-del { background: color-mix(in oklab, var(--diff-del-theme) 9%, transparent); }
 .rv-suggest-line.is-add { background: color-mix(in oklab, var(--diff-add-theme) 9%, transparent); }

@@ -283,7 +283,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           ) : !pf.hunks.length ? (
             <p className="rv-file-msg">{pf.status === "renamed" ? "Renamed with no changes" : "No changes to show"}</p>
           ) : (
-            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift extends, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
+            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift extends on its side, Enter comments (its pencil starts the range on the other side), n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
               {rows.map((r, i) => (
                 <RowView
                   key={i}
