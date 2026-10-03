@@ -793,14 +793,3 @@ def test_reload_exits_1_on_a_chain_that_does_not_resolve(app, capsys):
     assert caught.value.code == 1
     out = capsys.readouterr().out
     assert "invalid: chain broken" in out and "no_such_node" in out
-
-
-def test_restart_help_says_when_it_exits_1(capsys):
-    """R10D-07, R10c-06: `--help` said nothing of the exit 1 with no server, a
-    change the notes call script-breaking, nor of the attached server."""
-    with pytest.raises(SystemExit):
-        cli.main(["admin", "restart", "--help"])
-    text = " ".join(capsys.readouterr().out.split())
-    assert "With no server running it starts nothing and exits 1" in text
-    assert "attached to a terminal is stopped and not started again" in text
-    assert "restart exits 1" in text

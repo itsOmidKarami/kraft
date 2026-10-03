@@ -196,3 +196,14 @@ def test_stop_does_not_wait_on_a_server_that_never_answers(tmp_path, monkeypatch
     captured = capsys.readouterr()
     assert "did not list its active items within 0.3s" in captured.err
     assert "stopped (pid 4171)" in captured.out
+
+
+def test_restart_help_says_when_it_exits_1(capsys):
+    """R10D-07, R10c-06: `--help` said nothing of the exit 1 with no server, a
+    change the notes call script-breaking, nor of the attached server."""
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "restart", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "With no server running it starts nothing and exits 1" in text
+    assert "attached to a terminal is stopped and not started again" in text
+    assert "restart exits 1" in text

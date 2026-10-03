@@ -427,6 +427,9 @@ def test_submit_review_says_only_a_human_should_decide():
             "add_review_comment",
             {"body": "hi", "work_item_id": "w1", "file_path": "a.py", "label": "must_fix"},
         ),
+        ("resolve_thread", "resolve_thread", {"thread_id": "t1"}),
+        ("reopen_thread", "reopen_thread", {"thread_id": "t1"}),
+        ("submit_review", "submit_review", {"outcome": "comment", "work_item_id": "w1"}),
         (
             "add_review_comment",
             "add_review_comment",
@@ -441,9 +444,6 @@ def test_submit_review_says_only_a_human_should_decide():
                 "quote": "-a\n+b",
             },
         ),
-        ("resolve_thread", "resolve_thread", {"thread_id": "t1"}),
-        ("reopen_thread", "reopen_thread", {"thread_id": "t1"}),
-        ("submit_review", "submit_review", {"outcome": "comment", "work_item_id": "w1"}),
     ],
 )
 def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, client_fn, args):
