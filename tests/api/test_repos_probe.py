@@ -1,14 +1,41 @@
 """`POST /repos/probe` and the probe behind `POST /repos`: the evidence they
-tell, when they read detectors.yaml, and that they never block the server."""
+tell, when they read detectors.yaml, and that they never block the server;
+and the checkout `GET /repos` suggests connecting."""
 
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
 from support.harness import commit_all, make_repo, make_repo_with_submodule
 from support.probe import JEST
+
+
+#: Reads real config: no default repo entry stands in for the one under test.
+@pytest.mark.api_client(default_setup=False)
+@pytest.mark.parametrize(
+    "cwd, connect, suggested",
+    [
+        pytest.param("sample", False, "sample", id="a checkout is suggested"),
+        pytest.param("sample/src", False, "sample", id="from inside it, its top"),
+        pytest.param("plain", False, None, id="outside a checkout, nothing"),
+        pytest.param("sample", True, None, id="already connected, nothing"),
+    ],
+)
+def test_lists_the_servers_own_checkout_as_the_suggested_repo(
+    tmp_path, client, monkeypatch, cwd, connect, suggested
+):
+    """First-run offers the git checkout the server was started in (BD-2)."""
+    repo = make_repo(tmp_path)
+    (repo / "src").mkdir(exist_ok=True)
+    (tmp_path / "plain").mkdir()
+    if connect:
+        assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
+    monkeypatch.chdir(tmp_path / cwd)
+    got = client.get("/api/repos").json()["suggested"]
+    assert (got and Path(got).resolve()) == (suggested and (tmp_path / suggested).resolve())
 
 
 def test_a_repo_that_declares_no_tests_connects_enabled(tmp_path, client, templates_dir):
