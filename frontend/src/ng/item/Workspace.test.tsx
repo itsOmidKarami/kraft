@@ -134,7 +134,7 @@ describe("Workspace", () => {
 
 // R10a-06: a running node read "running 0s" for up to 30 s, the clock ticking every 30 s.
 describe("the item page's clock", () => {
-  const running = { id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, round: 0, thread: 1, created_at: "2026-09-13T09:59:57Z", started_at: "2026-09-13T09:59:57Z", exited_at: null, model: "sonnet", tokens_in: 1, tokens_out: 1, cost_usd: 0, wall_ms: null } as unknown as WorkerSession;
+  const running = { id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, round: 0, thread: 1, created_at: "2026-09-13T09:59:57Z", started_at: "2026-09-13T09:59:57Z", exited_at: null, model: "m", tokens_in: 1, tokens_out: 1, cost_usd: 0, wall_ms: null } as unknown as WorkerSession;
   afterEach(() => vi.useRealTimers());
 
   it("counts a running node's time every second", async () => {
