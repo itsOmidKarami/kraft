@@ -170,7 +170,7 @@ describe("Repos page: connecting", () => {
     expect(found).toHaveTextContent("uv sync found, but web/ has nothing to prepare it");
     expect(found).toHaveTextContent("origin/main, where work items start");
     // None proposed, not none found: the form says which, without the detector's word "stopped".
-    expect(found).toHaveTextContent("No test command proposed: connects disabled until you set a test command in Templates › Repos.");
+    expect(found).toHaveTextContent("No test command proposed: connects disabled. Once it is connected, set its test command in its pane here, then Enable it.");
     expect(found).not.toHaveTextContent(/stopped/i);
   });
 
@@ -181,7 +181,7 @@ describe("Repos page: connecting", () => {
     await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
     await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new");
     await userEvent.click(screen.getByRole("button", { name: "Check" }));
-    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connects disabled until you set a test command in Templates › Repos.");
+    expect(await screen.findByLabelText("What was found")).toHaveTextContent("No tests found: connects disabled. Once it is connected, set its test command in its pane here, then Enable it.");
     await userEvent.click(within(screen.getByRole("dialog", { name: "Connect a repo" })).getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalled());
     expect(vi.mocked(d.postOps).mock.calls[0][2][0]).toMatchObject({ op: "add_repo", fields: { enabled: false } });
@@ -235,7 +235,7 @@ describe("Repos page: connecting", () => {
     const dialog = screen.getByRole("dialog", { name: "Connect a repo" });
     const connect = await within(dialog).findByRole("button", { name: "Connect" });
     expect(connect).toHaveAccessibleDescription("No commit yet: a work item's branch starts from one. Commit its files, then press Check again.");
-    expect(within(dialog).queryByText(/connects disabled until you set a test command/)).toBeNull();
+    expect(within(dialog).queryByText(/connects disabled/)).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: "Check again" }));
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Connect" })).toBeEnabled());
     expect(vi.mocked(http.request).mock.calls.filter(([p]) => p === "/repos/probe")).toHaveLength(2);
