@@ -4,7 +4,7 @@ import { useStore } from "../../store";
 import type { CompareTarget, KraftEvent } from "../../types";
 import * as http from "../http";
 import { COALESCE_MS } from "../item/useItem";
-import { useCompare, useThreads } from "./useReview";
+import { THREADS_POLL_MS, useCompare, useThreads } from "./useReview";
 
 const ev = (work_item_id: string, seq: number, type: string): KraftEvent => ({ seq, work_item_id, type, payload: {}, created_at: "t" });
 const calls = (part: string) => vi.mocked(http.request).mock.calls.filter(([p]) => String(p).includes(part)).map(([p]) => String(p));
@@ -46,6 +46,17 @@ describe("useCompare", () => {
 });
 
 describe("useThreads", () => {
+  // R9b-15: a draft from `kraft item comment` writes no event, and an open review
+  // page kept saying "1 pending" over a second one.
+  it("reads again on coming back into view, and every so often while shown, with no event", async () => {
+    renderHook(() => useThreads("w1"));
+    expect(calls("/threads")).toHaveLength(1);
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(calls("/threads")).toHaveLength(2);
+    await act(async () => void vi.advanceTimersByTime(THREADS_POLL_MS));
+    expect(calls("/threads")).toHaveLength(3);
+  });
+
   it("reads once, then once per burst of this item's thread events, never for others", async () => {
     renderHook(() => useThreads("w1"));
     expect(calls("/threads")).toHaveLength(1);
