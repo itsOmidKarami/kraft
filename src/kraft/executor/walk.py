@@ -2076,9 +2076,11 @@ async def run_once(
             # the original steer survived this far untaken, report it before
             # it is overwritten (Kraft-s7c04.50).
             await _report_if_undelivered(db, work_item_id, carried)
+            # Named by the base branch it moved on, not the item's own branch.
+            base_name = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
             carried = Steer(
                 prompts.rebase_drift_note(
-                    worktree, store.branch_for(row), pre_base or "HEAD", new_base or "HEAD"
+                    worktree, base_name, pre_base or "HEAD", new_base or "HEAD"
                 ),
                 # Kraft wrote this one, not a person; it must not claim the
                 # judge exemption a human's own answer gets.

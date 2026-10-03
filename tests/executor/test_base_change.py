@@ -104,7 +104,8 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
     # it, so it is reported undelivered -- which is where its text is readable.
     assert script.steers["check"][1].source == "seeded"
     [undelivered] = it.events("steer_undelivered")
-    assert "rebased onto a newer" in undelivered["payload"]["steer"]
+    # Named by its base branch, never the item's own (R11E-07).
+    assert "rebased onto a newer main before opening its MR" in undelivered["payload"]["steer"]
 
 
 @pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
