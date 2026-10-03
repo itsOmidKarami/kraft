@@ -43,19 +43,22 @@ describe("StateCard", () => {
   });
 
   // R11a-01: a stuck loop had no card, so its only Retry was at the foot of the node's pane.
+  // R12b-01: a stuck fix loop stops on its judge, which no retry path can name; the card retries the node.
+  const judge = { node: "verification", task: "verification.fix_loop.judge" };
   it.each([
-    ["stuck", "Stuck", null],
-    ["question", "Needs you", null],
-    ["worker_lost", "Needs you", null],
-  ] as const)("a needs-you %s stop with no card of its own gets one: the reason, Retry from the task, Escalate…", async (kind, title, question) => {
+    ["stuck", "Stuck", null, {}, "merge_request › open › open_draft", "Retry from open_draft", "merge_request.open.open_draft"],
+    ["stuck", "Stuck", null, judge, "verification › fix_loop › judge", "Retry from verification", "verification"],
+    ["question", "Needs you", null, {}, "merge_request › open › open_draft", "Retry from open_draft", "merge_request.open.open_draft"],
+    ["worker_lost", "Needs you", null, {}, "merge_request › open › open_draft", "Retry from open_draft", "merge_request.open.open_draft"],
+  ] as const)("a needs-you %s stop with no card of its own gets one: the reason, Retry by a path the server takes, Escalate…", async (kind, title, question, over, at, label, path) => {
     const calls = stubFetch(WRITES);
-    const { h } = show({ display_status: "needs_you", status: "needs_human", needs_context_question: question, stop: stop(kind, { reason: "stuck: 1 finding(s) unchanged across cycle 1" }) });
+    const { h } = show({ display_status: "needs_you", status: "needs_human", needs_context_question: question, stop: stop(kind, { reason: "stuck: 1 finding(s) unchanged across cycle 1", ...over }) });
     const card = screen.getByRole("region", { name: title });
-    expect(card).toHaveTextContent("merge_request › open › open_draft · attempt 3");
+    expect(card).toHaveTextContent(`${at} · attempt 3`);
     expect(card).toHaveTextContent("stuck: 1 finding(s) unchanged across cycle 1");
-    await userEvent.click(within(card).getByRole("button", { name: "Retry from open_draft" }));
+    await userEvent.click(within(card).getByRole("button", { name: label }));
     await waitFor(() => expect(h.reload).toHaveBeenCalled());
-    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request.open.open_draft" } }]);
+    expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path } }]);
     await userEvent.click(within(card).getByRole("button", { name: "Escalate…" }));
     expect(h.onEscalate).toHaveBeenCalled();
   });

@@ -30,9 +30,14 @@ describe("actionPath", () => {
     expect(actionPath(v1, "verification.checks.lint")).toBe("verification.checks.lint");
     expect(actionPath(v1, "lint")).toBe("verification.checks.lint");
   });
-  it("falls back to the node for a legacy node, no task, or an unknown task", () => {
-    expect(actionPath(legacy, "self_review")).toBe("implement");
-    expect(actionPath(v1, null)).toBe("verification");
-    expect(actionPath(v1, "nope")).toBe("verification");
+  it.each([
+    ["a legacy node", legacy, "self_review", "implement"],
+    ["no task", v1, null, "verification"],
+    ["an unknown task", v1, "nope", "verification"],
+    // R12b-01: a stuck stop's task is the fix loop's judge, not one of the node's steps; sent as is, it was a 422.
+    ["a fix-loop task, not a step of the node", v1, "verification.fix_loop.judge", "verification"],
+    ["a task path of another node", v1, "merge_request.open.open_draft", "verification"],
+  ] as const)("falls back to the node for %s", (_, node, task, path) => {
+    expect(actionPath(node, task)).toBe(path);
   });
 });
