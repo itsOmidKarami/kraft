@@ -219,3 +219,44 @@ def test_doctor_passes_a_repo_naming_a_steering_profile_the_library_defines(app,
     row = _by_name(asyncio.run(doctor.run_checks()), "steering steered")
 
     assert row["ok"], row
+
+
+def _set_entry(tmp_path, **values):
+    """Overwrite the first repos.yaml entry's keys, as a 1.4 install left them."""
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["repos"][0].update(values)
+    path.write_text(yaml.safe_dump(data))
+
+
+def test_doctor_says_an_empty_test_command_runs_no_tests(app, tmp_path):
+    """1.4 stopped such a repo's items at verify; now they pass it with no test
+    run, and nothing a person looks at said so."""
+    repo = make_repo(tmp_path, name="emptytest")
+    asyncio.run(client.ensure_repo(str(repo)))
+    _set_entry(tmp_path, test_command="", test_scopes=None)
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "tests emptytest")
+
+    assert row["warn"], row
+    assert 'test_command ""' in row["detail"]
+    assert "pass verify without running a test" in row["detail"]
+
+
+def test_doctor_names_an_entry_from_before_the_probe_and_says_to_connect_again(app, tmp_path):
+    """An entry connected before this release's probe can leave both commands
+    undecided where the probe now finds them; connecting again saves them."""
+    repo = make_repo(tmp_path, name="older")
+    (repo / "Makefile").write_text("setup:\n\ttrue\ntest:\n\ttrue\n")
+    subprocess.run(["git", "-C", str(repo), "add", "Makefile"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "make"], check=True)
+    asyncio.run(client.ensure_repo(str(repo)))
+    _set_entry(tmp_path, test_command=None, test_scopes=None, setup_command=None)
+
+    rows = asyncio.run(doctor.run_checks())
+
+    again = f"run `kraft repo connect {repo}` again to save it"
+    tests = _by_name(rows, "tests older")
+    assert tests["warn"] and "stop at verify" in tests["detail"], tests
+    assert "`make test`" in tests["detail"] and again in tests["detail"]
+    assert again in _by_name(rows, "setup older")["detail"]

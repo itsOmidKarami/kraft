@@ -996,16 +996,44 @@ async def _tls_listener_check() -> dict:
     return _check("egress listener", problem is None, detail)
 
 
-def _suggested_setup(path: Path, templates_dir: Path) -> str | None:
-    """What `kraft repo connect` would propose today, or None when it finds
-    nothing (or cannot read the repo or `detectors.yaml`: the row already
-    fails, and a second error would only bury it)."""
+def _probed(path: Path, templates_dir: Path) -> detect.Proposal | None:
+    """What `kraft repo connect` would propose today, or None when it cannot
+    read the repo or `detectors.yaml`: the row already fails, and a second
+    error would only bury it."""
     if not path.is_dir():
         return None
     try:
-        return detect.probe(path, templates_dir).setup_command
+        return detect.probe(path, templates_dir)
     except config.ConfigError:
         return None
+
+
+def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict | None:
+    """A repo whose items run no test: `test_command: ""` passes verify with
+    none, and an entry with no test command stops each item there. An entry
+    connected before this release's probe can be the second where the probe
+    now finds a command, and `kraft repo connect` again saves it."""
+    if repo.test_scopes:
+        return None
+    name = f"tests {_label(repo)}"
+    if repo.test_command == "":
+        return _check(
+            name,
+            True,
+            'test_command "" — work items here pass verify without running a test',
+            warn=True,
+        )
+    if repo.test_command is not None:
+        return None
+    found = probed.test_command if probed else None
+    advice = (
+        f"connect proposes `{found}` now: run `kraft repo connect {repo.path}` again to save it"
+        if found
+        else 'set one under Templates › Repos, or `""` if it has no tests'
+    )
+    return _check(
+        name, True, f"no test command, so its work items stop at verify; {advice}", warn=True
+    )
 
 
 def _label(repo: config.RepoEntry) -> str:
@@ -1047,21 +1075,30 @@ async def _repo_checks() -> list[dict]:
             checks.append(_check(name, True, f"{path} — no .beads: work items here file no bead"))
         else:
             checks.append(_check(name, True, str(path)))
+        # Probed only for what the entry leaves undecided, as connecting it
+        # again would: a decided entry is the operator's, and costs no probe.
+        undecided = repo.setup_command is None or (
+            repo.test_command is None and not repo.test_scopes
+        )
+        probed = await asyncio.to_thread(_probed, path, live) if undecided else None
         if repo.setup_command is None:
             # No default stands behind this key: an undeclared repo stops its
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
             # makes it survivable.
-            suggestion = await asyncio.to_thread(_suggested_setup, path, live)
+            suggestion = probed.setup_command if probed else None
+            again = f"; run `kraft repo connect {repo.path}` again to save it" if suggestion else ""
             checks.append(
                 _check(
                     f"setup {_label(repo)}",
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
-                    ' (use "" if this repo deliberately needs no preparation), or tick '
+                    f' (use "" if this repo deliberately needs no preparation){again}, or tick '
                     "No setup needed under Templates › Repos",
                 )
             )
+        if (tests := _tests_check(repo, probed)) is not None:
+            checks.append(tests)
         unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
         if unrecognised:
             # Loaded, with a warning nobody may be reading: a key that binds
