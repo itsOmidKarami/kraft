@@ -43,6 +43,9 @@ design/**/*.zip
 # Written by Settings → Access and Settings → Notify. Everything else the
 # Settings screens write is versioned on purpose; these hold a password hash,
 # a bind address, and a webhook URL that are per-machine, so they stay local.
+config/access.yaml
+config/notify.yaml
+# The same, in a checkout from before the 2.0 rename.
 templates/access.yaml
 templates/notify.yaml
 
