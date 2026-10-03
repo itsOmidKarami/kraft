@@ -76,6 +76,9 @@ export function missingLine(tools: MissingTool[] | undefined): string | null {
  *  `POST /repos` and `add_repo` refuse it, as a work item's branch would be an empty orphan. */
 export const NO_COMMIT = "its working copy: the repo has no commit yet, and a work item's branch starts from one. Commit its files, then check it again.";
 
+/** The same refusal, by the button it turns off: why it is off and the way on (R10a-01). */
+export const NO_COMMIT_WHY = "No commit yet: a work item's branch starts from one. Commit its files, then press Check again.";
+
 /** The commit the probe read, as a person names it: `origin/main`, or the
  *  checkout's HEAD when the clone has no origin branch. Edits not committed
  *  and pushed there are not read, so it is said. `null` is a repo with no commit. */

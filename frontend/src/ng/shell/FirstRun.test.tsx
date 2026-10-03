@@ -76,6 +76,40 @@ describe("FirstRun", () => {
     expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
   });
 
+  // R10a-01: the reason sits by the button it turns off, and Check again reads the
+  // repo again (once it has a commit) without the path being edited.
+  it("says by Add repo why a repo with no commit cannot be added, and checks it again in place", async () => {
+    vi.mocked(api.probeRepo).mockResolvedValueOnce({ ...PROBE, read_from: null });
+    const user = setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    await screen.findByRole("list", { name: "Probe results" });
+    for (let i = 0; i < 12 && screen.queryAllByText("checking…").length; i++) await tick(PROBE_STEP_MS);
+    const addButton = screen.getByRole("button", { name: "Add repo" });
+    expect(addButton).toBeDisabled();
+    expect(addButton).toHaveAccessibleDescription("No commit yet: a work item's branch starts from one. Commit its files, then press Check again.");
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+    await reveal();
+    expect(api.probeRepo).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.probeRepo).mock.calls[1][0]).toBe("/code/acme");
+    expect(screen.queryByText(/No commit yet/)).toBeNull();
+  });
+
+  it("reads a repo with no commit again on Enter in the field", async () => {
+    vi.mocked(api.probeRepo).mockResolvedValueOnce({ ...PROBE, read_from: null });
+    const user = setup();
+    mount();
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
+    await user.click(screen.getByRole("button", { name: "+ Add repo" }));
+    await screen.findByRole("list", { name: "Probe results" });
+    for (let i = 0; i < 12 && screen.queryAllByText("checking…").length; i++) await tick(PROBE_STEP_MS);
+    await user.type(screen.getByLabelText(/Path to a local git checkout/), "{Enter}");
+    await reveal();
+    expect(api.probeRepo).toHaveBeenCalledTimes(2);
+    expect(api.addRepo).not.toHaveBeenCalled();
+  });
+
   it("probes first, reveals one row at a time, then adds with the probed values", async () => {
     const user = setup();
     mount();

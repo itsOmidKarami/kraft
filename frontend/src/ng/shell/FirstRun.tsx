@@ -5,7 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
-import { missingLine, others, readFrom, setupLine, stopLine, testsLine } from "../templates/repos/evidence";
+import { missingLine, NO_COMMIT_WHY, others, readFrom, setupLine, stopLine, testsLine } from "../templates/repos/evidence";
 import "./first-run.css";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
@@ -225,6 +225,9 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
 
   const rows = probe ? probeRows(probe) : [];
   const probed = probe != null && shown >= rows.length;
+  // A repo with no commit cannot be added yet: the reason sits by the button it turns off,
+  // and Check again (or Enter) reads it again without editing the path (R10a-01).
+  const noCommit = probe?.read_from === null;
   const circle = (n: number) => (
     <StepCircle key={n} n={n} state={n === step ? "current" : n < step || (n === 1 && added) ? "done" : "todo"} onClick={n <= reached ? () => setStep(n) : undefined} />
   );
@@ -252,7 +255,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
               <Field label="Path to a local git checkout" error={error}>
                 <input value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={!!added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
-                  onKeyDown={(e) => e.key === "Enter" && (probe ? probed && !added && doAdd() : doProbe())} />
+                  onKeyDown={(e) => e.key === "Enter" && (probe && !noCommit ? probed && !added && doAdd() : doProbe())} />
               </Field>
               {probe && (
                 <ul className="fr-probes" aria-label="Probe results">
@@ -265,7 +268,11 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 {added ? (
                   <Button variant="primary" onClick={() => go(2)}>Continue</Button>
                 ) : probe ? (
-                  <Button variant="primary" disabled={!probed || adding || probe.read_from === null} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
+                  <>
+                    <Button variant="primary" disabled={!probed || adding || noCommit} aria-describedby={noCommit && probed ? "fr-no-commit" : undefined} onClick={doAdd}>{adding ? "Adding…" : "Add repo"}</Button>
+                    {noCommit && probed && <Button disabled={probing} onClick={doProbe}>Check again</Button>}
+                    {noCommit && probed && <span id="fr-no-commit" className="fr-why" role="status">{NO_COMMIT_WHY}</span>}
+                  </>
                 ) : (
                   <Button variant="primary" disabled={!path.trim() || probing} onClick={doProbe}>{probing ? "Probing…" : "+ Add repo"}</Button>
                 )}
