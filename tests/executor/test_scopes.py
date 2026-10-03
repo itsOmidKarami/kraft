@@ -540,15 +540,66 @@ async def test_every_red_scope_is_named_and_listed(item_on):
     assert payload["facts"] == {**one, "failed_scopes": [one, two]}
 
 
-async def test_a_red_scope_is_named_from_the_latest_run_only(item_on):
-    """The newest run (its round and head) by each command's later row: a
-    scope red in an earlier round, or red and then green again at the same
-    head, is not what stopped the item now."""
+#: A run the node was entered for again: a retry, at the same round and head.
+_RETRY = "retry"
+_RED = [("s-red", "failed", "red", None)]
+_SHARED = {
+    "test_command": "red",
+    "areas": {
+        "ui": {
+            "paths": ["frontend/**"],
+            "verification": {"test_scopes": [_UI | {"command": "red"}]},
+        }
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("runs", "fields", "expected"),
+    [
+        pytest.param(
+            [
+                (0, [("s-old", "failed", "old", None)]),
+                (
+                    1,
+                    [
+                        ("s-flaky", "failed", "flaky", None),
+                        *_RED,
+                        ("s-flaky-2", "done", "flaky", None),
+                    ],
+                ),
+            ],
+            None,
+            {"command": "red"},
+            id="an-earlier-round-and-a-flake",
+        ),
+        pytest.param(
+            [(0, [("s-old", "failed", "npm tset", None)]), _RETRY, (0, _RED)],
+            None,
+            {"command": "red"},
+            id="a-retry-at-the-same-head",
+        ),
+        pytest.param(
+            [(0, _RED)],
+            _SHARED,
+            {"command": "red", "scope": "**, frontend/**"},
+            id="a-repo-and-an-area-scope-share-the-command",
+        ),
+    ],
+)
+async def test_a_red_scope_is_named_from_the_latest_run_only(item_on, runs, fields, expected):
+    """The run since the node was last entered, at the newest round and head,
+    by each command's later row: a scope red in an earlier round, before a
+    retry at an unchanged head, or red and then green again, is not what
+    stopped the item now. Two scopes sharing a command name no one area."""
     it = await item_on(_verify(), repo="/r")
-    await _exited(it, [("s-old", "failed", "old", None)], round=0)
-    rerun = [("s-flaky", "failed", "flaky", None), ("s-red", "failed", "red", None)]
-    await _exited(it, [*rerun, ("s-flaky-2", "done", "flaky", None)], round=1)
+    for run in runs:
+        if run == _RETRY:
+            await it.database.write(lambda c: store.enter_node(c, it.id, "verify"))
+        else:
+            await _exited(it, run[1], round=run[0])
+    entry = entry_of({"setup_command": "", **fields}) if fields else None
 
-    found = dispatch.failed_test_scopes(it.database, it.id, "verify", "verify.main.t", None)
+    found = dispatch.failed_test_scopes(it.database, it.id, "verify", "verify.main.t", entry)
 
-    assert found == [{"command": "red", "session_id": "s-red"}]
+    assert found == [{**expected, "session_id": "s-red"}]

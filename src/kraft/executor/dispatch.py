@@ -589,18 +589,30 @@ def failed_test_scopes(
     session_id}` per failed command, `setup` marking an area's setup.
 
     A stop names these so a person reads the command that went red, not the
-    builtin's own id (R12a-03). The latest run is every row sharing the newest
-    row's round and head_sha, which one dispatch stamps once (the rule
-    `collect_findings` reads by); a command run twice in it, a re-measure at
-    the same head, counts by its later row. The row records the command it
-    ran, not the scope, so the scope is read back off the repo's table by that
-    command: one the table no longer declares names no scope."""
+    builtin's own id (R12a-03). The latest run is the rows created since the
+    node was last entered (its newest `node_started`: a retry, or a
+    re-measure after the node's repair) that share the newest row's round and
+    head_sha, which one dispatch stamps once. A retry at an unchanged head
+    measures at the same round and head as the attempt before it, so the
+    entry is what keeps a command the operator has since replaced out of it.
+    A command run twice in the run, a task's own retry, counts by its later
+    row.
+
+    The row records the command it ran, not its scope or area, so both are
+    read back off the repo's table by that command, and two scopes that share
+    one command read as one: their later row, both scopes' paths, and an area
+    only when they agree on it. One the table no longer declares names no
+    scope."""
     rows = db.read(
         lambda c: c.execute(
-            "SELECT id, status, round, head_sha, command, result_path FROM worker_sessions "
-            "WHERE work_item_id = ? AND node_id = ? AND hook_point = ? "
-            "ORDER BY created_at, rowid",
-            (work_item_id, node_id, task_hook),
+            "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.result_path "
+            "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
+            "AND e.type = 'worker_session_created' "
+            "AND json_extract(e.payload, '$.session_id') = ws.id "
+            "WHERE ws.work_item_id = ? AND ws.node_id = ? AND ws.hook_point = ? "
+            "AND e.seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ? "
+            "AND type = 'node_started' AND node_id = ?) ORDER BY e.seq",
+            (work_item_id, node_id, task_hook, work_item_id, node_id),
         ).fetchall()
     )
     if not rows:
@@ -626,7 +638,8 @@ def failed_test_scopes(
             entry["scope"] = ", ".join(p for s in scopes for p in s["paths"])
         if (code := _exit_code(row["result_path"])) is not None:
             entry["exit_code"] = code
-        if area := next((s["area"] for s in scopes or setups if s["area"]), None):
+        areas = {s["area"] for s in scopes or setups}
+        if len(areas) == 1 and (area := areas.pop()):
             entry["area"] = area
         if setups and not scopes:
             entry["setup"] = True

@@ -170,12 +170,13 @@ def _print_event(event: dict, as_json: bool) -> None:
     print(json.dumps(event) if as_json else render.event_line([event], headers=False), flush=True)
 
 
-async def _logs_session(work_item_id: str | None) -> str:
+async def _logs_session(work_item_id: str | None, follow: bool) -> str:
     """The session `view logs` reads with no `--session`: the newest one, or,
     while the item is stopped, the one that stopped it, as the board's stop
     card names it. An auto-escalation starts the moment an item stops, so the
-    newest log was the escalation's and not why it stopped (R12a-03). The
-    newer session it passes over is named on stderr, with how to read it."""
+    newest log was the escalation's and not why it stopped (R12a-03). `-f`
+    still follows the newest, the one that can still write. Whichever of the
+    two it passes over is named on stderr, with how to read it."""
     item = await client.get_work_item(work_item_id, full=True)
     sessions = item.get("worker_sessions") or []
     if not sessions:
@@ -193,19 +194,22 @@ async def _logs_session(work_item_id: str | None) -> str:
             ),
             newest,
         )
-    if stopped is not newest:
-        print(
-            f"showing {stopped['hook_point']} ({stopped['status']}), the session that stopped "
-            f"the item; the newest is {newest['hook_point']} ({newest['status']}): "
-            f"kraft view logs --session {newest['id']}",
-            file=sys.stderr,
-        )
-    return stopped["id"]
+    if stopped is newest:
+        return newest["id"]
+    shown, other = (newest, stopped) if follow else (stopped, newest)
+    print(
+        f"showing {shown['hook_point']} ({shown['status']}); "
+        f"the session that stopped the item is {stopped['hook_point']} ({stopped['status']}), "
+        f"the newest is {newest['hook_point']} ({newest['status']}): "
+        f"kraft view logs --session {other['id']}",
+        file=sys.stderr,
+    )
+    return shown["id"]
 
 
 def _cmd_logs(ns: argparse.Namespace) -> None:
     async def run() -> None:
-        session_id = ns.session or await _logs_session(ns.id)
+        session_id = ns.session or await _logs_session(ns.id, ns.follow)
         lines = await client.log_backlog(session_id, ns.n)
         for entry in lines:
             _print_log(entry, ns.json)
@@ -432,7 +436,7 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     logs.add_argument("-f", "--follow", action="store_true", help="follow until the session stops")
     logs.add_argument(
         "--session",
-        help="default: the most recent session; while the item is stopped, the one that stopped it",
+        help="default: the newest; while the item is stopped (and no -f), the one that stopped it",
     )
     logs.add_argument(
         "-n", type=int, default=50, help="backlog lines before following (0 for none)"

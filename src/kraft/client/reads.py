@@ -164,15 +164,6 @@ async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
     return item.get("worker_sessions", [])
 
 
-async def latest_session(work_item_id: str | None = None) -> dict:
-    """The most recent session — "what is it doing now", which is the question
-    `kraft view logs` is asked."""
-    sessions = await worker_sessions(work_item_id)
-    if not sessions:
-        raise ValueError("no worker session has run for this work item yet")
-    return sessions[-1]
-
-
 async def events(work_item_id: str | None = None, after_seq: int = 0) -> list[dict]:
     """The chain's own history: node transitions, gate decisions, escalations.
 
