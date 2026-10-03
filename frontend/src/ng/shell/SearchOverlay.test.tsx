@@ -158,7 +158,7 @@ describe("SearchOverlay", () => {
     expect(parts("Caching spec")).toEqual(["lucide-file-text", "spec", "alpha"]);
     expect(parts("New bead")).toEqual(["lucide-circle-dot", "open", undefined]);
     expect(parts("Appearance")).toEqual(["lucide-palette", undefined, "Settings"]);
-    expect(parts("Repos")).toEqual(["lucide-git-branch", undefined, "Templates"]);
+    expect(parts("Library")).toEqual(["lucide-library-big", undefined, "Templates"]);
     expect(screen.getAllByText("⏎", { selector: ".ng-search-key" })).toHaveLength(1);
     expect(options()[0].querySelector(".ng-search-key")).not.toBeNull();
     await user.keyboard("{ArrowDown}");
