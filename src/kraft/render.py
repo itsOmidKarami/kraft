@@ -421,6 +421,15 @@ def health_block(payload: dict) -> str:
     embeddings = index.get("embeddings", {})
     pairs = [
         ("status", paint(status, colour)),
+        ("version", str(payload.get("version") or "-")),
+    ]
+    installed = payload.get("installed")
+    if installed and payload.get("version") and installed != payload["version"]:
+        # Not degraded: the old server still serves. A restart finishes the update.
+        pairs.append(
+            ("installed", f"{installed}: restart pending, run kraft admin restart to finish it")
+        )
+    pairs += [
         ("bind", str(payload.get("bind", "-"))),
         ("documents", str(index.get("documents", 0))),
         ("repos scanned", str(index.get("repos_scanned", 0))),

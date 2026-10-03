@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 from datetime import UTC, datetime
 
+import pytest
+
 from kraft import render
 
 
@@ -212,6 +214,19 @@ def test_health_block_ok_is_short():
     out = render.health_block(payload)
     assert "ok" in out
     assert "invalid" not in out.lower()
+
+
+@pytest.mark.parametrize(
+    ("installed", "pending"), [("1.5.0rc15", False), ("1.5.0rc16", True)], ids=["same", "newer"]
+)
+def test_health_block_names_the_running_version_and_a_pending_restart(installed, pending):
+    """`kraft admin update` without `--restart` leaves the old server up. Only
+    `--json` said so; the operations page verifies a restart with this."""
+    payload = {"status": "ok", "version": "1.5.0rc15", "installed": installed, "index": {}}
+    out = render.health_block(payload)
+    assert "1.5.0rc15" in out
+    assert ("restart pending" in out) is pending
+    assert ("1.5.0rc16" in out) is pending
 
 
 def test_health_block_says_an_installed_model_is_failing():
