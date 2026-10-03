@@ -135,7 +135,7 @@ describe("Banner", () => {
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
       expect(onRaise).not.toHaveBeenCalled();
       expect(screen.getByRole("dialog", { name: "Raise budget cap" })).toHaveTextContent("Now $5. Maximum $25.");
-      const input = screen.getByRole("spinbutton");
+      const input = screen.getByRole("textbox");
       expect(screen.getByRole("button", { name: "Save & retry" })).toBeDisabled();
       await userEvent.clear(input);
       await userEvent.type(input, "7.5");
@@ -147,13 +147,40 @@ describe("Banner", () => {
     it("takes cents, and a value that is not above the current cap stays unsaveable", async () => {
       mount({ path: "", key: "budget_usd", value: 0.001, maximum: null });
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
-      const input = screen.getByRole("spinbutton");
+      const input = screen.getByRole("textbox");
       await userEvent.clear(input);
       await userEvent.type(input, "0.001");
       expect(screen.getByRole("button", { name: "Save & retry" })).toBeDisabled();
       await userEvent.clear(input);
       await userEvent.type(input, "0.05");
       expect(screen.getByRole("button", { name: "Save & retry" })).toBeEnabled();
+    });
+
+    // Number() took "0x10" as $16 and "1e3" as $1000, and a number field turned "0,5" into 05 and saved $5 (R13b-01).
+    it.each([
+      ["a comma-decimal 0,5", "0,5", 0.5],
+      ["a grouped 1,000.50", "1,000.50", 1000.5],
+      ["a leading dollar sign", "$7.5", 7.5],
+    ])("reads %s as dollars the way the budget editor does", async (_, typed, saved) => {
+      const { calls, reload } = mount({ path: "", key: "budget_usd", value: 0.05, maximum: null });
+      await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+      const input = screen.getByRole("textbox");
+      await userEvent.clear(input);
+      await userEvent.type(input, typed);
+      await userEvent.click(screen.getByRole("button", { name: "Save & retry" }));
+      await waitFor(() => expect(reload).toHaveBeenCalled());
+      expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ policy: { budget_usd: saved } });
+    });
+
+    it.each([["hex", "0x10"], ["an exponent", "1e3"], ["an ambiguous 1,000", "1,000"], ["Infinity", "Infinity"]])("refuses %s with the hint, and sends nothing", async (_, typed) => {
+      const { calls } = mount({ path: "", key: "budget_usd", value: 0.05, maximum: null });
+      await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+      const input = screen.getByRole("textbox");
+      await userEvent.clear(input);
+      await userEvent.type(input, typed);
+      expect(screen.getByRole("button", { name: "Save & retry" })).toBeDisabled();
+      expect(screen.getByRole("dialog")).toHaveTextContent("Type the amount plainly, like 1000 or 1.5.");
+      expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
     });
   });
 

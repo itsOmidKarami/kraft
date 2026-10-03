@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
+import { dollars, dollarsText, DOLLARS_HINT } from "../../format";
 import type { StopLimit, WorkItem } from "../../types";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -37,11 +38,12 @@ export function useLimitAsked(id: string, take: () => void) {
 export function RaiseLimit({ itemId, limit, override, onClose, onDone }: { itemId: string; limit: StopLimit; override: WorkItem["policy_override"]; onClose: () => void; onDone: () => void }) {
   const { label, unit, money } = WHAT[limit.key];
   const show = (v: number) => (money ? `$${v}` : String(v));
-  const [text, setText] = useState(String(limit.value));
+  const [text, setText] = useState(money ? dollarsText(limit.value) : String(limit.value));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const n = Number(text);
-  const valid = (money ? Number.isFinite(n) : Number.isInteger(n)) && n > limit.value;
+  // Dollars are read one way everywhere (`dollars`): a number field turned "0,5" into 05 (R13b-01).
+  const n = money ? dollars(text) : Number(text);
+  const valid = (money ? Number.isFinite(n) : Number.isInteger(n)) && n > limit.value && (!money || limit.maximum == null || n <= limit.maximum);
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -67,9 +69,9 @@ export function RaiseLimit({ itemId, limit, override, onClose, onDone }: { itemI
         <Field
           label={`${label(limit.path)} (${unit})`}
           hint={`Now ${show(limit.value)}. ${limit.maximum == null ? "No maximum." : `Maximum ${show(limit.maximum)}.`}`}
-          error={error}
+          error={error ?? (money && text.trim() && Number.isNaN(n) ? DOLLARS_HINT : null)}
         >
-          <input data-autofocus className="item-input" type="number" inputMode={money ? "decimal" : "numeric"} min={money ? limit.value : limit.value + 1} max={limit.maximum ?? undefined} step={money ? "any" : 1} value={text} onChange={(e) => setText(e.target.value)} />
+          <input data-autofocus className="item-input" type={money ? "text" : "number"} inputMode={money ? "decimal" : "numeric"} {...(!money && { min: limit.value + 1, max: limit.maximum ?? undefined, step: 1 })} value={text} onChange={(e) => setText(e.target.value)} />
         </Field>
       </form>
     </Dialog>

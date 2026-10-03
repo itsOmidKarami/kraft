@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
+import { lineCount } from "../../../format";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { act } from "../../item/actions";
 import { chainGraph, rejectTarget } from "../../item/graph";
@@ -190,7 +191,7 @@ function NodeLog({ item, node }: { item: ItemDetail; node: string }) {
       <div className="ph-chips ph-chips-inline" role="group" aria-label="Sources">
         {SOURCES.map((s) => <button key={s} type="button" className={`ph-chip${src === s ? " ph-is-on" : ""}`} aria-pressed={src === s} onClick={() => setSrc(s)}>{s}</button>)}
         <span className="ph-spacer" />
-        <span className="ph-count">{lines ? `${lines.length} lines` : "Reading…"}</span>
+        <span className="ph-count">{lines ? lineCount(lines.length) : "Reading…"}</span>
       </div>
       <LogLines lines={shown} empty="No lines to show. Clear the filter, or the node has not started." />
     </>

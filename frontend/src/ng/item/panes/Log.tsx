@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { clock, logLineText } from "../../../format";
+import { clock, lineCount, logLineText } from "../../../format";
 import type { LogLine } from "../../../types";
 import { useModal } from "../../../useModal";
 import { Maximize2 } from "../../icons";
@@ -45,7 +45,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
       <button type="button" className="item-link" onClick={() => navigator.clipboard?.writeText(shown.map(logLineText).join("\n"))}>copy</button>
     </>
   );
-  const count = lines ? `${shown.length} lines` : "Reading…";
+  const count = lines ? lineCount(shown.length) : "Reading…";
   if (error) return <p className="item-muted">{error}</p>;
   return (
     <>
@@ -61,7 +61,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
       )}
       {body(false)}
       {full && (
-        <LogScreen title={title} crumb={crumb} count={lines ? `log · ${shown.length} lines` : "log · reading…"} controls={controls} onClose={() => setFull(false)}>
+        <LogScreen title={title} crumb={crumb} count={lines ? `log · ${lineCount(shown.length)}` : "log · reading…"} controls={controls} onClose={() => setFull(false)}>
           {body(true)}
         </LogScreen>
       )}

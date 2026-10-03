@@ -1,7 +1,7 @@
 import { EllipsisVertical } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DOLLARS_HINT, dollars, elapsedBetween, shortId } from "../../../format";
+import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
@@ -286,8 +286,9 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
   const money = !!words.money;
   const show = (v: number) => (money ? `$${v}` : String(v));
   const submit = async (text: string) => {
-    const n = Number(text.trim());
-    if (money ? !(Number.isFinite(n) && n > 0) : !Number.isInteger(n) || n <= 0) return setError(money ? "Enter a dollar amount." : `Enter a whole number of ${words.unit}.`);
+    // Dollars are read one way everywhere: Number() took "0x10" as $16 and "1e3" as a thousand (R13b-01).
+    const n = money ? dollars(text) : Number(text.trim());
+    if (money ? !(n > 0) : !Number.isInteger(n) || n <= 0) return setError(money ? (Number.isNaN(n) && text.trim() ? DOLLARS_HINT : "Enter a dollar amount.") : `Enter a whole number of ${words.unit}.`);
     if (n <= limit.value) return setError(`It has to be above the current ${show(limit.value)}.`);
     if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${show(limit.maximum)}.`);
     setError(null);
@@ -304,7 +305,7 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
     <EditSheet
       title={`Raise the ${words.noun}`}
       text={`Now ${money ? show(limit.value) : `${limit.value} ${words.unit}`}${where}. ${limit.maximum != null ? `The policy maximum is ${show(limit.maximum)}.` : "The policy sets no maximum."} Applies to this item only, then retries.`}
-      initial={String(limit.value)}
+      initial={money ? dollarsText(limit.value) : String(limit.value)}
       submitLabel="Save & retry"
       error={error}
       busy={busy}

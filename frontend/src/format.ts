@@ -281,6 +281,9 @@ export const dollarsText = (n: number): string => {
   return /^[1-9]\d{0,2}\.\d{3}$/.test(s) ? `${s}0` : s;
 };
 
+/** "1 line", "2 lines". */
+export const lineCount = (n: number): string => `${n} line${n === 1 ? "" : "s"}`;
+
 /** What to say when `dollars` refused what was typed. */
 export const DOLLARS_HINT = "Type the amount plainly, like 1000 or 1.5.";
 

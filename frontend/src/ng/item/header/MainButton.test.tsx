@@ -26,6 +26,17 @@ describe("MainButton", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  // The menu is over the page, and over the modal the main action opens: it stayed above it, took the first Esc and stacked a second card (R13b-03).
+  it("closes the hover menu when its main button is pressed", async () => {
+    const onMain = vi.fn();
+    render(<Harness onMain={onMain} />);
+    await userEvent.hover(screen.getByRole("button", { name: "Pause" }));
+    expect(await screen.findByRole("menu", { name: "Item actions" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(onMain).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it.each(["{ArrowDown}", "{Enter}"])("opens the menu on the main action from ▾ with %s, and Escape hands focus back to ▾", async (key) => {
     render(<Harness />);
     await userEvent.tab();

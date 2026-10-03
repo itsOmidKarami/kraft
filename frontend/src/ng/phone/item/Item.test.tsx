@@ -441,6 +441,30 @@ describe("raising the cap that stopped the item (R73)", () => {
     expect(sent(calls)).toEqual([]);
   });
 
+  // The policy budget_usd stop reads dollars as the budget sheet does, not with Number() (R13b-01).
+  describe("a policy budget_usd stop", () => {
+    const budgeted = () => item("needs_you", { ...stop("budget", { reason: "budget_usd reached: $0.05 spent in the work item, cap $0.05" }), limit: limit({ key: "budget_usd", value: 0.05, maximum: null }) } as WorkItemStop);
+    const typeCap = async (v: string) => {
+      await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
+      const box = screen.getByLabelText("Raise the budget cap", { selector: "input" });
+      await userEvent.clear(box);
+      await userEvent.type(box, `${v}{Enter}`);
+    };
+
+    it("reads 0,5 as fifty cents", async () => {
+      const calls = mount(budgeted());
+      await typeCap("0,5");
+      await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ policy: { budget_usd: 0.5 } }));
+    });
+
+    it.each([["hex", "0x10"], ["an exponent", "1e3"], ["an ambiguous 1,000", "1,000"]])("refuses %s with the hint, before any call", async (_, typed) => {
+      const calls = mount(budgeted());
+      await typeCap(typed);
+      expect(await screen.findByRole("alert")).toHaveTextContent("Type the amount plainly, like 1000 or 1.5.");
+      expect(sent(calls)).toEqual([]);
+    });
+  });
+
   it("a refused patch shows the server's words and does not retry", async () => {
     const calls = mount(capped(limit()), "/work-items/w1", { "PATCH /work-items/w1": [422, { detail: "time_cap_minutes exceeds the policy maximum 480" }] });
     await openSheet();

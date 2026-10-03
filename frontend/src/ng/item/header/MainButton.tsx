@@ -89,7 +89,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
     <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={left}>
       {/* aria-disabled, not disabled, while busy: a browser takes focus off a button it
           disables, and the focus of Start, Apply and start or Resume fell to the page (R10b-04). */}
-      <button ref={button} type="button" className={`item-main-action is-${main}`} aria-disabled={busy || undefined} onClick={act}>
+      <button ref={button} type="button" className={`item-main-action is-${main}`} aria-disabled={busy || undefined} onClick={() => { close(); act(); }}>
         <Icon size={13} aria-hidden />
         {/* Every row's label in one cell, only the main one shown: the button is as wide as its widest row, so the menu over it fits at its width. */}
         <span className="item-main-label">
