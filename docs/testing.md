@@ -215,7 +215,9 @@ green — their tests left with them (Kraft-79382).
 
 **Intent pins:** `docs/intent/*.md` reference test ids by name. Renaming or
 parametrizing a pinned test means repointing it in the same change. Run
-`just intent` and `tests/test_intent_origins.py`.
+`just intent` and `tests/test_intent_origins.py`. `just intent-repoint OLD NEW`
+rewrites every pin on `OLD` (or `OLD[case]`) to `NEW` in one go, and refuses
+when `NEW` does not collect.
 
 ## Running
 
