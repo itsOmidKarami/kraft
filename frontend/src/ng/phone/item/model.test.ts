@@ -132,6 +132,22 @@ describe("a budget stop's spent fact", () => {
   });
 });
 
+describe("a question card (PH-12)", () => {
+  const turn = (id: string, thread: number, created_at: string) => ({ id, node_id: "verification", hook_point: "verification.escalation", thread, created_at }) as never;
+  const q = (task: string, sessions: unknown[] = []) => mk("needs_you", stop("question", { task }), { needs_context_question: "Allow it?", worker_sessions: sessions as never });
+  it("has the speech bubble and names the thread and turn of an escalation's question", () => {
+    const c = cardOf(q("verification.escalation", [turn("a", 1, "2026-09-13T09:00:00Z"), turn("b", 1, "2026-09-13T09:05:00Z")]));
+    expect(c).toMatchObject({ icon: "message-square", where: "asked by escalation · thread 1, turn 2 · on verification" });
+  });
+  it("counts turns within the latest thread only", () => {
+    const c = cardOf(q("verification.escalation", [turn("a", 1, "2026-09-13T09:00:00Z"), turn("b", 2, "2026-09-13T09:05:00Z")]));
+    expect(c?.where).toBe("asked by escalation · thread 2, turn 1 · on verification");
+  });
+  it("leaves a task's own question as it was", () => {
+    expect(cardOf(q("verification.review.code_review"))?.where).toBe("asked by code_review · on verification");
+  });
+});
+
 describe("a cap stop's facts (PH-7)", () => {
   it("say the running time against its cap beside the spend", () => {
     const i = mk("needs_you", stop("cap"), { running_time: { running_s: 8 * 3600 + 120, cap_minutes: 480 }, budget_cap: { cap_usd: 5, source: "item", spent_usd: 3.72 } });

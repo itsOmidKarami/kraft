@@ -2,6 +2,7 @@ import { ago, elapsed, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
 import { budgetRaise, headerState, archivable, NOT_RAISABLE } from "../../item/status";
 import { taskName } from "../../item/paths";
+import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
 import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
 import type { ChainNode } from "../../graph/layout";
@@ -14,6 +15,8 @@ import type { ChainNode } from "../../graph/layout";
 export type Tone = "warn" | "bad" | "info" | "ok" | "muted";
 export interface Card {
   tone: Tone;
+  /** A speech bubble before the title: the card asks you something. */
+  icon?: "message-square";
   title: string;
   where?: string;
   text?: string;
@@ -32,6 +35,15 @@ const runClock = (item: ItemDetail): [string, string][] => {
   const t = item.running_time;
   return t?.cap_minutes != null ? [["running", `${elapsed(t.running_s * 1000)} of ${elapsed(t.cap_minutes * 60_000)}`]] : [];
 };
+
+/** " · thread 1, turn 2": which escalation conversation a question came from, and how far into it. */
+function conversation(item: ItemDetail): string {
+  const stop = item.stop;
+  if (!stop?.node || taskName(stop.task ?? "") !== ESCALATION) return "";
+  const turns = escalationsOf(item, stop.node);
+  const last = turns.at(-1);
+  return last ? ` · thread ${last.thread}, turn ${turns.filter((s) => s.thread === last.thread).length}` : "";
+}
 
 /** A budget stop's spend, against the cap that stopped it when the item can
  *  raise that cap, and to the cent, as the stop's reason prints it
@@ -87,7 +99,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null
         case "cap": return { tone: "bad", title: (stop.reason ?? "A limit was reached").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined, text: stopLimitOf(item) ? "Raise the cap to carry on, or Steer first if it should finish sooner." : "Retry runs the node again. Steer first if it should finish sooner.", facts: [...runClock(item), ...spent(item)] };
         case "question": {
           const q = item.needs_context_question;
-          return { tone: "warn", title: "Needs you", where: `asked by ${stop.task ? taskName(stop.task) : "the agent"}${stop.node ? ` · on ${stop.node}` : ""}`, text: q ? `“${q}”` : (stop.reason ?? undefined), facts: [] };
+          return { tone: "warn", icon: "message-square", title: "Needs you", where: `asked by ${stop.task ? taskName(stop.task) : "the agent"}${conversation(item)}${stop.node ? ` · on ${stop.node}` : ""}`, text: q ? `“${q}”` : (stop.reason ?? undefined), facts: [] };
         }
         case "conflict": {
           const unresolved = list(facts.unresolved);

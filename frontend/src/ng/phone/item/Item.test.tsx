@@ -326,6 +326,14 @@ describe("Raise budget (C.6)", () => {
   });
 });
 
+describe("the question card (PH-12)", () => {
+  it("draws a speech bubble before its title", async () => {
+    mount(item("needs_you", stop("question"), { needs_context_question: "Allow the change?" }));
+    const card = await screen.findByRole("region", { name: "Needs you" });
+    expect(card.querySelector(".ph-statecard-title svg.lucide-message-square")).not.toBeNull();
+  });
+});
+
 describe("⋮ (C.5)", () => {
   it("lists what the bar does not and acts", async () => {
     const calls = mount(item("running", null, { mr_ref: { number: 142, url: "https://forge/142" } }), "/work-items/w1", { "POST /work-items/w1/duplicate": [200, { id: "w2", status: "paused" }], "GET /work-items/w2": [200, item("paused", null, { id: "w2" })] });

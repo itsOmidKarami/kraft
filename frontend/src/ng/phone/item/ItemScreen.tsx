@@ -1,4 +1,4 @@
-import { EllipsisVertical } from "lucide-react";
+import { EllipsisVertical, MessageSquare } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, shortId } from "../../../format";
@@ -142,7 +142,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         </div>
         {card && (
           <section className={`ph-statecard ph-tone-${card.tone}`} aria-label={card.title}>
-            <h2 className="ph-statecard-title">{card.title}</h2>
+            <h2 className="ph-statecard-title">{card.icon && <MessageSquare size={15} className="ph-statecard-icon" aria-hidden="true" />}{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
             {card.facts.length > 0 && (
