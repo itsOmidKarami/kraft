@@ -13,7 +13,10 @@ carrying its own, slightly different, version of it.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +25,33 @@ from pathlib import Path
 class WorktreeRead:
     text: str
     truncated: bool
+
+
+def open_dir_no_symlinks(root: Path, parts: Sequence[str], *, create: bool = False) -> int:
+    """Open the directory `root/<parts...>`, refusing a symlink at every
+    component below `root`, and return its fd for the caller to close.
+
+    `create` makes each missing component as it goes, with `mkdir` relative
+    to its parent's fd, so a link planted where one should be is refused
+    rather than created through. A component that is empty, `.` or `..`, or
+    holds a separator, is refused too: an absolute one would make `openat`
+    ignore the directory it was given.
+    """
+    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts:
+            if part in ("", ".", "..") or "/" in part or os.sep in part:
+                raise OSError(errno.EINVAL, f"refusing path component {part!r}")
+            if create:
+                with contextlib.suppress(FileExistsError):
+                    os.mkdir(part, dir_fd=dir_fd)
+            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = nxt
+    except BaseException:
+        os.close(dir_fd)
+        raise
+    return dir_fd
 
 
 def open_no_symlinks(root: Path, rel: str) -> int:
@@ -36,12 +66,8 @@ def open_no_symlinks(root: Path, rel: str) -> int:
     parts = Path(rel).parts
     # The root's own ancestors are server-owned, so following links above the
     # worktree is fine (and necessary on macOS, where /tmp is a symlink).
-    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    dir_fd = open_dir_no_symlinks(root, parts[:-1])
     try:
-        for part in parts[:-1]:
-            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
-            os.close(dir_fd)
-            dir_fd = nxt
         return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
     finally:
         os.close(dir_fd)

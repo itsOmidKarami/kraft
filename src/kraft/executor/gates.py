@@ -1139,11 +1139,16 @@ async def resume_after_escalation(
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, launch, worktree)
-            new_base = await _builtins.refresh_worktree_base(
-                worktree,
-                Path(row["repo"]),
-                store.branch_for(row),
-                base=await _builtins.base_branch(db, work_item_id, Path(row["repo"])),
+            # Left to a node that rebases itself (`walk.rebases_itself`).
+            new_base = (
+                None
+                if walk.rebases_itself(row, node_id)
+                else await _builtins.refresh_worktree_base(
+                    worktree,
+                    Path(row["repo"]),
+                    store.branch_for(row),
+                    base=await _builtins.base_branch(db, work_item_id, Path(row["repo"])),
+                )
             )
         except RuntimeError as exc:
             reason = str(exc)

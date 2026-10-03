@@ -60,6 +60,26 @@ def chain_of(row) -> MaterializedChain:
     return chain
 
 
+def rebases_itself(row, node_id: str | None) -> bool:
+    """Whether node `node_id` of `row`'s chain declares `on_base_changed`: it
+    rebases onto the base itself and restarts its span when that moved it.
+    A door that rebased first (`/retry`, `/resume`, a gate's self-retry)
+    took that move from it: the node then found nothing to rebase, and the
+    span it guards never ran on the new base (R11E-06)."""
+    if node_id is None:
+        return False
+    try:
+        nodes = store.effective_nodes(chain_of(row), store.node_overrides_of(row))
+    except LookupError:
+        return False
+    node = next((n for n in nodes if n.id == node_id), None)
+    return (
+        node is not None
+        and isinstance(node.node, ExecNode)
+        and (node.node.on_base_changed is not None)
+    )
+
+
 #: Task kinds whose work runs inside the orchestrator process, so no commit a
 #: fix agent makes in its worktree can change what executes (Kraft-s7c04.24).
 #: A subprocess task is deliberately absent: it runs the worktree's own
@@ -2076,9 +2096,11 @@ async def run_once(
             # the original steer survived this far untaken, report it before
             # it is overwritten (Kraft-s7c04.50).
             await _report_if_undelivered(db, work_item_id, carried)
+            # Named by the base branch it moved on, not the item's own branch.
+            base_name = await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
             carried = Steer(
                 prompts.rebase_drift_note(
-                    worktree, store.branch_for(row), pre_base or "HEAD", new_base or "HEAD"
+                    worktree, base_name, pre_base or "HEAD", new_base or "HEAD"
                 ),
                 # Kraft wrote this one, not a person; it must not claim the
                 # judge exemption a human's own answer gets.

@@ -297,29 +297,39 @@ def install_kind() -> str:
     return "pip"
 
 
-def _not_by_uv(kind: str, release: Release) -> str:
-    """Why `perform` will not update a pipx, pip or source install, and the
-    command that will. A `uv tool install` there adds a second copy and
-    leaves the `kraft` on PATH, and every MCP server and hook that runs it,
-    on the old one."""
+def _install_command(kind: str, wanted: str) -> str:
+    """The command that installs `wanted` (`requirement`'s shape) into this
+    Kraft the way `kind` (`install_kind`) installed it: `uv`, `pipx` or
+    `pip`."""
     import importlib.util
 
-    wanted = requirement(release)
-    # The interpreter pipx's venv was made from, as named, never resolved: a
-    # resolved path names one patch release, which an upgrade of that Python
-    # then leaves behind and a cleanup deletes.
-    python = getattr(sys, "_base_executable", None) or sys.executable
+    if kind == "uv":
+        return f'uv tool install --force --python {_python()} "{wanted}"'
+    if kind == "pipx":
+        # The interpreter pipx's venv was made from, as named, never resolved: a
+        # resolved path names one patch release, which an upgrade of that Python
+        # then leaves behind and a cleanup deletes.
+        python = getattr(sys, "_base_executable", None) or sys.executable
+        return f'pipx install --force --python {python} "{wanted}"'
     # A venv uv made has no pip of its own.
     pip = (
         f"{sys.executable} -m pip install --upgrade"
         if importlib.util.find_spec("pip") is not None
         else f"uv pip install --python {sys.executable} --upgrade"
     )
-    command = {
-        "pipx": f'pipx install --force --python {python} "{wanted}"',
-        "pip": f'{pip} "{wanted}"',
-        "source": "git pull, then just setup (or just install for the `kraft` command)",
-    }[kind]
+    return f'{pip} "{wanted}"'
+
+
+def _not_by_uv(kind: str, release: Release) -> str:
+    """Why `perform` will not update a pipx, pip or source install, and the
+    command that will. A `uv tool install` there adds a second copy and
+    leaves the `kraft` on PATH, and every MCP server and hook that runs it,
+    on the old one."""
+    command = (
+        "git pull, then just setup (or just install for the `kraft` command)"
+        if kind == "source"
+        else _install_command(kind, requirement(release))
+    )
     where = {
         "pipx": "with pipx",
         "pip": f"with pip, into {sys.prefix}",
@@ -330,6 +340,27 @@ def _not_by_uv(kind: str, release: Release) -> str:
         "would add a second copy, and the `kraft` you run would stay as it is. "
         f"Update it the way it was installed:\n  {command}"
     )
+
+
+def add_extra_hint(extra: str) -> str:
+    """How to add `extra` to this install: the command that reinstalls this
+    very version (`==`) on this very Python, with the extras it already has,
+    the way it was installed (`install_kind`). An unpinned `uv tool install
+    'kraft-sdlc[vector]'` took the newest final release, a downgrade from a
+    release candidate the next start refused over its newer database, and
+    moved the tool to uv's default Python; on a pip, pipx or Homebrew
+    install it added a second Kraft beside the one that runs."""
+    kind = install_kind()
+    if kind == "brew":
+        return (
+            f"Homebrew's kraft formula does not ship the '{extra}' extra; "
+            f"see Enable vector search in the install docs"
+        )
+    if kind == "source":
+        return f"`uv sync --extra {extra}` in the checkout (`just setup-vector`)"
+    extras = sorted({*installed_extras(), extra})
+    wanted = f"{PACKAGE}[{','.join(extras)}]=={installed()}"
+    return f"`{_install_command(kind, wanted)}`"
 
 
 def _receipt() -> dict:

@@ -3,9 +3,6 @@
 onto the base the merge request targets."""
 
 import asyncio
-import contextlib
-import os
-import signal
 import subprocess
 from pathlib import Path
 
@@ -17,13 +14,7 @@ from kraft import builtins as kraft_builtins
 from kraft import caps, events
 from kraft.config import git_read
 
-
-def _commit(cwd, name, text, message):
-    """Write `name` under `cwd` and commit everything; returns the new HEAD."""
-    (cwd / name).write_text(text)
-    _git(cwd, "add", "-A")
-    _git(cwd, "commit", "-m", message)
-    return git_read(cwd, "rev-parse", "HEAD")
+_commit = wtree.commit
 
 
 def _porcelain(cwd):
@@ -393,12 +384,21 @@ async def test_mr_rebase_raises_on_conflict(database, run_dirs, repo):
     assert wtree.base_ref(database) != git_read(repo, "rev-parse", "HEAD")
 
 
-async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(database, run_dirs, repo):
-    """Kraft-xngty: refused state is no failure a fix loop may work on."""
+@pytest.mark.parametrize("shape", ["base-moved", "up-to-date", "tracked-change"])
+async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(
+    database, run_dirs, repo, shape
+):
+    """Kraft-xngty: refused state is no failure a fix loop may work on.
+    R11E-02: whatever else the worktree looks like. A rebase cut short by its
+    time cap or a killed server leaves HEAD detached at the base, which read
+    as up to date, or as dirty, and the item went on without its commits."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     _commit(worktree, "work.txt", "work\n", "worktree work")
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    if shape != "up-to-date":
+        _commit(repo, "moved.txt", "moved on\n", "moved on")
+    if shape == "tracked-change":
+        (worktree / "work.txt").write_text("half-checked-out\n")
     (Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "rebase-merge").mkdir()
 
     status = await kraft_builtins.mr_rebase(
@@ -415,6 +415,10 @@ async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(database
     )
 
     assert status == "config_error"
+    log = database.read(
+        lambda c: c.execute("SELECT log_path FROM worker_sessions WHERE id='s1'").fetchone()
+    )["log_path"]
+    assert f"`git checkout -f {wtree.branch(database)}`" in Path(log).read_text()
 
 
 async def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(
@@ -504,21 +508,8 @@ async def test_mr_rebase_reports_done_when_it_moved_nothing(database, run_dirs, 
     assert status == "done"
 
 
-@pytest.fixture
-def hung(tmp_path):
-    """Where a hanging hook below records the pid of its `sleep`. Each is
-    killed once the test is done: git gives up on the hook, but nothing ends
-    the hook itself, which would otherwise outlive the test."""
-    pids = tmp_path / "hook-pids"
-    yield pids
-    for pid in pids.read_text().split() if pids.exists() else ():
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(int(pid), signal.SIGKILL)
-
-
-def _sleep_recorded(pids, seconds: float) -> str:
-    """The hook's last lines: the shell becomes the `sleep`, its pid in `pids`."""
-    return f'echo $$ >> "{pids}"\nexec sleep {seconds}\n'
+hung = wtree.hung
+_sleep_recorded = wtree.sleep_recorded
 
 
 def _hanging_pre_rebase_hook(repo, pids, seconds: float) -> None:
@@ -748,7 +739,7 @@ async def test_a_set_aside_a_killed_server_left_is_cleared(database, run_dirs, r
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
-    stale = Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "kraft-set-aside"
+    stale = kraft_builtins.set_aside_dir(worktree)
     (stale / "sub").mkdir(parents=True)
     (stale / "sub" / "uv.lock").write_text("left by a SIGKILL\n")
     _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
