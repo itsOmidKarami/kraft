@@ -107,6 +107,17 @@ describe("Approve (F.3)", () => {
     await waitFor(() => expect(where()).toBe("/work-items/w1"));
   });
 
+  it("counts your pending comments, and Approve asks before it sends them with the approval", async () => {
+    const mine = thread({ id: "t2", draft: true, comments: [{ id: "c2", thread_id: "t2", review_id: null, author: "you", attempt: null, body: "Round two: rename it", suggestion: null, claim: null, created_at: "2026-09-13T09:00:00Z", draft: true }] });
+    const calls = mount(gateItem({ gate_artifact: null }), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, [thread(), mine]], "POST /work-items/w1/gates/plan_approval/review": [200, { outcome: "approve", gate: "plan_approval" }] });
+    expect(await screen.findByText(/· 1 pending$/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    const sheet = await screen.findByRole("dialog", { name: "Approve and send 1 comment?" });
+    expect(posts(calls)).toEqual([]);
+    await userEvent.click(within(sheet).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/review", body: { outcome: "approve" } }]));
+  });
+
   it("is disabled, with the reason, while a must-fix thread is open (mutate approveBlock to see this fail)", async () => {
     mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, [thread({ label: "must_fix" })]] });
     const approve = await screen.findByRole("button", { name: "Approve" });
