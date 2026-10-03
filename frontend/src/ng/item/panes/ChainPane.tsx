@@ -8,7 +8,7 @@ import type { Applied } from "../draft/applied";
 import { appliedRows } from "../draft/AppliedRows";
 import { useDraft } from "../draft/context";
 import { lines } from "../draft/view";
-import { age, eventLine } from "../events";
+import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { DocViewer } from "../DocViewer";
@@ -27,16 +27,18 @@ const statusLine = (item: ItemDetail) => {
   return [st.replace("_", " "), live && step ? `step ${step.index} of ${step.count}` : "", live ? item.current_node_id ?? "" : ""].filter(Boolean).join(" · ");
 };
 
+const RECENT = 5;
+
 /** The chain pane's Overview (Decisions §5 Chain pane): status, progress,
  *  current (a link), spend, the documents attached at intake (each opens when
  *  the caller can open it) and Recent, whose lines select their node. */
-export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void }) {
+export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void; onMore?: () => void }) {
   const sum = item.summary;
   const cap = item.budget_cap;
-  const recent = [...events].reverse().flatMap((e) => {
-    const line = eventLine(e);
-    return line ? [{ e, line }] : [];
-  }).slice(0, 20);
+  // The last few lines of the story (WI-2); the rest behind a link: the caller's (the peek's Activity) or in place.
+  const [all, setAll] = useState(false);
+  const story = recentLines(events);
+  const recent = all ? story : story.slice(0, RECENT);
   const live = !["done", "archived", "cancelled"].includes(item.display_status ?? "");
   const [attached, setAttached] = useState<string | null>(null);
   return (
@@ -80,6 +82,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
           ))}
         </ol>
       ) : <p className="item-muted">Nothing yet.</p>}
+      {story.length > RECENT && !all && <button type="button" className="item-link ip-recent-more" onClick={onMore ?? (() => setAll(true))}>{onMore ? "All activity" : `Show ${story.length - RECENT} earlier`}</button>}
     </>
   );
 }

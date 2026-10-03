@@ -89,14 +89,14 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       onFocus={open}
       footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
-      {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} />}
+      {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
       {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
       {tab === "config" && <Config item={item} reload={loaded.reload} budget={budget} onBudget={onBudget} />}
     </Inspector>
   );
 }
 
-function Overview({ item, version, reload, onRaise }: { item: ItemDetail; version: string; reload: () => void; onRaise: () => void }) {
+function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail; version: string; reload: () => void; onRaise: () => void; onMore: () => void }) {
   const navigate = useNavigate();
   const anchor = useRef<HTMLDivElement>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -115,7 +115,7 @@ function Overview({ item, version, reload, onRaise }: { item: ItemDetail; versio
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
         {error && <p className="item-error" role="alert">{error}</p>}
       </div>
-      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} />
+      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} />
       {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={anchor} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
