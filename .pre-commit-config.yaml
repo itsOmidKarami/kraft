@@ -35,7 +35,7 @@ repos:
         pass_filenames: false
         # So the SKIPPED line shows when a worker or a credential-less shell commits.
         verbose: true
-        files: ^(templates/|src/kraft/harnesses/)
+        files: ^(config/|src/kraft/harnesses/)
       # vscode/schemas/ is generated from pydantic models spread across
       # src/kraft/ (templates/models.py, environment.py, policy.py, config.py,
       # cap_levels.py, ...); a hand-kept file list would miss the next one.
