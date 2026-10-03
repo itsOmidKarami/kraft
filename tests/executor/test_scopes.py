@@ -14,6 +14,8 @@ from kraft.config import probe_repo
 from kraft.executor import dispatch
 from kraft.findings import JobRef
 
+from .test_walk import _walk
+
 _BUILTIN = {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
 _FRONTEND = {"paths": ["frontend/**"], "command": "frontend-cmd"}
 _BACKEND = {"paths": ["backend/**"], "command": "backend-cmd"}
@@ -455,3 +457,84 @@ async def test_collect_findings_ignores_a_stale_needs_context_row_from_a_reviewe
         await it.session(sid, "verify.main.review", status, head_sha="sha-a")
 
     assert dispatch.collect_findings(it.database, it.id, it.chain.chain.nodes[0], 0) == ([], set())
+
+
+# -- what a red scope's stop says (R12a-03) -------------------------------------
+
+
+_EXIT_3 = "sh -c 'exit 3'"
+
+
+@pytest.mark.parametrize(
+    ("fields", "named", "facts"),
+    [
+        pytest.param(
+            {"test_command": _EXIT_3},
+            f"`{_EXIT_3}` (scope `**`, exit 3)",
+            {"command": _EXIT_3, "scope": "**", "exit_code": 3},
+            id="test-command",
+        ),
+        pytest.param(
+            {
+                "test_scopes": [
+                    {"paths": ["src/**", "*"], "command": _EXIT_3},
+                    _ALL | {"command": "true"},
+                ]
+            },
+            f"`{_EXIT_3}` (scope `src/**, *`, exit 3)",
+            {"command": _EXIT_3, "scope": "src/**, *", "exit_code": 3},
+            id="a-later-scope-passes",
+        ),
+        pytest.param(
+            {
+                "test_command": "true",
+                "areas": {
+                    "ui": {
+                        "paths": ["**"],
+                        "setup": _EXIT_3,
+                        "verification": {"test_scopes": [{"paths": ["**"], "command": "true"}]},
+                    }
+                },
+            },
+            f"`{_EXIT_3}` (setup of area `ui`, exit 3)",
+            {"command": _EXIT_3, "exit_code": 3, "area": "ui", "setup": True},
+            id="area-setup",
+        ),
+    ],
+)
+async def test_a_red_scope_stops_naming_its_command_scope_and_session(
+    item_on, fields, named, facts
+):
+    """quick-task's verify went red as `task failed in node verify:
+    test_changed_scopes [builtin]` with empty facts: neither the command nor
+    its scope showed anywhere, and the session holding the output was only in
+    `view events --json` (R12a-03). The reason names the command and its
+    scope; `facts` carries them, the exit code and that session -- the failed
+    one, even when a later scope's passing session is newer."""
+    it = await item_on(_verify())
+
+    await _walk(it, repo_entry=entry_of({"setup_command": "", **fields}))
+
+    [failed] = [s for s in it.sessions() if s["status"] == "failed"]
+    payload = it.events("work_item_needs_human")[-1]["payload"]
+    assert payload["reason"] == f"task failed in node verify: t [builtin] — tests failed: {named}"
+    assert payload["facts"] == {**facts, "session_id": failed["id"]}
+
+
+async def test_every_red_scope_is_named_and_listed(item_on):
+    """Two scopes go red in one run: the reason names both, and `facts` keeps
+    the first one's keys flat (what the board's card shows) with both under
+    `failed_scopes`."""
+    it = await item_on(_verify())
+    scopes = [{"paths": ["a/**"], "command": "false"}, {"paths": ["b/**"], "command": _EXIT_3}]
+
+    await _walk(it, repo_entry=entry_of({"setup_command": "", "test_scopes": scopes}))
+
+    first, second = (s["id"] for s in it.sessions())
+    payload = it.events("work_item_needs_human")[-1]["payload"]
+    assert payload["reason"].endswith(
+        f"tests failed: `false` (scope `a/**`, exit 1); `{_EXIT_3}` (scope `b/**`, exit 3)"
+    )
+    one = {"command": "false", "scope": "a/**", "exit_code": 1, "session_id": first}
+    two = {"command": _EXIT_3, "scope": "b/**", "exit_code": 3, "session_id": second}
+    assert payload["facts"] == {**one, "failed_scopes": [one, two]}

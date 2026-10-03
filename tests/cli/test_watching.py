@@ -148,6 +148,20 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
     assert "999" not in out
 
 
+def _session(sid, node="verify", hook="verify.main.test", status="failed"):
+    return {"id": sid, "node_id": node, "hook_point": hook, "status": status}
+
+
+def _serves(monkeypatch, *sessions, status="active", stop=None):
+    """`client.get_work_item` answering an item that ran `sessions`, oldest
+    first, and is `status` with `stop`: what `view logs` picks its default from."""
+
+    async def fake_item(work_item_id=None, *, full=False):
+        return {"status": status, "stop": stop, "worker_sessions": list(sessions)}
+
+    monkeypatch.setattr(client, "get_work_item", fake_item)
+
+
 def test_logs_without_a_session_says_so(app, capsys, make_item, repo):
     wid = make_item(repo)
     with pytest.raises(SystemExit) as caught:
@@ -160,9 +174,6 @@ def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
     """The backlog path needs no server streaming: it is a plain GET."""
     wid = make_item(repo)
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
-
     async def fake_get(path, **params):
         assert path == "/worker-sessions/sess-1/log"
         return {
@@ -174,18 +185,62 @@ def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
             ],
         }
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid])
     out = capsys.readouterr().out
     assert "first" in out and "second" in out
 
 
+_IMPL = _session("s-impl", "implementation", "implementation.main.implement", "done")
+_RED = _session("s-red")
+_GREEN = _session("s-green", status="done")
+_ESCALATION = _session("s-esc", hook="escalation", status="running")
+_STOP = {"node": "verify", "facts": {}}
+
+
+@pytest.mark.parametrize(
+    ("status", "stop", "sessions", "shown"),
+    [
+        pytest.param("active", None, [_IMPL, _RED, _GREEN], "s-green", id="running-newest"),
+        pytest.param("needs_human", _STOP, [_IMPL, _RED, _ESCALATION], "s-red", id="escalated"),
+        pytest.param(
+            "needs_human",
+            {**_STOP, "facts": {"session_id": "s-red"}},
+            [_IMPL, _RED, _GREEN, _ESCALATION],
+            "s-red",
+            id="red-scope-before-a-green-one",
+        ),
+        pytest.param("needs_human", _STOP, [_IMPL, _RED], "s-red", id="nothing-newer"),
+    ],
+)
+def test_logs_defaults_to_the_session_that_stopped_the_item(
+    app, monkeypatch, capsys, make_item, repo, status, stop, sessions, shown
+):
+    """R12a-03: an item stops, an auto-escalation starts at once, and `view
+    logs ID` showed the escalation rather than why it stopped. While stopped,
+    the default is the stop's own session (the failed scope `facts` names, or
+    the node's newest that is not an escalation), and stderr names the newer
+    one it passed over with how to read it."""
+    wid = make_item(repo)
+    asked = []
+
+    async def fake_get(path, **params):
+        asked.append(path)
+        return {"lines": []}
+
+    _serves(monkeypatch, *sessions, status=status, stop=stop)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    cli.main(["view", "logs", wid])
+
+    assert asked == [f"/worker-sessions/{shown}/log"]
+    newest = sessions[-1]["id"]
+    err = capsys.readouterr().err
+    assert (f"kraft view logs --session {newest}" in err) is (shown != newest)
+
+
 def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
     wid = make_item(repo)
-
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
 
     async def fake_get(path, **params):
         return {
@@ -194,7 +249,7 @@ def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
             "lines": [{"n": i, "t": None, "src": "stdout", "text": f"line{i}"} for i in range(10)],
         }
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "-n", "3"])
     out = capsys.readouterr().out.strip().splitlines()
@@ -205,13 +260,10 @@ def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
 def test_logs_json_is_ndjson(app, monkeypatch, capsys, make_item, repo):
     wid = make_item(repo)
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
-
     async def fake_get(path, **params):
         return {"lines": [{"n": 0, "t": None, "src": "stdout", "text": "one"}]}
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "--json"])
     out = capsys.readouterr().out.strip()
@@ -311,13 +363,10 @@ def test_logs_n_zero_prints_no_backlog(app, monkeypatch, capsys, make_item, repo
     """`-n 0` means none. Truthiness would read it as "no limit"."""
     wid = make_item(repo)
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
-
     async def fake_get(path, **params):
         return {"lines": [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]}
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "-n", "0"])
     assert capsys.readouterr().out == ""
@@ -332,9 +381,6 @@ def test_logs_n_zero_follow_starts_after_the_lines_already_written(
     wid = make_item(repo)
     asked = []
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "running"}
-
     async def fake_get(path, **params):
         rows = [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]
         return {"lines": rows, "next_line": 5}
@@ -343,7 +389,7 @@ def test_logs_n_zero_follow_starts_after_the_lines_already_written(
         asked.append(after_line)
         yield {"n": 5, "t": None, "src": "stdout", "text": "new"}
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     monkeypatch.setattr(client, "stream_log", fake_stream)
     cli.main(["view", "logs", wid, "-n", "0", "-f"])
