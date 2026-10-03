@@ -61,11 +61,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
 @pytest.mark.parametrize(
     ("route", "body", "detail"),
     [
-        (
-            "work-items",
-            {"title": "x", "repo": "/tmp", "chain_template": "nope"},
-            "no chain 'nope'",
-        ),
+        ("work-items", {"title": "x", "repo": "/tmp", "chain_template": "nope"}, "no chain 'nope'"),
         ("work-items", {"title": "x"}, None),
         ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
@@ -79,6 +75,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         ("triggers", {"title": "   ", "repo": "REPO"}, "title cannot be empty"),
         ("work-items", {"title": "line1\nline2", "repo": "REPO"}, "the title is one line"),
         ("triggers", {"title": "a\r\nb", "repo": "REPO"}, "the title is one line"),
+        ("work-items", {"title": "one line\n", "repo": "REPO"}, "the title is one line"),
     ],
     ids=[
         "an-unknown-template",
@@ -91,6 +88,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         "trigger-a-whitespace-title",
         "a-multi-line-title",
         "trigger-a-multi-line-title",
+        "a-trailing-line-break",
     ],
 )
 def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):

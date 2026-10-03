@@ -637,10 +637,15 @@ def _check_title(title: str) -> None:
         )
 
 
+#: Every character `str.splitlines` breaks a line at.
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+
+
 def _check_one_line(title: str) -> None:
     """A title is one line: a line break in it broke `kraft view list`'s
-    table, the row wrapping under the ID column."""
-    if len(title.splitlines()) > 1:
+    table, the row wrapping under the ID column. A trailing one too, as the
+    blank-title refusal refuses rather than strips."""
+    if not _LINE_BREAKS.isdisjoint(title):
         raise HTTPException(422, "the title is one line: put the rest in the description instead")
 
 
