@@ -253,7 +253,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   // and Check again (or Enter) reads it again without editing the path (R10a-01).
   const noCommit = probe?.read_from === null;
   const circle = (n: number) => (
-    <StepCircle key={n} n={n} state={n === step ? "current" : n < step || (n === 1 && added) ? "done" : "todo"} onClick={n <= reached ? () => setStep(n) : undefined} />
+    <StepCircle key={n} n={n} state={n === step ? "current" : (n === 1 ? added : n < step) ? "done" : "todo"} onClick={n <= reached ? () => setStep(n) : undefined} />
   );
 
   const Icon = STEP_ICON[step - 1];

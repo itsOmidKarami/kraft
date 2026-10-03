@@ -60,13 +60,26 @@ describe("DocViewer", () => {
     expect(screen.queryByRole("button", { name: "Other editors" })).toBeNull();
   });
 
-  it("copies the path", async () => {
-    stubFetch({ "GET /documents/d1": [200, doc] });
+  it.each([
+    ["a scanned file's absolute path", { origin: "git_scan", repo: "/code/kraft/", path: ".engineering/specs/caching.md" }, "/code/kraft/.engineering/specs/caching.md"],
+    ["the path as it is when it has no origin", {}, doc.path],
+  ])("copies %s", async (_, over, copied) => {
+    stubFetch({ "GET /documents/d1": [200, { ...doc, ...over }] });
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
     render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={() => {}} />);
     await userEvent.click(await screen.findByRole("button", { name: "Copy path" }));
-    expect(writeText).toHaveBeenCalledWith(doc.path);
+    expect(writeText).toHaveBeenCalledWith(copied);
+  });
+
+  // A session summary or gate artifact lives only in the index: Open in editor always answered 409 (R13b-02, as 1.4's hasFile).
+  it("offers neither Open in editor nor Copy path for an indexed document with no file, and does not ask for editors", async () => {
+    const calls = stubFetch({ "GET /documents/d1": [200, { ...doc, origin: "event_ingest" }], "GET /editors": [200, EDITORS] });
+    render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={() => {}} />);
+    await screen.findByText("no size bound");
+    expect(screen.queryByRole("button", { name: "Copy path" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
+    expect(calls.filter((c) => c.path === "/editors")).toEqual([]);
   });
 
   it("shows a gate's artifact without editors or a path to copy (it has no index row)", async () => {

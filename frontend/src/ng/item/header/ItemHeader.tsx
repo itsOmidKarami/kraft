@@ -11,7 +11,7 @@ import { act } from "../actions";
 import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
 import { actionPath } from "../paths";
-import { archivable, headerState, menuDoors, type PanelItem } from "../status";
+import { archivable, headerState, menuDoors, neverStarted, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
@@ -151,7 +151,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   const menu: MenuItem[] = [
     { label: "Review changes", onSelect: () => navigate(`/work-items/${encodeURIComponent(item.id)}/review`) },
     { label: "Item settings", onSelect: onSettings },
-    { label: "Open worktree in editor", onSelect: () => void run(act.openWorktree(item.id)), ...(gone && { disabled: true, sub: ended ? "worktree removed" : "worktree removed · Retry recreates it" }) },
+    { label: "Open worktree in editor", onSelect: () => void run(act.openWorktree(item.id)), ...(gone && { disabled: true, sub: neverStarted(item) ? "not started yet" : ended ? "worktree removed" : "worktree removed · Retry recreates it" }) },
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },

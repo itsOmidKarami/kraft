@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { createPortal } from "react-dom";
-import { docBody } from "../../format";
-import type { WorkItemDocument } from "../../types";
+import { copyablePath, docBody } from "../../format";
+import type { DocumentDetail, WorkItemDocument } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
 import { ChevronDown, X } from "../icons";
 import { Button } from "../ui/Button";
@@ -20,7 +20,7 @@ const urlOf = (s: DocSource) =>
   : s.kind === "artifact" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifact`
   // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
   : `/work-items/${encodeURIComponent(s.workItemId)}/attachments/${encodeURIComponent(s.attachment)}`;
-type Viewed = { title: string; path: string; content: string; truncated?: boolean };
+type Viewed = { title: string; path: string; content: string; truncated?: boolean; repo?: string; origin?: DocumentDetail["origin"] };
 
 /** The search's terms, two letters or more, as one case-blind pattern; null for none. */
 export function termsOf(query: string): RegExp | null {
@@ -100,7 +100,9 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
   const step = (by: number) => setAt((a) => (a + by + matches.length) % matches.length);
   const titleHit = !!(doc && query && termsOf(query)?.test(doc.title));
   const indexed = source.kind === "document";
-  const editors = useEditors(indexed);
+  // A session summary or gate artifact lives only in Kraft's index: no file to open or copy (it answers 409).
+  const hasFile = !!doc && doc.origin !== "event_ingest";
+  const editors = useEditors(indexed && hasFile);
   const by = source.kind === "document" ? source.by : undefined;
   return createPortal(
     <div className="dv-scrim" {...backdropProps(onClose)}>
@@ -113,10 +115,10 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
           </div>
           {doc && <p className="dv-path is-mono">{doc.path}</p>}
           {by && <p className="dv-by">written by {by}</p>}
-          {indexed && doc && (
+          {indexed && doc && hasFile && (
             <div className="dv-actions">
               <OpenInEditor editors={editors} open={open} />
-              <Button onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+              <Button onClick={() => navigator.clipboard?.writeText(copyablePath(doc)).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
             </div>
           )}
         </header>

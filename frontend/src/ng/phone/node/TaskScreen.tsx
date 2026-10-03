@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ago, elapsed, tokens, usd } from "../../../format";
+import { ago, elapsed, lineCount, tokens, usd } from "../../../format";
 import type { WorkerSession } from "../../../types";
 import { escalationsOf, ESCALATION, lookWord, messagesThrough, sessionLook, sessionsOf } from "../../item/nodeGraph";
 import { stepsOf } from "../../item/paths";
@@ -124,7 +124,7 @@ function TaskLog({ session }: { session?: WorkerSession }) {
       <div className="ph-chips ph-chips-inline" role="group" aria-label="Sources">
         {SOURCES.map((s) => <button key={s} type="button" className={`ph-chip${src === s ? " ph-is-on" : ""}`} aria-pressed={src === s} onClick={() => setSrc(s)}>{s}</button>)}
         <span className="ph-spacer" />
-        <span className="ph-count">{lines ? `${lines.length} lines${running ? " · following" : ""}` : session ? "Reading…" : "0 lines"}</span>
+        <span className="ph-count">{lines ? `${lineCount(lines.length)}${running ? " · following" : ""}` : session ? "Reading…" : lineCount(0)}</span>
       </div>
       {error ? <p className="ph-note">{error}</p> : <LogLines lines={shown} empty="No lines to show. Clear the filter, or the task has not started." />}
     </>

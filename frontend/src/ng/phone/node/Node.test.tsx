@@ -107,6 +107,15 @@ describe("the node screen (D)", () => {
     expect(await screen.findByText("fix attempts 3 · wall clock 45m · changed for this item")).toBeInTheDocument();
   });
 
+  it.each([
+    ["one line", [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }], "1 line"],
+    ["two lines", [{ n: 1, t: "0:03", src: "agent", text: "a", summary: "a" }, { n: 2, t: "0:04", src: "agent", text: "b", summary: "b" }], "2 lines"],
+  ])("counts the node's log, %s (R13b-07)", async (_, lines, count) => {
+    mount(item("running"), "/work-items/w1/nodes/verification?tab=log", { "GET /worker-sessions/s1/log": [200, { lines }] });
+    await screen.findByText(/loaded review_package|\ba\b/);
+    expect(document.querySelector(".ph-count")!.textContent).toBe(count);
+  });
+
   it("filters the node's log by source and says when nothing is left", async () => {
     mount(item("running"), "/work-items/w1/nodes/verification?tab=log");
     expect(await screen.findByText(/loaded review_package/)).toBeInTheDocument();

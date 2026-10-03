@@ -229,18 +229,19 @@ describe("ng Sidebar", () => {
 
   // A restart is what an installed update waits on, and the name says so (#502 review).
   const AVAILABLE = "Kraft v0.9.4, update available", RESTART = "Kraft v0.9.4, restart to finish the update";
-  it.each<[string, object, boolean, string]>([
-    ["the feed has a newer release", HEALTH, true, AVAILABLE],
-    ["a newer release is installed and waits on a restart", { ...HEALTH, installed: "0.9.5" }, false, RESTART],
-    ["the server is too old to report what is installed (R10c-01)", (({ installed: _, ...h }) => h)(HEALTH), false, RESTART],
-    ["an older release is installed (R10c-03)", { ...HEALTH, installed: "0.9.3" }, false, RESTART],
-  ])("marks an update in the footer when %s", async (_, health, behind, name) => {
+  // The visible word says it too, not only the name (R13b-05).
+  it.each<[string, object, boolean, string, string]>([
+    ["the feed has a newer release", HEALTH, true, AVAILABLE, "update"],
+    ["a newer release is installed and waits on a restart", { ...HEALTH, installed: "0.9.5" }, false, RESTART, "restart"],
+    ["the server is too old to report what is installed (R10c-01)", (({ installed: _, ...h }) => h)(HEALTH), false, RESTART, "restart"],
+    ["an older release is installed (R10c-03)", { ...HEALTH, installed: "0.9.3" }, false, RESTART, "restart"],
+  ])("marks an update in the footer when %s", async (_, health, behind, name, word) => {
     vi.mocked(api.getHealth).mockResolvedValue(health as never);
     vi.mocked(http.request).mockResolvedValue({ status: 200, body: { installed: "0.9.4", latest: "v0.9.9", channel: "stable", behind, checked_at: null } });
     mount("/templates/chains");
     const foot = await screen.findByRole("link", { name });
     expect(foot).toHaveAttribute("href", "/settings/about");
-    expect(foot).toHaveTextContent(/^v0\.9\.4update$/);
+    expect(foot).toHaveTextContent(`v0.9.4${word}`);
   });
 });
 

@@ -264,7 +264,7 @@ describe("ItemHeader", () => {
     expect(await screen.findByText("Review changes", { selector: '[aria-current="page"]' })).toBeInTheDocument();
   });
 
-  it("disables Open worktree once the worktree is gone, and says Retry brings it back only on a live item", async () => {
+  it("disables Open worktree once the worktree is gone, and says Retry brings it back only on a live item, and that a never-started one is not started yet", async () => {
     const calls = stubFetch({});
     const open = async () => {
       await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
@@ -277,10 +277,16 @@ describe("ItemHeader", () => {
     await userEvent.click(live);
     expect(writes(calls)).toEqual([]);
     unmount();
-    show({ worktree_exists: false, display_status: "done" });
+    const { unmount: unmount2 } = show({ worktree_exists: false, display_status: "done" });
     const ended = await open();
     expect(ended).toBeDisabled();
     expect(ended).toHaveTextContent(/^Open worktree in editorworktree removed$/);
+    unmount2();
+    // Never made, so nothing was removed and Retry has nothing to recreate (R13b-04).
+    show({ worktree_exists: false, display_status: "paused", current_node_id: null });
+    const fresh = await open();
+    expect(fresh).toBeDisabled();
+    expect(fresh).toHaveTextContent(/^Open worktree in editornot started yet$/);
   });
 
   it("offers Duplicate on an ended item and opens the copy", async () => {

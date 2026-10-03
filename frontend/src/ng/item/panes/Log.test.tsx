@@ -21,6 +21,9 @@ describe("Log", () => {
     await userEvent.click(screen.getByRole("button", { name: "agent" }));
     expect(screen.queryByText(/reading cache\.py/)).toBeNull();
     expect(screen.getByText(/dispatch/)).toBeInTheDocument();
+    expect(screen.getByText("1 line")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "full screen" }));
+    expect(screen.getByRole("dialog").querySelector(".ip-log-screen-head")).toHaveTextContent("log · 1 line");
   });
 
   it("goes full screen over the viewport with the crumb, the task, the count and the controls, and Escape leaves it", async () => {
