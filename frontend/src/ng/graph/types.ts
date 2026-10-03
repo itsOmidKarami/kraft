@@ -29,9 +29,14 @@ export type GraphItem = {
 
 const STATE_WORD: Record<GlyphState, string> = { plain: "", done: "done", current: "running", todo: "not started", failed: "failed", esc: "escalated", ghost: "removed", amber: "waiting" };
 
-/** A node or task button's accessible name: `<id>, <kind>, <state>[, attempt N]` (spec §5.2). */
-export function accessibleName(item: GraphItem, kind: string): string {
-  const word = STATE_WORD[item.state ?? "plain"];
+/** A node or task button's accessible name: `<id>, <kind>, <state>[, attempt N]` (spec §5.2).
+ *  A current node or task that runs nothing says why in the words drawn for
+ *  it ("needs you", "waiting on CI", "paused", "capped"): its glyph is the
+ *  running one, but "running" told a screen reader the opposite (R12b-09).
+ *  `wait` and `sub` are a chain node's (`layout.ChainNode`). */
+export function accessibleName(item: GraphItem & { wait?: string; sub?: string }, kind: string): string {
+  const idle = item.state === "current" && !item.running;
+  const word = (idle && (item.wait ?? item.sub ?? item.meta)) || STATE_WORD[item.state ?? "plain"];
   return [item.id, kind, word, item.attempt && item.attempt >= 2 ? `attempt ${item.attempt}` : ""].filter(Boolean).join(", ");
 }
 
