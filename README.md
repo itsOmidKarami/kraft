@@ -22,6 +22,12 @@ Cursor, Antigravity, OpenCode, Amp or Gemini CLI too. The shipped chains run
 their agent steps on Claude Code, and any step can
 [switch to another agent](https://itsomidkarami.github.io/kraft/guides/switch-harness).
 
+**New in 2.0:** a redesigned web interface built around what needs you, a
+review page that works like a code host's, and a `kraft repo connect` that
+proposes a repo's setup and test commands from its own files.
+[What's new in 2.0](https://itsomidkarami.github.io/kraft/get-started/whats-new)
+has the rest, and what to check before you upgrade from 1.4.
+
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge

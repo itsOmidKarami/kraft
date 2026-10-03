@@ -72,7 +72,7 @@ and a key the file leaves out takes its default.
 
 ### `palette` is legacy
 
-Before 1.5, `palette` (`nocturne`, `rose`, `forest`, `amber` or `slate`) chose
+Before 2.0, `palette` (`nocturne`, `rose`, `forest`, `amber` or `slate`) chose
 the colours. No interface writes it any more, and Kraft converts it once at
 startup, before anything reads the theme:
 
@@ -82,8 +82,9 @@ startup, before anything reads the theme:
   `amber`, and `slate` becomes `slate` with `blue`. The amount of colour is the
   file's own `colour_amount`, else `full`. A file that already names its own
   `surface` just loses the `palette`.
-- The original bytes are saved as `theme.yaml.pre-1.5` first. An existing copy
-  is never overwritten.
+- The original bytes are saved as `theme.yaml.pre-2.0` first. An existing copy
+  is never overwritten, and a `theme.yaml.pre-1.5` that a 1.5.0 release
+  candidate saved counts as that copy: no second one is written beside it.
 - A missing file, a file with no `palette`, and one that does not parse or
   holds a value Kraft does not know are left alone. With no `theme.yaml` at
   all, the look is `ink` with `violet` at `full`.
