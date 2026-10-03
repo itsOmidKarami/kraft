@@ -490,6 +490,24 @@ def test_patching_one_repo_does_not_write_enabled_into_an_untouched_entrys_absen
 
 
 @pytest.mark.api_client(edit_templates=_no_enabled_key)
+def test_a_patch_writes_only_the_fields_each_entry_sets(client, templates_dir):
+    """R10a-07: a re-connect (a PATCH) rewrote every entry with every field
+    spelled out, `id: null`, `env: {}` and the rest, into a file people diff
+    and edit. The answer is still the whole entry."""
+    answer = client.patch("/api/repos?path=/other", json={"setup_command": "uv sync"}).json()
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    by_path = {e["path"]: e for e in on_disk["repos"]}
+    assert by_path["/r"] == {"path": "/r"}
+    assert by_path["/other"] == {
+        "path": "/other",
+        "test_command": "pytest",
+        "setup_command": "uv sync",
+        "managed": True,
+    }
+    assert {"env", "areas", "sandbox", "setup_command"} <= set(answer)
+
+
+@pytest.mark.api_client(edit_templates=_no_enabled_key)
 def test_a_rename_on_an_enabled_entry_with_no_test_command_goes_through(client):
     """Kraft-hv4uy: the refusal is about a PATCH that *makes* a repo enabled
     with nothing to verify. `/r` is already in that state (absent `enabled`
