@@ -26,9 +26,11 @@ export function DraftConfig({ path, saying }: { path: string; saying?: string })
   if (!d || d.draft.status !== "ready") return null;
   const node = path.split(".")[0];
   if (!d.editable(node)) return <Note>{saying ?? "Already run or running: edit a later node."}</Note>;
-  const chain = notStarted(d.raw) ? materialized(d.raw) : null;
+  // The frozen chain says what kind a task is, started or not; its values are shown as given only before the start.
+  const frozen = materialized(d.raw);
+  const chain = notStarted(d.raw) ? frozen : null;
   const h = typeof opts === "string" ? null : opts.harnesses;
-  const task = chain ? taskAt(chain, path) : undefined;
+  const task = frozen ? taskAt(frozen, path) : undefined;
   const fields = fieldsFor(path).filter((f) => !task || applies(f, task.kind));
   return (
     <>

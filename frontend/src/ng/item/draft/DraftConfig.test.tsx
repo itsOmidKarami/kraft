@@ -167,9 +167,15 @@ describe("DraftConfig", () => {
     expect(screen.getByRole("button", { name: "Override model" }).closest(".cfg-row")).toHaveTextContent("opus-reporepo");
   });
 
-  it("once the item has started, says as the chain gives it and offers every field, as before", async () => {
-    await show(TASK, reply([]), {}, detail({ materialized_chain: FROZEN }));
-    expect((await screen.findAllByText("as the chain gives it")).length).toBe(9);
+  it.each([
+    ["a builtin (forge) task", TASK, ["Override running cap", "Override total cap", "Override budget ($)", "Override token budget"]],
+    ["a subprocess task", "verification.checks.lint", ["Override command", "Override running cap", "Override total cap", "Override budget ($)", "Override token budget"]],
+    ["an agent task", "verification.review.code_review", ["Override harness", "Override model", "Override effort", "Override prompt", "Override running cap", "Override total cap", "Override budget ($)", "Override token budget"]],
+  ])("once the item has started, says as the chain gives it and offers only the fields %s has", async (_, path, expected) => {
+    await show(path, reply([]), {}, detail({ materialized_chain: FROZEN, current_node_id: "plan" }));
+    const labels = (await screen.findAllByRole("button", { name: /^Override / })).map((b) => b.getAttribute("aria-label"));
+    expect(labels).toEqual(expected);
+    expect((await screen.findAllByText("as the chain gives it")).length).toBe(expected.length);
   });
 
   it("shows nothing until the draft has loaded", () => {
