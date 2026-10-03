@@ -15,10 +15,12 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 
 from kraft.paths import default_run_dir
 
@@ -190,14 +192,20 @@ def _store(blob: dict) -> None:
     admin start`) sees the old file or the new one, never half of one, which
     it would take for a miss and a failure write would then replace."""
     path = _cache_path()
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(blob))
+        # A name of its own per write: the server checks from several threads
+        # at once, and two writers sharing one temp file would swap in half of it.
+        fd, name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+        tmp = Path(name)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(blob))
         os.replace(tmp, path)
     except OSError:
         # A read-only or full run dir costs a re-check next time, nothing more.
-        tmp.unlink(missing_ok=True)
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
 
 
 def _write_failure(now: float, channel: str) -> None:
@@ -342,7 +350,6 @@ def install_kind() -> str:
     made, and Homebrew's venv has its own path shape."""
     import json
     from importlib.metadata import PackageNotFoundError, distribution
-    from pathlib import Path
 
     if _is_homebrew_install():
         return "brew"
@@ -429,7 +436,6 @@ def add_extra_hint(extra: str) -> str:
 def _receipt() -> dict:
     """uv's record of how this tool was installed, or {} when it is not a uv tool."""
     import tomllib
-    from pathlib import Path
 
     try:
         return tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text()).get("tool") or {}

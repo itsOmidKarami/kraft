@@ -117,6 +117,8 @@ def test_the_cache_is_replaced_whole_never_written_in_place(cache, monkeypatch, 
     monkeypatch.setattr(update.os, "replace", lambda a, b: swaps.append((a, b)) or real(a, b))
     monkeypatch.setattr(update, "_fetch", lambda *_: [] if fails else RELEASE_JSON)
     update.latest()
-    [(src, dst)] = swaps
+    update.latest(force=True)
+    (src, dst), (again, _) = swaps
     assert (dst, src.parent) == (cache, cache.parent)
+    assert src != again, "each write needs its own temp file: the server writes from threads"
     assert [p.name for p in cache.parent.iterdir()] == [cache.name]
