@@ -45,6 +45,11 @@ describe("PathFooter", () => {
     expect(screen.queryByLabelText("Steer for the retry")).toBeNull();
   });
 
+  it.each(["done", "cancelled", "archived"] as const)("offers no Retry or Skip on a %s item: its chain does not run again", (status) => {
+    render(<PathFooter item={detail({ display_status: status })} path="implementation" what="node" state="stopped" reload={() => {}} />);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it("retries on ⌘↵ from the steer", async () => {
     const calls = stubFetch(WRITES);
     render(<PathFooter item={detail()} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);

@@ -5,10 +5,14 @@ import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { sendOnModEnter } from "../../keys";
 
+const ENDED = new Set(["done", "cancelled", "archived"]);
+
 /** A node's, step's or task's footer (Decisions §5 Pause on a path, §6 Skip):
  *  Pause, Skip and Retry in that order, by state. Skip and Retry confirm in
  *  the pane; Retry takes a steer when the item has an agent to read it. */
-export function PathFooter({ item, path, what, state, reload, extra }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode }) {
+export function PathFooter({ item, path, what, state: shown, reload, extra }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode }) {
+  // An item that has ended runs nothing again: its chain refuses a retry (409), so none is offered (R8b-06).
+  const state = ENDED.has(item.display_status ?? "") ? null : shown;
   const [confirm, setConfirm] = useState<"skip" | "retry" | null>(null);
   const [steer, setSteer] = useState("");
   const [busy, setBusy] = useState(false);
