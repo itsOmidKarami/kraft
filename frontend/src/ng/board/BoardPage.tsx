@@ -65,7 +65,9 @@ function useNow() {
 }
 
 /** `/`: the board (W6). First-run while no repo is connected, decided once
- *  on load so connecting one mid-setup does not swap the page away. */
+ *  on load so connecting one mid-setup does not swap the page away, until
+ *  the first work item exists: one filed from the CLI or anywhere else ends
+ *  the setup, so the board shows it (R11a-02). */
 export function BoardPage() {
   const prefs = useBoardPrefs();
   const [query, setQuery] = useBoardQuery(prefs?.group_by);
@@ -100,10 +102,20 @@ export function BoardPage() {
       // or skipped; one whose repo is no longer connected starts over.
       const saved = savedFirstRun();
       if (saved && !r.repos.some((x) => x.path === saved.path)) clearFirstRun();
+      // Items already loaded: no first-run to flash up before the effect below takes it away.
+      if (Object.keys(useStore.getState().workItems).length > 0) return clearFirstRun();
       setFresh(r.repos.length === 0 || savedFirstRun() != null);
     }).catch(() => {});
     api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});
   }, []);
+
+  // Any item at all, archived too: the board has something to say, and the wizard's saved step is done with.
+  const anyItem = Object.keys(itemsById).length > 0;
+  useEffect(() => {
+    if (!fresh || !anyItem) return;
+    clearFirstRun();
+    setFresh(false);
+  }, [fresh, anyItem]);
 
   const groups = useMemo(
     () =>
@@ -197,8 +209,15 @@ export function BoardPage() {
     rows[Math.max(0, Math.min(rows.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]?.focus();
   };
 
+  // Over first-run as over the board: a server older than its interface says so either way (R11a-11).
+  const restart = olderServer(health) && (
+    <div className="board-offline board-restart" role="alert">
+      <span className="board-offline-mark" aria-hidden>!</span>
+      <span className="board-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
+    </div>
+  );
   // FirstRun's last step opens the composer, which lives on the board.
-  if (fresh && !query.new) return <FirstRun onDone={() => setFresh(false)} />;
+  if (fresh && !query.new) return <>{restart}<FirstRun onDone={() => setFresh(false)} /></>;
 
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
@@ -234,12 +253,7 @@ export function BoardPage() {
           <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
         </div>
       )}
-      {olderServer(health) && (
-        <div className="board-offline board-restart" role="alert">
-          <span className="board-offline-mark" aria-hidden>!</span>
-          <span className="board-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
-        </div>
-      )}
+      {restart}
       <div className="board-filters">
         <label className="board-filter">
           <span className="board-visually-hidden">Filter</span>

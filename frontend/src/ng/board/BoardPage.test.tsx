@@ -56,10 +56,13 @@ afterEach(() => {
 });
 
 describe("BoardPage, against a server older than its interface (R10c-01)", () => {
-  it("says over the board to restart when /health has a version but no installed", async () => {
+  // Over first-run too: it sat behind the wizard (R11a-11).
+  it.each([["the board", true], ["first-run", false]])("says over %s to restart when /health has a version but no installed", async (_where, items) => {
     vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "1.4.0" } as never);
-    put(item("w1", "running"));
+    if (items) put(item("w1", "running"));
+    else vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     board();
+    if (!items) expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent("This server is older than its web interface");
     expect(banner).toHaveTextContent("Run kraft admin restart.");
@@ -91,6 +94,21 @@ describe("BoardPage", () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     board();
     expect(await screen.findByRole("heading", { name: "Connect a repo" })).toBeInTheDocument();
+    expect(localStorage.getItem("kraft.firstRun")).toBeNull();
+  });
+
+  // R11a-02: items filed from the CLI ran and finished while the board kept saying "Nothing on the board yet".
+  it.each([["already there", true], ["filed while it shows", false]])("gives first-run up for the board once an item exists: %s", async (_when, before) => {
+    localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/r", name: "r", disabled: false }));
+    vi.spyOn(api, "getTemplates").mockResolvedValue([]);
+    if (before) put(item("w1", "done"));
+    board();
+    if (!before) {
+      expect(await screen.findByRole("heading", { name: /register Kraft with Claude Code/ })).toBeInTheDocument();
+      act(() => useStore.setState({ workItems: { w1: item("w1", "done") } }));
+    }
+    expect(await screen.findByText("Item w1")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /register Kraft with Claude Code/ })).toBeNull();
     expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
