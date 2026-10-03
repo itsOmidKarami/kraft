@@ -223,6 +223,19 @@ jobs:
           # a site-packages path that a python version bump would invalidate.
           /tmp/smoke/bin/python -c \
             "from kraft.paths import BUNDLED; import sys; sys.exit(0 if (BUNDLED / 'web' / 'index.html').is_file() else 1)"
+          # The defaults a new home is seeded from: without them its first
+          # start exits, naming no bundled defaults to seed it.
+          if ! /tmp/smoke/bin/python -c \
+              "from kraft.paths import BUNDLED; import sys; c = BUNDLED / 'config'; sys.exit(0 if (c / 'library.yaml').is_file() and (c / 'chains').is_dir() else 1)"; then
+            echo "::error::the wheel has no kraft/_bundled/config with a library.yaml and chains/"
+            exit 1
+          fi
+          # Never this machine's password hash or webhook: `just bundle` strips them.
+          # unzip exits 0 when any named file is in the wheel, 11 when none is.
+          if unzip -l "$WHEEL" kraft/_bundled/config/access.yaml kraft/_bundled/config/notify.yaml >/dev/null 2>&1; then
+            echo "::error::the wheel carries kraft/_bundled/config/access.yaml or notify.yaml"
+            exit 1
+          fi
           # The web UI bundles react, lucide-react, the Inter font and more, and
           # their licenses ask for their notices to go wherever their code does.
           if ! unzip -l "$WHEEL" kraft/_bundled/web/THIRD_PARTY_LICENSES.txt >/dev/null; then
