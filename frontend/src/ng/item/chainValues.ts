@@ -1,4 +1,5 @@
 import type { Harnesses, Repo } from "../../types";
+import { KIND_ICON, type TaskKind } from "../icons";
 import type { ItemDetail } from "./useItem";
 
 /** The item's own chain as intake froze it (`materialized_chain`): what a
@@ -49,6 +50,19 @@ function scopes(m: Materialized, path: string) {
 }
 
 export const taskAt = (m: Materialized, path: string) => scopes(m, path).task;
+
+const glyphKind = (k: string | undefined): TaskKind | undefined => (k && k in KIND_ICON ? (k as TaskKind) : undefined);
+
+/** What a node's glyph draws (WI-3): its tasks' kind when they share one (agent ✦, builtin ⚙,
+ *  subprocess >_, forge git-pull), else none. The API's chain lists bare task ids; the frozen chain has the kinds. */
+export function nodeTaskKind(m: Materialized | null, id: string): TaskKind | undefined {
+  const node = m && nodeAt(m, id);
+  const kinds = new Set(node ? stepsOfNode(node).flatMap((s) => s.tasks.map((t) => t.kind)) : []);
+  return kinds.size === 1 ? glyphKind([...kinds][0]) : undefined;
+}
+
+/** A task's kind by its path, from the frozen chain. */
+export const taskKindAt = (m: Materialized | null, path: string) => glyphKind(m ? taskAt(m, path)?.kind : undefined);
 export const nodeAt = (m: Materialized, id: string) => m.chain.nodes.find((n) => n.id === id);
 
 /** Every task a node launches: its steps', and its fix loop's repair and judge. */

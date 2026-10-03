@@ -20,7 +20,7 @@ import { PathFooter } from "./PathFooter";
 import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
 import { chainName } from "../chainName";
-import { notStarted } from "../chainValues";
+import { materialized, notStarted, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
 
 export type PaneArgs = {
@@ -207,7 +207,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
-  const kind = esc || at?.model ? "agent" : undefined;
+  const kind = esc ? "agent" : taskKindAt(materialized(item), path) ?? (at?.model ? "agent" : undefined);
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
   const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task · ${look.running ? (look.meta ?? "running") : lookWord(look)}` };

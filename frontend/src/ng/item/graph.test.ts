@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KraftEvent, WorkerSession } from "../../types";
 import { accessibleName } from "../graph/types";
 import { chainGraph, rejectTarget } from "./graph";
-import { detail, V1 } from "./testkit";
+import { detail, FROZEN, V1 } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
@@ -43,6 +43,11 @@ describe("chainGraph", () => {
     const node = chainGraph(item, [], NOW).nodes[2];
     expect(node).toMatchObject(want);
     expect(accessibleName(node, "node")).toBe(name);
+  });
+
+  it("draws each node's glyph by its tasks' kind, from the frozen chain (WI-3): mixed kinds draw none", () => {
+    const { nodes } = chainGraph(detail({ materialized_chain: FROZEN }), [], NOW);
+    expect(nodes.map((n) => [n.id, n.taskKind])).toEqual([["plan", "agent"], ["plan_approval", undefined], ["verification", undefined], ["merge_request", "builtin"]]);
   });
 
   it("draws a gate waiting for you as the current gate (the amber diamond)", () => {

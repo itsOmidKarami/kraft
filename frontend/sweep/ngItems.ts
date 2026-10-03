@@ -40,6 +40,13 @@ export const NG_NODES: Node[] = [
   exec("release", { ship: ["release"] }),
 ];
 
+/** Each task's kind, as the API's `materialized_chain` carries it (its `chain_definition` lists bare ids):
+ *  what the canvas draws a node's and a task's glyph by. */
+const KIND: Record<string, string> = { unit_tests: "builtin", rebase: "builtin", lint: "subprocess", typecheck: "subprocess", open_draft: "forge", mr_checks: "forge", release: "forge" };
+const FROZEN = JSON.stringify({
+  chain: { nodes: NG_NODES.map((n) => ({ id: n.id, kind: n.kind, steps: n.steps.map((st) => ({ id: st[0].split(".")[1], tasks: st.map((p) => { const task = p.split(".")[2]; return { id: task, kind: KIND[task] ?? "agent" }; }) })) })) },
+});
+
 /** Where each scenario stands: the current node (index), and the step it is on there. */
 const AT: Record<NgScenario, number> = {
   running: 7, "needs-you": 7, "needs-gate": 13, escalated: 7, capped: 7, done: 15, cancelled: 7, archived: 15,
@@ -104,6 +111,7 @@ export function buildNgItem(sc: NgScenario, seed: number, variant: Variant): Ite
     status: "active", chain_template: "default",
     chain_definition: { template_id: "default", nodes: NG_NODES },
     effective_chain: { template_id: "default", nodes: NG_NODES },
+    materialized_chain: FROZEN,
     current_node_id: currentNode, bead_id: "kraft-cb59",
     created_at: t(0), updated_at: t(m),
     auto_gate: true, pending_gate: null, gate_artifact: null, steerable: true,
