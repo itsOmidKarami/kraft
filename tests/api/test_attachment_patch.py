@@ -275,3 +275,44 @@ def test_a_patch_racing_another_patch_is_refused_and_the_winner_keeps_its_files(
     assert [p.name for p in (client.app.state.run_dirs.attachments / wid).iterdir()] == [
         Path(filed["plan"]["source"]).name
     ]
+
+
+# --- GET /work-items/{id}/attachments/{kind}: reading one before start ------
+
+
+def test_an_attachment_reads_from_the_snapshot_and_follows_a_revision(client, repo):
+    """Before start there is no worktree and no indexed document: a spec or
+    plan is read from Kraft's own snapshot, never the caller's file, which
+    may have changed since, and a revision is read once it replaces it."""
+    plan = _doc(repo, "plans/p.md", "---\nkind: plan\n---\n# The plan\n\nStep one.\n")
+    wid = _file(client, repo, attachments=[{"kind": "plan", "path": plan}])
+    (repo / plan).write_text("# Edited after filing\n")
+
+    got = client.get(f"/api/work-items/{wid}/attachments/plan")
+
+    assert got.status_code == 200, got.text
+    assert got.json() == {
+        "work_item_id": wid,
+        "kind": "plan",
+        "path": plan,
+        "title": "The plan",
+        "content": "# The plan\n\nStep one.\n",
+        "truncated": False,
+    }
+    assert client.get(f"/api/work-items/{wid}/attachments/spec").status_code == 404
+
+    revised = _doc(repo, "plans/p2.md", "# Plan two\n")
+    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"plan": revised}})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}/attachments/plan").json()["title"] == "Plan two"
+
+
+def test_an_attachment_whose_snapshot_is_gone_is_a_404_saying_so(client, repo):
+    wid = _file(client, repo, attachments=[{"kind": "spec", "path": _doc(repo, "s.md", "# s\n")}])
+    for f in (client.app.state.run_dirs.attachments / wid).iterdir():
+        f.unlink()
+
+    got = client.get(f"/api/work-items/{wid}/attachments/spec")
+
+    assert got.status_code == 404
+    assert got.json()["detail"] == "Kraft no longer has the copy of this work item's spec"

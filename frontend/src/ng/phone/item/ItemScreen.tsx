@@ -6,7 +6,7 @@ import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
 import { act } from "../../item/actions";
 import { isEscalation } from "../../item/nodeGraph";
-import { budgetRaise, headerState } from "../../item/status";
+import { budgetRaise, headerState, neverStarted } from "../../item/status";
 import { pathSel, placeUrl } from "../../item/url";
 import type { ItemDetail } from "../../item/useItem";
 import { useCompare } from "../../review/useReview";
@@ -51,7 +51,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
   const { lines } = useLog(session && !ended ? session.id : null, live);
-  const compare = useCompare(item.id, "base", "latest", false, item.head_sha);
+  const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item));
   const files = compare.state === "ready" ? (compare.data.files ?? []) : [];
   const adds = files.reduce((n, f) => n + f.insertions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
@@ -97,6 +97,16 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
           <h1 className="ph-item-title">{item.title}</h1>
           {text && <p className={`ph-brief${brief ? " ph-is-open" : ""}`}>{text}</p>}
           {longBrief && <button type="button" className="ph-linkbtn" aria-expanded={brief} onClick={() => setBrief(!brief)}>{brief ? "less" : "more"}</button>}
+          {!!item.attachments?.length && (
+            <p className="ph-attached">
+              <span className="ph-item-meta">attached</span>
+              {item.attachments.map((a) => (
+                <button key={a.kind} type="button" className="ph-linkbtn" onClick={() => navigate(itemUrl(item.id, `?attached=${encodeURIComponent(a.kind)}`))}>
+                  {a.kind} <span className="ph-underline">{a.path.split("/").at(-1)}</span>
+                </button>
+              ))}
+            </p>
+          )}
           {files.length > 0 && (
             <button type="button" className="ph-linkbtn ph-diff-link" onClick={() => navigate(reviewUrl(item.id, gate && item.pending_gate ? `?gate=${encodeURIComponent(gate)}` : ""))}>
               <span>{files.length} {files.length === 1 ? "file" : "files"}</span>

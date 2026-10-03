@@ -66,6 +66,19 @@ describe("the item screen (C)", () => {
     await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
   });
 
+  it("before start: lists the attached spec and plan, opens Kraft's copy of one, and asks for no diff", async () => {
+    const attachments = [{ kind: "spec" as const, path: "docs/specs/ws.md" }, { kind: "plan" as const, path: "docs/plans/ui.md" }];
+    const calls = mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], attachments }), "/work-items/w1", {
+      "GET /work-items/w1/attachments/plan": [200, { title: "UI plan", path: "docs/plans/ui.md", content: "# UI plan\n\nStep **one**.", truncated: false }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "plan ui.md" }));
+    expect(where()).toBe("/work-items/w1?attached=plan");
+    expect(await screen.findByRole("heading", { name: "UI plan" })).toBeInTheDocument();
+    expect(screen.getByText("one")).toBeInTheDocument();
+    // A never-started item has no worktree to compare: the server would answer 409.
+    expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
+  });
+
   it("opens a node on a tap of its row", async () => {
     mount(item("running"));
     await userEvent.click(await screen.findByRole("button", { name: /verification/ }));

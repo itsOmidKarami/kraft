@@ -9,9 +9,11 @@ export type Fetched<T> = { state: "loading" } | { state: "error"; status: number
 /** `GET /compare` for one pair of targets. Read again when either target or
  *  the whitespace flag changes, and when the item's HEAD moves (a new commit
  *  changes `latest`). */
-export function useCompare(id: string, from: CompareTarget, to: CompareTarget, ignoreWhitespace: boolean, head: string | null | undefined) {
+export function useCompare(id: string, from: CompareTarget, to: CompareTarget, ignoreWhitespace: boolean, head: string | null | undefined, skip = false) {
   const [got, setGot] = useState<Fetched<Compare>>({ state: "loading" });
   useEffect(() => {
+    // `skip`: there is nothing to compare yet (a never-started item has no worktree, and the server answers 409).
+    if (skip) return;
     let live = true;
     const q = new URLSearchParams({ from, to });
     if (ignoreWhitespace) q.set("ignore_whitespace", "1");
@@ -20,7 +22,7 @@ export function useCompare(id: string, from: CompareTarget, to: CompareTarget, i
       setGot(status === 200 ? { state: "ready", data: body } : { state: "error", status, error: detailOf(body) });
     });
     return () => void (live = false);
-  }, [id, from, to, ignoreWhitespace, head]);
+  }, [id, from, to, ignoreWhitespace, head, skip]);
   return got;
 }
 

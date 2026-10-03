@@ -20,6 +20,8 @@ export function Item() {
     return () => clearInterval(t);
   }, []);
   if (params.get("doc")) return <Doc id={params.get("doc")!} />;
+  // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
+  if (params.get("attached")) return <Doc url={`/work-items/${encodeURIComponent(id)}/attachments/${encodeURIComponent(params.get("attached")!)}`} />;
   if (loaded.state === "loading")
     return (
       <>

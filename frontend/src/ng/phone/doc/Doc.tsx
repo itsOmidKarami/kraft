@@ -8,21 +8,22 @@ import "./doc.css";
 
 type Viewed = { title: string; path: string; content: string };
 
-/** A document (W17 brief F.5), over whichever screen opened it with `?doc=<id>`: title, path (wraps, copyable), the text. */
-export function Doc({ id }: { id: string }) {
+/** A document (W17 brief F.5), over whichever screen opened it with `?doc=<id>`: title, path (wraps, copyable), the text.
+ *  `url` reads one that is not indexed instead, such as a spec attached at intake (`?attached=<kind>`). */
+export function Doc({ id, url }: { id?: string; url?: string }) {
   const [doc, setDoc] = useState<Viewed | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     setDoc(null);
     setError(null);
-    request<Viewed>(`/documents/${encodeURIComponent(id)}`).then((r) => {
+    request<Viewed>(url ?? `/documents/${encodeURIComponent(id ?? "")}`).then((r) => {
       if (!live) return;
       if (r.status === 200) setDoc(r.body);
       else setError(r.status === 404 ? "This document is gone." : detailOf(r.body));
     });
     return () => void (live = false);
-  }, [id]);
+  }, [id, url]);
   return (
     <>
       <ScreenHeader />

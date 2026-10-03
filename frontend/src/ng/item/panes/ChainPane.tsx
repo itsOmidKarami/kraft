@@ -11,6 +11,7 @@ import { lines } from "../draft/view";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
+import { DocViewer } from "../DocViewer";
 import { budgetRaise, neverStarted } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
@@ -37,8 +38,10 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
     return line ? [{ e, line }] : [];
   }).slice(0, 20);
   const live = !["done", "archived", "cancelled"].includes(item.display_status ?? "");
+  const [attached, setAttached] = useState<string | null>(null);
   return (
     <>
+      {attached && <DocViewer source={{ kind: "attachment", workItemId: item.id, attachment: attached }} onClose={() => setAttached(null)} />}
       <dl className="item-facts ip-facts">
         <div><dt>status</dt><dd>{statusLine(item)}</dd></div>
         {sum && <div><dt>progress</dt><dd>{sum.nodes_done} of {sum.nodes_total} nodes · {sum.gates_passed} {sum.gates_passed === 1 ? "gate" : "gates"} passed</dd></div>}
@@ -53,7 +56,9 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
                 return (
                   <span key={a.kind} className="ip-attached">
                     {a.kind}{" "}
-                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button> : <span className="is-mono" title={a.path}>{name}</span>}
+                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button>
+                      // Not indexed yet (before start nothing is): it reads from the copy Kraft kept at intake.
+                      : <button type="button" className="item-link is-mono" title={a.path} onClick={() => setAttached(a.kind)}>{name}</button>}
                   </span>
                 );
               })}

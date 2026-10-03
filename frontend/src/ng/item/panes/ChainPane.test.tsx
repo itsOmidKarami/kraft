@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
@@ -47,10 +47,17 @@ describe("ChainOverview", () => {
     await userEvent.click(screen.getByRole("button", { name: "ui.md" }));
     expect(onDoc).toHaveBeenCalledWith(docs[0]);
     unmount();
-    // The board's peek has no documents to open: the names still show, as text.
+    // With no indexed document to open (the board's peek, or any item before it starts),
+    // a name opens the copy Kraft kept at intake.
+    const calls = stubFetch({ "GET /work-items/w1/attachments/spec": [200, { title: "Workspace spec", path: "docs/specs/ws.md", content: "# Workspace spec\n\nShare one **worktree**.", truncated: false }] });
     const peek = render(<ChainOverview item={detail({ attachments })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ui.md");
-    expect(screen.queryByRole("button", { name: "ws.md" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "ws.md" }));
+    const viewer = await screen.findByRole("dialog", { name: "Workspace spec" });
+    expect(await within(viewer).findByText("worktree")).toBeInTheDocument();
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /work-items/w1/attachments/spec"]);
+    await userEvent.click(within(viewer).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     peek.unmount();
     render(<ChainOverview item={detail({ attachments: [] })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.queryByText("attached")).toBeNull();
