@@ -51,14 +51,14 @@ afterEach(() => {
 
 describe("the phone board, against a server older than its interface (R10c-01)", () => {
   it("says over the board to restart when /health has a version but no installed", async () => {
-    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "1.5.0rc14" } as never);
+    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "1.4.0" } as never);
     put(item("r1", "running"));
     mount();
     expect(await screen.findByRole("alert")).toHaveTextContent("This server is older than its web interface");
   });
 
   it("says nothing when the server reports what is installed", async () => {
-    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "1.5.0", installed: "1.5.0" } as never);
+    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "2.0.0", installed: "2.0.0" } as never);
     put(item("r1", "running"));
     mount();
     await screen.findByText("Item r1");

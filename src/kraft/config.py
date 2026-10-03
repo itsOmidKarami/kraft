@@ -1293,16 +1293,37 @@ class Theme(_Model):
         return out
 
 
+#: What the 2.0 upgrade saves the original `theme.yaml` as, beside it.
+THEME_BACKUP = ".pre-2.0"
+#: What the 1.5.0 release candidates, which became 2.0, saved it as. One of
+#: these that exists is the backup: it holds the file from before the first
+#: conversion, so a later one never writes a second copy or replaces it.
+EARLIER_THEME_BACKUPS = (".pre-1.5",)
+
+
+def theme_backup(path: str | Path) -> Path:
+    """Where `migrate_theme` keeps (or kept) the original of `path`: the
+    earlier pre-release's copy when one exists, else `<name>.pre-2.0`."""
+    path = Path(path)
+    for suffix in EARLIER_THEME_BACKUPS:
+        earlier = path.with_name(path.name + suffix)
+        if earlier.exists():
+            return earlier
+    return path.with_name(path.name + THEME_BACKUP)
+
+
 def migrate_theme(path: str | Path) -> bool:
-    """The 1.5 upgrade: write the look `palette` stands for as the file's own
+    """The 2.0 upgrade: write the look `palette` stands for as the file's own
     `surface`, `accent` and `colour_amount`, then drop `palette`. All three are
     written: a file with its own surface defaults to no accent at subtle, so
     `surface` alone would change the look. `effective()` answers the same
     before and after, which is the point: the user sees no change.
 
-    The original bytes go to `theme.yaml.pre-1.5` first, never overwriting an
-    earlier copy. A missing, unreadable or invalid file, or one without
-    `palette`, is left alone. True when the file was rewritten."""
+    The original bytes go to `theme.yaml.pre-2.0` first (`theme_backup`),
+    never overwriting an earlier copy, and none is written beside a
+    `theme.yaml.pre-1.5` a 1.5.0 release candidate left. A missing,
+    unreadable or invalid file, or one without `palette`, is left alone. True
+    when the file was rewritten."""
     path = Path(path)
     try:
         data = read_yaml(path)
@@ -1314,7 +1335,7 @@ def migrate_theme(path: str | Path) -> bool:
     if "surface" not in data:
         data.update({key: look[key] for key in THEME_V2_KEYS})
     del data["palette"]
-    backup = path.with_name(path.name + ".pre-1.5")
+    backup = theme_backup(path)
     if not backup.exists():
         backup.write_bytes(path.read_bytes())
     write_yaml(path, data)

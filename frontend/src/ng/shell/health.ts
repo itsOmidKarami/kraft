@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import * as api from "../../api";
 import type { Health } from "../../types";
 
-/** A server from before 1.5 serving this interface: it reports its `version`
- *  but not `installed`, which every 1.5 server sends. That is the window
+/** A server from before 2.0 serving this interface: it reports its `version`
+ *  but not `installed`, which every server since 1.5.0rc14 sends. That is the window
  *  between 1.4's `kraft admin update` and the restart that finishes it: the
  *  files on disk (this page among them) are new and the process is old, so
  *  the board it answers cannot be trusted. `kraft admin doctor`'s restart row

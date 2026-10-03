@@ -90,7 +90,7 @@ export function registerBoard(context: vscode.ExtensionContext, store: Store, ap
   const act = (action: Action) => async (node?: { item?: WorkItem }) => {
     const item = itemOf(node);
     if (!item) return;
-    if (readOnly()) return void vscode.window.showWarningMessage("Kraft is read-only: the daemon's version does not match this extension.");
+    if (readOnly()) return void vscode.window.showWarningMessage("Kraft is read-only: this server's version does not work with this extension. Hover Kraft in the status bar to see which one to update.");
     await runAction(api, store, item, action);
   };
   for (const a of ["pause", "resume", "retry", "cancel", "skip", "escalate", "archive"] as Action[]) {
