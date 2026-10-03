@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from support.api import _paused, _poll_events, _post_default, _set_status
 from support.harness import make_repo_with_engineering
 
@@ -64,7 +65,16 @@ def test_a_chain_the_policy_now_refuses_is_a_422(client, repo, templates_dir):
     assert _item_count(client) == 1
 
 
-def test_duplicate_carries_the_listed_fields_and_nothing_else(client, tmp_path):
+@pytest.mark.parametrize(
+    ("stored", "title", "description"),
+    [("t", "t", "d"), ("t\nmore of it\n", "t", "more of it\n\nd")],
+    ids=["one-line", "stored-by-1.4-on-two-lines"],
+)
+def test_duplicate_carries_the_listed_fields_and_nothing_else(
+    client, tmp_path, stored, title, description
+):
+    """A title 1.4 stored with a line break is folded, as a cron trigger's is:
+    its first line is the title, and the rest leads the description (R11F-03)."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     r = client.post(
         "/api/work-items",
@@ -80,6 +90,11 @@ def test_duplicate_carries_the_listed_fields_and_nothing_else(client, tmp_path):
     )
     assert r.status_code == 201, r.text
     src_id = r.json()["id"]
+    db = client.app.state.db
+    client.portal.call(
+        db.write,
+        lambda c: c.execute("UPDATE work_items SET title = ? WHERE id = ?", (stored, src_id)),
+    )
     src = client.get(f"/api/work-items/{src_id}").json()
 
     dr = client.post(f"/api/work-items/{src_id}/duplicate")
@@ -89,8 +104,7 @@ def test_duplicate_carries_the_listed_fields_and_nothing_else(client, tmp_path):
     assert new_id != src_id
 
     dup = client.get(f"/api/work-items/{new_id}").json()
-    assert dup["title"] == src["title"]
-    assert dup["description"] == src["description"]
+    assert (dup["title"], dup["description"]) == (title, description)
     assert dup["repo"] == src["repo"]
     assert dup["chain_template"] == src["chain_template"]
     assert dup["status"] == "paused"

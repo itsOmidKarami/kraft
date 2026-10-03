@@ -139,8 +139,18 @@ def kv(pairs: list[tuple[str, str]]) -> str:
 
 
 def _cell(value: object) -> str:
-    """None and "" are the same absence to a reader, and both read as "-"."""
-    return "-" if value in (None, "") else str(value)
+    """None and "" are the same absence to a reader, and both read as "-".
+
+    A cell is one line: a line break in it, such as in a title 1.4 stored
+    with one, wrapped its row under the first column. Its first line that
+    has any text stands for it."""
+    if value in (None, ""):
+        return "-"
+    text = str(value)
+    lines = text.splitlines()
+    if lines == [text]:
+        return text
+    return next((line for line in lines if line.strip()), "-")
 
 
 def _pad(value: str, width: int) -> str:

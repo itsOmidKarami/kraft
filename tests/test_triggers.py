@@ -48,7 +48,22 @@ async def test_tick_ignores_a_not_yet_due_trigger(tmp_path, stub_app):
     assert filed == []
 
 
-async def test_tick_files_a_paused_item_on_a_due_trigger(tmp_path, stub_app):
+@pytest.mark.parametrize(
+    ("title", "filed_title", "filed_description"),
+    [
+        ("Nightly sweep", "Nightly sweep", "d"),
+        ("Nightly sweep\n", "Nightly sweep", "d"),
+        ("Nightly sweep\nof every repo\n", "Nightly sweep", "of every repo\n\nd"),
+    ],
+    ids=["one-line", "block-scalar", "two-lines"],
+)
+async def test_tick_files_a_paused_item_on_a_due_trigger(
+    tmp_path, stub_app, title, filed_title, filed_description
+):
+    """A title is one line. A trigger's is folded rather than refused, as no
+    one is there to fix it, and `title: >` in YAML always ends in a line
+    break: the first line is the title, the rest leads the description
+    (R11F-03)."""
     repo = isolated_bd(tmp_path)
     pol = policy.Policy(
         loops={},
@@ -58,7 +73,7 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(tmp_path, stub_app):
                 cron="30 14 * * *",
                 repo=str(repo),
                 chain="default",
-                title="Nightly sweep",
+                title=title,
                 description="d",
             )
         ],
@@ -71,11 +86,11 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(tmp_path, stub_app):
     assert len(filed) == 1
     row = app.state.db.read(
         lambda c: c.execute(
-            "SELECT status, title FROM work_items WHERE id=?", (filed[0],)
+            "SELECT status, title, description FROM work_items WHERE id=?", (filed[0],)
         ).fetchone()
     )
     assert row["status"] == "paused"
-    assert row["title"] == "Nightly sweep"
+    assert (row["title"], row["description"]) == (filed_title, filed_description)
 
     # a second tick in the same minute must not file a second item
     assert await triggers.tick(app, now=now) == []

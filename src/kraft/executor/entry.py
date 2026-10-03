@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
+def one_line_title(title: str, description: str | None) -> tuple[str, str | None]:
+    """`title` folded to its first line, the rest put at the top of `description`.
+
+    A title is one line: a line break broke `kraft view list`'s table. The
+    doors a person types at refuse one (`api/routes/work_items._check_title`),
+    but a `policy.yaml` cron trigger has no one to refuse, and a YAML block
+    scalar (`title: >`) always ends in a line break. Duplicate copies a title
+    1.4 stored as it was. Those are folded here instead, so the item still
+    files with nothing of its text lost.
+    """
+    lines = title.splitlines()
+    if lines == [title]:
+        return title, description
+    first = next((i for i, line in enumerate(lines) if line.strip()), len(lines))
+    head = lines[first].strip() if first < len(lines) else ""
+    rest = "\n".join(lines[first + 1 :]).strip()
+    if not rest:
+        return head, description
+    return head, f"{rest}\n\n{description}" if description else rest
+
+
 def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItemTarget:
     """The immutable target of an item filed against one repository.
 
@@ -113,6 +134,7 @@ async def intake(
     #: launches read its repository's names against the live library.
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
+    title, description = one_line_title(title, description)
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
     # item, `kraft admin start` typed in $HOME — and nothing records it, so the work

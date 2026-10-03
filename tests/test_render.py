@@ -38,6 +38,20 @@ def test_table_renders_a_missing_key_as_a_dash():
     assert out.splitlines()[1].split() == ["Kraft-a", "-"]
 
 
+@pytest.mark.parametrize(
+    ("title", "shown"),
+    [("two\nlines", "two"), ("\nsecond", "second"), ("cr\r\nlf", "cr"), ("\n", "-")],
+    ids=["two-lines", "leading-break", "crlf", "only-a-break"],
+)
+def test_table_shows_a_cells_first_line_only(title, shown):
+    """A title 1.4 stored with a line break wrapped `kraft view list`'s row
+    under its ID column (R11F-03)."""
+    rows = [{"title": title, "id": "Kraft-a"}]
+    out = render.table(rows, [("TITLE", "title"), ("ID", "id")], width=80).splitlines()
+    assert len(out) == 2
+    assert out[1].split() == [shown, "Kraft-a"]
+
+
 def test_relative_time_is_compact():
     now = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
     assert render.relative_time("2026-09-06T11:56:00+00:00", now) == "4m ago"
