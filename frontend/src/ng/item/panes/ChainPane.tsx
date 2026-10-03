@@ -29,7 +29,6 @@ const statusLine = (item: ItemDetail) => {
 
 const RECENT = 5;
 
-
 /** The chain pane's Overview (Decisions §5 Chain pane): status, progress,
  *  current (a link), spend, the documents attached at intake (each opens when
  *  the caller can open it) and Recent, whose lines select their node. */
