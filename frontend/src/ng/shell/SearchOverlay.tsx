@@ -8,7 +8,7 @@ import type { Bead, SearchResult, WorkItem } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
 import { groupOf } from "../board/model";
 import { termsOf } from "../item/DocViewer";
-import { reasonTail } from "../board/rowText";
+import { gateWords, reasonTail } from "../board/rowText";
 import { Kbd } from "../ui/Kbd";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
@@ -65,7 +65,8 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
     ? {
         id: `${section}:${i.id}`,
         section,
-        label: `Review ${i.pending_gate}`,
+        // The gate as the board words it: "Review spec", not "Review spec_approval" (#502 review).
+        label: `Review ${gateWords(i.pending_gate)}`,
         subLead: i.title,
         sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
         icon: Diamond,

@@ -61,13 +61,14 @@ export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.sp
  *  GAP §2 #9): an indexed document opens in an editor and copies its path; a
  *  gate's artifact, read off the worktree with no index row or absolute path,
  *  shows only its text. A press on the scrim or Escape closes it. */
-export function DocViewer({ source, query, onClose }: { source: DocSource; query?: string; onClose: () => void }) {
+/** `returnTo`: where focus goes on close when what opened it is gone (search's overlay). */
+export function DocViewer({ source, query, onClose, returnTo }: { source: DocSource; query?: string; onClose: () => void; returnTo?: () => HTMLElement | null | undefined }) {
   const [doc, setDoc] = useState<Viewed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // Not kept across openings: the viewer unmounts on close.
   const [full, setFull] = useState(false);
-  const ref = useModal<HTMLDivElement>(onClose);
+  const ref = useModal<HTMLDivElement>(onClose, returnTo);
   const titleId = useId();
   const body = useRef<HTMLDivElement>(null);
   const [matches, setMatches] = useState<Range[]>([]);
