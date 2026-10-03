@@ -664,21 +664,27 @@ def test_config_dir_reads_a_home_not_yet_renamed_under_its_old_name(monkeypatch,
     assert paths.config_dir() == tmp_path / "config"
 
 
-def test_seed_home_adopts_a_1x_templates_directory_instead_of_seeding(monkeypatch, tmp_path):
+@pytest.mark.parametrize("marker", ["library.yaml", "registry.yaml"], ids=["1.x", "0.x"])
+def test_seed_home_adopts_a_pre_2_templates_directory_instead_of_seeding(
+    monkeypatch, tmp_path, marker
+):
     """The 2.0 rename: a home whose config still sits in `templates/` is
     renamed to `config/` once, so an upgrade keeps every edited file and never
-    seeds a fresh copy beside the operator's."""
+    seeds a fresh copy beside the operator's. A 0.x home (a registry, no
+    library) is adopted too, so `kraft admin update` finds it where every
+    reader now looks and offers the replacement."""
     _bundle(monkeypatch, tmp_path)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
     old = tmp_path / "home" / "templates"
     old.mkdir(parents=True)
-    (old / "library.yaml").write_text("tasks: {}\n")
+    (old / marker).write_text("tasks: {}\n")
     (old / "policy.yaml").write_text("default: {attempts: 1, wall_clock_s: 1}\n")
     home = paths.default_config_dir()
 
     assert cli.seed_home(home) is False
 
     assert not old.exists()
+    assert (home / marker).is_file()
     assert (home / "policy.yaml").read_text() == "default: {attempts: 1, wall_clock_s: 1}\n"
     assert not (home / "access.yaml").exists()  # adopted, not seeded over
     # Once: the next start finds `config/` and leaves it alone.
@@ -711,18 +717,6 @@ def test_adopting_a_home_carries_the_keys_2_0_moved_between_files(monkeypatch, t
     ]
     assert (home / "intake.yaml").read_text().startswith("# pickup\n")
     assert (home / "policy.yaml").read_text().startswith("# caps\n")
-
-
-def test_adopting_a_0x_home_renames_it_for_the_major_update(monkeypatch, tmp_path):
-    """A 0.x home (a registry, no library) is adopted too, so `kraft admin
-    update` finds it where every reader now looks and offers the replacement."""
-    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
-    old = tmp_path / "home" / "templates"
-    old.mkdir(parents=True)
-    (old / "registry.yaml").write_text("hooks: {}\n")
-    home = paths.default_config_dir()
-    assert cli.admin.adopt_pre_2_home(home) is True
-    assert (home / "registry.yaml").is_file() and not old.exists()
 
 
 @pytest.mark.parametrize(
