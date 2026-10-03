@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
 import { resetHarnessOptions } from "../../templates/panes/useHarnessOptions";
@@ -71,6 +72,25 @@ describe("ChainConfig", () => {
     render(<ChainConfig item={detail({ budget_cap: { cap_usd: 5, source: "policy", spent_usd: 4, daily: { spent_usd: 18.2, cap_usd: 50 } }, ...over })} policy={null} reload={reload} editBudget={editBudget} onEditBudget={onEditBudget} />);
     return { reload, onEditBudget };
   };
+
+  // R11a-03: the field opened with the caret after the cap, so typing 0.03 saved $100.03.
+  // R11b-03: the field that had the focus is gone after Escape, Cancel or a save; ✎ takes it back.
+  it.each(["{Escape}", "Cancel", "7{Enter}"])("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close) => {
+    const calls = stubFetch(WRITES);
+    function Editing() {
+      const [on, setOn] = useState(false);
+      return <ChainConfig item={detail({ budget_cap: { cap_usd: 100, source: "item", spent_usd: 4 } })} policy={null} reload={() => {}} editBudget={on} onEditBudget={setOn} />;
+    }
+    render(<Editing />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit budget" }));
+    const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Budget in dollars" });
+    expect(field).toHaveFocus();
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, 3]);
+    if (close === "Cancel") await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    else await userEvent.keyboard(close);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit budget" })).toHaveFocus());
+    expect(posts(calls)).toEqual(close === "7{Enter}" ? [{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: 7 } }] : []);
+  });
 
   it("turns a meter amber past 75% and red at the cap", () => {
     show();

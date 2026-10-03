@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
@@ -82,14 +82,14 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
   );
 }
 
-function Meter({ label, used, of, ratio, max, onEdit }: { label: string; used: string; of: string | null; ratio?: number; max?: string; onEdit?: () => void }) {
+function Meter({ label, used, of, ratio, max, onEdit, editRef }: { label: string; used: string; of: string | null; ratio?: number; max?: string; onEdit?: () => void; editRef?: Ref<HTMLButtonElement> }) {
   const tone = ratio == null ? "" : ratio >= 1 ? " is-bad" : ratio > 0.75 ? " is-warn" : "";
   return (
     <div className={`meter${tone}`}>
       <div className="meter-row">
         <span className="meter-label">{label}</span>
         <span className="meter-value"><strong>{used}</strong>{of ? <> of {of}</> : " · no cap"}</span>
-        {onEdit && <button type="button" className="icon-btn meter-edit" aria-label={`Edit ${label.toLowerCase()}`} onClick={onEdit}>✎</button>}
+        {onEdit && <button ref={editRef} type="button" className="icon-btn meter-edit" aria-label={`Edit ${label.toLowerCase()}`} onClick={onEdit}>✎</button>}
       </div>
       {ratio != null && (
         <div className="meter-bar-row">
@@ -140,7 +140,8 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
       {/* A form, focused on open: Enter saves the typed cap and Escape cancels, so the editor
           Raise cap and ✎ open needs no pointer (R10a-05). */}
       <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (Number(value) > 0) void send(Number(value)); }}>
-        <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
+        {/* The cap in force is selected on focus, so what is typed replaces it: typing 0.03 after the caret saved $100.03 (R11a-03). */}
+        <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
         <Button type="submit" variant="primary" disabled={!(Number(value) > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
       </form>
@@ -169,6 +170,17 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
   const [error, setError] = useState<string | null>(null);
   const cap = item.budget_cap;
   const daily = cap?.daily;
+  // The editor's Escape, Cancel and save hand the focus back to ✎, as an override row's do: the field that had it is gone (R11b-03).
+  const pencil = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!editBudget && refocus.current) pencil.current?.focus();
+    refocus.current = false;
+  }, [editBudget]);
+  const closeBudget = () => {
+    refocus.current = true;
+    onEditBudget(false);
+  };
   const used = item.usage?.total;
   const overrides = Object.entries(item.node_overrides ?? {});
   const draftRows = appliedRows(applied);
@@ -199,9 +211,10 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
           of={cap.cap_usd != null ? usd(cap.cap_usd) : null}
           ratio={cap.cap_usd ? cap.spent_usd / cap.cap_usd : undefined}
           onEdit={() => onEditBudget(!editBudget)}
+          editRef={pencil}
         />
       )}
-      {editBudget && <BudgetEditor item={item} onCancel={() => onEditBudget(false)} onDone={() => { onEditBudget(false); reload(); }} />}
+      {editBudget && <BudgetEditor item={item} onCancel={closeBudget} onDone={() => { closeBudget(); reload(); }} />}
       {used && <Meter label="Tokens" used={tokens(used.tokens_in + used.tokens_out)} of={null} />}
       {daily && <Meter label="Today, all items" used={usd(daily.spent_usd)} of={daily.cap_usd != null ? usd(daily.cap_usd) : null} ratio={daily.cap_usd ? daily.spent_usd / daily.cap_usd : undefined} max="policy · shared" />}
       <p className="item-muted">Whichever limit is reached first stops the item. An item cap can't go above the policy maximum.</p>
