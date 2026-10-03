@@ -1038,12 +1038,16 @@ _INTERPRETER_FLAGS: dict[str, dict] = {
         "value": "rC",
         "long_value": {"--require", "--import", "--loader", "--experimental-loader"},
     },
-    "perl": {"script": "eE", "value": "I"},
+    # -M/-m/-I name a module or directory; -x -i -C -F -d -D take the rest of
+    # their own word and never the next one (`perl -pi -e`). -l and -0 take
+    # digits only, so `-lane` still reaches its `e`.
+    "perl": {"script": "eE", "value": "IMm", "attached": "xiCFdD"},
     "ruby": {"script": "e", "value": "IrCEF"},
     "php": {"script": "r", "long": {"--run"}, "value": "dc"},
     "lua": {"script": "e", "value": "l"},
     "julia": {"script": "eE", "long": {"--eval", "--print"}},
     "rscript": {"script": "e"},
+    "osascript": {"script": "e", "value": "l"},
     "other": {"script": "e"},
 }
 _INTERPRETERS = (
@@ -1055,7 +1059,8 @@ _INTERPRETERS = (
     (re.compile(r"lua(?:jit|[\d.]*)"), "lua"),
     (re.compile(r"julia"), "julia"),
     (re.compile(r"R(?:script)?"), "rscript"),
-    (re.compile(r"tclsh[\d.]*|osascript|elixir|groovy"), "other"),
+    (re.compile(r"tclsh[\d.]*|elixir|groovy"), "other"),
+    (re.compile(r"osascript"), "osascript"),
 )
 
 
@@ -1067,6 +1072,7 @@ def _interpreter_script(name: str, args: list[str]) -> bool:
         return False
     flags = _INTERPRETER_FLAGS[family]
     script, value, stop = flags["script"], flags.get("value", ""), flags.get("stop", "")
+    attached = flags.get("attached", "")
     j = 0
     while j < len(args):
         word = args[j]
@@ -1087,6 +1093,8 @@ def _interpreter_script(name: str, args: list[str]) -> bool:
             if letter in value:
                 # The rest of the cluster is its value; none, and the next word is.
                 skip = k == len(letters) - 1
+                break
+            if letter in attached:
                 break
         j += 2 if skip else 1
     return False
