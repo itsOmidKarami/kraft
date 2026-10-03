@@ -204,6 +204,7 @@ per line with the reason after it:
 ## Removed tests
 - tests/test_old.py::test_gone -- replaced by tests/test_new.py::test_here
 - tests/test_dead_file.py -- the whole file went with the feature
+- tests/test_notify.py::test_get_notify_with_* -- folded into tests/test_notify.py::test_get_notify_reports_a_bad_config_file_cleanly[...]
 
 ## Removed requirements
 - some-req-name -- superseded by other-req-name
@@ -219,6 +220,17 @@ all. The heading may end in a colon. The failure prints the missing block ready 
 re-run the job: it reads the body fresh, not from the push that triggered
 it. This exists because a PR once silently reverted two merged PRs with CI
 green — their tests left with them (Kraft-79382).
+
+A fold declares its cluster with a wildcard, so consolidation is one line per
+cluster: an id whose test name ends in `*` covers every removed test in that
+same file whose id starts with the rest (cases included, `[` read literally).
+The path stays literal, since a wildcard across files would hide exactly the
+revert this job exists to catch, and a deleted file is still declared by its
+plain path. The prefix must be longer than `test_`, and the line must name the
+replacement as a `path::test` that exists at HEAD (a `[case]` or `[...]`
+suffix is fine). A wildcard that is refused declares nothing, and one that
+matches no removed test fails the job as unused, so a typo in the prefix
+cannot pass unnoticed; each prints its own line saying what to fix.
 
 **Intent pins:** `docs/intent/*.md` reference test ids by name. Renaming or
 parametrizing a pinned test means repointing it in the same change. Run

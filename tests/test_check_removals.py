@@ -65,6 +65,30 @@ def test_a_removal_inside_an_html_comment_is_not_declared(cr):
 
 
 @pytest.mark.parametrize(
+    ("opening", "closing"),
+    [("```markdown", "```"), ("~~~", "~~~"), ("````", "`````"), ("```", None)],
+    ids=["backticks", "tildes", "a-longer-close", "never-closed"],
+)
+def test_a_removed_tests_heading_inside_a_code_fence_declares_nothing(cr, opening, closing):
+    """A PR body that shows the wildcard as an example, fenced under a literal
+    `## Removed tests`, is read as an example the way a reviewer reads it: the
+    removal is still missing and no wildcard problem is printed."""
+    removed = {"tests/test_n.py::test_get_notify_with_a"}
+    example = (
+        f"## Summary\nFor example:\n\n{opening}\n## Removed tests\n"
+        "- tests/test_n.py::test_get_notify_with_a\n"
+        "- tests/test_n.py::test_cluster_* -- folded into tests/test_n.py::test_folded\n"
+    )
+    body = example + (f"{closing}\n" if closing else "")
+    assert cr.declared(body) == {"tests": set(), "requirements": set()}
+    assert cr.undeclared(removed, set(), set(), body, set())["tests"] == sorted(removed)
+    assert cr.wildcard_problems(removed, body, set()) == []
+    if closing:  # a real section after the fence still declares
+        live = body + "\n## Removed tests\n- tests/test_n.py::test_get_notify_with_a\n"
+        assert cr.undeclared(removed, set(), set(), live, set())["tests"] == []
+
+
+@pytest.mark.parametrize(
     ("body", "missing"),
     [
         ("", {"tests": ["t/test_x.py::test_a"], "requirements": ["req-a"]}),
@@ -251,3 +275,149 @@ def test_a_removed_tests_heading_ending_in_a_colon_still_declares(cr):
     body = "## Removed tests:\n- t/test_x.py::test_a\n### Removed requirements:\n- req-a\n"
     assert cr.declared(body) == {"tests": {"t/test_x.py::test_a"}, "requirements": {"req-a"}}
     assert cr.declared("## Removed tests, mostly\n- t/test_x.py::test_a\n")["tests"] == set()
+
+
+#: A fold's replacement, standing at HEAD, for the wildcard tests below.
+_FOLDED = "tests/test_n.py::test_get_notify_reports_a_bad_config_file_cleanly"
+
+
+@pytest.mark.parametrize(
+    ("name", "left"),
+    [
+        ("test_get_notify_with_*", ["without_a_file"]),
+        ("test_get_notify_with_a*", ["without_a_file"]),
+        ("test_get_notify_with_a_bad_yaml[*", ["with_a_missing_file", "without_a_file"]),
+        (
+            "test_get_notify_with_a_bad_yaml[refused]*",
+            ["with_a_bad_yaml[a-tab]", "with_a_missing_file", "without_a_file"],
+        ),
+    ],
+    ids=["the-cluster", "a-longer-prefix", "one-tests-cases", "a-whole-case-id"],
+)
+def test_a_wildcard_declaration_covers_every_removed_test_with_that_prefix_in_that_file(
+    cr, name, left
+):
+    """`[` in a declared prefix is a literal, not fnmatch's character class:
+    `test_y[refused]*` covers `test_y[refused]`, not `test_yr`."""
+    removed = {
+        f"tests/test_n.py::test_get_notify_{t}"
+        for t in [
+            "with_a_bad_yaml[refused]",
+            "with_a_bad_yaml[a-tab]",
+            "with_a_missing_file",
+            "without_a_file",
+        ]
+    }
+    body = f"## Removed tests\n- tests/test_n.py::{name} -- folded into {_FOLDED}[missing]\n"
+    assert cr.undeclared(removed, set(), set(), body, {_FOLDED}) == {
+        "tests": [f"tests/test_n.py::test_get_notify_{t}" for t in left],
+        "requirements": [],
+    }
+    assert cr.wildcard_problems(removed, body, {_FOLDED}) == []
+
+
+def test_a_wildcard_covers_nothing_in_another_file(cr):
+    """The path stays literal: a wildcard across files would hide a revert."""
+    removed = {
+        "tests/test_n.py::test_get_notify_with_a",
+        "tests/test_other.py::test_get_notify_with_a",
+        "tests/test_n.pyi::test_get_notify_with_a",
+    }
+    body = f"## Removed tests\n- tests/test_n.py::test_get_notify_with_* -- into {_FOLDED}\n"
+    assert cr.undeclared(removed, set(), set(), body, {_FOLDED})["tests"] == [
+        "tests/test_n.pyi::test_get_notify_with_a",
+        "tests/test_other.py::test_get_notify_with_a",
+    ]
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["tests/test_gone*", "tests/*.py", "tests/*.py::test_get_notify_with_a"],
+    ids=["a-path-prefix", "a-path-glob", "a-glob-in-the-path-part"],
+)
+def test_a_wildcard_with_no_double_colon_is_not_a_declaration(cr, pattern):
+    removed = {"tests/test_gone.py::test_get_notify_with_a"}
+    deleted = {"tests/test_gone.py"}
+    body = f"## Removed tests\n- {pattern} -- folded into {_FOLDED}\n"
+    assert cr.undeclared(removed, deleted, set(), body, {_FOLDED})["tests"] == sorted(removed)
+    [problem] = cr.wildcard_problems(removed, body, {_FOLDED})
+    assert problem.startswith(f"- {pattern} -- ") and "path stays literal" in problem
+    # A deleted file is still declared by its literal path.
+    literal = "## Removed tests\n- tests/test_gone.py -- the feature went\n"
+    assert cr.undeclared(removed, deleted, set(), literal, set())["tests"] == []
+    assert cr.wildcard_problems(removed, literal, set()) == []
+
+
+def test_a_wildcard_that_matches_nothing_is_reported_as_unused(cr):
+    """A typo in the prefix must not pass silently, even when every removal is
+    declared some other way."""
+    removed = {"tests/test_n.py::test_get_notify_with_a"}
+    typo = "tests/test_n.py::test_get_notfy_with_*"
+    body = f"## Removed tests\n- tests/test_n.py::test_get_notify_with_a\n- {typo} -- {_FOLDED}\n"
+    assert cr.undeclared(removed, set(), set(), body, {_FOLDED})["tests"] == []
+    [problem] = cr.wildcard_problems(removed, body, {_FOLDED})
+    assert problem.startswith(f"- {typo} -- ") and "matches no test this PR removes" in problem
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "tests/test_n.py::test_*",
+        "tests/test_n.py::test*",
+        "tests/test_n.py::*",
+        "tests/test_n.py::TestNotify::test_*",
+    ],
+    ids=["test_", "test", "empty", "a-classes-methods"],
+)
+def test_a_wildcard_with_a_bare_test_prefix_is_refused(cr, pattern):
+    removed = {
+        "tests/test_n.py::test_get_notify_with_a",
+        "tests/test_n.py::TestNotify::test_b",
+    }
+    body = f"## Removed tests\n- {pattern} -- folded into {_FOLDED}\n"
+    assert cr.undeclared(removed, set(), set(), body, {_FOLDED})["tests"] == sorted(removed)
+    [problem] = cr.wildcard_problems(removed, body, {_FOLDED})
+    assert problem.startswith(f"- {pattern} -- ") and "longer than `test_`" in problem
+
+
+@pytest.mark.parametrize(
+    ("replacement", "passes"),
+    [
+        ("tests/test_n.py::test_folded[a-case]", True),
+        ("`tests/test_n.py::test_folded`.", True),
+        ("tests/test_n.py::test_never_written", False),
+        ("tests/test_n.py::test_cluster_one", False),  # it existed at base, not at HEAD
+        ("tests/test_n.py", False),
+        ("the new parametrized test", False),
+    ],
+    ids=["parametrized", "quoted", "a-typo", "one-of-the-removed", "a-path-alone", "prose"],
+)
+def test_a_wildcard_must_name_a_replacement_that_exists_at_head(
+    cr, repo, tmp_path, monkeypatch, capsys, replacement, passes
+):
+    """End to end, so the replacement is looked up in the head tree. A refused
+    wildcard declares nothing, so the ready-to-paste block still lists the
+    tests it meant to cover."""
+    (repo / "tests").mkdir(exist_ok=True)
+    (repo / "tests" / "test_n.py").write_text(
+        "def test_cluster_one(): pass\ndef test_cluster_two(): pass\n"
+    )
+    base = _commit_all(repo, "base")
+    _git(repo, "checkout", "-qb", "pr")
+    (repo / "tests" / "test_n.py").write_text("def test_folded(): pass\n")
+    _commit_all(repo, "fold the cluster")
+    monkeypatch.chdir(repo)
+    body = tmp_path / "body.md"
+    pattern = "tests/test_n.py::test_cluster_*"
+    body.write_text(f"## Removed tests\n- {pattern} -- folded into {replacement}\n")
+
+    assert cr.main(["check_removals.py", base, str(body)]) == (0 if passes else 1)
+    printed = capsys.readouterr().out
+    if not passes:
+        assert f"- {pattern} -- name the test that replaces" in printed
+        block = printed[printed.index("## Removed tests") :]
+        assert block.splitlines()[:3] == [
+            "## Removed tests",
+            "- tests/test_n.py::test_cluster_one",
+            "- tests/test_n.py::test_cluster_two",
+        ]

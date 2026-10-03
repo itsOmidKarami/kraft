@@ -21,6 +21,7 @@ the reason after it. CI's `removals declared` job fails without them (see
 
 ## Removed tests
 - tests/test_old.py::test_gone -- replaced by tests/test_new.py::test_here
+- tests/test_old.py::test_cluster_* -- folded into tests/test_old.py::test_folded[...]
 
 ## Removed requirements
 - some-req-name -- superseded by other-req-name
