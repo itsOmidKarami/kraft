@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -1550,7 +1551,8 @@ async def _git_group(
     paused or cancelled item's branch was rebased after the stop and the
     caller's clean-up ran beside it (R12E-04). On a cancel the whole group
     gets SIGTERM, then SIGKILL past `GIT_STOP_GRACE_S`, and `_GitCancelled`
-    is raised only once git is reaped (or could not be, which it says)."""
+    is raised only once git is reaped (or could not be, which it says),
+    however many cancels arrive while it stops."""
     handle = _GitGroup(args)
     running = asyncio.ensure_future(
         asyncio.to_thread(_run_git_group, args, timeout=timeout, env=env, handle=handle)
@@ -1558,36 +1560,52 @@ async def _git_group(
     try:
         return await asyncio.shield(running)
     except asyncio.CancelledError:
-        gone = await _uncancellable(_stop_git_group(handle, running))
+        stopping = asyncio.ensure_future(_stop_git_group(handle, running))
+        # A second cancel (a pause, then a cancel; a server's own shutdown)
+        # still waits the stop out: the caller's clean-up needs its answer.
+        with contextlib.suppress(asyncio.CancelledError):
+            await _uncancellable(stopping)
+        gone = not stopping.cancelled() and stopping.exception() is None and stopping.result()
         raise _GitCancelled(gone) from None
 
 
 async def _stop_git_group(handle: _GitGroup, running: asyncio.Future) -> bool:
     """End the group `running`'s thread waits on and wait for that thread.
-    Whether every process of the group is gone."""
+    Whether every process of the group is gone. Signals and polls from the
+    loop, never a worker thread: the default executor can be full of threads
+    each waiting on a git, and a stop queued behind them never came."""
     pgid = handle.stop()
     if pgid is not None:
-        await asyncio.to_thread(_end_group, pgid, GIT_STOP_GRACE_S)
+        _signal_groups([pgid], signal.SIGTERM)
+        if not await _groups_gone([pgid], GIT_STOP_GRACE_S):
+            _signal_groups([pgid], signal.SIGKILL)
     await asyncio.wait({running}, timeout=GIT_STOP_GRACE_S)
     if not running.done():
         logger.warning("a stopped `%s` was still running", " ".join(handle.args))
         return False
     if not running.cancelled():
         running.exception()  # its own outcome no longer matters: retrieved, not logged
-    return handle.pid is None or await asyncio.to_thread(_group_gone, handle.pid, 0.0)
+    # Stopped before it started, the thread killed it itself: its members
+    # may not be reaped yet.
+    return handle.pid is None or await _groups_gone([handle.pid], GIT_STOP_GRACE_S)
 
 
-def _end_group(pgid: int, grace: float) -> bool:
-    """SIGTERM to process group `pgid`, SIGKILL to whatever of it outlives
-    `grace`. Whether it is gone."""
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        return True
-    if _group_gone(pgid, grace):
-        return True
-    _kill_group(pgid)
-    return _group_gone(pgid, grace)
+def _signal_groups(pgids: list[int], sig: int) -> None:
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+async def _groups_gone(pgids: list[int], wait_s: float) -> bool:
+    """`_group_gone` for each of `pgids`, polled on the loop."""
+    deadline = _caps.monotonic() + wait_s
+    while not all(_group_gone(pgid, 0.0) for pgid in pgids):
+        if _caps.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
 
 
 def end_running_git_groups() -> None:
@@ -1595,9 +1613,15 @@ def end_running_git_groups() -> None:
     server is shutting down. Called once the walks are cancelled, which stop
     their own (`_git_group`) and clean up after them; one left here would run
     on past the server, rewriting a branch and holding its `index.lock`
-    against the next server's start (R12E-04)."""
-    for pgid in list(_RUNNING_GIT_GROUPS):
-        _end_group(pgid, GIT_STOP_GRACE_S)
+    against the next server's start (R12E-04). SIGTERM to all of them, one
+    shared `GIT_STOP_GRACE_S`, then SIGKILL to what is left."""
+    pgids = list(_RUNNING_GIT_GROUPS)
+    if not pgids:
+        return
+    _signal_groups(pgids, signal.SIGTERM)
+    deadline = _caps.monotonic() + GIT_STOP_GRACE_S
+    left = [p for p in pgids if not _group_gone(p, max(0.0, deadline - _caps.monotonic()))]
+    _signal_groups(left, signal.SIGKILL)
 
 
 async def _uncancellable(awaitable):

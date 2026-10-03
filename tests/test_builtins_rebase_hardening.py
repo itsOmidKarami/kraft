@@ -147,15 +147,11 @@ async def _hung_pid(pids) -> int:
     raise AssertionError("the hanging hook never started")
 
 
-@pytest.mark.parametrize("hang", ["smudge", "smudge-deaf-to-sigterm", "pre-rebase-hook"])
-async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
-    database, run_dirs, repo, hung, hang
-):
-    """R12E-04: a pause, cancel or shutdown cancelled only the await, so the
-    git in its thread rebased the branch after the stop, and the setup's
-    lockfile was put back while that git was still checking the base out.
-    The whole group is stopped first; then the rebase it started is aborted
-    and the lockfile goes back, so the branch is as it was before the stop."""
+async def _rebase_hung_mid_way(database, run_dirs, repo, hung, tmp_path, hang):
+    """Item w1's worktree, with an agent commit and a setup `uv.lock`, in a
+    `refresh_worktree_base` that hangs where `hang` says. Returns the
+    worktree, its branch, the agent commit, the running rebase and the pid
+    of what hangs, once it does."""
     from kraft.adapters import forge
 
     await wtree.make_item(database, repo)
@@ -170,27 +166,96 @@ async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
         hook.write_text("#!/bin/sh\n" + wtree.sleep_recorded(hung, 60))
         hook.chmod(0o755)
         wtree.commit(repo, "moved.txt", "moved on\n", "moved on")
+    elif hang == "conflict-abort":
+        wtree.commit(repo, "work.txt", "the base's\n", "conflicting work")
+        wtree.hanging_rebase_hook(repo, tmp_path, hung, "abort", seconds=3)
     else:
-        _hanging_smudge_filter(repo, hung, seconds=60, deaf=hang == "smudge-deaf-to-sigterm")
+        _hanging_smudge_filter(repo, hung, seconds=60, deaf=hang.startswith("smudge-deaf"))
     rebase = asyncio.create_task(
         kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     )
     pid = await _hung_pid(hung)
     assert not (worktree / "uv.lock").exists()  # set aside while git runs
+    return worktree, branch, work, rebase, pid
+
+
+def _left_mid_rebase(worktree) -> list[str]:
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    return sorted(p.name for p in gitdir.glob("*") if p.name in LEFT_MID_REBASE)
+
+
+@pytest.mark.parametrize(
+    ("hang", "cancel_again_after"),
+    [
+        ("smudge", None),
+        ("smudge-deaf-to-sigterm", None),
+        ("smudge-deaf-to-sigterm", 0.3),
+        ("smudge-deaf-to-sigterm", 2.5),
+        ("pre-rebase-hook", None),
+        ("conflict-abort", None),
+    ],
+    ids=[
+        "smudge",
+        "smudge-deaf-to-sigterm",
+        "cancelled-again-in-the-sigterm-grace",
+        "cancelled-again-in-the-sigkill-wait",
+        "pre-rebase-hook",
+        "cancelled-in-a-conflicts-abort",
+    ],
+)
+async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
+    tmp_path, database, run_dirs, repo, hung, hang, cancel_again_after
+):
+    """R12E-04: a pause, cancel or shutdown cancelled only the await, so the
+    git in its thread rebased the branch after the stop, and the setup's
+    lockfile was put back while that git was still checking the base out.
+    The whole group is stopped first; then the rebase it started is aborted
+    and the lockfile goes back, so the branch is as it was before the stop.
+    A second cancel (a pause, then a cancel) changes none of it, and an abort
+    already running when the cancel comes is waited out, not raced."""
+    worktree, branch, work, rebase, pid = await _rebase_hung_mid_way(
+        database, run_dirs, repo, hung, tmp_path, hang
+    )
 
     rebase.cancel()
+    if cancel_again_after is not None:
+        await asyncio.sleep(cancel_again_after)
+        rebase.cancel()
     with pytest.raises(asyncio.CancelledError):
         await rebase
 
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
     assert not kraft_builtins._RUNNING_GIT_GROUPS
-    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
-    assert sorted(p.name for p in gitdir.glob("*") if p.name in LEFT_MID_REBASE) == []
+    assert _left_mid_rebase(worktree) == []
     assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
     assert git_read(worktree, "rev-parse", "HEAD") == work
     assert (worktree / "uv.lock").read_text() == "by the setup\n"
     assert not kraft_builtins.set_aside_dir(worktree).exists()
+
+
+async def test_a_stopped_git_that_will_not_die_is_left_alone(
+    tmp_path, database, run_dirs, repo, hung, monkeypatch
+):
+    """A git group still there after its SIGKILL may still be writing the
+    worktree: no abort runs beside it and the setup's lockfile stays set
+    aside, for the next walk to stop on its `rebase-merge` for a person."""
+
+    async def never_gone(*_args):
+        return False
+
+    monkeypatch.setattr(kraft_builtins, "_groups_gone", never_gone)
+    worktree, _, _, rebase, _ = await _rebase_hung_mid_way(
+        database, run_dirs, repo, hung, tmp_path, "smudge"
+    )
+
+    rebase.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await rebase
+
+    assert "rebase-merge" in _left_mid_rebase(worktree)
+    assert not (worktree / "uv.lock").exists()
+    assert (kraft_builtins.set_aside_dir(worktree) / "uv.lock").read_text() == "by the setup\n"
 
 
 async def test_a_shutdown_ends_a_running_git_group_and_everything_it_started(hung):
