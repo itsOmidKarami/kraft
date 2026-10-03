@@ -1225,7 +1225,10 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
             "Stop then start again, the same way it was running. This ends any running "
             "agent, and each of those items stops when Kraft starts again: pause running "
             "items first (kraft item pause ID) and resume them after, or retry them. It "
-            "lists the active items first and, in a terminal, asks before going on."
+            "lists the active items first and, in a terminal, asks before going on. With "
+            "no server running it starts nothing and exits 1 (start one with kraft admin "
+            "start). A server running attached to a terminal is stopped and not started "
+            "again, since only that terminal can bring it back, and restart exits 1."
         ),
     )
     restart.add_argument("-y", "--yes", action="store_true", help="do not ask about running agents")
