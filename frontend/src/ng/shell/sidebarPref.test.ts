@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyInitialSidebar, defaultSidebar, readSidebar, SIDEBAR_KEY, writeSidebar } from "./sidebarPref";
+import { applyInitialSidebar, currentSidebar, readSidebar, SIDEBAR_KEY, writeSidebar } from "./sidebarPref";
 
 afterEach(() => {
   localStorage.clear();
@@ -8,15 +8,17 @@ afterEach(() => {
 });
 
 describe("sidebar preference", () => {
-  it("is pinned from 1280 up and a rail below", () => {
-    expect([defaultSidebar(1279), defaultSidebar(1280), defaultSidebar(1920)]).toEqual(["rail", "pinned", "pinned"]);
+  it.each([390, 1024, 1279, 1920])("is pinned at %ipx with nothing stored", (width) => {
+    vi.stubGlobal("innerWidth", width);
+    expect(currentSidebar()).toBe("pinned");
+    vi.unstubAllGlobals();
   });
 
   it("lets a stored value win at any width", () => {
-    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    localStorage.setItem(SIDEBAR_KEY, "rail");
     vi.stubGlobal("innerWidth", 1024);
     applyInitialSidebar();
-    expect(document.documentElement.dataset.sidebar).toBe("pinned");
+    expect(document.documentElement.dataset.sidebar).toBe("rail");
     vi.unstubAllGlobals();
   });
 
@@ -31,10 +33,10 @@ describe("sidebar preference", () => {
     expect(document.documentElement.dataset.sidebar).toBe("rail");
   });
 
-  it("falls back to the width default, without throwing, when storage throws", () => {
+  it("falls back to pinned, without throwing, when storage throws", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("denied"); });
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("denied"); });
-    vi.stubGlobal("innerWidth", 1500);
+    vi.stubGlobal("innerWidth", 1024);
     expect(() => applyInitialSidebar()).not.toThrow();
     expect(document.documentElement.dataset.sidebar).toBe("pinned");
     expect(() => writeSidebar("rail")).not.toThrow();

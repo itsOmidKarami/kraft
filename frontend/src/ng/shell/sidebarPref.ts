@@ -1,9 +1,7 @@
+/** "rail" is the stored word for unpinned, kept so a stored choice survives. */
 export type SidebarMode = "pinned" | "rail";
 
 export const SIDEBAR_KEY = "kraft.sidebar.v2";
-const PIN_MIN_WIDTH = 1280;
-
-export const defaultSidebar = (width: number): SidebarMode => (width >= PIN_MIN_WIDTH ? "pinned" : "rail");
 
 /** The stored choice, or null: nothing stored, or storage unreadable. */
 export function readSidebar(): SidebarMode | null {
@@ -15,7 +13,8 @@ export function readSidebar(): SidebarMode | null {
   }
 }
 
-export const currentSidebar = (): SidebarMode => readSidebar() ?? defaultSidebar(window.innerWidth);
+/** Pinned at every width until the reader chooses otherwise. */
+export const currentSidebar = (): SidebarMode => readSidebar() ?? "pinned";
 
 /** Stores the choice and puts it on <html> in the same step. */
 export function writeSidebar(mode: SidebarMode): void {

@@ -35,6 +35,24 @@ describe("ng CSS", () => {
     expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-mid"));
   });
 
+  it("takes an unpinned sidebar to no width, and keeps its overlay 180ms after the pointer leaves", () => {
+    const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
+    expect(css).toMatch(/:root\[data-sidebar="rail"\]\s*{\s*--ng-side-w:\s*0px;/);
+    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*\b180ms\b/);
+  });
+
+  it("lays the document drawer over the theme's scrim, black at 40%", () => {
+    expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain(":root { --scrim: rgb(0 0 0 / 40%); }");
+    expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
+  });
+
+  it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
+    const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
+    const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);
+    expect(z("\\.dialog-backdrop")).toBeLessThan(z("\\.popover"));
+    expect(z("\\.popover")).toBeLessThan(z("\\.toasts"));
+  });
+
   // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
   // shipped css.contract.test.ts, which the cutover deletes.
   it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {

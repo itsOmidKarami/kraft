@@ -31,6 +31,50 @@ describe("Title", () => {
   });
 });
 
+describe("Title, leaving the field", () => {
+  it.each([
+    ["saves an edit, as Enter does", "New", [{ title: "New" }], "New"],
+    ["restores the old title when the field is blank", "   ", [], "Old"],
+    ["sends nothing when the title is unchanged", "Old", [], "Old"],
+  ])("%s", async (_, typed, sent, shown) => {
+    const calls = stubFetch(WRITES);
+    render(<><Title id="w1" title="Old" onSaved={() => {}} /><button>elsewhere</button></>);
+    await userEvent.click(screen.getByRole("button", { name: "Old" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), typed);
+    await userEvent.click(screen.getByRole("button", { name: "elsewhere" }));
+    await waitFor(() => expect(writes(calls).map((c) => (c as { body?: unknown }).body)).toEqual(sent));
+    // A saved title shows once the item is read again; the field has closed either way.
+    if (!sent.length) expect(screen.getByRole("heading", { name: shown })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
+  });
+
+  it("saves a second rename ended by a click away, after a first one ended with Enter", async () => {
+    const calls = stubFetch(WRITES);
+    const { rerender } = render(<><Title id="w1" title="Old" onSaved={() => {}} /><button>elsewhere</button></>);
+    await userEvent.click(screen.getByRole("button", { name: "Old" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "New{Enter}");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
+    rerender(<><Title id="w1" title="New" onSaved={() => {}} /><button>elsewhere</button></>);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "Newer");
+    await userEvent.click(screen.getByRole("button", { name: "elsewhere" }));
+    await waitFor(() => expect(writes(calls).map((c) => (c as { body?: unknown }).body)).toEqual([{ title: "New" }, { title: "Newer" }]));
+  });
+
+  it("sends one save on Enter, not a second one when the field then goes away", async () => {
+    const calls = stubFetch(WRITES);
+    render(<Title id="w1" title="Old" onSaved={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Old" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "New{Enter}");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
+    expect(writes(calls)).toHaveLength(1);
+  });
+});
+
 describe("Brief", () => {
   it("edits in the same spot, says who reads it, and saves the description", async () => {
     const calls = stubFetch(WRITES);
@@ -89,6 +133,16 @@ describe("DiffLine", () => {
     const { container } = render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
     await new Promise((r) => setTimeout(r, 0));
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it.each([
+    [[], "1 file +2 −1 · Review changes"],
+    [[{ state: "open" }, { state: "resolved" }, { state: "claimed" }], "1 file +2 −1 · 2 open threads · Review changes"],
+    [[{ state: "open" }], "1 file +2 −1 · 1 open thread · Review changes"],
+  ])("counts the open review threads between the diff and Review changes: %j", async (threads, text) => {
+    stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }], "GET /work-items/w1/threads": [200, threads] });
+    render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText(/1 file/)).toHaveTextContent(text));
   });
 
   it("reads the diff again on each read of the item, and an older read that answers late does not win", async () => {

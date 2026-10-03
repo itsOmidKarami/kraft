@@ -13,7 +13,7 @@ export function Shell() {
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [tail, setTail] = useState<HTMLElement | null>(null);
   const [searching, setSearching] = useState(false);
-  const [viewing, setViewing] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ id: string; q: string } | null>(null);
 
   // From every page, including with focus in a field.
   useEffect(() => {
@@ -41,8 +41,8 @@ export function Shell() {
             </main>
           </div>
         </div>
-        {searching && <SearchOverlay onClose={closeSearch} onDocument={setViewing} />}
-        {viewing && <DocViewer source={{ kind: "document", id: viewing }} onClose={() => setViewing(null)} />}
+        {searching && <SearchOverlay onClose={closeSearch} onDocument={(id, q) => setViewing({ id, q })} />}
+        {viewing && <DocViewer source={{ kind: "document", id: viewing.id }} query={viewing.q} onClose={() => setViewing(null)} />}
         <ApplyDialogs />
       </HeaderTailHost.Provider>
     </HeaderActionsHost.Provider>

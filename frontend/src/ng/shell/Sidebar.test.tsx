@@ -9,6 +9,7 @@ import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 import { SIDEBAR_KEY } from "./sidebarPref";
 import * as drafts from "../templates/draft/draftApi";
+import * as http from "../http";
 import { countIn } from "../board/counts";
 
 const ITEM: WorkItem = {
@@ -40,6 +41,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, "getHealth").mockResolvedValue(HEALTH as never);
   vi.spyOn(drafts, "listDrafts").mockResolvedValue({ status: 200, body: [] });
+  vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { installed: "0.9.4", latest: "v0.9.4", channel: "stable", behind: false, checked_at: null } });
   useStore.setState({ workItems: {}, sessionsByItem: {}, eventsByItem: {}, connection: "open" } as never);
 });
 
@@ -56,7 +58,7 @@ describe("ng Sidebar", () => {
     expect(within(nav()).getByText("Settings")).toBeInTheDocument();
     expect(within(nav()).getByRole("link", { name: "Library" })).toHaveAttribute("aria-current", "page");
     expect(within(nav()).getByRole("link", { name: "Chains" })).not.toHaveAttribute("aria-current");
-    await screen.findByText("127.0.0.1:8765 · v0.9.4");
+    await screen.findByRole("link", { name: "Kraft v0.9.4" });
   });
 
   it("prints Search's shortcut for the platform: Ctrl+K off a Mac, ⌘K on one", async () => {
@@ -70,9 +72,12 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("button", { name: /^Search/ })).toHaveTextContent("⌘K");
   });
 
-  it("keeps every row in the tab order, so the rail works without a pointer", async () => {
+  it("keeps every row in the tab order, so an unpinned sidebar works without a pointer", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
     mount();
     await userEvent.tab(); // skip link
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveFocus();
     await userEvent.tab();
     expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
     await userEvent.tab();
@@ -88,6 +93,18 @@ describe("ng Sidebar", () => {
     expect(now).not.toBe(was);
     expect(localStorage.getItem(SIDEBAR_KEY)).toBe(now === "true" ? "pinned" : "rail");
     expect(document.documentElement.dataset.sidebar).toBe(now === "true" ? "pinned" : "rail");
+  });
+
+  it("puts the pin in the head beside Kraft · live, its panel icon and title following the state", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    mount();
+    const pin = screen.getByRole("button", { name: "Pin sidebar" });
+    expect(pin.closest(".ng-side-head")).not.toBeNull();
+    expect(pin).toHaveAttribute("title", "Collapse sidebar");
+    expect(pin.querySelector(".lucide-panel-left-close")).not.toBeNull();
+    await userEvent.click(pin);
+    expect(pin).toHaveAttribute("title", "Pin sidebar");
+    expect(pin.querySelector(".lucide-panel-left-open")).not.toBeNull();
   });
 
   it("starts from the stored choice", () => {
@@ -106,11 +123,11 @@ describe("ng Sidebar", () => {
     expect(pin).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("falls back to the width default, without an error, when storage throws", () => {
+  it("falls back to pinned, without an error, when storage throws", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("denied"); });
     vi.stubGlobal("innerWidth", 1024);
     expect(() => mount()).not.toThrow();
-    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "true");
     vi.unstubAllGlobals();
   });
 
@@ -129,78 +146,22 @@ describe("ng Sidebar", () => {
     field.remove();
   });
 
-  it("closes a revealed rail on Escape and returns focus to main", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "rail");
+  // Unpinned, only the pointer leaving (or focus leaving) hides it, in CSS. A
+  // close in script would also move focus out of it, which is what these catch.
+  it.each<[string, () => Promise<void>, ("pinned" | "rail")?]>([
+    ["unpinning with the pin", async () => void (await userEvent.click(screen.getByRole("button", { name: "Pin sidebar" }))), "pinned"],
+    ["unpinning with Ctrl+\\", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Control>}\\{/Control}"); }, "pinned"],
+    ["Escape", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Escape}"); }],
+    ["the window losing focus", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); act(() => void window.dispatchEvent(new Event("blur"))); }],
+    ["choosing a row", async () => void (await userEvent.click(screen.getByRole("link", { name: "Analytics" })))],
+    ["choosing a row from the keyboard", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Enter}"); }],
+  ])("leaves an unpinned sidebar open after %s, keeping focus in it", async (_, act_, from = "rail") => {
+    localStorage.setItem(SIDEBAR_KEY, from);
     mount();
-    await userEvent.tab();
-    await userEvent.tab();
-    expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
-    await userEvent.keyboard("{Escape}");
-    expect(screen.getByRole("main")).toHaveFocus();
-    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
-  });
-
-  it("collapses at once on unpin, with the pointer still on the pin, and keeps no focus that would hold it open", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "pinned");
-    mount();
-    const pin = screen.getByRole("button", { name: "Pin sidebar" });
-    await userEvent.click(pin);
-    expect(pin).toHaveAttribute("aria-pressed", "false");
-    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
-    expect(document.querySelector(".ng-sidebar")).not.toContainElement(document.activeElement as HTMLElement);
-  });
-
-  it("collapses on unpin from the keyboard too, keeping focus on the pin", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "pinned");
-    mount();
-    const pin = screen.getByRole("button", { name: "Pin sidebar" });
-    pin.focus();
-    await userEvent.keyboard("{Enter}");
-    expect(pin).toHaveAttribute("aria-pressed", "false");
-    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
-    expect(pin).toHaveFocus();
-  });
-
-  it("keeps a revealed rail open under the pointer when a row is clicked, with no focus left to hold it open", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "rail");
-    mount();
-    const row = screen.getByRole("link", { name: "Analytics" });
-    await userEvent.hover(row);
-    await userEvent.click(row);
-    expect(row).toHaveAttribute("aria-current", "page");
-    expect(document.querySelector(".ng-side")).not.toHaveAttribute("data-dismissed");
-    expect(screen.getByRole("main")).toHaveFocus();
-  });
-
-  it("closes a revealed rail when a row goes to a page from the keyboard", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "rail");
-    mount();
-    const row = screen.getByRole("link", { name: "Analytics" });
-    row.focus();
-    await userEvent.keyboard("{Enter}");
-    expect(row).toHaveAttribute("aria-current", "page");
-    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
-    expect(screen.getByRole("main")).toHaveFocus();
-  });
-
-  it("closes a revealed rail when the window loses focus, without a click back in the page", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "rail");
-    mount();
-    await userEvent.tab();
-    await userEvent.tab();
-    expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
-    act(() => void window.dispatchEvent(new Event("blur")));
-    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
-    expect(document.querySelector(".ng-sidebar")).not.toContainElement(document.activeElement as HTMLElement);
-  });
-
-  it("reveals a closed rail again when the pointer comes back to it", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "rail");
-    mount();
-    act(() => void window.dispatchEvent(new Event("blur")));
-    expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
-    await userEvent.hover(screen.getByRole("link", { name: "Analytics" }));
-    expect(document.querySelector(".ng-side")).not.toHaveAttribute("data-dismissed");
+    await act_();
+    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector(".ng-side")!.attributes).toHaveLength(1);
+    expect(document.querySelector(".ng-sidebar")).toContainElement(document.activeElement as HTMLElement);
   });
 
   it("does not move focus out of a pinned sidebar when a row is clicked", async () => {
@@ -209,15 +170,6 @@ describe("ng Sidebar", () => {
     const row = screen.getByRole("link", { name: "Analytics" });
     await userEvent.click(row);
     expect(row).toHaveFocus();
-  });
-
-  it("leaves Escape alone while pinned", async () => {
-    localStorage.setItem(SIDEBAR_KEY, "pinned");
-    mount();
-    await userEvent.tab();
-    await userEvent.tab();
-    await userEvent.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
   });
 
   it("counts what the board's Needs you group holds, a paused mid-chain item included and a never-started one not", () => {
@@ -255,41 +207,30 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("img", { name: word })).toBeInTheDocument();
   });
 
-  it("reads the footer from /health and links About", async () => {
+  it("shows the version alone in the footer, linking About", async () => {
     mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.queryByRole("link", { name: /Current UI/ })).toBeNull();
-    expect(screen.queryByText(/restart to finish the update/)).toBeNull();
+    const foot = await screen.findByRole("link", { name: "Kraft v0.9.4" });
+    expect(foot).toHaveAttribute("href", "/settings/about");
+    expect(foot).toHaveTextContent(/^v0\.9\.4$/);
+    expect(screen.queryByText(/127\.0\.0\.1|restart|installed/)).toBeNull();
   });
 
-  it("says to restart when the version on disk is not the one this server runs", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, installed: "0.9.5" } as never);
+  it.each<[string, object, boolean]>([
+    ["the feed has a newer release", HEALTH, true],
+    ["a newer release is installed and waits on a restart", { ...HEALTH, installed: "0.9.5" }, false],
+    ["the server is too old to report what is installed (R10c-01)", (({ installed: _, ...h }) => h)(HEALTH), false],
+    ["an older release is installed (R10c-03)", { ...HEALTH, installed: "0.9.3" }, false],
+  ])("marks an update in the footer when %s", async (_, health, behind) => {
+    vi.mocked(api.getHealth).mockResolvedValue(health as never);
+    vi.mocked(http.request).mockResolvedValue({ status: 200, body: { installed: "0.9.4", latest: "v0.9.9", channel: "stable", behind, checked_at: null } });
     mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "v0.9.5 installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.getByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toBeInTheDocument();
-  });
-});
-
-describe("ng Sidebar, against a server older than its interface (R10c-01)", () => {
-  it("says to restart when the server is too old to report what is installed", async () => {
-    const { installed: _, ...old } = HEALTH;
-    vi.mocked(api.getHealth).mockResolvedValue(old as never);
-    mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "a newer Kraft is installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
-  });
-});
-
-describe("ng Sidebar, with an older release installed (R10c-03)", () => {
-  it("does not call a rollback an update to finish", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, installed: "0.9.3" } as never);
-    mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "v0.9.3 installed, older than this server: see About" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.queryByText(/restart to finish the update/)).toBeNull();
+    const foot = await screen.findByRole("link", { name: "Kraft v0.9.4, update available" });
+    expect(foot).toHaveAttribute("href", "/settings/about");
+    expect(foot).toHaveTextContent(/^v0\.9\.4update$/);
   });
 });
 
-describe("ng Sidebar draft dots", () => {
-  const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
+describe("ng Sidebar draft dots", () => {  const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
 
   it("marks an area with an open draft and counts its problems, from GET /drafts", async () => {
     vi.mocked(drafts.listDrafts).mockResolvedValue({ status: 200, body: [draft("chains", "default", 0), draft("chains", "broken", 2), draft("library", "library", 0)] });
@@ -297,7 +238,6 @@ describe("ng Sidebar draft dots", () => {
     const chains = await within(nav()).findByRole("link", { name: "Chains, unpublished draft, 2 problems" });
     expect(chains).toHaveAttribute("aria-current", "page");
     expect(chains.querySelector(".ng-side-count")).toHaveTextContent("2");
-    expect(chains.querySelector(".ng-side-mark.is-bad")).not.toBeNull();
     const library = within(nav()).getByRole("link", { name: "Library, unpublished draft" });
     expect(library.querySelector(".ng-side-count")).toBeNull();
     expect(within(nav()).getByRole("link", { name: "Harnesses" }).querySelector(".ng-side-dot")).toBeNull();

@@ -2,19 +2,24 @@ import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState } from "react";
 import * as api from "../../api";
 import { plainMarkdown } from "../../format";
-import type { DiffFile } from "../../types";
+import type { DiffFile, ReviewThread } from "../../types";
+import { request } from "../http";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { sendOnModEnter } from "../keys";
 
-/** The title, edited in place (Decisions §2): Enter saves, Esc restores. */
+/** The title, edited in place (Decisions §2): Enter or leaving the field
+ *  saves, Esc restores; a blank one left by blur restores too. */
 export function Title({ id, title, onSaved }: { id: string; title: string; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(title);
   const [error, setError] = useState<string | null>(null);
   const hint = useId();
+  // Set by Enter or Esc: the blur that follows (the field going away) is not a second answer.
+  const settled = useRef(false);
   useEffect(() => setText(title), [title]);
   const stop = () => {
+    settled.current = true;
     setEditing(false);
     setText(title);
     setError(null);
@@ -23,15 +28,21 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
     const t = text.trim();
     if (!t) return setError("A title can't be blank.");
     if (t === title) return stop();
+    settled.current = true;
     const r = await act.patch(id, { title: t });
-    if (!r.ok) return setError(r.error);
+    if (!r.ok) { settled.current = false; return setError(r.error); }
     setEditing(false);
     onSaved();
+  };
+  const blur = () => {
+    if (settled.current) return;
+    if (!text.trim()) stop();
+    else void save();
   };
   if (!editing)
     return (
       <h1 className="item-title">
-        <button type="button" className="item-title-btn" title="Rename" onClick={() => setEditing(true)}>{title}</button>
+        <button type="button" className="item-title-btn" title="Rename" onClick={() => { settled.current = false; setEditing(true); }}>{title}</button>
       </h1>
     );
   return (
@@ -48,7 +59,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
           if (e.key === "Enter") void save();
           if (e.key === "Escape") { e.stopPropagation(); stop(); }
         }}
-        onBlur={stop}
+        onBlur={blur}
       />
       <span id={hint} className="item-muted">{error ? <span className="item-error" role="alert">{error}</span> : "Enter to save · Esc"}</span>
     </div>
@@ -125,14 +136,28 @@ export function useDiffFiles(id: string, version: string): DiffFile[] | null {
 
 export const totals = (files: DiffFile[]) => ({ add: files.reduce((a, f) => a + f.insertions, 0), del: files.reduce((a, f) => a + f.deletions, 0) });
 
-/** `N files +A −D · Review changes` (the prototype's diff line); hidden with no diff. */
+/** How many of the item's review threads are not resolved, read again with the item (as the gate pane counts them). */
+function useOpenThreads(id: string, version: string): number {
+  const [open, setOpen] = useState(0);
+  useEffect(() => {
+    let live = true;
+    request<ReviewThread[]>(`/work-items/${encodeURIComponent(id)}/threads`).then((r) => live && setOpen(r.status === 200 && Array.isArray(r.body) ? r.body.filter((t) => t.state !== "resolved").length : 0));
+    return () => { live = false; };
+  }, [id, version]);
+  return open;
+}
+
+/** `N files +A −D · K open threads · Review changes` (the prototype's diff
+ *  line), the threads only when there are some; hidden with no diff. */
 export function DiffLine({ id, version }: { id: string; version: string }) {
   const files = useDiffFiles(id, version);
+  const threads = useOpenThreads(id, version);
   if (!files?.length) return null;
   const { add, del } = totals(files);
   return (
     <p className="item-diffline">
       {files.length} {files.length === 1 ? "file" : "files"} <span className="item-add">+{add}</span> <span className="item-del">−{del}</span>
+      {threads > 0 && <><span aria-hidden> · </span>{threads} open {threads === 1 ? "thread" : "threads"}</>}
       <span aria-hidden> · </span>
       <Link className="item-link is-strong" to={`/work-items/${encodeURIComponent(id)}/review`}>Review changes</Link>
     </p>

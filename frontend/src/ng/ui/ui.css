@@ -38,7 +38,7 @@
 .tab:hover { color: var(--text-sub); }
 .tab[aria-selected="true"] { border-bottom-color: var(--text); color: var(--text); }
 
-.popover { position: fixed; z-index: 50; min-width: 160px; max-height: 60vh; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--side) 60%, transparent); }
+.popover { position: fixed; z-index: 65; min-width: 160px; max-height: 60vh; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--side) 60%, transparent); }
 .menu { display: flex; flex-direction: column; }
 .menu-item { padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; font-size: 12.5px; color: var(--text); text-align: left; cursor: pointer; }
 .menu-item:not(:disabled):is(:hover, :focus-visible) { background: var(--line); }
@@ -58,6 +58,13 @@
 .menu-item:disabled .menu-sub { color: var(--text-faint); }
 .menu-heading { padding: 6px 10px 4px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
 
+/* `notch`: an arrow toward the anchor, on the side and edge Popover placed it.
+   Its content scrolls itself, so the notch is not clipped. */
+.popover[data-notch] { overflow: visible; max-height: none; }
+.popover[data-notch]::before { content: ""; position: absolute; left: 22px; width: 9px; height: 9px; background: var(--surface); border: 1px solid var(--border); transform: rotate(45deg); }
+.popover[data-notch][data-align="end"]::before { left: auto; right: 22px; }
+.popover[data-notch][data-side="below"]::before { top: -6px; border-right: 0; border-bottom: 0; }
+.popover[data-notch][data-side="above"]::before { bottom: -6px; border-left: 0; border-top: 0; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px; overflow-y: auto; background: color-mix(in oklab, var(--side) 70%, transparent); }
 .dialog { width: min(480px, 100%); padding: 18px 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .dialog:focus-visible { outline: none; }

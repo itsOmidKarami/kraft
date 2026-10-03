@@ -183,6 +183,24 @@
         "wrap_lines": false
       }
     },
+    "editor": {
+      "anyOf": [
+        {
+          "enum": [
+            "code",
+            "cursor",
+            "zed",
+            "obsidian"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Editor"
+    },
     "mode": {
       "default": "dark",
       "enum": [
