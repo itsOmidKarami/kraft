@@ -757,3 +757,31 @@ def test_no_other_site_may_frame_any_response(dist, client, method, path, header
     directives = [d.strip() for d in r.headers["content-security-policy"].split(";")]
     assert "frame-ancestors 'self'" in directives
     assert r.headers["x-frame-options"] == "SAMEORIGIN"
+
+
+@pytest.mark.parametrize(
+    "headers", [{"sec-fetch-dest": "document"}, {}], ids=["a-navigation", "a-plain-get"]
+)
+def test_an_updated_bundle_is_not_served_by_the_server_it_does_not_match(
+    dist, client, monkeypatch, headers
+):
+    """`kraft admin update` replaced the bundle under this server: the new
+    interface against the old API misreads it, so the shell says to restart
+    instead. A hashed asset is still served, for a tab already open."""
+    from kraft import update
+
+    monkeypatch.setattr(update, "installed", lambda: "99.0.0")
+
+    r = client.get("/work-items", headers=headers)
+
+    assert r.status_code == 503
+    assert "kraft admin restart" in r.text and "99.0.0" in r.text
+    assert r.headers["cache-control"] == "no-store"
+    assert client.get("/index.html").status_code == 503
+    assert client.get("/assets/app.js").status_code == 200
+
+
+def test_the_shell_is_served_while_the_installed_version_is_the_running_one(dist, client):
+    r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
+    assert r.status_code == 200
+    assert r.text.startswith("<!doctype html><title>kraft</title>")

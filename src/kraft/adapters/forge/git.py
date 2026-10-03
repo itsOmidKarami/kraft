@@ -148,19 +148,78 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
 
+#: Lockfiles a package manager writes by itself where a repo commits none:
+#: `uv sync` in a pyproject with no `uv.lock`, as an entry connected before
+#: the probe stopped proposing it for one still runs.
+WRITTEN_LOCKFILES = frozenset({"uv.lock"})
+
+#: In the worktree's own git dir (`git rev-parse --absolute-git-dir`): the
+#: untracked `WRITTEN_LOCKFILES` its setup command wrote, one per line. Only
+#: these are left out of a commit; a lockfile the agent made is its work.
+SETUP_WROTE = "kraft-setup-wrote"
+
+
 def is_environment(path: Path) -> bool:
-    """Whether `path` is a directory a setup installs into: a virtualenv
-    (it holds `pyvenv.cfg`) or a `node_modules`."""
+    """Whether untracked `path` is a directory a setup installs into: a
+    virtualenv (it holds `pyvenv.cfg`) or a `node_modules`."""
     return path.name == "node_modules" or (path / "pyvenv.cfg").is_file()
 
 
-async def _environment_dirs(repo: Path, base: str) -> list[str]:
-    """Untracked directories that are an install, not work (`is_environment`):
-    a setup's `.venv/` in a repo that never ignored it is a thousand files,
-    and no merge request wants them. Only a directory git lists as untracked
-    whole: one the repo tracks is the repo's own, edits and all. Asked for
-    as `normal`, since `status.showUntrackedFiles=all` in a user's or the
-    repo's config would list its files one by one instead."""
+async def untracked_lockfiles(repo: Path) -> set[str]:
+    """The untracked `WRITTEN_LOCKFILES` in `repo`, by path; none where
+    `repo` is not a git checkout."""
+    try:
+        raw = await run_git(
+            repo,
+            ["git", "status", "--porcelain", "-z", "--untracked-files=all", "--", "."],
+        )
+    except ForgeError:
+        return set()
+    return {
+        entry[3:]
+        for entry in raw.split("\0")
+        if entry.startswith("?? ") and Path(entry[3:]).name in WRITTEN_LOCKFILES
+    }
+
+
+async def _setup_wrote_path(repo: Path) -> Path:
+    return Path((await run_git(repo, ["git", "rev-parse", "--absolute-git-dir"])).strip()) / (
+        SETUP_WROTE
+    )
+
+
+async def setup_wrote(repo: Path) -> set[str]:
+    """What `record_setup_writes` recorded for this worktree."""
+    try:
+        return set((await _setup_wrote_path(repo)).read_text().split())
+    except (OSError, ForgeError):
+        return set()
+
+
+async def record_setup_writes(repo: Path, before: set[str]) -> None:
+    """Record the lockfiles a setup command just wrote: untracked now and not
+    before it ran, plus those it wrote before that are still untracked. One
+    that was there before this setup and not recorded is the agent's."""
+    after = await untracked_lockfiles(repo)
+    wrote = (after - before) | (await setup_wrote(repo) & after)
+    try:
+        (await _setup_wrote_path(repo)).write_text("".join(f"{p}\n" for p in sorted(wrote)))
+    except (OSError, ForgeError):
+        # Not a git checkout: nothing commits from it, so nothing to keep out.
+        return
+
+
+async def environment_paths(repo: Path, base: str) -> list[str]:
+    """Untracked paths that are an install, not work: a virtualenv or
+    `node_modules` (`is_environment`) -- a setup's `.venv/` in a repo that
+    never ignored it is a thousand files -- and a lockfile this worktree's
+    setup command wrote (`record_setup_writes`), which would otherwise land
+    in every work item's merge request. No merge request wants either. Only
+    a path git lists as untracked: one the repo tracks is the repo's own,
+    edits and all. Asked for as `normal`, since `status.showUntrackedFiles=
+    all` in a user's or the repo's config would list a directory's files one
+    by one instead."""
+    wrote = await setup_wrote(repo)
     with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
             repo,
@@ -177,7 +236,8 @@ async def _environment_dirs(repo: Path, base: str) -> list[str]:
     return [
         entry[3:].rstrip("/")
         for entry in raw.split("\0")
-        if entry.startswith("?? ") and entry.endswith("/") and is_environment(repo / entry[3:])
+        if entry.startswith("?? ")
+        and ((entry.endswith("/") and is_environment(repo / entry[3:])) or entry[3:] in wrote)
     ]
 
 
@@ -203,14 +263,15 @@ async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     spec/plan/chain_review/review_brief once none of them are committed
     either) — without also assuming every path under a Kraft root is ours.
 
-    An untracked virtualenv or `node_modules` (`_environment_dirs`) is left
-    out too: what a setup installed is never work product, whether or not
+    An untracked virtualenv or `node_modules`, or a lockfile the setup
+    command wrote (`environment_paths`), is left out too: what a setup
+    installed is never work product, whether or not
     the repo thought to ignore it.
     """
     return [
         ".",
         *(f":(exclude){p}" for p in await _kraft_written_paths(repo, base)),
-        *(f":(exclude,literal){p}" for p in await _environment_dirs(repo, base)),
+        *(f":(exclude,literal){p}" for p in await environment_paths(repo, base)),
     ]
 
 

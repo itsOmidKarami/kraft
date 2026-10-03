@@ -177,6 +177,9 @@ jobs:
           TAG: ${{ steps.impact.outputs.tag }}
         run: |
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" tag -a "$TAG" -m "$TAG"
+          # Every zip entry dated by the tagged commit, not by when the bundle
+          # was copied: anyone can rebuild the tag and get the published sha256.
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           uv tool install rust-just
           npm ci --prefix frontend
           just bundle

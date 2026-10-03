@@ -90,9 +90,13 @@ async def spa(path: str, request: Request):
     if dist is None:
         raise HTTPException(404, "not found")
     candidate = (dist / path).resolve()
-    if dist.resolve() in candidate.parents and candidate.is_file():
+    if (
+        dist.resolve() in candidate.parents
+        and candidate.is_file()
+        and candidate != (dist / "index.html").resolve()
+    ):
         return FileResponse(candidate)
-    return FileResponse(dist / "index.html")
+    return perimeter.spa_shell(request, dist)
 
 
 @app.exception_handler(config_mod.ConfigError)

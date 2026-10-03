@@ -214,6 +214,24 @@ def test_health_block_ok_is_short():
     assert "invalid" not in out.lower()
 
 
+def test_health_block_says_an_installed_model_is_failing():
+    """`[vector]` installed but the model will not download: `available` alone
+    printed "available" over a search that was answering 500."""
+    payload = {
+        "status": "ok",
+        "bind": "127.0.0.1",
+        "index": {
+            "documents": 1,
+            "repos_scanned": 1,
+            "last_scan_at": None,
+            "embeddings": {"available": True, "model": "m", "chunks": 0, "reason": "403 Forbidden"},
+            "errors": [],
+        },
+    }
+    out = render.health_block(payload)
+    assert "failing (403 Forbidden)" in out
+
+
 def test_doctor_block_marks_warn_separately_from_skip_and_ok():
     rows = [
         {"name": "spa bundle", "ok": True, "detail": "fine", "skipped": False, "warn": False},

@@ -95,14 +95,16 @@ def _tail(log: Path) -> str:
     return "\n".join(f"    {line}" for line in lines[-_TAIL:])
 
 
-def _changed(worktree: Path) -> tuple[set[str], set[str]]:
+def _changed(worktree: Path, *, setup: bool = False) -> tuple[set[str], set[str]]:
     """(what `git add -A` would stage, the installs left out of it). The
     first: untracked files git does not ignore, and tracked files changed,
     less Kraft's own roots and an untracked virtualenv or `node_modules`,
-    which Kraft's sweep leaves out (`forge.git.work_product_pathspec`). The
-    second: those installs, by directory. The agent commits on its own too,
-    and a `git add -A` of its takes one the repo does not ignore."""
-    from kraft.adapters.forge.git import is_environment
+    which Kraft's sweep leaves out (`forge.git.work_product_pathspec`), and,
+    after the `setup` step, a lockfile it wrote, which the sweep leaves out
+    too. The second: those installs, by directory or file. The agent commits
+    on its own too, and a `git add -A` of its takes one the repo does not
+    ignore."""
+    from kraft.adapters.forge.git import WRITTEN_LOCKFILES, is_environment
 
     out = subprocess.run(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -115,8 +117,10 @@ def _changed(worktree: Path) -> tuple[set[str], set[str]]:
     kraft_roots = tuple(f"{r}/" for r in config_mod.KRAFT_ROOTS)
 
     def install(path: str) -> str | None:
-        parts = path.split("/")[:-1]
-        for n in range(1, len(parts) + 1):
+        parts = path.split("/")
+        if setup and parts[-1] in WRITTEN_LOCKFILES:
+            return path
+        for n in range(1, len(parts)):
             if is_environment(worktree.joinpath(*parts[:n])):
                 return "/".join(parts[:n])
         return None
@@ -253,10 +257,17 @@ def _rehearse(entry, repo, worktree, env, logs, timeout_minutes, say) -> bool:
                 'run-once flag, or `env: {CI: "true"}` in the repo\'s repos.yaml entry, which '
                 "workers get too"
             )
-        changed, installs = _changed(worktree)
-        left = sorted(changed - baseline)
+        changed, installs = _changed(worktree, setup=label == "setup")
+        left = sorted(changed - baseline - installed)
         for where in sorted(installs - installed):
             # Not a failure: Kraft's own commits leave it out.
+            if (worktree / where).is_file():
+                say(
+                    f"    left {where}, a lockfile the repo does not commit: Kraft's commits "
+                    "leave it out, but an agent's `git add -A` would commit it. Commit one "
+                    "(uv lock), so every work item installs the same versions"
+                )
+                continue
             say(
                 f"    left {where}/, an install the repo does not ignore: Kraft's commits "
                 "leave it out, but an agent's `git add -A` would commit it. Ignore it "

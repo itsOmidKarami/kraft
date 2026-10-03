@@ -19,14 +19,20 @@ export interface RepoField {
   choices?: "steering" | "harnesses";
   /** A checkbox that sets the field to `""`, the command that does nothing. */
   none?: string;
+  /** What the cell says for that `""`, when the quote marks alone would not say it. */
+  empty?: string;
   placeholder?: string;
 }
+
+/** `test_command: ""`: a repo with no tests, whose items pass verify without
+ *  running any. Not "not set", which stops every item at verify. */
+export const NO_TESTS = "no tests (passes verify)";
 
 const policy = (key: string, label: string, p: Pick<RepoField, "show" | "parse">): RepoField => ({ key: `policy.${key}`, label, ...p, placeholder: "not set" });
 
 export const FIELDS: RepoField[] = [
   { key: "default_chain_template", label: "default chain", choice: "chain", ...text, fallback: "default" },
-  { key: "test_command", label: "test command", ...text },
+  { key: "test_command", label: "test command", ...command, none: "No tests", empty: NO_TESTS },
   { key: "test_scopes", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
   { key: "setup_command", label: "setup command", ...command, none: "No setup needed" },
   { key: "intent_dir", label: "intent dir", ...text },

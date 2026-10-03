@@ -15,6 +15,11 @@ import { useGroupCount } from "../board/counts";
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
 
+/** `kraft admin update` replaced the package, but this server still runs the old one. */
+export function restartPending(health: Health | null | undefined): boolean {
+  return !!health?.installed && !!health.version && health.installed !== health.version;
+}
+
 /** Polled like the shipped sidebar's own `useHealth`. */
 function useHealth(): Health | null {
   const [health, setHealth] = useState<Health | null>(null);
@@ -151,6 +156,11 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           <NavLink to="/settings/about" end className="ng-side-meta ng-side-label" onClick={went}>
             {health ? `${bind}${health.version ? ` · v${health.version}` : ""}` : ""}
           </NavLink>
+          {restartPending(health) && (
+            <NavLink to="/settings/about" end className="ng-side-meta ng-side-label is-warn" onClick={went}>
+              v{health?.installed} installed: restart to finish the update
+            </NavLink>
+          )}
           <button
             type="button"
             className="ng-side-pin"

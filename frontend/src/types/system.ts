@@ -11,9 +11,13 @@ export interface Health {
    *  signed in · N days" before a session exists to ask `/access` for it.
    *  Absent on an older server that hasn't picked up this field yet. */
   session_expiry_days?: number;
-  /** This build's installed version, or "0.0.0+source" for a checkout that
-   *  was never installed (`kraft.update.installed()`). Sidebar footer only. */
+  /** The version this server process is running, or "0.0.0+source" for a
+   *  checkout that was never installed. Sidebar footer only. */
   version?: string;
+  /** The version installed on disk, which a restart would run. It differs from
+   *  `version` between `kraft admin update` and the restart that finishes it.
+   *  Absent on an older server, whose `version` was the installed one. */
+  installed?: string;
   /** The directory holding this instance's databases, logs and worktrees. */
   run_dir?: string;
   pid?: number;

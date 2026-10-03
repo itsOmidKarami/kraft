@@ -35,10 +35,6 @@ CACHE_TTL = 86_400
 #: with no route out is not something anybody times.
 TIMEOUT = 2.0
 
-#: The wheel download in `perform`. Someone asked for it and is watching, and
-#: a multi-megabyte wheel through `glab api` does not fit in `TIMEOUT`.
-DOWNLOAD_TIMEOUT = 120.0
-
 
 #: Pre-release marks in ascending order; a final release outranks all of them.
 _MARKS = ("a", "b", "rc")
@@ -100,7 +96,7 @@ def _cache_path():
 
 
 def _request(url: str, timeout: float) -> bytes:
-    """One plain GET, shared by the releases list and the wheel download.
+    """One plain GET, for the releases list.
 
     The project is public, so no authentication needed.
     """
@@ -196,7 +192,9 @@ def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
         if cached is not None:
             return cached
     try:
-        release = _parse(_fetch(RELEASES_URL, TIMEOUT), channel)
+        # The most a page holds: GitHub's default 30 is one long pre-release
+        # cycle, which would push the newest final off it.
+        release = _parse(_fetch(f"{RELEASES_URL}?per_page=100", TIMEOUT), channel)
     except Exception:  # noqa: BLE001
         # Deliberately bare: httpx raises a dozen types, json another, and a
         # version check is never worth turning a working command into a
@@ -258,6 +256,121 @@ def _stale_kraft_tool(run) -> bool:
     return listing.returncode == 0 and re.search(r"^kraft v", out, re.MULTILINE) is not None
 
 
+#: The package this project publishes, on PyPI and in its release wheels.
+PACKAGE = "kraft-sdlc"
+
+
+def install_kind() -> str:
+    """Which installer made this Kraft: `brew`, `uv` (a uv tool, which the
+    install script makes too), `pipx`, `source` (an editable checkout), or
+    `pip` for any other environment.
+
+    Read off this process's own environment, as `shadowing_kraft` reads
+    which `kraft` this is: uv and pipx each leave a file in the venv they
+    made, and Homebrew's venv has its own path shape."""
+    import json
+    from importlib.metadata import PackageNotFoundError, distribution
+    from pathlib import Path
+
+    if _is_homebrew_install():
+        return "brew"
+    prefix = Path(sys.prefix)
+    if (prefix / "uv-receipt.toml").is_file():
+        return "uv"
+    if (prefix / "pipx_metadata.json").is_file():
+        return "pipx"
+    try:
+        direct = json.loads(distribution(PACKAGE).read_text("direct_url.json") or "{}")
+    except (PackageNotFoundError, ValueError):
+        direct = {}
+    if (direct.get("dir_info") or {}).get("editable"):
+        return "source"
+    return "pip"
+
+
+def _not_by_uv(kind: str, release: Release) -> str:
+    """Why `perform` will not update a pipx, pip or source install, and the
+    command that will. A `uv tool install` there adds a second copy and
+    leaves the `kraft` on PATH, and every MCP server and hook that runs it,
+    on the old one."""
+    import importlib.util
+
+    wanted = requirement(release)
+    python = os.path.realpath(sys.executable)
+    # A venv uv made has no pip of its own.
+    pip = (
+        f"{sys.executable} -m pip install --upgrade"
+        if importlib.util.find_spec("pip") is not None
+        else f"uv pip install --python {sys.executable} --upgrade"
+    )
+    command = {
+        "pipx": f'pipx install --force --python {python} "{wanted}"',
+        "pip": f'{pip} "{wanted}"',
+        "source": "git pull, then just setup (or just install for the `kraft` command)",
+    }[kind]
+    where = {
+        "pipx": "with pipx",
+        "pip": f"with pip, into {sys.prefix}",
+        "source": "from a source checkout",
+    }[kind]
+    return (
+        f"kraft admin update: this Kraft was installed {where}. Updating it with uv "
+        "would add a second copy, and the `kraft` you run would stay as it is. "
+        f"Update it the way it was installed:\n  {command}"
+    )
+
+
+def _receipt() -> dict:
+    """uv's record of how this tool was installed, or {} when it is not a uv tool."""
+    import tomllib
+    from pathlib import Path
+
+    try:
+        return tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text()).get("tool") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def installed_extras() -> list[str]:
+    """The extras this install was made with, so an update keeps them.
+
+    uv's receipt names them for a uv tool. `vector` is also read off the
+    import it brings, which covers an install uv no longer records the
+    request for: every 1.4 `kraft admin update` left a receipt naming only a
+    temporary wheel."""
+    import importlib.util
+
+    found = set()
+    for requirement in _receipt().get("requirements") or []:
+        if isinstance(requirement, dict) and requirement.get("name") == PACKAGE:
+            found.update(str(extra) for extra in requirement.get("extras") or [])
+    if importlib.util.find_spec("fastembed") is not None:
+        found.add("vector")
+    return sorted(found)
+
+
+def _python() -> str:
+    """The interpreter an update installs on: the one the user chose, if uv
+    recorded it, else the one running now. Never the tool venv's own
+    `bin/python`, which the reinstall replaces."""
+    chosen = _receipt().get("python")
+    if isinstance(chosen, str) and chosen:
+        # A version ("3.12") as is. A path's directory, not the path: the
+        # venv's `python` is a link out of it.
+        where = os.path.realpath(os.path.dirname(chosen)) + os.sep
+        if os.sep not in chosen or not where.startswith(os.path.realpath(sys.prefix) + os.sep):
+            return chosen
+    return os.path.realpath(sys.executable)
+
+
+def requirement(release: Release) -> str:
+    """`kraft-sdlc[extras]==X.Y.Z` for `release`, the same shape the install
+    docs give for pinning a version."""
+    extras = installed_extras()
+    named = f"[{','.join(extras)}]" if extras else ""
+    return f"{PACKAGE}{named}=={release.tag.removeprefix('v')}"
+
+
 def perform(release: Release, *, run=None) -> int:
     """Replace this install with `release`. Returns the installer's exit code.
 
@@ -269,12 +382,18 @@ def perform(release: Release, *, run=None) -> int:
     -- that's a dev-only edge of `kraft admin update --force`, and `brew
     upgrade` no-opping on an up-to-date formula is a fine ceiling for it.
 
-    Otherwise, `uv tool install --force` is the same command `just install`
-    ends with, so an updated Kraft is byte-identical to a freshly installed
-    one rather than something only this path can produce.
+    Installed by pipx, pip or from a checkout -> refused, with the command
+    that does update it (`install_kind`).
 
-    `release.wheel_url` is a plain public URL now, but it is still fetched here
-    rather than handed to `uv`, so that one code path downloads every wheel.
+    Otherwise, `uv tool install --force` of `kraft-sdlc[extras]==X` from the
+    package index, on the same Python: the extras and the interpreter the
+    user installed with survive the update, and uv's record of the tool is
+    one `uv tool upgrade` can read. The release workflow creates the GitHub
+    release before it publishes to PyPI, so in that window the index has no
+    such version, and the release's wheel is installed by its URL instead.
+    uv records that URL, which stays valid, where the temporary file this
+    used to download the wheel to did not. Nothing checks the wheel that
+    the index install does not, so it is the fallback, not the default.
     """
     run = run or subprocess.run
     if _is_homebrew_install():
@@ -288,6 +407,9 @@ def perform(release: Release, *, run=None) -> int:
                 f"  {' '.join(command)}"
             ) from None
 
+    if (kind := install_kind()) != "uv":
+        raise SystemExit(_not_by_uv(kind, release))
+
     if _stale_kraft_tool(run):
         # ponytail: told, not migrated -- a `kraft` receipt could be another
         # project's tool of that name, and uninstalling it is not ours to do.
@@ -299,17 +421,22 @@ def perform(release: Release, *, run=None) -> int:
             "  uv tool install --force --reinstall kraft-sdlc"
         )
 
-    import tempfile
-    from pathlib import Path
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        wheel_path = Path(tmpdir) / release.wheel_url.rsplit("/", 1)[-1]
-        wheel_path.write_bytes(_request(release.wheel_url, DOWNLOAD_TIMEOUT))
-        command = ["uv", "tool", "install", "--force", "--from", str(wheel_path), "kraft-sdlc"]
-        try:
-            return run(command).returncode
-        except FileNotFoundError:
-            raise SystemExit(
-                "kraft admin update: `uv` is not on PATH. Install it, or run this yourself:\n"
-                f"  {' '.join(command)}"
-            ) from None
+    wanted = requirement(release)
+    base = ["uv", "tool", "install", "--force", "--python", _python()]
+    command = [*base, wanted]
+    try:
+        code = run(command).returncode
+    except FileNotFoundError:
+        raise SystemExit(
+            "kraft admin update: `uv` is not on PATH. Install it, or run this yourself:\n"
+            f"  {' '.join(command)}"
+        ) from None
+    if code == 0:
+        return 0
+    print(
+        f"kraft admin update: could not install {wanted} from the package index; "
+        f"installing the release's wheel instead: {release.wheel_url}",
+        file=sys.stderr,
+    )
+    extras = wanted[len(PACKAGE) :].split("==", 1)[0]
+    return run([*base, f"{PACKAGE}{extras} @ {release.wheel_url}"]).returncode

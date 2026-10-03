@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, detect, harness, registration
+from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration
 from kraft.adapters import forge
 from kraft.executor import fallback
 from kraft.paths import (
@@ -85,6 +85,8 @@ async def run_checks() -> list[dict]:
         if health is not None
         else [_check("health", True, "skipped: no server", skipped=True)]
     )
+    if health is not None:
+        checks.append(_restart_check(health))
     checks.extend(_config_checks())
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
@@ -138,6 +140,40 @@ def _health_checks(payload: dict) -> list[dict]:
         status = str(payload.get("status", "?"))
         return [_check("health", payload.get("status") == "ok", status), extra]
     return [*(_check("health", False, reason) for reason in reasons), extra]
+
+
+def _restart_check(payload: dict) -> dict:
+    """Is the server running the version installed on disk?
+
+    `kraft admin update` without `--restart` replaces the package under a
+    server that keeps running the old code, and the old server's interface is
+    replaced with it. A warning, not a failure: nothing is broken, but nothing
+    the board shows can be trusted until the restart. A server that does not
+    report `installed` predates this check, so it is older than this install.
+    """
+    from kraft import update
+
+    here = update.installed()
+    running = payload.get("version")
+    pid = payload.get("pid")
+    who = f"the server (pid {pid})" if pid is not None else "the server"
+    if "installed" not in payload:
+        return _check(
+            "restart",
+            True,
+            f"{who} runs a release older than the installed {here}: restart it to finish "
+            "the update - kraft admin restart",
+            warn=True,
+        )
+    if running != here:
+        return _check(
+            "restart",
+            True,
+            f"{who} runs {running}, but {here} is installed: restart it to finish the "
+            "update - kraft admin restart",
+            warn=True,
+        )
+    return _check("restart", True, f"{who} runs the installed version ({here})")
 
 
 def _config_checks() -> list[dict]:
@@ -217,26 +253,23 @@ def _detectors_check(templates: Path) -> dict:
 def _pidfile_check() -> dict:
     """A pidfile naming a process that is gone looks, to every other check
     here, exactly like no server ever started -- nothing before this ever
-    said so (Kraft-mqwg)."""
+    said so (Kraft-mqwg). One naming a live process that is not this run
+    dir's server (a reused pid, another user's process) is worse: `kraft
+    admin stop` used to signal it. `kraft.pidfile` decides which it is."""
     pid_path = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).pid
-    if not pid_path.is_file():
+    state = pidfile.read(pid_path)
+    if state.running:
+        return _check("pidfile", True, f"{pid_path} (pid {state.pid})")
+    if state.pid is None and state.why == "no pidfile":
         return _check("pidfile", True, "no pidfile")
-    try:
-        pid = int(pid_path.read_text())
-    except (OSError, ValueError) as exc:
-        return _check("pidfile", False, f"{pid_path}: {exc}")
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return _check(
-            "pidfile",
-            False,
-            f"{pid_path} names pid {pid}, which is not running - stale; "
-            "the next `kraft admin start` clears it",
-        )
-    except PermissionError:
-        pass  # alive, and not ours to signal
-    return _check("pidfile", True, f"{pid_path} (pid {pid})")
+    if state.pid is None:
+        return _check("pidfile", False, f"{pid_path}: {state.why}")
+    return _check(
+        "pidfile",
+        False,
+        f"{pid_path} names pid {state.pid}, which {state.why} - stale; "
+        "the next `kraft admin start` or `stop` clears it",
+    )
 
 
 def _chain_template_files(directory: Path) -> dict[str, set[str]]:
@@ -281,6 +314,9 @@ def _chain_templates_check() -> dict:
             "chain_templates", True, "skipped: no chain templates in this version", skipped=True
         )
     live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    if not live_dir.is_dir():
+        # A home never started: nothing is missing from a copy not made yet.
+        return _check("chain_templates", True, "skipped: no templates dir", skipped=True)
     live = _chain_template_files(live_dir)
     parts = []
     for name, shipped_ids in shipped.items():
@@ -963,16 +999,44 @@ async def _tls_listener_check() -> dict:
     return _check("egress listener", problem is None, detail)
 
 
-def _suggested_setup(path: Path, templates_dir: Path) -> str | None:
-    """What `kraft repo connect` would propose today, or None when it finds
-    nothing (or cannot read the repo or `detectors.yaml`: the row already
-    fails, and a second error would only bury it)."""
+def _probed(path: Path, templates_dir: Path) -> detect.Proposal | None:
+    """What `kraft repo connect` would propose today, or None when it cannot
+    read the repo or `detectors.yaml`: the row already fails, and a second
+    error would only bury it."""
     if not path.is_dir():
         return None
     try:
-        return detect.probe(path, templates_dir).setup_command
+        return detect.probe(path, templates_dir)
     except config.ConfigError:
         return None
+
+
+def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict | None:
+    """A repo whose items run no test: `test_command: ""` passes verify with
+    none, and an entry with no test command stops each item there. An entry
+    connected before this release's probe can be the second where the probe
+    now finds a command, and `kraft repo connect` again saves it."""
+    if repo.test_scopes:
+        return None
+    name = f"tests {_label(repo)}"
+    if repo.test_command == "":
+        return _check(
+            name,
+            True,
+            'test_command "" — work items here pass verify without running a test',
+            warn=True,
+        )
+    if repo.test_command is not None:
+        return None
+    found = probed.test_command if probed else None
+    advice = (
+        f"connect proposes `{found}` now: run `kraft repo connect {repo.path}` again to save it"
+        if found
+        else 'set one under Templates › Repos, or `""` if it has no tests'
+    )
+    return _check(
+        name, True, f"no test command, so its work items stop at verify; {advice}", warn=True
+    )
 
 
 def _label(repo: config.RepoEntry) -> str:
@@ -1014,21 +1078,30 @@ async def _repo_checks() -> list[dict]:
             checks.append(_check(name, True, f"{path} — no .beads: work items here file no bead"))
         else:
             checks.append(_check(name, True, str(path)))
+        # Probed only for what the entry leaves undecided, as connecting it
+        # again would: a decided entry is the operator's, and costs no probe.
+        undecided = repo.setup_command is None or (
+            repo.test_command is None and not repo.test_scopes
+        )
+        probed = await asyncio.to_thread(_probed, path, live) if undecided else None
         if repo.setup_command is None:
             # No default stands behind this key: an undeclared repo stops its
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
             # makes it survivable.
-            suggestion = await asyncio.to_thread(_suggested_setup, path, live)
+            suggestion = probed.setup_command if probed else None
+            again = f"; run `kraft repo connect {repo.path}` again to save it" if suggestion else ""
             checks.append(
                 _check(
                     f"setup {_label(repo)}",
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
-                    ' (use "" if this repo deliberately needs no preparation), or tick '
+                    f' (use "" if this repo deliberately needs no preparation){again}, or tick '
                     "No setup needed under Templates › Repos",
                 )
             )
+        if (tests := _tests_check(repo, probed)) is not None:
+            checks.append(tests)
         unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
         if unrecognised:
             # Loaded, with a warning nobody may be reading: a key that binds

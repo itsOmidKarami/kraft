@@ -13,6 +13,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from support.pidfile import hold_pidfile
 
 from kraft import cli, update
 from kraft.paths import RunDirs
@@ -66,10 +67,16 @@ def terminal(monkeypatch, capsys):
 
 
 @pytest.fixture
-def restarted(monkeypatch):
+def restarted(monkeypatch, tmp_path):
+    """`_restart`, recorded instead of run, behind a server that holds its
+    pidfile: restart refuses outright when none does."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
+    held = hold_pidfile(RunDirs(tmp_path / "run").pid, 4171)
     calls = []
     monkeypatch.setattr(cli.admin, "_restart", lambda ns: calls.append(ns))
-    return calls
+    yield calls
+    held.release()
 
 
 @pytest.mark.parametrize(
@@ -104,6 +111,8 @@ def test_restart_lists_active_items_and_asks_in_a_terminal(
 
 @pytest.mark.parametrize("active", [[], None], ids=["none-active", "no-server"])
 def test_restart_with_nothing_running_does_not_ask(board, terminal, restarted, capsys, active):
+    """`no-server`: the listing gets no answer from a server that holds its
+    pidfile. With no server at all, restart refuses (test_admin.py)."""
     board["active"] = active
     terminal.answer = "n"
     cli.main(["admin", "restart"])
@@ -115,15 +124,11 @@ def test_restart_with_nothing_running_does_not_ask(board, terminal, restarted, c
 def test_stop_lists_active_items_but_never_asks(board, terminal, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     run_dirs = RunDirs(tmp_path / "run")
-    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
-    run_dirs.pid.write_text("4171")
-    alive = [True]
+    held = hold_pidfile(run_dirs.pid, 4171)
 
     def fake_kill(pid, sig):
-        if sig == 0 and not alive[0]:
-            raise ProcessLookupError
-        if sig != 0:
-            alive[0] = False
+        held.release()  # the server's exit drops its lock and its file
+        run_dirs.pid.unlink()
 
     monkeypatch.setattr(os, "kill", fake_kill)
     terminal.answer = "n"
@@ -173,15 +178,13 @@ def test_stop_does_not_wait_on_a_server_that_never_answers(tmp_path, monkeypatch
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setattr(cli.admin, "_LIST_TIMEOUT", 0.3, raising=False)
     run_dirs = RunDirs(tmp_path / "run")
-    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
-    run_dirs.pid.write_text("4171")
+    held = hold_pidfile(run_dirs.pid, 4171)
     signalled = []
 
     def fake_kill(pid, sig):
-        if sig == 0 and signalled:
-            raise ProcessLookupError
-        if sig != 0:
-            signalled.append(time.monotonic())
+        signalled.append(time.monotonic())
+        held.release()  # the server's exit drops its lock and its file
+        run_dirs.pid.unlink()
 
     monkeypatch.setattr(os, "kill", fake_kill)
     began = time.monotonic()

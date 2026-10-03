@@ -17,6 +17,7 @@ import pytest
 import uvicorn
 import yaml
 from support.harness import fake_templates_dir
+from support.pidfile import hold_pidfile
 from support.server import child_env, output_of
 
 from kraft import cli, client
@@ -238,8 +239,7 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys)
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
     pid_path = RunDirs(tmp_path / "run").pid
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(os.getpid()))
+    held = hold_pidfile(pid_path)
     monkeypatch.setattr(
         cli.admin._SignalLoggingServer,
         "run",
@@ -249,6 +249,7 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys)
         cli.admin._serve()
     assert "already running" in capsys.readouterr().err
     assert pid_path.exists()
+    held.release()
 
 
 def test_a_stale_pidfile_does_not_block_serve(tmp_path, monkeypatch):
@@ -271,16 +272,13 @@ def test_a_stale_pidfile_does_not_block_serve(tmp_path, monkeypatch):
 def test_stop_signals_the_running_pid(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     pid_path = RunDirs(tmp_path / "run").pid
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text("4171")
-    signalled, alive = [], [True]
+    held = hold_pidfile(pid_path, 4171)
+    signalled = []
 
     def fake_kill(pid, sig):
-        if sig == 0 and not alive[0]:
-            raise ProcessLookupError
-        if sig != 0:
-            signalled.append((pid, sig))
-            alive[0] = False
+        signalled.append((pid, sig))
+        held.release()  # the server's exit drops its lock and its file
+        pid_path.unlink()
 
     monkeypatch.setattr(os, "kill", fake_kill)
     cli.main(["admin", "stop"])
@@ -300,17 +298,19 @@ def test_stop_waits_for_the_process_to_actually_exit(tmp_path, monkeypatch, caps
         [
             sys.executable,
             "-c",
-            "import signal,sys,time\n"
+            "import signal,sys,time\nfrom kraft import pidfile\nfrom pathlib import Path\n"
             "signal.signal(signal.SIGTERM, lambda *a: (time.sleep(1.5), sys.exit(0)))\n"
-            "time.sleep(30)\n",
-        ]
+            "fd = pidfile.hold(Path(sys.argv[1])); print(flush=True); time.sleep(30)\n",
+            str(pid_path),
+        ],
+        stdout=subprocess.PIPE,
     )
     # Reaped as it exits: an unwaited child stays a zombie, and `os.kill(pid, 0)`
     # succeeds on a zombie. The real daemon is never the stopping shell's child.
     reaper = threading.Thread(target=proc.wait, daemon=True)
     reaper.start()
     try:
-        pid_path.write_text(str(proc.pid))
+        proc.stdout.readline()  # it holds the pidfile, as a server does
         cli.main(["admin", "stop"])
         assert proc.poll() is not None, "stop returned while the process was still alive"
         assert f"stopped (pid {proc.pid})" in capsys.readouterr().out
@@ -467,11 +467,14 @@ def test_serve_records_detached_mode_when_asked(tmp_path, monkeypatch):
     assert seen["mode"] == "detached"
 
 
-def test_restart_with_no_server_is_not_an_error(tmp_path, monkeypatch, capsys):
+def test_restart_with_no_server_says_nothing_was_restarted_and_fails(tmp_path, monkeypatch, capsys):
+    """It exited 0 having started nothing, so `restart && ...` went on with no server."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
-    cli.main(["admin", "restart"])
-    assert "no server running" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["admin", "restart"])
+    assert exc.value.code == 1
+    assert "no server running, so nothing was restarted" in capsys.readouterr().err
 
 
 def test_start_detached_waits_for_health_not_just_the_pidfile(tmp_path, monkeypatch, capsys):
@@ -481,8 +484,8 @@ def test_start_detached_waits_for_health_not_just_the_pidfile(tmp_path, monkeypa
     run_dirs = RunDirs(tmp_path / "run").ensure()
     FakeProc = type("FakeProc", (), {"poll": lambda self: None})
 
-    def fake_popen(*a, **k):  # pidfile before health, like a real child; own pid reads "alive"
-        run_dirs.pid.write_text(str(os.getpid()))
+    def fake_popen(*a, **k):  # pidfile before health, like a real child, and held as one holds it
+        fake_popen.held = hold_pidfile(run_dirs.pid)
         return FakeProc()
 
     monkeypatch.setattr(cli.admin.subprocess, "Popen", fake_popen)
@@ -502,16 +505,12 @@ def test_start_detached_waits_for_health_not_just_the_pidfile(tmp_path, monkeypa
 def test_restart_brings_a_detached_server_back_detached(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     run_dirs = RunDirs(tmp_path / "run")
-    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
-    run_dirs.pid.write_text("4171")
+    held = hold_pidfile(run_dirs.pid, 4171)
     run_dirs.mode.write_text("detached")
-    alive = [True]
 
     def fake_kill(pid, sig):
-        if sig == 0 and not alive[0]:
-            raise ProcessLookupError
-        if sig != 0:
-            alive[0] = False
+        held.release()  # the server's exit drops its lock and its file
+        run_dirs.pid.unlink()
 
     monkeypatch.setattr(os, "kill", fake_kill)
     monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
@@ -527,16 +526,12 @@ def test_restart_refuses_to_guess_at_an_attached_server(tmp_path, monkeypatch, c
     in -- stop it, and say so, rather than silently starting it detached."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     run_dirs = RunDirs(tmp_path / "run")
-    run_dirs.pid.parent.mkdir(parents=True, exist_ok=True)
-    run_dirs.pid.write_text("4171")
+    held = hold_pidfile(run_dirs.pid, 4171)
     run_dirs.mode.write_text("attached")
-    alive = [True]
 
     def fake_kill(pid, sig):
-        if sig == 0 and not alive[0]:
-            raise ProcessLookupError
-        if sig != 0:
-            alive[0] = False
+        held.release()  # the server's exit drops its lock and its file
+        run_dirs.pid.unlink()
 
     monkeypatch.setattr(os, "kill", fake_kill)
     monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)

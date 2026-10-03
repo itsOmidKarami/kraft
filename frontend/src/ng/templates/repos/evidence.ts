@@ -1,4 +1,5 @@
 import type { MissingTool, ProbeCandidate, ProbeStop } from "../../../types/settings";
+import { NO_TESTS } from "./fields";
 
 /** What a probe read its proposal from: the sources of the chosen `role`
  *  commands ("justfile recipe `test`"), or null when it chose none. A test
@@ -99,7 +100,7 @@ type Tested = { test_command?: unknown; test_scopes?: unknown };
 export function testsCell(e: Tested): string {
   const scopes = Array.isArray(e.test_scopes) ? e.test_scopes.length : 0;
   const cmd = typeof e.test_command === "string" ? e.test_command : "";
-  if (!scopes) return cmd || "—";
+  if (!scopes) return e.test_command === "" ? NO_TESTS : cmd || "—";
   return `${cmd || "no root command"} + ${scopes} scope${scopes === 1 ? "" : "s"}`;
 }
 

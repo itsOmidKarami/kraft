@@ -95,6 +95,11 @@ export function AboutPage() {
             <span className={`set-verdict is-${verdict.tone}`} role="status">{verdict.text}</span>
           </div>
           {error && <span className="set-error" role="alert">{error}</span>}
+          {health?.installed && health.version && health.installed !== health.version && (
+            <p className="set-hint is-warn" role="status">
+              This server is still running {health.version}, and {health.installed} is installed. Restart it to finish the update: <code>kraft admin restart</code>
+            </p>
+          )}
           <p className="set-hint">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
           <div className="set-command">
             <code>{command}</code>

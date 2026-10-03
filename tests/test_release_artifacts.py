@@ -224,6 +224,17 @@ def _steps() -> list[str]:
     return re.findall(r"- (?:name: (.+)|uses: .+)", RELEASE_YML.read_text())
 
 
+def test_the_wheel_is_built_with_the_tagged_commits_time():
+    """Without `SOURCE_DATE_EPOCH`, two builds of one tag differed in the zip
+    dates of every bundled file, so nobody could re-derive the published
+    sha256 from the tag."""
+    text = RELEASE_YML.read_text()
+    start = text.index("- name: tag locally, then build")
+    step = text[start : text.index("\n      - ", start + 1)]
+    epoch = step.find('export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"')
+    assert -1 < epoch < step.index("just bundle") < step.index("uv build --wheel")
+
+
 def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
     names = [n for n in _steps() if n]
     pin, build, smoke = (

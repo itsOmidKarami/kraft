@@ -23,7 +23,7 @@ import httpx
 import uvicorn
 import yaml
 
-from kraft import client, config, permission_hooks, render
+from kraft import client, config, permission_hooks, pidfile, render
 from kraft.cli import common, templates
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 from kraft.policy import CarriedPolicy
@@ -196,7 +196,7 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
 
 
 def seed_home(templates_dir: Path) -> bool:
-    """Copy the packaged config into an empty home. True if it seeded.
+    """Copy the packaged config into a home that has none. True if it seeded.
 
     Only ever creates. An upgrade must not overwrite a policy the operator
     edited, and `access.yaml` is never bundled — it holds a password hash and a
@@ -206,19 +206,86 @@ def seed_home(templates_dir: Path) -> bool:
     anyone who points `KRAFT_TEMPLATES_DIR` at a checkout with a live
     notify.yaml and runs `just install` -- if either file ever slips into
     `BUNDLED / "templates"`, it must still not reach a seeded home.
+
+    A directory made before the first start, holding only what the docs say
+    to write there (a `sandbox.yaml`, a `detectors.yaml`), has no
+    `library.yaml`: each bundled file it lacks is added beside the ones it
+    has, and the whole directory is then the operator's alone, as a seeded
+    one is. A home with a `library.yaml` was seeded, and one with a legacy
+    registry is a pre-V1 home for `kraft admin update`; neither is touched.
+    Nor is a directory holding none of Kraft's config names: a mistyped
+    `KRAFT_TEMPLATES_DIR` must not fill some other directory with it.
     """
-    if finish_interrupted_update(templates_dir) or templates_dir.exists():
+    from kraft.templates.library import LIBRARY_FILE, is_pre_v1
+
+    if finish_interrupted_update(templates_dir):
+        return False
+    if templates_dir.exists() and (
+        (templates_dir / LIBRARY_FILE).exists() or is_pre_v1(templates_dir)
+    ):
         return False
     if not (BUNDLED / "templates").is_dir():
+        if templates_dir.exists():
+            return False  # a config directory pointed at by hand, in a source checkout
         raise SystemExit(
             f"kraft: no config in {templates_dir} and no bundled defaults to seed it "
             "with. This build shipped without them — reinstall with `just install`, "
             "or point KRAFT_TEMPLATES_DIR at a config directory."
         )
+    if templates_dir.exists() and not _holds_config(templates_dir):
+        return False
     # Build beside the target and rename: an interrupted copy must not leave a
     # half-seeded home that every later start then treats as already seeded.
-    _stage_bundle(templates_dir).rename(templates_dir)
+    staging = _stage_bundle(templates_dir)
+    if not templates_dir.exists():
+        staging.rename(templates_dir)
+        return True
+    # Moved in one at a time, `library.yaml` last: it is what marks a home
+    # seeded, so a fill cut short is finished by the next start.
+    for entry in sorted(staging.iterdir(), key=lambda p: p.name == LIBRARY_FILE):
+        _move_missing(entry, templates_dir / entry.name)
+    shutil.rmtree(staging, ignore_errors=True)
+    _operators_alone(templates_dir)
     return True
+
+
+def _holds_config(directory: Path) -> bool:
+    """Empty (dotfiles aside), or holding at least one name Kraft's config
+    uses: a templates directory someone started, not an unrelated one."""
+    names = {p.name for p in directory.iterdir() if not p.name.startswith(".")}
+    known = {p.name for p in (BUNDLED / "templates").iterdir()}
+    return not names or bool(names & (known | set(MACHINE_CONFIG) | CONFIG_EXTRAS))
+
+
+#: Config files a templates directory can hold that are neither bundled nor
+#: carried across a major update: read when present, never seeded.
+CONFIG_EXTRAS = frozenset({"sandbox.yaml", "detectors.yaml"})
+
+
+def _operators_alone(root: Path) -> None:
+    """`root` and everything under it the operator's alone, as every file
+    Kraft saves there is (`config.write_text` creates 0600) and as `run/` is:
+    directories 0700, files 0600. A symlink is left as it is."""
+    root.chmod(0o700)
+    for parent, dirs, files in os.walk(root):
+        for name in dirs:
+            path = os.path.join(parent, name)
+            if not os.path.islink(path):
+                os.chmod(path, 0o700)
+        for name in files:
+            path = os.path.join(parent, name)
+            if not os.path.islink(path):
+                os.chmod(path, 0o600)
+
+
+def _move_missing(source: Path, target: Path) -> None:
+    """Move `source` to `target` where `target` has nothing; into a directory
+    that exists, each of its entries the same way. Never replaces a file."""
+    if not target.exists() and not target.is_symlink():
+        source.rename(target)
+    elif source.is_dir() and target.is_dir():
+        for entry in source.iterdir():
+            _move_missing(entry, target / entry.name)
 
 
 def _stage_bundle(templates_dir: Path) -> Path:
@@ -236,15 +303,9 @@ def _stage_bundle(templates_dir: Path) -> Path:
     # Deliberately not `.yaml`, so nothing that globs this directory's YAML
     # ever reads the stamp as configuration.
     (staging / ".seeded-version").write_text(f"{_version()}\n")
-    # The operator's alone, as every file Kraft saves there is (`config.
-    # write_text` creates 0600) and as `run/` is: the copy would otherwise
-    # carry the package's 0644 until its first save from Settings.
-    staging.chmod(0o700)
-    for parent, dirs, files in os.walk(staging):
-        for name in dirs:
-            os.chmod(os.path.join(parent, name), 0o700)
-        for name in files:
-            os.chmod(os.path.join(parent, name), 0o600)
+    # The copy would otherwise carry the package's 0644 until its first save
+    # from Settings.
+    _operators_alone(staging)
     return staging
 
 
@@ -388,28 +449,25 @@ def _pid_path() -> Path:
 
 
 def _read_pid(path: Path) -> int | None:
-    """The live pid in `path`, or None - clearing the file when it is stale.
+    """The pid of this run dir's live server, or None - clearing a stale file.
 
-    A pidfile that outlived a SIGKILLed server names nothing, so no caller may
-    treat its existence alone as "a server is running".
+    A pidfile that outlived its server names nothing, and its pid may since
+    have gone to another process, so no caller may treat the file alone as
+    "a server is running" (`kraft.pidfile` says how a pid is confirmed).
+    `_refuse_if_addr_taken` closes the common two-run-dirs-one-port case
+    (Kraft-kquf).
     """
-    # ponytail: a pid can be recycled, so a stale file could name an unrelated
-    # process; check the command name too if that ever bites. `_refuse_if_addr_taken`
-    # closes the common two-run-dirs-one-port case (Kraft-kquf); a race between
-    # that check and the actual bind is still possible but is now a window of
-    # milliseconds, not "always collides silently".
-    try:
-        pid = int(path.read_text())
-    except (FileNotFoundError, ValueError):
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        path.unlink(missing_ok=True)
-        return None
-    except PermissionError:
-        pass  # alive, and not ours to signal
-    return pid
+    state = pidfile.read(path)
+    if state.running:
+        return state.pid
+    if state.pid is not None or path.is_file():
+        cleared = pidfile.clear_stale(path, state.pid)
+        if cleared and state.why != "is not running":
+            # A dead pid is the ordinary stale file and needs no word. One
+            # naming somebody else's process is what this check is for.
+            what = f"pid {state.pid} {state.why}" if state.pid is not None else state.why
+            print(f"kraft: removed a stale pidfile: {what}", file=sys.stderr)
+    return None
 
 
 def _update_notice() -> None:
@@ -543,9 +601,8 @@ class _SignalLoggingServer(uvicorn.Server):
     removed at delivery would make `_cmd_stop` print "stopped" while the old
     process is still alive, and would let a second `_serve` past both the
     pidfile check and the address probe (uvicorn closes the listening socket
-    first) onto the same run dir. The pidfile of a process that died
-    signal-killed is stale, not a conflict, and `_read_pid` is what clears
-    it -- it checks the pid is alive on every read.
+    first) onto the same run dir. `_serve`'s `_exit_on_signal` clears it once
+    the drain is over.
     """
 
     def handle_exit(self, sig, frame):
@@ -574,18 +631,30 @@ def _serve() -> None:
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
-    if running is not None:
+    # The lock, not the read, is what keeps a second server out: two starts
+    # racing past the read cannot both take it. It is held until this process
+    # exits, however it exits (`kraft.pidfile`).
+    held = pidfile.hold(pid_path) if running is None else None
+    if held is None:
         # Two servers on one run dir share databases and worktrees, and only
         # collide on the port if they were given the same one.
+        running = running or pidfile.read(pid_path).pid
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
 
-    # A signal landing between here and `server.run()` installing uvicorn's
-    # own handlers kills the process outright: no handler, no `finally`, no
-    # `handle_exit`, and the pidfile outlives it. That file names a dead pid,
-    # which `_read_pid` detects and clears on the next read -- so the gap
-    # needs no handler of its own.
-    pid_path.write_text(str(os.getpid()))
+    def _exit_on_signal(sig, frame):
+        # uvicorn re-raises the SIGTERM it drained on, with this handler put
+        # back, so the `finally` below never runs on the most common way a
+        # server stops (`kraft admin stop`, a service manager, a reboot).
+        # Clear the files here, then die by the signal as before: a service
+        # manager reads that as a clean stop. A SIGTERM before uvicorn's
+        # own handlers are in lands here too.
+        pid_path.unlink(missing_ok=True)
+        RunDirs(pid_path.parent).mode.unlink(missing_ok=True)
+        signal.signal(sig, signal.SIG_DFL)
+        os.kill(os.getpid(), sig)
+
+    previous = signal.signal(signal.SIGTERM, _exit_on_signal)
     # So `kraft admin restart` starts it back up the same way it was running:
     # `_start_detached` marks its child with KRAFT_DETACHED before exec'ing
     # into this same function.
@@ -624,6 +693,8 @@ def _serve() -> None:
     finally:
         pid_path.unlink(missing_ok=True)
         RunDirs(pid_path.parent).mode.unlink(missing_ok=True)
+        os.close(held)
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _cmd_start(ns: argparse.Namespace) -> None:
@@ -885,7 +956,20 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
     this only stops it and says so -- restarting it is that terminal's job.
     """
     _confirm_running_agents(ns, "restarting", ask=True)
+    _refuse_restart_with_no_server()
     _restart(ns)
+
+
+def _refuse_restart_with_no_server() -> None:
+    """`kraft admin restart` with nothing to restart. Not a quiet success: a
+    script running `restart` wants a server after it. `update --restart`
+    does not ask this; with no server, it has nothing to restart."""
+    if not _service_installed() and _read_pid(_pid_path()) is None:
+        print(
+            "kraft: no server running, so nothing was restarted - start it: kraft admin start",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def _restart(ns: argparse.Namespace) -> None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import pathlib
 import plistlib
 import shutil
@@ -15,6 +14,7 @@ import uuid
 
 import pytest
 from support.harness import fake_templates_dir
+from support.pidfile import hold_pidfile
 
 from kraft import cli
 from kraft.paths import RunDirs
@@ -91,9 +91,7 @@ def test_install_service_refuses_while_a_daemon_is_running(tmp_path, monkeypatch
     """Installing while a daemon runs must not produce two daemons on one
     run dir -- and must not touch the filesystem at all, on any platform."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    pid_path = RunDirs(tmp_path / "run").pid
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(os.getpid()))
+    held = hold_pidfile(RunDirs(tmp_path / "run").pid)
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **k: pytest.fail("touched the service manager")
     )
@@ -101,6 +99,7 @@ def test_install_service_refuses_while_a_daemon_is_running(tmp_path, monkeypatch
         cli.main(["admin", "install-service"])
     assert not cli.admin._launchd_plist_path().exists()
     assert not cli.admin._systemd_unit_path().exists()
+    held.release()
 
 
 def test_launchd_plist_content(tmp_path, monkeypatch):

@@ -298,6 +298,20 @@ describe("Repos page: the Config rows", () => {
     expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { setup_command: null } }]);
   });
 
+  it("says a repo whose test command is \"\" has no tests and passes verify, where clearing it would stop its items", async () => {
+    cleanPreview();
+    const repos = REPOS.map((r) => (r.name === "platform" ? { ...r, entry: { ...r.entry, test_command: "" } } : r));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ resolved: { repos, detected: DETECTED } as never })));
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    expect(screen.getByRole("button", { name: /^test command, no tests \(passes verify\)/ })).toBeInTheDocument();
+    const none = screen.getByRole("checkbox", { name: "No tests" });
+    expect(none).toBeChecked();
+    await userEvent.click(none);
+    await waitFor(() => expect(d.postOps).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(d.postOps).mock.calls[0][2]).toEqual([{ op: "set_repo", path: "/src/platform", patch: { test_command: null } }]);
+  });
+
   it("clears a value this repo sets with Reset, which sends null", async () => {
     cleanPreview();
     mount();

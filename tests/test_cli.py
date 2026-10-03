@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+from support.pidfile import hold_pidfile
 from support.server import child_env
 
 from kraft import cli, paths
@@ -96,10 +97,61 @@ def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):
     _bundle(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
     home.mkdir(parents=True)
+    (home / "library.yaml").write_text("tasks: {mine: {}}\n")
     (home / "policy.yaml").write_text("loops: {mine: 1}\n")
 
     assert cli.seed_home(home) is False
     assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
+    assert not (home / "chains").exists()  # a seeded home's deleted file stays deleted
+
+
+def test_a_templates_dir_made_before_the_first_start_gets_the_rest_seeded(monkeypatch, tmp_path):
+    """The sandbox and detectors pages say to write a file into templates/. Made
+    before the first start, that directory kept the whole bundle out, and the
+    server came up degraded, refusing work. Each file it lacks is seeded; none
+    it has is touched."""
+    _bundle(monkeypatch, tmp_path)
+    home = tmp_path / "home" / "templates"
+    (home / "chains").mkdir(parents=True)
+    home.chmod(0o755)
+    (home / "sandbox.yaml").write_text("cli: podman\n")
+    (home / "sandbox.yaml").chmod(0o644)
+    (home / "policy.yaml").write_text("loops: {mine: 1}\n")
+    (home / "chains" / "mine.yaml").write_text("id: mine\n")
+
+    assert cli.seed_home(home) is True
+    assert (home / "sandbox.yaml").read_text() == "cli: podman\n"
+    assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
+    assert (home / "chains" / "mine.yaml").read_text() == "id: mine\n"
+    assert (home / "library.yaml").read_text() == "tasks: {}\n"
+    assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
+    assert not (home / "notify.yaml").exists()
+    assert not home.with_name("templates.seeding").exists()
+    modes = {p.relative_to(home).as_posix(): p.stat().st_mode & 0o777 for p in home.rglob("*")}
+    assert (home.stat().st_mode & 0o777, modes.pop("chains")) == (0o700, 0o700)
+    assert set(modes.values()) == {0o600}, modes
+    assert cli.seed_home(home) is False
+
+
+def test_a_directory_holding_no_kraft_config_is_not_seeded(monkeypatch, tmp_path):
+    """A mistyped KRAFT_TEMPLATES_DIR naming somebody's project: left alone."""
+    _bundle(monkeypatch, tmp_path)
+    elsewhere = tmp_path / "project"
+    elsewhere.mkdir()
+    (elsewhere / "README.md").write_text("mine\n")
+
+    assert cli.seed_home(elsewhere) is False
+    assert [p.name for p in elsewhere.iterdir()] == ["README.md"]
+
+
+def test_a_pre_v1_home_is_left_for_the_major_update(monkeypatch, tmp_path):
+    _bundle(monkeypatch, tmp_path)
+    home = tmp_path / "home" / "templates"
+    home.mkdir(parents=True)
+    (home / "registry.yaml").write_text("hooks: {}\n")
+
+    assert cli.seed_home(home) is False
+    assert [p.name for p in home.iterdir()] == ["registry.yaml"]
 
 
 def test_seed_home_says_so_when_there_is_nothing_to_seed_with(monkeypatch, tmp_path):
@@ -161,6 +213,7 @@ def test_the_stamp_is_not_yaml_so_load_templates_never_sees_it(monkeypatch, tmp_
 def test_seeding_an_existing_home_still_does_nothing(tmp_path):
     home = tmp_path / "home" / "templates"
     home.mkdir(parents=True)
+    (home / "library.yaml").write_text("tasks: {}\n")
 
     assert cli.seed_home(home) is False
     assert not (home / ".seeded-version").exists()
@@ -176,9 +229,10 @@ def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch, capsys):
 
 
 def _servable_home(monkeypatch, tmp_path, access_yaml: str) -> Path:
-    """A templates dir that already exists, so _serve() skips seeding."""
+    """A templates dir already seeded, so _serve() skips seeding."""
     home = tmp_path / "templates"
     home.mkdir()
+    (home / "library.yaml").write_text("tasks: {}\n")
     (home / "access.yaml").write_text(access_yaml)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
     # setenv, not delenv: `kraft serve --host` writes KRAFT_HOST into os.environ,
@@ -335,13 +389,14 @@ def test_detach_returns_once_the_child_is_up(monkeypatch, tmp_path, capsys):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    # `_read_pid` clears a pidfile naming a dead pid, so the "child" has to
-    # write one that is actually alive — this test process's own.
+    # `_read_pid` clears a pidfile no live server holds, so the "child" has to
+    # hold one, as a real server does (support.pidfile).
     fake_child_pid = str(os.getpid())
+    held = []
 
     def fake_popen(*args, **kwargs):
         return _FakePopen(
-            on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(fake_child_pid)
+            on_start=lambda: held.append(hold_pidfile(paths.RunDirs(run_dir).ensure().pid))
         )
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
@@ -366,12 +421,12 @@ def test_the_detached_child_imports_kraft_not_the_shell_cwd(monkeypatch, tmp_pat
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    argvs = []
+    argvs, held = [], []
 
     def fake_popen(argv, **kwargs):
         argvs.append(argv)
         return _FakePopen(
-            on_start=lambda: paths.RunDirs(run_dir).ensure().pid.write_text(str(os.getpid()))
+            on_start=lambda: held.append(hold_pidfile(paths.RunDirs(run_dir).ensure().pid))
         )
 
     async def healthy():
@@ -402,13 +457,12 @@ def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, caps
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-    pid_path = paths.RunDirs(run_dir).pid
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(os.getpid()))
+    held = hold_pidfile(paths.RunDirs(run_dir).pid)
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("spawned a second server"))
     with pytest.raises(SystemExit):
         cli.main(["admin", "start", "--detach"])
     assert "already running" in capsys.readouterr().err
+    held.release()
 
 
 def test_detach_reports_a_child_that_exits_before_binding(monkeypatch, tmp_path, capsys):

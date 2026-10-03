@@ -70,6 +70,11 @@ describe("probe evidence", () => {
     expect(testsCell({})).toBe("—");
   });
 
+  it("lists a repo whose test command is \"\" as having no tests, which passes verify, never as not set", () => {
+    expect(testsCell({ test_command: "" })).toBe("no tests (passes verify)");
+    expect(testsCell({ test_command: null })).toBe("—");
+  });
+
   it("names the root as the root in a stop", () => {
     expect(stopLine({ dir: ".", reason: "a project", detector: "ruby" })).toBe("the root is a project");
     expect(stopLine({ dir: "api", reason: "a project", detector: "ruby" })).toBe("api/ is a project");

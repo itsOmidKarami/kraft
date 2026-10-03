@@ -493,9 +493,11 @@ class _StubEmbedder:
     """Deterministic 384-d vectors: identical text embeds identically."""
 
     model_name = "stub-model"
+    loaded = True
 
-    def __init__(self, available=True):
+    def __init__(self, available=True, failing=None):
         self._available = available
+        self._failing = failing  # installed, but the model will not load: why
         self.reason = None if available else "stub unavailable"
 
     def available(self):
@@ -511,6 +513,9 @@ class _StubEmbedder:
         return [self._vec(t) for t in texts] if self._available else None
 
     def encode(self, texts):
+        if self._failing:
+            self.reason = self._failing
+            raise OSError(self._failing)
         if not self._available:
             raise RuntimeError(self.reason)
         return [self._vec(t) for t in texts]
@@ -546,6 +551,22 @@ async def test_hybrid_without_an_embedder_degrades_to_fts(tmp_path, database):
     hits, served = ix.search_with_mode("reconnect", mode="hybrid")
     assert served == "fts"
     assert [h["path"] for h in hits] == [".engineering/specs/ws.md"]
+
+
+async def test_a_model_that_will_not_load_degrades_hybrid_and_refuses_vector(tmp_path, database):
+    """The `vector` extra installed, the model not downloadable (offline, a
+    proxy): hybrid, the default, answered 500 instead of degrading to text."""
+    repo, ix = _indexed(tmp_path, database, _StubEmbedder(failing="403 Forbidden"))
+    await ix.startup_scan()
+
+    hits, served = ix.search_with_mode("reconnect", mode="hybrid")
+
+    assert served == "fts"
+    assert [h["path"] for h in hits] == [".engineering/specs/ws.md"]
+    with pytest.raises(RuntimeError, match="403 Forbidden"):
+        ix.search_with_mode("reconnect", mode="vector")
+    assert ix.health()["embeddings"]["state"] == "failing"
+    assert ix.vector_failing() == "403 Forbidden"
 
 
 async def test_vector_search_finds_documents_and_respects_filters(tmp_path, database):

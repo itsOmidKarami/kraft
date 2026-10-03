@@ -55,6 +55,21 @@ def test_health_reports_port_and_version(client):
     assert isinstance(h["version"], str) and h["version"]
 
 
+def test_health_reports_the_running_version_after_an_update_on_disk(client, monkeypatch):
+    """`kraft admin update` without `--restart` replaces the package under a
+    running server. `version` is what this process loaded, `installed` what a
+    restart would run, and the two differ until that restart."""
+    from kraft import update
+
+    running = client.get("/api/health").json()["version"]
+    monkeypatch.setattr(update, "installed", lambda: "99.0.0")
+
+    h = client.get("/api/health").json()
+
+    assert (h["version"], h["installed"]) == (running, "99.0.0")
+    assert running != "99.0.0"
+
+
 def test_health_reports_how_long_the_process_has_been_up(client):
     """`uptime_s` counts from the app's start, in whole seconds, so About can say "up 3d 4h"."""
     client.app.state.started_at = time.monotonic() - 3725

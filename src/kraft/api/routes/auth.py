@@ -132,6 +132,12 @@ async def health(request: Request):
         # public: the login screen's "stay signed in · N days" needs this
         # before a session exists to ask `/access` for it.
         "session_expiry_days": st.access["session_expiry_days"],
-        # public: the sidebar footer names its own build (UI v2 · 01)
-        "version": update_mod.installed(),
+        # public: the sidebar footer names its own build (UI v2 · 01). The
+        # version this process is running, not what is on disk now:
+        # `kraft admin update` without `--restart` leaves the old server up.
+        "version": getattr(st, "version", None) or update_mod.installed(),
+        # public: what a restart would run. Differs from `version` between an
+        # update and the restart that finishes it; the SPA and `admin doctor`
+        # both say so.
+        "installed": update_mod.installed(),
     }

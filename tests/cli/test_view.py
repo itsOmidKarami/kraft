@@ -24,6 +24,19 @@ def test_list_refuses_a_status_typo_instead_of_showing_an_empty_board(capsys):
     assert "invalid choice: 'needs-human'" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "note", [None, "vector search is failing (403), so this is text search only"]
+)
+def test_search_prints_why_it_fell_back_to_text(note):
+    hit = {"kind": "specs", "repo": "/r", "path": "a.md"}
+    payload = {"mode": "fts", "results": [hit], **({"note": note} if note else {})}
+
+    out = view._render_search(payload)
+
+    assert "a.md" in out
+    assert (f"note: {note}" in out) if note else ("note:" not in out)
+
+
 def test_search_renders_results(monkeypatch, capsys):
     """One row per hit, with `--limit` passed through to the API."""
     seen = []
