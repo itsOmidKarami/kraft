@@ -3,13 +3,21 @@ import type { ChainNode, KraftEvent } from "../../types";
 import type { GateView } from "../graph/GateView";
 import type { Sel } from "../graph/usePaneSelection";
 import { rejectTarget } from "./graph";
-import { sessionLook, sessionsOf } from "./nodeGraph";
+import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
 import { gateDecision } from "./panes/GatePane";
-import { materialized, nodeAt } from "./chainValues";
+import { ENDED, materialized, nodeAt } from "./chainValues";
 import { taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 
 type Props = ComponentProps<typeof GateView>;
+
+/** What clicking a gate's reviewer selects: its `auto_review` task when the frozen chain has one, else the gate's first listed task. */
+export function reviewerSel(item: ItemDetail, gate: ChainNode): Sel {
+  const frozen = materialized(item);
+  const t = gate.tasks[0];
+  if (frozen && nodeAt(frozen, gate.id)?.auto_review) return { kind: "task", node: gate.id, step: AUTO_REVIEW, task: AUTO_REVIEW };
+  return t ? { kind: "task", node: gate.id, step: t.split(".")[1], task: taskName(t) } : { kind: "node", node: gate.id };
+}
 
 /** A gate's node view for W3's GateView (Decisions §6 Gates): its auto_review
  *  task (when it declares one) with its run state and verdict, the diamond,
@@ -22,7 +30,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
   const own = frozen ? nodeAt(frozen, gate.id) : undefined;
   const path = own?.auto_review ? `${gate.id}.auto_review` : gate.tasks[0];
   const ids = item.chain_definition.nodes.map((n) => n.id);
-  const ahead = !pending && !decided && ids.indexOf(item.current_node_id ?? "") < ids.indexOf(gate.id);
+  const ahead = !pending && !decided && !ENDED.has(item.display_status ?? "") && ids.indexOf(item.current_node_id ?? "") < ids.indexOf(gate.id);
   const last = path ? sessionsOf(item, path).at(-1) : undefined;
   const verdict = [...events].reverse().find((e) => (e.type === "gate_approved" || e.type === "gate_rejected") && (e.payload.gate ?? e.node_id) === gate.id && e.payload.by === "agent");
   const to = rejectTarget(item.chain_definition.nodes, gate.id);

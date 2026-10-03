@@ -21,7 +21,7 @@ export type ItemPolicy = (Record<string, unknown> & { paths?: Record<string, Rec
 /** A value as the chain (or what stands in for it) gives it, and where it comes from: the chip a row shows. */
 export type Given = { value: string; source: string };
 
-const ENDED = new Set(["done", "cancelled", "archived"]);
+export const ENDED = new Set(["done", "cancelled", "archived"]);
 
 /** Filed and never started: no node has run, and it has not ended. */
 export const notStarted = (item: Pick<ItemDetail, "current_node_id" | "display_status">) => !item.current_node_id && !ENDED.has(item.display_status ?? "");
@@ -45,7 +45,8 @@ function scopes(m: Materialized, path: string) {
   const [n, s, t] = path.split(".");
   const node = m.chain.nodes.find((x) => x.id === n);
   const step = node && s ? stepsOfNode(node).find((x) => x.id === s) : undefined;
-  const task = step && t ? step.tasks.find((x) => x.id === t) : undefined;
+  // A gate's reviewer is `<gate>.auto_review`: no step of the chain, but a task of its own.
+  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : undefined;
   return { node, step, task };
 }
 
