@@ -188,11 +188,9 @@ one of the five shapes above.
 
 **Removing a test means accounting for it:** name what replaces it, or
 state what it uniquely pinned — "nothing, proven by mutation" is a valid
-answer, but it has to be checked, not assumed. A declared id may end its
-function part with `*`, matching every removed test in that same file whose
-id starts with that prefix (the path part stays literal):
-`tests/test_x.py::test_prefix_* -- folded into tests/test_x.py::test_table[...]`.
-A fold declares its cluster in one line and proves one mutation per row.
+answer, but it has to be checked, not assumed. A fold declares its whole
+cluster in one wildcard line (the rule is below) and proves one mutation per
+row.
 
 CI holds a pull request to that. `dev/check_removals.py`, run by the
 `removals declared` job, fails when the PR deletes a test function (or a
@@ -204,7 +202,7 @@ per line with the reason after it:
 ## Removed tests
 - tests/test_old.py::test_gone -- replaced by tests/test_new.py::test_here
 - tests/test_dead_file.py -- the whole file went with the feature
-- tests/test_notify.py::test_get_notify_with_* -- folded into tests/test_notify.py::test_get_notify_reports_a_bad_config_file_cleanly[...]
+- tests/test_notify.py::test_get_notify_with_* -- folded into tests/test_notify.py::test_a_bad_notify_file_is_reported_cleanly[...]
 
 ## Removed requirements
 - some-req-name -- superseded by other-req-name

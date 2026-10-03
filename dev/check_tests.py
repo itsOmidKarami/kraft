@@ -56,16 +56,17 @@ Five checks, over both testpaths (`tests/` and `plugins/kraft-lite/tests/`):
       one only inside a nested function the test never names.
   (e) no helper body is copied across test files: module-level functions
       not named `test_*`, in two or more files, with the same
-      `helper_fingerprint` (from `dev/test_shape_report.py`, loaded by path:
-      the body once its docstring, annotations and keyword order are gone,
-      plus the value of every module-level constant it names). The copies
-      that existed when the rule landed are held by DUPLICATE_HELPER_CEILING,
-      two numbers that may shrink, never grow: how many such groups, and how
-      many copies they hold. Past either, the check names every group and
-      its copies, and what to import when one is a `tests/support` function
-      (underscore or not); a ceiling more than DUPLICATE_HELPER_STALE_MARGIN
-      above the real count is stale. Rule (c) is satisfied by splitting a file; this
-      is what makes a split safe.
+      `helper_fingerprint` (the body once its docstring, annotations and
+      keyword order are gone, plus the value of every module-level constant
+      it names). `helper_groups` is the one grouping, which
+      `dev/test_shape_report.py` reads too. The copies that existed when the
+      rule landed are held by DUPLICATE_HELPER_CEILING, two numbers that may
+      shrink, never grow: how many such groups, and how many copies they
+      hold. Past either, the check names every group and its copies, and
+      what to import when one is a `tests/support` function (underscore or
+      not); a ceiling more than DUPLICATE_HELPER_STALE_MARGIN above the real
+      count is stale. Rule (c) is satisfied by splitting a file; this is
+      what makes a split safe.
 
 A file this script cannot parse is a failure, not a skip: a checker that
 reads a parse error as "nothing to check here" is the exact bug this
@@ -79,17 +80,18 @@ Run directly: `uv run python dev/check_tests.py`, or `just check-tests`.
 from __future__ import annotations
 
 import ast
-import functools
-import importlib.util
+import copy
+import hashlib
 import re
 import shlex
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import NamedTuple
 
 ROOT = Path(__file__).parent.parent
-TESTS = ROOT / "tests"
-#: The other testpath (pyproject `testpaths`), relative to ROOT.
+#: The two testpaths (pyproject `testpaths`), relative to a repo root.
+TESTS = Path("tests")
 PLUGIN_TESTS = Path("plugins") / "kraft-lite" / "tests"
 
 LINE_BUDGET = 800
@@ -192,13 +194,15 @@ DUPLICATE_HELPER_CEILING = {"groups": 71, "copies": 165}
 DUPLICATE_HELPER_STALE_MARGIN = {"groups": 1, "copies": 2}
 
 
-def _test_files() -> list[Path]:
-    """Both testpaths: `tests/` and the kraft-lite plugin's own."""
-    return sorted([*TESTS.rglob("*.py"), *(ROOT / PLUGIN_TESTS).rglob("*.py")])
+def _test_files(root: Path = ROOT) -> list[Path]:
+    """Both testpaths under `root`: `tests/` and the kraft-lite plugin's own."""
+    return sorted([*(root / TESTS).rglob("*.py"), *(root / PLUGIN_TESTS).rglob("*.py")])
 
 
-def trees_and_support() -> tuple[dict[str, ast.Module], dict[str, ast.Module], list[str]]:
-    """Every file `_test_files` names, parsed and keyed by its relpath:
+def trees_and_support(
+    root: Path = ROOT,
+) -> tuple[dict[str, ast.Module], dict[str, ast.Module], list[str]]:
+    """Every file `_test_files(root)` names, parsed and keyed by its relpath:
     `tests/support/`'s apart from the rest (they are rule (e)'s import
     targets), then one message per file that would not parse. `main()` and
     `dev/test_shape_report.py --print-helper-ceiling` both read the tree
@@ -206,26 +210,27 @@ def trees_and_support() -> tuple[dict[str, ast.Module], dict[str, ast.Module], l
     trees: dict[str, ast.Module] = {}
     support: dict[str, ast.Module] = {}
     errors: list[str] = []
-    for path in _test_files():
-        tree, error = _parse(path)
+    for path in _test_files(root):
+        tree, error = _parse(path, root)
         if error is not None:
             errors.append(error)
             continue
-        relpath = path.relative_to(ROOT).as_posix()
-        (support if path.is_relative_to(TESTS / "support") else trees)[relpath] = tree
+        relpath = path.relative_to(root).as_posix()
+        (support if _in_support(relpath) else trees)[relpath] = tree
     return trees, support, errors
 
 
-def _parse(path: Path) -> tuple[ast.Module | None, str | None]:
+def _parse(path: Path, root: Path = ROOT) -> tuple[ast.Module | None, str | None]:
     """`(tree, None)` on success, `(None, message)` on a parse failure --
     never silently `None, None`: a caller that gets a failure must count it,
     not skip the file. `OSError` (permission denied, gone between listing
     and reading) counts the same as a syntax error or a bad encoding: every
-    one of them is "could not check this file", not "nothing to check"."""
+    one of them is "could not check this file", not "nothing to check". The
+    message names `path` relative to `root`."""
     try:
         return ast.parse(path.read_text(), filename=str(path)), None
     except (SyntaxError, UnicodeDecodeError, OSError) as exc:
-        return None, f"{path.relative_to(ROOT)}: could not parse ({exc})"
+        return None, f"{path.relative_to(root)}: could not parse ({exc})"
 
 
 # ---------------------------------------------------------------------------
@@ -765,23 +770,76 @@ def check_expectation_allowlist_is_current(all_test_ids: set[str]) -> list[str]:
 # (e) no duplicated helper body across test files
 # ---------------------------------------------------------------------------
 
-_SHAPE_REPORT = Path(__file__).resolve().with_name("test_shape_report.py")
+
+def _in_support(relpath: str) -> bool:
+    """A file under `tests/support/`, where the shared helpers live."""
+    return Path(relpath).is_relative_to(TESTS / "support")
 
 
-@functools.cache
-def _shape_report():
-    """`dev/test_shape_report.py`, loaded by path on first use: its
-    `helper_fingerprint` is what its duplicated-helper numbers (and
-    `--print-helper-ceiling`) group by, so this rule must group by the very
-    same one. Loaded here, not at import: the report loads this file too."""
-    spec = importlib.util.spec_from_file_location("_dev_test_shape_report_for_check", _SHAPE_REPORT)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+def _module_constants(module: ast.Module) -> dict[str, list[ast.expr]]:
+    """Every name `module` binds with a top-level `Assign`/`AnnAssign`, to the
+    value(s) it is bound to, in source order."""
+    values: dict[str, list[ast.expr]] = defaultdict(list)
+    for node in module.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in targets:
+            for name in ast.walk(target):
+                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
+                    values[name.id].append(value)
+    return dict(values)
 
 
-# A NamedTuple, not a dataclass: this file is loaded by path without a
-# `sys.modules` entry, which `@dataclass` needs to resolve its annotations.
+def helper_fingerprint(fn: ast.FunctionDef, module: ast.Module | None = None) -> str:
+    """The body of a module-level helper with everything that doesn't change
+    what it does stripped: docstring, annotations, return annotation, and
+    keyword-argument order in calls (the 17 `_git` copies differ only in
+    where `check=True` sits).
+
+    With `module` (the file `fn` is defined in), every name in the body
+    that `module` assigns at top level appends `NAME = <value>`, sorted by
+    name: nine `def _row(**f): return {**DEFAULTS, **f}` over nine different
+    `DEFAULTS` are nine helpers, not one. An imported or unknown name adds
+    nothing past the name already in the body."""
+    fn = copy.deepcopy(fn)
+    if fn.body and isinstance(fn.body[0], ast.Expr) and isinstance(fn.body[0].value, ast.Constant):
+        fn.body = fn.body[1:]
+    for node in ast.walk(fn):
+        if isinstance(node, ast.arg):
+            node.annotation = None
+        elif isinstance(node, ast.Call):
+            node.keywords.sort(key=lambda k: k.arg or "")
+    fn.returns = None
+    body = ast.unparse(fn.body)
+    if module is None:
+        return body
+    constants = _module_constants(module)
+    named = dict.fromkeys(
+        node.id
+        for stmt in fn.body
+        for node in ast.walk(stmt)
+        if isinstance(node, ast.Name) and node.id in constants
+    )
+    return "\n".join(
+        [body, *(f"{name} = {ast.unparse(v)}" for name in sorted(named) for v in constants[name])]
+    )
+
+
+def helper_key(name: str, fingerprint: str) -> str:
+    """`<name>#<first 8 hex of sha1(fingerprint)>`: a group's name, unique per body."""
+    return f"{name}#{hashlib.sha1(fingerprint.encode()).hexdigest()[:8]}"
+
+
+def most_common_name(names: Iterable[str]) -> str:
+    """The name most of `names` use, ties to the alphabetically first."""
+    counts = Counter(names)
+    return min(counts, key=lambda n: (-counts[n], n))
+
+
 class _Helper(NamedTuple):
     relpath: str
     lineno: int
@@ -797,34 +855,56 @@ class _Helper(NamedTuple):
         return ".".join([*parts[parts.index("support") :], self.name])
 
 
-def duplicate_helper_groups(
-    trees: dict[str, ast.Module], support: dict[str, ast.Module]
-) -> dict[str, list[_Helper]]:
-    """Every module-level non-`test_*` function in `trees` and `support`,
-    grouped by `helper_fingerprint` and keyed `<most common name>#<sha1[:8]>`,
-    keeping only the groups defined in two or more files. Each group's first
-    entry is the one the rest duplicate: a `tests/support` function when one
-    is in the group, else the first copy in path order."""
-    report = _shape_report()
-    by_fingerprint: dict[str, list[_Helper]] = {}
-    for relpath, tree in [*trees.items(), *support.items()]:
+class HelperGroup(NamedTuple):
+    #: `<most common name>#<sha1[:8]>`, from `helper_key`.
+    key: str
+    #: every definition with this body: a `tests/support` one first when the
+    #: group has one (the original the rest duplicate), then path order.
+    copies: list[_Helper]
+
+    @property
+    def name(self) -> str:
+        return self.key.rsplit("#", 1)[0]
+
+    @property
+    def files(self) -> list[str]:
+        return sorted({h.relpath for h in self.copies})
+
+    @property
+    def original(self) -> _Helper | None:
+        """The `tests/support` function the other copies should import, if any."""
+        return self.copies[0] if self.copies[0].in_support else None
+
+
+def helper_groups(trees: Mapping[str, ast.Module]) -> dict[str, HelperGroup]:
+    """Every module-level non-`test_*` function in `trees` (relpath -> module),
+    grouped by `helper_fingerprint` and keyed by that fingerprint, one-file
+    groups included: the one grouping both rule (e) and
+    `dev/test_shape_report.py` read."""
+    by_fingerprint: dict[str, list[_Helper]] = defaultdict(list)
+    for relpath, tree in trees.items():
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not (
                 node.name.startswith("test_")
             ):
-                by_fingerprint.setdefault(report.helper_fingerprint(node, tree), []).append(
-                    _Helper(relpath, node.lineno, node.name, relpath in support)
+                by_fingerprint[helper_fingerprint(node, tree)].append(
+                    _Helper(relpath, node.lineno, node.name, _in_support(relpath))
                 )
-    groups = {}
-    for fingerprint, found in by_fingerprint.items():
-        if len({h.relpath for h in found}) < 2:
-            continue
-        names = Counter(h.name for h in found)
-        name = min(names, key=lambda n: (-names[n], n))
-        groups[report.helper_key(name, fingerprint)] = sorted(
-            found, key=lambda h: (not h.in_support, h.relpath, h.lineno)
+    return {
+        fingerprint: HelperGroup(
+            helper_key(most_common_name(h.name for h in found), fingerprint),
+            sorted(found, key=lambda h: (not h.in_support, h.relpath, h.lineno)),
         )
-    return groups
+        for fingerprint, found in by_fingerprint.items()
+    }
+
+
+def duplicate_helper_groups(
+    trees: dict[str, ast.Module], support: dict[str, ast.Module]
+) -> list[HelperGroup]:
+    """`helper_groups` over `trees` and `support`, keeping only the groups
+    defined in two or more files."""
+    return [g for g in helper_groups({**trees, **support}).values() if len(g.files) >= 2]
 
 
 def duplicate_helper_counts(
@@ -832,7 +912,7 @@ def duplicate_helper_counts(
 ) -> dict[str, int]:
     """Copies per duplicated group: DUPLICATE_HELPER_CEILING bounds how many
     keys this has and the sum of its values."""
-    return {key: len(found) for key, found in duplicate_helper_groups(trees, support).items()}
+    return {g.key: len(g.copies) for g in duplicate_helper_groups(trees, support)}
 
 
 def duplicate_helper_totals(counts: dict[str, int]) -> dict[str, int]:
@@ -841,17 +921,16 @@ def duplicate_helper_totals(counts: dict[str, int]) -> dict[str, int]:
     return {"groups": len(counts), "copies": sum(counts.values())}
 
 
-def _group_line(key: str, found: list[_Helper]) -> str:
+def _group_line(group: HelperGroup) -> str:
     """`_git (3 copies): tests/a.py:12, tests/b.py:40 -- <what to do>`, listing
     every copy but a `tests/support` original, which the advice names."""
-    original, *copies = found
-    if original.in_support:
-        listed = copies
+    if original := group.original:
+        listed = group.copies[1:]
         fix = f"use {original.dotted} ({original.relpath}:{original.lineno})"
     else:
-        listed, fix = found, "move it into tests/support/ and import it"
+        listed, fix = group.copies, "move it into tests/support/ and import it"
     where = ", ".join(f"{h.relpath}:{h.lineno}" for h in listed)
-    return f"{key.rsplit('#', 1)[0]} ({len(found)} copies): {where} -- {fix}"
+    return f"{group.name} ({len(group.copies)} copies): {where} -- {fix}"
 
 
 def check_duplicate_helpers(
@@ -861,7 +940,7 @@ def check_duplicate_helpers(
     DUPLICATE_HELPER_CEILING; past either, one line per number over it, then
     one per group with its copies, so whoever added a copy can find it."""
     groups = duplicate_helper_groups(trees, support)
-    actual = duplicate_helper_totals({key: len(found) for key, found in groups.items()})
+    actual = duplicate_helper_totals({g.key: len(g.copies) for g in groups})
     over = [
         f"duplicated helper {what} across test files: {actual[what]}, over the ceiling of "
         f"{ceiling} (dev/check_tests.py:DUPLICATE_HELPER_CEILING) -- it may shrink, not grow"
@@ -870,7 +949,7 @@ def check_duplicate_helpers(
     ]
     if not over:
         return []
-    return [*over, *(_group_line(key, found) for key, found in groups.items())]
+    return [*over, *map(_group_line, groups)]
 
 
 def check_duplicate_helper_ceiling_is_current(counts: dict[str, int]) -> list[str]:
@@ -897,13 +976,13 @@ def main() -> int:
     actual_lines: dict[str, int] = {}
     all_test_ids: set[str] = set()
     real_cli: dict[str, int] = {}
-    for path in _test_files():
+    for path in _test_files(ROOT):
         relpath = path.relative_to(ROOT).as_posix()
         lines = _line_count(path)
         if lines is not None:
             actual_lines[relpath] = lines
         violations.extend(check_line_budget(path, relpath))
-    trees, support, errors = trees_and_support()
+    trees, support, errors = trees_and_support(ROOT)
     violations.extend(errors)
     for relpath, tree in sorted({**trees, **support}.items()):
         all_test_ids |= _test_qualnames(tree, relpath)

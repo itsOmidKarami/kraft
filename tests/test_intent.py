@@ -1,7 +1,7 @@
 import subprocess
-from pathlib import Path
 
 import pytest
+from support.harness import write
 
 from kraft import intent
 from kraft.intent import Report, Requirement, check, main, parse_collect_output, parse_file, render
@@ -24,20 +24,8 @@ WHILE an item is paused, the system SHALL NOT advance the chain.
 """
 
 
-@pytest.fixture
-def write_tree(tmp_path: Path):
-    """Write one capability file, `gates.md`, into tmp_path and return its path."""
-
-    def write(body: str = TREE) -> Path:
-        path = tmp_path / "gates.md"
-        path.write_text(body)
-        return path
-
-    return write
-
-
-def test_parse_reads_id_text_pins_and_origin(write_tree):
-    reqs = parse_file(write_tree())
+def test_parse_reads_id_text_pins_and_origin(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
 
     assert [r.id for r in reqs] == [
         "reject-records-note-and-reopens",
@@ -51,28 +39,28 @@ def test_parse_reads_id_text_pins_and_origin(write_tree):
     assert first.origin is not None and first.origin.endswith("design.md")
 
 
-def test_parse_splits_comma_separated_pins(write_tree):
-    reqs = parse_file(write_tree())
+def test_parse_splits_comma_separated_pins(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     assert reqs[1].enforced_by == (
         "tests/test_gates.py::test_one",
         "tests/test_gates.py::test_two",
     )
 
 
-def test_parse_allows_zero_pins_and_no_origin(write_tree):
-    reqs = parse_file(write_tree())
+def test_parse_allows_zero_pins_and_no_origin(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     assert reqs[2].enforced_by == ()
     assert reqs[2].origin is None
 
 
-def test_parse_records_source_line_for_reporting(write_tree):
-    reqs = parse_file(write_tree())
+def test_parse_records_source_line_for_reporting(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     # `## REQ reject-...` is the third line of the file.
     assert reqs[0].line == 3
 
 
-def test_check_flags_a_pin_that_does_not_resolve(write_tree):
-    reqs = parse_file(write_tree())
+def test_check_flags_a_pin_that_does_not_resolve(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     report = check(reqs, {"tests/test_gates.py::test_one", "tests/test_gates.py::test_two"})
 
     assert [(r.id, missing) for r, missing in report.broken] == [
@@ -81,8 +69,8 @@ def test_check_flags_a_pin_that_does_not_resolve(write_tree):
     assert report.ok is False
 
 
-def test_check_lists_unpinned_without_failing(write_tree):
-    reqs = parse_file(write_tree())
+def test_check_lists_unpinned_without_failing(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     all_ids = {
         "tests/test_gates.py::test_reject",
         "tests/test_gates.py::test_one",
@@ -95,9 +83,9 @@ def test_check_lists_unpinned_without_failing(write_tree):
     assert report.ok is True
 
 
-def test_check_flags_duplicate_ids(write_tree):
+def test_check_flags_duplicate_ids(tmp_path):
     body = TREE + "\n## REQ two-pins\nThe system SHALL do it twice.\n"
-    reqs = parse_file(write_tree(body))
+    reqs = parse_file(write(tmp_path, "gates.md", body))
     report = check(reqs, set())
 
     assert [r.id for r in report.duplicates] == ["two-pins"]
@@ -113,7 +101,7 @@ def test_report_is_empty_for_an_empty_tree(tmp_path):
     assert report.ok is True
 
 
-def test_malformed_req_id_is_reported_not_dropped(write_tree):
+def test_malformed_req_id_is_reported_not_dropped(tmp_path):
     # A capital, an underscore: fails the kebab-case id rule but still parses
     # as a heading, so it must not vanish along with its text and pins.
     body = (
@@ -129,7 +117,7 @@ def test_malformed_req_id_is_reported_not_dropped(write_tree):
         "## REQ ok-two\n"
         "The system SHALL do a third thing.\n"
     )
-    path = write_tree(body)
+    path = write(tmp_path, "gates.md", body)
     reqs = parse_file(path)
 
     # Parsing keeps the malformed requirement rather than silently dropping it.
@@ -159,8 +147,8 @@ def test_check_does_not_flag_duplicate_ids_across_different_files(tmp_path):
     assert report.ok is True
 
 
-def test_requirement_is_hashable_and_frozen(write_tree):
-    req = parse_file(write_tree())[0]
+def test_requirement_is_hashable_and_frozen(tmp_path):
+    req = parse_file(write(tmp_path, "gates.md", TREE))[0]
     assert isinstance(req, Requirement)
     assert {req}  # frozen dataclasses are hashable
 
@@ -187,8 +175,8 @@ def test_parse_collect_output_ignores_warnings_and_blank_lines():
     assert len(parse_collect_output(noisy)) == 3
 
 
-def test_render_names_the_file_and_line_of_a_broken_pin(write_tree):
-    reqs = parse_file(write_tree())
+def test_render_names_the_file_and_line_of_a_broken_pin(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     text = render(check(reqs, set()))
 
     assert "BROKEN" in text
@@ -196,8 +184,8 @@ def test_render_names_the_file_and_line_of_a_broken_pin(write_tree):
     assert "tests/test_gates.py::test_reject" in text
 
 
-def test_render_lists_unpinned_requirements(write_tree):
-    reqs = parse_file(write_tree())
+def test_render_lists_unpinned_requirements(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     all_ids = {
         "tests/test_gates.py::test_reject",
         "tests/test_gates.py::test_one",
@@ -209,9 +197,9 @@ def test_render_lists_unpinned_requirements(write_tree):
     assert "no-pin-yet" in text
 
 
-def test_render_prints_a_summary_line_even_when_everything_resolves(write_tree):
+def test_render_prints_a_summary_line_even_when_everything_resolves(tmp_path):
     # TREE has 3 requirements: one 1-pin, one 2-pin, one with no pin.
-    reqs = parse_file(write_tree())
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     all_ids = {
         "tests/test_gates.py::test_reject",
         "tests/test_gates.py::test_one",
@@ -222,15 +210,15 @@ def test_render_prints_a_summary_line_even_when_everything_resolves(write_tree):
     assert text.splitlines()[-1] == "intent: 3 requirements, 2 pinned, 1 unpinned, 0 broken"
 
 
-def test_render_summary_counts_broken_pins(write_tree):
-    reqs = parse_file(write_tree())
+def test_render_summary_counts_broken_pins(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", TREE))
     text = render(check(reqs, set()))
 
     assert text.splitlines()[-1] == "intent: 3 requirements, 2 pinned, 1 unpinned, 3 broken"
 
 
-def test_main_exits_one_on_a_broken_pin(tmp_path, write_tree, monkeypatch, capsys):
-    write_tree()
+def test_main_exits_one_on_a_broken_pin(tmp_path, monkeypatch, capsys):
+    write(tmp_path, "gates.md", TREE)
     monkeypatch.setattr("kraft.intent.collect_node_ids", lambda root: set())
 
     assert main([str(tmp_path)]) == 1
@@ -254,8 +242,8 @@ def test_a_collection_that_found_nothing_is_an_error_not_every_pin_broken(tmp_pa
     assert "ImportError while loading conftest" in str(exc.value)
 
 
-def test_main_exits_zero_when_only_unpinned(tmp_path, write_tree, monkeypatch, capsys):
-    write_tree()
+def test_main_exits_zero_when_only_unpinned(tmp_path, monkeypatch, capsys):
+    write(tmp_path, "gates.md", TREE)
     monkeypatch.setattr(
         "kraft.intent.collect_node_ids",
         lambda root: {
@@ -298,11 +286,11 @@ enforced-by: tests/test_gates.py::test_one, frontend/src/store.test.ts::derives 
 """
 
 
-def test_a_frontend_pin_counts_as_pinned_not_unpinned(write_tree):
+def test_a_frontend_pin_counts_as_pinned_not_unpinned(tmp_path):
     """Kraft-fxyz: a capability covered by a vitest test used to read as UNPINNED,
     because `collect_node_ids` asks pytest and pytest has never heard of
     `frontend/**/*.test.tsx`. Two of eleven `gates` requirements were false gaps."""
-    reqs = parse_file(write_tree(FRONTEND_TREE))
+    reqs = parse_file(write(tmp_path, "gates.md", FRONTEND_TREE))
     report = check(reqs, {"tests/test_gates.py::test_one"})
 
     assert report.unpinned == []
@@ -313,10 +301,10 @@ def test_a_frontend_pin_counts_as_pinned_not_unpinned(write_tree):
     ]
 
 
-def test_a_frontend_pin_is_never_reported_broken(write_tree):
+def test_a_frontend_pin_is_never_reported_broken(tmp_path):
     """It is unresolvable here, not wrong -- pytest's node ids are the wrong
     place to look for it, so absence from that set proves nothing."""
-    reqs = parse_file(write_tree(FRONTEND_TREE))
+    reqs = parse_file(write(tmp_path, "gates.md", FRONTEND_TREE))
     report = check(reqs, set())
 
     assert [pin for _req, pin in report.broken] == ["tests/test_gates.py::test_one"]
@@ -324,17 +312,17 @@ def test_a_frontend_pin_is_never_reported_broken(write_tree):
     assert not report.ok  # the *pytest* pin is genuinely broken
 
 
-def test_frontend_pins_alone_leave_the_report_ok(write_tree):
+def test_frontend_pins_alone_leave_the_report_ok(tmp_path):
     body = "\n".join(FRONTEND_TREE.splitlines()[:6])
-    reqs = parse_file(write_tree(body))
+    reqs = parse_file(write(tmp_path, "gates.md", body))
     report = check(reqs, set())
 
     assert report.ok
     assert len(report.unverified) == 1
 
 
-def test_render_names_frontend_pins_as_unchecked_rather_than_silent(write_tree):
-    reqs = parse_file(write_tree(FRONTEND_TREE))
+def test_render_names_frontend_pins_as_unchecked_rather_than_silent(tmp_path):
+    reqs = parse_file(write(tmp_path, "gates.md", FRONTEND_TREE))
     text = render(check(reqs, {"tests/test_gates.py::test_one"}))
 
     assert "FRONTEND" in text
@@ -344,7 +332,7 @@ def test_render_names_frontend_pins_as_unchecked_rather_than_silent(write_tree):
     )
 
 
-def test_a_frontend_pin_with_no_test_name_is_broken_not_silent_coverage(write_tree):
+def test_a_frontend_pin_with_no_test_name_is_broken_not_silent_coverage(tmp_path):
     """Nothing resolves a frontend pin, so shape is the only check left. Without
     it, `enforced-by: frontend/Board.test.tsx` reads as coverage forever -- the
     opposite failure to the one Kraft-fxyz reported, and quieter."""
@@ -354,15 +342,15 @@ def test_a_frontend_pin_with_no_test_name_is_broken_not_silent_coverage(write_tr
         "The board SHALL do a thing.\n"
         "enforced-by: frontend/src/views/board/Board.test.tsx\n"
     )
-    report = check(parse_file(write_tree(body)), set())
+    report = check(parse_file(write(tmp_path, "gates.md", body)), set())
 
     assert [pin for _req, pin in report.broken] == ["frontend/src/views/board/Board.test.tsx"]
     assert report.unverified == []
     assert not report.ok
 
 
-def test_main_does_not_parse_the_tree_readme(tmp_path, write_tree, monkeypatch, capsys):
-    write_tree()
+def test_main_does_not_parse_the_tree_readme(tmp_path, monkeypatch, capsys):
+    write(tmp_path, "gates.md", TREE)
     (tmp_path / "README.md").write_text(
         "# The format\n\n## REQ not-a-requirement\nThe system SHALL be ignored.\n"
     )
@@ -378,11 +366,11 @@ def test_main_does_not_parse_the_tree_readme(tmp_path, write_tree, monkeypatch, 
     assert "not-a-requirement" not in capsys.readouterr().out
 
 
-def test_render_puts_the_failing_lines_last_before_the_summary(write_tree):
+def test_render_puts_the_failing_lines_last_before_the_summary(tmp_path):
     """A failed check reaches the fix loop as a blind failure whose message
     is the log's last five lines (findings._extract_message): the lines
     that fail the check must be the ones nearest the summary."""
-    lines = render(check(parse_file(write_tree()), set())).splitlines()
+    lines = render(check(parse_file(write(tmp_path, "gates.md", TREE)), set())).splitlines()
     kinds = [line.split()[0] for line in lines[:-1]]
     assert kinds.index("UNPINNED") < kinds.index("BROKEN")
     assert kinds[-1] == "BROKEN"
@@ -415,8 +403,8 @@ def _repoint(tmp_path, monkeypatch, old: str, new: str, collected: set[str]) -> 
     return main(["--repoint", old, new, str(tmp_path)])
 
 
-def test_repoint_rewrites_every_pin_with_that_id(tmp_path, write_tree, monkeypatch, capsys):
-    gates = write_tree(REPOINT_TREE)
+def test_repoint_rewrites_every_pin_with_that_id(tmp_path, monkeypatch, capsys):
+    gates = write(tmp_path, "gates.md", REPOINT_TREE)
     other = tmp_path / "review.md"
     other.write_text(
         f"# Intent: review\n\n## REQ third\nThe system SHALL review.\nenforced-by: {OLD}\n"
@@ -433,12 +421,14 @@ def test_repoint_rewrites_every_pin_with_that_id(tmp_path, write_tree, monkeypat
     assert out.count(str(other)) == 1
 
 
-def test_repoint_carries_the_case_of_an_already_parametrized_pin(tmp_path, write_tree, monkeypatch):
+def test_repoint_carries_the_case_of_an_already_parametrized_pin(tmp_path, monkeypatch):
     """Renaming a parametrized test keeps its case ids: `OLD[a]` becomes `NEW[a]`
     when NEW names no case of its own, so one command moves every case."""
-    gates = write_tree(
+    gates = write(
+        tmp_path,
+        "gates.md",
         "# Intent: gates\n\n## REQ cases\nThe system SHALL do both.\n"
-        "enforced-by: tests/test_gates.py::test_a[x], tests/test_gates.py::test_a[y]\n"
+        "enforced-by: tests/test_gates.py::test_a[x], tests/test_gates.py::test_a[y]\n",
     )
     old, new = "tests/test_gates.py::test_a", "tests/test_gates.py::test_b"
     collected = {f"{new}[x]", f"{new}[y]"}
@@ -448,8 +438,8 @@ def test_repoint_carries_the_case_of_an_already_parametrized_pin(tmp_path, write
     assert parse_file(gates)[0].enforced_by == (f"{new}[x]", f"{new}[y]")
 
 
-def test_repoint_refuses_a_target_that_does_not_collect(tmp_path, write_tree, monkeypatch, capsys):
-    gates = write_tree(REPOINT_TREE)
+def test_repoint_refuses_a_target_that_does_not_collect(tmp_path, monkeypatch, capsys):
+    gates = write(tmp_path, "gates.md", REPOINT_TREE)
 
     assert _repoint(tmp_path, monkeypatch, OLD, NEW, COLLECTED - {NEW}) == 1
 
@@ -459,10 +449,10 @@ def test_repoint_refuses_a_target_that_does_not_collect(tmp_path, write_tree, mo
     assert str(gates) not in out  # no file reported as touched
 
 
-def test_repoint_refuses_an_old_id_that_no_pin_names(tmp_path, write_tree, monkeypatch, capsys):
+def test_repoint_refuses_an_old_id_that_no_pin_names(tmp_path, monkeypatch, capsys):
     """A typo in OLD would otherwise succeed silently, rewriting nothing, and the
     real pin would surface as BROKEN only on the next `just intent`."""
-    gates = write_tree(REPOINT_TREE)
+    gates = write(tmp_path, "gates.md", REPOINT_TREE)
     typo = "tests/test_gates.py::test_onee"
 
     assert _repoint(tmp_path, monkeypatch, typo, NEW, COLLECTED) == 1
@@ -471,7 +461,7 @@ def test_repoint_refuses_an_old_id_that_no_pin_names(tmp_path, write_tree, monke
     assert typo in capsys.readouterr().out
 
 
-def test_repoint_leaves_other_pins_on_the_line_alone(tmp_path, write_tree, monkeypatch):
+def test_repoint_leaves_other_pins_on_the_line_alone(tmp_path, monkeypatch):
     body = (
         "# Intent: gates\n\n## REQ mixed\nThe system SHALL do a thing.\n"
         # `test_one_more` and `test_one` share a prefix: only the exact id moves.
@@ -479,7 +469,7 @@ def test_repoint_leaves_other_pins_on_the_line_alone(tmp_path, write_tree, monke
         "tests/test_gates.py::test_one_more\n"
         "origin: src/kraft/gates.py\n"
     )
-    gates = write_tree(body)
+    gates = write(tmp_path, "gates.md", body)
 
     assert _repoint(tmp_path, monkeypatch, OLD, NEW, COLLECTED) == 0
 

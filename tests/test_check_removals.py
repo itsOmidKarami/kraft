@@ -49,19 +49,20 @@ def test_declared_reads_only_the_lines_under_each_removed_heading(cr):
         "### Removed requirements\n- some-req superseded\n\n"
         "## Test plan\n- other-req\n"
     )
-    assert cr.declared(body) == {
-        "tests": {"tests/test_x.py::test_a", "tests/test_y.py"},
-        "requirements": {"some-req"},
-    }
+    declared = cr.parse_body(body)
+    assert (declared.listed, declared.reqs) == (
+        {"tests/test_x.py::test_a", "tests/test_y.py"},
+        {"some-req"},
+    )
 
 
 def test_a_removal_inside_an_html_comment_is_not_declared(cr):
     """The PR template's example sections sit in a comment a reviewer never
     sees; left there, they must not count."""
     template = (_SCRIPT.parents[1] / ".github" / "PULL_REQUEST_TEMPLATE.md").read_text()
-    assert cr.declared(template) == {"tests": set(), "requirements": set()}
+    assert cr.parse_body(template) == (set(), set(), [])
     body = "<!--\n## Removed tests\n- tests/test_x.py::test_a\n-->\n## Removed tests\n- t/b.py\n"
-    assert cr.declared(body)["tests"] == {"t/b.py"}
+    assert cr.parse_body(body).listed == {"t/b.py"}
 
 
 @pytest.mark.parametrize(
@@ -80,12 +81,13 @@ def test_a_removed_tests_heading_inside_a_code_fence_declares_nothing(cr, openin
         "- tests/test_n.py::test_cluster_* -- folded into tests/test_n.py::test_folded\n"
     )
     body = example + (f"{closing}\n" if closing else "")
-    assert cr.declared(body) == {"tests": set(), "requirements": set()}
-    assert cr.undeclared(removed, set(), set(), body, set())["tests"] == sorted(removed)
-    assert cr.wildcard_problems(removed, body, set()) == []
+    declared = cr.parse_body(body)
+    assert declared == (set(), set(), [])
+    assert cr.undeclared(removed, set(), set(), declared, set())["tests"] == sorted(removed)
+    assert cr.wildcard_problems(removed, declared, set()) == []
     if closing:  # a real section after the fence still declares
         live = body + "\n## Removed tests\n- tests/test_n.py::test_get_notify_with_a\n"
-        assert cr.undeclared(removed, set(), set(), live, set())["tests"] == []
+        assert cr.undeclared(removed, set(), set(), cr.parse_body(live), set())["tests"] == []
 
 
 @pytest.mark.parametrize(
@@ -112,14 +114,27 @@ def test_a_removed_tests_heading_inside_a_code_fence_declares_nothing(cr, openin
     ids=["nothing-declared", "each-one-listed", "an-edited-files-path", "under-the-wrong-heading"],
 )
 def test_undeclared_names_every_removal_the_body_leaves_out(cr, body, missing):
-    assert cr.undeclared({"t/test_x.py::test_a"}, set(), {"req-a"}, body) == missing
+    declared = cr.parse_body(body)
+    assert cr.undeclared({"t/test_x.py::test_a"}, set(), {"req-a"}, declared, set()) == missing
 
 
 def test_a_deleted_files_tests_are_declared_by_its_path(cr):
     removed = {"t/test_gone.py::test_a", "t/test_gone.py::test_b", "ui/A.test.tsx"}
     deleted = {"t/test_gone.py", "ui/A.test.tsx"}
     body = "## Removed tests\n- t/test_gone.py\n- ui/A.test.tsx\n"
-    assert cr.undeclared(removed, deleted, set(), body) == {"tests": [], "requirements": []}
+    declared = cr.parse_body(body)
+    assert cr.undeclared(removed, deleted, set(), declared, set()) == {
+        "tests": [],
+        "requirements": [],
+    }
+
+
+def test_undeclared_has_no_default_for_the_tests_at_head(cr):
+    """Left out, `at_head` used to default to nothing, which quietly refused
+    every wildcard as naming no replacement; now leaving it out is an error."""
+    body = "## Removed tests\n- t/test_x.py::test_a_* -- folded into t/test_x.py::test_b\n"
+    with pytest.raises(TypeError, match="at_head"):
+        cr.undeclared({"t/test_x.py::test_a_1"}, set(), set(), cr.parse_body(body))
 
 
 def test_the_check_fails_a_silent_revert_and_passes_once_it_is_declared(
@@ -261,8 +276,9 @@ def test_a_test_newly_marked_skip_is_a_removal(cr, repo, tmp_path, monkeypatch, 
 
 def test_a_removed_tests_heading_ending_in_a_colon_still_declares(cr):
     body = "## Removed tests:\n- t/test_x.py::test_a\n### Removed requirements:\n- req-a\n"
-    assert cr.declared(body) == {"tests": {"t/test_x.py::test_a"}, "requirements": {"req-a"}}
-    assert cr.declared("## Removed tests, mostly\n- t/test_x.py::test_a\n")["tests"] == set()
+    declared = cr.parse_body(body)
+    assert (declared.listed, declared.reqs) == ({"t/test_x.py::test_a"}, {"req-a"})
+    assert cr.parse_body("## Removed tests, mostly\n- t/test_x.py::test_a\n").listed == set()
 
 
 #: A fold's replacement, standing at HEAD, for the wildcard tests below.
@@ -296,7 +312,9 @@ def test_a_wildcard_declaration_covers_every_removed_test_with_that_prefix_in_th
             "without_a_file",
         ]
     }
-    body = f"## Removed tests\n- tests/test_n.py::{name} -- folded into {_FOLDED}[missing]\n"
+    body = cr.parse_body(
+        f"## Removed tests\n- tests/test_n.py::{name} -- folded into {_FOLDED}[missing]\n"
+    )
     assert cr.undeclared(removed, set(), set(), body, {_FOLDED}) == {
         "tests": [f"tests/test_n.py::test_get_notify_{t}" for t in left],
         "requirements": [],
@@ -311,7 +329,9 @@ def test_a_wildcard_covers_nothing_in_another_file(cr):
         "tests/test_other.py::test_get_notify_with_a",
         "tests/test_n.pyi::test_get_notify_with_a",
     }
-    body = f"## Removed tests\n- tests/test_n.py::test_get_notify_with_* -- into {_FOLDED}\n"
+    body = cr.parse_body(
+        f"## Removed tests\n- tests/test_n.py::test_get_notify_with_* -- into {_FOLDED}\n"
+    )
     assert cr.undeclared(removed, set(), set(), body, {_FOLDED})["tests"] == [
         "tests/test_n.pyi::test_get_notify_with_a",
         "tests/test_other.py::test_get_notify_with_a",
@@ -326,12 +346,12 @@ def test_a_wildcard_covers_nothing_in_another_file(cr):
 def test_a_wildcard_with_no_double_colon_is_not_a_declaration(cr, pattern):
     removed = {"tests/test_gone.py::test_get_notify_with_a"}
     deleted = {"tests/test_gone.py"}
-    body = f"## Removed tests\n- {pattern} -- folded into {_FOLDED}\n"
+    body = cr.parse_body(f"## Removed tests\n- {pattern} -- folded into {_FOLDED}\n")
     assert cr.undeclared(removed, deleted, set(), body, {_FOLDED})["tests"] == sorted(removed)
     [problem] = cr.wildcard_problems(removed, body, {_FOLDED})
     assert problem.startswith(f"- {pattern} -- ") and "path stays literal" in problem
     # A deleted file is still declared by its literal path.
-    literal = "## Removed tests\n- tests/test_gone.py -- the feature went\n"
+    literal = cr.parse_body("## Removed tests\n- tests/test_gone.py -- the feature went\n")
     assert cr.undeclared(removed, deleted, set(), literal, set())["tests"] == []
     assert cr.wildcard_problems(removed, literal, set()) == []
 
@@ -341,7 +361,9 @@ def test_a_wildcard_that_matches_nothing_is_reported_as_unused(cr):
     declared some other way."""
     removed = {"tests/test_n.py::test_get_notify_with_a"}
     typo = "tests/test_n.py::test_get_notfy_with_*"
-    body = f"## Removed tests\n- tests/test_n.py::test_get_notify_with_a\n- {typo} -- {_FOLDED}\n"
+    body = cr.parse_body(
+        f"## Removed tests\n- tests/test_n.py::test_get_notify_with_a\n- {typo} -- {_FOLDED}\n"
+    )
     assert cr.undeclared(removed, set(), set(), body, {_FOLDED})["tests"] == []
     [problem] = cr.wildcard_problems(removed, body, {_FOLDED})
     assert problem.startswith(f"- {typo} -- ") and "matches no test this PR removes" in problem
@@ -362,7 +384,7 @@ def test_a_wildcard_with_a_bare_test_prefix_is_refused(cr, pattern):
         "tests/test_n.py::test_get_notify_with_a",
         "tests/test_n.py::TestNotify::test_b",
     }
-    body = f"## Removed tests\n- {pattern} -- folded into {_FOLDED}\n"
+    body = cr.parse_body(f"## Removed tests\n- {pattern} -- folded into {_FOLDED}\n")
     assert cr.undeclared(removed, set(), set(), body, {_FOLDED})["tests"] == sorted(removed)
     [problem] = cr.wildcard_problems(removed, body, {_FOLDED})
     assert problem.startswith(f"- {pattern} -- ") and "longer than `test_`" in problem

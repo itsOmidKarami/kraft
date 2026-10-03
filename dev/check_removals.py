@@ -27,7 +27,7 @@ A fold declares its cluster in one line: an id whose test name ends in `*`
 covers every removed test in that same file whose id starts with the rest.
 
     - tests/test_notify.py::test_get_notify_with_* -- folded into
-      tests/test_notify.py::test_get_notify_reports_a_bad_config_file_cleanly[...]
+      tests/test_notify.py::test_a_bad_notify_file_is_reported_cleanly[...]
 
 The path stays literal (a wildcard across files would hide a revert, the very
 thing this checks for), the prefix must say more than `test_`, the line must
@@ -45,12 +45,14 @@ import re
 import subprocess
 import sys
 from pathlib import PurePosixPath
+from typing import NamedTuple
 
 _REQ = re.compile(r"^## REQ (\S+)", re.M)
 _HEADING = re.compile(r"^#+\s*(.*?)\s*$")
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 #: A ``` or ~~~ fence, to a closing run of the same character at least as
-#: long, or to the end of the body when it is never closed (as CommonMark).
+#: long, or to the end of the body when it is never closed (as CommonMark):
+#: a ```` (four) fence runs past a ``` line and ends at a ````` (five) one.
 #: Stripping one hides nothing a reviewer reads as live: a declaration lost
 #: to it is reported missing, never passed.
 _FENCE = re.compile(
@@ -231,15 +233,6 @@ def _entries(body: str):
             yield section, words[0].strip("`"), words[1:]
 
 
-def declared(body: str) -> dict[str, set[str]]:
-    """The ids listed under each `Removed ...` heading, as written: a
-    wildcard is kept raw here and read by `_wildcards`."""
-    out: dict[str, set[str]] = {"tests": set(), "requirements": set()}
-    for section, entry, _ in _entries(body):
-        out[section].add(entry)
-    return out
-
-
 def _named(words: list[str]) -> set[str]:
     """The `path::test` ids a line's free text names, quotes and trailing
     punctuation stripped; `name[case]` and `name[...]` also name `name`."""
@@ -251,11 +244,36 @@ def _named(words: list[str]) -> set[str]:
     return ids
 
 
-def named_tests(body: str) -> set[str]:
-    """Every id the wildcard lines of `Removed tests` name as a replacement:
-    what the check has to look up at HEAD."""
-    wild = (text for kind, entry, text in _entries(body) if kind == "tests" and "*" in entry)
-    return set().union(*(_named(text) for text in wild))
+class Declared(NamedTuple):
+    """What a PR body declares under its `Removed ...` headings, read once."""
+
+    #: the literal ids under `Removed tests`: test ids and deleted file paths
+    listed: set[str]
+    #: the REQ names under `Removed requirements`
+    reqs: set[str]
+    #: each `Removed tests` id with a `*` in it, with the `path::test` ids its
+    #: line names (the replacement it must name, looked up at HEAD)
+    wildcards: list[tuple[str, set[str]]]
+
+    @property
+    def replacements(self) -> set[str]:
+        """Every id a wildcard line names: what has to be looked up at HEAD."""
+        return set().union(*(named for _, named in self.wildcards))
+
+
+def parse_body(body: str) -> Declared:
+    """The `Removed ...` sections of `body`, read once for every check that needs them."""
+    listed: set[str] = set()
+    reqs: set[str] = set()
+    wildcards: list[tuple[str, set[str]]] = []
+    for section, entry, text in _entries(body):
+        if section == "requirements":
+            reqs.add(entry)
+        elif "*" in entry:
+            wildcards.append((entry, _named(text)))
+        else:
+            listed.add(entry)
+    return Declared(listed, reqs, wildcards)
 
 
 #: The prefix before a wildcard's `*` has to say more than this: `test_*`
@@ -263,7 +281,7 @@ def named_tests(body: str) -> set[str]:
 _BARE_PREFIX = "test_"
 
 
-def _refusal(pattern: str, text: list[str], at_head: set[str]) -> str | None:
+def _refusal(pattern: str, named: set[str], at_head: set[str]) -> str | None:
     """Why the wildcard `pattern` declares nothing, or None when it may."""
     path, sep, name = pattern.rpartition("::")
     if not sep or "*" in path:
@@ -278,7 +296,7 @@ def _refusal(pattern: str, text: list[str], at_head: set[str]) -> str | None:
             f"the prefix before `*` must be longer than `{_BARE_PREFIX}`: "
             "name the cluster (`test_get_notify_with_*`)"
         )
-    if not _named(text) & at_head:
+    if not named & at_head:
         return (
             "name the test that replaces the cluster, as `path::test` after the wildcard; "
             "it must exist at HEAD"
@@ -286,7 +304,7 @@ def _refusal(pattern: str, text: list[str], at_head: set[str]) -> str | None:
     return None
 
 
-def _wildcards(body: str, at_head: set[str]) -> tuple[list[str], list[str]]:
+def _wildcards(declared: Declared, at_head: set[str]) -> tuple[list[str], list[str]]:
     """(the prefix each usable wildcard in `Removed tests` covers, a problem
     line for each refused one).
 
@@ -294,20 +312,18 @@ def _wildcards(body: str, at_head: set[str]) -> tuple[list[str], list[str]]:
     so the two agree except that fnmatch reads `[` as a character class, and
     `test_y[*` must cover the parametrize case `test_y[refused]`."""
     prefixes, problems = [], []
-    for section, entry, text in _entries(body):
-        if section != "tests" or "*" not in entry:
-            continue
-        if why := _refusal(entry, text, at_head):
+    for entry, named in declared.wildcards:
+        if why := _refusal(entry, named, at_head):
             problems.append(f"- {entry} -- {why}")
         else:
             prefixes.append(entry[:-1])
     return prefixes, problems
 
 
-def wildcard_problems(removed: set[str], body: str, at_head: set[str]) -> list[str]:
+def wildcard_problems(removed: set[str], declared: Declared, at_head: set[str]) -> list[str]:
     """A line for each wildcard in `Removed tests` that declares nothing:
     refused, or covering no test `removed` holds (a typo in the prefix)."""
-    prefixes, problems = _wildcards(body, at_head)
+    prefixes, problems = _wildcards(declared, at_head)
     return problems + [
         f"- {p}* -- matches no test this PR removes: check the prefix for a typo"
         for p in prefixes
@@ -319,29 +335,28 @@ def undeclared(
     removed: set[str],
     deleted: set[str],
     removed_reqs: set[str],
-    body: str,
-    at_head: set[str] = frozenset(),
+    declared: Declared,
+    at_head: set[str],
 ) -> dict[str, list[str]]:
     """What `removed` (test ids and frontend test file paths) and
-    `removed_reqs` leave out of the body. A test in a `deleted` file is
+    `removed_reqs` leave out of `declared`. A test in a `deleted` file is
     declared by that file's path too, a case of a test removed whole by
     that test's id, and a test by a usable wildcard covering it (`at_head`:
     the test ids that exist at HEAD, which a wildcard's replacement must be
-    one of; with none given, no wildcard declares anything)."""
-    listed = declared(body)["tests"]
-    prefixes, _ = _wildcards(body, at_head)
+    one of)."""
+    prefixes, _ = _wildcards(declared, at_head)
 
     def said(t: str) -> bool:
         path = t.split("::")[0]
         test = t.split("[")[0]
         return (
-            t in listed
-            or (path in deleted and path in listed)
+            t in declared.listed
+            or (path in deleted and path in declared.listed)
             or any(t.startswith(p) for p in prefixes)
             or (test != t and test in removed and said(test))
         )
 
-    reqs = removed_reqs - declared(body)["requirements"]
+    reqs = removed_reqs - declared.reqs
     missing = {t for t in removed if not said(t)}
     # A test removed whole is named once, not once more per case.
     tests = sorted(t for t in missing if t.split("[")[0] == t or t.split("[")[0] not in missing)
@@ -385,15 +400,20 @@ def removals(base: str, head: str) -> tuple[set[str], set[str], set[str]]:
     return removed, deleted, reqs - moved
 
 
+def tests_at_head(declared: Declared, head: str) -> set[str]:
+    """The test ids at `head` in every file a wildcard's replacement names."""
+    paths = {t.split("::")[0] for t in declared.replacements}
+    return set().union(*(tests_in(p, _show(head, p)) for p in paths if _is_py_test(p)))
+
+
 def main(argv: list[str]) -> int:
     base, body_file, head = argv[1], argv[2], argv[3] if len(argv) > 3 else "HEAD"
     with open(body_file, encoding="utf-8") as f:
-        body = f.read()
+        declared = parse_body(f.read())
     removed, deleted, reqs = removals(base, head)
-    paths = {t.split("::")[0] for t in named_tests(body)}
-    at_head = set().union(*(tests_in(p, _show(head, p)) for p in paths if _is_py_test(p)))
-    missing = undeclared(removed, deleted, reqs, body, at_head)
-    problems = wildcard_problems(removed, body, at_head)
+    at_head = tests_at_head(declared, head)
+    missing = undeclared(removed, deleted, reqs, declared, at_head)
+    problems = wildcard_problems(removed, declared, at_head)
     if not any(missing.values()) and not problems:
         print("ok: every removed test and requirement is declared in the PR body")
         return 0

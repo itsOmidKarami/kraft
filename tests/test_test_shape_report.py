@@ -13,6 +13,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,26 @@ def test_counts_a_helper_body_defined_in_two_files_once_per_file(report, tree):
     assert group["key"] == f"_git#{hashlib.sha1(fingerprint.encode()).hexdigest()[:8]}"
 
 
+@pytest.mark.parametrize(
+    ("decorators", "expected"),
+    [
+        ("@pytest.mark.skip", (1, 0, False)),
+        ("@pytest.mark.parametrize('x', [1, 2, 3])", (3, 0, True)),
+        ("@pytest.mark.parametrize('x', CASES)", (2, 1, True)),
+        (
+            "@pytest.mark.parametrize('x', [1, 2, 3])\n@pytest.mark.parametrize('y', [1, 2])\n"
+            "@pytest.mark.parametrize('z', CASES)",
+            (12, 1, True),
+        ),
+        ("@parametrize", (1, 0, True)),
+    ],
+    ids=["none", "literal", "non-literal", "stacked", "bare"],
+)
+def test_parametrize_counts_cases_estimates_and_whether_it_found_one(report, decorators, expected):
+    (fn,) = ast.parse(f"{decorators}\ndef test_x(x):\n    assert x\n").body
+    assert report._parametrize(fn.decorator_list) == expected
+
+
 def test_json_output_carries_the_same_numbers(report, tree, capsys):
     assert report.main(["--root", str(tree), "--json"]) == 0
     printed = json.loads(capsys.readouterr().out)
@@ -123,12 +144,23 @@ def test_json_output_carries_the_same_numbers(report, tree, capsys):
     assert printed["test_functions"] == 4
 
 
+def _rows(text: str) -> dict[str, list[str]]:
+    """Each line of `text` as its label and the values after it, split on runs
+    of two or more spaces, so a check reads a row, not its padding."""
+    rows = {}
+    for line in text.splitlines():
+        label, *values = re.split(r"\s{2,}", line.strip())
+        rows[label] = values
+    return rows
+
+
 def test_text_output_names_each_number(report, tree, capsys):
     assert report.main(["--root", str(tree)]) == 0
     out = capsys.readouterr().out
-    assert "test functions          4" in out
-    assert "collected cases (est.)  17" in out
-    assert "duplicated helpers      1 names / 2 copies" in out
+    rows = _rows(out)
+    assert rows["test functions"] == ["4"]
+    assert rows["collected cases (est.)"] == ["17"]
+    assert rows["duplicated helpers"] == ["1 names / 2 copies"]
     assert "_git 2" in out
 
 
@@ -175,71 +207,6 @@ def test_densest_modules_rank_by_tests_per_100_code_lines(report, tmp_path):
     assert (modules["mod.py"]["tests"], modules["mod.py"]["code_lines"]) == (3, 150)
     assert modules["mod.py"]["per_100"] == 2.0
     assert modules["mod_more.py"]["tests"] == 1
-
-
-def test_fingerprint_ignores_docstring_annotations_and_keyword_order(report):
-    def fn(source):
-        return report.helper_fingerprint(ast.parse(source).body[0])
-
-    plain = "def f(x):\n    def g(y):\n        return h(y, a=1, b=2)\n    return g(x)\n"
-    dressed = (
-        'def f(x: int) -> int:\n    """Doc."""\n'
-        "    def g(y: str):\n        return h(y, b=2, a=1)\n    return g(x)\n"
-    )
-    assert fn(plain) == fn(dressed)
-    assert fn(plain) != fn(plain.replace("b=2", "b=3"))
-
-
-def test_fingerprint_appends_each_module_constant_the_body_names(report):
-    def fn(source):
-        module = ast.parse(source)
-        return report.helper_fingerprint(module.body[-1], module)
-
-    row = "def _row(**f):\n    return {**DEFAULTS, **f}\n"
-    one, two = "DEFAULTS = {'a': 1}\n" + row, "DEFAULTS = {'a': 2}\n" + row
-    assert fn(one) != fn(two)
-    assert fn(one) == fn("import os\n" + one)
-    assert fn(one).endswith("DEFAULTS = {'a': 1}")
-    # an imported or unknown name adds nothing past the name already in the body,
-    # nor does one a top-level statement only assigns into
-    imported = "from defaults import DEFAULTS\n" + row
-    assert fn(imported) == report.helper_fingerprint(ast.parse(row).body[0])
-    env = "def _env():\n    return os.environ['HOME']\n"
-    patched = "import os\nos.environ['HOME'] = '/h'\n" + env
-    assert fn(patched) == report.helper_fingerprint(ast.parse(env).body[0])
-    # several constants: sorted by name, not by where the body names them
-    assert fn("A = 1\nB = 2\n\ndef f():\n    return B + A\n").endswith("\nA = 1\nB = 2")
-
-
-@pytest.mark.parametrize(
-    ("binding", "appended"),
-    [
-        ("DEFAULTS = {'a': 1}", "DEFAULTS = {'a': 1}"),
-        ("DEFAULTS: dict = {'a': 1}", "DEFAULTS = {'a': 1}"),
-        ("OTHER, DEFAULTS = 0, {'a': 1}", "DEFAULTS = (0, {'a': 1})"),
-        ("OTHER = DEFAULTS = {'a': 1}", "DEFAULTS = {'a': 1}"),
-        ("DEFAULTS: dict\nDEFAULTS = {'a': 1}", "DEFAULTS = {'a': 1}"),
-        ("DEFAULTS = {}\nDEFAULTS = {'a': 1}", "DEFAULTS = {}\nDEFAULTS = {'a': 1}"),
-    ],
-    ids=["plain", "annotated", "unpacked", "chained", "declared", "rebound"],
-)
-def test_fingerprint_reads_each_top_level_binding_shape(report, binding, appended):
-    module = ast.parse(binding + "\n\n\ndef _row(**f):\n    return {**DEFAULTS, **f}\n")
-    assert report.helper_fingerprint(module.body[-1], module) == (
-        "return {**DEFAULTS, **f}\n" + appended
-    )
-
-
-def test_helpers_over_different_module_constants_are_not_one_group(report, tmp_path):
-    row = "def _row(**f):\n    return {**DEFAULTS, **f}\n\n\ndef test_r():\n    assert _row()\n"
-    write(tmp_path, "tests/test_a.py", "DEFAULTS = {'a': 1}\n" + row)
-    write(tmp_path, "tests/test_b.py", "DEFAULTS = {'b': 2}\n" + row)
-    assert report.measure(tmp_path)["duplicated_helpers"]["names"] == 0
-    write(tmp_path, "tests/test_c.py", "DEFAULTS = {'a': 1}\n" + row)
-    assert report.measure(tmp_path)["duplicated_helpers"]["groups"][0]["files"] == [
-        "tests/test_a.py",
-        "tests/test_c.py",
-    ]
 
 
 def test_print_helper_ceiling_prints_rule_e_numbers_over_both_testpaths(report, tree, capsys):
@@ -311,29 +278,30 @@ def _git_repo(root: Path, files: dict[str, str | None]) -> str:
 
 
 def _nudge(report, tmp_path, capsys, head_files: dict[str, str | None]) -> tuple[str, int]:
+    """`(stdout, exit code)` of `--diff` from `_BASE` to `head_files`; a quiet
+    run must have said why on stderr."""
     base = _git_repo(tmp_path, _BASE)
     head = _git_repo(tmp_path, head_files)
     code = report.main(["--diff", base, head, "--root", str(tmp_path)])
-    return capsys.readouterr().out, code
+    out, err = capsys.readouterr()
+    if not out:
+        assert err == "nothing to nudge about\n"
+    return out, code
 
 
 def test_diff_mode_reports_the_delta_between_two_revisions(report, tmp_path, capsys):
     new_file = "import subprocess\n\n\n" + _commit_helper() + _plain("b", 3)
     out, code = _nudge(report, tmp_path, capsys, {"tests/test_b.py": new_file})
     assert code == 0
-    assert out == (
-        "This PR changes the test tree:\n"
-        "```\n"
-        "  test functions     +3    (0 of them parametrized)\n"
-        "  collected cases    +3\n"
-        f"  lines in tests/    +{len(new_file.splitlines())}\n"
-        "  verbatim-repeat    +3 lines already present 5+ times elsewhere in tests/\n"
-        "  helpers            +1 copy of `_commit` (3 exist; "
-        "`support.harness.commit_all` is the shared one)\n"
-        "```\n"
-        "If the new tests are rows of one behavior, fold them into a table\n"
-        '(docs/testing.md, "One behaviour, one test"). If they are new behaviors, ignore this.\n'
-    )
+    rows = _rows(out)
+    assert rows["test functions"] == ["+3", "(0 of them parametrized)"]
+    assert rows["collected cases"] == ["+3"]
+    assert rows["lines in tests/"] == [f"+{len(new_file.splitlines())}"]
+    assert rows["verbatim-repeat"] == ["+3 lines already present 5+ times elsewhere in tests/"]
+    assert rows["helpers"] == [
+        "+1 copy of `_commit` (3 exist; `support.harness.commit_all` is the shared one)"
+    ]
+    assert '(docs/testing.md, "One behaviour, one test")' in out
 
 
 def test_diff_mode_is_quiet_when_there_is_nothing_to_nudge_about(report, tmp_path, capsys):
@@ -341,7 +309,7 @@ def test_diff_mode_is_quiet_when_there_is_nothing_to_nudge_about(report, tmp_pat
     # one added line is not a repeat of anything.
     row = _BASE["tests/test_a.py"].replace("[1, 2]", "[1, 2, 3]")
     out, code = _nudge(report, tmp_path, capsys, {"tests/test_a.py": row})
-    assert (out, code) == ("nothing to nudge about\n", 0)
+    assert (out, code) == ("", 0)
 
 
 def _file(*parts: str) -> str:
@@ -433,7 +401,7 @@ def test_diff_mode_nudges_only_on_one_of_its_three_signs(
     out, code = _nudge(report, tmp_path, capsys, {where: added})
     assert code == 0
     if says is None:
-        assert out == "nothing to nudge about\n"
+        assert out == ""
     else:
         assert says in out
 
@@ -441,7 +409,7 @@ def test_diff_mode_nudges_only_on_one_of_its_three_signs(
 def test_diff_mode_follows_a_moved_file_instead_of_calling_it_all_new(report, tmp_path, capsys):
     moved = {"tests/test_a.py": None, "tests/test_c.py": _BASE["tests/test_a.py"]}
     out, code = _nudge(report, tmp_path, capsys, moved)
-    assert (out, code) == ("nothing to nudge about\n", 0)
+    assert (out, code) == ("", 0)
 
 
 def _worktrees(root: Path) -> int:
@@ -456,13 +424,15 @@ def test_diff_mode_exits_0_and_leaves_no_worktree_behind_when_it_cannot_measure(
 
     assert report.main(["--diff", base, "no-such-rev", "--root", str(tmp_path)]) == 0
     captured = capsys.readouterr()
-    assert captured.out == "nothing to nudge about\n"
+    assert captured.out == ""
     assert "tests nudge skipped" in captured.err
 
     def boom(root):
         raise OSError("disk went away")
 
-    monkeypatch.setattr(report, "measure", boom)
+    monkeypatch.setattr(report, "_read", boom)
     assert report.main(["--diff", base, head, "--root", str(tmp_path)]) == 0
-    assert "disk went away" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "disk went away" in captured.err
     assert _worktrees(tmp_path) == 1
