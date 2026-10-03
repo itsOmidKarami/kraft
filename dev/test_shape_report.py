@@ -34,8 +34,9 @@ numbers off a half-read tree are worse than none).
                             its most common name. "N names / M copies" is N
                             groups and the M definitions in them. The fingerprint
                             is strict (the body must be the same code once
-                            docstring, annotations and keyword order are gone),
-                            so it undercounts what a person sees as "the same
+                            docstring, annotations and keyword order are gone,
+                            over the same module constant values), so it
+                            undercounts what a person sees as "the same
                             `_git`"; `same-name helpers` is the looser count, a
                             name defined in two or more files.
     densest modules         for each `src/kraft/**/*.py` of >= MIN_MODULE_LINES
@@ -93,11 +94,35 @@ def _checker(root: Path):
     return mod
 
 
-def helper_fingerprint(fn: ast.FunctionDef) -> str:
+def _module_constants(module: ast.Module) -> dict[str, list[ast.expr]]:
+    """Every name `module` binds with a top-level `Assign`/`AnnAssign`, to the
+    value(s) it is bound to, in source order."""
+    values: dict[str, list[ast.expr]] = defaultdict(list)
+    for node in module.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in targets:
+            for name in ast.walk(target):
+                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
+                    values[name.id].append(value)
+    return dict(values)
+
+
+def helper_fingerprint(fn: ast.FunctionDef, module: ast.Module | None = None) -> str:
     """The body of a module-level helper with everything that doesn't change
     what it does stripped: docstring, annotations, return annotation, and
     keyword-argument order in calls (the 17 `_git` copies differ only in
-    where `check=True` sits)."""
+    where `check=True` sits).
+
+    With `module` (the file `fn` is defined in), every name in the body
+    that `module` assigns at top level appends `NAME = <value>`, sorted by
+    name: nine `def _row(**f): return {**DEFAULTS, **f}` over nine different
+    `DEFAULTS` are nine helpers, not one. An imported or unknown name adds
+    nothing past the name already in the body."""
     fn = copy.deepcopy(fn)
     if fn.body and isinstance(fn.body[0], ast.Expr) and isinstance(fn.body[0].value, ast.Constant):
         fn.body = fn.body[1:]
@@ -107,7 +132,19 @@ def helper_fingerprint(fn: ast.FunctionDef) -> str:
         elif isinstance(node, ast.Call):
             node.keywords.sort(key=lambda k: k.arg or "")
     fn.returns = None
-    return ast.unparse(fn.body)
+    body = ast.unparse(fn.body)
+    if module is None:
+        return body
+    constants = _module_constants(module)
+    named = dict.fromkeys(
+        node.id
+        for stmt in fn.body
+        for node in ast.walk(stmt)
+        if isinstance(node, ast.Name) and node.id in constants
+    )
+    return "\n".join(
+        [body, *(f"{name} = {ast.unparse(v)}" for name in sorted(named) for v in constants[name])]
+    )
 
 
 def helper_key(name: str, fingerprint: str) -> str:
@@ -281,7 +318,7 @@ def measure(root: Path = ROOT) -> dict:
         tests_per_file[relpath] = tally["functions"] - before
         for node in tree.body:
             if isinstance(node, _FUNCS) and not node.name.startswith("test_"):
-                defs[helper_fingerprint(node)].append((relpath, node.name))
+                defs[helper_fingerprint(node, tree)].append((relpath, node.name))
 
     nontrivial = sum(line_counts.values())
     repeated = sum(n for n in line_counts.values() if n >= REPEAT_AT)

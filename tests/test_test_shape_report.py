@@ -193,6 +193,58 @@ def test_fingerprint_ignores_docstring_annotations_and_keyword_order(report):
     assert fn(plain) != fn(plain.replace("b=2", "b=3"))
 
 
+def test_fingerprint_appends_each_module_constant_the_body_names(report):
+    def fn(source):
+        module = ast.parse(source)
+        return report.helper_fingerprint(module.body[-1], module)
+
+    row = "def _row(**f):\n    return {**DEFAULTS, **f}\n"
+    one, two = "DEFAULTS = {'a': 1}\n" + row, "DEFAULTS = {'a': 2}\n" + row
+    assert fn(one) != fn(two)
+    assert fn(one) == fn("import os\n" + one)
+    assert fn(one).endswith("DEFAULTS = {'a': 1}")
+    # an imported or unknown name adds nothing past the name already in the body,
+    # nor does one a top-level statement only assigns into
+    imported = "from defaults import DEFAULTS\n" + row
+    assert fn(imported) == report.helper_fingerprint(ast.parse(row).body[0])
+    env = "def _env():\n    return os.environ['HOME']\n"
+    patched = "import os\nos.environ['HOME'] = '/h'\n" + env
+    assert fn(patched) == report.helper_fingerprint(ast.parse(env).body[0])
+    # several constants: sorted by name, not by where the body names them
+    assert fn("A = 1\nB = 2\n\ndef f():\n    return B + A\n").endswith("\nA = 1\nB = 2")
+
+
+@pytest.mark.parametrize(
+    ("binding", "appended"),
+    [
+        ("DEFAULTS = {'a': 1}", "DEFAULTS = {'a': 1}"),
+        ("DEFAULTS: dict = {'a': 1}", "DEFAULTS = {'a': 1}"),
+        ("OTHER, DEFAULTS = 0, {'a': 1}", "DEFAULTS = (0, {'a': 1})"),
+        ("OTHER = DEFAULTS = {'a': 1}", "DEFAULTS = {'a': 1}"),
+        ("DEFAULTS: dict\nDEFAULTS = {'a': 1}", "DEFAULTS = {'a': 1}"),
+        ("DEFAULTS = {}\nDEFAULTS = {'a': 1}", "DEFAULTS = {}\nDEFAULTS = {'a': 1}"),
+    ],
+    ids=["plain", "annotated", "unpacked", "chained", "declared", "rebound"],
+)
+def test_fingerprint_reads_each_top_level_binding_shape(report, binding, appended):
+    module = ast.parse(binding + "\n\n\ndef _row(**f):\n    return {**DEFAULTS, **f}\n")
+    assert report.helper_fingerprint(module.body[-1], module) == (
+        "return {**DEFAULTS, **f}\n" + appended
+    )
+
+
+def test_helpers_over_different_module_constants_are_not_one_group(report, tmp_path):
+    row = "def _row(**f):\n    return {**DEFAULTS, **f}\n\n\ndef test_r():\n    assert _row()\n"
+    _write(tmp_path, "tests/test_a.py", "DEFAULTS = {'a': 1}\n" + row)
+    _write(tmp_path, "tests/test_b.py", "DEFAULTS = {'b': 2}\n" + row)
+    assert report.measure(tmp_path)["duplicated_helpers"]["names"] == 0
+    _write(tmp_path, "tests/test_c.py", "DEFAULTS = {'a': 1}\n" + row)
+    assert report.measure(tmp_path)["duplicated_helpers"]["groups"][0]["files"] == [
+        "tests/test_a.py",
+        "tests/test_c.py",
+    ]
+
+
 def test_print_helper_allowlist_keys_by_name_and_fingerprint_hash(report, tree, capsys):
     assert report.main(["--root", str(tree), "--print-helper-allowlist"]) == 0
     printed = capsys.readouterr().out
