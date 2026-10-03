@@ -64,6 +64,14 @@ const row = (text: RegExp) => {
 afterEach(() => vi.restoreAllMocks());
 const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
 
+/** The page's two doors for a pick: `onPick` for a new one, `onRange` for an edit of the one there. */
+function Probe({ onPick, onRange, ...o }: Partial<Omit<DiffViewProps, "prefs">> & { onPick: (p: Pick | null) => void; onRange: (p: Pick) => void }) {
+  const [picked, setPicked] = useState<Pick | null>(null);
+  return <View {...o} picked={picked} onPick={(p) => (onPick(p), setPicked(p))} onRange={(p) => (onRange(p), setPicked(p))} />;
+}
+const pickNum = (text: RegExp, label: string, shiftKey = false) => fireEvent.click(within(row(text)).getByRole("button", { name: label }), { shiftKey });
+const grip = (text: RegExp, end: "start" | "last") => row(text).querySelector<HTMLElement>(`.rv-grip.is-${end}`)!;
+
 describe("DiffView", () => {
   it("draws unified lines with both numbers and their marks; binary files say so", () => {
     render(<View />);
@@ -117,9 +125,9 @@ describe("DiffView", () => {
     expect(write).toHaveBeenCalledWith(PATCH.split("diff --git a/logo.png")[0]);
   });
 
-  it("says in the lines' name that a range across sides is the composer pencil's, not Shift's (R10b-11)", () => {
+  it("says in the lines' name how the range moves, with no pencil to start it on the other side", () => {
     render(<View onCompose={vi.fn()} />);
-    expect(screen.getByRole("group", { name: /^Lines of search\/cache.py/ })).toHaveAccessibleName(/Shift extends on its side, Enter comments \(its pencil starts the range on the other side\)/);
+    expect(screen.getByRole("group", { name: /^Lines of search\/cache.py/ })).toHaveAccessibleName(/Shift and the arrows move the end of the range, Enter comments/);
   });
 
   it("picks by keyboard: arrows move, Shift extends on one side, Enter composes", () => {
@@ -190,7 +198,7 @@ describe("DiffView", () => {
   it("+ in the gutter comments on its own line, and is not drawn on an ended item", () => {
     const onCompose = vi.fn();
     const { unmount } = render(<View onCompose={onCompose} />);
-    fireEvent.click(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line +6" }));
+    fireEvent.click(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line 6" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 6, head: 6 });
     expect(row(/self.max_items = max_items/)).toHaveClass("is-picked");
     unmount();
@@ -201,7 +209,7 @@ describe("DiffView", () => {
   it("a drag from + sweeps a range, a frame at a time, and opens the composer on it when released", async () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
-    fireEvent.mouseDown(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line +5" }));
+    fireEvent.mouseDown(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line 5" }));
     // Over the removed line: it has no new side, so the pick stays put.
     fireEvent.mouseOver(row(/max_items=None/).querySelector(".rv-code")!);
     fireEvent.mouseOver(row(/self._store/).querySelector(".rv-code")!);
@@ -224,7 +232,7 @@ describe("DiffView", () => {
     expect(row(/max_items=50_000/)).toHaveClass("is-picked");
     expect(row(/self._store/)).toHaveClass("is-picked");
     expect(row(/def get/)).not.toHaveClass("is-picked");
-    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on lines +5 to +7" });
+    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on lines 5–7" });
     fireEvent.mouseDown(plus);
     fireEvent.mouseUp(plus);
     fireEvent.click(plus);
@@ -235,7 +243,7 @@ describe("DiffView", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
     fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Pick new line 5" }));
-    const plus = within(row(/def get/)).getByRole("button", { name: "Comment on line +8" });
+    const plus = within(row(/def get/)).getByRole("button", { name: "Comment on line 8" });
     fireEvent.mouseDown(plus, { shiftKey: true });
     fireEvent.mouseUp(plus, { shiftKey: true });
     fireEvent.click(plus, { shiftKey: true });
@@ -247,16 +255,16 @@ describe("DiffView", () => {
     const { unmount } = render(<View onCompose={onCompose} />);
     const ctx = row(/class EmbeddingCache:$/);
     fireEvent.click(within(ctx).getByRole("button", { name: "Pick old line 4" }));
-    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on line −4" }));
+    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on old line 4" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 4, head: 4 });
     fireEvent.click(within(ctx).getByRole("button", { name: "Pick new line 4" }));
-    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on line +4" }));
+    fireEvent.click(within(ctx).getByRole("button", { name: "Comment on line 4" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 4, head: 4 });
     unmount();
     render(<View onCompose={onCompose} prefs={{ layout: "split" }} />);
-    fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Comment on line −5" }));
+    fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Comment on old line 5" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "old", anchor: 5, head: 5 });
-    fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line +5" }));
+    fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Comment on line 5" }));
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 5, head: 5 });
   });
 
@@ -265,7 +273,7 @@ describe("DiffView", () => {
     render(<View onCompose={onCompose} />);
     fireEvent.click(within(row(/max_items=50_000/)).getByRole("button", { name: "Pick new line 5" }));
     fireEvent.click(within(row(/def get/)).getByRole("button", { name: "Pick new line 8" }), { shiftKey: true });
-    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on lines +5 to +8" }));
+    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on lines 5–8" }));
     fireEvent.mouseOver(row(/def get/));
     fireEvent.mouseUp(window);
     expect(onCompose).toHaveBeenCalledExactlyOnceWith({ path: "search/cache.py", side: "new", anchor: 7, head: 8 });
@@ -275,7 +283,7 @@ describe("DiffView", () => {
   it("a release back on the row it started on, off the +, is a click on its +", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
-    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on line +7" }));
+    fireEvent.mouseDown(within(row(/self._store/)).getByRole("button", { name: "Comment on line 7" }));
     fireEvent.mouseOver(row(/def get/));
     fireEvent.mouseOver(row(/self._store/));
     fireEvent.mouseUp(row(/self._store/).querySelector(".rv-code")!);
@@ -297,7 +305,7 @@ describe("DiffView", () => {
 `);
     const onCompose = vi.fn();
     render(<View files={[{ path: "a.py", insertions: 2, deletions: 2, touched_by: [], viewed: false }]} patch={new Map(two.map((f) => [f.path, f]))} onCompose={onCompose} />);
-    fireEvent.mouseDown(within(row(/^a$/)).getByRole("button", { name: "Comment on line +1" }));
+    fireEvent.mouseDown(within(row(/^a$/)).getByRole("button", { name: "Comment on line 1" }));
     fireEvent.mouseOver(row(/^B$/));
     fireEvent.mouseOver(row(/^y$/));
     fireEvent.mouseOver(row(/^Z$/));
@@ -315,9 +323,9 @@ describe("DiffView", () => {
     expect(tabbable()).toEqual([]);
     lines.focus();
     await userEvent.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
-    expect(tabbable().map((b) => b.getAttribute("aria-label"))).toEqual(["Comment on line +5"]);
+    expect(tabbable().map((b) => b.getAttribute("aria-label"))).toEqual(["Comment on line 5"]);
     await userEvent.tab();
-    expect(screen.getByRole("button", { name: "Comment on line +5" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Comment on line 5" })).toHaveFocus();
     await userEvent.keyboard("{Enter}");
     expect(onCompose).toHaveBeenCalledExactlyOnceWith({ path: "search/cache.py", side: "new", anchor: 5, head: 5 });
   });
@@ -326,7 +334,7 @@ describe("DiffView", () => {
     for (const layout of ["unified", "split"] as const) {
       const onCompose = vi.fn();
       const { unmount } = render(<View onCompose={onCompose} prefs={{ layout }} />);
-      fireEvent.mouseDown(within(row(/max_items=None/)).getByRole("button", { name: "Comment on line −5" }));
+      fireEvent.mouseDown(within(row(/max_items=None/)).getByRole("button", { name: "Comment on old line 5" }));
       fireEvent.mouseOver(row(/max_items=50_000/).querySelector(".rv-code")!);
       await frame();
       expect(row(/max_items=None/)).toHaveClass("is-picked");
@@ -342,13 +350,13 @@ describe("DiffView", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);
     fireEvent.click(within(row(/max_items=None/)).getByRole("button", { name: "Pick old line 5" }));
-    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line +6" });
+    const plus = within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on line 6" });
     fireEvent.mouseDown(plus, { shiftKey: true });
     fireEvent.mouseUp(plus, { shiftKey: true });
     fireEvent.click(plus, { shiftKey: true });
     expect(onCompose).toHaveBeenLastCalledWith({ path: "search/cache.py", anchorSide: "old", anchor: 5, side: "new", head: 6 });
     expect([/max_items=None/, /max_items=50_000/, /self.max_items = max_items/].map((r) => row(r).classList.contains("is-picked"))).toEqual([true, true, true]);
-    expect(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on lines −5 to +6" })).toBeInTheDocument();
+    expect(within(row(/self.max_items = max_items/)).getByRole("button", { name: "Comment on old 5 – new 6" })).toBeInTheDocument();
     // The context line after them is old 6 and new 7: on the old side the range would drop the added lines.
     fireEvent.click(within(row(/self._store/)).getByRole("button", { name: "Pick old line 6" }), { shiftKey: true });
     fireEvent.keyDown(screen.getByRole("group", { name: /^Lines of search/ }), { key: "Enter" });
@@ -441,5 +449,83 @@ describe("the + lane", () => {
     expect(marked()).toEqual([row(/max_items=None/)]);
     fireEvent.mouseLeave(lines);
     expect(marked()).toEqual([]);
+  });
+});
+
+describe("DiffView range handles (RV-1)", () => {
+  const FIVE = /max_items=50_000/, SIX = /self.max_items = max_items/, SEVEN = /self._store/;
+  const setup = () => {
+    const onPick = vi.fn(), onRange = vi.fn();
+    render(<Probe onPick={onPick} onRange={onRange} />);
+    pickNum(FIVE, "Pick new line 5");
+    pickNum(SIX, "Pick new line 6", true);
+    onPick.mockClear();
+    onRange.mockClear();
+    return { onPick, onRange };
+  };
+
+  it("draws a handle on the first and the last row of the picked range, and none on the rows between or outside it", () => {
+    setup();
+    pickNum(SEVEN, "Pick new line 7", true);
+    expect(grip(FIVE, "start")).not.toBeNull();
+    expect(grip(SEVEN, "last")).not.toBeNull();
+    expect(document.querySelectorAll(".rv-grip")).toHaveLength(2);
+    expect(row(SIX).querySelector(".rv-grip")).toBeNull();
+    expect(row(/def get/).querySelector(".rv-grip")).toBeNull();
+  });
+
+  it("puts both handles on a single picked line, and none with no pick", () => {
+    render(<View />);
+    expect(document.querySelector(".rv-grip")).toBeNull();
+    pickNum(FIVE, "Pick new line 5");
+    expect(row(FIVE).querySelectorAll(".rv-grip")).toHaveLength(2);
+  });
+
+  it("dragging the last handle moves the end of the range and leaves the start, as a range edit", async () => {
+    const { onPick, onRange } = setup();
+    fireEvent.mouseDown(grip(SIX, "last"));
+    fireEvent.mouseOver(row(SEVEN));
+    await frame();
+    expect(row(SEVEN)).toHaveClass("is-picked");
+    fireEvent.mouseUp(window);
+    expect(onRange).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 5, head: 7 });
+    expect(onPick).not.toHaveBeenCalled();
+    expect(row(SEVEN).querySelector(".rv-grip.is-last")).not.toBeNull();
+  });
+
+  it("dragging the first handle moves the start and leaves the end, and past the end turns the range round", async () => {
+    const { onRange } = setup();
+    fireEvent.mouseDown(grip(FIVE, "start"));
+    fireEvent.mouseOver(row(/class EmbeddingCache:$/));
+    await frame();
+    fireEvent.mouseUp(window);
+    expect(onRange).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 6, head: 4 });
+    expect(row(/class EmbeddingCache:$/).querySelector(".rv-grip.is-start")).not.toBeNull();
+    fireEvent.mouseDown(grip(/class EmbeddingCache:$/, "start"));
+    fireEvent.mouseOver(row(SEVEN));
+    await frame();
+    fireEvent.mouseUp(window);
+    expect(onRange).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 6, head: 7 });
+  });
+
+  it("a handle pressed and let go without moving changes nothing", () => {
+    const { onRange, onPick } = setup();
+    fireEvent.mouseDown(grip(SIX, "last"));
+    fireEvent.mouseUp(window);
+    expect(onRange).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+    expect(row(SIX)).toHaveClass("is-picked");
+  });
+
+  it("Shift-click outside the range extends it, and Shift with the arrows moves its end: both range edits", () => {
+    const { onPick, onRange } = setup();
+    pickNum(SEVEN, "Pick new line 7", true);
+    expect(onRange).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 5, head: 7 });
+    fireEvent.keyDown(screen.getByRole("group", { name: /^Lines of search\/cache.py/ }), { key: "ArrowDown", shiftKey: true });
+    expect(onRange).toHaveBeenLastCalledWith({ path: "search/cache.py", side: "new", anchor: 5, head: 8 });
+    expect(onPick).not.toHaveBeenCalled();
+    // A plain click starts a new pick instead.
+    pickNum(SIX, "Pick new line 6");
+    expect(onPick).toHaveBeenCalledTimes(1);
   });
 });

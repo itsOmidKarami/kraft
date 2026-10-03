@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReviewThread, ThreadLabel } from "../../types";
-import { Pencil } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
-import { Menu } from "../ui/Menu";
-import { isMixed, isOneLine, startSideOf, type LineRange } from "./range";
-import type { Anchor, Side } from "./rows";
-import { LABELS, codeBlock, lineRef, rangeName } from "./Thread";
+import { IconButton } from "../ui/IconButton";
+import { X } from "../icons";
+import { isMixed, isOneLine, rangeLabel, startSideOf, type LineRange } from "./range";
+import { LABELS, codeBlock } from "./Thread";
 import { mod, sendOnModEnter } from "../keys";
 
 /** Where a comment goes: a range of a file's lines, or the whole file. */
@@ -16,32 +15,25 @@ export interface Target {
 }
 export const targetKey = (t: Target) => (t.range ? `${t.path}|${startSideOf(t.range)}${t.range.start}|${t.range.side}${t.range.end}` : `${t.path}|file`);
 
-/** A line the range could start on instead, with its text. */
-export interface StartOption {
-  at: Anchor;
-  text: string;
-}
-
 /** The composer's text until Add to review (spec §6.4: local until then). */
 export interface Draft {
   body: string;
   label: ThreadLabel | null;
   /** null: no suggested change. */
   suggest: string | null;
-  /** The range a kept suggestion was written for, once the pencil moved the start (R10b-09). */
+  /** The range a kept suggestion was written for, once the range moved under it (R10b-09). */
   wrote?: string;
 }
 export const EMPTY: Draft = { body: "", label: null, suggest: null };
 
 /** The comment composer (prototype 467–486). The text lives in `drafts`,
  *  keyed by target, so moving around the page does not lose it. */
-export function Composer({ target, lines, starts, onStart, drafts, editing, onSubmit, onCancel }: {
+export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit, onCancel }: {
   target: Target;
   /** The new-side text of the range, for a suggested change. */
   lines: string[];
-  /** The lines above the range's end it could start on instead (the header's pencil); none hides it. */
-  starts?: StartOption[];
-  onStart?: (a: Anchor) => void;
+  /** The header's ×: the range back to its last line. Absent, or on one line, no ×. */
+  onCollapse?: () => void;
   drafts: Map<string, Draft>;
   /** A draft thread being edited: its values start the composer. */
   editing?: ReviewThread | null;
@@ -65,7 +57,7 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
     drafts.set(key, next);
   };
   const r = target.range;
-  const where = r ? rangeName(r) : "Comment on this file";
+  const where = r ? rangeLabel(r) : "Comment on this file";
   // A range picked across a gap between hunks holds lines the diff doesn't show, so there is nothing to edit them from.
   const gap = !!r && lines.length < r.end - r.start + 1;
   // A suggestion replaces new-side lines, so a range across sides takes none.
@@ -103,25 +95,12 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
     >
       <div className="rv-composer-head">
         {r ? (
-          <span className="rv-muted rv-range-name">
-            Comment on {isOneLine(r) ? "line" : "lines"} <LineChip side={startSideOf(r)} line={r.start} />
-            {!isOneLine(r) && <> to <LineChip side={r.side} line={r.end} /></>}
+          <span className="rv-range-name">
+            {where}
+            {!editing && onCollapse && !isOneLine(r) && <IconButton label="Back to the last line" onClick={onCollapse}><X size={12} aria-hidden /></IconButton>}
           </span>
         ) : (
           <span className="rv-muted">{where}</span>
-        )}
-        {r && !editing && onStart && starts && starts.length > 1 && (
-          <Menu
-            label="Change the start line"
-            heading="Start line"
-            trigger={<Pencil size={12} aria-hidden />}
-            items={starts.map((o) => ({
-              label: lineRef(o.at.side, o.at.line),
-              hint: o.text.trim().slice(0, 48) || " ",
-              checked: o.at.side === startSideOf(r) && o.at.line === r.start,
-              onSelect: () => onStart(o.at),
-            }))}
-          />
         )}
         <span className="rv-muted" aria-hidden="true">·</span>
         {/* One tab stop, the checked chip; the arrows move the choice, as the ARIA radio group does (R10b-11). */}
@@ -149,11 +128,11 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
         <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
       )}
       {d.suggest !== null && d.wrote && (
-        // The pencil moved the start: the typed suggestion is kept, never dropped unsaid (R10b-09).
+        // The range moved under it: the typed suggestion is kept, never dropped unsaid (R10b-09).
         <p className="rv-moved" role="status">
           {suggests
             ? `Your suggested change was written for ${d.wrote.toLowerCase()}. Check that it should replace ${where.toLowerCase()}, or remove it.`
-            : `Your suggested change, written for ${d.wrote.toLowerCase()}, is set aside: a suggestion replaces new lines only. Move the start back to the new side to bring it back.`}
+            : `Your suggested change, written for ${d.wrote.toLowerCase()}, is set aside: a suggestion replaces new lines only. Move the range back onto the new side to bring it back.`}
         </p>
       )}
       {d.suggest !== null && suggests && (
@@ -174,8 +153,9 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
         <div className="rv-row-actions">
           <span className="rv-muted rv-notes">
             <span>{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ${mod("↵")} ${editing ? "save" : "add to review"}`}</span>
-            {/* Ranges have no button of their own: say how to make one where one line was picked. */}
+            {/* Ranges have no button of their own: say how to make one, and how to change it. */}
             {r && isOneLine(r) && !editing && !preview && <span>Drag the + or Shift-click to comment on several lines</span>}
+            {r && !isOneLine(r) && !editing && !preview && <span>Drag the handles or Shift-click to change the lines</span>}
           </span>
           <span className="rv-spacer" />
           {suggests && gap && <span className="rv-muted">No suggestion across lines the diff doesn't show</span>}
@@ -192,6 +172,3 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
     </div>
   );
 }
-
-/** A line number in the composer's header, coloured by its side. */
-const LineChip = ({ side, line }: { side: Side; line: number }) => <span className={`rv-line-chip is-${side}`}>{lineRef(side, line)}</span>;

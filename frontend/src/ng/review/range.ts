@@ -25,6 +25,15 @@ export const lineRef = (side: Side, line: number) => `${side === "old" ? "−" :
 export const rangeName = (r: LineRange) =>
   isOneLine(r) ? `Line ${lineRef(r.side, r.start)}` : `Lines ${lineRef(startSideOf(r), r.start)} to ${lineRef(r.side, r.end)}`;
 
+const capital = (s: string) => s[0].toUpperCase() + s.slice(1);
+/** Where a comment is going, in the words its composer header and the + button's tooltip use: "Line 5", "Lines 2–10",
+ *  "Old lines 2–10" on the old side, and across sides "Old 5 – new 6". */
+export function rangeLabel(r: LineRange): string {
+  if (isMixed(r)) return `${capital(startSideOf(r))} ${r.start} – ${r.side} ${r.end}`;
+  const where = r.start === r.end ? `line ${r.start}` : `lines ${r.start}–${r.end}`;
+  return capital(r.side === "old" ? `old ${where}` : where);
+}
+
 /** A thread's range, or null on a file or the whole item. */
 export const threadRange = (t: ReviewThread): LineRange | null =>
   t.start_line === null || !t.side

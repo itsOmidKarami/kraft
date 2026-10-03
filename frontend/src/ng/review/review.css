@@ -115,6 +115,10 @@
 .rv-plus { position: absolute; top: 1px; left: 2px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-sub); cursor: pointer; visibility: hidden; }
 /* Hover is the data-hover the diff moves to the line under the pointer: a `:hover` rule here cost every row of a huge diff on each crossing. */
 [data-hover] > .rv-plus, .rv-plus.is-head, .rv-plus:focus-visible { visibility: visible; }
+/* The handles on a shaded range's first and last rows: dragged to move that end. */
+.rv-grip { position: absolute; left: 24px; z-index: 2; width: 24px; height: 6px; box-sizing: border-box; border: 1px solid var(--bg); border-radius: 3px; background: var(--info); cursor: ns-resize; }
+.rv-grip.is-start { top: -3px; }
+.rv-grip.is-last { bottom: -3px; }
 .rv-plus:hover { background: var(--line); color: var(--text); }
 .rv-plus:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: var(--font-sans); }
@@ -155,10 +159,7 @@
 .rv-suggest-line.is-add { background: color-mix(in oklab, var(--diff-add-theme) 9%, transparent); }
 .rv-suggest .rv-textarea { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 /* The composer's "Comment on lines −2 to +2": each end coloured by its side. */
-.rv-range-name { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.rv-line-chip { padding: 0 5px; border-radius: 4px; font: 500 11.5px/1.6 ui-monospace, Menlo, monospace; color: var(--text); }
-.rv-line-chip.is-old { background: color-mix(in oklab, var(--rv-del, var(--diff-del-theme)) 22%, transparent); }
-.rv-line-chip.is-new { background: color-mix(in oklab, var(--rv-add, var(--diff-add-theme)) 22%, transparent); }
+.rv-range-name { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-weight: 500; color: var(--text); }
 .rv-notes { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .rv-elsewhere { margin: 0 16px 24px; }
 .rv-whole { margin-top: 16px; }
