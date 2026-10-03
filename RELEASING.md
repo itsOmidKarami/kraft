@@ -106,13 +106,6 @@ you press the button:
   <https://open-vsx.org/user-settings/trusted-publishers> as an owner of the
   `kraft-sdlc` namespace. Check that it still lists this repository,
   `release.yml` and the `release` environment.
-- [ ] **README links to unreleased docs are switched to the release's.**
-  Before 2.0.0, the README's "What's new in 2.0" link points at
-  `/kraft/next/get-started/whats-new`, because the stable docs at `/kraft/`
-  have no such page until 2.0.0 is out. In the pull request that the release
-  is cut after, change it to `/kraft/get-started/whats-new`: the wheel and
-  PyPI carry the README as it is at the tag. `git grep kraft/next/ README.md`
-  finds any link like it.
 
 ## What a stable run publishes
 
@@ -195,7 +188,10 @@ Two things the build writes into those artifacts, because the tag alone doesn't:
   its images relative to `vscode/`. A release's page keeps its images; the
   repository's front page and the docs on `/next/` still show `main`'s, and
   releases published before this existed keep the links they have, since PyPI
-  can't edit a release.
+  can't edit a release. On a stable tag, `pin-wheel` also points the README's
+  links to `main`'s docs (`/kraft/next/…`, for a page only `main` has until
+  the release is out) at the release's own (`/kraft/…`), so a README may link
+  `/next/` for a page the coming release adds, with nothing to switch by hand.
 - **`vscode/CHANGELOG.md` is written by the release, never by hand.** The
   extension ships at Kraft's version, so each section is Kraft's notes for that
   version, from the same pull requests as `CHANGELOG.md`. It is what the

@@ -63,6 +63,32 @@ def test_a_moving_asset_url_is_pinned_to_the_tag(before, after):
     assert release_artifacts.pin_refs(before, "v1.5.0", "o/r") == (after or before)
 
 
+_NEXT = "[What's new](https://o.github.io/r/next/get-started/whats-new)"
+
+
+@pytest.mark.parametrize(
+    ("tag", "before", "after"),
+    [
+        ("v2.0.0", _NEXT, "[What's new](https://o.github.io/r/get-started/whats-new)"),
+        ("v2.0.0", "https://O.GitHub.io/r/next/", "https://O.GitHub.io/r/"),
+        # A pre-release's stable docs are still the last release's.
+        ("v2.0.0rc2", _NEXT, None),
+        ("v2.0.0b1", _NEXT, None),
+        # Already the release's, someone else's site, or a page named next.
+        ("v2.0.0", "https://o.github.io/r/get-started/whats-new", None),
+        ("v2.0.0", "https://other.github.io/r/next/x", None),
+        ("v2.0.0", "https://o.github.io/r2/next/x", None),
+        ("v2.0.0", "https://o.github.io/r/guides/next/x", None),
+    ],
+    ids=["stable", "case", "rc", "beta", "pinned", "other-owner", "other-repo", "deeper"],
+)
+def test_a_stable_tag_points_main_s_docs_at_the_release_s(tag, before, after):
+    """The README links What's new on `/next/` until the release that adds it
+    is out; frozen into that release's PyPI page, the link would drift to
+    whatever `main` says later (R11D-02)."""
+    assert release_artifacts.pin_docs(before, tag, "o/r") == (after or before)
+
+
 def test_the_repository_matches_however_github_spells_it():
     url = "https://raw.githubusercontent.com/ITSomidkarami/Kraft/main/a.png"
     assert release_artifacts.pin_refs(url, "v1.5.0") == url.replace("/main/", "/v1.5.0/")
@@ -128,6 +154,7 @@ def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
     wheel = tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl"
     image = "![board](https://raw.githubusercontent.com/o/r/main/.github/assets/board.png)\n"
     image += "![theirs](https://raw.githubusercontent.com/other/repo/main/a.png)\n"
+    image += "[new](https://o.github.io/r/next/get-started/whats-new)\n"
     before = _wheel(wheel, image)
     release_artifacts.pin_wheel(wheel, "v1.5.0", "o/r")
     with zipfile.ZipFile(wheel) as z:
@@ -141,6 +168,7 @@ def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
     assert b"/o/r/v1.5.0/.github/assets/board.png" in after[meta]
     assert b"/o/r/main/" not in after[meta]
     assert b"/other/repo/main/a.png" in after[meta]
+    assert b"(https://o.github.io/r/get-started/whats-new)" in after[meta]
     # The header's own github.com link is not an asset URL.
     assert b"Project-URL: Source, https://github.com/o/r\n" in after[meta]
     for name in before:

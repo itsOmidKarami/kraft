@@ -5,8 +5,10 @@ What a release writes into what it ships, which a tag alone does not:
   python3 dev/release_artifacts.py pin-wheel <wheel> <tag>
       Points the wheel's description (README.md, as PyPI renders it) at <tag>
       instead of `main`, so a version's PyPI page keeps the screenshots that
-      version shipped with. Only this repository's links move: $GITHUB_REPOSITORY,
-      or itsOmidKarami/kraft when that is unset.
+      version shipped with. On a stable tag its links to `main`'s docs
+      (`/<repo>/next/`) go to the release's (`/<repo>/`) too. Only this
+      repository's links move: $GITHUB_REPOSITORY, or itsOmidKarami/kraft when
+      that is unset.
   python3 dev/release_artifacts.py vsix-version <tag>
       Prints <tag> as the version `vsce package` stamps on the .vsix, in
       semver: v1.5.0 -> 1.5.0, v1.5.0rc2 -> 1.5.0-rc.2.
@@ -54,6 +56,26 @@ def pin_refs(text: str, tag: str, repository: str = REPOSITORY) -> str:
     return moving.sub(lambda m: f"{m[1]}/{tag}/", text)
 
 
+def pin_docs(text: str, tag: str, repository: str = REPOSITORY) -> str:
+    """`text` with `repository`'s links to `main`'s docs moved to the release's, on a stable `tag`.
+
+    The docs site serves the latest stable release at `/<repo>/` and `main` at
+    `/<repo>/next/`. A README links a page that exists only on `main` under
+    `/next/` until the release that adds it is out; on that release's own PyPI
+    page the link would then lead to whatever `main` says later. A
+    pre-release's page keeps `/next/`: the stable docs are still the last
+    release's.
+    """
+    match = _TAG.fullmatch(tag)
+    if not match:
+        raise ValueError(f"cannot read a version out of {tag!r}")
+    if match[2] is not None:
+        return text
+    owner, name = (re.escape(part) for part in repository.split("/", 1))
+    docs = re.compile(rf"(https://{owner}\.github\.io/{name})/next/", re.IGNORECASE)
+    return docs.sub(lambda m: f"{m[1]}/", text)
+
+
 def _record_row(path: str, data: bytes) -> list[str]:
     digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
     return [path, f"sha256={digest}", str(len(data))]
@@ -71,7 +93,7 @@ def pin_wheel(wheel: Path, tag: str, repository: str = REPOSITORY) -> None:
         infos = src.infolist()
         contents = {info.filename: src.read(info) for info in infos}
     (meta,) = (n for n in contents if re.fullmatch(r"[^/]+\.dist-info/METADATA", n))
-    pinned = pin_refs(contents[meta].decode(), tag, repository).encode()
+    pinned = pin_docs(pin_refs(contents[meta].decode(), tag, repository), tag, repository).encode()
     if pinned == contents[meta]:
         return
     contents[meta] = pinned
