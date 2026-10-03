@@ -81,7 +81,9 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
   const n = nodes.find((x) => x.id === i.current_node_id) ?? nodes[nodes.length - 1];
   const kind: GlyphKind = n?.kind === "gate" ? "gate" : "exec";
-  const icon = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned") ? "ban" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
+  const dropped = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned");
+  const finished = i.display_status === "done" || (i.display_status === "archived" && !dropped);
+  const icon = dropped ? "ban" : finished ? "check" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
   const state: GlyphState = (() => {
     switch (i.display_status) {
       case "failed": return "failed";
@@ -106,8 +108,10 @@ export function ticksOf(i: Row): Tick[] {
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
   const hot = groupOf(i) === "needs" || i.display_status === "escalated";
-  return nodes.map((n, k) => ({
+  const ticks: Tick[] = nodes.map((n, k) => ({
     gate: n.kind === "gate",
     state: ended || (at >= 0 && k < at) ? "done" : at >= 0 && k === at ? (hot ? "hot" : "current") : "todo",
   }));
+  // An ended item reads as finished at a glance: the nodes between two gates are one dash (BD-6).
+  return ended ? ticks.filter((t, k) => t.gate || !ticks[k - 1] || ticks[k - 1].gate) : ticks;
 }
