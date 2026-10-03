@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { detailOf, request } from "../../http";
 import { useConfigDraft, type ConfigDraft } from "../../templates/draft/useConfigDraft";
 import { problemText } from "../../templates/problems";
-import { FIELDS, FORGES, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
+import { FIELDS, FORGES, NO_TESTS, patchFor, sourceOf, valueOf, type RepoField } from "../../templates/repos/fields";
 import { setRepo } from "../../templates/repos/RepoConfig";
 import { harnessChoices, steeringChoices } from "../../templates/choices";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
@@ -44,7 +44,7 @@ export function ReposList() {
           title="Connected"
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
-            sub: `${r.path} · chain ${String(r.entry.default_chain_template ?? "default")}${r.entry.test_command ? ` · ${String(r.entry.test_command)}` : ""}`,
+            sub: `${r.path} · chain ${String(r.entry.default_chain_template ?? "default")}${r.entry.test_command === "" ? ` · ${NO_TESTS}` : r.entry.test_command ? ` · ${String(r.entry.test_command)}` : ""}`,
             chips: [{ label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />
@@ -83,7 +83,7 @@ export function RepoView() {
 
   const rowOf = (f: RepoField): RowSpec => {
     const v = valueOf(repo!, f);
-    const shown = f.show(f.key === "steering" ? repo!.resolved.steering : v) || f.fallback || "not set";
+    const shown = (v === "" && f.empty) || f.show(f.key === "steering" ? repo!.resolved.steering : v) || f.fallback || "not set";
     const base: RowSpec = { key: f.key, label: f.label, value: shown, sub: sourceOf(repo!, f), changed: changed(f.key.replace(/^policy\./, "policy")) };
     if (f.choice) {
       const options = (f.choice === "chain" ? chains : FORGES).map((x) => ({ value: x, label: x }));

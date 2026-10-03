@@ -42,7 +42,7 @@ export function RepoConfig({ draft, repo, chains }: { draft: ConfigDraft; repo: 
 
 function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft; repo: RepoView; f: RepoField; chains: string[]; problem?: Problem; changed: boolean }) {
   const v = valueOf(repo, f);
-  const shown = f.show(f.key === "steering" ? repo.resolved.steering : v);
+  const shown = v === "" && f.empty ? f.empty : f.show(f.key === "steering" ? repo.resolved.steering : v);
   const set = v != null && !(Array.isArray(v) && v.length === 0);
   const source = sourceOf(repo, f);
   const library = useLibrary();
