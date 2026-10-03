@@ -152,25 +152,52 @@ def _parse(payload, channel: str = "stable") -> Release | None:
     return best[1] if best else None
 
 
-def _read_cache(now: float, channel: str) -> Release | None:
+def _load() -> dict | None:
+    """The cache file as an object, or None when it is missing, unreadable, or
+    valid JSON of another shape (`[]`, `null`, `1`): all of them a miss."""
     try:
         blob = json.loads(_cache_path().read_text())
+    except (OSError, ValueError):
+        return None
+    return blob if isinstance(blob, dict) else None
+
+
+def _read_cache(now: float, channel: str) -> Release | None:
+    blob = _load()
+    try:
+        if blob is None:
+            return None
         if blob.get("channel", "stable") != channel or now - float(blob["checked_at"]) >= CACHE_TTL:
             return None
         return Release(tag=blob["tag"], wheel_url=blob["wheel_url"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
 
 
 def _recently_failed(now: float, channel: str) -> bool:
     """True when a check on `channel` failed less than `RETRY_AFTER` ago."""
+    blob = _load()
     try:
-        blob = json.loads(_cache_path().read_text())
-        if blob.get("channel", "stable") != channel:
+        if blob is None or blob.get("channel", "stable") != channel:
             return False
         return 0 <= now - float(blob["failed_at"]) < RETRY_AFTER
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return False
+
+
+def _store(blob: dict) -> None:
+    """Replace the cache file whole: a reader (another tab's request, `kraft
+    admin start`) sees the old file or the new one, never half of one, which
+    it would take for a miss and a failure write would then replace."""
+    path = _cache_path()
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(blob))
+        os.replace(tmp, path)
+    except OSError:
+        # A read-only or full run dir costs a re-check next time, nothing more.
+        tmp.unlink(missing_ok=True)
 
 
 def _write_failure(now: float, channel: str) -> None:
@@ -179,46 +206,32 @@ def _write_failure(now: float, channel: str) -> None:
     `last_checked` reads `checked_at`, which stays the time of the last
     success; the failure rides beside it as `failed_at`.
     """
-    path = _cache_path()
-    try:
-        try:
-            blob = json.loads(path.read_text())
-        except (OSError, ValueError):
-            blob = None
-        if not isinstance(blob, dict) or blob.get("channel", "stable") != channel:
-            blob = {"channel": channel}
-        blob["failed_at"] = now
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(blob))
-    except OSError:
-        pass
+    blob = _load()
+    if blob is None or blob.get("channel", "stable") != channel:
+        blob = {"channel": channel}
+    blob["failed_at"] = now
+    _store(blob)
 
 
 def _write_cache(release: Release, now: float, channel: str) -> None:
-    path = _cache_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "tag": release.tag,
-                    "wheel_url": release.wheel_url,
-                    "channel": channel,
-                    "checked_at": now,
-                }
-            )
-        )
-    except OSError:
-        # A read-only or full run dir costs a re-check next time, nothing more.
-        pass
+    _store(
+        {
+            "tag": release.tag,
+            "wheel_url": release.wheel_url,
+            "channel": channel,
+            "checked_at": now,
+        }
+    )
 
 
 def last_checked(channel: str = "stable") -> float | None:
     """When a check on `channel` last succeeded, however long ago; None if never."""
+    blob = _load()
     try:
-        blob = json.loads(_cache_path().read_text())
-        return float(blob["checked_at"]) if blob.get("channel", "stable") == channel else None
-    except (OSError, ValueError, KeyError, TypeError):
+        return (
+            float(blob["checked_at"]) if blob and blob.get("channel", "stable") == channel else None
+        )
+    except (ValueError, KeyError, TypeError):
         return None
 
 

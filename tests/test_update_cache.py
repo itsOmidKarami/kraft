@@ -32,8 +32,8 @@ def cache(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("age", "fetches"),
-    [(update.RETRY_AFTER - 60, 1), (update.RETRY_AFTER + 60, 2)],
-    ids=["inside-the-retry-window", "after-it"],
+    [(update.RETRY_AFTER - 60, 1), (update.RETRY_AFTER + 60, 2), (-60, 2)],
+    ids=["inside-the-retry-window", "after-it", "failed-in-the-future"],
 )
 @pytest.mark.parametrize(
     "feed",
@@ -91,3 +91,32 @@ def test_cache_only_never_fetches(cache, monkeypatch):
     update.latest()
     monkeypatch.setattr(update, "_fetch", explode)
     assert update.latest(cache_only=True).tag == "v0.4.0"
+
+
+@pytest.mark.parametrize(
+    "text", ["[]", "null", "1", '"x"'], ids=["list", "null", "number", "string"]
+)
+def test_a_cache_file_that_is_not_an_object_is_a_miss_not_a_crash(cache, monkeypatch, text):
+    cache.parent.mkdir(parents=True)
+    cache.write_text(text)
+    assert update.last_checked() is None
+    monkeypatch.setattr(update, "_fetch", lambda *_: RELEASE_JSON)
+    assert update.latest().tag == "v0.4.0"
+    assert json.loads(cache.read_text())["tag"] == "v0.4.0"
+    cache.write_text(text)
+    monkeypatch.setattr(update, "_fetch", lambda *_: [])
+    assert update.latest() is None
+    assert json.loads(cache.read_text())["channel"] == "stable"
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_the_cache_is_replaced_whole_never_written_in_place(cache, monkeypatch, fails):
+    """A reader must never catch a half-written file."""
+    swaps = []
+    real = update.os.replace
+    monkeypatch.setattr(update.os, "replace", lambda a, b: swaps.append((a, b)) or real(a, b))
+    monkeypatch.setattr(update, "_fetch", lambda *_: [] if fails else RELEASE_JSON)
+    update.latest()
+    [(src, dst)] = swaps
+    assert (dst, src.parent) == (cache, cache.parent)
+    assert [p.name for p in cache.parent.iterdir()] == [cache.name]
