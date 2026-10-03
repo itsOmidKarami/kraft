@@ -98,6 +98,15 @@ describe("task pane", () => {
     expect(screen.getByText("And the merge request?")).toBeInTheDocument();
   });
 
+  it("counts the escalation's sessions as turns, the word its Thread tab uses (R10b-06)", () => {
+    const turns = detail({ worker_sessions: [sess("escalation", 1, { id: "e1", node_id: "verification" }), sess("escalation", 2, { id: "e2", node_id: "verification" })] });
+    mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation", turns);
+    const p = pane("escalation");
+    expect(within(p).getByText("turn 2 of 2")).toBeInTheDocument();
+    expect(within(p).queryByText(/attempt 2 of 2/)).toBeNull();
+    expect(within(p).getByRole("button", { name: "Earlier turn" })).toBeInTheDocument();
+  });
+
   it("cuts the thread at a turn whose message names no session by the turn's place among its node's", async () => {
     const turns = detail({ worker_sessions: [sess("escalation", 1, { id: "e1", node_id: "verification" }), sess("escalation", 2, { id: "e2", node_id: "verification" })] });
     const msg = (seq: number, turn: number, message: string, node_id = "verification") => ({ seq, work_item_id: "w1", type: "escalation_message", payload: { thread: 1, turn, message }, node_id, created_at: "2026-09-13T09:00:00Z" });
