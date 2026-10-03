@@ -23,6 +23,7 @@ def _record(repo: Path) -> Path:
 def _setup_writes(repo: Path, name: str = "uv.lock", text: str = "by the setup\n") -> None:
     """What `builtins._prepare` does around a setup that writes `name`."""
     before = asyncio.run(forge.lockfile_digests(repo))
+    (repo / name).parent.mkdir(parents=True, exist_ok=True)
     (repo / name).write_text(text)
     asyncio.run(forge.record_setup_writes(repo, before))
 
@@ -132,6 +133,8 @@ def test_a_directory_that_only_looks_like_an_install_is_committed(tmp_path, file
     repo = make_repo(tmp_path)
     _write_each(repo, files, "work\n")
     added = [f for f in files if not f.endswith("package.json")]
+    # A setup that runs after the agent wrote it did not make it.
+    asyncio.run(forge.record_setup_writes(repo, asyncio.run(forge.lockfile_digests(repo))))
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == []
     assert _sweep(repo) == sorted(added)
@@ -147,13 +150,18 @@ def test_a_directory_that_only_looks_like_an_install_is_committed(tmp_path, file
         ),
         (("node_modules/.pnpm/x/i.js",), "node_modules"),
         (("env/pyvenv.cfg", "env/Scripts/python.exe"), "env"),
+        (("setup:node_modules/x/i.js",), "node_modules"),
     ],
-    ids=["pnpm-marker", "beside-package-json", "pnpm-store", "windows-venv"],
+    ids=["pnpm-marker", "beside-package-json", "pnpm-store", "windows-venv", "made-by-the-setup"],
 )
 def test_a_real_install_is_left_out(tmp_path, files, install):
-    """A `package.json` beside it is the repo's own, so committed first."""
+    """A `package.json` beside it is the repo's own, so committed first. A
+    `node_modules` the setup made needs no marker: bun leaves none."""
     repo = make_repo(tmp_path)
-    _write_each(repo, files, "installed\n")
+    _write_each(repo, [f for f in files if not f.startswith("setup:")], "installed\n")
+    for f in files:
+        if f.startswith("setup:"):
+            _setup_writes(repo, f.removeprefix("setup:"))
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == [install]
 

@@ -667,9 +667,9 @@ def _check_one_line(title: str) -> None:
 
 
 #: The characters that reorder text as it is shown (Unicode's bidi controls).
-_BIDI_CONTROLS = frozenset(
-    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
-)
+#: Not the marks (ALM, LRM, RLM): they are common in pasted Persian, Arabic
+#: and Hebrew text, and cannot reorder strong text.
+_BIDI_CONTROLS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
 class TriggerBody(BaseModel):

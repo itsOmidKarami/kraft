@@ -227,6 +227,8 @@ def test_patch_sets_the_title_without_clobbering_the_description(client, repo):
     assert [e["payload"]["title"] for e in evs if e["type"] == "work_item_title_edited"] == [
         "a better label"
     ]
+    # A right-to-left mark, common in pasted Persian or Hebrew, is no control to refuse.
+    assert client.patch(f"/api/work-items/{wid}", json={"title": "نسخه \u200f2"}).status_code == 200
 
 
 def test_patch_refuses_an_empty_body_and_a_blank_title(client, repo):

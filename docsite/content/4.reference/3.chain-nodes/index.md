@@ -48,7 +48,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `on_failure` | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
 | `fix_loop` | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes, up to `max_attempts` and the wall clock that `policy.yaml` gives the loop (`<node>.fix_loop`). See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | An agent task dispatched when the node is stuck after recovery and the fix loop, before a person is asked. |
-| `on_base_changed` | What to re-run when a rebase moves the base. `restart_from` names an earlier node. `on_conflict` names the task or steps that resolve a conflicting rebase. A retry or resume that starts at such a node leaves the rebase to it, so a move still restarts the span. |
+| `on_base_changed` | What to re-run when a rebase moves the base. `restart_from` names an earlier node. `on_conflict` names the task or steps that resolve a conflicting rebase. A retry or resume that starts at such a node leaves the rebase to it when the node has an `mr_rebase` task of its own, so a move still restarts the span. |
 | `read_only` | `true` makes Kraft verify that the node's steps leave the worktree as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
 | `icon` | The [icon](#icons) the board draws for the node. |
 
