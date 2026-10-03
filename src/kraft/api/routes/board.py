@@ -6,8 +6,8 @@ from datetime import datetime
 
 from fastapi import HTTPException, Request
 
+from kraft import caps, events, executor, store
 from kraft import config as config_mod
-from kraft import events, executor, store
 from kraft import policy as policy_mod
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
@@ -936,6 +936,9 @@ async def get_work_item(wid: str, request: Request):
         # response's truthy `budget` object read as "the item is stopped for
         # budget" even when it is running fine under its cap.
         "budget_cap": budget_cap(st, row),
+        # The time budget beside the dollars: what the item-wide running-time
+        # cap has measured and allows (`caps.running_time`).
+        "running_time": st.db.read(lambda c: caps.running_time(c, row)),
         "rate_limit": _rate_limit_retries(st, row),
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],

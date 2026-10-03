@@ -268,6 +268,21 @@ class _Timeline:
         return min((s[2] for s in runs), default=None)
 
 
+def running_time(conn, row, *, now: str | None = None) -> dict | None:
+    """The work item's running-time clock and cap, as its `time_cap_minutes`
+    measures them: the seconds any of its sessions ran since the last human
+    retry, and the item-wide cap in minutes (None: no cap). None for an item
+    with no frozen chain."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        return None
+    line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
+    return {
+        "running_s": round(line.running("", line.since)),
+        "cap_minutes": snapshot.work_item_policy().time_cap_minutes,
+    }
+
+
 def _levels(snapshot, path: str) -> list[tuple[str, str]]:
     """`(path, kind)` of the work item and each node and step enclosing the
     task at `path`, broadest first -- the scopes whose caps it runs under."""

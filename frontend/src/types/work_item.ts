@@ -355,6 +355,8 @@ export interface WorkItem {
   /** This item's effective spend cap and its source. Only on the detail
    *  endpoint. */
   budget_cap?: BudgetCap;
+  /** The item's time budget (detail only): what its item-wide `time_cap_minutes` has measured, and that cap (null: none). */
+  running_time?: { running_s: number; cap_minutes: number | null } | null;
   /** Whether the item set its own dollar cap, and that cap (null: no cap).
    *  Unset, the policy's `work_item_usd` holds it. Only on the detail endpoint. */
   budget_set?: number | boolean;

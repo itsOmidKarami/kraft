@@ -6,7 +6,7 @@ import type { ChainNode, DiffFile, KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { neverStarted } from "./status";
+import { neverStarted, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
 import { useDiffFiles } from "./Top";
 import { runVersion } from "./useItem";
@@ -88,7 +88,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
-  const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", `${usd(item.budget_cap.spent_usd)}${item.budget_cap.cap_usd != null ? ` of ${usd(item.budget_cap.cap_usd)}` : ""}`] : null;
+  const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", spentLine(item)] : null;
   const where = stop ? [pathOf(stop.task) || stop.node, stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   const status = item.display_status;
 

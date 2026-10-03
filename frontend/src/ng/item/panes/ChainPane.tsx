@@ -12,7 +12,7 @@ import { age, recent as recentLines } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
 import { DocViewer } from "../DocViewer";
-import { budgetRaise, neverStarted } from "../status";
+import { budgetRaise, neverStarted, spentLine } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
@@ -28,6 +28,7 @@ const statusLine = (item: ItemDetail) => {
 };
 
 const RECENT = 5;
+
 
 /** The chain pane's Overview (Decisions §5 Chain pane): status, progress,
  *  current (a link), spend, the documents attached at intake (each opens when
@@ -69,7 +70,7 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
             </dd>
           </div>
         )}
-        {cap && <div><dt>spent</dt><dd>{usd(cap.spent_usd)}{cap.cap_usd != null ? ` of ${usd(cap.cap_usd)}` : ""}</dd></div>}
+        {cap && <div><dt>spent</dt><dd>{spentLine(item)}</dd></div>}
         {/* Off the item page (the board's peek), which chain and repo: the page's crumb says them there. */}
         {where && <div><dt>chain</dt><dd>{chainName(item)} · frozen at intake</dd></div>}
         {where && <div><dt>repo</dt><dd>{repoName(item.repo)}</dd></div>}
