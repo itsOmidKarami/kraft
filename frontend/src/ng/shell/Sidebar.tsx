@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Pin } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "../icons";
 import { Kbd } from "../ui/Kbd";
 import { useStore } from "../../store";
 import { NAV_ICON } from "../icons";
@@ -85,6 +85,17 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           <span className={`ng-side-live-dot ${connection === "open" ? "ok" : "warn"}`} role="img" aria-label={connectionWord(connection)} />
           <span className="ng-side-brand ng-side-label">Kraft</span>
           <span className={`ng-side-live ng-side-label ${connection === "open" ? "ok" : "warn"}`}>{connectionWord(connection)}</span>
+          <button
+            type="button"
+            className="ng-side-pin"
+            aria-pressed={mode === "pinned"}
+            title={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
+            // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11).
+            aria-label="Pin sidebar"
+            onClick={toggle}
+          >
+            {mode === "pinned" ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
+          </button>
         </div>
         <nav className="ng-side-nav" aria-label="Pages">
           <button type="button" className="ng-side-row" aria-label="Search" aria-keyshortcuts="Meta+K Control+K" onClick={() => onSearch?.()}>
@@ -107,17 +118,6 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
               {restartWords(health)}
             </NavLink>
           )}
-          <button
-            type="button"
-            className="ng-side-pin"
-            aria-pressed={mode === "pinned"}
-            title={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
-            // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11).
-            aria-label="Pin sidebar"
-            onClick={toggle}
-          >
-            <Pin size={16} aria-hidden />
-          </button>
         </div>
       </aside>
     </div>

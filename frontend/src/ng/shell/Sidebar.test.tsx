@@ -70,9 +70,12 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("button", { name: /^Search/ })).toHaveTextContent("⌘K");
   });
 
-  it("keeps every row in the tab order, so the rail works without a pointer", async () => {
+  it("keeps every row in the tab order, so an unpinned sidebar works without a pointer", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
     mount();
     await userEvent.tab(); // skip link
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveFocus();
     await userEvent.tab();
     expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
     await userEvent.tab();
@@ -88,6 +91,18 @@ describe("ng Sidebar", () => {
     expect(now).not.toBe(was);
     expect(localStorage.getItem(SIDEBAR_KEY)).toBe(now === "true" ? "pinned" : "rail");
     expect(document.documentElement.dataset.sidebar).toBe(now === "true" ? "pinned" : "rail");
+  });
+
+  it("puts the pin in the head beside Kraft · live, its panel icon and title following the state", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    mount();
+    const pin = screen.getByRole("button", { name: "Pin sidebar" });
+    expect(pin.closest(".ng-side-head")).not.toBeNull();
+    expect(pin).toHaveAttribute("title", "Collapse sidebar");
+    expect(pin.querySelector(".lucide-panel-left-close")).not.toBeNull();
+    await userEvent.click(pin);
+    expect(pin).toHaveAttribute("title", "Pin sidebar");
+    expect(pin.querySelector(".lucide-panel-left-open")).not.toBeNull();
   });
 
   it("starts from the stored choice", () => {
