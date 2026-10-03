@@ -23,6 +23,7 @@ import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { countIn } from "./counts";
+import { Skeleton } from "./Skeleton";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -304,7 +305,7 @@ export function BoardPage() {
         <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
-            {load.state === "loading" && items.length === 0 ? <Skeleton /> : groups.map((g) => (
+            {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">
                   <span>{g.label}</span>
@@ -359,27 +360,6 @@ export function BoardPage() {
         )}
         <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
-    </div>
-  );
-}
-
-/** The board while its first list read runs (AreaBoard 65–70). */
-function Skeleton() {
-  return (
-    <div className="board-skeleton" aria-busy="true" aria-label="Loading the board">
-      {[3, 3, 2].map((rows, g) => (
-        <div key={g}>
-          <span className="sk sk-head" />
-          {Array.from({ length: rows }, (_, r) => (
-            <div key={r} className="sk-row">
-              <span />
-              <span className="sk sk-glyph" />
-              <span className="sk-lines"><span className="sk" style={{ width: `${52 + ((g + r) % 3) * 12}%` }} /><span className="sk sk-short" /></span>
-              <span className="sk sk-ticks" />
-            </div>
-          ))}
-        </div>
-      ))}
     </div>
   );
 }

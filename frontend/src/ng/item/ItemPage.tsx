@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { Skeleton } from "../board/Skeleton";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { Banner, QuestionCard } from "./Banner";
@@ -27,7 +28,7 @@ export function ItemPage() {
     setPageItem(item);
     return () => setPageItem(null);
   }, [item, setPageItem]);
-  if (loaded.state === "loading") return <div className="item-page" aria-busy="true" />;
+  if (loaded.state === "loading") return <div className="item-page"><Skeleton label="Loading the work item" /></div>;
   if (loaded.state === "missing")
     return <Placeholder label="Work item not found" note={`There is no work item ${id}. It may have been removed.`} />;
   return (

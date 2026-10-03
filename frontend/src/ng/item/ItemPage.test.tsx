@@ -34,6 +34,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ItemPage", () => {
+  it("shows the board's skeleton while the item is read (WI-5)", async () => {
+    // A read that never answers: the page stays loading.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    mount();
+    expect(screen.getByLabelText("Loading the work item")).toHaveAttribute("aria-busy", "true");
+  });
+
   it("opens the gate's review from the banner's Review changes", async () => {
     const gated = detail({ status: "needs_human", display_status: "needs_you", current_node_id: "plan_approval", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } as never });
     stubFetch({ "GET /work-items/w1": [200, gated] });
