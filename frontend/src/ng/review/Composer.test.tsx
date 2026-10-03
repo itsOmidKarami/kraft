@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Compare, CompareFile, ReviewThread } from "../../types";
 import * as http from "../http";
@@ -235,6 +235,13 @@ describe("useComments", () => {
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("use this");
     expect(screen.getByRole("textbox", { name: "Suggested change" })).toHaveValue("z = CHANGED");
     expect(screen.getByRole("status")).toHaveTextContent("Your suggested change was written for line +2. Check that it should replace lines +1 to +2, or remove it.");
+    // R11b-06: moved back to the lines it was written for, the note goes; the suggestion stays.
+    fireEvent.click(screen.getByRole("button", { name: "Change the start line" }));
+    act(() => fireEvent.click(screen.getByRole("menuitemradio", { name: /^\+2/ })));
+    cleanup();
+    render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
+    expect(screen.getByRole("textbox", { name: "Suggested change" })).toHaveValue("z = CHANGED");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("sets a typed suggestion aside, unsent, when the pencil makes the range cross sides", async () => {

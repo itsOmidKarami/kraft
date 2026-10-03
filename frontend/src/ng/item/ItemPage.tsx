@@ -12,7 +12,7 @@ import { PausedCard, StateCard } from "./StateCard";
 import { Brief, DiffLine, Title } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
-import { Workspace } from "./Workspace";
+import { openBudgetEditor, Workspace } from "./Workspace";
 import { runVersion, useItem, type ItemDetail } from "./useItem";
 import "./item.css";
 
@@ -48,6 +48,18 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   const openGate = useSelect(item.id);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
+  // Raise cap (the banner's and the header's) opens the budget editor on a budget stop, as the peek's does (R11a-05).
+  const raise = () => {
+    if (item.stop?.kind === "budget") openBudgetEditor(item.id);
+    settings();
+  };
+  const threadOf = () => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "task", node: item.stop.node, step: ESCALATION, task: ESCALATION } }));
+  // The header's Answer: the question card's box when it is on the page, else the thread the question is in.
+  const answer = () => {
+    const box = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Your answer"]');
+    if (box) return box.focus();
+    threadOf();
+  };
   const runLog = () => {
     const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
     const last = [...item.worker_sessions].reverse().find((s) => s.node_id === node?.id && s.hook_point.split(".").length === 3);
@@ -57,17 +69,17 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   };
   return (
     <div className="item-page">
-      <ItemHeader item={item} reload={reload} onSettings={settings} onRunLog={runLog} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} />
+      <ItemHeader item={item} reload={reload} onSettings={settings} onRaise={raise} onGate={openGate} onAnswer={answer} onRunLog={runLog} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} />
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
         <DiffLine id={item.id} version={runVersion(item)} />
       </div>
-      <Banner item={item} onOpenGate={openGate} onRaise={settings} reload={reload} />
+      <Banner item={item} onOpenGate={openGate} onRaise={raise} reload={reload} />
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />
-      <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "task", node: item.stop.node, step: ESCALATION, task: ESCALATION } }))} />
+      <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={threadOf} />
       <Workspace item={item} version={version} reload={reload} />
     </div>
   );

@@ -166,6 +166,18 @@ function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview
       ],
     };
   }
+  // Any other stop that needs you: a stuck fix loop, a question with no text, a kind a later server adds.
+  // A gate, a question, a cap and a budget have their banner or question card; this one has its own way on (R11a-01).
+  if (status === "needs_you" && stop && !(["gate", "budget", "cap"] as string[]).includes(stop.kind) && !(stop.kind === "question" && item.needs_context_question)) {
+    return {
+      tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, node: stop.node,
+      facts: spent ? [spent] : [],
+      actions: [
+        { label: stop.task ? `Retry from ${taskName(stop.task)}` : "Retry", primary: true, run: () => run(act.retry(item.id, node ? { path: actionPath(node, stop.task) } : {})) },
+        { label: "Escalate…", run: h.onEscalate },
+      ],
+    };
+  }
   if (status === "cancelled") {
     const ev = [...events].reverse().find((e) => e.type === "work_item_cancelled");
     const at = str(ev?.payload.node_id) ?? item.current_node_id;

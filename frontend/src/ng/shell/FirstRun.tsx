@@ -5,6 +5,7 @@ import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
+import { onMac } from "../keys";
 import { missingLine, NO_COMMIT_WHY, others, readFrom, setupLine, stopLine, testsLine } from "../templates/repos/evidence";
 import "./first-run.css";
 
@@ -165,8 +166,9 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     return () => clearTimeout(t);
   }, [probe, shown]);
 
-  // Check again goes as it re-probes: focus returns to the path field, where Enter
-  // adds the repo once its rows are read, not to the page (review L1).
+  // A probe swaps the button that started it (+ Add repo, Check again) for another, so
+  // focus returns to the path field, where Enter adds the repo once its rows are read,
+  // not to the page (review L1, R11a-08).
   const pathField = useRef<HTMLInputElement>(null);
   const refocus = useRef(false);
   useEffect(() => {
@@ -176,7 +178,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   }, [probing]);
   const doProbe = async () => {
     if (!path.trim() || probing) return;
-    refocus.current = probe?.read_from === null;
+    refocus.current = true;
     setProbing(true);
     setError(null);
     setProbe(null);
@@ -263,7 +265,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             <>
               <h2>Connect a repo</h2>
               <Field label="Path to a local git checkout" error={error}>
-                <input ref={pathField} value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={!!added}
+                <input ref={pathField} value={path} spellCheck={false} placeholder={onMac() ? "/Users/you/code/project" : "/home/you/code/project"} disabled={!!added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
                   onKeyDown={(e) => e.key === "Enter" && (probe && !noCommit ? probed && !added && doAdd() : doProbe())} />
               </Field>

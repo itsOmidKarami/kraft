@@ -46,12 +46,21 @@ describe("GateFooter", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/gates/plan_approval/reject", body: { note: "Add the invalidation story." } }]));
   });
 
-  it("moves focus into the note on Reject…, and back to Reject… on Cancel (R7b-10)", async () => {
+  // Escape closes an empty note as Cancel does; one with text in it stays, text and all (R11b-02).
+  it.each(["Cancel", "Escape"])("moves focus into the note on Reject…, and back to Reject… on %s (R7b-10)", async (how) => {
     render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
     expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveFocus();
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    if (how === "Cancel") await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    else await userEvent.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Reject…" })).toHaveFocus();
+  });
+
+  it("keeps a note with text in it on Escape (R11b-02)", async () => {
+    render(<GateFooter item={pending} gate={gate} reload={() => {}} onRead={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Reject…" }));
+    await userEvent.keyboard("The spec misses the cache eviction policy.{Escape}");
+    expect(screen.getByLabelText("Why (the next agent reads it)")).toHaveValue("The spec misses the cache eviction policy.");
   });
 
   it("rejects on ⌘↵ from the note, and not before there is one", async () => {

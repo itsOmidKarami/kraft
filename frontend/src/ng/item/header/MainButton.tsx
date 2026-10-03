@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Archive, ArchiveRestore, ChevronDown, CircleCheck, Pause, Play, RotateCcw, Siren, X } from "../../icons";
+import { Archive, ArchiveRestore, ChevronDown, CircleAlert, CircleCheck, MessageSquare, Pause, Play, RotateCcw, Siren, X } from "../../icons";
 import { Popover } from "../../ui/Popover";
 import { MAIN_LABEL, type Main, type PanelItem } from "../status";
 
-const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore };
+const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore, gate: CircleCheck, answer: MessageSquare, conflicts: CircleAlert, reopen: RotateCcw };
 const ITEM: Record<PanelItem, { label: string; icon: typeof Pause; tone?: string }> = {
   escalate: { label: "Escalate…", icon: Siren, tone: "warn" },
   complete: { label: "Mark complete…", icon: CircleCheck },

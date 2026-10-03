@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkerSession } from "../../types";
 import { detail, fresh, stubFetch } from "./testkit";
-import { usePaneMemory, Workspace } from "./Workspace";
+import { openBudgetEditor, usePaneMemory, Workspace } from "./Workspace";
 
 beforeEach(() => {
   stubFetch();
@@ -129,6 +129,36 @@ describe("Workspace", () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));
     expect(where()).toBe("/work-items/w1");
+  });
+});
+
+// R11a-05's request to open the budget editor is this item's, and taken at once: one the
+// item page never took does not open the editor on a later visit (#504 review).
+describe("a request to open the budget editor", () => {
+  it.each([
+    ["this item's, just made, opens it", "w1", 0, true],
+    ["another item's does not", "w2", 0, false],
+    ["one never taken, 30 s old, does not", "w1", 30_000, false],
+  ])("%s", async (_name, id, age, opens) => {
+    stubFetch();
+    openBudgetEditor(id, Date.now() - age);
+    mount("/work-items/w1?tab=config");
+    await act(async () => {});
+    expect(screen.queryByRole("textbox", { name: "Budget in dollars" }) !== null).toBe(opens);
+  });
+});
+
+// R11b-04: a node waiting on CI or the provider, and one stopped at its cap, were called "running".
+describe("a node the run stands on but does not run", () => {
+  const stop = (kind: string, more = {}) => ({ kind, node: "verification", task: null, resume_at: null, reason: null, ...more }) as never;
+  it.each([
+    ["waiting on CI", { status: "waiting", display_status: "waiting", stop: stop("wait") }, /^exec node · waiting on CI/],
+    ["rate limited", { status: "rate_limited", display_status: "waiting", stop: stop("rate_limit") }, /^exec node · waiting · rate limit/],
+    ["stopped at its budget cap", { status: "needs_human", display_status: "needs_you", stop: stop("budget", { scope: "work_item" }) }, /^exec node · stopped at the cap$/],
+  ] as const)("%s says so in the pane", (_name, over, sub) => {
+    stubFetch();
+    mount("/work-items/w1?sel=verification", over as never);
+    expect(within(screen.getByRole("complementary", { name: "verification pane" })).getByText(sub)).toBeInTheDocument();
   });
 });
 

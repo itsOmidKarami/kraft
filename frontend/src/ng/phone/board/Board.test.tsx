@@ -57,6 +57,17 @@ describe("the phone board, against a server older than its interface (R10c-01)",
     expect(await screen.findByRole("alert")).toHaveTextContent("This server is older than its web interface");
   });
 
+  // R11b-08: an update or a rollback under an open tab said nothing on the phone; the desktop's sidebar did.
+  it.each([
+    ["an update", "2.0.1", "Kraft v2.0.1 installed: restart to finish the update."],
+    ["a rollback", "1.4.0", "Kraft v1.4.0 installed, older than this server: see About."],
+  ])("says what %s installed under it needs, as the sidebar does", async (_what, installed, line) => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "2.0.0", installed } as never);
+    put(item("r1", "running"));
+    mount();
+    expect(await screen.findByText(line)).toHaveAttribute("role", "status");
+  });
+
   it("says nothing when the server reports what is installed", async () => {
     vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "2.0.0", installed: "2.0.0" } as never);
     put(item("r1", "running"));

@@ -47,7 +47,8 @@ describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () 
   };
   it.each([
     ["running node", item("running"), "verification", ["pause", "skip"]],
-    ["escalated node", item("escalated"), "verification", ["pause", "skip"]],
+    // R11b-01: /pause and /skip refuse a live escalation; a human's Retry outranks its turn.
+    ["escalated node", item("escalated"), "verification", [null, "retry-node"]],
     // R10b-01: /retry answers 409 to an item that is not stopped, so a paused node resumes and a waiting one pauses.
     ["paused node", item("paused"), "verification", ["skip", "resume"]],
     ["node waiting on CI", item("waiting", stop("wait")), "verification", ["pause", "skip"]],

@@ -11,7 +11,7 @@ import { act } from "../actions";
 import { useDraft } from "../draft/context";
 import { DraftState, ReviewButton } from "../draft/DraftBar";
 import { actionPath } from "../paths";
-import { archivable, headerState, type PanelItem } from "../status";
+import { archivable, headerState, menuDoors, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
 import { CompleteDialog, EscalateDialog, PauseConfirm } from "./Dialogs";
@@ -33,8 +33,14 @@ export function useDuplicate(id: string, onError: (e: string) => void) {
 type Props = {
   item: ItemDetail;
   reload: () => void;
-  /** Select the chain and open its Config tab (Item settings, the capped Resume). */
+  /** Select the chain and open its Config tab (Item settings). */
   onSettings: () => void;
+  /** Raise cap: the Config tab with the budget editor open on a budget stop. Item settings when absent. */
+  onRaise?: () => void;
+  /** Open gate: the gate's pane on the item page. The review page's gate view when absent. */
+  onGate?: (gate: string) => void;
+  /** Answer: the question card's answer box. The item page when absent. */
+  onAnswer?: () => void;
   /** Select the current node's latest task, Log tab. */
   onRunLog: () => void;
   /** Outside triggers for the cancel card (the MR-closed state card's Cancel item…). */
@@ -46,7 +52,7 @@ type Props = {
 
 /** The right side of the item page's header row (Decisions §1, §14): others
  *  need you, elapsed, the badge, the main button with its panel, and ⋮. */
-export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
+export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
   const group = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   // The board's Needs you count, this item left out.
@@ -64,6 +70,14 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
   const [error, setError] = useState<string | null>(null);
   const ended = ENDED.has(item.display_status ?? "");
   const gone = item.worktree_exists === false;
+  // The elapsed clock ticks as the pane's does: every second while an agent or a check runs, else every 30 s (R11b-11).
+  const ticking = !ended && item.worker_sessions.some((s) => s.status === "running" || s.status === "pending");
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), ticking ? 1_000 : 30_000);
+    return () => clearInterval(t);
+  }, [ticking]);
 
   const run = async (p: Promise<{ ok: boolean; error?: string }>) => {
     setBusy(true);
@@ -106,9 +120,17 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
     if (ops.some((o) => !o.passed)) return draft.setReviewing(true, start);
     start();
   };
+  const itemUrl = `/work-items/${encodeURIComponent(item.id)}`;
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
-    if (hs.main === "raise") return onSettings();
+    if (hs.main === "raise") return (onRaise ?? onSettings)();
+    if (hs.main === "gate") {
+      const gate = item.pending_gate ?? item.stop?.node ?? "";
+      return onGate ? onGate(gate) : navigate(`${itemUrl}/review?gate=${encodeURIComponent(gate)}`);
+    }
+    if (hs.main === "answer") return onAnswer ? onAnswer() : navigate(itemUrl);
+    if (hs.main === "conflicts") return navigate(`${itemUrl}/review${item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""}`);
+    if (hs.main === "reopen") return void run(act.reopenMr(item.id));
     if (asksFirst()) return draft!.setReviewing(true, start);
     if (hs.main === "start") return void startFresh();
     if (hs.main === "resume") return start();
@@ -133,9 +155,10 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },
     { label: "View run log", onSelect: onRunLog },
-    ...(ended
-      ? [{ label: "Duplicate as new item", onSelect: duplicate }]
-      : [{ label: "Escalate…", onSelect: () => setEscalating(true) }, { label: "Cancel…", onSelect: () => setCancelling(true), danger: true }]),
+    // Escalate… only where /escalate takes it: not on a running item, nor while a turn runs.
+    ...menuDoors(item).map((d): MenuItem => (d === "duplicate" ? { label: "Duplicate as new item", onSelect: duplicate }
+      : d === "escalate" ? { label: "Escalate…", onSelect: () => setEscalating(true) }
+      : { label: "Cancel…", onSelect: () => setCancelling(true), danger: true })),
   ];
 
   const endedAt = ended ? item.updated_at : null;
@@ -150,7 +173,7 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
         </Link>
       )}
       <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
-        <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt)}
+        <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
       <span className={`item-badge is-${hs.tone}`}>{hs.badge}</span>
       <div className="item-main-group">

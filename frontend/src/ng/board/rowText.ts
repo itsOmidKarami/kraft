@@ -40,7 +40,8 @@ export function reasonTail(i: Row, now = Date.now()): string {
         return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
       case "waiting": {
         const at = i.stop?.resume_at ?? i.retry_at;
-        return at ? `retry ${until(at, now)}` : `waiting at ${node}`;
+        // A CI wait checks again; only a rate limit retries (R11b-05).
+        return at ? `${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting at ${node}`;
       }
       case "escalated": return "escalation running";
       case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
@@ -69,6 +70,8 @@ export function rowAction(i: Row): RowAction | null {
     // A row carries neither the stop's limit nor the item's spend, so it cannot tell the item's own cap from a daily
     // or token one the server will not raise: the peek's banner can (`budgetRaise`), and offers the raise or Retry.
     case "budget": return { label: "Open", kind: "peek", tab: "overview" };
+    // A stuck loop's way on is Retry, on the peek's card (R11a-01): the row said Open.
+    case "stuck": return { label: "Retry…", kind: "peek", tab: "overview" };
     default: return { label: "Open", kind: "peek", tab: "overview" };
   }
 }

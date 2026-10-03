@@ -65,6 +65,26 @@ describe("ng AboutPage", () => {
     expect(note).not.toHaveTextContent("kraft admin restart");
   });
 
+  // R11b-09: the command and "Run this" sat beside "up to date", and under a rollback's advice.
+  it.each([
+    ["behind", { version: "1.4.0", installed: "1.4.0" }, UPDATE, /^Run this in a terminal, then restart Kraft/],
+    ["up to date", { version: "2.0.0", installed: "2.0.0" }, { ...UPDATE, installed: "2.0.0", behind: false }, /^To update later, run this in a terminal/],
+    ["rolling back", { version: "2.0.0", installed: "1.4.0" }, UPDATE, null],
+  ] as const)("%s: offers kraft admin update as what it is", async (_name, versions, answer, hint) => {
+    served = () => reply(200, answer);
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], ...versions });
+    render(<AboutPage />);
+    await screen.findByText(/checked/);
+    await waitFor(() => expect(api.getHealth).toHaveBeenCalled());
+    if (hint) {
+      expect(screen.getByText(hint)).toBeInTheDocument();
+      expect(screen.getByText("kraft admin update")).toBeInTheDocument();
+    } else {
+      await screen.findByText(/An older Kraft/);
+      expect(screen.queryByText("kraft admin update")).toBeNull();
+    }
+  });
+
   it("reads an unreachable feed as unknown", async () => {
     served = () => reply(200, { ...UPDATE, latest: null, behind: null, checked_at: null });
     render(<AboutPage />);

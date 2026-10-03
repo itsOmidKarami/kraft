@@ -352,3 +352,69 @@ def run_with_app(api, scenario):
             return await scenario()
 
     return asyncio.run(wrapper())
+
+
+def _create_escalation_session(
+    wid: str, session_id: str, node_id: str, *, pid: int | None = None
+) -> None:
+    """A live `worker_sessions` row for `wid` (`hook_point='escalation'`,
+    `status='running'`) -- the shape `retry`'s self-retry check reads,
+    without actually dispatching an agent."""
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
+            "log_path, result_path, status, created_at) VALUES (?, ?, ?, 'escalation', ?, "
+            "'x', 'x', 'running', datetime('now'))",
+            (session_id, wid, node_id, pid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _in_state(client, repo, state: dict) -> str:
+    """A default-chain item put in `state` (a `lifecycle_doors.json` row) directly."""
+    from kraft import events, store
+
+    wid = _paused(client, repo, chain_template="default")
+    with closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c, c:
+        c.execute(
+            "UPDATE work_items SET status = ?, current_node_id = ? WHERE id = ?",
+            (state["status"], state["node"], wid),
+        )
+        if "stop" in state:
+            kw = {"budget": state["budget"]} if "budget" in state else {}
+            store.mark_needs_human(c, wid, state["node"], state["reason"], kind=state["stop"], **kw)
+        if "gate" in state:
+            events.append(c, wid, "gate_requested", {"gate": state["gate"]}, node_id=state["node"])
+        if state.get("archived"):
+            c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
+        if state.get("mr"):
+            events.append(c, wid, "mr_opened", {"number": 7, "url": "u"}, node_id=state["node"])
+    if state.get("escalation"):
+        _create_escalation_session(wid, f"esc-{wid}", state["node"])
+        with (
+            closing(sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")) as c,
+            c,
+        ):
+            events.append(c, wid, "escalation_message", {"session_id": f"esc-{wid}"})
+    return wid
+
+
+async def _spawn_never_returning(app, wid):
+    """Register a walk task for `wid` that never finishes: a gate under an
+    agent's review, as `task_is_live` sees it. Run it on the client's loop,
+    `client.portal.call(lambda: _spawn_never_returning(client.app, wid))`,
+    and undo it with `_cancel_task`."""
+    from kraft.api import deps
+
+    deps.spawn(app, wid, asyncio.Event().wait())
+
+
+async def _cancel_task(app, wid):
+    """Cancel and drop `wid`'s registered walk task, if any, and wait for it."""
+    task = app.state.tasks.pop(wid, None)
+    if task is not None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

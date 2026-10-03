@@ -61,6 +61,13 @@ async function probeAndAdd(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("FirstRun", () => {
+  // R11a-08: a Mac's home in the placeholder read wrong on Linux.
+  it.each([["MacIntel", "/Users/you/code/project"], ["Linux x86_64", "/home/you/code/project"]])("on %s, the path's placeholder is %s", (platform, placeholder) => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+    mount();
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveAttribute("placeholder", placeholder);
+  });
+
   it("names the address the server is on", async () => {
     mount();
     expect(await screen.findByText("127.0.0.1:4317")).toBeInTheDocument();
@@ -118,6 +125,8 @@ describe("FirstRun", () => {
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
     expect(await screen.findAllByText("checking…")).toHaveLength(5);
+    // + Add repo is gone with the probe: focus is in the path field, where Enter adds, not on the page (R11a-08).
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveFocus();
     expect(api.addRepo).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
     await tick(PROBE_STEP_MS / 3);
