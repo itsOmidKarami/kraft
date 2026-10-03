@@ -104,12 +104,7 @@ async def get_document(doc_id: str, request: Request):
 
 
 #: Editor id -> the argv that opens a file with it. The UI offers exactly these.
-_EDITORS = {
-    "code": ["code"],
-    "cursor": ["cursor"],
-    "zed": ["zed"],
-    "obsidian": ["obsidian"],
-}
+_EDITORS = {name: [name] for name in config_mod.EDITORS}
 
 
 def _os_open() -> list[str] | None:
@@ -149,6 +144,27 @@ def _launch_editor(request: Request, editor: str | None, path: Path) -> dict:
     except OSError as exc:
         raise HTTPException(501, f"could not launch {name or 'the default editor'}: {exc}") from exc
     return {"path": str(path), "editor": name or "system"}
+
+
+@api_router.get("/editors")
+async def list_editors(request: Request):
+    """The editors this machine can launch, for the viewer's Open in editor:
+    only those whose executable is on PATH, whether the system opener is,
+    and the default chosen in Settings (theme.yaml `editor`, else
+    `KRAFT_EDITOR`). Loopback only, as opening one is: for anyone else the
+    answer would describe a machine they cannot open anything on."""
+    if not perimeter._client_is_local(request):
+        raise HTTPException(403, "this server only opens editors for a client on its own machine")
+    try:
+        chosen = config_mod.Theme.load(request.app.state.templates_dir / "theme.yaml").editor
+    except config_mod.ConfigError:
+        chosen = None
+    system = _os_open()
+    return {
+        "available": [name for name, argv in _EDITORS.items() if shutil.which(argv[0])],
+        "system": bool(system and shutil.which(system[0])),
+        "default": chosen or os.environ.get("KRAFT_EDITOR") or None,
+    }
 
 
 @api_router.post("/documents/{doc_id}/open")

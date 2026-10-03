@@ -494,6 +494,49 @@ def test_bead_search_is_live_and_quiet_on_an_empty_query(client):
     assert body["beads"] == []
 
 
+@pytest.mark.parametrize(
+    ("on_path", "theme", "env", "expected"),
+    [
+        (
+            {"zed", "open", "xdg-open"},
+            {},
+            None,
+            {"available": ["zed"], "system": True, "default": None},
+        ),
+        (set(), {}, None, {"available": [], "system": False, "default": None}),
+        (
+            {"code", "cursor"},
+            {"editor": "cursor"},
+            "zed",
+            {"available": ["code", "cursor"], "system": False, "default": "cursor"},
+        ),
+        ({"code"}, {}, "zed", {"available": ["code"], "system": False, "default": "zed"}),
+    ],
+    ids=["only-what-is-on-path", "nothing-found", "settings-default-over-env", "env-default"],
+)
+def test_editors_lists_only_what_this_machine_can_launch(
+    client, monkeypatch, on_path, theme, env, expected
+):
+    monkeypatch.setattr(
+        "shutil.which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+    )
+    if env:
+        monkeypatch.setenv("KRAFT_EDITOR", env)
+    else:
+        monkeypatch.delenv("KRAFT_EDITOR", raising=False)
+    if theme:
+        assert client.put("/api/theme", json=theme).status_code == 200
+    assert client.get("/api/editors").json() == expected
+
+
+@pytest.mark.api_client(peer=("10.0.0.5", 54321))
+def test_editors_is_refused_for_a_non_loopback_client(client, monkeypatch):
+    _as_authenticated_lan_peer(client, monkeypatch)
+    r = client.get("/api/editors")
+    assert r.status_code == 403, r.text
+    assert "own machine" in r.json()["detail"]
+
+
 @pytest.mark.api_client(peer=("10.0.0.5", 54321))
 def test_open_document_is_refused_for_a_non_loopback_client(client, repo, monkeypatch):
     """Opening an editor starts a process and puts a window on the *server's*

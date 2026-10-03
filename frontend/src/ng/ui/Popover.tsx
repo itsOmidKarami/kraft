@@ -67,10 +67,12 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
       closeBack();
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    // Capture: a dialog under it (the document viewer) listens on document
+    // too, and was there first; Escape closes the popover alone.
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
   }, [open, onClose, anchor]);
 
