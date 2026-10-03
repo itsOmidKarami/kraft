@@ -4,19 +4,19 @@ import { elapsed, repoName, tokens, usd } from "../../format";
 import { useStore } from "../../store";
 import type { Analytics } from "../../types";
 import { chainOf } from "../board/model";
-import { HeaderActions } from "../shell/HeaderActions";
+import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { Menu } from "../ui/Menu";
 import { weekBuckets } from "./weeks";
 import "./analytics.css";
 
-function Section({ id, title, note, children }: { id: string; title: string; note?: string; children: React.ReactNode }) {
+function Section({ id, title, note, bare, children }: { id: string; title: string; note?: string; bare?: boolean; children: React.ReactNode }) {
   return (
     <section className="an-section" aria-labelledby={id}>
       <div className="an-section-head">
         <h2 id={id}>{title}</h2>
         {note && <span className="an-section-note">{note}</span>}
       </div>
-      {children}
+      {bare ? children : <div className="an-panel">{children}</div>}
     </section>
   );
 }
@@ -86,15 +86,12 @@ export function AnalyticsPage() {
   return (
     <div className="an-page">
       {filters}
-      <header className="an-head">
-        <h1>Analytics</h1>
-        <span className="an-scope">Last 8 weeks · completed work items</span>
-      </header>
+      <HeaderTail><span className="an-scope">· Last 8 weeks · completed work items</span></HeaderTail>
       {error && <p className="an-error" role="alert">{error}</p>}
       {!report && !error && <p className="an-empty">Loading…</p>}
       {report && t && (
         <>
-          <Section id="an-overview" title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history; nothing is estimated.">
+          <Section id="an-overview" bare title="Overview" note="Where the time and the money went. Rolled up from recorded worker sessions and event history; nothing is estimated.">
             <div className="an-kpis">
               <Kpi
                 label="Completed"
