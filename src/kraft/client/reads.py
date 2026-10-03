@@ -115,6 +115,12 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
     item = await transport._get(f"/work-items/{transport.segment(work_item_id)}")
     if full:
         return {**item, "next_node_id": _next_node_id(item)}
+    return trim_work_item(item)
+
+
+def trim_work_item(item: dict) -> dict:
+    """The detail endpoint's answer cut to what `get_work_item` hands an agent
+    and `kraft view show` prints."""
     keep = (
         "id",
         "title",

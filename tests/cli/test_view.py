@@ -65,3 +65,39 @@ def test_search_json_is_the_api_payload(app, capsys):
     cli.main(["view", "search", "anything", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["query"] == "anything"
+
+
+@pytest.mark.parametrize(
+    ("stop", "hinted"),
+    [
+        ({"kind": "budget", "scope": "work_item"}, True),
+        ({"kind": "budget", "limit": {"path": "", "key": "budget_usd", "value": 5}}, True),
+        ({"kind": "budget", "scope": "daily"}, False),
+        ({"kind": "budget", "scope": "tokens"}, False),
+        ({"kind": "gate"}, False),
+    ],
+    ids=["own-cap", "policy-cap", "daily", "token", "not-budget"],
+)
+def test_show_names_raise_budget_on_a_stop_it_can_raise(monkeypatch, capsys, stop, hinted):
+    """R10a-10: the board offers Raise cap; `kraft view show` printed the stop
+    reason and `suggested_action None`, and named no command."""
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {
+            "id": "w1",
+            "status": "needs_human",
+            "current_node_id": "plan",
+            "stop_reason": "budget cap reached: $0.04 spent on this work item, cap $0.03.",
+            "suggested_action": None,
+            "stop": stop,
+            "chain_definition": {"nodes": []},
+        }
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    out = capsys.readouterr().out
+    assert ("next kraft item raise-budget w1 --usd N" in " ".join(out.split())) is hinted
+    assert "chain_definition" not in out
+    cli.main(["view", "show", "w1", "--json"])
+    assert json.loads(capsys.readouterr().out)["stop"] == stop
