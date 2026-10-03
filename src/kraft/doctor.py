@@ -225,12 +225,52 @@ def _config_checks() -> list[dict]:
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_detectors_check(templates))
+    checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
     checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
     return checks
+
+
+#: What 2.0 moved or renamed in the config files, each still read under its
+#: old name: file, the old key, and where it lives now.
+MOVED_KEYS = (
+    ("intake.yaml", "max_concurrent", "policy.yaml's `max_concurrent`"),
+    ("policy.yaml", "triggers", "intake.yaml's `schedules`"),
+    ("repos.yaml", "default_chain_template", "`default_chain` on the entry"),
+    ("theme.yaml", "board.group_by: template", "`chain`"),
+)
+
+
+def _moved_keys_check(templates: Path) -> dict:
+    """A key 2.0 moved, still written under its old name: read, so nothing
+    stops, and named here so the file gets tidied rather than carrying a
+    key no reader honours (intake.yaml's `max_concurrent`) or one the
+    Settings screens no longer show (policy.yaml's `triggers`)."""
+    found: list[str] = []
+    for name, key, now in MOVED_KEYS:
+        try:
+            data = config.read_yaml(templates / name, {})
+        except config.ConfigError:
+            continue  # its own row says so
+        if name == "repos.yaml":
+            hit = any(
+                isinstance(r, dict) and "default_chain_template" in r
+                for r in (data.get("repos") or [])
+                if data
+            )
+        elif name == "theme.yaml":
+            board = data.get("board") if isinstance(data, dict) else None
+            hit = isinstance(board, dict) and board.get("group_by") == "template"
+        else:
+            hit = isinstance(data, dict) and key in data
+        if hit:
+            found.append(f"{name}: {key} is {now} since 2.0")
+    if not found:
+        return _check("moved keys", True, "none: every key is where 2.0 reads it")
+    return _check("moved keys", True, "; ".join(found), warn=True)
 
 
 def _detectors_check(templates: Path) -> dict:

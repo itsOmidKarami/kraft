@@ -202,7 +202,7 @@ DUPLICATE_HELPER_ALLOWLIST: dict[str, int] = {
     "_by_name#3083e449": 3,
     "_cap#d8825abc": 2,
     "_capture#601f0018": 2,
-    "_claude_profile#3c165ce0": 2,
+    "_claude_profile#e3d12ce4": 2,
     "_closed_port#deb4dc33": 2,
     "_commit#27e09d8c": 3,
     "_cycles#28a90170": 2,

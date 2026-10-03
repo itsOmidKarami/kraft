@@ -65,7 +65,7 @@ Report-only until the human says to act. Then, for each item they pick:
 
 1. State the exact edit before making it - which line in
    `~/.kraft/config/library.yaml` or the live chain file under `chains/`,
-   or which of `set_chain_template` / `set_node_overrides` /
+   or which of `set_chain` / `set_node_overrides` /
    `set_agent_overrides` for a per-item override instead of the shared file.
 2. Wait for confirmation.
 3. Apply it, then re-run `kraft admin templates lint` and `kraft admin doctor`

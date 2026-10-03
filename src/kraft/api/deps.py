@@ -373,7 +373,7 @@ def library_or_503(st):
     One function so every door answers the same way. `TemplateLibrary.
     from_yaml_dir` raises on any single bad file, so one malformed
     `chains/*.yaml` leaves *every* chain unresolvable -- and each door that
-    reports that as "unknown chain template" tells the operator their chain id
+    reports that as "unknown chain" tells the operator their chain id
     is wrong. Same posture as `invalid_policy`'s 503: name the file, refuse the
     work, leave the Settings screens reachable.
     """
@@ -385,7 +385,7 @@ def library_or_503(st):
 
 def chain_template_for(entry: RepoEntry, chain_template: str | None) -> str | None:
     """The template an item filed in `entry`'s repo runs, as the row stores it:
-    the caller's own, else the repo's `default_chain_template`, else None --
+    the caller's own, else the repo's `default_chain`, else None --
     the `default` template, un-chosen (Kraft-cd47). Every intake door asks this
     one function (Kraft-9efnk.11). A workspace item asks its root repo.
 
@@ -395,7 +395,7 @@ def chain_template_for(entry: RepoEntry, chain_template: str | None) -> str | No
     """
     if chain_template is not None:
         return chain_template
-    default = entry.default_chain_template
+    default = entry.default_chain
     return None if default in (None, "default") else default
 
 
@@ -413,7 +413,7 @@ def resolve_chain(st, chain_template: str | None):
     try:
         return st.library.resolve_chain(chain_template if chain_template is not None else "default")
     except TemplateLibraryError:
-        logger.warning("chain template %r does not resolve", chain_template, exc_info=True)
+        logger.warning("chain %r does not resolve", chain_template, exc_info=True)
         return None
 
 
@@ -437,7 +437,7 @@ def resolve_chain_or_422(st, chain_template: str | None):
     except TemplateLibraryError as exc:
         # The resolver's own message: it names the unknown id, or the path and
         # reference that broke the chain (Kraft-n1zp9).
-        raise HTTPException(422, f"chain template {name!r}: {exc}") from exc
+        raise HTTPException(422, f"chain {name!r}: {exc}") from exc
 
 
 def intake_chain_or_422(st, repo: str, chain_template: str | None):

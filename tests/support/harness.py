@@ -282,7 +282,7 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # through `support.api._client` stopped at "harness 'fake' is not
         # available", which reads as a chain defect and is a fixture one.
         home = os.environ.get("KRAFT_HOME")
-        harnesses = (Path(home) / "templates" if home else templates_dir) / "harnesses"
+        harnesses = (Path(home) / "config" if home else templates_dir) / "harnesses"
         harnesses.mkdir(parents=True, exist_ok=True)
         # `fake` is the *bundled* `claude` declaration under another id with its
         # `command:` swapped -- the fake agents stand in for `claude`, and speak
@@ -316,20 +316,26 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # An agent profile's model is keyed by provider, and every profile
         # above is now on `fake`: give each tier claude's model there too, so
         # a shipped task launches the model it would in production.
-        on_fake = {
-            pid: {**body, "model": {**body["model"], "fake": body["model"]["claude"]}}
-            for pid, body in agent_profiles.items()
-        }
+        on_fake = {pid: _profile_on_fake(body) for pid, body in agent_profiles.items()}
         write_agent_profiles(templates_dir, on_fake)
         if home:
-            write_harness_profiles(Path(home) / "templates", profiles)
-            write_agent_profiles(Path(home) / "templates", on_fake)
+            write_harness_profiles(Path(home) / "config", profiles)
+            write_agent_profiles(Path(home) / "config", on_fake)
     (templates_dir / "library.yaml").write_text(library)
     chains = templates_dir / "chains"
     chains.mkdir(exist_ok=True)
     for chain in sorted((_REPO_ROOT / "config" / "chains").glob("*.yaml")):
         shutil.copy(chain, chains / chain.name)
     return templates_dir
+
+
+def _profile_on_fake(body: dict) -> dict:
+    """`body` with claude's route copied onto the `fake` provider, in whichever
+    of the two profile shapes the file uses (`providers:`, or the older
+    `model:` map)."""
+    if "providers" in body:
+        return {**body, "providers": {**body["providers"], "fake": body["providers"]["claude"]}}
+    return {**body, "model": {**body["model"], "fake": body["model"]["claude"]}}
 
 
 def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:

@@ -14,7 +14,7 @@ from kraft.client import context, reads, transport
 async def create_work_item(
     title: str,
     repo: str | None = None,
-    chain_template: str | None = None,
+    chain: str | None = None,
     description: str | None = None,
     attachments: list[dict] | None = None,
     auto_gate: bool = True,
@@ -36,8 +36,8 @@ async def create_work_item(
 
     `repo` defaults to the repo of the work item this session is standing in,
     which is the common case for a worker filing follow-up work.
-    `chain_template` unset is not sent, so the server applies the repo's
-    `default_chain_template` (Kraft-9efnk.11).
+    `chain` unset is not sent, so the server applies the repo's
+    `default_chain` (Kraft-9efnk.11).
 
     `attachments` are documents that already exist —
     `[{"kind": "spec"|"plan", "path": "..."}]`, at most one of each. Each trims
@@ -72,7 +72,7 @@ async def create_work_item(
         {
             "title": title,
             "repo": context.absolute_path(repo),
-            **({"chain_template": chain_template} if chain_template else {}),
+            **({"chain_template": chain} if chain else {}),
             "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
@@ -429,18 +429,17 @@ async def mr_labels(labels: list[str], work_item_id: str | None = None) -> dict:
     )
 
 
-async def set_chain_template(template: str, work_item_id: str | None = None) -> dict:
+async def set_chain(chain: str, work_item_id: str | None = None) -> dict:
     """Switch a not-yet-started Kraft work item onto a different chain
-    template (Kraft-gwn6). 404s on an unknown template name; 409s once the
-    item has a `current_node_id` -- the template is fixed for the life of a
-    started item.
+    (Kraft-gwn6). 404s on an unknown chain id; 409s once the item has a
+    `current_node_id` -- the chain is fixed for the life of a started item.
 
     `resolve_work_item`, not `_forbid_self_action`: this is not a gate
     decision, the same reasoning `mr_labels` above gives for its own door.
     """
     target = await context.resolve_work_item(work_item_id)
     return await transport._patch(
-        f"/work-items/{transport.segment(target)}", {"chain_template": template}
+        f"/work-items/{transport.segment(target)}", {"chain_template": chain}
     )
 
 

@@ -8,7 +8,7 @@
           "enum": [
             "status",
             "repo",
-            "template"
+            "chain"
           ],
           "title": "Group By",
           "type": "string"

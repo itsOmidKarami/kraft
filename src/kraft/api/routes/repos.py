@@ -11,7 +11,7 @@ from typing import Annotated
 
 import yaml
 from fastapi import HTTPException, Request
-from pydantic import AfterValidator, BaseModel
+from pydantic import AfterValidator, AliasChoices, BaseModel, Field
 
 from kraft import config as config_mod
 from kraft import detect
@@ -35,7 +35,10 @@ AbsolutePath = Annotated[str, AfterValidator(_absolute)]
 class RepoBody(BaseModel):
     path: AbsolutePath
     name: str | None = None
-    default_chain_template: str | None = None
+    #: `default_chain_template` before 2.0; both names are read.
+    default_chain: str | None = Field(
+        default=None, validation_alias=AliasChoices("default_chain", "default_chain_template")
+    )
     test_command: str | None = None
     test_scopes: list[dict] | None = None
     setup_command: str | None = None
@@ -150,7 +153,7 @@ def _auto_connect_children(
         child = {
             "path": probed["path"],
             "name": probed["name"],
-            "default_chain_template": "default",
+            "default_chain": "default",
             "test_command": probed["test_command"],
             "test_scopes": _nested_scopes(probed),
             "setup_command": probed["setup_command"],
@@ -371,7 +374,7 @@ async def _add_repo(body: RepoBody, st) -> dict:
     entry = {
         "path": probed["path"],
         "name": body.name or probed["name"],
-        "default_chain_template": body.default_chain_template or "default",
+        "default_chain": body.default_chain or "default",
         "test_command": test_command,
         "test_scopes": test_scopes,
         "setup_command": setup_command,
@@ -424,7 +427,10 @@ def _failed(probed: dict) -> dict:
 
 class RepoPatch(BaseModel):
     name: str | None = None
-    default_chain_template: str | None = None
+    #: `default_chain_template` before 2.0; both names are read.
+    default_chain: str | None = Field(
+        default=None, validation_alias=AliasChoices("default_chain", "default_chain_template")
+    )
     test_command: str | None = None
     test_scopes: list[dict] | None = None
     setup_command: str | None = None

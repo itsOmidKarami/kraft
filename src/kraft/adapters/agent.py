@@ -325,7 +325,7 @@ def resolve_agent_task(
         raise _steering.SteeringError(
             f"selects steering {list(task.steering)!r}, but this work item was materialized "
             "before steering was frozen into its snapshot, so there is no intake-time text "
-            "to run it with. Re-file the item, or switch its chain template before it starts."
+            "to run it with. Re-file the item, or switch its chain before it starts."
         )
     missing = [n for n in task.steering if n not in (steering or {})]
     if missing:

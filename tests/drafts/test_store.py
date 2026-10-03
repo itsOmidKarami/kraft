@@ -107,7 +107,7 @@ def test_a_write_that_parses_to_the_published_file_drops_the_draft(conn, clock):
         ("harnesses", ("harnesses.yaml", "policy.yaml")),
         ("repos", ("repos.yaml",)),
         ("policy", ("policy.yaml",)),
-        ("intake", ("intake.yaml", "policy.yaml")),
+        ("intake", ("intake.yaml",)),
     ],
 )
 def test_a_config_area_registers_its_files_under_its_own_name_as_key(area, files):

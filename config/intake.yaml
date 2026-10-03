@@ -1,12 +1,23 @@
-# Autonomous pickup from `bd ready`. Off by default. Editable here or from
-# Settings → Auto-intake, which applies a change without a restart.
+# What files work without anyone typing `kraft item create`: autonomous pickup
+# from `bd ready`, and schedules. Editable here or from Settings → Auto-intake,
+# which applies a change without a restart. How many items may run at once is
+# `policy.yaml`'s `max_concurrent`.
 #
 # An auto-started work item passes NO gate automatically. It runs to its first
 # gate and stops for a human exactly as a typed-in one does. Auto-intake removes
 # the typing, not the judgement.
 enabled: false
 interval_s: 300
-max_concurrent: 3
 repos: []              # empty means every enabled repo in repos.yaml
 priority_ceiling: 2    # only P2 and below start unattended: the highest-priority
                        # work is what a human should be looking at
+
+# Fire a work item from a schedule -- always filed paused, same as manual
+# intake. Off by default (no schedules means nothing fires); uncomment and
+# edit to add one.
+# schedules:
+#   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
+#     repo: /path/to/repo
+#     chain: default              # a chain id from chains/
+#     title: "Nightly dependency check"
+#     description: "Filed by the 9am weekday schedule"

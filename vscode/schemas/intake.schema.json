@@ -1,4 +1,41 @@
 {
+  "$defs": {
+    "Schedule": {
+      "additionalProperties": false,
+      "description": "One `schedules:` entry of `intake.yaml`: a cron that files a work item,\npaused, as `kraft item create` would (`triggers.tick`).",
+      "properties": {
+        "chain": {
+          "title": "Chain",
+          "type": "string"
+        },
+        "cron": {
+          "title": "Cron",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "repo": {
+          "title": "Repo",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cron",
+        "repo",
+        "chain",
+        "title"
+      ],
+      "title": "Schedule",
+      "type": "object"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -12,18 +49,6 @@
       "title": "Interval S",
       "type": "integer"
     },
-    "max_concurrent": {
-      "anyOf": [
-        {
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Max Concurrent"
-    },
     "priority_ceiling": {
       "default": 2,
       "title": "Priority Ceiling",
@@ -35,6 +60,14 @@
         "type": "string"
       },
       "title": "Repos",
+      "type": "array"
+    },
+    "schedules": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Schedule"
+      },
+      "title": "Schedules",
       "type": "array"
     }
   },

@@ -340,7 +340,6 @@ def resolve(st, key, raw, files, published) -> dict:
             "findings": data.get("findings") or {},
             "archive": data.get("archive") or {},
             "max_concurrent": policy.max_concurrent,
-            "triggers": data.get("triggers") or [],
         },
     }
     return out

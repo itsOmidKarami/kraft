@@ -201,13 +201,15 @@ def test_tools_must_be_a_list_of_names(client):
 
 
 def test_set_profile_in_both_shapes(client):
+    """The seed ships `providers:`; a hand-written older-shape profile (one
+    `model:` map, one `effort`) is edited in its own shape, and a `providers`
+    patch turns it into the new one."""
+    text = client.get(URL).json()["files"]["harnesses.yaml"]
+    older = text + "  old:\n    effort: low\n    model: {claude: haiku}\n"
+    assert client.put(f"{URL}/files/harnesses.yaml", json={"text": older}).status_code == 200
     r = ops(
         client,
-        {
-            "op": "set_profile",
-            "name": "fast",
-            "patch": {"model": {"claude": "haiku"}, "effort": "low"},
-        },
+        {"op": "set_profile", "name": "old", "patch": {"model": {"codex": "gpt-5"}}},
         {
             "op": "set_profile",
             "name": "deep",
@@ -216,10 +218,17 @@ def test_set_profile_in_both_shapes(client):
     )
     assert r.status_code == 200, r.text
     profiles = written(client, "harnesses.yaml")["profiles"]
-    assert profiles["fast"]["model"]["claude"] == "haiku"
-    # A `providers` patch turned the older shape into the new one, per provider.
+    assert profiles["old"]["model"] == {"claude": "haiku", "codex": "gpt-5"}
     assert profiles["deep"]["providers"]["codex"] == {"model": "gpt-5", "effort": "high"}
-    assert "model" not in profiles["deep"]
+    # Editing an older-shape profile's model from the new shape converts it.
+    r = ops(
+        client,
+        {"op": "set_profile", "name": "old", "patch": {"providers": {"claude": {"model": "opus"}}}},
+    )
+    assert r.status_code == 200, r.text
+    profiles = written(client, "harnesses.yaml")["profiles"]
+    assert profiles["old"]["providers"]["claude"] == {"model": "opus"}
+    assert "model" not in profiles["old"]
 
 
 def test_set_profile_refuses_both_shapes_at_once(client):

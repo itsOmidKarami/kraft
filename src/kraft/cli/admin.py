@@ -342,8 +342,7 @@ def _stage_bundle(templates_dir: Path) -> Path:
 
 #: What a home holds that belongs to this machine rather than to the template
 #: schema: the password hash and bind, the webhook, the theme, the connected
-#: repositories, auto-intake, the pre-1.0 steering files (folded into the library
-#: at the next start) and harness
+#: repositories, auto-intake and harness
 #: overrides. A major update carries each across unchanged; everything else --
 #: the registry, the chains, `policy.yaml` -- is replaced, and kept in the backup.
 MACHINE_CONFIG = (
@@ -352,7 +351,6 @@ MACHINE_CONFIG = (
     "theme.yaml",
     "repos.yaml",
     "intake.yaml",
-    "steering",
     "harnesses",
 )
 

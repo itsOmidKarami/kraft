@@ -81,6 +81,40 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(tmp_path, stub_app):
     assert await triggers.tick(app, now=now) == []
 
 
+async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app):
+    """2.0: schedules live in `intake.yaml` (`config.Intake.schedules`); a
+    `policy.yaml` still naming `triggers:` fires too, keyed apart so neither
+    double-files the other's minute."""
+    repo = isolated_bd(tmp_path)
+    pol = policy.Policy(
+        loops={},
+        default=policy.Cap(attempts=3, wall_clock_s=3600),
+        triggers=[policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title="old")],
+    )
+    intake = {
+        "enabled": False,
+        "schedules": [
+            {
+                "cron": "30 14 * * *",
+                "repo": str(repo),
+                "chain": "default",
+                "title": "new",
+                "description": "",
+            }
+        ],
+    }
+
+    app = stub_app(**_state(tmp_path, policy_obj=pol), intake=intake)
+    _connect(tmp_path, repo)
+    now = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
+    filed = await triggers.tick(app, now=now)
+    titles = app.state.db.read(
+        lambda c: [r["title"] for r in c.execute("SELECT title FROM work_items ORDER BY title")]
+    )
+    assert (len(filed), titles) == (2, ["new", "old"])
+    assert await triggers.tick(app, now=now) == []
+
+
 async def test_tick_is_a_noop_with_no_policy(tmp_path, stub_app):
     app = stub_app(**_state(tmp_path, policy_obj=None))
     assert await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC)) == []

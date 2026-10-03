@@ -446,7 +446,6 @@ MACHINE = {
     "notify.yaml": "enabled: false\n",
     "repos.yaml": "repos: [{path: /work/mine}]\n",
     "intake.yaml": "enabled: true\n",
-    "steering/mine.md": "Ask before deleting anything.\n",
     "theme.yaml": "accent: teal\n",
     "harnesses/mine.yaml": "id: mine\n",
 }

@@ -91,7 +91,7 @@ the missing name, reusing the same resolution the refusals above use --
 so a repos.yaml hand-edited outside those doors, or a library edited outside
 Kraft, does not read healthy until the next intake's refusal.
 enforced-by: tests/test_config_repos.py::test_steering_names_are_checked_against_the_library_profiles_given, tests/api/test_repos.py::test_add_repo_with_a_missing_steering_name_is_refused, tests/api/test_repository_steering.py::test_intake_refuses_a_repository_naming_a_profile_the_library_lacks, tests/api/test_repository_steering.py::test_a_library_save_removing_a_profile_a_repository_names_is_refused, tests/adapters/test_agent.py::test_steering_is_repo_first_then_task, frontend/src/ng/shell/aliases.test.tsx::shipped addresses, tests/cli/test_doctor_repos.py::test_doctor_fails_a_repo_naming_a_steering_profile_the_library_lacks, tests/cli/test_doctor_repos.py::test_doctor_passes_a_repo_naming_a_steering_profile_the_library_defines
-origin: src/kraft/worker/steering.py -- Kraft-91i6p: 1.0 shipped two steering systems, library profiles frozen at intake and `templates/steering/*.md` files read at each launch; Omid (2026-09-22) kept the library's and removed the files before 1.0, so removing them later would not need another major release.
+origin: src/kraft/worker/steering.py -- Kraft-91i6p: 1.0 shipped two steering systems, library profiles frozen at intake and `templates/steering/*.md` files read at each launch; Omid (2026-09-22) kept the library's and removed the files before 1.0. The fold of a leftover `steering/` directory into the library ran until 2.0.
 
 ## REQ repository-steering-is-frozen-at-intake
 
@@ -111,15 +111,6 @@ the item is steered. A fanned-out member repository's frozen text is still
 found only by its own live `repos.yaml` path -- a member's path edited
 mid-flight still silently loses its steering (Kraft-ku1um).
 enforced-by: tests/api/test_repository_steering.py::test_repository_steering_is_frozen_into_the_snapshot_at_intake, tests/worker/test_steering.py::test_a_frozen_snapshot_answers_whatever_the_live_library_says, tests/api/test_repository_steering.py::test_a_snapshot_from_before_the_freeze_runs_on_the_live_library, tests/worker/test_steering.py::test_a_snapshot_from_before_the_freeze_reads_the_live_library, tests/worker/test_steering.py::test_frozen_steering_survives_the_repos_yaml_path_changing, tests/worker/test_steering.py::test_an_unsteered_repository_in_a_partly_steered_workspace_gets_nothing_and_does_not_raise, tests/executor/test_policy_enforcement_config_errors.py::test_a_gate_review_whose_steering_cannot_be_resolved_ends_undecided_not_raising, tests/executor/test_policy_enforcement_config_errors.py::test_an_escalation_whose_steering_cannot_be_resolved_stops_as_its_own_session[manual]
-
-## REQ pre-1-0-steering-files-become-library-profiles
-
-WHEN the server starts with a `templates/steering/` directory, the system
-SHALL add each non-empty `<name>.md` file to `library.yaml` as the steering
-profile `<name>` with the file's text, unless the library already defines
-`<name>`, and SHALL then move the directory aside unchanged, so that no text
-is lost and a `repos.yaml` naming a file keeps resolving to its text.
-enforced-by: tests/worker/test_steering.py::test_each_steering_file_becomes_a_library_profile_and_the_directory_moves_aside, tests/worker/test_steering.py::test_a_library_with_no_steering_section_gains_one, tests/worker/test_steering.py::test_an_unusual_layout_is_rewritten_whole_with_the_original_kept, tests/worker/test_steering.py::test_an_empty_file_is_skipped_and_kept_aside, tests/api/test_repository_steering.py::test_steering_files_become_library_profiles_at_startup
 
 ## REQ a-document-contract-names-the-chain-that-carries-it-on
 

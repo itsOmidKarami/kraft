@@ -288,9 +288,7 @@ def _cmd_mr_label(ns: argparse.Namespace) -> None:
 
 
 def _cmd_set_chain(ns: argparse.Namespace) -> None:
-    common.emit(
-        asyncio.run(client.set_chain_template(ns.template, ns.id)), common._render_action, ns.json
-    )
+    common.emit(asyncio.run(client.set_chain(ns.chain, ns.id)), common._render_action, ns.json)
 
 
 def _cmd_set_attachments(ns: argparse.Namespace) -> None:
@@ -430,7 +428,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     create.add_argument("--repo", help="default: the repo you are standing in")
     create.add_argument(
         "--chain",
-        help="chain template (default: the repo's default_chain_template, else `default`)",
+        help="the chain to run (default: the repo's default_chain, else `default`)",
     )
     create.add_argument(
         "--base-branch",
@@ -651,15 +649,18 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     escalate.set_defaults(func=_cmd_escalate)
 
     set_chain = subs.add_parser(
-        "set-chain", parents=[common], help="switch a not-yet-started item's chain template"
+        "set-chain", parents=[common], help="switch a not-yet-started item's chain"
     )
     # A plain optional positional, like pause/resume/retry -- there is only
-    # one positional-shaped argument here (`--template` is a flag either way),
+    # one positional-shaped argument here (`--chain` is a flag either way),
     # unlike `mr-label`, which needs `--id` because a bare positional ahead of
     # its own `nargs="+"` labels would be ambiguous the moment two labels are
     # given with no id.
     set_chain.add_argument("id", nargs="?")
-    set_chain.add_argument("--template", required=True, help="a chain template name")
+    # `--template` was the 1.x spelling; still accepted, not listed.
+    set_chain.add_argument(
+        "--chain", "--template", dest="chain", required=True, help="a chain id", metavar="CHAIN"
+    )
     set_chain.set_defaults(func=_cmd_set_chain)
 
     set_attachments = subs.add_parser(

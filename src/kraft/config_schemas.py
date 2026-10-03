@@ -95,7 +95,7 @@ def _file(title: str, properties: dict, models: list[type[BaseModel]], *, closed
 
 
 def chain_schema() -> dict:
-    return authored(_model(models_mod.Chain, "Kraft chain template"))
+    return authored(_model(models_mod.Chain, "Kraft chain"))
 
 
 def library_schema() -> dict:

@@ -314,7 +314,7 @@ async def get_policy_preview(key: str, request: Request, chain: str):
         raise HTTPException(422, f"policy.yaml does not load: {exc}") from exc
     library = deps.library_or_503(st)
     if chain not in library.chain_ids:
-        raise HTTPException(404, f"unknown chain template {chain!r}")
+        raise HTTPException(404, f"unknown chain {chain!r}")
     scopes = policy_caps.chain_scopes(st, chain, parsed.instance_policy())
     if scopes is None:
         raise HTTPException(422, f"chain {chain!r} does not resolve")

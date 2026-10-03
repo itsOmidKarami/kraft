@@ -13,7 +13,7 @@ _REPO_COLUMNS = [
     ("", "here"),
     ("NAME", "name"),
     ("STATE", "state"),
-    ("CHAIN", "default_chain_template"),
+    ("CHAIN", "default_chain"),
     ("PATH", "path"),
 ]
 

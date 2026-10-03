@@ -114,14 +114,18 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
     repo = make_repo(tmp_path)
     created = client.post(
         "/api/repos",
-        json={"path": str(repo), "default_chain_template": "default", "enabled": False},
+        json={"path": str(repo), "default_chain": "default", "enabled": False},
     )
     assert created.status_code == 201
     path = created.json()["path"]
 
     on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
     assert on_disk["repos"][0]["path"] == path
-    assert client.get("/api/repos").json()["repos"][0]["default_chain_template"] == "default"
+    assert client.get("/api/repos").json()["repos"][0]["default_chain"] == "default"
+    # The pre-2.0 name is still read on the wire, and answered under the new one.
+    patched = client.patch(f"/api/repos?path={path}", json={"default_chain_template": "quick-task"})
+    assert patched.status_code == 200, patched.text
+    assert client.get("/api/repos").json()["repos"][0]["default_chain"] == "quick-task"
 
     # connecting the same repo twice is a conflict, not a duplicate row
     assert client.post("/api/repos", json={"path": str(repo)}).status_code == 409

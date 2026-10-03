@@ -5,7 +5,7 @@ navigation:
 description: Node keys, task kinds, read_only, extends, and canonical paths in chain files.
 ---
 
-The keys a chain file under `templates/chains/` accepts, and the keys of every
+The keys a chain file under `config/chains/` accepts, and the keys of every
 task kind. For what a chain, node, task, and gate are, see
 [Concepts](/concepts/vocabulary). For the reusable components a chain extends,
 see [Library and chains](/reference/configuration/library-and-chains).

@@ -30,7 +30,7 @@ def _pre_v1_home(root: Path) -> tuple[Path, dict[str, bytes]]:
     files' original bytes (what `replace_pre_v1_config` must carry across
     untouched). Shaped after `~/.kraft/config.pre-v1-20260922-192004` on
     this machine (`access.yaml`, `repos.yaml`, `intake.yaml`, `theme.yaml`,
-    `steering/`, `policy.yaml`) plus a pre-V1 `harnesses.yaml` (no
+    `policy.yaml`) plus a pre-V1 `harnesses.yaml` (no
     `profiles:` block -- that key did not exist before V1)."""
     home = root / "templates"
     home.mkdir()
@@ -59,11 +59,8 @@ def _pre_v1_home(root: Path) -> tuple[Path, dict[str, bytes]]:
     (home / "intake.yaml").write_text(
         yaml.safe_dump({"enabled": False, "interval_s": 300, "repos": []})
     )
-    (home / "steering").mkdir()
-    (home / "steering" / "note.md").write_text("# never signal a process you did not start\n")
     for name in ("repos.yaml", "access.yaml", "notify.yaml", "theme.yaml", "intake.yaml"):
         carried[name] = (home / name).read_bytes()
-    carried["steering/note.md"] = (home / "steering" / "note.md").read_bytes()
 
     # A 0.x `policy.yaml`: one key V1 still has (`budget`), one it dropped
     # (`legacy_only_cap`, never a V1 `PolicyInput` field).

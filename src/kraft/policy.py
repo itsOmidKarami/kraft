@@ -152,6 +152,8 @@ class PolicyInput(BaseModel):
     findings: FindingsInput = Field(default_factory=FindingsInput)
     budget: Budget | None = None
     rate_limit_retries: PositiveInt = 5
+    #: Pre-2.0: schedules live in `intake.yaml` (`config.Intake.schedules`).
+    #: Still read, so an upgraded file keeps firing; `doctor` names the move.
     triggers: list[TriggerInput] = Field(default_factory=list)
     max_concurrent: PositiveInt = 3
     archive: ArchiveInput | None = None
@@ -210,23 +212,7 @@ class PolicyInput(BaseModel):
         for key in ("loops", "findings", "triggers"):
             if raw.get(key) is None:
                 raw.pop(key, None)
-        raw_mc = raw.get("max_concurrent")
-        if raw_mc is None:
-            # Compat: an intake.yaml written before the move still names the
-            # operator's real limit under the old key. Honour it once rather
-            # than silently reverting every upgraded install to the default
-            # of 3.
-            legacy_path = path.parent / "intake.yaml"
-            if legacy_path.is_file():
-                try:
-                    legacy = yaml.safe_load(legacy_path.read_text())
-                except (OSError, ValueError, yaml.YAMLError):
-                    legacy = None
-                if isinstance(legacy, dict) and isinstance(legacy.get("max_concurrent"), int):
-                    raw_mc = legacy["max_concurrent"]
-        if raw_mc is None:
-            raw_mc = 3
-        raw["max_concurrent"] = raw_mc
+        raw.setdefault("max_concurrent", 3)
         try:
             parsed = cls.model_validate(raw)
         except ValidationError as exc:

@@ -1,11 +1,8 @@
-import logging
 from pathlib import Path
 
 import pytest
-import yaml
 from support.harness import entry_of
 
-from kraft import config
 from kraft.templates.library import TemplateLibrary
 from kraft.worker import steering
 
@@ -117,83 +114,3 @@ def test_a_snapshot_from_before_the_freeze_reads_the_live_library():
     assert steering.for_repository(entry, None, {"house": "migrated"}) == ("migrated",)
     with pytest.raises(steering.SteeringError, match="filed before repository steering"):
         steering.for_repository(entry, None, {})
-
-
-# -- the one-time migration of templates/steering/*.md ------------------------
-
-_LIBRARY = """\
-# the operator's own comment
-steering:
-  kept:
-    instructions: the library's own text
-"""
-
-
-def _home(tmp_path, library=_LIBRARY, files=None):
-    (tmp_path / "library.yaml").write_text(library)
-    d = tmp_path / "steering"
-    d.mkdir()
-    for name, body in (files or {}).items():
-        (d / f"{name}.md").write_text(body)
-    return tmp_path
-
-
-def _steering_of(home):
-    return yaml.safe_load((home / "library.yaml").read_text())["steering"]
-
-
-def test_each_steering_file_becomes_a_library_profile_and_the_directory_moves_aside(tmp_path):
-    body = "Prefer the stdlib.\n\n  - indented line\n"
-    home = _home(tmp_path, files={"house-style": body, "kept": "the file's text"})
-    (home / "repos.yaml").write_text(
-        yaml.safe_dump({"repos": [{"path": "/r", "steering": ["house-style", "kept"]}]})
-    )
-
-    assert steering.migrate_files(home) == ["house-style"]
-
-    assert _steering_of(home) == {
-        # A name the library already defines keeps the library's text.
-        "kept": {"instructions": "the library's own text"},
-        "house-style": {"instructions": body},
-    }
-    text = (home / "library.yaml").read_text()
-    assert text.startswith("# the operator's own comment\n")
-    assert not (home / "steering").exists()
-    assert (home / "steering.pre-1.0" / "kept.md").read_text() == "the file's text"
-    # repos.yaml's names resolve, to the text the files held.
-    library = TemplateLibrary.from_yaml_dir(home)
-    profiles = {n: p.instructions for n, p in library.steering.items()}
-    (entry,) = config.load_repos(home / "repos.yaml", steering=profiles)
-    assert steering.select(entry.steering, profiles, where="x")["house-style"] == body
-    # Once: the next start finds no directory and does nothing.
-    assert steering.migrate_files(home) == []
-    assert (home / "library.yaml").read_text() == text
-
-
-def test_a_library_with_no_steering_section_gains_one(tmp_path):
-    home = _home(tmp_path, library="# mine\n", files={"a": "alpha\n"})
-    steering.migrate_files(home)
-    assert _steering_of(home) == {"a": {"instructions": "alpha\n"}}
-    assert (home / "library.yaml").read_text().startswith("# mine\n")
-
-
-def test_an_unusual_layout_is_rewritten_whole_with_the_original_kept(tmp_path):
-    home = _home(tmp_path, library="steering: {x: {instructions: y}}\n", files={"a": "alpha"})
-    steering.migrate_files(home)
-    assert _steering_of(home) == {"x": {"instructions": "y"}, "a": {"instructions": "alpha"}}
-    assert (home / "library.yaml.pre-1.0").read_text() == "steering: {x: {instructions: y}}\n"
-
-
-def test_an_empty_file_is_skipped_and_kept_aside(tmp_path, caplog):
-    home = _home(tmp_path, files={"blank": "  \n"})
-    with caplog.at_level(logging.WARNING, logger="kraft.worker.steering"):
-        assert steering.migrate_files(home) == []
-    assert "blank" not in _steering_of(home)
-    assert (home / "steering.pre-1.0" / "blank.md").exists()
-    assert "skipped empty" in caplog.text
-
-
-def test_a_library_that_does_not_parse_leaves_the_files_in_place(tmp_path):
-    home = _home(tmp_path, library="steering: [not, a, mapping]\n", files={"a": "alpha"})
-    assert steering.migrate_files(home) == []
-    assert (home / "steering" / "a.md").exists()

@@ -33,17 +33,7 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
 @pytest.mark.parametrize(
     ("entry", "expected"),
     [
-        ({"gitlab_project": "group/repo"}, {"forge": "gitlab", "project": "group/repo"}),
         ({"forge": "github", "project": "o/r"}, {"forge": "github", "project": "o/r"}),
-        (
-            {"forge": "github", "project": "o/r", "gitlab_project": "g/r"},
-            {"forge": "github", "project": "o/r"},
-        ),
-        # a hand-edited half-migrated entry: `project` set, `forge` absent
-        (
-            {"project": "group/kept", "gitlab_project": "group/legacy"},
-            {"forge": None, "project": "group/kept"},
-        ),
         ({}, {"forge": None, "project": None}),
         ({"forge": "gitea", "project": "t/r"}, {"forge": "gitea"}),
         ({}, {"sandbox": None}),
@@ -68,17 +58,14 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         # Ruling 212: an absent `enabled` is enabled, not disabled.
         ({}, {"enabled": True}),
         ({"enabled": False}, {"enabled": False}),
-        ({}, {"name": None, "default_chain_template": None}),
+        ({}, {"name": None, "default_chain": None}),
         (
-            {"name": "r", "default_chain_template": "quick"},
-            {"name": "r", "default_chain_template": "quick"},
+            {"name": "r", "default_chain": "quick"},
+            {"name": "r", "default_chain": "quick"},
         ),
     ],
     ids=[
-        "reads-a-legacy-gitlab-project",
         "passes-through-the-new-shape",
-        "the-new-shape-wins-over-legacy",
-        "an-explicit-project-survives-a-legacy-key",
         "forge-and-project-default-to-none",
         "keeps-an-unknown-forge",
         "sandbox-defaults-to-none",
@@ -96,8 +83,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "keeps-an-intent-dir",
         "an-absent-enabled-is-enabled",
         "keeps-an-explicit-enabled-false",
-        "name-and-default-chain-template-default-to-none",
-        "keeps-a-declared-name-and-default-chain-template",
+        "name-and-default-chain-default-to-none",
+        "keeps-a-declared-name-and-default-chain",
     ],
 )
 def test_load_repos_reads_an_entry(tmp_path, entry, expected):
@@ -106,8 +93,8 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
     assert "gitlab_project" not in repo.model_dump()
 
 
-def test_model_dump_repo_keeps_an_unset_enabled_name_and_chain_template_absent(tmp_path):
-    """Ruling 212: `enabled: bool = True` (and `name`, `default_chain_template`)
+def test_model_dump_repo_keeps_an_unset_enabled_name_and_default_chain_absent(tmp_path):
+    """Ruling 212: `enabled: bool = True` (and `name`, `default_chain`)
     carry a typed default so every reader can use the attribute, but a save or
     a `GET /repos` must not fill an absent key in with it -- that would turn a
     read into a write, flipping nothing but appearing to opt every existing
@@ -116,18 +103,18 @@ def test_model_dump_repo_keeps_an_unset_enabled_name_and_chain_template_absent(t
     dumped = repo.model_dump_repo()
     assert "enabled" not in dumped
     assert "name" not in dumped
-    assert "default_chain_template" not in dumped
+    assert "default_chain" not in dumped
 
 
 def test_model_dump_repo_keeps_an_explicit_value(tmp_path):
     (repo,) = _load(
         tmp_path,
-        {"path": "/r", "enabled": False, "name": "r", "default_chain_template": "quick"},
+        {"path": "/r", "enabled": False, "name": "r", "default_chain": "quick"},
     )
     dumped = repo.model_dump_repo()
     assert dumped["enabled"] is False
     assert dumped["name"] == "r"
-    assert dumped["default_chain_template"] == "quick"
+    assert dumped["default_chain"] == "quick"
 
 
 @pytest.mark.parametrize(
@@ -199,30 +186,6 @@ def test_steering_names_are_checked_against_the_library_profiles_given(tmp_path)
     assert config.load_repos(path)[0].steering == ["missing"]
 
 
-@pytest.mark.parametrize(
-    "legacy",
-    [{"default_model": "sonnet"}, {"default_root_merge_policy": "skip"}],
-    ids=["default-model", "default-root-merge-policy"],
-)
-def test_a_retired_repo_key_is_dropped_on_read_and_gone_after_a_save(tmp_path, caplog, legacy):
-    """Ruling 165's upgrade path: an existing `repos.yaml` still loads, the
-    retired key is not carried along as an unknown extra (it would otherwise
-    round-trip forever), a warning names it, and the next save persists the
-    new shape. `default_model` has no one-to-one successor -- it was one model
-    for every provider -- so it is dropped, not guessed into `models:`."""
-    (key,) = legacy
-    with caplog.at_level(logging.WARNING, logger="kraft.config"):
-        (entry,) = _load(tmp_path, {"path": "/r", **legacy})
-    assert key not in entry.model_dump()
-    assert entry.models == {}
-    assert key in caplog.text
-    # Its own warning, never the unrecognised-key one (nor its near-miss
-    # refusal): a retired key is known, and where it went is named.
-    assert "unrecognised" not in caplog.text
-    config.save_repos(tmp_path / "repos.yaml", [entry.model_dump()])
-    assert key not in (tmp_path / "repos.yaml").read_text()
-
-
 def test_repo_entry_keeps_the_messages_the_hand_rolled_loader_gave(tmp_path):
     """Thirteen of repos.yaml's fourteen ConfigError messages name the offending key.
     A model that says 'Input should be a valid boolean' instead is a regression
@@ -240,14 +203,6 @@ def test_repo_entry_empty_string_items_use_pydantic_inner_constraints(field):
     with pytest.raises(ValidationError) as exc:
         config.RepoEntry.model_validate({"path": "/a", field: [""]})
     assert exc.value.errors()[0]["type"] == "string_too_short"
-
-
-def test_save_repos_round_trip_drops_legacy_key(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
-    config.save_repos(path, [r.model_dump() for r in config.load_repos(path)])
-    assert "gitlab_project" not in path.read_text()
-    assert "forge: gitlab" in path.read_text()
 
 
 def test_load_repos_hands_over_the_model_not_a_dump_of_it(tmp_path):
@@ -298,57 +253,6 @@ def test_an_entrys_sandbox_is_whichever_key_set_it(tmp_path, entry, expected):
     assert repo.effective_sandbox == (SandboxPolicy(**expected) if expected else None)
     layer = repo.repository_override()
     assert (layer.sandbox if layer else None) == repo.effective_sandbox
-
-
-# ── the legacy `submodules:` edge migration ──
-
-
-def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
-    edge = {
-        "path": "libs/a",
-        "enabled": True,
-        "test_command": "cargo test",
-        "chain_override": "quick",
-    }
-    repos = _load(tmp_path, {"path": "/ws", "name": "ws", "submodules": [edge]})
-    assert [r.path for r in repos] == ["/ws", "/ws/libs/a"]
-    child = repos[1]
-    assert child.name == "a"
-    assert child.enabled is True
-    assert child.test_command == "cargo test"
-    assert child.default_chain_template == "quick"
-    # a human had set these values, so the child is a decision, not noise
-    assert child.managed is True
-
-
-def test_an_all_default_submodule_edge_is_dropped(tmp_path):
-    # Carries no human decision, so there is nothing to preserve. Task 3's
-    # auto-connect re-creates it as managed: false.
-    repos = _load(tmp_path, {"path": "/ws", "submodules": [{"path": "libs/a", "enabled": False}]})
-    assert [r.path for r in repos] == ["/ws"]
-
-
-def test_an_existing_child_entry_wins_over_a_legacy_edge(tmp_path):
-    repos = _load(
-        tmp_path,
-        {"path": "/ws", "submodules": [{"path": "libs/a", "test_command": "stale"}]},
-        {"path": "/ws/libs/a", "test_command": "real"},
-    )
-    assert [r.path for r in repos] == ["/ws", "/ws/libs/a"]
-    assert repos[1].test_command == "real"
-
-
-def test_migration_drops_submodules_and_allow_cross_repo_keys(tmp_path):
-    edge = {"path": "libs/a", "enabled": True}
-    for entry in _load(tmp_path, {"path": "/ws", "allow_cross_repo": True, "submodules": [edge]}):
-        assert "submodules" not in entry.model_dump()
-        assert "allow_cross_repo" not in entry.model_dump()
-
-
-def test_migration_is_idempotent(tmp_path):
-    once = _load(tmp_path, {"path": "/ws", "submodules": [{"path": "libs/a", "enabled": True}]})
-    config.save_repos(tmp_path / "repos.yaml", [r.model_dump() for r in once])
-    assert config.load_repos(tmp_path / "repos.yaml") == once
 
 
 # ── probe_repo ──
@@ -597,12 +501,10 @@ def test_a_caller_that_reports_unrecognised_keys_itself_gets_no_warning(caplog):
 
 
 def test_the_keys_kraft_itself_writes_are_not_unrecognised(tmp_path, caplog):
-    """`name`, `enabled` and `default_chain_template` are written on connect
+    """`name`, `enabled` and `default_chain` are written on connect
     and read elsewhere; they are no operator's typo."""
     with caplog.at_level(logging.WARNING, logger="kraft.config"):
-        config.load_repos(
-            _entry(tmp_path, name="r", enabled=True, default_chain_template="default")
-        )
+        config.load_repos(_entry(tmp_path, name="r", enabled=True, default_chain="default"))
 
     assert not caplog.records
 
@@ -777,3 +679,24 @@ def test_two_spellings_of_one_origin_are_the_same_repository(tmp_path, origin_a,
         )
 
     assert config.same_repository(config.repository_identity(a), config.repository_identity(b))
+
+
+def test_default_chain_template_is_read_as_default_chain_and_saved_under_the_new_name(
+    tmp_path, caplog
+):
+    """2.0 renamed the key; a 1.x `repos.yaml` still loads, the warning names
+    the new key, and the next save writes it. A file naming both keeps the
+    new one."""
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        old, both = _load(
+            tmp_path,
+            {"path": "/r", "default_chain_template": "quick"},
+            {"path": "/s", "default_chain_template": "quick", "default_chain": "mine"},
+        )
+    assert (old.default_chain, both.default_chain) == ("quick", "mine")
+    assert "'default_chain' since 2.0" in caplog.text
+    assert "unrecognised" not in caplog.text
+    config.save_repos(tmp_path / "repos.yaml", [r.model_dump_repo() for r in (old, both)])
+    text = (tmp_path / "repos.yaml").read_text()
+    assert "default_chain_template" not in text
+    assert "default_chain: quick" in text

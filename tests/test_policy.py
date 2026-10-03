@@ -328,13 +328,6 @@ def test_load_policy_reads_scalar(tmp_path, tail, attr, expected):
     assert getattr(policy.load_policy(d), attr) == expected
 
 
-def test_load_policy_falls_back_to_legacy_intake_max_concurrent(tmp_path):
-    (tmp_path / "intake.yaml").write_text("max_concurrent: 9\n")
-    d = tmp_path / "policy.yaml"
-    d.write_text("default: { attempts: 1, wall_clock_s: 1 }\n")
-    assert policy.load_policy(d).max_concurrent == 9
-
-
 def test_a_cap_rejects_a_zero_attempt_count():
     """`load_policy` checked this; it is now a field constraint that cannot be
     bypassed by constructing a Cap directly, which the dataclass allowed."""

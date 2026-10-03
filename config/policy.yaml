@@ -33,6 +33,10 @@ default:             { attempts: 3, wall_clock_s: 3600 }
 findings:
   loop_severities: [critical, important]
 
+# How many work items may be active at once across every repo, however they
+# were started: a person's Start, auto-intake and a schedule all take a slot.
+max_concurrent: 3
+
 # Spend caps, in dollars. This file turns both on; delete a key to turn that
 # cap off (a missing key is no cap). A cap refuses to START the next agent
 # task; it cannot interrupt one that is already running, because the agent
@@ -63,16 +67,9 @@ forge_cli_timeout_s: 120
 archive:
   after_days: 30
 
-# Fire a work item from a schedule instead of typing into `kraft item create`
-# -- always files the item paused, same as manual intake. Off by
-# default (no triggers below means no timer, no tick); uncomment and edit to
-# add one.
-# triggers:
-#   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
-#     repo: /path/to/repo
-#     chain: default              # a chain_template id from templates/
-#     title: "Nightly dependency check"
-#     description: "Filed by the 9am weekday trigger"
+# Schedules (a work item filed from a cron) are `intake.yaml`'s `schedules:`,
+# with the rest of what files work by itself. A `triggers:` list here is
+# still read; `kraft admin doctor` names the move.
 
 # ── Operational defaults and administrator maxima ─────────────────────────────
 #

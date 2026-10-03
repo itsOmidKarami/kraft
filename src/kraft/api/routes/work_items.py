@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 from kraft import config as config_mod
 from kraft import executor, store
@@ -658,7 +658,10 @@ class TriggerBody(BaseModel):
     repo: str
     title: str
     description: str = ""
-    chain_template: str | None = None
+    #: `chain_template` before 2.0; both names are read.
+    chain: str | None = Field(
+        default=None, validation_alias=AliasChoices("chain", "chain_template")
+    )
 
 
 # Kraft-859.
@@ -671,7 +674,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if st.invalid_policy:
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
-    chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
+    chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain)
     _check_title(body.title)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
@@ -968,7 +971,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         # once there *is* a library to be absent from.
         deps.library_or_503(st)
         if body.chain_template not in st.library.chain_ids:
-            raise HTTPException(404, f"unknown chain template {body.chain_template!r}")
+            raise HTTPException(404, f"unknown chain {body.chain_template!r}")
         if row["current_node_id"] is not None:
             raise HTTPException(
                 409, "work item has already started; template is fixed for its life"

@@ -57,7 +57,7 @@ def add_repo(d, path: str, fields: dict | None = None) -> None:
         {
             "path": path,
             "name": Path(path).name,
-            "default_chain_template": "default",
+            "default_chain": "default",
             "enabled": False,
             "managed": True,
             **(fields or {}),
@@ -148,7 +148,7 @@ def _view(st, entry: RepoEntry, instance) -> tuple[dict, list[dict]]:
         problems.append(_problem(entry.path, exc.field, f"{entry.path}: {exc}"))
     set_keys = set(override.model_dump(exclude_none=True)) if override else set()
     fields = TemplatePolicyOverride.model_fields
-    chain = entry.default_chain_template or "default"
+    chain = entry.default_chain or "default"
     view = {
         "path": entry.path,
         "name": entry.name,
@@ -214,12 +214,12 @@ def resolve(st, key, raw, files, published) -> dict:
         out["problems"] += problems
         if bad := _path_problem(entry):
             out["problems"].append(bad)
-        if chains and entry.default_chain_template not in {None, *chains}:
+        if chains and entry.default_chain not in {None, *chains}:
             out["problems"].append(
                 _problem(
                     entry.path,
-                    "default_chain_template",
-                    f"{entry.path}: default_chain_template {entry.default_chain_template!r} "
+                    "default_chain",
+                    f"{entry.path}: default_chain {entry.default_chain!r} "
                     "names no chain in the library",
                 )
             )

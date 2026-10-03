@@ -48,7 +48,7 @@ def test_the_tools_are_registered():
         "cancel_work_item",
         "escalate_work_item",
         "set_mr_labels",
-        "set_chain_template",
+        "set_chain",
         "set_attachments",
         "set_agent_overrides",
         "set_node_overrides",
@@ -167,7 +167,7 @@ def test_create_work_item_forwards_auto_gate(monkeypatch):
     assert seen["kwargs"].get("auto_gate") is False
     assert seen["args"] == ("t",), "every other argument should be passed by keyword"
     # unnamed, so the server applies the repo's default chain (Kraft-9efnk.11)
-    assert seen["kwargs"]["chain_template"] is None
+    assert seen["kwargs"]["chain"] is None
 
 
 def test_the_items_own_policy_reaches_the_api_from_both_tools(monkeypatch):

@@ -142,12 +142,12 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
         # misleading answer the API's 503 replaced.
         logger.warning(
             "auto-intake: the template library is invalid (%s), skipping",
-            "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
+            "; ".join(getattr(st, "invalid_library", None) or ["config/library.yaml"]),
         )
         return None
     chain = deps.resolve_chain(st, deps.chain_template_for(repo, None))
     if chain is None:
-        logger.warning("auto-intake: %s has no valid chain template, skipping", repo.path)
+        logger.warning("auto-intake: %s has no valid chain, skipping", repo.path)
         return None
     # Spec §5 is "an auto-started item passes no gate automatically". A template
     # with no gate at all satisfies that by having nothing to pass, which is the
