@@ -12,6 +12,7 @@ import { authoredAt, changeAt, normalise, problemsAt, valueAt, type NodeA, type 
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { nextStepId, uniq } from "./NodeView";
 import { problemWord } from "./problems";
+import { autoEscalates } from "./escalateWords";
 
 export type BottomTab = "on_failure" | "fix_loop" | "escalation" | "on_conflict";
 const LABEL: Record<BottomTab, string> = { on_failure: "On failure", fix_loop: "Fix loop", escalation: "Escalation", on_conflict: "On conflict" };
@@ -161,12 +162,12 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
   };
 
   const empty = (() => {
-    const delay = Math.round((r.policy_values?.auto_escalate_delay_s ?? 0) / 60);
+    const delay = autoEscalates(r.policy_values?.auto_escalate_delay_s ?? 0);
     const restart = typeof conflict?.restart_from === "string" ? conflict.restart_from : "…";
     switch (shown) {
       case "on_failure": return { a: `No handler for ${owner.label}. `, link: "Add a recovery plan", b: " that runs once when it fails.", note: "Without one, the failure goes straight to the fix loop.", go: (el: HTMLElement) => void addHandler("on_failure", owner.path, el) };
       case "fix_loop": return { a: "No fix loop. ", link: "Add a fix loop", b: " that repairs and re-measures this node.", note: "Without one, a failed measurement stops the node for you.", go: (el: HTMLElement) => void addHandler("fix_loop", node, el) };
-      case "escalation": return { a: "No escalation task. ", link: "Add one", b: " to run when this node is stuck.", note: `Without one, Kraft auto-escalates after ${delay}m (policy).`, go: (el: HTMLElement) => openMenu(el, "Add an escalation task", (c) => [{ op: "add_task", slot: "escalation", node, ...c }], true) };
+      case "escalation": return { a: "No escalation task. ", link: "Add one", b: " to run when this node is stuck.", note: `Without one, Kraft auto-escalates ${delay} (policy).`, go: (el: HTMLElement) => openMenu(el, "Add an escalation task", (c) => [{ op: "add_task", slot: "escalation", node, ...c }], true) };
       default: return { a: "No conflict handler. ", link: "Add one", b: " to resolve a rebase conflict.", note: `Without one, a rebase conflict is an ordinary task failure. Success restarts from ${restart}.`, go: (el: HTMLElement) => void addHandler("on_conflict", node, el) };
     }
   })();

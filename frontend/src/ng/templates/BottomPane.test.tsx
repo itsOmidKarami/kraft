@@ -73,7 +73,7 @@ describe("bottom pane", () => {
 
   it("an escalation is added from the agent-only menu into its slot", async () => {
     const { draft } = mount("verification", { tab: "escalation" });
-    expect(screen.getByText(/Without one, Kraft auto-escalates after 0m/)).toBeInTheDocument();
+    expect(screen.getByText("Without one, Kraft auto-escalates at once (policy).")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add one" }));
     const menu = await screen.findByRole("dialog", { name: "Add an escalation task" });
     expect(within(menu).queryByRole("menuitem", { name: "Blank forge task" })).toBeNull();
