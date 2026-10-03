@@ -22,10 +22,13 @@ import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
 import { nodeBar, overrideWords, reviewPath, type NodeAct } from "./model";
 import { Strip } from "./Strip";
 import { chainName } from "../../item/chainName";
+import { materialized, nodeAt } from "../../item/chainValues";
+import "../areas/areas.css";
+import { yamlOf } from "../areas/yaml";
 import "./node.css";
 
-export type NodeTab = "overview" | "log" | "config";
-const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
+export type NodeTab = "overview" | "log" | "config" | "yaml";
+const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }, { id: "yaml", label: "YAML" }];
 const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
 
 export interface PlaceProps {
@@ -58,6 +61,8 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
   const paths = stepsOf(api).steps;
   const escalations = escalationsOf(item, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task } }));
+  const m = materialized(item);
+  const frozen = m ? nodeAt(m, nodeId) : undefined;
   const doc = docs.find((d) => d.path === item.gate_artifact);
 
   const act1 = (a: NodeAct) => {
@@ -142,6 +147,12 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
           </>
         )}
         {tab === "log" && <NodeLog item={item} node={nodeId} />}
+        {tab === "yaml" && (
+          <div className="ph-yaml">
+            <p className="ph-yaml-file">{chainName(item)} · {nodeId} · as frozen at intake</p>
+            <pre className="ph-yaml-text">{yamlOf({ ...(frozen ?? api) as unknown as Record<string, unknown>, ...(item.node_overrides?.[nodeId] ? { changed_for_this_item: item.node_overrides[nodeId] } : {}) })}</pre>
+          </div>
+        )}
         {tab === "config" && (
           <>
             <Facts rows={[

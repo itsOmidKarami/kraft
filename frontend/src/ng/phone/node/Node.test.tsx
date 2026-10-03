@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, holdFetch, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -114,6 +114,17 @@ describe("the node screen (D)", () => {
     mount(item("running"), "/work-items/w1/nodes/verification?tab=log", { "GET /worker-sessions/s1/log": [200, { lines }] });
     await screen.findByText(/loaded review_package|\ba\b/);
     expect(document.querySelector(".ph-count")!.textContent).toBe(count);
+  });
+
+  it("has a YAML tab with the node as the item froze it, and what was changed for this item", async () => {
+    mount(item("running", null, { materialized_chain: FROZEN, node_overrides: { verification: { attempts: 3 } } }), "/work-items/w1/nodes/verification");
+    await userEvent.click(await screen.findByRole("tab", { name: "YAML" }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?tab=yaml");
+    const text = document.querySelector(".ph-yaml-text")!.textContent!;
+    expect(text).toContain("id: verification");
+    expect(text).toContain("fix_loop:\n  max_attempts: 2");
+    expect(text).toContain("steps:\n  - id: checks\n    tasks:\n      - id: lint");
+    expect(text).toContain("changed_for_this_item:\n  attempts: 3");
   });
 
   it("filters the node's log by source and says when nothing is left", async () => {
