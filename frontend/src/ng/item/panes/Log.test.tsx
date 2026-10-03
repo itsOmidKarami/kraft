@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../testkit";
@@ -49,6 +49,25 @@ describe("Log", () => {
     await screen.findByText(/reading cache\.py/);
     expect(screen.getByLabelText("Log lines").scrollTop).toBe(900);
     height.mockRestore();
+  });
+
+  it("stops following once the reader scrolls up, and resumes at the bottom", async () => {
+    stubFetch(answer as never);
+    const height = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
+    const client = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    render(<Log sessionId="s1" running={false} title="t" />);
+    await screen.findByText(/reading cache\.py/);
+    const pre = screen.getByLabelText("Log lines");
+    const follow = screen.getByRole("checkbox", { name: "follow" });
+    expect(follow).toBeChecked();
+    pre.scrollTop = 100;
+    fireEvent.scroll(pre);
+    expect(follow).not.toBeChecked();
+    pre.scrollTop = 600;
+    fireEvent.scroll(pre);
+    expect(follow).toBeChecked();
+    height.mockRestore();
+    client.mockRestore();
   });
 
   it("reads again while the session runs, and not once it ended", async () => {
