@@ -6,6 +6,7 @@ const nodes: ChainNode[] = [
   { id: "plan", gate_after: null, tasks: ["plan.write.plan"], steps: [["plan.write.plan"]] },
   { id: "verification", gate_after: null, tasks: ["verification.checks.lint", "verification.checks.typecheck"], steps: [["verification.checks.lint", "verification.checks.typecheck"]] },
 ];
+const gated: ChainNode[] = [...nodes, { id: "final_review", kind: "gate", gate_after: null, tasks: [], steps: [] }];
 const q = (s: string) => new URLSearchParams(s);
 
 describe("item URL", () => {
@@ -31,6 +32,13 @@ describe("item URL", () => {
 
   it("knows a node's escalation task, which no step lists", () => {
     expect(readPlace("verification", q("sel=verification.escalation.escalation&tab=thread"), nodes).sel).toEqual({ kind: "task", node: "verification", step: "escalation", task: "escalation" });
+  });
+
+  it("round-trips a gate's reviewer as <gate>.auto_review, and reads it on no other node", () => {
+    const sel = { kind: "task", node: "final_review", step: "auto_review", task: "auto_review" } as const;
+    expect(readPlace("final_review", q("sel=final_review.auto_review&tab=log&attempt=2"), gated)).toMatchObject({ sel, tab: "log", attempt: 2 });
+    expect(placeUrl("w1", { node: "final_review", sel, tab: "log", attempt: 2 })).toBe("/work-items/w1/nodes/final_review?sel=final_review.auto_review&tab=log&attempt=2");
+    expect(readPlace("verification", q("sel=verification.auto_review"), gated).sel).toEqual({ kind: "node", node: "verification" });
   });
 
   it("falls back to the floor for an unknown sel, and to the chain for an unknown node", () => {

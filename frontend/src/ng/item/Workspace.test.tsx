@@ -31,6 +31,14 @@ const mount = (path = "/work-items/w1", over: Parameters<typeof detail>[0] = {})
 const where = () => screen.getByTestId("where").textContent;
 
 describe("Workspace", () => {
+  it("clicking a gate's reviewer selects the reviewer's task pane, not the gate", async () => {
+    const materialized_chain = JSON.stringify({ chain: { nodes: [{ id: "plan_approval", kind: "gate", auto_review: { id: "auto_review", kind: "agent" } }] } });
+    mount("/work-items/w1/nodes/plan_approval", { materialized_chain });
+    await userEvent.click(screen.getByRole("button", { name: /auto_review.*reviewer task/ }));
+    expect(where()).toBe("/work-items/w1/nodes/plan_approval?sel=plan_approval.auto_review");
+    expect(screen.getByRole("complementary", { name: "auto_review pane" })).toBeInTheDocument();
+  });
+
   it("opens on the chain's pane, and a node click selects it in the URL", async () => {
     mount();
     expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +65,37 @@ describe("task pane", () => {
     // One turn: no switcher, the subtitle says how it went.
     expect(within(pane("escalation")).getByText("escalation · agent task · needs you")).toBeInTheDocument();
     expect(within(pane("escalation")).queryByRole("button", { name: "Earlier attempt" })).toBeNull();
+  });
+
+  describe("a gate's auto_review", () => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan_approval", kind: "gate", auto_review: { id: "auto_review", kind: "agent" } }] } });
+    const reviewed = detail({ materialized_chain: frozen, display_status: "failed", worker_sessions: [sess("plan_approval.auto_review", 1, { model: null }), sess("plan_approval.auto_review", 2, { model: null, status: "failed" })] });
+    const url = "/work-items/w1/nodes/plan_approval?sel=plan_approval.auto_review";
+
+    it("opens its own pane: attempts, the kind from the frozen chain, and a crumb back to the gate", async () => {
+      mount(url, reviewed);
+      const p = pane("auto_review");
+      expect(within(p).getByText(/attempt 2 of 2/)).toBeInTheDocument();
+      expect(within(p).getByText(/^agent task · /)).toBeInTheDocument();
+      expect(within(p).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "Input", "Output", "Log", "Config"]);
+      // "<gate> › auto_review": the gate links back, the reviewer is text (no step of the chain to open).
+      expect(within(p).getByRole("button", { name: "plan_approval" })).toBeInTheDocument();
+      expect(within(p).queryByRole("button", { name: "auto_review" })).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Earlier attempt" }));
+      expect(screen.getByTestId("where").textContent).toBe(`${url}&attempt=1`);
+      expect(within(pane("auto_review")).getByText(/attempt 1 of 2/)).toBeInTheDocument();
+    });
+
+    it("reads the attempt's log on the Log tab", async () => {
+      mount(`${url}&tab=log`, reviewed);
+      expect(within(pane("auto_review")).getByRole("tab", { name: "Log" })).toHaveAttribute("aria-selected", "true");
+      await waitFor(() => expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toContain("/api/worker-sessions/plan_approval.auto_review-2/log?format=jsonl"));
+    });
+
+    it("offers no Skip or Retry: /skip and /retry refuse a path under a gate", () => {
+      mount(url, reviewed);
+      for (const name of ["Retry", "Skip task", "Pause", "Resume"]) expect(within(pane("auto_review")).queryByRole("button", { name })).toBeNull();
+    });
   });
 
   it("hands focus to the other arrow when one reaches the end", async () => {
