@@ -503,26 +503,29 @@ def test_an_unignored_install_stays_out_when_git_lists_every_untracked_file(tmp_
     assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
 
 
-def test_commit_stragglers_leaves_out_a_uv_lock_uv_wrote_but_not_one_the_repo_tracks(tmp_path):
+def test_commit_stragglers_leaves_out_only_the_lockfile_the_setup_wrote(tmp_path):
     """An entry connected before the probe stopped proposing `uv sync` for a
-    pyproject with no lockfile still runs it, and uv writes a `uv.lock` that
-    every work item then committed. Untracked, it is an install; tracked,
-    an edit to it is work."""
+    pyproject with no lockfile still runs it, and every work item committed
+    the `uv.lock` it wrote. That one stays out; a `uv.lock` the agent made,
+    or an edit to one the repo tracks, is work."""
     repo = _repo_with_origin(tmp_path)
     (repo / "web").mkdir()
     (repo / "web" / "uv.lock").write_text("version = 1\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "web's lockfile")
-    (repo / "uv.lock").write_text("version = 1\n")
+    before = asyncio.run(forge.untracked_lockfiles(repo))
+    (repo / "uv.lock").write_text("by the setup\n")
+    asyncio.run(forge.record_setup_writes(repo, before))
+    (repo / "api").mkdir()
+    (repo / "api" / "uv.lock").write_text("by the agent\n")
     (repo / "web" / "uv.lock").write_text("version = 2\n")
-    (repo / "forgotten.py").write_text("never added\n")
 
     asyncio.run(
         forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
     swept = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
-    assert sorted(swept) == ["forgotten.py", "web/uv.lock"]
+    assert sorted(swept) == ["api/uv.lock", "web/uv.lock"]
     asyncio.run(forge.assert_clean(repo, "main"))
 
 

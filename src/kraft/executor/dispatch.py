@@ -1171,6 +1171,21 @@ async def _dispatch_task(
             mounts=_builtins.item_mounts(work_item_row),
             identity=_builtins.item_identity(db, work_item_row["id"]),
         )
+        # Said, not silent: a lockfile the setup command wrote stays out of the
+        # commit, and a person reading the item can see that it did.
+        dropped = sorted(
+            await _forge.setup_wrote(Path(worktree))
+            & await _forge.untracked_lockfiles(Path(worktree))
+        )
+        if dropped:
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_row["id"],
+                    "sweep_left_out",
+                    {"node_id": node.id, "task": task.path, "paths": dropped},
+                )
+            )
     except RuntimeError as exc:  # ForgeError included
         logger.warning("could not commit stragglers after %s: %r", task.path, exc)
         # A log line only reaches whoever is tailing the server at the

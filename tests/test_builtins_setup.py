@@ -49,3 +49,19 @@ async def test_a_repo_with_no_commit_gets_no_worktree(tmp_path, database, run_di
     with pytest.raises(RuntimeError, match="has no commit to branch from"):
         await wtree.ensure(database, run_dirs, repo, repo_entry=entry_of({"setup_command": ""}))
     assert not (run_dirs.worktrees / "w1").exists()
+
+
+async def test_the_setup_records_only_the_lockfile_it_wrote(tmp_path):
+    """What the straggler sweep then leaves out: a `uv.lock` there before the
+    setup ran (the agent's, from an earlier attempt) is not the setup's."""
+    from support.harness import make_repo
+
+    from kraft.adapters import forge
+
+    repo = make_repo(tmp_path)
+    (repo / "agent").mkdir()
+    (repo / "agent" / "uv.lock").write_text("by the agent\n")
+    entry = entry_of({"setup_command": "echo v1 > uv.lock && echo v2 >> agent/uv.lock"})
+    for _ in range(2):  # every walk entry runs it again
+        await kraft_builtins.run_setup_command(repo, repo, entry)
+        assert await forge.setup_wrote(repo) == {"uv.lock"}

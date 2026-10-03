@@ -826,6 +826,9 @@ async def run_setup_command(
         )
     if not cmd:
         return ""
+    # What is untracked before it runs, so the lockfile it writes (a `uv sync`
+    # with no `uv.lock`) can be told from one the agent made.
+    lockfiles = await git.untracked_lockfiles(worktree)
     client_env = worker_env(repo_entry)
     withheld: set[str] = set()
     if sandbox and checkout is None:
@@ -956,6 +959,7 @@ async def run_setup_command(
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")
+    await git.record_setup_writes(worktree, lockfiles)
     return f"$ {cmd}\n{done.stdout}{done.stderr}"
 
 
