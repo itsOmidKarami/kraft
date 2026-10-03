@@ -153,7 +153,7 @@ export function BoardPage() {
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
     // The gate's review, its brief open beside the diff (the review shows it when the gate has one).
     if (a.kind === "gate") return open(item.id, `/review?gate=${encodeURIComponent(a.gate)}&doc=1`);
-    if (a.kind === "peek") return peek(item.id, a.tab);
+    if (a.kind === "peek") return peek(item.id, a.tab, a.budget);
     const r = await act.resume(item.id);
     setRowErrors((e) => {
       const { [item.id]: _, ...rest } = e;

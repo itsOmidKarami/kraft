@@ -52,7 +52,7 @@ describe("rowAction", () => {
     expect(a(row("needs_you", { stop: stop("question") }))).toMatchObject({ label: "Answer", kind: "peek", tab: "overview" });
     expect(a(row("needs_you", { stop: stop("cap") }))).toMatchObject({ label: "Raise cap", kind: "peek", tab: "config" });
     // The row cannot tell a cap the server raises from one it refuses; the peek's banner can.
-    expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Open", kind: "peek", tab: "overview" });
+    expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Raise budget", kind: "peek", tab: "config", budget: true });
     expect(a(row("needs_you", { stop: stop("mr_closed") }))).toMatchObject({ label: "Open", kind: "peek" });
     expect(a(row("needs_you", { stop: stop("stuck") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });
     expect(a(row("failed", { stop: stop("failed") }))).toMatchObject({ label: "Retry…", kind: "peek" });

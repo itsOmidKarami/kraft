@@ -416,19 +416,15 @@ describe("BoardPage", () => {
     expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
   });
 
-  it("opens a budget stop's peek on Overview, whose Raise cap opens Config with the budget editor", async () => {
+  it("offers Raise budget on a budget stop's row, which opens the peek's budget editor (BD-3)", async () => {
     const b = item("b1", "needs_you", { status: "needs_human", stop: { kind: "budget", node: "verification", reason: "Spend cap reached", resume_at: null, scope: "work_item" } as WorkItem["stop"], budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as WorkItem["budget_cap"] });
     put(b);
     stubFetch({ "GET /work-items/b1": [200, { ...b, worker_sessions: [] }], "GET /work-items/b1/events": [200, []], "GET /policy": [200, {}] });
     board();
-    expect(screen.queryByRole("button", { name: "Raise budget" })).toBeNull();
-    await userEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
     expect(where()).toBe("/?sel=b1");
-    expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    // The banner's Raise cap; the footer's main button says the same and does the same.
-    await userEvent.click((await screen.findAllByRole("button", { name: "Raise cap" }))[0]);
-    expect(await screen.findByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("opens the composer from + New work item, closing the peek", async () => {

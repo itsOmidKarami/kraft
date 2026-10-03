@@ -99,6 +99,22 @@ describe("Peek", () => {
     await opened();
   });
 
+  // BD-3: a board row's Raise budget asks for the budget editor; the peek opens the one that raises this stop's cap.
+  it.each([
+    ["the item's own cap: Config's budget editor", budgetStop, async () => {
+      expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
+    }],
+    ["a policy dollar cap: its own editor", { ...budgetStop, stop: stop("budget", { reason: "Spend cap reached", limit: { path: "", key: "budget_usd", value: 5, maximum: null } }) }, async () => expect(await screen.findByRole("dialog", { name: "Raise budget cap" })).toBeInTheDocument()],
+    ["the daily cap: the banner saying why it can't", { ...budgetStop, stop: stop("budget", { reason: "Daily cap reached", scope: "daily" }) }, async () => {
+      await waitFor(() => expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true"));
+      expect(await screen.findByText(/The item can't raise this cap/)).toBeInTheDocument();
+    }],
+  ] as const)("opens on a row's Raise budget at %s", async (_, over, opened) => {
+    mount(over as Partial<ItemDetail>, { start: "config", budget: true });
+    await opened();
+  });
+
   it("moves focus into the budget editor's field, and Enter saves the typed cap (R10a-05)", async () => {
     const calls = mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
     fireEvent.click((await screen.findAllByRole("button", { name: "Raise cap" }))[0]);

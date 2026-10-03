@@ -17,7 +17,7 @@ import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { PausedCard, StateCard } from "../item/StateCard";
-import { headerState, MAIN_LABEL, neverStarted } from "../item/status";
+import { budgetRaise, headerState, MAIN_LABEL, neverStarted } from "../item/status";
 import { placeUrl } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
@@ -47,6 +47,15 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
 }) {
   const loaded = useItem(id);
   const navigate = useNavigate();
+  // Asked for the budget editor (a row's Raise budget) on a stop it does not raise: the stop's own
+  // limit editor, or Overview, whose banner says why the item can't raise it.
+  const stop = loaded.state === "ready" ? loaded.item.stop : null;
+  useEffect(() => {
+    if (!budget || !stop || stop.kind !== "budget" || budgetRaise({ stop }) === "item") return;
+    onBudget(false);
+    onTab("overview");
+    if (stop.limit) openLimitEditor(id);
+  }, [budget, stop, id, onBudget, onTab]);
   const open = () => navigate(`/work-items/${encodeURIComponent(id)}`);
   const common = { id: "board-peek", open: true, size, onCollapse: onClose, onExpand: () => {} };
   if (loaded.state !== "ready")

@@ -55,7 +55,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
 
 export type RowAction =
   | { label: string; kind: "gate"; gate: string }
-  | { label: string; kind: "peek"; tab: "overview" | "config" }
+  | { label: string; kind: "peek"; tab: "overview" | "config"; budget?: boolean }
   | { label: string; kind: "resume" };
 
 /** The one action a row offers, or none. */
@@ -67,9 +67,9 @@ export function rowAction(i: Row): RowAction | null {
     case "gate": return { label: "Review to approve", kind: "gate", gate: i.pending_gate ?? nodeOf(i) };
     case "question": return { label: "Answer", kind: "peek", tab: "overview" };
     case "cap": return { label: "Raise cap", kind: "peek", tab: "config" };
-    // A row carries neither the stop's limit nor the item's spend, so it cannot tell the item's own cap from a daily
-    // or token one the server will not raise: the peek's banner can (`budgetRaise`), and offers the raise or Retry.
-    case "budget": return { label: "Open", kind: "peek", tab: "overview" };
+    // A row carries neither the stop's limit nor its scope: the peek it opens picks the editor that raises this
+    // cap (`budgetRaise`), or stays on the banner that says why the item can't, with Retry.
+    case "budget": return { label: "Raise budget", kind: "peek", tab: "config", budget: true };
     // A stuck loop's way on is Retry, on the peek's card (R11a-01): the row said Open.
     case "stuck": return { label: "Retry…", kind: "peek", tab: "overview" };
     default: return { label: "Open", kind: "peek", tab: "overview" };
