@@ -89,14 +89,37 @@ def release_impact(prs: list[dict]) -> str:
     return min((impact_of(pr) for pr in prs), key=IMPACTS.index, default="none")
 
 
+#: A list item at the left margin: one of an entry's own bullets, not a nested one.
+_TOP_ITEM = re.compile(r"^[-*] ")
+#: A line that ends the text of the bullet above it: a nested item or a fence.
+_NOT_PROSE = re.compile(r"^\s*(?:[-*+] |\d+[.)] |```)")
+
+
 def changelog_entry(pr: dict) -> str:
-    """The PR's `## Changelog` section as a list item, or its title without one."""
+    """The PR's `## Changelog` section as a list item, or its title without one.
+
+    Every bullet at the left margin carries the PR's number, at the end of its
+    own text (before any nested list under it). Only the last one did, so a
+    reader of a multi-bullet group could not tell which PR the others came
+    from (R10h-06)."""
     match = _SECTION.search(pr.get("body") or "")
     text = _ATTRIBUTION.sub("", _COMMENT.sub("", match.group(1))).strip() if match else ""
     text = text or pr["title"]
     if not text.startswith(("- ", "* ")):
         text = f"- {text}"
-    return f"{text} (#{pr['number']})"
+    lines = text.split("\n")
+    tops = [i for i, line in enumerate(lines) if _TOP_ITEM.match(line)]
+    for start in tops:
+        end = start
+        while (
+            end + 1 < len(lines)
+            and lines[end + 1].strip()
+            and not _TOP_ITEM.match(lines[end + 1])
+            and not _NOT_PROSE.match(lines[end + 1])
+        ):
+            end += 1
+        lines[end] += f" (#{pr['number']})"
+    return "\n".join(lines)
 
 
 def release_notes(prs: list[dict]) -> str:
