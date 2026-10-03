@@ -529,8 +529,7 @@ def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, 
 
 
 def v1_task_at(chain, path: str):
-    """The `ResolvedTask` at `path` (`node.step.task`) in a `MaterializedChain`;
-    `StopIteration` when there is none."""
+    """The `ResolvedTask` at `path` (`node.step.task`) in a chain; `StopIteration` if none."""
     return next(t for n in chain.chain.nodes for t in n.tasks() if t.path == path)
 
 
