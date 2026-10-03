@@ -5,7 +5,6 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
-import { openPane } from "../item/Workspace";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
@@ -152,10 +151,8 @@ export function BoardPage() {
     return n;
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
-    if (a.kind === "gate") {
-      openPane();
-      return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
-    }
+    // The gate's review, its brief open beside the diff (the review shows it when the gate has one).
+    if (a.kind === "gate") return open(item.id, `/review?gate=${encodeURIComponent(a.gate)}&doc=1`);
     if (a.kind === "peek") return peek(item.id, a.tab);
     const r = await act.resume(item.id);
     setRowErrors((e) => {

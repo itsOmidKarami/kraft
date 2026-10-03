@@ -6,7 +6,6 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
-import { usePaneMemory } from "../item/Workspace";
 import { Shell } from "../shell/Shell";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
@@ -226,17 +225,15 @@ describe("BoardPage", () => {
     expect(where()).toBe("/work-items/r1");
   });
 
-  it("opens a gate row's item page on the gate, and resumes a paused row in place, its refusal on the row", async () => {
+  it("opens a gate row's review with its brief, and resumes a paused row in place, its refusal on the row", async () => {
     put(item("g1", "needs_you", { stop: { kind: "gate", node: "plan_approval", reason: null, resume_at: null } as WorkItem["stop"], pending_gate: "plan_approval" }), item("p2", "paused"));
     const calls = stubFetch({ "POST /work-items/p2/resume": [409, { detail: "work item is active, not paused" }] });
     board();
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
-    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
-    expect(where()).toBe("/work-items/g1?sel=plan_approval");
-    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
+    expect(where()).toBe("/work-items/g1/review?gate=plan_approval&doc=1");
   });
 
   it("opens the composer instead of first-run when asked (FirstRun's last step)", async () => {
