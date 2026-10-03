@@ -1264,8 +1264,15 @@ async def refresh_worktree_base(
                     f"git rebase failed for {worktree}: {detail}", tuple(unmerged.splitlines())
                 ),
             )
-    finally:
-        _put_back_setup_lockfiles(worktree, aside)
+    except BaseException:
+        # The rebase's own error is the one to report: a put-back that fails
+        # too is logged, never raised in its place.
+        try:
+            _put_back_setup_lockfiles(worktree, aside)
+        except Exception:
+            logger.exception("could not put the setup's lockfiles back in %s", worktree)
+        raise
+    _put_back_setup_lockfiles(worktree, aside)
     return head
 
 
@@ -1284,9 +1291,17 @@ def _refuse_unstarted_rebase(worktree: Path, done: subprocess.CompletedProcess) 
     ):
         return
     detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
+    # The paths first: a stop reason is read by its first line. git lists
+    # each one tab-indented under its "would be overwritten" line.
+    paths = [line.strip() for line in detail.splitlines() if line.startswith("\t")]
+    first = (
+        f"untracked {', '.join(paths)} would be overwritten by the base branch; "
+        f"move or delete {'it' if len(paths) == 1 else 'them'}, then retry"
+        if paths
+        else "git would not start the rebase onto the base branch; fix what it names, then retry"
+    )
     raise RebaseBlocked(
-        f"git rebase could not start in {worktree}, so nothing was rebased: {detail}\n"
-        "Move or delete the files git names, then retry the item."
+        f"{first}\ngit rebase could not start in {worktree}, so nothing was rebased: {detail}"
     )
 
 
@@ -1301,11 +1316,16 @@ async def _set_aside_setup_lockfiles(worktree: Path) -> list[str]:
     a base that has since committed its own `uv.lock`, as Kraft advises,
     could not be checked out over the setup's untracked one. Returns what
     was moved, for `_put_back_setup_lockfiles`."""
-    lockfiles = await git.setup_lockfiles(worktree)
-    if not lockfiles:
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None:
         return []
-    store_dir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir") or "") / SET_ASIDE
-    shutil.rmtree(store_dir, ignore_errors=True)  # a crash's leftovers: setup rewrites them
+    store_dir = Path(gitdir) / SET_ASIDE
+    # What a server killed mid-rebase left: the setup's next run rewrites it.
+    shutil.rmtree(store_dir, ignore_errors=True)
+    # Only a lockfile known to be as the setup left it: one with no digest (a
+    # record from before them) may hold the agent's edit, and moving it out
+    # of the way of a base's copy would lose that.
+    lockfiles = await git.setup_lockfiles(worktree, unknown=False)
     moved = []
     for rel in sorted(lockfiles):
         (store_dir / rel).parent.mkdir(parents=True, exist_ok=True)

@@ -293,17 +293,19 @@ async def record_setup_writes(repo: Path, before: Mapping[str, str | None]) -> N
         return
 
 
-async def setup_lockfiles(repo: Path) -> set[str]:
+async def setup_lockfiles(repo: Path, *, unknown: bool = True) -> set[str]:
     """The lockfiles this worktree's setup wrote that are still untracked and
     still hold what the setup left in them: the ones no commit takes. One the
-    agent has since edited is its work, and is committed."""
+    agent has since edited is its work, and is committed. One recorded with
+    no digest (before they were kept) counts as unchanged, unless `unknown`
+    is False."""
     wrote = await setup_wrote(repo)
     if not wrote:
         return set()
     return {
         p
         for p in await untracked_lockfiles(repo)
-        if p in wrote and wrote[p] in (None, _digest(repo / p))
+        if p in wrote and (wrote[p] == _digest(repo / p) or (unknown and wrote[p] is None))
     }
 
 

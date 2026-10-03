@@ -708,9 +708,69 @@ async def test_an_untracked_file_the_base_would_overwrite_stops_for_a_person(
     _commit(repo, "notes.txt", "the base's\n", "base adds notes.txt")
     head = git_read(worktree, "rev-parse", "HEAD")
 
-    with pytest.raises(kraft_builtins.RebaseBlocked, match=r"could not start(.|\n)*notes\.txt"):
+    with pytest.raises(kraft_builtins.RebaseBlocked) as blocked:
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+    # A stop reason is read by its first line, which ended at git's "would be
+    # overwritten by checkout:", with the file on the line after it.
+    assert str(blocked.value).splitlines()[0] == (
+        "untracked notes.txt would be overwritten by the base branch; move or delete it, then retry"
+    )
+    assert "could not detach HEAD" in str(blocked.value)
     assert git_read(worktree, "rev-parse", "HEAD") == head
     assert (worktree / "notes.txt").read_text() == "the agent's, never added\n"
 
     assert await _mr_rebase(database, run_dirs, repo, worktree, branch) == "config_error"
+    log = database.read(
+        lambda c: c.execute("SELECT log_path FROM worker_sessions WHERE id='s1'").fetchone()
+    )["log_path"]
+    assert Path(log).read_text().startswith("untracked notes.txt would be overwritten")
+
+
+async def test_a_lockfile_recorded_with_no_digest_is_never_set_aside(database, run_dirs, repo):
+    """A record from 1.5.0rc14 names `uv.lock` with no digest, so an agent's
+    edit to it cannot be told from the setup's own. Set aside, the base's
+    committed copy would replace it and the agent's edit would be lost:
+    git's refusal, a stop for a person, keeps it."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    (gitdir / "kraft-setup-wrote").write_text("uv.lock\n")
+    (worktree / "uv.lock").write_text("the setup's, then the agent's edit\n")
+    _commit(repo, "uv.lock", "committed on the base\n", "commit a lockfile")
+
+    with pytest.raises(kraft_builtins.RebaseBlocked, match="untracked uv.lock"):
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+    assert (worktree / "uv.lock").read_text() == "the setup's, then the agent's edit\n"
+
+
+async def test_a_set_aside_a_killed_server_left_is_cleared(database, run_dirs, repo):
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    stale = Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "kraft-set-aside"
+    (stale / "sub").mkdir(parents=True)
+    (stale / "sub" / "uv.lock").write_text("left by a SIGKILL\n")
+    _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+
+    await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    assert not stale.exists()
+
+
+async def test_a_failing_put_back_never_hides_the_rebases_own_error(
+    database, run_dirs, repo, monkeypatch, caplog
+):
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    (worktree / "notes.txt").write_text("the agent's\n")
+    _commit(repo, "notes.txt", "the base's\n", "base adds notes.txt")
+
+    def broken(*_a):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(kraft_builtins, "_put_back_setup_lockfiles", broken)
+    with pytest.raises(kraft_builtins.RebaseBlocked):
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+    assert "could not put the setup's lockfiles back" in caplog.text
