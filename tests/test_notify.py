@@ -20,24 +20,34 @@ from support.harness import fake_templates_dir, isolated_bd
 from kraft import config, events, notify
 from kraft import db as kdb
 
+DEFAULT_EVENTS = ["gate_requested", "work_item_needs_human"]
+#: A `notify.yaml` that does not parse. The token sits on the broken line, the
+#: one a parser error would quote back.
+MALFORMED = b'url: "https://hook.invalid/t0ken\n'
+#: Valid YAML, but not UTF-8: `read_text()` raises `UnicodeDecodeError`, a
+#: `ValueError` rather than an `OSError`. The token sits on an otherwise-valid
+#: line; the file fails to decode as a whole, so it must never surface.
+INVALID_UTF8 = b'url: "https://hook.invalid/t0ken"\nbad: "\xff\xfe garbage"\n'
 
-def test_missing_notify_yaml_reads_as_the_shipped_default(tmp_path):
-    cfg = config.Notify.load(tmp_path / "notify.yaml")
-    assert cfg.model_dump() == {
-        "enabled": False,
-        "url": None,
-        "base_url": None,
-        "events": ["gate_requested", "work_item_needs_human"],
-    }
 
-
-def test_partial_notify_yaml_fills_in_the_rest(tmp_path):
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (None, {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS}),
+        (
+            "enabled: true\n",
+            {"enabled": True, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+        ),
+    ],
+    ids=["no-file", "partial-file"],
+)
+def test_notify_yaml_loads_with_every_missing_key_defaulted(tmp_path, text, expected):
+    """A missing file reads as the shipped default; a partial one keeps what it
+    says and fills in the rest."""
     path = tmp_path / "notify.yaml"
-    path.write_text("enabled: true\n")
-    cfg = config.Notify.load(path)
-    assert cfg.enabled is True
-    assert cfg.url is None
-    assert cfg.events == ["gate_requested", "work_item_needs_human"]
+    if text is not None:
+        path.write_text(text)
+    assert config.Notify.load(path).model_dump() == expected
 
 
 def test_saved_notify_yaml_is_0600_because_it_holds_a_token(tmp_path):
@@ -55,10 +65,6 @@ def test_a_saved_notify_yaml_holds_only_the_known_keys(tmp_path):
     assert set(yaml.safe_load(path.read_text())) == set(config.Notify.model_fields)
 
 
-async def _database(tmp_path):
-    return await kdb.Database.open(tmp_path / "orchestrator.db")
-
-
 async def _seed_item(database, wid="w1", title="Ship the thing"):
     await database.write(
         lambda c: c.execute(
@@ -70,15 +76,18 @@ async def _seed_item(database, wid="w1", title="Ship the thing"):
     )
 
 
-def _notifier(tmp_path, database, sends, *, status=200, **kw):
+def _notifier(tmp_path, database, sends, *, answer=200, base_url=None, **kw):
     """A Notifier whose transport is a recording stub. `sends` collects
-    (url, body) tuples; `status` is what the endpoint answers."""
+    (url, body) tuples; `answer` is what the endpoint does: a status code to
+    answer with, or an exception to raise."""
     cfg = tmp_path / "notify.yaml"
-    config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
+    config.Notify(enabled=True, url="https://hook.invalid/t0ken", base_url=base_url).save(cfg)
 
     async def transport(request: httpx.Request) -> httpx.Response:
         sends.append((str(request.url), json.loads(request.content)))
-        return httpx.Response(status)
+        if isinstance(answer, Exception):
+            raise answer
+        return httpx.Response(answer)
 
     n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765", **kw)
     n._transport = httpx.MockTransport(transport)
@@ -104,44 +113,62 @@ async def _drain(database, n: notify.Notifier) -> None:
     raise AssertionError(f"notifier never settled (cursor={n.cursor}, tail={tail})")
 
 
-async def test_fires_on_gate_requested_with_a_working_link(tmp_path, database):
+@pytest.mark.parametrize(
+    ("event_type", "payload", "base_url", "expected"),
+    [
+        (
+            "gate_requested",
+            {"gate": "spec_approval"},
+            None,
+            {
+                "type": "gate_requested",
+                "gate": "spec_approval",
+                "url": "http://127.0.0.1:8765/work-items/w1",
+            },
+        ),
+        (
+            "work_item_needs_human",
+            {"node_id": "build", "reason": "capped"},
+            None,
+            {
+                "type": "work_item_needs_human",
+                "gate": None,
+                "url": "http://127.0.0.1:8765/work-items/w1",
+            },
+        ),
+        (
+            "gate_requested",
+            {"gate": "spec_approval"},
+            "https://kraft.tail1234.ts.net/",
+            {
+                "type": "gate_requested",
+                "gate": "spec_approval",
+                "url": "https://kraft.tail1234.ts.net/work-items/w1",
+            },
+        ),
+    ],
+    ids=["gate-requested", "needs-human-has-no-gate", "base-url-beats-the-bind-fallback"],
+)
+async def test_a_stop_sends_one_message_that_links_to_the_item(
+    tmp_path, database, event_type, payload, base_url, expected
+):
+    """The two stop types each send once, to the configured URL, with a link a
+    phone can open: `base_url` from the config when there is one, else the
+    address Kraft is bound to."""
     await _seed_item(database)
     sends: list = []
-    n = _notifier(tmp_path, database, sends)
+    n = _notifier(tmp_path, database, sends, base_url=base_url)
     await n.start()
-    await database.write(
-        lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
-    )
+    await database.write(lambda c: events.append(c, "w1", event_type, payload))
     await _drain(database, n)
     await n.stop()
 
-    assert len(sends) == 1
-    url, body = sends[0]
-    assert url == "https://hook.invalid/t0ken"
-    assert body == {
-        "work_item_id": "w1",
-        "title": "Ship the thing",
-        "type": "gate_requested",
-        "gate": "spec_approval",
-        "url": "http://127.0.0.1:8765/work-items/w1",
-    }
-
-
-async def test_fires_on_needs_human_with_no_gate(tmp_path, database):
-    await _seed_item(database)
-    sends: list = []
-    n = _notifier(tmp_path, database, sends)
-    await n.start()
-    await database.write(
-        lambda c: events.append(
-            c, "w1", "work_item_needs_human", {"node_id": "build", "reason": "capped"}
+    assert sends == [
+        (
+            "https://hook.invalid/t0ken",
+            {"work_item_id": "w1", "title": "Ship the thing", **expected},
         )
-    )
-    await _drain(database, n)
-    await n.stop()
-
-    assert [b["type"] for _, b in sends] == ["work_item_needs_human"]
-    assert sends[0][1]["gate"] is None
+    ]
 
 
 async def test_fires_on_nothing_else_across_every_emitted_type(tmp_path, database):
@@ -188,41 +215,45 @@ async def test_fires_on_nothing_else_across_every_emitted_type(tmp_path, databas
     assert sends == []
 
 
-async def test_two_stops_for_one_transition_coalesce_into_one_send(tmp_path, database):
+@pytest.mark.parametrize(
+    ("stops", "sent_to"),
+    [
+        (
+            [
+                ("w1", "gate_requested", {"gate": "plan_approval"}),
+                ("w1", "work_item_needs_human", {"reason": "exhausted"}),
+            ],
+            ["w1"],
+        ),
+        (
+            [
+                ("w1", "gate_requested", {"gate": "spec_approval"}),
+                ("w2", "gate_requested", {"gate": "spec_approval"}),
+            ],
+            ["w1", "w2"],
+        ),
+    ],
+    ids=["one-item-two-stops", "two-items"],
+)
+async def test_stops_in_one_window_coalesce_per_item(tmp_path, database, stops, sent_to):
     """`POST /gates/{gate}/reject` writes `reject_gate` then, on an exhausted
     reject loop, `mark_needs_human` in the same second, on an item that was
-    just notified about. One window, one message."""
+    just notified about. One window, one message -- per item: a different item
+    stopping in the same window is news of its own."""
 
-    await _seed_item(database)
-    sends: list = []
-    n = _notifier(tmp_path, database, sends)
-    await n.start()
-    await database.write(
-        lambda c: events.append(c, "w1", "gate_requested", {"gate": "plan_approval"})
-    )
-    await database.write(
-        lambda c: events.append(c, "w1", "work_item_needs_human", {"reason": "exhausted"})
-    )
-    await _drain(database, n)
-    await n.stop()
-
-    assert len(sends) == 1
-
-
-async def test_a_different_item_in_the_same_window_still_sends(tmp_path, database):
     await _seed_item(database, "w1")
     await _seed_item(database, "w2", "Other thing")
     sends: list = []
     n = _notifier(tmp_path, database, sends)
     await n.start()
-    for wid in ("w1", "w2"):
+    for wid, event_type, payload in stops:
         await database.write(
-            lambda c, wid=wid: events.append(c, wid, "gate_requested", {"gate": "spec_approval"})
+            lambda c, wid=wid, t=event_type, p=payload: events.append(c, wid, t, p)
         )
     await _drain(database, n)
     await n.stop()
 
-    assert sorted(b["work_item_id"] for _, b in sends) == ["w1", "w2"]
+    assert sorted(b["work_item_id"] for _, b in sends) == sent_to
 
 
 async def test_startup_does_not_replay_events_older_than_the_process(tmp_path, database):
@@ -277,29 +308,39 @@ async def test_start_honours_a_passed_cursor_instead_of_a_fresh_max_seq(tmp_path
     assert len(sends) == 1
 
 
-async def test_disabled_sends_nothing_and_still_keeps_up(tmp_path, database):
+@pytest.mark.parametrize(
+    ("text", "load_error"),
+    [
+        ("enabled: false\nurl: https://hook.invalid/t0ken\n", None),
+        ("enabled: true\n", None),
+        (MALFORMED.decode(), "not valid YAML"),
+        ("enabled: true\nurl: https://hook.invalid/t0ken\nbase_url: 8080\n", "base_url"),
+    ],
+    ids=["disabled", "enabled-without-a-url", "malformed-yaml", "malformed-base-url"],
+)
+async def test_a_notify_yaml_that_cannot_send_sends_nothing_and_keeps_up(
+    tmp_path, database, text, load_error
+):
+    """Off, armed with nowhere to send, or unparsable: the notifier sends
+    nothing and records no failure, and its cursor still keeps up, so enabling
+    later does not burst a day of stale stops.
+
+    A file Kraft cannot parse must not guess at being enabled: `reload()`
+    falls back to the defaults rather than keep serving the config it had.
+    An operator typo like `base_url: 8080` (a YAML int) used to survive load
+    and fail at send time; the model now rejects it at load, the same "sends
+    nothing" failure mode."""
+
     await _seed_item(database)
     sends: list = []
-    n = _notifier(tmp_path, database, sends)
-    config.Notify(enabled=False).save(tmp_path / "notify.yaml")
+    n = _notifier(tmp_path, database, sends, retry_delay=0.0)
+    # Written as an operator would, by hand: the model refuses to save these.
+    path = tmp_path / "notify.yaml"
+    path.write_text(text)
+    if load_error:
+        with pytest.raises(config.ConfigError, match=load_error):
+            config.Notify.load(path)
     n.reload()
-    await n.start()
-    await database.write(
-        lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
-    )
-    await _drain(database, n)
-    seq = database.read(lambda c: c.execute("SELECT MAX(seq) AS s FROM events").fetchone()["s"])
-    await n.stop()
-
-    assert sends == []
-    # cursor kept up, so enabling later does not burst a day of stale stops
-    assert n.cursor == seq
-
-
-async def test_a_failing_endpoint_retries_once_then_records_the_failure(tmp_path, database):
-    await _seed_item(database)
-    sends: list = []
-    n = _notifier(tmp_path, database, sends, status=500, retry_delay=0.0)
     await n.start()
     await database.write(
         lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
@@ -308,21 +349,31 @@ async def test_a_failing_endpoint_retries_once_then_records_the_failure(tmp_path
     rows = database.read(lambda c: events.read_after(c, 0))
     await n.stop()
 
-    assert len(sends) == 2  # the send, then exactly one retry
-    failed = [r for r in rows if r["type"] == "notification_failed"]
-    assert len(failed) == 1
-    assert failed[0]["payload"] == {
-        "event_type": "gate_requested",
-        "status": 500,
-        "host": "hook.invalid",
-        "error": None,
-    }
+    assert sends == []
+    assert [r["type"] for r in rows] == ["gate_requested"]  # no notification_failed either
+    assert n.cursor == rows[-1]["seq"]
 
 
-async def test_the_url_never_reaches_an_event_payload_or_a_log(tmp_path, caplog, database):
+@pytest.mark.parametrize(
+    ("answer", "status", "error"),
+    [
+        (500, 500, None),
+        (httpx.ConnectError("boom to https://hook.invalid/t0ken"), None, "ConnectError"),
+    ],
+    ids=["http-500", "connect-error"],
+)
+async def test_a_failed_send_retries_once_and_records_no_url(
+    tmp_path, caplog, database, answer, status, error
+):
+    """One retry, then a `notification_failed` event with the status and the
+    host -- never the URL, in the event or in a log line. The security-critical
+    line is `error = type(exc).__name__`, never `str(exc)`: httpx bakes the full
+    request URL into several of its exception messages, so the connect-error
+    row is the one that would catch a regression to `error = str(exc)`."""
+
     await _seed_item(database)
     sends: list = []
-    n = _notifier(tmp_path, database, sends, status=500, retry_delay=0.0)
+    n = _notifier(tmp_path, database, sends, answer=answer, retry_delay=0.0)
     await n.start()
     with caplog.at_level("DEBUG"):
         await database.write(
@@ -332,6 +383,16 @@ async def test_the_url_never_reaches_an_event_payload_or_a_log(tmp_path, caplog,
     rows = database.read(lambda c: events.read_after(c, 0))
     await n.stop()
 
+    assert len(sends) == 2  # the send, then exactly one retry
+    failed = [r for r in rows if r["type"] == "notification_failed"]
+    assert len(failed) == 1
+    assert failed[0]["payload"] == {
+        "event_type": "gate_requested",
+        "status": status,
+        "host": "hook.invalid",
+        "error": error,
+    }
+    assert "notification to hook.invalid failed" in caplog.text
     assert "t0ken" not in json.dumps(rows)
     assert "t0ken" not in caplog.text
 
@@ -370,88 +431,6 @@ async def test_a_hanging_endpoint_does_not_block_the_drain_pass(tmp_path, databa
         await n.stop()
 
 
-async def test_base_url_from_config_wins_over_the_bind_fallback(tmp_path, database):
-    await _seed_item(database)
-    sends: list = []
-    n = _notifier(tmp_path, database, sends)
-    config.Notify(
-        enabled=True, url="https://hook.invalid/t0ken", base_url="https://kraft.tail1234.ts.net/"
-    ).save(tmp_path / "notify.yaml")
-    n.reload()
-    await n.start()
-    await database.write(
-        lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
-    )
-    await _drain(database, n)
-    await n.stop()
-
-    assert sends[0][1]["url"] == "https://kraft.tail1234.ts.net/work-items/w1"
-
-
-async def test_a_malformed_base_url_is_rejected_at_load_and_sends_nothing(tmp_path, database):
-    """An operator typo like `base_url: 8080` (a YAML int) used to survive load
-    and fail at send time. The model rejects it at load; the notifier then falls
-    back to disabled, which is the same "sends nothing" failure mode."""
-
-    await _seed_item(database)
-    sends: list = []
-    n = _notifier(tmp_path, database, sends)
-    # Written as an operator would, by hand: the model refuses to save it.
-    config.write_yaml(
-        tmp_path / "notify.yaml",
-        {"enabled": True, "url": "https://hook.invalid/t0ken", "base_url": 8080},
-    )
-    with pytest.raises(config.ConfigError, match="base_url"):
-        config.Notify.load(tmp_path / "notify.yaml")
-    n.reload()
-    await n.start()
-    await database.write(
-        lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
-    )
-    await _drain(database, n)
-    await n.stop()
-
-    assert sends == []
-
-
-async def test_a_transport_error_records_the_class_name_never_the_message(
-    tmp_path, caplog, database
-):
-    """The security-critical line: `error = type(exc).__name__`, never
-    `str(exc)` -- httpx bakes the full request URL into several of its
-    exception messages, so this is the one test that would catch a
-    regression to `error = str(exc)`."""
-
-    await _seed_item(database)
-
-    async def boom(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("boom to https://hook.invalid/t0ken")
-
-    cfg = tmp_path / "notify.yaml"
-    config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
-    n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765", retry_delay=0.0)
-    n._transport = httpx.MockTransport(boom)
-    await n.start()
-    with caplog.at_level("DEBUG"):
-        await database.write(
-            lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
-        )
-        await _drain(database, n)
-    rows = database.read(lambda c: events.read_after(c, 0))
-    await n.stop()
-
-    failed = [r for r in rows if r["type"] == "notification_failed"]
-    assert len(failed) == 1
-    assert failed[0]["payload"] == {
-        "event_type": "gate_requested",
-        "status": None,
-        "host": "hook.invalid",
-        "error": "ConnectError",
-    }
-    assert "t0ken" not in json.dumps(rows)
-    assert "t0ken" not in caplog.text
-
-
 def test_get_notify_defaults_before_the_file_exists(client):
     body = client.get("/api/notify").json()
     assert body == {
@@ -471,65 +450,76 @@ def test_get_notify_never_returns_the_url(client):
     assert "url" not in body
 
 
-def test_put_omitting_url_preserves_the_stored_secret(client):
-    client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
-    client.put("/api/notify", json={"events": ["gate_requested"]})
-    templates_dir = Path(client.app.state.templates_dir)
-    saved = config.Notify.load(templates_dir / "notify.yaml")
-    assert saved.url == "https://hook.invalid/t0ken"
-    assert saved.events == ["gate_requested"]
-    assert saved.enabled is True
+@pytest.mark.parametrize(
+    ("first", "second", "saved"),
+    [
+        (
+            {"enabled": True, "url": "https://hook.invalid/t0ken"},
+            {"events": ["gate_requested"]},
+            {
+                "enabled": True,
+                "url": "https://hook.invalid/t0ken",
+                "base_url": None,
+                "events": ["gate_requested"],
+            },
+        ),
+        (
+            {"url": "https://hook.invalid/t0ken"},
+            {"url": ""},
+            {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+        ),
+        (
+            {"enabled": True, "url": "https://hook.invalid/t0ken"},
+            {"url": ""},
+            {"enabled": False, "url": None, "base_url": None, "events": DEFAULT_EVENTS},
+        ),
+    ],
+    ids=["omitted-url-is-kept", "empty-url-clears", "empty-url-clears-and-disables"],
+)
+def test_put_merges_its_body_over_the_stored_file(client, first, second, saved):
+    """A field the body omits keeps its stored value: editing the event list
+    must not require re-entering a token the UI is never allowed to show back.
+    `url: ""` is the explicit clear, and the only UI path to revoke a leaked
+    token ("Clear URL" sends `{url: ""}` alone). If that 422'd because
+    `enabled` is still true, an operator could never get rid of a live token
+    through the UI -- clearing the URL implies turning the feature off, not
+    failing the invariant that a config cannot be enabled with nowhere to
+    send."""
+    assert client.put("/api/notify", json=first).status_code == 200
 
+    res = client.put("/api/notify", json=second)
 
-def test_put_empty_string_clears_the_url(client):
-    client.put("/api/notify", json={"url": "https://hook.invalid/t0ken"})
-    client.put("/api/notify", json={"url": ""})
-    assert client.get("/api/notify").json()["url_set"] is False
-
-
-def test_clearing_the_url_while_enabled_disables_instead_of_422ing(client):
-    """The only UI path to revoke a leaked token is "Clear URL", which sends
-    `{url: ""}` alone. If that 422s because `enabled` is still true, an
-    operator can never actually get rid of a live token through the UI --
-    clearing the URL must imply turning the feature off, not fail the
-    invariant that a config cannot be enabled with nowhere to send."""
-    res = client.put("/api/notify", json={"url": "https://hook.invalid/t0ken", "enabled": True})
     assert res.status_code == 200
-
-    res = client.put("/api/notify", json={"url": ""})
-    assert res.status_code == 200
-    body = res.json()
-    assert body["url_set"] is False
-    assert body["enabled"] is False
-
+    assert res.json() == {
+        "enabled": saved["enabled"],
+        "url_set": saved["url"] is not None,
+        "base_url": saved["base_url"],
+        "events": saved["events"],
+        "last_test": None,
+    }
     templates_dir = Path(client.app.state.templates_dir)
-    saved = config.Notify.load(templates_dir / "notify.yaml")
-    assert saved.url is None
-    assert saved.enabled is False
+    assert config.Notify.load(templates_dir / "notify.yaml").model_dump() == saved
 
 
-def test_put_refuses_a_non_http_url(client):
-    res = client.put("/api/notify", json={"url": "file:///etc/passwd"})
+@pytest.mark.parametrize(
+    ("body", "detail"),
+    [
+        ({"url": "file:///etc/passwd"}, "url must be an http or https URL"),
+        ({"base_url": "file:///etc/passwd"}, "base_url must be an http or https URL"),
+        ({"enabled": True}, "set a webhook URL before enabling notifications"),
+    ],
+    ids=["non-http-url", "non-http-base-url", "enabling-without-a-url"],
+)
+def test_put_refuses_a_bad_setting_and_writes_nothing(client, body, detail):
+    """A rejected PUT must not leave a half-applied config on disk -- for
+    `enabling-without-a-url`, `enabled` must not get written even though it was
+    the only field the request set."""
+    res = client.put("/api/notify", json=body)
+
     assert res.status_code == 422
-    assert client.get("/api/notify").json()["url_set"] is False
-
-
-def test_put_refuses_a_non_http_base_url(client):
-    res = client.put("/api/notify", json={"base_url": "file:///etc/passwd"})
-    assert res.status_code == 422
-    assert client.get("/api/notify").json()["base_url"] is None
-
-
-def test_put_refuses_enabling_without_a_url(client):
-    res = client.put("/api/notify", json={"enabled": True})
-    assert res.status_code == 422
-    # The property this test exists to prove: a rejected PUT must not leave a
-    # half-applied config on disk -- `enabled` did not get written even though
-    # it was the only field the request set.
+    assert res.json() == {"detail": detail}
     templates_dir = Path(client.app.state.templates_dir)
-    saved = config.Notify.load(templates_dir / "notify.yaml")
-    assert saved.enabled is False
-    assert saved.url is None
+    assert config.Notify.load(templates_dir / "notify.yaml") == config.Notify()
 
 
 def test_put_reloads_the_running_notifier(client):
@@ -593,158 +583,112 @@ def test_notifier_stops_before_the_database_closes(tmp_path, monkeypatch):
     assert order == ["notifier", "database"]
 
 
-def test_get_notify_with_a_malformed_yaml_file_returns_a_clean_422(client):
-    """`read_yaml`'s `ConfigError` normally quotes the offending source line --
-    for `notify.yaml` that line is the webhook URL. `config.Notify.load`
-    sanitizes it before the route (and the global `ConfigError` handler) ever
-    see it."""
-    templates_dir = Path(client.app.state.templates_dir)
-    (templates_dir / "notify.yaml").write_text('url: "https://hook.invalid/t0ken\n')
-
-    res = client.get("/api/notify")
-
-    assert res.status_code == 422
-    assert "t0ken" not in res.text
-    assert res.json() == {"detail": "notify.yaml: not valid YAML"}
-
-
-def test_a_malformed_notify_yaml_does_not_crash_startup(tmp_path, monkeypatch, caplog):
-    """`Notifier.__init__` calls `Notify.load` before `lifespan`'s `try:` --
-    letting a malformed file raise there would abort startup over an entirely
-    optional config, and leak the broadcaster, indexer, `index_conn` and
-    database un-stopped on the way out."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    templates_dir = fake_templates_dir(tmp_path, "claude")
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    (templates_dir / "notify.yaml").write_text('url: "https://hook.invalid/t0ken\n')
-    import kraft.api as api
-
-    with caplog.at_level("WARNING"):
-        with TestClient(
-            api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1"
-        ) as c:  # must not raise
-            assert c.app.state.notifier.config["enabled"] is False
-
-    assert "t0ken" not in caplog.text
-
-
-def test_a_malformed_notify_yaml_falls_back_to_disabled_and_sends_nothing(tmp_path):
-    """The other half of the fail-safe: not just "does not crash", but "sends
-    nothing" -- a config Kraft cannot parse must not guess at being enabled."""
-
-    async def scenario():
-        database = await _database(tmp_path)
-        await _seed_item(database)
-        cfg = tmp_path / "notify.yaml"
-        cfg.write_text('url: "https://hook.invalid/t0ken\n')
-        sends: list = []
-
-        async def transport(request: httpx.Request) -> httpx.Response:
-            sends.append((str(request.url), json.loads(request.content)))
-            return httpx.Response(200)
-
-        n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765")
-        n._transport = httpx.MockTransport(transport)
-        assert n.config["enabled"] is False
-        await n.start()
-        await database.write(
-            lambda c: events.append(c, "w1", "gate_requested", {"gate": "spec_approval"})
-        )
-        await _drain(database, n)
-        await n.stop()
-        await database.close()
-
-        assert sends == []
-
-    asyncio.run(scenario())
-
-
-def test_get_notify_with_invalid_utf8_returns_a_clean_422_and_disables(
-    tmp_path, monkeypatch, caplog
+@pytest.mark.parametrize(
+    "content",
+    [MALFORMED, INVALID_UTF8],
+    ids=["malformed", "invalid-utf8"],
+)
+def test_a_bad_notify_yaml_at_startup_disables_instead_of_crashing(
+    request, templates_dir, caplog, content
 ):
-    """`read_text()`'s `UnicodeDecodeError` is a `ValueError`, not an
-    `OSError` -- `read_yaml` must catch it too, or a `notify.yaml` in the
-    wrong encoding crashes `Notifier.__init__` exactly like a YAML syntax
-    error used to. The token sits on an otherwise-valid line; the file still
-    fails to decode as a whole, so it must never surface."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    templates_dir = fake_templates_dir(tmp_path, "claude")
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    (templates_dir / "notify.yaml").write_bytes(
-        b'url: "https://hook.invalid/t0ken"\nbad: "\xff\xfe garbage"\n'
-    )
-    import kraft.api as api
+    """`Notifier.__init__` calls `Notify.load` before `lifespan`'s `try:` --
+    letting a broken file raise there would abort startup over an entirely
+    optional config, and leak the broadcaster, indexer, `index_conn` and
+    database un-stopped on the way out. `read_text()`'s `UnicodeDecodeError`
+    is a `ValueError`, not an `OSError`, so `read_yaml` must catch it too, or
+    a file in the wrong encoding crashes startup exactly like a YAML syntax
+    error used to. The warning is the record, and it must not carry the
+    token."""
+    (templates_dir / "notify.yaml").write_bytes(content)
+    caplog.set_level("WARNING")
 
-    with caplog.at_level("WARNING"):
-        with TestClient(
-            api.app, client=("127.0.0.1", 54321), base_url="http://127.0.0.1"
-        ) as c:  # must not raise
-            assert c.app.state.notifier.config["enabled"] is False
-            res = c.get("/api/notify")
+    client = request.getfixturevalue("client")  # starts the app on the file above
 
-    assert res.status_code == 422
-    assert "t0ken" not in res.text
+    assert client.app.state.notifier.config["enabled"] is False
+    assert "notify.yaml: not valid YAML -- notifications disabled" in caplog.text
     assert "t0ken" not in caplog.text
 
 
-def test_get_notify_with_a_permission_denied_file_reports_that_not_bad_yaml(client):
-    """`read_yaml` folds a genuine `OSError` into the same `ConfigError` as a
-    YAML syntax error; `Notify.load` must not blanket both into "not valid
-    YAML" -- an operator who cannot read their own file needs to be told
-    that, not sent hunting for a typo that is not there."""
-    if os.geteuid() == 0:
-        pytest.skip("root ignores file permissions")
-    templates_dir = Path(client.app.state.templates_dir)
-    path = templates_dir / "notify.yaml"
-    path.write_text("enabled: true\n")
-    os.chmod(path, 0o000)
+@pytest.mark.parametrize(
+    ("content", "unreadable", "method", "detail"),
+    [
+        (MALFORMED, False, "get", "notify.yaml: not valid YAML"),
+        (INVALID_UTF8, False, "get", "notify.yaml: not valid YAML"),
+        (
+            b"url: [https://hook.invalid/t0ken]\n",
+            False,
+            "get",
+            "notify.yaml: url: Input should be a valid string",
+        ),
+        pytest.param(
+            b"url: https://hook.invalid/t0ken\n",
+            True,
+            "get",
+            "notify.yaml: cannot be read: Permission denied",
+            marks=pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions"),
+        ),
+        (MALFORMED, False, "put", "notify.yaml: not valid YAML"),
+    ],
+    ids=["malformed-get", "utf8-get", "invalid-value-get", "denied-get", "malformed-put"],
+)
+def test_a_bad_notify_file_is_reported_cleanly(client, caplog, content, unreadable, method, detail):
+    """`read_yaml`'s `ConfigError` normally quotes the offending source line,
+    and pydantic's error echoes the offending value -- for `notify.yaml` that
+    line or value is the webhook URL. `config.Notify.load` sanitizes both
+    before the route (and the global `ConfigError` handler) ever see them, for
+    `GET` and for `PUT`, which loads the file before it touches the request
+    body. It must not blanket an unreadable file into "not valid YAML"
+    either: an operator who cannot read their own file needs to be told that,
+    not sent hunting for a typo that is not there. A `PUT` that cannot read the
+    file leaves it as it was."""
+    path = Path(client.app.state.templates_dir) / "notify.yaml"
+    path.write_bytes(content)
+    if unreadable:
+        os.chmod(path, 0o000)
     try:
-        res = client.get("/api/notify")
+        if method == "get":
+            res = client.get("/api/notify")
+        else:
+            res = client.put("/api/notify", json={"enabled": True})
     finally:
         os.chmod(path, 0o600)
 
     assert res.status_code == 422
-    detail = res.json()["detail"]
-    assert "cannot be read" in detail
-    assert "not valid YAML" not in detail
-
-
-def test_put_notify_with_a_malformed_yaml_file_returns_a_clean_422(client):
-    """`put_notify` also calls `config_mod.Notify.load` -- before it ever
-    touches the request body -- so the same sanitizing path `GET /notify`
-    uses must cover it too."""
-    templates_dir = Path(client.app.state.templates_dir)
-    (templates_dir / "notify.yaml").write_text('url: "https://hook.invalid/t0ken\n')
-
-    res = client.put("/api/notify", json={"enabled": True})
-
-    assert res.status_code == 422
+    assert res.json() == {"detail": detail}
     assert "t0ken" not in res.text
+    assert "t0ken" not in caplog.text
+    assert path.read_bytes() == content
 
 
-async def test_send_test_records_status_and_latency(tmp_path, database):
-    n = _notifier(tmp_path, database, [])
+@pytest.mark.parametrize(
+    ("answer", "status", "error"),
+    [
+        (200, 200, None),
+        (httpx.ConnectError("boom to https://hook.invalid/t0ken"), None, "ConnectError"),
+    ],
+    ids=["delivered", "connect-error"],
+)
+async def test_send_test_records_its_outcome(tmp_path, database, answer, status, error):
+    """`send_test` is one synchronous attempt; what came back is kept as
+    `last_test`. A transport error records its class name, never its message,
+    which carries the URL."""
+    sends: list = []
+    n = _notifier(tmp_path, database, sends, answer=answer)
+
     result = await n.send_test()
-    assert result["status"] == 200
+
+    assert {k: result[k] for k in ("status", "error")} == {"status": status, "error": error}
     assert result["ms"] >= 0
-    assert result["error"] is None
     assert n.last_test == result
-
-
-async def test_send_test_without_a_url_raises(tmp_path, database):
-    n = _notifier(tmp_path, database, [])
-    n._config["url"] = None
-    with pytest.raises(ValueError):
-        await n.send_test()
+    assert [body["type"] for _, body in sends] == ["test"]
 
 
 def test_notify_test_endpoint_needs_a_url(client):
+    """`send_test` raises `ValueError` with no URL set; the route turns that
+    into a 422 rather than sending to nowhere."""
     resp = client.post("/api/notify/test")
     assert resp.status_code == 422
+    assert resp.json() == {"detail": "no webhook URL is set"}
 
 
 def test_get_notify_carries_last_test_after_a_send(client, monkeypatch):
