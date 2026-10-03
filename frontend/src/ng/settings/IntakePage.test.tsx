@@ -67,6 +67,19 @@ describe("Auto-intake page", () => {
     expect(screen.getByText("Auto-intake is off.")).toBeInTheDocument();
   });
 
+  it("says when the next check is, from the last check and the interval, but not for an unpublished interval (ST-3)", async () => {
+    const recent = [{ id: 9, at: new Date(Date.now() - 2 * 60_000).toISOString(), ready: 0, started: [], skipped: [] }];
+    vi.mocked(http.request).mockImplementation(((path: string) => (path.startsWith("/intake/checks") ? ok(recent) : ok({ repos: [] }))) as never);
+    mount();
+    const status = () => within(screen.getByRole("main")).getByRole("button", { pressed: true }).querySelector(".ink-status")!;
+    await waitFor(() => expect(status()).toHaveTextContent(/^On · next check in 3 min$/));
+    document.body.innerHTML = "";
+    vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ changes: [{ path: "interval_s", kind: "change", summary: "300 → 120", file: "intake.yaml" }] }, INTAKE, true)));
+    mount();
+    await screen.findByText("0 ready · none started");
+    expect(status()).toHaveTextContent(/^On$/);
+  });
+
   it("lists recent checks with each skip reason in its own words, and the empty state", async () => {
     mount();
     const list = await screen.findByRole("region", { name: "Recent checks" });

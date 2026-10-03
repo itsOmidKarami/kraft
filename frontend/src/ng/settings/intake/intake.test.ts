@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkText } from "./checks";
+import { checkText, nextCheck } from "./checks";
 import { describeCron } from "./cron";
 import { intakeOf } from "./types";
 import { intervalFromText, showMinutes, toMinutes } from "./units";
@@ -47,4 +47,16 @@ describe("Auto-intake", () => {
     expect(intakeOf({ resolved: ok } as never)).toEqual(ok);
     expect(intakeOf({ resolved: null } as never)).toBeNull();
   });
+});
+
+describe("nextCheck", () => {
+  const last = "2026-10-03T10:00:00Z";
+  const at = (m: number) => Date.parse(last) + m * 60_000;
+  it.each([
+    ["three minutes off", last, at(2), "next check in 3 min"],
+    ["inside the last minute", last, at(4.5), "next check in under a minute"],
+    ["just past due", last, at(5.5), "next check due now"],
+    ["long past due: the poller restarted since", last, at(9), null],
+    ["no check yet", undefined, at(0), null],
+  ] as [string, string | undefined, number, string | null][])("%s", (_, from, now, text) => expect(nextCheck(from, 300, now)).toBe(text));
 });

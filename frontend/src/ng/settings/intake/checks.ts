@@ -18,6 +18,18 @@ export function checkText(c: Check, ceiling: number): string {
   return [`${c.ready} ready`, c.started.length ? `started ${c.started.join(", ")}` : "none started", ...skipped].join(" · ");
 }
 
+/** When the poller checks next: it sleeps `interval_s` after each check, so the last one plus the interval
+ *  (ST-3). Null when that can't be told: no check yet, or long past due, since a restart or a publish starts
+ *  the poller's clock afresh. */
+export function nextCheck(last: string | undefined, interval_s: number, now: number): string | null {
+  const at = last ? Date.parse(last) : NaN;
+  if (Number.isNaN(at)) return null;
+  const ms = at + interval_s * 1000 - now;
+  if (ms <= -60_000) return null;
+  if (ms <= 60_000) return ms <= 0 ? "next check due now" : "next check in under a minute";
+  return `next check in ${Math.ceil(ms / 60_000)} min`;
+}
+
 export const hhmm = (at: string) => {
   const d = new Date(at);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
