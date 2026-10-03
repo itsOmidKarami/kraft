@@ -167,7 +167,6 @@ def test_a_cancelled_items_kept_worktree_is_not_an_orphan(app, tmp_path):
 @pytest.mark.parametrize(("intake_off", "said"), [(True, "are off"), (False, "are kept")])
 def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch, intake_off, said):
     # A reload's refusal keeps the running schedules: not "off" (R12 review P2-2).
-    # A start on the bad file turns off intake.yaml's, not a policy.yaml trigger.
     async def degraded():
         return {
             "status": "degraded",
@@ -184,10 +183,7 @@ def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch, in
     assert len(details) == 4
     assert any("quick-task.yaml" in d for d in details)
     (line,) = [d for d in details if d.startswith("invalid intake.yaml")]
-    assert "'61'" in line and said in line
-    assert ("its schedules are off (a trigger left in policy.yaml still fires)" in line) is (
-        intake_off
-    )
+    assert "'61'" in line and said in line and ("policy.yaml still fires" in line) is intake_off
 
 
 def test_a_missing_vector_extra_is_advice_not_a_failure():

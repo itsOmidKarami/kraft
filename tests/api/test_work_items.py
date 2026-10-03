@@ -59,6 +59,12 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
     assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
 
 
+#: Two names for two chains, refused in one sentence (not pydantic's list).
+TWO_CHAINS = (
+    "`chain` 'default' and `chain_template` 'quick-task' name different chains; send `chain` alone"
+)
+
+
 @pytest.mark.parametrize(
     ("route", "body", "detail"),
     [
@@ -67,8 +73,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         (
             "work-items",
             {"title": "x", "repo": "REPO", "chain": "default", "chain_template": "quick-task"},
-            "`chain` 'default' and `chain_template` 'quick-task' name different chains; "
-            "send `chain` alone",
+            TWO_CHAINS,
         ),
         (
             "triggers",
@@ -345,24 +350,12 @@ def test_patch_refuses_chain_template_once_started(client, repo):
 @pytest.mark.parametrize(
     ("body", "status", "detail"),
     [
-        pytest.param(
-            {"chain": "does-not-exist"},  # 2.0's name
-            404,
-            "unknown chain 'does-not-exist'",
-            id="an-unknown-chain",
-        ),
-        pytest.param(
-            {"chain": "default", "chain_template": "quick-task"},
-            422,
-            "`chain` 'default' and `chain_template` 'quick-task' name different chains; "
-            "send `chain` alone",
-            id="chain-and-chain-template-differ",
-        ),
+        ({"chain": "does-not-exist"}, 404, "unknown chain 'does-not-exist'"),  # 2.0's name
+        ({"chain": "default", "chain_template": "quick-task"}, 422, TWO_CHAINS),
     ],
+    ids=["an-unknown-chain", "chain-and-chain-template-differ"],
 )
 def test_patch_refuses_an_unknown_chain_template(client, repo, body, status, detail):
-    """A chain it cannot switch to, or two names for two chains, said in one
-    sentence rather than pydantic's list echoing the body."""
     wid = _paused(client, repo)
 
     r = client.patch(f"/api/work-items/{wid}", json=body)
