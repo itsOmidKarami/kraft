@@ -16,7 +16,7 @@ beforeEach(() => {
     calls.push(`${init?.method ?? "GET"} ${String(url).replace(/^.*\/api/, "")}`);
     return Promise.resolve(served());
   });
-  vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "1.4.0" });
+  vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "1.4.0", installed: "1.4.0" });
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -49,6 +49,12 @@ describe("ng AboutPage", () => {
     vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.4.0", installed: "1.5.0" });
     render(<AboutPage />);
     expect(await screen.findByText(/This server is still running 1\.4\.0, and 1\.5\.0 is installed/)).toHaveTextContent("kraft admin restart");
+  });
+
+  it("says to restart when the server is too old to report what is installed (R10c-01)", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.5.0rc14" });
+    render(<AboutPage />);
+    expect(await screen.findByText(/This server runs a release older than the Kraft installed/)).toHaveTextContent("kraft admin restart");
   });
 
   it("reads an unreachable feed as unknown", async () => {
@@ -91,7 +97,7 @@ describe("ng AboutPage", () => {
     expect(write).toHaveBeenLastCalledWith("kraft admin update");
   });
 
-  const instance = { status: "ok" as const, invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "1.4.0", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 120 };
+  const instance = { status: "ok" as const, invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "1.4.0", installed: "1.4.0", run_dir: "/Users/you/.kraft", pid: 41822, uptime_s: 3 * 86_400 + 4 * 3600 + 120 };
 
   it("draws the run directory, the process and the search index from /health", async () => {
     vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, index: { documents: 214, last_scan_at: new Date(Date.now() - 120_000).toISOString(), errors: [] } });

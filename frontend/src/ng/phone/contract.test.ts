@@ -71,6 +71,7 @@ const ALLOWED = [
   "shell/useDraftCounts", // the draft dots of More
   "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
   "shell/routes", // the list of pages, as data: Search's Go to rows
+  "shell/health", // olderServer and useHealth: the restart banner over the board, one test for both layouts
 ];
 
 const ng = join(dirname(fileURLToPath(import.meta.url)), "..");

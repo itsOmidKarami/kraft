@@ -25,7 +25,7 @@ const ITEM: WorkItem = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
-const HEALTH = { status: "ok", invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "0.9.4" };
+const HEALTH = { status: "ok", invalid_templates: {}, invalid_policy: [], bind: "127.0.0.1", port: 8765, version: "0.9.4", installed: "0.9.4" };
 
 const mount = (path = "/") =>
   render(
@@ -267,6 +267,15 @@ describe("ng Sidebar", () => {
     mount("/templates/chains");
     expect(await screen.findByRole("link", { name: "v0.9.5 installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
     expect(screen.getByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toBeInTheDocument();
+  });
+});
+
+describe("ng Sidebar, against a server older than its interface (R10c-01)", () => {
+  it("says to restart when the server is too old to report what is installed", async () => {
+    const { installed: _, ...old } = HEALTH;
+    vi.mocked(api.getHealth).mockResolvedValue(old as never);
+    mount("/templates/chains");
+    expect(await screen.findByRole("link", { name: "a newer Kraft is installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
   });
 });
 

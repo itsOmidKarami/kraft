@@ -49,6 +49,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("the phone board, against a server older than its interface (R10c-01)", () => {
+  it("says over the board to restart when /health has a version but no installed", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "1.5.0rc14" } as never);
+    put(item("r1", "running"));
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent("This server is older than its web interface");
+  });
+
+  it("says nothing when the server reports what is installed", async () => {
+    vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", version: "1.5.0", installed: "1.5.0" } as never);
+    put(item("r1", "running"));
+    mount();
+    await screen.findByText("Item r1");
+    await waitFor(() => expect(api.getHealth).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("the phone board (B)", () => {
   it("files items in the desktop's four groups, in its order, and the groups equal groupsOf", async () => {
     const list = [item("r1", "running"), gate("g2"), item("d3", "done"), item("p4", "paused", { current_node_id: null }), item("p5", "paused"), item("f6", "failed")];
@@ -223,7 +241,8 @@ describe("a card's inline actions (B.4)", () => {
 
     await userEvent.click(card("b2").getByRole("button", { name: "Open" }));
     expect(where()).toContain("/work-items/b2");
-    expect(calls).toEqual([]);
+    // The board reads /health for the restart banner (R10c-01); Open itself sends nothing.
+    expect(calls.filter((c) => c.path !== "/health")).toEqual([]);
   });
 
   it("paused mid-chain: Resume calls act.resume", async () => {
