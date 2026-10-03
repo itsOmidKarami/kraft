@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
-import { act } from "../../item/actions";
+import { act, draftWaits } from "../../item/actions";
 import { isEscalation } from "../../item/nodeGraph";
 import { budgetRaise, headerState, neverStarted } from "../../item/status";
 import { pathSel, placeUrl } from "../../item/url";
@@ -67,7 +67,12 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "steer": case "reject": case "answer": case "escalate": case "cancel": case "complete": return navigate(itemUrl(item.id, `?compose=${id}`));
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
-      case "resume": case "start": return void run(act.resume(item.id), id === "start" ? "Started." : "Resumed.");
+      case "resume": return void run(act.resume(item.id), "Resumed.");
+      // Start never applies a draft: with one, the sheet asks first, as the desktop's Review & apply does.
+      case "start": return void draftWaits(item.id).then((waits) => {
+        if (waits) sheet.open("start-draft");
+        else void run(act.resume(item.id), "Started.");
+      });
       case "retry": return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}), "Retrying.");
       case "retry-now": return void run(act.retry(item.id), "Retrying.");
       case "reopen-mr": return void run(act.reopenMr(item.id), "MR reopened.");
@@ -159,6 +164,27 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
   const kebab = useMemo(() => kebabOf(item), [item]);
 
   if (sheet.is("pause")) return <PauseSheet item={item} node={node} sheet={sheet} reload={reload} />;
+  // Start found a draft (R9b-01 on the phone): what the desktop's Review & apply asks, here.
+  if (sheet.is("start-draft"))
+    return (
+      <ChoiceSheet
+        title="Start with unapplied changes?"
+        text="This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft."
+        options={[{ value: "apply", label: "Apply and start" }, { value: "without", label: "Start without them" }]}
+        onPick={async (v) => {
+          if (v === "apply") {
+            const a = await act.applyDraft(item.id);
+            if (!a.ok) return void showToast(a.error);
+          }
+          const r = await act.resume(item.id);
+          if (!r.ok) return void showToast(r.error);
+          showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
+          sheet.close();
+          reload();
+        }}
+        onClose={sheet.close}
+      />
+    );
   if (sheet.is("kebab"))
     return (
       <ChoiceSheet

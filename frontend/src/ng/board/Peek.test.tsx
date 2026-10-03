@@ -8,6 +8,8 @@ import { useResizable } from "../graph/useResizable";
 import { acceptWrites, detail, stubFetch } from "../item/testkit";
 import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
+import { answer, ov } from "../item/draft/testkit";
+import type { MarkedOp } from "../item/draft/types";
 import { Peek, type PeekTab } from "./Peek";
 
 /** The writes these pages send; any other write is refused. */
@@ -24,8 +26,8 @@ function Harness({ start = "overview", budget = false }: { start?: PeekTab; budg
 
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
 
-const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[] } = {}) => {
-  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}] });
+const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[]; draft?: MarkedOp[] } = {}) => {
+  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}], "GET /work-items/w1/draft": answer(opts.draft ?? []) });
   render(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
@@ -82,6 +84,21 @@ describe("Peek", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start" }));
     await act(async () => {});
     expect(calls.find((c) => c.method === "POST")).toMatchObject({ path: "/work-items/w1/resume" });
+  });
+
+  it("Start with a draft starts nothing here: it goes to the item page, which asks Apply and start or Start without them", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: null }, { draft: [ov("implementation", undefined, { budget_usd: 2 })] });
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await act(async () => {});
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?start=1");
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+  });
+
+  it("Start with only passed edits in the draft starts as before", async () => {
+    const calls = mount({ status: "paused", display_status: "paused", current_node_id: null }, { draft: [ov("plan", undefined, { budget_usd: 2 }, true)] });
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await act(async () => {});
+    expect(calls.filter((c) => c.method !== "GET").map((c) => c.path)).toEqual(["/work-items/w1/resume"]);
   });
 
   it("puts the item's main action in the footer: Pause asks first, Archive once done, and Open item", async () => {

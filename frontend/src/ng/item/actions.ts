@@ -28,6 +28,8 @@ export const act = {
   /** A budget stop's way on: raise the cap and retry in one call. */
   raiseBudget: (id: string, budgetUsd: number | null) => post(`${at(id)}/budget/raise`, { budget_usd: budgetUsd }),
   patch: (id: string, body: Record<string, unknown>) => post(at(id), body, "PATCH"),
+  /** Apply the item's draft (Review & apply's own call), for a surface with no draft dialog. */
+  applyDraft: (id: string) => post(`${at(id)}/draft/apply`),
   approve: (id: string, gate: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/approve`),
   reject: (id: string, gate: string, note: string) => post(`${at(id)}/gates/${encodeURIComponent(gate)}/reject`, { note }),
   /** B5 (R2): the worker capability's routes, unreachable until it ships — the card that calls them renders only with its fields. */
@@ -39,4 +41,19 @@ export const act = {
 export async function cancelPreview(id: string) {
   const r = await request<import("../../types").CancelPreview>(`${at(id)}/cancel-preview`);
   return r.status === 200 ? { ok: true as const, body: r.body } : { ok: false as const, error: detailOf(r.body) };
+}
+
+/** Where a Start pressed outside the item page goes when the item's draft
+ *  holds changes: the item page, which asks there what its header's Start
+ *  asks (Apply and start, or Start without them). */
+export const askStartUrl = (id: string) => `${at(id)}?start=1`;
+
+/** Whether a Start pressed outside the item page must ask first (the board's
+ *  peek, the phone): Start never applies a draft, so with an op in it the run
+ *  has not passed, it asks. A draft it cannot read asks too, rather than start
+ *  past one it could not see. */
+export async function draftWaits(id: string): Promise<boolean> {
+  const d = await request<{ ops?: { passed?: boolean }[] }>(`${at(id)}/draft`);
+  if (d.status === 404) return false;
+  return !(d.status === 200 && Array.isArray(d.body?.ops) && d.body.ops.every((o) => o.passed));
 }

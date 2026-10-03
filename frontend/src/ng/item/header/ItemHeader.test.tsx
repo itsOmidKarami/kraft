@@ -69,9 +69,9 @@ describe("ItemHeader", () => {
   describe("Start with a draft", () => {
     const NEVER = { status: "paused", display_status: "paused", current_node_id: null } as const;
     const DRAFT = { ...WRITES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) };
-    const mount = (reload = vi.fn()) => {
+    const mount = (reload = vi.fn(), path?: string) => {
       const it = detail(NEVER);
-      inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} onRunLog={() => {}} /><ReviewDialog /></ItemDraftProvider>);
+      inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} onRunLog={() => {}} /><ReviewDialog /></ItemDraftProvider>, path);
       return reload;
     };
     // The draft's own read and the shell's are reads: only these two matter.
@@ -96,6 +96,15 @@ describe("ItemHeader", () => {
       await screen.findByText("DRAFT · 1 CHANGE");
       await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
       await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("arriving with ?start=1 (a Start from the peek) asks the same question, once, and starts only when told", async () => {
+      const calls = stubFetch(DRAFT);
+      mount(vi.fn(), "/work-items/w1?start=1");
+      const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Start without them" }));
       await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
     });
 
