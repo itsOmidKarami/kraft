@@ -118,45 +118,56 @@ def test_a_record_from_before_digests_still_leaves_its_lockfile_out(tmp_path):
     assert _sweep(repo) == ["work.py"]
 
 
+def _write(repo: Path, files, text: str) -> None:
+    """Write each of `files`; a `package.json` is the repo's own, so committed."""
+    for f in files:
+        (repo / f).parent.mkdir(parents=True, exist_ok=True)
+        (repo / f).write_text(text)
+        if f.endswith("package.json"):
+            _git(repo, "add", f)
+            _git(repo, "commit", "-q", "-m", "a package")
+
+
 @pytest.mark.parametrize(
     "files",
     [
         ("node_modules/fixpkg/index.js",),
         ("env/pyvenv.cfg", "env/lib/site.py"),
+        ("fixtures/proj/package.json", "fixtures/proj/node_modules/dep/index.js"),
     ],
-    ids=["node_modules-with-no-marker", "bare-pyvenv-cfg"],
+    ids=["node_modules-with-no-marker", "bare-pyvenv-cfg", "beside-a-tracked-package-json"],
 )
 def test_a_directory_that_only_looks_like_an_install_is_committed(tmp_path, files):
     """A resolver's test fixture named `node_modules`, or a directory with a
     `pyvenv.cfg` and no interpreter, is the agent's work, not an install:
-    it used to be dropped from the merge request with no trace."""
+    it used to be dropped from the merge request with no trace. So is one
+    beside a `package.json` the repo tracks, with no package manager's
+    marker in it (R11E-04)."""
     repo = make_repo(tmp_path)
-    for f in files:
-        (repo / f).parent.mkdir(parents=True, exist_ok=True)
-        (repo / f).write_text("work\n")
+    _write(repo, files, "work\n")
+    added = [f for f in files if not f.endswith("package.json")]
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == []
-    assert _sweep(repo) == sorted(files)
+    assert _sweep(repo) == sorted(added)
 
 
 @pytest.mark.parametrize(
     ("files", "install"),
     [
         (("node_modules/.modules.yaml", "node_modules/x/i.js"), "node_modules"),
-        (("web/package.json", "web/node_modules/x/i.js"), "web/node_modules"),
+        (
+            ("web/package.json", "web/node_modules/.package-lock.json", "web/node_modules/x/i.js"),
+            "web/node_modules",
+        ),
+        (("node_modules/.pnpm/x/i.js",), "node_modules"),
         (("env/pyvenv.cfg", "env/Scripts/python.exe"), "env"),
     ],
-    ids=["pnpm-marker", "beside-package-json", "windows-venv"],
+    ids=["pnpm-marker", "beside-package-json", "pnpm-store", "windows-venv"],
 )
 def test_a_real_install_is_left_out(tmp_path, files, install):
     """A `package.json` beside it is the repo's own, so committed first."""
     repo = make_repo(tmp_path)
-    for f in files:
-        (repo / f).parent.mkdir(parents=True, exist_ok=True)
-        (repo / f).write_text("installed\n")
-        if f.endswith("package.json"):
-            _git(repo, "add", f)
-            _git(repo, "commit", "-q", "-m", "a package")
+    _write(repo, files, "installed\n")
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == [install]
 

@@ -179,10 +179,12 @@ WRITTEN_LOCKFILES = frozenset(LOCK_COMMANDS)
 SETUP_WROTE = "kraft-setup-wrote"
 
 #: What a package manager leaves at the top of a `node_modules` it installed:
-#: npm 7 and later, pnpm, Yarn 1 and Yarn 2+'s node-modules linker.
+#: npm 7 and later, pnpm (`.modules.yaml`, and its `.pnpm` store), Yarn 1 and
+#: Yarn 2+'s node-modules linker.
 _NODE_MODULES_MARKERS = (
     ".package-lock.json",
     ".modules.yaml",
+    ".pnpm",
     ".yarn-integrity",
     ".yarn-state.yml",
 )
@@ -191,16 +193,13 @@ _NODE_MODULES_MARKERS = (
 def is_environment(path: Path) -> bool:
     """Whether untracked directory `path` is one a setup installs into: a
     virtualenv (`pyvenv.cfg` beside its `python`) or a `node_modules` a
-    package manager made (its marker file inside, or a `package.json`
-    beside it). A directory that only has the name or a bare `pyvenv.cfg`
-    is something the agent wrote, such as a resolver's test fixture, and
-    is its work. `lexists`, not `exists`: a virtualenv's `python` is a link
-    to an interpreter the host may not have, when a sandbox made it."""
+    package manager made (its marker inside). A directory that only has the
+    name, a bare `pyvenv.cfg`, or a `package.json` beside it is something the
+    agent wrote, such as a resolver's test fixture, and is its work.
+    `lexists`, not `exists`: a virtualenv's `python` is a link to an
+    interpreter the host may not have, when a sandbox made it."""
     if path.name == "node_modules":
-        return (
-            any(os.path.lexists(path / m) for m in _NODE_MODULES_MARKERS)
-            or (path.parent / "package.json").is_file()
-        )
+        return any(os.path.lexists(path / m) for m in _NODE_MODULES_MARKERS)
     return (path / "pyvenv.cfg").is_file() and any(
         os.path.lexists(path / p) for p in ("bin/python", "Scripts/python.exe")
     )
