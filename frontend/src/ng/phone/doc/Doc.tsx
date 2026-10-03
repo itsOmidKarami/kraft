@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { docBody } from "../../../format";
+import { copyablePath, docBody } from "../../../format";
 import { detailOf, request } from "../../http";
 import { Markdown } from "../../ui/Markdown";
 import { showToast } from "../../ui/Toast";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import "./doc.css";
 
-type Viewed = { title: string; path: string; content: string };
+type Viewed = { title: string; path: string; content: string; repo?: string; origin?: string };
 
 /** A document (W17 brief F.5), over whichever screen opened it with `?doc=<id>`: title, path (wraps, copyable), the text.
  *  `url` reads one that is not indexed instead, such as a spec attached at intake (`?attached=<kind>`). */
@@ -35,7 +35,8 @@ export function Doc({ id, url }: { id?: string; url?: string }) {
             <div className="ph-doc-head">
               <h1 className="ph-doc-title">{doc.title}</h1>
               <p className="ph-doc-path">{doc.path}</p>
-              <button type="button" className="ph-linkbtn" onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => showToast("Could not copy the path."))}>Copy path</button>
+              {/* A session summary or gate artifact lives only in Kraft's index: there is no file path to copy (R13b-02). */}
+              {doc.origin !== "event_ingest" && <button type="button" className="ph-linkbtn" onClick={() => navigator.clipboard?.writeText(copyablePath(doc)).then(() => showToast("Copied path"), () => showToast("Could not copy the path."))}>Copy path</button>}
             </div>
             {doc.content.trim() ? <div className="ph-doc-body"><Markdown text={docBody(doc.content, doc.title)} /></div> : <p className="ph-empty">This document is empty.</p>}
           </>

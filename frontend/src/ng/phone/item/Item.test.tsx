@@ -441,6 +441,14 @@ describe("raising the cap that stopped the item (R73)", () => {
     expect(sent(calls)).toEqual([]);
   });
 
+  it.each([["hex", "0x10"], ["an exponent", "1e3"], ["a decimal", "600.5"]])("a whole-number cap refuses %s, which Number() would have read", async (_, typed) => {
+    const calls = mount(capped(limit()));
+    await openSheet();
+    await type(typed);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a whole number of");
+    expect(sent(calls)).toEqual([]);
+  });
+
   // The policy budget_usd stop reads dollars as the budget sheet does, not with Number() (R13b-01).
   describe("a policy budget_usd stop", () => {
     const budgeted = () => item("needs_you", { ...stop("budget", { reason: "budget_usd reached: $0.05 spent in the work item, cap $0.05" }), limit: limit({ key: "budget_usd", value: 0.05, maximum: null }) } as WorkItemStop);

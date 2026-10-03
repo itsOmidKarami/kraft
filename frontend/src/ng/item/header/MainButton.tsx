@@ -65,14 +65,20 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
     onToast.current?.gone.disconnect();
     onToast.current = null;
   };
+  // Set by a press that closed the menu to do something: the pointer then lands on the button, where
+  // the menu's own row was, and its mouseenter must not open the menu again over the dialog that
+  // press opened (R13b-03). Cleared when the pointer leaves.
+  const quiet = useRef(false);
   const hover = (on: boolean) => {
     if (!menu) return;
+    if (on && quiet.current) return;
     if (leave.current) clearTimeout(leave.current);
     unwatch();
     if (on) setOpen(true);
     else leave.current = setTimeout(close, 160);
   };
   const left = (e: React.MouseEvent) => {
+    quiet.current = false;
     const toasts = e.relatedTarget instanceof Element ? e.relatedTarget.closest(".toasts") : null;
     if (!menu || !toasts) return hover(false);
     if (leave.current) clearTimeout(leave.current);
@@ -89,7 +95,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
     <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={left}>
       {/* aria-disabled, not disabled, while busy: a browser takes focus off a button it
           disables, and the focus of Start, Apply and start or Resume fell to the page (R10b-04). */}
-      <button ref={button} type="button" className={`item-main-action is-${main}`} aria-disabled={busy || undefined} onClick={() => { close(); act(); }}>
+      <button ref={button} type="button" className={`item-main-action is-${main}`} aria-disabled={busy || undefined} onClick={() => { quiet.current = true; close(); act(); }}>
         <Icon size={13} aria-hidden />
         {/* Every row's label in one cell, only the main one shown: the button is as wide as its widest row, so the menu over it fits at its width. */}
         <span className="item-main-label">
@@ -107,7 +113,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
         if (list.current?.contains(document.activeElement)) toggle.current?.focus();
       }} role="menu" label="Item actions" focusIn={false}>
         <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={left}>
-          <button ref={(el) => void (refs.current[0] = el)} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={`menu-item item-panel-item item-panel-main is-${main}`} onClick={() => { close(); button.current?.focus(); act(); }}>
+          <button ref={(el) => void (refs.current[0] = el)} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={`menu-item item-panel-item item-panel-main is-${main}`} onClick={() => { quiet.current = true; close(); button.current?.focus(); act(); }}>
             <Icon size={13} aria-hidden /> <span className="item-main-label">{MAIN_LABEL[main]}</span>
             {/* Over ▾: a press there, meant to open the menu, must not run the action. */}
             <span className="item-panel-caret" aria-hidden onClick={(e) => e.stopPropagation()}><ChevronUp size={12} /></span>

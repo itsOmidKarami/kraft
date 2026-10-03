@@ -287,7 +287,8 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
   const show = (v: number) => (money ? `$${v}` : String(v));
   const submit = async (text: string) => {
     // Dollars are read one way everywhere: Number() took "0x10" as $16 and "1e3" as a thousand (R13b-01).
-    const n = money ? dollars(text) : Number(text.trim());
+    // Whole numbers are digits only too: Number() took "0x10" as 16 and "1e1" as 10.
+    const n = money ? dollars(text) : /^\d+$/.test(text.trim()) ? Number(text.trim()) : NaN;
     if (money ? !(n > 0) : !Number.isInteger(n) || n <= 0) return setError(money ? (Number.isNaN(n) && text.trim() ? DOLLARS_HINT : "Enter a dollar amount.") : `Enter a whole number of ${words.unit}.`);
     if (n <= limit.value) return setError(`It has to be above the current ${show(limit.value)}.`);
     if (limit.maximum != null && n > limit.maximum) return setError(`The policy maximum is ${show(limit.maximum)}.`);

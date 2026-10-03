@@ -281,6 +281,11 @@ export const dollarsText = (n: number): string => {
   return /^[1-9]\d{0,2}\.\d{3}$/.test(s) ? `${s}0` : s;
 };
 
+/** What Copy path puts on the clipboard: a scanned file's absolute path, as 1.4's did
+ *  (`path` is relative to `repo`); any other document's own path. */
+export const copyablePath = (d: { path: string; repo?: string; origin?: string }): string =>
+  d.origin === "git_scan" && d.repo && !d.path.startsWith("/") ? `${d.repo.replace(/\/$/, "")}/${d.path}` : d.path;
+
 /** "1 line", "2 lines". */
 export const lineCount = (n: number): string => `${n} line${n === 1 ? "" : "s"}`;
 

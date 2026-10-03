@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { createPortal } from "react-dom";
-import { docBody } from "../../format";
+import { copyablePath, docBody } from "../../format";
 import type { DocumentDetail, WorkItemDocument } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
 import { ChevronDown, X } from "../icons";
@@ -21,10 +21,6 @@ const urlOf = (s: DocSource) =>
   // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
   : `/work-items/${encodeURIComponent(s.workItemId)}/attachments/${encodeURIComponent(s.attachment)}`;
 type Viewed = { title: string; path: string; content: string; truncated?: boolean; repo?: string; origin?: DocumentDetail["origin"] };
-
-/** What Copy path puts on the clipboard: a scanned file's absolute path, as 1.4's did
- *  (`path` is relative to `repo`); any other document's own path. */
-export const copyablePath = (d: Viewed) => (d.origin === "git_scan" && d.repo && !d.path.startsWith("/") ? `${d.repo.replace(/\/$/, "")}/${d.path}` : d.path);
 
 /** The search's terms, two letters or more, as one case-blind pattern; null for none. */
 export function termsOf(query: string): RegExp | null {

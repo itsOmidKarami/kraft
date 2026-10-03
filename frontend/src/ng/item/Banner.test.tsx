@@ -176,6 +176,22 @@ describe("Banner", () => {
       expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ policy: { budget_usd: saved } });
     });
 
+    it("keeps Save off above the policy maximum and says the maximum, not the dollars hint", async () => {
+      const { calls } = mount({ path: "", key: "budget_usd", value: 5, maximum: 25 });
+      await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+      const input = screen.getByRole("textbox");
+      await userEvent.clear(input);
+      await userEvent.type(input, "30");
+      expect(screen.getByRole("button", { name: "Save & retry" })).toBeDisabled();
+      expect(screen.getByRole("dialog")).toHaveTextContent("Now $5. Maximum $25.");
+      expect(screen.getByRole("dialog")).not.toHaveTextContent("Type the amount plainly");
+      await userEvent.type(input, "{Enter}");
+      expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+      await userEvent.clear(input);
+      await userEvent.type(input, "25");
+      expect(screen.getByRole("button", { name: "Save & retry" })).toBeEnabled();
+    });
+
     it.each([["hex", "0x10"], ["an exponent", "1e3"], ["an ambiguous 1,000", "1,000"], ["Infinity", "Infinity"]])("refuses %s with the hint, and sends nothing", async (_, typed) => {
       const { calls } = mount({ path: "", key: "budget_usd", value: 0.05, maximum: null });
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
