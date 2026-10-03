@@ -469,12 +469,13 @@ class Indexer:
         return out
 
     def _read_attachment(self, work_item_id: str, attachment: dict) -> str | None:
-        """An unindexed attachment's text: from the item's own worktree, or,
-        before the item has one, from the copy Kraft stored at intake under
-        `run/attachments/<id>/`, the one the worktree will get. Never the main
-        checkout, which holds files no one attached (R11F-02). Once the
-        worktree exists it is the only source, so a worker's edit, or its
-        deletion, is what shows."""
+        """An unindexed attachment's text: from the item's own worktree while
+        it has one, else from the copy Kraft stored at intake under
+        `run/attachments/<id>/`: before the item starts (the copy the
+        worktree will get), and after its worktree is removed (what it was
+        filed with). Never the main checkout, which holds files no one
+        attached (R11F-02). While the worktree exists it is the only source,
+        so a worker's edit, or its deletion, is what shows."""
         if self._run_dirs is None:
             return None
         if (self._run_dirs.worktrees / work_item_id).exists():
@@ -715,7 +716,14 @@ class Indexer:
         attachment = next((a for a in json.loads(row["attachments"]) if a["kind"] == kind), None)
         if attachment is None:
             return None
-        return self._worktree_file(attachment["path"], work_item_id)
+        # Only a file that is there. Before the item starts there is no
+        # worktree, and an editor saving to this path would make
+        # `run/worktrees/<id>/` a plain directory, which `ensure_worktree`
+        # then takes for the worktree (R11F-02 review). The stored copy is
+        # never offered either: editing it would change what the item is
+        # filed with behind `kraft item set-attachments`' back.
+        path = self._worktree_file(attachment["path"], work_item_id)
+        return path if path is not None and path.is_file() else None
 
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
         """Content fetch for the synthetic `attachment:{work_item_id}:{kind}` ids

@@ -379,12 +379,17 @@ async def test_documents_for_work_item_shows_an_unindexed_attachment(
     assert doc["title"] == title
 
 
+@pytest.mark.parametrize(
+    "worktree", ["with-the-file", "without-it", None], ids=["worktree", "file-gone", "not-started"]
+)
 async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo(
-    tmp_path, database, conn, repo
+    tmp_path, database, conn, repo, worktree
 ):
     """Kraft-2jy6: `open_document` needs the same worktree-first path
     `_synthesize_attachment_doc` already resolves content from — the file is
-    on the item's branch, not the registered repo's checkout."""
+    on the item's branch, not the registered repo's checkout. Only a file
+    that is there: before the item starts, an editor saving to the path
+    would create the worktree's directory as a plain one (R11F-02 review)."""
     from kraft.paths import RunDirs
 
     await database.write(
@@ -397,12 +402,14 @@ async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo
     )
     rd = RunDirs(tmp_path / "run").ensure()
     wt = rd.worktrees / "w1" / ".engineering" / "plans"
-    wt.mkdir(parents=True)
-    (wt / "p.md").write_text("# Attached plan\nbody\n")
+    if worktree is not None:
+        wt.mkdir(parents=True)
+    if worktree == "with-the-file":
+        (wt / "p.md").write_text("# Attached plan\nbody\n")
 
     ix = Indexer(conn, database, repos_env=str(repo), run_dirs=rd)
     resolved = ix.resolve_attachment_path("attachment:w1:plan")
-    assert resolved == (wt / "p.md").resolve()
+    assert resolved == ((wt / "p.md").resolve() if worktree == "with-the-file" else None)
     assert ix.resolve_attachment_path("attachment:w1:spec") is None
     assert ix.resolve_attachment_path("attachment:nope:plan") is None
 
