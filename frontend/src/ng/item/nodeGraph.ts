@@ -2,6 +2,7 @@ import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, WorkerSession } from "../../types";
 import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
+import { materialized, taskKindAt } from "./chainValues";
 import { stepsOf, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 
@@ -47,12 +48,13 @@ export function sessionLook(s: WorkerSession | undefined, now: number): Pick<Gra
  *  fix-loop arc once a round ran, and the on_failure footer line. */
 export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now()) {
   const { steps } = stepsOf(node);
+  const frozen = materialized(item);
   const out: NodeStep[] = steps.map((st) => ({
     id: st.id,
     tasks: st.tasks.map((path): GraphItem => {
       const ss = sessionsOf(item, path);
       const last = ss.at(-1);
-      return { id: taskName(path), taskKind: ss.some((s) => s.model) ? "agent" : undefined, attempt: last?.attempt, ...sessionLook(last, now) };
+      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: last?.attempt, ...sessionLook(last, now) };
     }),
   }));
   const esc = escalationsOf(item, node.id);

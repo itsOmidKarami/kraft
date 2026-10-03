@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Harnesses } from "../../types";
-import { agentTasks, attemptsAt, capAt, capText, effortOf, effortOptions, materialized, modelOf, modelSuggestions, notStarted, oneOf, taskAt, type MTask } from "./chainValues";
+import { agentTasks, attemptsAt, capAt, capText, effortOf, effortOptions, materialized, modelOf, modelSuggestions, notStarted, oneOf, producerOf, taskAt, type MTask } from "./chainValues";
 import { API_ITEM, SERVER_ATTEMPTS, SERVER_CAPS } from "./fixture.api";
 import { detail, FROZEN } from "./testkit";
 
@@ -102,4 +102,13 @@ describe("chainValues", () => {
     expect(capText("time_cap_minutes", 20)).toBe("20m");
     expect(capText("token_budget", null)).toBe("no cap");
   });
+});
+
+describe("producerOf", () => {
+  const m = materialized({ materialized_chain: JSON.stringify({ chain: { nodes: [
+    { id: "summary", kind: "exec", steps: [{ id: "main", tasks: [{ id: "write", kind: "agent", produces: "review_brief" }] }] },
+    { id: "final_review", kind: "gate", artifact: "review_brief" },
+    { id: "local_review", kind: "gate", artifact: "work_brief" },
+  ] } }) });
+  it.each([["final_review", "summary.main.write"], ["local_review", null], ["no_such_gate", null]])("%s's document was written by %s", (gate, by) => expect(producerOf(m, gate)).toBe(by));
 });

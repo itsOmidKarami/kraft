@@ -255,13 +255,24 @@ async def list_repos(request: Request):
     # removed out from under an entry must not 422 the screen that would let
     # an operator clear it. See `config.load_repos`'s docstring.
     path = deps.repos_path(st)
+    repos = config_mod.load_repos(path)
     return {
-        "repos": [r.model_dump_repo(mode="json") for r in config_mod.load_repos(path)],
+        "repos": [r.model_dump_repo(mode="json") for r in repos],
         "workspaces": {
             ws_id: ws.model_dump(mode="json")
             for ws_id, ws in config_mod.load_workspaces(path).items()
         },
+        "suggested": await asyncio.to_thread(_suggested, [r.path for r in repos]),
     }
+
+
+def _suggested(connected: list[str]) -> str | None:
+    """The git checkout this server was started in, when it is not connected
+    yet: the path first-run offers to connect. None outside a checkout."""
+    top = config_mod.git_read(Path.cwd(), "rev-parse", "--show-toplevel", expected_failure=True)
+    if top is None or any(Path(p).resolve() == Path(top).resolve() for p in connected):
+        return None
+    return top
 
 
 @api_router.post("/repos/probe")

@@ -27,6 +27,7 @@ import { useEvents } from "./useEvents";
 import { runVersion, type ItemDetail } from "./useItem";
 import { chainName } from "./chainName";
 import { notStarted } from "./chainValues";
+import { isTextField } from "../keys";
 
 const PAGE = "item";
 
@@ -99,6 +100,23 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     const moved = JSON.stringify(next.sel) !== JSON.stringify(place.sel) || next.node !== place.node;
     go({ node: next.level === "node" ? next.node : undefined, sel: next.sel, tab: moved ? undefined : place.tab, attempt: moved ? undefined : place.attempt, ...extra });
   };
+  // One Escape for the whole page (WI-1, the prototype's `key()`): what is open over the page takes
+  // it first (the review, a picker, the escalation card, the full-screen log, a document: each a
+  // dialog or popover that stops it at the document), then the side pane collapses, then a node
+  // view goes back to the chain. The pane and the canvases handle it themselves when focus is in
+  // them; this is every other place on the page. A text field or an open menu keeps its own.
+  const escape = useRef(() => {});
+  escape.current = () => dispatch({ type: "escape" });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || isTextField(e.target)) return;
+      if (e.target instanceof Element && e.target.closest('[role="menu"], [role="dialog"], .popover')) return;
+      escape.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Item settings, Raise cap and the capped Resume land on the chain's Config with the pane open.
   const tabParam = search.get("tab");
   const lastTab = useRef(tabParam);
@@ -155,7 +173,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
         {viewing?.kind === "gate" ? (
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
             onGate={() => pick({ kind: "node", node: viewing.id })}
-            onReviewer={() => { const t = viewing.tasks[0]; if (t) pick({ kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) }); }}
+            onReviewer={() => { const t = viewing.tasks[0]; pick(t ? { kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) } : { kind: "node", node: viewing.id }); }}
             onBackground={() => dispatch({ type: "background" })}
           />
         ) : viewing && inside ? (

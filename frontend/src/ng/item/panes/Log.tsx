@@ -34,7 +34,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
 
   const cut = lines?.find((l) => l.truncated);
   const shown = (lines ?? []).filter((l) => !l.truncated && !off.has(l.src));
-  const body = (big: boolean) => <LogBody lines={shown} follow={follow} big={big} />;
+  const body = (big: boolean) => <LogBody lines={shown} follow={follow} onFollow={setFollow} big={big} />;
   const toggle = (s: string) => setOff((o) => { const n = new Set(o); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   const controls = (
     <>
@@ -48,7 +48,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
   const count = lines ? `${shown.length} lines` : "Reading…";
   if (error) return <p className="item-muted">{error}</p>;
   return (
-    <>
+    <div className="ip-log-wrap">
       <div className="ip-log-head">
         <span className="item-muted">{count}</span>
         {controls}
@@ -65,7 +65,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
           {body(true)}
         </LogScreen>
       )}
-    </>
+    </div>
   );
 }
 
@@ -87,13 +87,20 @@ function LogScreen({ title, crumb, count, controls, onClose, children }: { title
   );
 }
 
-function LogBody({ lines, follow, big }: { lines: LogLine[]; follow: boolean; big: boolean }) {
+/** The <pre> is the scroller, in the pane as in full screen. Following keeps it at the
+ *  newest line; scrolling up stops following, scrolling back to the bottom resumes it. */
+function LogBody({ lines, follow, onFollow, big }: { lines: LogLine[]; follow: boolean; onFollow: (on: boolean) => void; big: boolean }) {
   const ref = useRef<HTMLPreElement>(null);
   useEffect(() => {
     if (follow && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [lines, follow]);
+  const onScroll = () => {
+    const el = ref.current!;
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+    if (bottom !== follow) onFollow(bottom);
+  };
   return (
-    <pre ref={ref} className={`ip-log${big ? " is-big" : ""}`} tabIndex={0} aria-label="Log lines">
+    <pre ref={ref} className={`ip-log${big ? " is-big" : ""}`} tabIndex={0} aria-label="Log lines" onScroll={onScroll}>
       {lines.map((l) => (
         <span key={l.n} className={`ip-log-line src-${l.src}`}>
           <span className="ip-log-t">{l.t ? (l.t.includes("T") ? clock(l.t) : l.t) : ""}</span>

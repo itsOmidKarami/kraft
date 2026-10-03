@@ -53,6 +53,18 @@ def test_budget_cap_daily_counts_only_since_local_midnight(client, repo):
     assert daily["spent_usd"] == 2.0
 
 
+def test_the_detail_reports_the_items_running_time_and_its_cap(client, repo):
+    """The time budget beside the dollars (WI-7): the item-wide running-time cap, as patched."""
+    wid = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
+    ).json()["id"]
+    patched = client.patch(f"/api/work-items/{wid}", json={"policy": {"time_cap_minutes": 480}})
+    assert patched.status_code == 200
+
+    detail = client.get(f"/api/work-items/{wid}").json()
+    assert detail["running_time"] == {"running_s": 0, "cap_minutes": 480}
+
+
 def test_budget_cap_reports_the_items_policy_budget_usd_when_it_is_the_lower_cap(client, repo):
     """A policy budget_usd stop's Raise cap writes the item's `policy.budget_usd`.
     The detail reports that cap, marked as the item's own and keyed by the field

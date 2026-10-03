@@ -49,8 +49,8 @@ describe("camera maths", () => {
     expect(revealCam(cam, { x0: 0, x1: 10, y0: 600, y1: 620 }, view).ty).toBe(300 - 24 - 310);
   });
   it("opens on the current node only while one is in progress", () => {
-    for (const s of ["running", "waiting", "needs_you", "escalated", "paused", "failed"]) expect(openingView(s, true)).toBe("current");
-    for (const s of ["queued", "done", "cancelled", "archived"]) expect(openingView(s, true)).toBe("fit");
+    for (const s of ["running", "waiting", "needs_you", "escalated", "paused"]) expect(openingView(s, true)).toBe("current");
+    for (const s of ["queued", "done", "cancelled", "archived", "failed"]) expect(openingView(s, true)).toBe("fit");
     expect(openingView("running", false)).toBe("fit");
   });
 });

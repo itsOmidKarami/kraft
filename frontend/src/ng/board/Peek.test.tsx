@@ -7,7 +7,6 @@ import { useStore } from "../../store";
 import type { KraftEvent } from "../../types";
 import { useResizable } from "../graph/useResizable";
 import { acceptWrites, detail, stubFetch } from "../item/testkit";
-import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
 import { answer, ov } from "../item/draft/testkit";
 import type { MarkedOp } from "../item/draft/types";
@@ -27,8 +26,8 @@ function Harness({ start = "overview", budget = false }: { start?: PeekTab; budg
 
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
 
-const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[]; draft?: MarkedOp[] } = {}) => {
-  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}], "GET /work-items/w1/draft": answer(opts.draft ?? []) });
+const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[]; draft?: MarkedOp[]; answers?: Record<string, [number, unknown]> } = {}) => {
+  const calls = stubFetch({ ...WRITES, ...opts.answers, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}], "GET /work-items/w1/draft": answer(opts.draft ?? []) });
   render(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
@@ -48,13 +47,21 @@ afterEach(() => {
 
 describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
-    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
-    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Open gate" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
-    // The item page's pane, collapsed there before, opens on the gate.
-    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
+    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review changes" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
+  });
+
+  it("explains the waiting gate: its place among the gates, the change, its open threads; and names the chain and repo (BD-4)", async () => {
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" }, { answers: {
+      "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 412, deletions: 88 }] }],
+      "GET /work-items/w1/threads": [200, [{ id: "t1", state: "open" }]],
+    } });
+    const banner = await screen.findByText(/Waiting for your approval at/);
+    await waitFor(() => expect(banner).toHaveTextContent("Waiting for your approval at plan_approval.plan_approval is the last gate. 1 file, +412 −88, 1 open thread."));
+    expect(screen.getByText("chain").nextElementSibling).toHaveTextContent(/^default · frozen at intake$/);
+    expect(screen.getByText("repo").nextElementSibling).toHaveTextContent(/^kraft-plugins$/);
   });
 
   // R11b-05: a waiting item's line said Running.
@@ -96,6 +103,22 @@ describe("Peek", () => {
     if (where === ".item-banner") fireEvent.click(await screen.findByRole("tab", { name: "Overview" }));
     await screen.findAllByRole("button", { name: "Raise cap" });
     fireEvent.click(within(document.querySelector<HTMLElement>(where)!).getByRole("button", { name: "Raise cap" }));
+    await opened();
+  });
+
+  // BD-3: a board row's Raise budget asks for the budget editor; the peek opens the one that raises this stop's cap.
+  it.each([
+    ["the item's own cap: Config's budget editor", budgetStop, async () => {
+      expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
+    }],
+    ["a policy dollar cap: its own editor", { ...budgetStop, stop: stop("budget", { reason: "Spend cap reached", limit: { path: "", key: "budget_usd", value: 5, maximum: null } }) }, async () => expect(await screen.findByRole("dialog", { name: "Raise budget cap" })).toBeInTheDocument()],
+    ["the daily cap: the banner saying why it can't", { ...budgetStop, stop: stop("budget", { reason: "Daily cap reached", scope: "daily" }) }, async () => {
+      await waitFor(() => expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true"));
+      expect(await screen.findByText(/The item can't raise this cap/)).toBeInTheDocument();
+    }],
+  ] as const)("opens on a row's Raise budget at %s", async (_, over, opened) => {
+    mount(over as Partial<ItemDetail>, { start: "config", budget: true });
     await opened();
   });
 

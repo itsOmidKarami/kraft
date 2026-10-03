@@ -309,6 +309,8 @@ export interface WorkItem {
   /** Whether `worktree_path` is on disk: false once it was reclaimed or
    *  deleted (and before the item first ran). Only on the detail endpoint. */
   worktree_exists?: boolean;
+  /** The branch the item's worktree lives on (detail only): `kraft/<slug>-<id>`, or `kraft/<id>` on an older row. */
+  branch?: string | null;
   /** The worktree's current HEAD (Kraft-lu2), so the gate can tell a
    *  measurement taken on this commit from one taken before it. Only on the
    *  detail endpoint. */
@@ -353,6 +355,8 @@ export interface WorkItem {
   /** This item's effective spend cap and its source. Only on the detail
    *  endpoint. */
   budget_cap?: BudgetCap;
+  /** The item's time budget (detail only): what its item-wide `time_cap_minutes` has measured, and that cap (null: none). */
+  running_time?: { running_s: number; cap_minutes: number | null } | null;
   /** Whether the item set its own dollar cap, and that cap (null: no cap).
    *  Unset, the policy's `work_item_usd` holds it. Only on the detail endpoint. */
   budget_set?: number | boolean;

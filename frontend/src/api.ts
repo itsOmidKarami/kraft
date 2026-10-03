@@ -184,7 +184,7 @@ export const getWorkItemDiff = (id: string) =>
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 
 export const getRepos = () =>
-  req<{ repos: Repo[]; workspaces?: Record<string, Workspace> }>("/repos");
+  req<{ repos: Repo[]; workspaces?: Record<string, Workspace>; suggested?: string | null }>("/repos");
 export const probeRepo = (path: string) => req<RepoProbe>("/repos/probe", json("POST", { path }));
 export const addRepo = (body: Partial<Repo> & { path: string }) =>
   req<Repo>("/repos", json("POST", body));

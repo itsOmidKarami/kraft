@@ -6,7 +6,6 @@ import * as api from "../../api";
 import { useStore } from "../../store";
 import type { DisplayStatus, WorkItem } from "../../types";
 import { detail, stubFetch } from "../item/testkit";
-import { usePaneMemory } from "../item/Workspace";
 import { Shell } from "../shell/Shell";
 import { BoardPage } from "./BoardPage";
 import { useBulk } from "./bulk";
@@ -79,10 +78,22 @@ describe("BoardPage, against a server older than its interface (R10c-01)", () =>
 });
 
 describe("BoardPage", () => {
-  it("shows first-run only when no repo is connected", async () => {
+  it("shows first-run only when no repo is connected, with + New work item still in the header (BD-2)", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    vi.spyOn(api, "getTemplates").mockResolvedValue([]);
     board();
     expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "+ New work item" }));
+    expect(where()).toBe("/?new=1");
+    expect(screen.getByRole("region", { name: "New work item" })).toBeInTheDocument();
+  });
+
+  it("turns first-run's + New work item off while the server can't be reached, as the board's is", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server — it may have stopped."));
+    board();
+    expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ New work item" })).toBeDisabled());
   });
 
   it("brings back a first-run left part-way while its repo is connected, and starts over once no repo is", async () => {
@@ -226,17 +237,15 @@ describe("BoardPage", () => {
     expect(where()).toBe("/work-items/r1");
   });
 
-  it("opens a gate row's item page on the gate, and resumes a paused row in place, its refusal on the row", async () => {
+  it("opens a gate row's review with its brief, and resumes a paused row in place, its refusal on the row", async () => {
     put(item("g1", "needs_you", { stop: { kind: "gate", node: "plan_approval", reason: null, resume_at: null } as WorkItem["stop"], pending_gate: "plan_approval" }), item("p2", "paused"));
     const calls = stubFetch({ "POST /work-items/p2/resume": [409, { detail: "work item is active, not paused" }] });
     board();
     await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
     expect(calls.find((c) => c.path === "/work-items/p2/resume")).toMatchObject({ method: "POST" });
     expect(await screen.findByRole("alert")).toHaveTextContent("work item is active, not paused");
-    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     await userEvent.click(screen.getByRole("button", { name: "Review to approve" }));
-    expect(where()).toBe("/work-items/g1?sel=plan_approval");
-    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
+    expect(where()).toBe("/work-items/g1/review?gate=plan_approval&doc=1");
   });
 
   it("opens the composer instead of first-run when asked (FirstRun's last step)", async () => {
@@ -268,10 +277,10 @@ describe("BoardPage", () => {
 
   it("goes offline when the read fails: the banner carries the error, rows stay, actions are off; Retry now reads again", async () => {
     put(item("p1", "paused"));
-    const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items) — it may have stopped."));
+    const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items?include_abandoned=true) — it may have stopped."));
     board();
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server (GET /work-items) — it may have stopped. Showing what was loaded before");
+    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server — it may have stopped. Showing what was loaded before");
     expect(screen.getByText("OFFLINE")).toBeInTheDocument();
     expect(screen.getByText("Item p1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
@@ -419,19 +428,15 @@ describe("BoardPage", () => {
     expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
   });
 
-  it("opens a budget stop's peek on Overview, whose Raise cap opens Config with the budget editor", async () => {
+  it("offers Raise budget on a budget stop's row, which opens the peek's budget editor (BD-3)", async () => {
     const b = item("b1", "needs_you", { status: "needs_human", stop: { kind: "budget", node: "verification", reason: "Spend cap reached", resume_at: null, scope: "work_item" } as WorkItem["stop"], budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as WorkItem["budget_cap"] });
     put(b);
     stubFetch({ "GET /work-items/b1": [200, { ...b, worker_sessions: [] }], "GET /work-items/b1/events": [200, []], "GET /policy": [200, {}] });
     board();
-    expect(screen.queryByRole("button", { name: "Raise budget" })).toBeNull();
-    await userEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
     expect(where()).toBe("/?sel=b1");
-    expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    // The banner's Raise cap; the footer's main button says the same and does the same.
-    await userEvent.click((await screen.findAllByRole("button", { name: "Raise cap" }))[0]);
-    expect(await screen.findByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("opens the composer from + New work item, closing the peek", async () => {

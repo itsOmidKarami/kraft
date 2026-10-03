@@ -1,14 +1,14 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { DisplayStatus, StopKind, WorkItemStop } from "../../types";
+import type { DisplayStatus, StopKind, WorkItem, WorkItemStop } from "../../types";
 import { steerDoor } from "../phone/item/Composer";
 import { kebabOf, pairOf, type ActId } from "../phone/item/model";
 import { nodeBar, type NodeActId } from "../phone/node/model";
 import { chainGraph } from "./graph";
 import { footerState } from "./nodeGraph";
 import { footerActs } from "./panes/PathFooter";
-import { archivable, budgetRaise, headerState, MAIN_LABEL, menuDoors, type Main, type PanelItem } from "./status";
+import { archivable, budgetRaise, headerState, MAIN_LABEL, menuDoors, spentLine, type Main, type PanelItem } from "./status";
 import { detail } from "./testkit";
 import type { ItemDetail } from "./useItem";
 
@@ -158,4 +158,13 @@ describe("no surface offers a door the server refuses (R11b-01)", () => {
     const item = detail(over);
     expect(WAY[headerState(item).main]).toBe(WAY[pairOf(item).primary!.id]);
   });
+});
+
+describe("spentLine", () => {
+  const cap = { cap_usd: 5, source: "policy", spent_usd: 2.41 } as WorkItem["budget_cap"];
+  it.each([
+    ["dollars and the running time against its cap", { budget_cap: cap, running_time: { running_s: 72 * 60, cap_minutes: 480 } }, "$2.41 of $5.00 · 1h 12m of 8h"],
+    ["no time cap: dollars alone", { budget_cap: cap, running_time: { running_s: 72 * 60, cap_minutes: null } }, "$2.41 of $5.00"],
+    ["an older server: dollars alone", { budget_cap: cap }, "$2.41 of $5.00"],
+  ] as [string, Pick<WorkItem, "budget_cap" | "running_time">, string][])("%s", (_, item, line) => expect(spentLine(item)).toBe(line));
 });

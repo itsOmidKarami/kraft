@@ -46,6 +46,24 @@ describe("ng CSS", () => {
     expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
   });
 
+  it("scrolls a pane's log in its own <pre>, which fills the pane body, so follow has something to move", () => {
+    const css = readFileSync(join(here, "item/item.css"), "utf-8");
+    expect(css).toMatch(/\.ip-log-wrap\s*{[^}]*height:\s*100%/);
+    expect(css).toMatch(/\.ip-log-wrap > \.ip-log\s*{[^}]*overflow:\s*auto/);
+  });
+
+  it("keeps the review footer's buttons on one line, the summary giving way", () => {
+    const css = readFileSync(join(here, "review/review.css"), "utf-8");
+    expect(css).toMatch(/\.rv-bar \.btn\s*{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap/);
+    expect(css).toMatch(/\.rv-bar > \.rv-muted\s*{[^}]*text-overflow:\s*ellipsis/);
+  });
+
+  it("keeps the Policy page's \"set below policy\" column at every width", () => {
+    const css = readFileSync(join(here, "settings/policy/policy.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).not.toMatch(/pol-below[^{]*{[^}]*display:\s*none/);
+    expect(css).not.toMatch(/has-below > :nth-child\(4\)[^{]*{[^}]*display:\s*none/);
+  });
+
   it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
     const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
     const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);

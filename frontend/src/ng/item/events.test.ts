@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KraftEvent } from "../../types";
-import { age, eventLine } from "./events";
+import { age, eventLine, recent } from "./events";
 
 const ev = (type: string, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: 1, work_item_id: "w", type, payload, node_id, created_at: "t" });
 
@@ -22,6 +22,31 @@ describe("eventLine", () => {
     expect(eventLine(ev("worker_session_exited"))).toBeNull();
     expect(eventLine(ev("sandbox_oom_killed"))).toBe("sandbox oom killed");
   });
+});
+
+describe("recent", () => {
+  let seq = 0;
+  const at = (type: string, payload: Record<string, unknown> = {}, node_id: string | null = null): KraftEvent => ({ seq: ++seq, work_item_id: "w", type, payload, node_id, created_at: "t" });
+  const started = (id: string, hook: string) => at("worker_session_started", { session_id: id, hook_point: hook, node_id: hook === "escalation" ? "verification" : hook.split(".")[0] }, hook === "escalation" ? "verification" : hook.split(".")[0]);
+  const exited = (id: string, status: string) => at("worker_session_exited", { session_id: id, status });
+  const story = (events: KraftEvent[]) => recent(events).map((r) => r.line);
+  it.each([
+    ["a live session leads, its node's start folded into it",
+      [at("node_started", {}, "verification"), started("s1", "verification.review.code_review")],
+      ["code_review is running on verification"]],
+    ["a session that ended well drops out, the next one leads",
+      [at("node_started", {}, "verification"), started("s1", "verification.checks.lint"), exited("s1", "done"), started("s2", "verification.review.code_review")],
+      ["code_review is running on verification"]],
+    ["a failed session says so at its end",
+      [started("s1", "verification.checks.lint"), exited("s1", "failed")],
+      ["lint failed on verification"]],
+    ["the node's finish takes the place of what ran in it; the fix loop stays",
+      [at("node_started", {}, "verification"), started("s1", "verification.checks.lint"), exited("s1", "failed"), at("fix_cycle_started", { cycle: 1 }, "verification"), started("s2", "verification.checks.lint"), exited("s2", "done"), at("node_completed", {}, "verification")],
+      ["verification finished", "verification · fix loop round 2"]],
+    ["an escalation's turn that ends reads answered",
+      [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), exited("s3", "done")],
+      ["escalation answered", "escalation on verification: why?"]],
+  ] as [string, KraftEvent[], string[]][])("%s", (_, events, lines) => expect(story(events)).toEqual(lines));
 });
 
 describe("age", () => {

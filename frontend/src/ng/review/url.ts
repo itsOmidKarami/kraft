@@ -50,6 +50,9 @@ export function reviewUrl(id: string, p: ReviewPlace, item: Defaults): string {
   return `/work-items/${encodeURIComponent(id)}/review${s ? `?${s}` : ""}`;
 }
 
+/** A gate's review, its brief open beside the diff (the page shows it when the gate has one). */
+export const gateReviewUrl = (id: string, gate: string) => `/work-items/${encodeURIComponent(id)}/review?gate=${encodeURIComponent(gate)}&doc=1`;
+
 /** The place from the URL, and a setter that replaces it: moving around the
  *  review page is not history; entering and leaving it is (links push). */
 export function useReviewPlace(item: WorkItem): [ReviewPlace, (patch: Partial<ReviewPlace>) => void] {

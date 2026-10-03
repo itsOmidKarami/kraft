@@ -2,12 +2,14 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
 import { ago, until, usd } from "../../format";
-import type { ChainNode, KraftEvent } from "../../types";
+import type { ChainNode, DiffFile, KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
-import { neverStarted } from "./status";
+import { neverStarted, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
+import { useDiffFiles } from "./Top";
+import { runVersion } from "./useItem";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
@@ -34,7 +36,9 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, onRepos: () => navigate("/settings/repos"), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  // What a failed run kept (WI-4): read only for a failed item whose worktree is still there.
+  const files = useDiffFiles(item.id, runVersion(item), item.display_status !== "failed" || item.worktree_exists === false);
+  const card = cardFor(item, { ...h, files, onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;
@@ -80,22 +84,27 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
   return { label, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
 }
 
-function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
+function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const node = item.chain_definition.nodes.find((n) => n.id === stop?.node);
-  const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", `${usd(item.budget_cap.spent_usd)}${item.budget_cap.cap_usd != null ? ` of ${usd(item.budget_cap.cap_usd)}` : ""}`] : null;
+  const spent: [string, ReactNode] | null = item.budget_cap ? ["spent", spentLine(item)] : null;
   const where = stop ? [pathOf(stop.task) || stop.node, stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   const status = item.display_status;
 
   if (status === "failed" && stop) {
     const fs: [string, ReactNode][] = Object.entries(facts).flatMap(([k, v]) => (str(v) ? [[k, str(v)!] as [string, ReactNode]] : []));
+    // "Do I lose anything?": the branch and what is on it stay.
+    const kept = [item.branch && `branch ${item.branch}`, h.files?.length && `${h.files.length} ${h.files.length === 1 ? "file" : "files"}`].filter(Boolean).join(" · ");
+    const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     return {
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,
-      facts: [...fs.slice(0, 3), ...(spent ? [spent] : [])],
+      facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
       actions: [
         retryFrom(item, node, run),
-        ...(stop.kind === "infra" ? [{ label: "Open Repos", run: h.onRepos }] : []),
+        // An infrastructure stop (a token, a forge, a remote) is fixed in the repo's settings. The stop names no
+        // cause the label could name ("Fix the token in Repos"), so it says where to look.
+        ...(stop.kind === "infra" ? [{ label: "Check the repo settings", run: h.onRepos }] : []),
         { label: "Escalate…", run: h.onEscalate },
       ],
     };

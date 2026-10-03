@@ -142,6 +142,33 @@ async def _ran(it, path: str, start: datetime, end: datetime, status: str = "don
     )
 
 
+@pytest.mark.parametrize("cap", [480, None], ids=["capped", "no cap"])
+async def test_running_time_counts_overlapping_sessions_once_and_names_the_items_cap(item_on, cap):
+    """What the item detail shows beside its spend (WI-7): the clock its
+    item-wide `time_cap_minutes` reads, and that cap."""
+    override = {"time_cap_minutes": cap} if cap else None
+    it = await item_on(_chain(), "build", policy_override=override)
+    now = datetime.now(UTC)
+    await _ran(it, "build.run.impl", now - timedelta(minutes=60), now - timedelta(minutes=30))
+    await _ran(it, "build.run.impl", now - timedelta(minutes=45), now - timedelta(minutes=15))
+
+    got = it.database.read(lambda c: caps.running_time(c, it.row(), now=now.isoformat()))
+
+    assert got == {"running_s": 45 * 60, "cap_minutes": cap}
+
+
+@pytest.mark.parametrize("stamp", ["now", "2026-01-01T00:00:00"], ids=["not a time", "no timezone"])
+async def test_running_time_is_unknown_for_a_session_stamp_the_clock_cant_read(item_on, stamp):
+    """Display only: the item's read shows no time rather than failing."""
+    it = await item_on(_chain(), "build")
+    await _ran(it, "build.run.impl", datetime.now(UTC) - timedelta(minutes=5), datetime.now(UTC))
+    await it.database.write(
+        lambda c: c.execute("UPDATE worker_sessions SET started_at = ?", (stamp,))
+    )
+
+    assert it.database.read(lambda c: caps.running_time(c, it.row())) is None
+
+
 async def test_a_launch_under_a_spent_cap_is_refused_and_nothing_runs(item_on, tmp_path):
     marker = tmp_path / "ran"
     it = await item_on(_chain(step={"time_cap_minutes": 1}, command=f"touch {marker}"), "build")

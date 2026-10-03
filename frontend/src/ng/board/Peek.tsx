@@ -13,11 +13,12 @@ import { CancelCard } from "../item/header/CancelCard";
 import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
 import { useSelect } from "../item/draft/select";
+import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { PausedCard, StateCard } from "../item/StateCard";
-import { headerState, MAIN_LABEL, neverStarted } from "../item/status";
+import { budgetRaise, headerState, MAIN_LABEL, neverStarted } from "../item/status";
 import { placeUrl } from "../item/url";
 import { useEvents } from "../item/useEvents";
 import { useItem, type ItemDetail } from "../item/useItem";
@@ -47,6 +48,15 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
 }) {
   const loaded = useItem(id);
   const navigate = useNavigate();
+  // Asked for the budget editor (a row's Raise budget) on a stop it does not raise: the stop's own
+  // limit editor, or Overview, whose banner says why the item can't raise it.
+  const stop = loaded.state === "ready" ? loaded.item.stop : null;
+  useEffect(() => {
+    if (!budget || !stop || stop.kind !== "budget" || budgetRaise({ stop }) === "item") return;
+    onBudget(false);
+    onTab("overview");
+    if (stop.limit) openLimitEditor(id);
+  }, [budget, stop, id, onBudget, onTab]);
   const open = () => navigate(`/work-items/${encodeURIComponent(id)}`);
   const common = { id: "board-peek", open: true, size, onCollapse: onClose, onExpand: () => {} };
   if (loaded.state !== "ready")
@@ -80,14 +90,14 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       onFocus={open}
       footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
-      {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} />}
+      {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} onMore={() => onTab("activity")} />}
       {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
       {tab === "config" && <Config item={item} reload={loaded.reload} budget={budget} onBudget={onBudget} />}
     </Inspector>
   );
 }
 
-function Overview({ item, version, reload, onRaise }: { item: ItemDetail; version: string; reload: () => void; onRaise: () => void }) {
+function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail; version: string; reload: () => void; onRaise: () => void; onMore: () => void }) {
   const navigate = useNavigate();
   const anchor = useRef<HTMLDivElement>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -96,21 +106,34 @@ function Overview({ item, version, reload, onRaise }: { item: ItemDetail; versio
   const duplicate = useDuplicate(item.id, setError);
   const events = useEvents(item.id, version);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
-  const openGate = useSelect(item.id);
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
-        <Banner item={item} onOpenGate={openGate} onRaise={onRaise} reload={reload} />
+        <Banner item={item} onRaise={onRaise} reload={reload} note={<GateNote item={item} version={version} />} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
         {error && <p className="item-error" role="alert">{error}</p>}
       </div>
-      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} />
+      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where />
       {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={anchor} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
   );
+}
+
+/** What the waiting gate decides on, in a line (BD-4): its place among the gates, the change and its open threads. */
+function GateNote({ item, version }: { item: ItemDetail; version: string }) {
+  const files = useDiffFiles(item.id, version, item.worktree_exists === false);
+  const threads = useOpenThreads(item.id, version);
+  const gates = item.chain_definition.nodes.filter((n) => n.kind === "gate").map((n) => n.id);
+  const gate = item.pending_gate ?? item.stop?.node ?? "";
+  const k = gates.indexOf(gate);
+  const place = k < 0 ? "" : k === gates.length - 1 ? `${gate} is the last gate.` : `${gate} is gate ${k + 1} of ${gates.length}.`;
+  const { add, del } = totals(files ?? []);
+  const change = files?.length ? ` ${files.length} ${files.length === 1 ? "file" : "files"}, +${add} −${del}` : "";
+  const open = threads ? `${change ? "," : ""} ${threads} open ${threads === 1 ? "thread" : "threads"}` : "";
+  return <>{place}{change}{open}{change || open ? "." : ""}</>;
 }
 
 const PAGE = 50;

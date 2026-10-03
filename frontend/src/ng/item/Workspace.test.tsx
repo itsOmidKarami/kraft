@@ -66,6 +66,32 @@ describe("Workspace", () => {
     expect(where()).toBe("/work-items/w1");
   });
 
+  it("walks Escape from anywhere on the page: a document first, then the pane, then the node view back to the chain (WI-1)", async () => {
+    stubFetch({ "GET /documents/d1": [200, { id: "d1", title: "Review notes", path: "/r/n.md", content: "notes" }] });
+    mount("/work-items/w1/nodes/verification?sel=verification&doc=d1");
+    await screen.findByText("notes");
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("complementary", { name: "verification pane" })).toBeInTheDocument();
+    document.body.focus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("complementary", { name: "verification pane, collapsed" })).toBeInTheDocument();
+    expect(where()).toMatch(/^\/work-items\/w1\/nodes\/verification/);
+    await userEvent.keyboard("{Escape}");
+    expect(where()).toMatch(/^\/work-items\/w1(\?|$)/);
+  });
+
+  it("leaves Escape to a text field on the page", async () => {
+    mount();
+    const box = document.createElement("input");
+    document.body.append(box);
+    box.focus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("complementary", { name: "default pane" })).toBeInTheDocument();
+    box.remove();
+  });
+
   it("keeps a collapse the person chose while they pick other nodes, and the rail expands it", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "Collapse pane" }));

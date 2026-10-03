@@ -1,4 +1,5 @@
 import type { DisplayStatus, WorkItem } from "../../types";
+import { elapsed, usd } from "../../format";
 
 /** What the header shows for an item. Read from the server's `display_status`
  *  and `stop` only (R16, R27, R28): never derived from sessions or events. */
@@ -156,3 +157,12 @@ export function menuDoors(item: EscalateFields): ("duplicate" | "escalate" | "ca
 
 /** Archive in the panel is live only once there is nothing left to stop. */
 export const archivable = (status: DisplayStatus | undefined) => status === "done" || status === "cancelled";
+
+/** "$2.41 of $5.00 · 1h 12m of 8h": the spend, and the running time beside it when the item has a time cap (WI-7). */
+export function spentLine(item: Pick<WorkItem, "budget_cap" | "running_time">): string {
+  const cap = item.budget_cap;
+  const time = item.running_time;
+  const money = cap ? `${usd(cap.spent_usd)}${cap.cap_usd != null ? ` of ${usd(cap.cap_usd)}` : ""}` : "";
+  const clock = time?.cap_minutes != null ? `${elapsed(time.running_s * 1000)} of ${elapsed(time.cap_minutes * 60_000)}` : "";
+  return [money, clock].filter(Boolean).join(" · ");
+}

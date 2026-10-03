@@ -5,7 +5,7 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
-import { openPane } from "../item/Workspace";
+import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
@@ -23,6 +23,7 @@ import { useBulk } from "./bulk";
 import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { countIn } from "./counts";
+import { Skeleton } from "./Skeleton";
 
 const GROUP_LABEL: Record<GroupBy, string> = { status: "Status", repo: "Repo", chain: "Chain" };
 const SORT_LABEL: Record<SortBy, string> = { attention: "Needs attention", updated: "Recently updated", created: "Created", title: "Title" };
@@ -53,6 +54,9 @@ function useListLoad() {
   }, [connection, refresh]);
   return { load, refresh, offline: load.state === "error" || connection === "reconnecting" };
 }
+
+/** The read's error without its request line ("(GET /work-items?…)"): the banner says what broke, not which call. */
+const bannerError = (e: string) => e.replace(/ \((?:GET|POST|PUT|PATCH|DELETE) [^)]*\)/, "").replace(/\.$/, "");
 
 /** A minute's clock for the rows' ages and "retry in". */
 function useNow() {
@@ -149,17 +153,15 @@ export function BoardPage() {
     return n;
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
-    if (a.kind === "gate") {
-      openPane();
-      return open(item.id, `?sel=${encodeURIComponent(a.gate)}`);
-    }
-    if (a.kind === "peek") return peek(item.id, a.tab);
+    // The gate's review, its brief open beside the diff (the review shows it when the gate has one).
+    if (a.kind === "gate") return navigate(gateReviewUrl(item.id, a.gate));
+    if (a.kind === "peek") return peek(item.id, a.tab, a.budget);
     const r = await act.resume(item.id);
     setRowErrors((e) => {
       const { [item.id]: _, ...rest } = e;
       return r.ok ? rest : { ...rest, [item.id]: r.error };
     });
-  }, [open, peek]);
+  }, [navigate, peek]);
 
   // Escape and the peek's own collapse button close it as an outside press
   // does, leaving no rail. Focus the peek held, or left on the
@@ -223,7 +225,15 @@ export function BoardPage() {
     </div>
   );
   // FirstRun's last step opens the composer, which lives on the board.
-  if (fresh && !query.new) return <>{restart}<FirstRun onDone={() => setFresh(false)} /></>;
+  // "+ New work item" stays in the header over first-run (BD-2): one filed from it ends the setup.
+  if (fresh && !query.new)
+    return (
+      <>
+        <HeaderActions><button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true })}>+ New work item</button></HeaderActions>
+        {restart}
+        <FirstRun onDone={() => setFresh(false)} />
+      </>
+    );
 
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));
@@ -254,7 +264,7 @@ export function BoardPage() {
         <div className="board-offline" role="alert">
           <span className="board-offline-mark" aria-hidden>!</span>
           <span className="board-offline-text">
-            Could not load the board{load.state === "error" ? `: ${load.error.replace(/\.$/, "")}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
+            Could not load the board{load.state === "error" ? `: ${bannerError(load.error)}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
           </span>
           <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
         </div>
@@ -295,7 +305,7 @@ export function BoardPage() {
         <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">
             {query.new && <Composer repoFilter={query.repo} onClose={() => setQuery({ new: false })} onCreated={(id) => peek(id)} />}
-            {load.state === "loading" && items.length === 0 ? <Skeleton /> : groups.map((g) => (
+            {load.state === "loading" && items.length === 0 ? <Skeleton label="Loading the board" /> : groups.map((g) => (
               <section key={g.key} className="board-group" aria-label={g.label}>
                 <h2 className="board-group-head">
                   <span>{g.label}</span>
@@ -350,27 +360,6 @@ export function BoardPage() {
         )}
         <BulkBar checked={items.filter((i) => checked.has(i.id))} byId={itemsById} offline={offline} onChecked={(ids) => setChecked(new Set(ids))} />
       </div>
-    </div>
-  );
-}
-
-/** The board while its first list read runs (AreaBoard 65–70). */
-function Skeleton() {
-  return (
-    <div className="board-skeleton" aria-busy="true" aria-label="Loading the board">
-      {[3, 3, 2].map((rows, g) => (
-        <div key={g}>
-          <span className="sk sk-head" />
-          {Array.from({ length: rows }, (_, r) => (
-            <div key={r} className="sk-row">
-              <span />
-              <span className="sk sk-glyph" />
-              <span className="sk-lines"><span className="sk" style={{ width: `${52 + ((g + r) % 3) * 12}%` }} /><span className="sk sk-short" /></span>
-              <span className="sk sk-ticks" />
-            </div>
-          ))}
-        </div>
-      ))}
     </div>
   );
 }
