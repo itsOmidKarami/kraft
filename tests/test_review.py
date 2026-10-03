@@ -198,6 +198,9 @@ def test_a_range_that_cannot_be_read_has_no_quote(tmp_path):
     # Never anything git could read as an option: `git diff --output=x` writes x.
     assert review.quote_range(repo, base, "--output=x", "q.py", "new", 1, 1) is None
     assert not (repo / "x").exists()
+    # A binary file is no lines: the diff draws none for it either.
+    binary = _commit(repo, {"b.dat": "a\0b\nc\n"})
+    assert review.quote_range(repo, head, binary, "b.dat", "new", 1, 1) is None
 
 
 def test_a_file_path_is_a_path_not_a_pathspec(tmp_path):

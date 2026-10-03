@@ -4,6 +4,7 @@ the repository's default branch, which is what every item used before."""
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from support import worktree as wtree
@@ -187,21 +188,23 @@ async def test_the_base_branch_names_the_items_own_repository_or_its_default(
     assert await kraft_builtins.base_branch(database, "legacy", repo) == "main"
 
 
-def test_the_ignore_rules_come_from_the_items_base_branch(origin):
+@pytest.mark.parametrize("rule", [b"release-only/\n", b"caf\xe9-only/\n"], ids=["utf-8", "latin-1"])
+def test_the_ignore_rules_come_from_the_items_base_branch(origin, rule):
     """A rule the base branch gained after the worktree was cut still binds
     it -- the base's, not `main`'s, which an item on `release` never merges
-    into."""
+    into. Byte for byte (R11s-01): a rule naming a path that is not UTF-8
+    still names that path, not one with a replacement character."""
     repo, other = origin
     _git(other, "checkout", "-q", "release")
-    (other / ".gitignore").write_text("release-only/\n")
+    (other / ".gitignore").write_bytes(rule)
     _git(other, "add", "-A")
     _git(other, "commit", "-q", "-m", "ignore release-only")
     _git(other, "push", "-q", "origin", "release")
     _git(repo, "fetch", "-q", "origin")
 
     with base_ignore_args(repo, "release") as args:
-        rules = open(args[1].split("=", 1)[1]).read()
-    assert rules == "release-only/\n"
+        rules = Path(args[1].split("=", 1)[1]).read_bytes()
+    assert rules == rule
     with base_ignore_args(repo, "main") as args:
         assert args == []
 

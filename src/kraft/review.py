@@ -374,7 +374,8 @@ def quote_range(
     # `cat-file blob` answers with the file or fails: `git show rev:<path>`
     # printed the commit itself for `rev:*` on a newer git.
     content = _config.git_read(worktree, "cat-file", "blob", f"{rev}:{path}", strip=False)
-    if content is None:
+    # A binary file is no lines to quote, as the diff draws none for it.
+    if content is None or "\0" in content:
         return None
     text = content.splitlines()
     if not 1 <= start <= end <= len(text):
