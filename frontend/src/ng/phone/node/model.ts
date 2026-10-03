@@ -82,14 +82,15 @@ export function fixLoopWords(item: ItemDetail, node: ApiNode): string | null {
   return rounds ? `round ${rounds + 1}${max != null ? ` of ${max}` : ""}` : `not looped${max != null ? ` · up to ${max} attempts` : ""}`;
 }
 
-/** "12m of 45m": how long the node has been going against its wall-clock cap; null with no cap or before it started. */
+/** "about 12m of 45m": how long the node has been going against its wall-clock cap; null with no cap or before it started. */
 export function wallWords(item: ItemDetail, node: ApiNode, events: KraftEvent[], now: number): string | null {
   const m = materialized(item);
   const own = item.node_overrides?.[node.id]?.wall_clock_s;
   const cap = own != null ? own / 60 : m ? capAt(m, node.id, "total_time_cap_minutes", item.policy_override).value : null;
   const span = nodeRunSpan(node.id, events, item.worker_sessions);
   if (cap == null || !span) return null;
-  return `${elapsed((span.to ? Date.parse(span.to) : now) - Date.parse(span.from))} of ${elapsed(cap * 60_000)}`;
+  // About: the node's run span, not the clock the server enforces the cap with (that one is not in the API).
+  return `about ${elapsed((span.to ? Date.parse(span.to) : now) - Date.parse(span.from))} of ${elapsed(cap * 60_000)}`;
 }
 
 /** A task id as a person says it: "repair pass", not repair_pass. */

@@ -11,8 +11,8 @@ export type MarkedOp = Op & { passed: boolean };
 
 export type Problem = { op: number; message: string };
 export type Budget = { spent_usd: number | null; cap_usd: number | null };
-/** A node the draft adds that resolved: the harnesses its agent tasks run on (policy allows them, or it would be a problem) and what a node of that id has cost per item so far (null: never run). Absent on a server before ED-5. */
-export type AddedCheck = { op: number; node: string; harnesses: string[]; estimate_usd: number | null };
+/** A node the draft adds that resolved: the harnesses its agent tasks run on (policy allows them, or it would be a problem) and what a node of that id has cost per item, averaged over `estimate_runs` items (null: never run; it blocks nothing). Absent on a server before ED-5. */
+export type AddedCheck = { op: number; node: string; harnesses: string[]; estimate_usd: number | null; estimate_runs: number | null };
 
 /** `GET|PUT /work-items/{id}/draft`, and apply's 200. */
 export type DraftView = {

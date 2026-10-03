@@ -405,8 +405,9 @@ def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
     """What Review & apply says of each node the draft adds that resolved: the
     harnesses its agent tasks run on (materializing the chain already refused one
     outside `allowed_harnesses`, as a problem on that op, so these are allowed)
-    and what the instance's finished runs of a node of that id cost, per item.
-    `estimate_usd` is null for an id nothing has run yet."""
+    and what the instance's runs of a node of that id cost, per item
+    (`estimate_usd`, the mean over `estimate_runs` items). Both are null for an
+    id nothing has run yet. The estimate is information: it blocks nothing."""
     failed = {p["op"] for p in evaluated.problems}
     nodes = {n.id: n for n in evaluated.chain.chain.nodes}
     out = []
@@ -417,12 +418,15 @@ def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
         harnesses = sorted(
             {t.task.harness for t in nodes[node_id].tasks() if isinstance(t.task, AgentTask)}
         )
-        estimate = st.db.read(
-            lambda c, node_id=node_id: c.execute(
-                "SELECT AVG(spent) FROM (SELECT SUM(cost_usd) AS spent FROM worker_sessions "
-                "WHERE node_id = ? AND cost_usd IS NOT NULL GROUP BY work_item_id)",
-                (node_id,),
-            ).fetchone()[0]
+        estimate, runs = st.db.read(
+            lambda c, node_id=node_id: tuple(
+                c.execute(
+                    "SELECT AVG(spent), COUNT(spent) FROM (SELECT SUM(cost_usd) AS spent "
+                    "FROM worker_sessions WHERE node_id = ? AND cost_usd IS NOT NULL "
+                    "GROUP BY work_item_id)",
+                    (node_id,),
+                ).fetchone()
+            )
         )
         out.append(
             {
@@ -430,6 +434,7 @@ def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
                 "node": node_id,
                 "harnesses": harnesses,
                 "estimate_usd": None if estimate is None else round(float(estimate), 2),
+                "estimate_runs": runs or None,
             }
         )
     return out

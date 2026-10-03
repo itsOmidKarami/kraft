@@ -64,6 +64,12 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
   const wall = wallWords(item, api, events, now);
   const m = materialized(item);
   const frozen = m ? nodeAt(m, nodeId) : undefined;
+  // What will run: the frozen node with this item's overrides over it, as the server folds them; an overridden key says so.
+  const own = item.node_overrides?.[nodeId] ?? {};
+  const effectiveYaml = yamlOf({ ...(frozen ?? api) as unknown as Record<string, unknown>, ...own })
+    .split("\n")
+    .map((l) => (Object.keys(own).some((k) => l.startsWith(`${k}:`)) ? `${l}  # override` : l))
+    .join("\n");
   const doc = docs.find((d) => d.path === item.gate_artifact);
 
   const act1 = (a: NodeAct) => {
@@ -151,8 +157,8 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
         {tab === "log" && <NodeLog item={item} node={nodeId} />}
         {tab === "yaml" && (
           <div className="ph-yaml">
-            <p className="ph-yaml-file">{chainName(item)} · {nodeId} · as frozen at intake</p>
-            <pre className="ph-yaml-text">{yamlOf({ ...(frozen ?? api) as unknown as Record<string, unknown>, ...(item.node_overrides?.[nodeId] ? { changed_for_this_item: item.node_overrides[nodeId] } : {}) })}</pre>
+            <p className="ph-yaml-file">As frozen at intake, with this item's overrides.</p>
+            <pre className="ph-yaml-text">{effectiveYaml}</pre>
           </div>
         )}
         {tab === "config" && (

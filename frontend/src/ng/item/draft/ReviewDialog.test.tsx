@@ -45,16 +45,18 @@ describe("ReviewDialog", () => {
   });
 
   it("checks the overrides against the policy maxima, and an added node's harness and estimate", async () => {
-    open({ [DRAFT]: answer(ok, [], withScan, null, [{ op: 1, node: "scan", harnesses: ["claude"], estimate_usd: 0.75 }]) });
+    open({ [DRAFT]: answer(ok, [], withScan, null, [{ op: 1, node: "scan", harnesses: ["claude"], estimate_usd: 0.75, estimate_runs: 3 }]) });
     const d = await dialog();
     expect(within(d).getByText("✓ within policy maxima")).toBeInTheDocument();
-    expect(within(d).getByText("✓ scan: harness claude is allowed · estimated +$0.750")).toBeInTheDocument();
+    expect(within(d).getByText("✓ scan: harness claude is allowed · ≈ +$0.750 (avg of 3 runs)")).toBeInTheDocument();
+    // The estimate is information: with the checks green, Apply is live.
+    expect(within(d).getByRole("button", { name: "Apply" })).toBeEnabled();
   });
 
   it("says so when an added node has no history to estimate from, or runs no agent", async () => {
-    open({ [DRAFT]: answer([add("scan", "verification"), add("lint", "scan")], [], withScan, null, [{ op: 0, node: "scan", harnesses: ["claude", "codex"], estimate_usd: null }, { op: 1, node: "lint", harnesses: [], estimate_usd: 0.1 }]) });
+    open({ [DRAFT]: answer([add("scan", "verification"), add("lint", "scan")], [], withScan, null, [{ op: 0, node: "scan", harnesses: ["claude", "codex"], estimate_usd: null, estimate_runs: null }, { op: 1, node: "lint", harnesses: [], estimate_usd: 0.1, estimate_runs: 1 }]) });
     expect(await screen.findByText("✓ scan: harnesses claude, codex are allowed · no estimate yet")).toBeInTheDocument();
-    expect(screen.getByText("✓ lint: runs no agent · estimated +$0.100")).toBeInTheDocument();
+    expect(screen.getByText("✓ lint: runs no agent · ≈ +$0.100 (avg of 1 run)")).toBeInTheDocument();
     expect(screen.queryByText("✓ within policy maxima")).toBeNull();
   });
 

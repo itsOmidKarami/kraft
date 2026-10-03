@@ -124,7 +124,7 @@ describe("the node screen (D)", () => {
     const facts = document.querySelector(".ph-facts")!;
     const row = (k: string) => within(facts as HTMLElement).getByText(k).nextElementSibling!.textContent;
     expect(row("fix loop")).toBe("round 2 of 3");
-    expect(row("wall")).toBe("12m of 45m");
+    expect(row("wall")).toBe("about 12m of 45m");
     expect(row("on failure")).toBe("repair pass, once");
   });
 
@@ -136,7 +136,9 @@ describe("the node screen (D)", () => {
     expect(text).toContain("id: verification");
     expect(text).toContain("fix_loop:\n  max_attempts: 2");
     expect(text).toContain("steps:\n  - id: checks\n    tasks:\n      - id: lint");
-    expect(text).toContain("changed_for_this_item:\n  attempts: 3");
+    expect(text).toContain("attempts: 3  # override");
+    expect(text.match(/# override/g)).toHaveLength(1);
+    expect(screen.getByText("As frozen at intake, with this item's overrides.")).toBeInTheDocument();
   });
 
   it("filters the node's log by source and says when nothing is left", async () => {

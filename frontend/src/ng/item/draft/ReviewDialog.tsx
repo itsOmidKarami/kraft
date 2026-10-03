@@ -131,7 +131,7 @@ function Review() {
           : <li className="is-ok">✓ within policy maxima</li>)}
         {(view.checks.added ?? []).map((a) => (
           <li key={a.op} className="is-ok">
-            ✓ {a.node}: {a.harnesses.length === 0 ? "runs no agent" : `${plural(a.harnesses.length, "harness", "harnesses")} ${a.harnesses.join(", ")} ${plural(a.harnesses.length, "is", "are")} allowed`} · {a.estimate_usd == null ? "no estimate yet" : `estimated +${usd(a.estimate_usd)}`}
+            ✓ {a.node}: {a.harnesses.length === 0 ? "runs no agent" : `${plural(a.harnesses.length, "harness", "harnesses")} ${a.harnesses.join(", ")} ${plural(a.harnesses.length, "is", "are")} allowed`} · {a.estimate_usd == null ? "no estimate yet" : `≈ +${usd(a.estimate_usd)} (avg of ${a.estimate_runs ?? 1} ${plural(a.estimate_runs ?? 1, "run", "runs")})`}
           </li>
         ))}
         <li className="is-ok">{budget.cap_usd == null ? "✓ no dollar cap on this item" : `✓ spent ${usd(budget.spent_usd ?? 0)} of the ${usd(budget.cap_usd)} budget`}</li>

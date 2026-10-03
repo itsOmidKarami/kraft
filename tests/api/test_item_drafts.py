@@ -129,7 +129,7 @@ def test_checks_name_the_harness_and_the_estimate_of_each_node_the_draft_adds(cl
     url = f"/api/work-items/{wid}/draft"
     [added] = client.put(url, json={"ops": [OVERRIDE, ADD]}).json()["checks"]["added"]
     assert (added["op"], added["node"], added["harnesses"]) == (1, "again", ["claude"])
-    assert added["estimate_usd"] is None
+    assert (added["estimate_usd"], added["estimate_runs"]) == (None, None)
 
     conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
     try:
@@ -145,7 +145,7 @@ def test_checks_name_the_harness_and_the_estimate_of_each_node_the_draft_adds(cl
     finally:
         conn.close()
     [priced] = client.get(url).json()["checks"]["added"]
-    assert priced["estimate_usd"] == 0.5
+    assert (priced["estimate_usd"], priced["estimate_runs"]) == (0.5, 2)
 
 
 def test_a_node_whose_op_cannot_apply_has_no_added_check(client, repo):
