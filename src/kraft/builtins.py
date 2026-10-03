@@ -1563,7 +1563,9 @@ async def _git_group(
         stopping = asyncio.ensure_future(_stop_git_group(handle, running))
         # A second cancel (a pause, then a cancel; a server's own shutdown)
         # still waits the stop out: the caller's clean-up needs its answer.
-        with contextlib.suppress(asyncio.CancelledError):
+        # A stop that failed reads as a git that may be alive, never as an
+        # ordinary error the caller would clean up beside it.
+        with contextlib.suppress(BaseException):
             await _uncancellable(stopping)
         gone = not stopping.cancelled() and stopping.exception() is None and stopping.result()
         raise _GitCancelled(gone) from None

@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import os
 import signal
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -185,14 +186,15 @@ def _left_mid_rebase(worktree) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    ("hang", "cancel_again_after"),
+    ("hang", "cancel_again_after", "workers"),
     [
-        ("smudge", None),
-        ("smudge-deaf-to-sigterm", None),
-        ("smudge-deaf-to-sigterm", 0.3),
-        ("smudge-deaf-to-sigterm", 2.5),
-        ("pre-rebase-hook", None),
-        ("conflict-abort", None),
+        ("smudge", None, None),
+        ("smudge-deaf-to-sigterm", None, None),
+        ("smudge-deaf-to-sigterm", 0.3, None),
+        ("smudge-deaf-to-sigterm", 2.5, None),
+        ("pre-rebase-hook", None, None),
+        ("conflict-abort", None, None),
+        ("smudge", None, 1),
     ],
     ids=[
         "smudge",
@@ -201,10 +203,20 @@ def _left_mid_rebase(worktree) -> list[str]:
         "cancelled-again-in-the-sigkill-wait",
         "pre-rebase-hook",
         "cancelled-in-a-conflicts-abort",
+        "the-executors-only-thread-waits-on-the-git",
     ],
 )
 async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
-    tmp_path, database, run_dirs, repo, hung, hang, cancel_again_after
+    tmp_path,
+    database,
+    run_dirs,
+    repo,
+    hung,
+    hang,
+    cancel_again_after,
+    workers,
+    request,
+    monkeypatch,
 ):
     """R12E-04: a pause, cancel or shutdown cancelled only the await, so the
     git in its thread rebased the branch after the stop, and the setup's
@@ -212,7 +224,13 @@ async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
     The whole group is stopped first; then the rebase it started is aborted
     and the lockfile goes back, so the branch is as it was before the stop.
     A second cancel (a pause, then a cancel) changes none of it, and an abort
-    already running when the cancel comes is waited out, not raced."""
+    already running when the cancel comes is waited out, not raced. The stop
+    needs no free thread: every one can be waiting on a git."""
+    if workers is not None:
+        # Put back at teardown: anyio may run the next test on this same loop.
+        pool = ThreadPoolExecutor(workers)
+        request.addfinalizer(lambda: pool.shutdown(wait=False))
+        monkeypatch.setattr(asyncio.get_running_loop(), "_default_executor", pool)
     worktree, branch, work, rebase, pid = await _rebase_hung_mid_way(
         database, run_dirs, repo, hung, tmp_path, hang
     )
@@ -221,8 +239,10 @@ async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
     if cancel_again_after is not None:
         await asyncio.sleep(cancel_again_after)
         rebase.cancel()
+    await asyncio.wait({rebase}, timeout=15)
+    assert rebase.done()
     with pytest.raises(asyncio.CancelledError):
-        await rebase
+        rebase.result()
 
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
@@ -234,17 +254,28 @@ async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
     assert not kraft_builtins.set_aside_dir(worktree).exists()
 
 
+@pytest.mark.parametrize("why", ["still-there-after-sigkill", "the-stop-itself-failed"])
 async def test_a_stopped_git_that_will_not_die_is_left_alone(
-    tmp_path, database, run_dirs, repo, hung, monkeypatch
+    tmp_path, database, run_dirs, repo, hung, monkeypatch, why
 ):
-    """A git group still there after its SIGKILL may still be writing the
-    worktree: no abort runs beside it and the setup's lockfile stays set
-    aside, for the next walk to stop on its `rebase-merge` for a person."""
+    """A git group still there after its SIGKILL, or one whose stop failed,
+    may still be writing the worktree: no abort runs beside it and the
+    setup's lockfile stays set aside, for the next walk to stop on its
+    `rebase-merge` for a person. The cancel stays a cancel."""
+    if why == "still-there-after-sigkill":
 
-    async def never_gone(*_args):
-        return False
+        async def never_gone(*_args):
+            return False
 
-    monkeypatch.setattr(kraft_builtins, "_groups_gone", never_gone)
+        monkeypatch.setattr(kraft_builtins, "_groups_gone", never_gone)
+    else:
+        real_stop = kraft_builtins._stop_git_group
+
+        async def failing_stop(*args):
+            await real_stop(*args)
+            raise OSError("the stop failed")
+
+        monkeypatch.setattr(kraft_builtins, "_stop_git_group", failing_stop)
     worktree, _, _, rebase, _ = await _rebase_hung_mid_way(
         database, run_dirs, repo, hung, tmp_path, "smudge"
     )
