@@ -482,8 +482,13 @@ def test_no_other_budget_stop_names_a_limit(breach):
             DailyBreach(scope="daily", spent_usd=12.5, cap_usd=10.0),
             "$12.50 spent on today, across every work item, cap $10.00",
         ),
+        # An exact binary tie: toFixed(3) gives 0.063, Python's half-even format 0.062.
+        (
+            WorkItemBreach(scope="work_item", spent_usd=0.0625, cap_usd=0.0625),
+            "$0.063 spent on this work item, cap $0.063",
+        ),
     ],
-    ids=["item-cap", "budget_usd", "daily"],
+    ids=["item-cap", "budget_usd", "daily", "half-up-tie"],
 )
 def test_a_budget_stop_names_dollars_as_the_meter_prints_them(breach, said):
     """Under a dollar the web UI's meter prints a tenth of a cent ($0.035), so

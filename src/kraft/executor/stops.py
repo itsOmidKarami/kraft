@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -129,8 +130,12 @@ def budget_breach(
 def _usd(n: float) -> str:
     """Dollars as the web UI's budget meter prints them (`format.ts` `usd`):
     cents from $1 up, a tenth of a cent under it, so a stop under a dollar
-    names the same number as the meter beside it."""
-    return f"${n:.2f}" if n >= 1 else f"${n:.3f}"
+    names the same number as the meter beside it. Rounded half up on the
+    float's exact value, as JavaScript's `toFixed` does: Python's own format
+    rounds an exact binary tie to even, so $0.0625 would read $0.062 here and
+    $0.063 on the meter."""
+    step = Decimal("0.01") if n >= 1 else Decimal("0.001")
+    return f"${Decimal(n).quantize(step, rounding=ROUND_HALF_UP)}"
 
 
 def budget_reason(breach: Breach) -> str:
