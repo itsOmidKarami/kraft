@@ -231,9 +231,12 @@ jobs:
             exit 1
           fi
           # Never this machine's password hash or webhook: `just bundle` strips them.
-          # unzip exits 0 when any named file is in the wheel, 11 when none is.
-          if unzip -l "$WHEEL" kraft/_bundled/config/access.yaml kraft/_bundled/config/notify.yaml >/dev/null 2>&1; then
-            echo "::error::the wheel carries kraft/_bundled/config/access.yaml or notify.yaml"
+          # unzip exits 11 when none of the named files is in the wheel, 0 when
+          # one is, and anything else when it cannot read the wheel: only 11 passes.
+          rc=0
+          unzip -l "$WHEEL" kraft/_bundled/config/access.yaml kraft/_bundled/config/notify.yaml >/dev/null 2>&1 || rc=$?
+          if [ "$rc" -ne 11 ]; then
+            echo "::error::the wheel carries kraft/_bundled/config/access.yaml or notify.yaml, or unzip could not read it (exit $rc)"
             exit 1
           fi
           # The web UI bundles react, lucide-react, the Inter font and more, and
