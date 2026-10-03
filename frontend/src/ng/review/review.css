@@ -195,6 +195,7 @@
 .rv-gate-doc { flex: 1 1 0; min-width: 0; overflow: auto; padding: 24px 32px; font-size: 13.5px; line-height: 1.65; }
 .rv-gate-doc > .md { max-width: 760px; }
 .rv-gate-doc-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+.rv-gate-doc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .rv-gate-doc-title { color: var(--text); font-size: 16px; font-weight: 600; }
 .rv-gate-side { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
 .rv-gate-side-head { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 6px; font-size: 12px; color: var(--text-sub); }

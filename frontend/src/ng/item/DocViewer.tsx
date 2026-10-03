@@ -13,14 +13,14 @@ import { editorChoices, editorName, SYSTEM_EDITOR, useEditors } from "./editors"
 import { showToast } from "../ui/Toast";
 import { detailOf, request } from "../http";
 
-export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string } | { kind: "attachment"; workItemId: string; attachment: string };
+export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string; by?: string } | { kind: "attachment"; workItemId: string; attachment: string };
 
 const urlOf = (s: DocSource) =>
   s.kind === "document" ? `/documents/${encodeURIComponent(s.id)}`
   : s.kind === "artifact" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifact`
   // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
   : `/work-items/${encodeURIComponent(s.workItemId)}/attachments/${encodeURIComponent(s.attachment)}`;
-type Viewed = { title: string; path: string; content: string; truncated?: boolean; repo?: string; origin?: DocumentDetail["origin"] };
+type Viewed = { title: string; path: string; content: string; truncated?: boolean; repo?: string; origin?: DocumentDetail["origin"]; absolute_path?: string };
 
 /** The search's terms, two letters or more, as one case-blind pattern; null for none. */
 export function termsOf(query: string): RegExp | null {
@@ -58,9 +58,8 @@ function paint(all: Range[], current: Range | undefined) {
 export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.split(".").at(-1), d.attempt ? `attempt ${d.attempt}` : ""].filter(Boolean).join(" › ") : "");
 
 /** A document in a drawer over the page's right side (prototype lines 278–283,
- *  GAP §2 #9): an indexed document opens in an editor and copies its path; a
- *  gate's artifact, read off the worktree with no index row or absolute path,
- *  shows only its text. A press on the scrim or Escape closes it. */
+ *  GAP §2 #9): an indexed document or a gate's artifact opens in an editor and
+ *  copies its path; an attachment Kraft holds a copy of shows only its text. A press on the scrim or Escape closes it. */
 /** `returnTo`: where focus goes on close when what opened it is gone (search's overlay). */
 export function DocViewer({ source, query, onClose, returnTo }: { source: DocSource; query?: string; onClose: () => void; returnTo?: () => HTMLElement | null | undefined }) {
   const [doc, setDoc] = useState<Viewed | null>(null);
@@ -79,8 +78,8 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlOf(source)]);
   const open = async (editor: string) => {
-    if (source.kind !== "document") return;
-    const r = await request(`/documents/${encodeURIComponent(source.id)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
+    if (source.kind === "attachment") return;
+    const r = await request(source.kind === "document" ? `/documents/${encodeURIComponent(source.id)}/open` : `/work-items/${encodeURIComponent(source.workItemId)}/artifact/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
     setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
   };
   // The matches of the search that opened it, found once the text is on the page.
@@ -99,11 +98,12 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
   useEffect(() => () => paint([], undefined), []);
   const step = (by: number) => setAt((a) => (a + by + matches.length) % matches.length);
   const titleHit = !!(doc && query && termsOf(query)?.test(doc.title));
-  const indexed = source.kind === "document";
-  // A session summary or gate artifact lives only in Kraft's index: no file to open or copy (it answers 409).
+  // An attachment before the item starts is a copy Kraft holds: nothing on disk to open.
+  const openable = source.kind !== "attachment";
+  // A session summary lives only in Kraft's index: no file to open or copy (it answers 409). A gate artifact is a file in the worktree.
   const hasFile = !!doc && doc.origin !== "event_ingest";
-  const editors = useEditors(indexed && hasFile);
-  const by = source.kind === "document" ? source.by : undefined;
+  const editors = useEditors(openable && hasFile);
+  const by = source.kind === "attachment" ? undefined : source.by;
   return createPortal(
     <div className="dv-scrim" {...backdropProps(onClose)}>
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`dv-drawer${full ? " is-full" : ""}`}>
@@ -115,10 +115,10 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
           </div>
           {doc && <p className="dv-path is-mono">{doc.path}</p>}
           {by && <p className="dv-by">written by {by}</p>}
-          {indexed && doc && hasFile && (
+          {openable && doc && hasFile && (
             <div className="dv-actions">
               <OpenInEditor editors={editors} open={open} />
-              <Button onClick={() => navigator.clipboard?.writeText(copyablePath(doc)).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+              <Button onClick={() => navigator.clipboard?.writeText(doc.absolute_path ?? copyablePath(doc)).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
             </div>
           )}
         </header>
@@ -149,7 +149,7 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
 
 /** One Open in editor button, on the default editor; ▾ lists the others this
  *  machine has. With none it stays, disabled, and says why. */
-function OpenInEditor({ editors, open }: { editors: ReturnType<typeof useEditors>; open: (editor: string) => void }) {
+export function OpenInEditor({ editors, open }: { editors: ReturnType<typeof useEditors>; open: (editor: string) => void }) {
   const choices = editors && typeof editors !== "string" ? editorChoices(editors) : [];
   if (!choices.length) {
     const why = typeof editors === "string" ? editors : editors ? "No editor found on this machine" : "Looking for editors…";
