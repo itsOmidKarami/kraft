@@ -234,7 +234,15 @@ def resolve(st, key, raw, files, published) -> dict:
         "repos": [v for v in views if v["managed"]],
         "detected": [v for v in views if not v["managed"]],
     }
-    out["changes"] += _changes(authored.parse(published.get(FILE)), raw.get(FILE))
+    # One change per repo entry: the file-level "repos.yaml · repos" row says
+    # the same thing again, so a one-field edit counted twice (R8b-05). It
+    # stays when no entry changed, such as a file that no longer parses.
+    entries_changed = _changes(authored.parse(published.get(FILE)), raw.get(FILE))
+    if entries_changed:
+        out["changes"] = [
+            c for c in out["changes"] if not (c["path"] == FILE and c.get("fields") == ["repos"])
+        ]
+    out["changes"] += entries_changed
     counted = [v["path"] for v in views] + gone
     out["impact"] = {"running": {p: running.get(p, 0) for p in counted}}
     return out

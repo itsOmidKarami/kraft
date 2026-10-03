@@ -168,11 +168,20 @@ def test_remove_repo_with_a_running_item_is_a_problem_and_blocks_publish(client,
     body = resolved(client, {"op": "remove_repo", "path": connected})
     assert body["impact"]["running"] == {connected: 1}
     assert any("open item(s); finish or cancel them first" in m for m in messages(body))
-    assert [(c["path"], c["kind"]) for c in body["changes"]] == [
-        ("repos.yaml", "change"),
-        (connected, "remove"),
-    ]
+    assert [(c["path"], c["kind"]) for c in body["changes"]] == [(connected, "remove")]
     assert client.post(f"{URL}/publish").status_code == 422
+
+
+def test_one_field_on_one_repo_is_one_change(client, connected):
+    """The file-level `repos.yaml · repos` row repeated the entry's own: ticking
+    No setup needed, or setting a setup command, read "DRAFT · 2 CHANGES" (R8b-05). Mutate: keep the
+    file-level row beside the entry's, and this reads two."""
+    body = resolved(
+        client, {"op": "set_repo", "path": connected, "patch": {"setup_command": "make deps"}}
+    )
+    assert [(c["path"], c["kind"], c["summary"]) for c in body["changes"]] == [
+        (connected, "change", "setup_command")
+    ]
 
 
 def test_remove_repo_with_no_running_item_publishes(client, connected, templates_dir):
