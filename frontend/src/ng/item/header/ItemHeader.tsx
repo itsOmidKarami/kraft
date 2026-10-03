@@ -41,8 +41,6 @@ type Props = {
   onGate?: (gate: string) => void;
   /** Answer: the question card's answer box. The item page when absent. */
   onAnswer?: () => void;
-  /** Select the current node's latest task, Log tab. */
-  onRunLog: () => void;
   /** Outside triggers for the cancel card (the MR-closed state card's Cancel item…). */
   cancelOpen?: boolean;
   onCancelOpen?: (open: boolean) => void;
@@ -52,7 +50,7 @@ type Props = {
 
 /** The right side of the item page's header row (Decisions §1, §14): others
  *  need you, elapsed, the badge, the main button with its panel, and ⋮. */
-export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
+export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
   const group = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   // The board's Needs you count, this item left out.
@@ -154,7 +152,6 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },
-    { label: "View run log", onSelect: onRunLog },
     // Escalate… only where /escalate takes it: not on a running item, nor while a turn runs.
     ...menuDoors(item).map((d): MenuItem => (d === "duplicate" ? { label: "Duplicate as new item", onSelect: duplicate }
       : d === "escalate" ? { label: "Escalate…", onSelect: () => setEscalating(true) }

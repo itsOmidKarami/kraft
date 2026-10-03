@@ -18,9 +18,9 @@ const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !==
 beforeEach(() => useStore.setState({ workItems: {} }));
 afterEach(() => vi.unstubAllGlobals());
 
-type Handlers = { reload: () => void; onSettings: () => void; onRunLog: () => void; onRaise: () => void; onGate: (gate: string) => void; onAnswer: () => void };
+type Handlers = { reload: () => void; onSettings: () => void; onRaise: () => void; onGate: (gate: string) => void; onAnswer: () => void };
 const show = (over: Parameters<typeof detail>[0] = {}, handlers: Partial<Handlers> = {}) =>
-  inShell(<ItemHeader item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRunLog={handlers.onRunLog ?? (() => {})} onRaise={handlers.onRaise} onGate={handlers.onGate} onAnswer={handlers.onAnswer} />);
+  inShell(<ItemHeader item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRaise={handlers.onRaise} onGate={handlers.onGate} onAnswer={handlers.onAnswer} />);
 
 /** The main button opens its menu; the main action is the menu's first row. */
 async function pressMain(name: RegExp) {
@@ -93,7 +93,7 @@ describe("ItemHeader", () => {
     const DRAFT = { ...WRITES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) };
     const mount = (reload = vi.fn(), path?: string) => {
       const it = detail(NEVER);
-      inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} onRunLog={() => {}} /><ReviewDialog /></ItemDraftProvider>, path);
+      inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} /><ReviewDialog /></ItemDraftProvider>, path);
       return reload;
     };
     // The draft's own read and the shell's are reads: only these two matter.
@@ -227,16 +227,16 @@ describe("ItemHeader", () => {
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
     const onSettings = vi.fn();
-    const onRunLog = vi.fn();
-    show({}, { onSettings, onRunLog });
+    show({}, { onSettings });
     const menu = async (name: RegExp) => {
       await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
       await userEvent.click(screen.getByRole("menuitem", { name }));
     };
+    await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Review changes", "Item settings", "Open worktree in editor", "Copy ID", "Copy link", "Escalate…", "Cancel…"]);
+    await userEvent.keyboard("{Escape}");
     await menu(/Item settings/);
     expect(onSettings).toHaveBeenCalled();
-    await menu(/View run log/);
-    expect(onRunLog).toHaveBeenCalled();
     await menu(/Copy ID/);
     await menu(/Copy link/);
     expect(writeText.mock.calls).toEqual([["w1"], [`${window.location.origin}/work-items/w1`]]);
