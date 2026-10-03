@@ -11,7 +11,7 @@ origin: src/kraft/api/deps.py §connected_or_422 (Kraft-ta8nv)
 
 ## REQ cron-trigger-requires-a-connected-repo
 IF a `policy.yaml` cron trigger's tick is due and its repo is not connected, THEN the system SHALL skip that trigger with a logged warning naming `kraft repo connect`, and SHALL still fire the other due triggers in the same tick.
-enforced-by: tests/test_triggers.py::test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tick
+enforced-by: tests/test_triggers.py::test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tick[unconnected-repo]
 origin: src/kraft/triggers.py §tick (Kraft-jzhg2)
 
 ## REQ trigger-poller-runs-without-boot-triggers

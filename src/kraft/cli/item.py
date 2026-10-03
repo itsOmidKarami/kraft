@@ -300,8 +300,13 @@ def _cmd_mr_label(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.mr_labels(ns.labels, ns.id)), common._render_action, ns.json)
 
 
+def _set_chain(result: dict) -> str:
+    """The PATCH answers `{id, chain_template}`, the 1.x key; it is a chain."""
+    return f"{result['id']} now runs the {result.get('chain_template')} chain"
+
+
 def _cmd_set_chain(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.set_chain(ns.chain, ns.id)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.set_chain(ns.chain, ns.id)), _set_chain, ns.json)
 
 
 def _cmd_set_attachments(ns: argparse.Namespace) -> None:
@@ -682,7 +687,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     # its own `nargs="+"` labels would be ambiguous the moment two labels are
     # given with no id.
     set_chain.add_argument("id", nargs="?")
-    # `--template` was the 1.x spelling; still accepted, not listed.
+    # `--template` was the 1.x spelling; still accepted, with no warning.
     set_chain.add_argument(
         "--chain", "--template", dest="chain", required=True, help="a chain id", metavar="CHAIN"
     )

@@ -141,16 +141,19 @@ async def reload(app) -> str | None:
     """`policy.yaml`, the library and `intake.yaml` reread into the running server,
     the poller replaced. A policy that does not validate is refused and the
     running one kept (its reason is returned); so is an `intake.yaml` that
-    does not load. Either stays pending."""
+    does not load, its reason kept as `st.invalid_intake` for the caller,
+    `/health` and doctor. Either stays pending."""
     st = app.state
     refused = deps.reload_policy(st)
     deps._reload_templates(st)
     digest = _digest(st.templates_dir / "intake.yaml")
     try:
         st.intake = config_mod.Intake.load(st.templates_dir / "intake.yaml").model_dump()
-    except config_mod.ConfigError:
-        pass
+    except config_mod.ConfigError as exc:
+        st.invalid_intake = str(exc)
     else:
+        st.invalid_intake = None
+        st.intake_off = False
         set_loaded(st, "intake.yaml", digest)
     await intake_mod.restart(app)
     notify(app)

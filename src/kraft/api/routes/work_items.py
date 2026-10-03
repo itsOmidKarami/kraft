@@ -7,7 +7,7 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from kraft import config as config_mod
 from kraft import executor, store
@@ -34,18 +34,40 @@ class Attachment(BaseModel):
     path: str
 
 
-class NewWorkItem(BaseModel):
+def _one_chain(data: object) -> object:
+    """`chain` and its pre-2.0 name `chain_template` are one field: a body
+    naming two different chains is refused, not settled by which name wins."""
+    if (
+        isinstance(data, dict)
+        and data.get("chain") is not None
+        and data.get("chain_template") is not None
+        and data["chain"] != data["chain_template"]
+    ):
+        raise ValueError("`chain` and `chain_template` name different chains; send `chain` alone")
+    return data
+
+
+class _OneChain(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _one_chain(cls, data: object) -> object:
+        return _one_chain(data)
+
+
+class NewWorkItem(_OneChain):
     title: str
     #: the brief — prose, and what the spec node writes a design from. A title is
     #: only a label.
     description: str = ""
     repo: str
-    #: None means no explicit template was chosen: the repo's
-    #: `default_chain_template` applies, else `default`
-    #: (`deps.chain_template_for`). Unchosen `default` is stored as None
-    #: (Kraft-cd47), distinguishable from an item that named `chain_template:
-    #: "default"` outright.
-    chain_template: str | None = None
+    #: None means no explicit chain was chosen: the repo's `default_chain`
+    #: applies, else `default` (`deps.chain_template_for`). Unchosen
+    #: `default` is stored as None (Kraft-cd47), distinguishable from an item
+    #: that named `chain: "default"` outright. `chain` is 2.0's name, as on
+    #: every other door; `chain_template` is still read (R12D-06).
+    chain_template: str | None = Field(
+        default=None, validation_alias=AliasChoices("chain_template", "chain")
+    )
     #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
     #: `repo` is the root of, the members it selects, and the root-pointer
     #: policy -- the workspace's `root_pointer_default` when unset. Frozen into
@@ -305,6 +327,7 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
     # a list of error dicts, and `kraft item create` prints `detail` straight
     # through -- one sentence is the contract every other CLI error keeps.
     _check_title(body.title)
+    _check_text("description", body.description)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
@@ -659,11 +682,19 @@ def _check_one_line(title: str) -> None:
     if not _LINE_BREAKS.isdisjoint(title):
         raise HTTPException(422, "the title is one line: put the rest in the description instead")
     # A tab misaligned the same table; an escape or a bidi override in a title
-    # `kraft view list` prints raw can make a terminal show something else.
-    if any(unicodedata.category(ch) == "Cc" or ch in _BIDI_CONTROLS for ch in title):
+    # `kraft view list` prints raw can make a terminal show something else. A
+    # lone surrogate (`\ud800`, which JSON can spell) is no character at all:
+    # it failed the write with a 500 (R12s-01).
+    if any(unicodedata.category(ch) in ("Cc", "Cs") or ch in _BIDI_CONTROLS for ch in title):
         raise HTTPException(
             422, "the title is plain text: no tab, escape or other control character"
         )
+
+
+def _check_text(name: str, text: str | None) -> None:
+    """A lone surrogate is no text: storing one failed the write (500/502)."""
+    if text is not None and any(unicodedata.category(ch) == "Cs" for ch in text):
+        raise HTTPException(422, f"the {name} is not text: it holds a lone surrogate")
 
 
 #: The characters that reorder text as it is shown (Unicode's bidi controls).
@@ -672,7 +703,7 @@ def _check_one_line(title: str) -> None:
 _BIDI_CONTROLS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
-class TriggerBody(BaseModel):
+class TriggerBody(_OneChain):
     repo: str
     title: str
     description: str = ""
@@ -694,6 +725,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
     chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain)
     _check_title(body.title)
+    _check_text("description", body.description)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     policy = deps.item_policy_or_422(st, body.repo)
@@ -721,7 +753,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     return await board.get_work_item(wid, request)
 
 
-class WorkItemPatch(BaseModel):
+class WorkItemPatch(_OneChain):
     #: Absent means untouched, in every field. This route is still not a
     #: general table editor -- a body carrying anything else is ignored, not
     #: applied -- but a screen that edits one field must not blank another,
@@ -733,8 +765,10 @@ class WorkItemPatch(BaseModel):
     #: A template name switches a not-yet-started item onto that template's
     #: own materialized chain (Kraft-gwn6). 404s on an unknown name; 409s once
     #: `current_node_id` is set -- the chain is fixed for the life of a
-    #: started item.
-    chain_template: str | None = None
+    #: started item. `chain`, 2.0's name, is read too.
+    chain_template: str | None = Field(
+        default=None, validation_alias=AliasChoices("chain_template", "chain")
+    )
     #: `None` (default) leaves the override alone. `{}` clears every field
     #: back to the template's own binding; a non-empty object *replaces* the
     #: whole stored override, as in 1.4 -- a field it does not name, or sends
@@ -944,7 +978,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
     # The fields `kraft` guards with `_forbid_self_action`, plus the budget: a
     # worker raising its own dollar cap is the same self-action. Title and
-    # description stay open; a chain template is fixed once the item starts.
+    # description stay open; a chain is fixed once the item starts.
     # The budget and the policy (which can raise `budget_usd` and the time
     # caps item-wide) are a person's call, so an escalation turn is refused
     # them too, like a gate (Kraft-9efnk.29).
@@ -968,13 +1002,14 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     ):
         raise HTTPException(
             422,
-            "nothing to patch: send a title, description, chain_template, agent_overrides, "
+            "nothing to patch: send a title, description, chain, agent_overrides, "
             "node_overrides, policy, attachments, or budget_usd",
         )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
     if body.title is not None:
         _check_one_line(body.title)
+    _check_text("description", body.description)
 
     if body.node_overrides is not None:
         _validate_node_overrides(st, row, body.node_overrides)
@@ -992,7 +1027,7 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             raise HTTPException(404, f"unknown chain {body.chain_template!r}")
         if row["current_node_id"] is not None:
             raise HTTPException(
-                409, "work item has already started; template is fixed for its life"
+                409, "work item has already started; its chain is fixed for its life"
             )
     if body.attachments is not None:
         if row["current_node_id"] is not None:

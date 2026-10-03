@@ -69,6 +69,10 @@ def set_repo(d, path: str, patch: dict) -> None:
     """Any entry field; an explicit null clears it. Like `PATCH /repos`, a save is a touch."""
     entry = _entry(d, path)
     d.file(FILE)
+    if "default_chain_template" in entry:
+        # The 1.x name, read as `default_chain` (`config.Repo`): a save
+        # renames it rather than writing the new key beside it (R12c-06).
+        entry.setdefault("default_chain", entry.pop("default_chain_template"))
     for k, v in patch.items():
         if v is None:
             entry.pop(k, None)

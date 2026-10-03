@@ -1464,6 +1464,14 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
             if stop.get("unknown_launches")
             else _NOT_ITEM_CAP.get(scope, "work item was not stopped by a spend cap"),
         )
+    spent = stop.get("spent_usd")
+    if body.budget_usd is not None and spent is not None and body.budget_usd <= spent:
+        # It would stop again at once, as the cap it replaces did (R12E-06).
+        raise HTTPException(
+            422,
+            f"the item has already spent {_usd(spent)}; a cap of {_usd(body.budget_usd)} "
+            "would stop it again at once: raise it above that, or to none",
+        )
     write = (
         _raise_policy_budget(wid, body.budget_usd)
         if item_wide
@@ -1920,6 +1928,23 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     # was never the case that widening was meant to cover).
     if row["current_node_id"] is None:
         raise HTTPException(409, "work item has not started")
+    budget = (board._current_stop(st, wid) or {}).get("budget") or {}
+    if row["status"] == "needs_human" and budget:
+        # The escalation's agent spends against the same cap, which refused
+        # its session with nothing on the item to say so (R12E-05). Every
+        # budget stop, the daily cap's too (`tests/api/lifecycle_doors.json`).
+        how = (
+            "raise budget.daily_usd on Settings › Policy or in policy.yaml, or wait for "
+            "local midnight"
+            if budget.get("scope") == "daily"
+            else f"raise it with `kraft item raise-budget {wid} --usd N` where that takes "
+            f"it (`kraft view show {wid}` names the cap)"
+        )
+        raise HTTPException(
+            409,
+            f"a spend cap stopped this item, and an escalation's agent would hit it too: "
+            f"{how}, then escalate",
+        )
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "message is required")

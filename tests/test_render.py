@@ -196,6 +196,7 @@ def test_health_block_names_each_degraded_reason():
         "bind": "127.0.0.1",
         "invalid_templates": {"broken.yaml": "no nodes"},
         "invalid_policy": "unknown key: foo",
+        "invalid_intake": "intake.yaml: 'interval_s': not a number",
         "reattach_summary": {
             "scanned": 2,
             "adopted": ["s1"],
@@ -220,6 +221,7 @@ def test_health_block_names_each_degraded_reason():
     assert "degraded" in out
     assert "broken.yaml" in out and "no nodes" in out
     assert "unknown key: foo" in out
+    assert "invalid intake" in out and "'interval_s': not a number" in out
     assert "12" in out  # documents
     assert "fastembed not installed" in out
     assert "1 adopted" in out and "2 scanned" in out

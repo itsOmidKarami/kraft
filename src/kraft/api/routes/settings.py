@@ -425,6 +425,9 @@ async def reload_templates_endpoint(request: Request):
         "valid": valid,
         "invalid_templates": deps.invalid_templates(st),
         "refused_policy": refused_policy,
+        # An `intake.yaml` that does not load: the running settings and
+        # schedules are kept, as the policy is.
+        "refused_intake": getattr(st, "invalid_intake", None),
     }
 
 
@@ -583,13 +586,26 @@ async def put_intake(body: IntakeBody, request: Request):
     would otherwise keep the old interval until the next reboot."""
     app_ = request.app
     st = app_.state
+    path = st.templates_dir / "intake.yaml"
     data = body.model_dump(exclude_none=True)
     if body.schedules is None:
         # The schedules live in this file since 2.0; a body that says nothing
-        # about them (every 1.x client) must not write them away.
-        data["schedules"] = list(st.intake.get("schedules") or [])
-    config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
-    st.intake = data
+        # about them (every 1.x client) must not write them away. The file's
+        # own, as `GET /intake` shows them, not the copy loaded at boot: a
+        # hand edit since then is kept too.
+        try:
+            own = config_mod.read_yaml(path).get("schedules")
+        except config_mod.ConfigError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        data["schedules"] = own if isinstance(own, list) else []
+    try:
+        intake = config_mod.Intake.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(422, config_mod.first_error(exc, config_mod.Intake.FILE)) from exc
+    intake.save(path)
+    st.intake = data = intake.model_dump()
+    st.invalid_intake = None
+    st.intake_off = False
     apply_mod.record(st, "intake.yaml")
     await intake_mod.restart(app_)
     apply_mod.notify(app_)

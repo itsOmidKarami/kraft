@@ -6,6 +6,7 @@ and `run_with_app` for the client tests, which reach the app over ASGI.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sqlite3
 import time
@@ -30,6 +31,12 @@ _POLL = 0.02
 #: also covers the client's lifespan and the rest of the test: a wait at the
 #: ceiling can never fail with its own message, only as a killed worker.
 WALK_TIMEOUT = 90
+
+
+def json_body(body: object) -> dict:
+    """A request body escaped to ASCII, for `client.post(url, **json_body(b))`:
+    JSON can spell a lone surrogate (`\\ud800`), httpx's encoder cannot."""
+    return {"content": json.dumps(body), "headers": {"content-type": "application/json"}}
 
 
 class _LoopbackClient(TestClient):

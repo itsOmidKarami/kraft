@@ -130,6 +130,27 @@ def test_reload_refuses_a_bad_policy_and_keeps_the_running_one(client, templates
     assert client.get("/api/health").json()["status"] == "ok"
 
 
+def test_reload_refuses_an_intake_yaml_that_does_not_load_and_says_so(client, templates_dir):
+    """R12E-03: it holds every schedule since 2.0, so a refusal is named by
+    the reload, `/health` and doctor, and a fixed file clears it."""
+    running = client.app.state.intake
+    path = templates_dir / "intake.yaml"
+    good = path.read_text() if path.exists() else ""
+    path.write_text("schedules: [{cron: 61 9 * * *, repo: r, chain: c, title: t}]\n")
+
+    r = client.post("/api/templates/reload").json()
+
+    assert "minute 61 is outside 0-59" in r["refused_intake"]
+    assert client.app.state.intake == running
+    health = client.get("/api/health").json()
+    assert (health["status"], health["invalid_intake"]) == ("degraded", r["refused_intake"])
+    assert health["intake_off"] is False  # the running schedules are kept
+
+    path.write_text(good)
+    assert client.post("/api/templates/reload").json()["refused_intake"] is None
+    assert client.get("/api/health").json()["invalid_intake"] is None
+
+
 def test_templates_lists_the_v1_chains_intake_materializes(tmp_path, monkeypatch):
     """Kraft-pplyo: the intake preview reads this list, so its nodes are the V1
     chain's own, in `ChainNode` shape, and a chain that does not resolve is

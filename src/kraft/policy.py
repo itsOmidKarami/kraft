@@ -335,7 +335,7 @@ class Policy:
             budget=parsed.budget or NO_BUDGET,
             archive_after_days=parsed.archive.after_days if parsed.archive else None,
             rate_limit_retries=parsed.rate_limit_retries,
-            triggers=[_trigger(f"{name}: triggers[{i}]", t) for i, t in enumerate(parsed.triggers)],
+            triggers=_triggers(name, parsed.triggers),
             max_concurrent=parsed.max_concurrent,
             auto_escalate_stuck=parsed.auto_escalate_stuck,
             auto_escalate_stuck_cap=parsed.auto_escalate_stuck_cap,
@@ -378,43 +378,120 @@ class CronFields:
     weekday: str
 
 
-def _cron_fields(name: str, expr: str) -> CronFields:
-    """ponytail: `*` or a comma-separated list of ints per field, no ranges
-    or steps (`1-5`, `*/15`) -- add `croniter` as a dependency if a
-    policy.yaml ever needs one."""
+#: Each cron field's name and the values it may hold, in field order. Day of
+#: week takes 0-7, both 0 and 7 meaning Sunday, as cron's own does.
+_CRON_FIELDS: tuple[tuple[str, int, int], ...] = (
+    ("minute", 0, 59),
+    ("hour", 0, 23),
+    ("day of month", 1, 31),
+    ("month", 1, 12),
+    ("day of week", 0, 7),
+)
+
+
+class CronRangeError(PolicyError):
+    """A cron value outside its field (minute 61, day of week 8): the one
+    refusal a 1.4 `policy.yaml` trigger could already hold, since 1.4 checked
+    only that each value was digits. Such a trigger never fired there."""
+
+
+#: What a cron number is: ASCII digits. `str.isdigit` also takes `²` and `٣`.
+_DIGITS = re.compile(r"[0-9]+")
+
+
+def _cron_values(name: str, part: str, label: str, lo: int, hi: int) -> frozenset[int]:
+    """The values one cron field matches: `*`, an integer, a range `A-B`, a
+    step `*/N`, `A-B/N` or `A/N` (A to the field's top), or a comma-separated
+    list of those. Anything else, or a value outside `lo`-`hi`, is refused."""
+    shape = (
+        f"{name}: field {part!r} must be '*', an integer, a range (1-5), a step (*/15), "
+        "or a comma-separated list of those"
+    )
+    out: set[int] = set()
+    for token in part.split(","):
+        base, slash, step_text = token.partition("/")
+        if slash and not (_DIGITS.fullmatch(step_text) and int(step_text) > 0):
+            raise PolicyError(f"{name}: field {part!r}: a step must be a positive integer")
+        step = int(step_text) if slash else 1
+        start_text, dash, end_text = base.partition("-")
+        if base == "*":
+            start, end = lo, hi
+        elif dash and _DIGITS.fullmatch(start_text) and _DIGITS.fullmatch(end_text):
+            start, end = int(start_text), int(end_text)
+        elif _DIGITS.fullmatch(base):
+            start = int(base)
+            end = hi if slash else start
+        else:
+            raise PolicyError(shape)
+        for value in (start, end):
+            if not lo <= value <= hi:
+                raise CronRangeError(
+                    f"{name}: field {part!r}: {label} {value} is outside {lo}-{hi}"
+                )
+        if start > end:
+            raise PolicyError(f"{name}: field {part!r}: the range {start}-{end} runs backwards")
+        out.update(range(start, end + 1, step))
+    return frozenset(out)
+
+
+def _cron_sets(name: str, expr: str) -> tuple[frozenset[int], ...]:
+    """Each field's matching values, in field order (`_CRON_FIELDS`). Day of
+    week's 7 is folded onto 0, Sunday."""
     parts = expr.split()
     if len(parts) != 5:
         raise PolicyError(f"{name}: cron expression must have exactly 5 fields: {expr!r}")
-    for part in parts:
-        for token in part.split(","):
-            if token != "*" and not token.isdigit():
-                raise PolicyError(
-                    f"{name}: field {part!r} must be '*' or a comma-separated list of "
-                    "integers; ranges and steps are not supported"
-                )
-    minute, hour, day, month, weekday = parts
+    sets = [
+        _cron_values(name, part, label, lo, hi)
+        for part, (label, lo, hi) in zip(parts, _CRON_FIELDS, strict=True)
+    ]
+    sets[4] = frozenset(0 if day == 7 else day for day in sets[4])
+    return tuple(sets)
+
+
+def _cron_fields(name: str, expr: str) -> CronFields:
+    """A 5-field cron expression, checked: each field is what `_cron_values`
+    reads, with every value in its field's range. Refused with a
+    `PolicyError` naming `name`, the way a policy.yaml trigger was in 1.4,
+    and every reader of a schedule (`config.Schedule`, the draft, the tick)
+    calls this one."""
+    _cron_sets(name, expr)
+    minute, hour, day, month, weekday = expr.split()
     return CronFields(minute, hour, day, month, weekday)
 
 
 def cron_due(expr: str, dt: datetime) -> bool:
-    """True when `dt` (minute resolution) matches a 5-field cron expression."""
-    fields = _cron_fields("cron", expr)
-
-    def matches(field: str, value: int) -> bool:
-        return field == "*" or value in {int(x) for x in field.split(",")}
-
+    """True when `dt` (minute resolution) matches a 5-field cron expression.
+    A day of month and a day of week must both match, as they always have
+    here (cron's own takes either when both are set)."""
+    minute, hour, day, month, weekday = _cron_sets("cron", expr)
     return (
-        matches(fields.minute, dt.minute)
-        and matches(fields.hour, dt.hour)
-        and matches(fields.day, dt.day)
-        and matches(fields.month, dt.month)
-        and matches(fields.weekday, dt.isoweekday() % 7)  # cron: 0 = Sunday
+        dt.minute in minute
+        and dt.hour in hour
+        and dt.day in day
+        and dt.month in month
+        and dt.isoweekday() % 7 in weekday  # cron: 0 = Sunday
     )
 
 
 def _trigger(name: str, raw: TriggerInput) -> Trigger:
     _cron_fields(f"{name}.cron", raw.cron)
     return Trigger(**raw.model_dump())
+
+
+def _triggers(name: str, raws: list[TriggerInput]) -> list[Trigger]:
+    """`policy.yaml`'s pre-2.0 `triggers:`, each checked as a schedule is. One
+    whose cron names a value outside its field (`0 24 * * *`) loaded in 1.4,
+    which never ran it: it is skipped with a warning, not a refusal of the
+    whole file, which would stop every intake door (R12 review P1-1).
+    `kraft admin doctor`'s `moved keys` row names it. Any other bad cron is
+    refused, as in 1.4."""
+    out = []
+    for i, raw in enumerate(raws):
+        try:
+            out.append(_trigger(f"{name}: triggers[{i}]", raw))
+        except CronRangeError as exc:
+            logger.warning("%s; that trigger is skipped, as 1.4 never ran it", exc)
+    return out
 
 
 class CapOverride(BaseModel):

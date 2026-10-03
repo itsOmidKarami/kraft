@@ -345,8 +345,16 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
         {"interval_s": 5},  # below the floor the poller would clamp to anyway
         {"priority_ceiling": 5},
         {"priority_ceiling": -1},
+        {"schedules": [{"cron": "0 9 * * 1", "repo": "/r", "title": "t"}]},  # 500, R12F-06
+        {"schedules": [{"cron": "61 9 * * *", "repo": "/r", "chain": "c", "title": "t"}]},
     ],
-    ids=["interval-below-the-floor", "ceiling-above-p4", "negative-ceiling"],
+    ids=[
+        "interval-below-the-floor",
+        "ceiling-above-p4",
+        "negative-ceiling",
+        "a-schedule-with-no-chain",
+        "a-cron-the-scheduler-cannot-run",
+    ],
 )
 def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
     body = {
@@ -361,13 +369,13 @@ def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
 
 def test_put_intake_keeps_the_schedules_a_body_leaves_out(client, templates_dir):
     """The schedules live in intake.yaml since 2.0; a 1.x-shaped body says
-    nothing about them and must not write them away. A body that names them
-    replaces them."""
+    nothing about them and must not write them away, including those a hand
+    edit added since boot (R12F-06). A body that names them replaces them."""
     schedule = {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "t"}
     (templates_dir / "intake.yaml").write_text(
         yaml.safe_dump({"enabled": False, "schedules": [schedule]})
     )
-    client.app.state.intake = config.Intake.load(templates_dir / "intake.yaml").model_dump()
+    assert client.app.state.intake["schedules"] == []  # loaded before the hand edit
     body = {"enabled": False, "interval_s": 300, "priority_ceiling": 2, "repos": []}
     assert client.put("/api/intake", json=body).status_code == 200
     on_disk = yaml.safe_load((templates_dir / "intake.yaml").read_text())

@@ -119,18 +119,23 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(
     assert await triggers.tick(app, now=now) == []
 
 
-@pytest.mark.parametrize("policy_file, want", [("readable", ["new", "old"]), ("invalid", [])])
+@pytest.mark.parametrize(
+    "policy_file, want",
+    [("readable", ["new", "old"]), ("duplicate", ["new"]), ("invalid", [])],
+)
 async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app, policy_file, want):
     """2.0: schedules live in `intake.yaml` (`config.Intake.schedules`); a
     `policy.yaml` still naming `triggers:` fires too, keyed apart so neither
-    double-files the other's minute. A `policy.yaml` that does not load
-    files nothing, as every intake door refuses: an item would freeze an
-    empty, uncapped policy."""
+    double-files the other's minute, and one that is the same schedule as an
+    `intake.yaml` entry (left behind, re-made on Settings) fires once. A
+    `policy.yaml` that does not load files nothing, as every intake door
+    refuses: an item would freeze an empty, uncapped policy."""
     repo = isolated_bd(tmp_path)
+    old = "new" if policy_file == "duplicate" else "old"
     pol = policy.Policy(
         loops={},
         default=policy.Cap(attempts=3, wall_clock_s=3600),
-        triggers=[policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title="old")],
+        triggers=[policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title=old)],
     )
     intake = {
         "enabled": False,
@@ -146,7 +151,7 @@ async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app, policy_
     }
 
     invalid = {"invalid_policy": ["policy.yaml: bad"]} if policy_file == "invalid" else {}
-    policy_obj = pol if policy_file == "readable" else None
+    policy_obj = None if policy_file == "invalid" else pol
     app = stub_app(**_state(tmp_path, policy_obj=policy_obj), intake=intake, **invalid)
     _connect(tmp_path, repo)
     now = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
@@ -198,12 +203,22 @@ async def test_a_trigger_whose_chain_exceeds_the_ceiling_is_skipped_not_the_whol
     assert titles == ["filed"]
 
 
+@pytest.mark.parametrize(
+    ("cron", "warned"),
+    [
+        ("30 14 * * *", ("{unconnected} is not a connected repo", "kraft repo connect")),
+        ("30 14 * * 1-9", ("day of week 9 is outside 0-7", "skipped")),
+    ],
+    ids=["unconnected-repo", "cron-it-cannot-run"],
+)
 async def test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tick(
-    tmp_path, stub_app, caplog
+    tmp_path, stub_app, caplog, cron, warned
 ):
     """Kraft-jzhg2: the HTTP intake doors already refuse a repo that is not
     connected (`deps.connected_or_422`, Kraft-ta8nv); an operator-authored
-    cron trigger must get the same door, not file straight past it."""
+    cron trigger must get the same door, not file straight past it. A cron
+    the scheduler cannot run (a file loaded before `config.Schedule` checked
+    it) skips that entry too, not every schedule after it (R12a-01)."""
     unconnected = tmp_path / "unconnected"
     unconnected.mkdir()
     connected = isolated_bd(tmp_path, name="connected")
@@ -211,9 +226,7 @@ async def test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tic
         loops={},
         default=policy.Cap(attempts=3, wall_clock_s=3600),
         triggers=[
-            policy.Trigger(
-                cron="30 14 * * *", repo=str(unconnected), chain="default", title="unconnected"
-            ),
+            policy.Trigger(cron=cron, repo=str(unconnected), chain="default", title="unconnected"),
             policy.Trigger(
                 cron="30 14 * * *", repo=str(connected), chain="default", title="connected"
             ),
@@ -231,8 +244,7 @@ async def test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tic
     assert titles == ["connected"]
     assert len(filed) == 1
     assert any(
-        f"{unconnected} is not a connected repo" in r.message and "kraft repo connect" in r.message
-        for r in caplog.records
+        all(w.format(unconnected=unconnected) in r.message for w in warned) for r in caplog.records
     )
 
 

@@ -22,6 +22,14 @@ budget:
   work_item_usd: 10     # per item
   daily_usd: 50
 
+repos:
+  - path: /a   # the dev repo
+    project: null
+  # the scratch repo
+  - path: /b
+    setup_command: x
+
+# the cron list
 schedules:
   - {cron: '0 9 * * 1', title: weekly}
 
@@ -82,6 +90,54 @@ archive:
             [],
             id="no-change-keeps-every-comment",
         ),
+        pytest.param(
+            lambda d: d["budget"].__setitem__("daily_usd", 60),
+            ["default:             { attempts: 3, wall_clock_s: 3600 }   # trailing note"],
+            [],
+            id="an-untouched-flow-mapping-keeps-its-spacing",
+        ),
+        pytest.param(
+            lambda d: d["repos"][1].__setitem__("setup_command", "y"),
+            [
+                "  - path: /a   # the dev repo\n    project: null\n"
+                "  # the scratch repo\n  - path: /b"
+            ],
+            ["setup_command: x"],
+            id="one-entry-of-a-list-edited-keeps-the-others-comments",
+        ),
+        pytest.param(
+            lambda d: d["repos"].pop(0),
+            ["repos:\n  # the scratch repo\n  - path: /b\n    setup_command: x"],
+            ["/a"],
+            id="an-entry-removed-keeps-the-rest-as-written",
+        ),
+        pytest.param(
+            lambda d: d["repos"].pop(),
+            ["    project: null\n\n# the cron list\nschedules:"],
+            ["/b", "# the scratch repo"],
+            id="the-last-entry-removed-keeps-the-next-keys-comment",
+        ),
+        pytest.param(
+            lambda d: d["repos"].append({"path": "/c"}),
+            ["  - path: /c\n\n# the cron list\nschedules:"],
+            [],
+            id="an-entry-appended-goes-before-the-next-keys-comment",
+        ),
+        pytest.param(
+            lambda d: d["repos"][1].__setitem__("env", {"on": "x"}),
+            ["'on': x"],
+            [],
+            id="a-new-key-on-stays-a-string",
+        ),
+        *[
+            pytest.param(
+                lambda d, word=word: d["repos"][1].__setitem__("env", {"DEBUG": word}),
+                [f"DEBUG: '{word}'"],
+                [],
+                id=f"the-string-{word}-stays-a-string",
+            )
+            for word in ("yes", "no", "on", "off", "Yes", "OFF")
+        ],
     ],
 )
 def test_rewrite_applies_the_change_and_keeps_the_rest(change, expect, gone):
@@ -148,3 +204,36 @@ def test_the_shipped_policy_keeps_its_documentation_through_an_edit(change):
     assert yaml.safe_load(out) == data
     comments = [line for line in text.splitlines() if line.startswith("#")]
     assert comments and [line for line in comments if line not in out] == []
+
+
+ENTRIES = """\
+repos:
+  # A: the api
+  - path: /a
+  # B: the web
+  - path: /b
+  # C: the cli
+  - path: /c
+# after the list
+other: 1
+"""
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [(0,), (1,), (2,), (0, 1), (0, 2), (1, 2)],
+    ids=["first", "middle", "last", "first-two", "first-and-last", "last-two"],
+)
+def test_a_removed_entrys_own_comment_goes_with_it_and_no_other(removed):
+    """ruamel keeps a comment line above an entry on the entry before it, so
+    removing one took the next entry's comment and left its own labelling
+    the next entry (R12 review P2-3)."""
+    data = yaml.safe_load(ENTRIES)
+    kept = [e for i, e in enumerate(data["repos"]) if i not in removed]
+    out = preserve.rewrite(ENTRIES, {**data, "repos": kept})
+    assert yaml.safe_load(out) == {**data, "repos": kept}
+    labels = [line.strip() for line in out.splitlines() if line.lstrip().startswith("#")]
+    names = {"/a": "# A: the api", "/b": "# B: the web", "/c": "# C: the cli"}
+    assert labels == [names[e["path"]] for e in kept] + ["# after the list"]
+    for entry in kept:
+        assert f"{names[entry['path']]}\n  - path: {entry['path']}" in out

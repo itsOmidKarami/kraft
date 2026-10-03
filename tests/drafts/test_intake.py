@@ -94,15 +94,35 @@ def test_schedule_ops_rewrite_schedules_in_place(client, connected):
     assert ops(client, {"op": "set_schedule", "index": 0, "patch": {"x": 1}}).status_code == 422
 
 
-def test_a_schedule_naming_no_connected_repo_or_no_chain_is_a_problem(client, connected):
-    body = resolved(client, schedule("/not/connected", chain="no-such-chain"))
+@pytest.mark.parametrize(
+    ("over", "fields"),
+    [
+        pytest.param(
+            {"repo": "/not/connected", "chain": "no-such-chain"},
+            {"repo", "chain"},
+            id="repo-and-chain",
+        ),
+        pytest.param({"cron": "61 9 * * 1-5"}, {"cron"}, id="a-cron-the-scheduler-cannot-run"),
+    ],
+)
+def test_a_schedule_naming_no_connected_repo_or_no_chain_is_a_problem(
+    client, connected, over, fields
+):
+    """Each is named once, on its schedule, and the screen still renders the
+    file. A cron is checked as the scheduler runs it (R12a-01): `61` was
+    published, then never fired."""
+    on = {"op": "set_intake", "patch": {"enabled": True}}
+    body = resolved(client, on, schedule(**{"repo": connected, **over}))
     by_field = {p["field"]: p for p in body["problems"] if "schedule" in p}
-    assert set(by_field) == {"repo", "chain"}
-    assert by_field["chain"]["path"] == "schedules[0].chain"
+    assert set(by_field) == fields
+    assert {p["path"] for p in by_field.values()} == {f"schedules[0].{f}" for f in fields}
+    assert len(body["problems"]) == len(fields)
+    assert body["resolved"]["schedules"][0]["title"] == "Weekly sweep"
     assert client.post(f"{URL}/publish").status_code == 422
 
-    body = resolved(client, {"op": "set_schedule", "index": 0, "patch": {"repo": connected}})
-    assert {p["field"] for p in body["problems"] if "schedule" in p} == {"chain"}
+    fixed = {"repo": connected, "chain": "default", "cron": "0 9 * * 1-5"}
+    body = resolved(client, {"op": "set_schedule", "index": 0, "patch": fixed})
+    assert body["problems"] == []
 
 
 def test_publish_applies_the_interval_and_schedules_with_one_poller_restart(

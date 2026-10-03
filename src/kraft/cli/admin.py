@@ -27,10 +27,12 @@ from kraft import client, config, permission_hooks, pidfile, render
 from kraft.cli import common, templates
 from kraft.paths import (
     BUNDLED,
+    LEGACY_CONFIG_DIR_VAR,
     RunDirs,
     config_dir,
     default_config_dir,
     default_run_dir,
+    names_default_config_dir,
     pre_2_config_dir,
 )
 from kraft.policy import CarriedPolicy
@@ -229,9 +231,11 @@ def adopt_pre_2_home(in_use: Path) -> bool:
     refuses is reported and the home read where it is (`paths.config_dir`).
     The keys 2.0 moved between files are `carry_moved_keys`'s, run by the
     same start."""
-    if os.environ.get("KRAFT_CONFIG_DIR"):
+    named_2 = os.environ.get("KRAFT_CONFIG_DIR")
+    if named_2 and not names_default_config_dir(named_2):
         # A 2.0 name, set on purpose: the directory it names is the
         # operator's, never renamed, merged into or refused, wherever it is.
+        # Naming the default itself is the default: nothing there to protect.
         return False
     home = default_config_dir()
     old = home.with_name("templates")
@@ -244,7 +248,11 @@ def adopt_pre_2_home(in_use: Path) -> bool:
         return False
     if pre_2_config_dir() != old:
         return False
-    reads_old = os.path.realpath(in_use) == os.path.realpath(old)
+    # Named by the 1.x variable, not merely read in the window before this
+    # rename (`paths.config_dir` reads `templates/` until `config/` has a
+    # library): only a variable keeps reading it after the merge.
+    named = os.environ.get(LEGACY_CONFIG_DIR_VAR)
+    reads_old = bool(named) and os.path.realpath(named) == os.path.realpath(old)
     if home.exists() or home.is_symlink():
         if not home.is_dir() or home.is_symlink() or (home / "library.yaml").exists():
             return False
@@ -316,19 +324,28 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
     written. Returns a line per move.
 
     Each file is rewritten over its own text (`drafts.preserve`), so its
-    comments stay, and through a symlink to wherever the file really is. The
-    triggers move only if `intake.yaml` then still loads (`config.Intake`):
-    1.4 ignored a key 2.0's schedule refuses (an `enabled: false`), and an
-    `intake.yaml` that fails to load turns auto-intake off with every
-    schedule in it. Left where they are, they are still read and fire. Only
-    the entries `schedules:` lacks are added, and `intake.yaml` is written
-    first: a start interrupted between the two writes moves nothing twice.
-    A file that does not parse is left alone, and its reader says why."""
+    comments stay, and through a symlink to wherever the file really is; a
+    moved trigger takes its own comments with it. A trigger moves only if
+    2.0's schedule takes it: 1.4 ignored a key it refuses (an `enabled:
+    false`), so that one stays, still read and fired, and the line says why;
+    the rest move. None move unless `intake.yaml` then still loads
+    (`config.Intake`): one that fails turns auto-intake off with every
+    schedule in it. Only the entries `schedules:` lacks are added, compared
+    as schedules (a missing `description` is an empty one), and
+    `intake.yaml` is written first: a start interrupted between the two
+    writes moves nothing twice. A file that does not parse is left alone,
+    and its reader says why."""
     import pydantic
     import yaml
 
-    from kraft.config import Intake, write_text
+    from kraft.config import Intake, Schedule, schedule_refusal, write_text
     from kraft.drafts import preserve
+
+    def schedule(entry: object) -> dict | None:
+        try:
+            return Schedule.model_validate(entry).model_dump()
+        except pydantic.ValidationError:
+            return None
 
     def load(name: str) -> tuple[Path, str, dict] | None:
         path = Path(os.path.realpath(config_dir / name))
@@ -361,7 +378,17 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
     if isinstance(triggers, list) and triggers:
         have = new_intake.get("schedules")
         have = have if isinstance(have, list) else []
-        add = [t for t in triggers if t not in have]
+        seen = [schedule(h) for h in have]
+        stay = [t for t in triggers if schedule(t) is None]
+        add, dupes = [], 0
+        for trigger in triggers:
+            if (as_schedule := schedule(trigger)) is None:
+                continue
+            if as_schedule in seen:
+                dupes += 1
+                continue
+            seen.append(as_schedule)
+            add.append(trigger)
         candidate = {**new_intake, "schedules": [*have, *add]}
         try:
             Intake.model_validate(candidate)
@@ -369,22 +396,40 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
             why = e.errors()[0]
             where = ".".join(str(p) for p in why["loc"])
             moved.append(
-                f"policy.yaml: triggers left where they are, still read: intake.yaml's "
-                f"schedules would refuse them ({where}: {why['msg']})"
+                f"policy.yaml: triggers left where they are, still read: intake.yaml "
+                f"would not load with them ({where}: {why['msg']})"
             )
         else:
-            new_intake = candidate
-            del new_policy["triggers"]
-            dupes = len(triggers) - len(add)
-            moved.append(
-                f"policy.yaml: {len(add)} trigger(s) moved to intake.yaml's schedules"
-                + (f" ({dupes} already there)" if dupes else "")
-            )
+            nodes = preserve.carried(policy_text, "triggers")
+            if len(nodes) == len(triggers):
+                # The same entries as ruamel nodes, so each keeps its comments.
+                add = [nodes[triggers.index(t)] for t in add]
+                candidate = {**new_intake, "schedules": [*have, *add]}
+            if add:
+                new_intake = candidate
+            if stay:
+                new_policy["triggers"] = stay
+            else:
+                del new_policy["triggers"]
+            if add or dupes:
+                moved.append(
+                    f"policy.yaml: {len(add)} trigger(s) moved to intake.yaml's schedules"
+                    + (f" ({dupes} already there)" if dupes else "")
+                )
+            if stay:
+                moved.append(
+                    f"policy.yaml: {len(stay)} trigger(s) left where they are, still read: "
+                    f"intake.yaml's schedules refuse them "
+                    f"({schedule_refusal(stay, 'triggers')}); fix that and the next start "
+                    "moves them"
+                )
     elif isinstance(triggers, list):
         del new_policy["triggers"]
         moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
     if new_intake != intake_data:
-        write_text(intake_path, preserve.rewrite(intake_text, new_intake))
+        # A moved list keeps the indent it had in policy.yaml.
+        offset = preserve.list_offset(policy_text)
+        write_text(intake_path, preserve.rewrite(intake_text, new_intake, list_offset=offset))
     if new_policy != policy_data:
         write_text(policy_path, preserve.rewrite(policy_text, new_policy))
     return moved
@@ -862,8 +907,11 @@ def _serve() -> None:
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
     # The lock is held: the home is this server's to rename, seed and move
-    # keys in.
-    prepare_home()
+    # keys in. Its `access.yaml` is read again from where it now is, in case
+    # the move left a different one in use (R12c-01).
+    if (host, port) != (moved := _bind(prepare_home())):
+        host, port = moved
+        _refuse_if_addr_taken(host, port)
 
     def _exit_on_signal(sig, frame):
         # uvicorn re-raises the SIGTERM it drained on, with this handler put
@@ -1254,19 +1302,30 @@ def _cmd_reindex(ns: argparse.Namespace) -> None:
 
 def _render_reload(result: dict) -> str:
     refused = result.get("refused_policy")
-    policy = "" if refused else " and policy.yaml"
-    lines = [f"reloaded {len(result.get('valid', []))} template(s){policy}"]
+    refused_intake = result.get("refused_intake")
+    files = [n for n, bad in (("policy.yaml", refused), ("intake.yaml", refused_intake)) if not bad]
+    also = f" and {' and '.join(files)}" if files else ""
+    lines = [f"reloaded {len(result.get('valid', []))} template(s){also}"]
     for name, reason in (result.get("invalid_templates") or {}).items():
         lines.append(f"  invalid: {name}: {reason}")
     if refused:
         lines.append(f"  refused: policy.yaml: {refused} (the running policy is kept)")
+    if refused_intake:
+        # `ConfigError` names the file itself.
+        lines.append(
+            f"  refused: {refused_intake} (the running auto-intake and schedules are kept)"
+        )
     return "\n".join(lines)
 
 
 def _cmd_reload(ns: argparse.Namespace) -> None:
     payload = asyncio.run(client.reload_templates())
     common.emit(payload, _render_reload, ns.json)
-    if payload.get("invalid_templates") or payload.get("refused_policy"):
+    if (
+        payload.get("invalid_templates")
+        or payload.get("refused_policy")
+        or payload.get("refused_intake")
+    ):
         # exit 1 so `kraft admin reload && ...` works; the reasons are already on stdout
         raise SystemExit(1)
 

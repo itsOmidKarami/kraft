@@ -18,6 +18,10 @@ def _invalid_policy(tdir):
     (tdir / "policy.yaml").write_text("default: { attempts: 0, wall_clock_s: 1 }\n")
 
 
+def _invalid_intake(tdir):
+    (tdir / "intake.yaml").write_text("interval_s: abc\n")
+
+
 @pytest.mark.parametrize(
     ("key", "names"),
     [
@@ -33,12 +37,19 @@ def _invalid_policy(tdir):
             marks=pytest.mark.api_client(edit_templates=_invalid_policy),
             id="an-invalid-policy",
         ),
+        pytest.param(
+            "invalid_intake",
+            "intake.yaml",
+            marks=pytest.mark.api_client(edit_templates=_invalid_intake),
+            id="an-unreadable-intake-yaml",
+        ),
     ],
 )
 def test_health_is_degraded_by(client, key, names):
     body = client.get("/api/health").json()
     assert body["status"] == "degraded"
     assert body[key]
+    assert body["intake_off"] is (key == "invalid_intake")  # started on it: off
     if names:
         assert names in body[key]
     assert "reattach_summary" in body

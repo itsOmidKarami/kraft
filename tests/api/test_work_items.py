@@ -13,7 +13,15 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.api import _await_gate, _paused, _poll_events, _post_default, _set_status, _started
+from support.api import (
+    _await_gate,
+    _paused,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _started,
+    json_body,
+)
 from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
@@ -55,6 +63,13 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
     ("route", "body", "detail"),
     [
         ("work-items", {"title": "x", "repo": "/tmp", "chain_template": "nope"}, "no chain 'nope'"),
+        ("work-items", {"title": "x", "repo": "/tmp", "chain": "nope"}, "no chain 'nope'"),
+        (
+            "work-items",
+            {"title": "x", "repo": "REPO", "chain": "default", "chain_template": "quick-task"},
+            None,
+        ),
+        ("triggers", {"title": "x", "repo": "REPO", "chain": "a", "chain_template": "b"}, None),
         ("work-items", {"title": "x"}, None),
         ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
@@ -72,9 +87,15 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         ("work-items", {"title": "a\tb", "repo": "REPO"}, "the title is plain text"),
         ("triggers", {"title": "a \x1b[31mred", "repo": "REPO"}, "the title is plain text"),
         ("work-items", {"title": "fix \u202etxt.exe", "repo": "REPO"}, "the title is plain text"),
+        ("work-items", {"title": "sur\ud800x", "repo": "REPO"}, "the title is plain text"),
+        ("work-items", {"title": "t", "description": "d\ud800", "repo": "REPO"}, "not text"),
+        ("triggers", {"title": "t", "description": "d\udfff", "repo": "REPO"}, "not text"),
     ],
     ids=[
         "an-unknown-template",
+        "an-unknown-chain",
+        "chain-and-chain-template-differ",
+        "trigger-chain-and-chain-template-differ",
         "no-repo",
         "a-nonexistent-repo",
         "trigger-an-unknown-template",
@@ -88,14 +109,19 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         "a-tab",
         "trigger-an-escape",
         "a-bidi-override",
+        "a-lone-surrogate",
+        "a-lone-surrogate-in-the-description",
+        "trigger-a-lone-surrogate-in-the-description",
     ],
 )
 def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):
     body = {k: str(repo) if v == "REPO" else v for k, v in body.items()}
-    r = client.post(f"/api/{route}", json=body)
+    r = client.post(f"/api/{route}", **json_body(body))
     assert r.status_code == 422
     if detail:
         assert detail in r.json()["detail"]
+    elif "chain" in body:
+        assert "name different chains" in r.json()["detail"][0]["msg"]
 
 
 @pytest.mark.parametrize(
@@ -247,6 +273,11 @@ def test_patch_refuses_an_empty_body_and_a_blank_title(client, repo):
     two = client.patch(f"/api/work-items/{wid}", json={"title": "line1\u2028line2"})
     assert two.status_code == 422
     assert "the title is one line" in two.json()["detail"]
+    lone = client.patch(f"/api/work-items/{wid}", **json_body({"title": "a\ud800"}))
+    assert (lone.status_code, lone.json()["detail"]) == (
+        422,
+        "the title is plain text: no tab, escape or other control character",
+    )
 
     assert client.get(f"/api/work-items/{wid}").json()["title"] == "t"
 
@@ -311,7 +342,7 @@ def test_patch_refuses_chain_template_once_started(client, repo):
 def test_patch_refuses_an_unknown_chain_template(client, repo):
     wid = _paused(client, repo)
 
-    r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "does-not-exist"})
+    r = client.patch(f"/api/work-items/{wid}", json={"chain": "does-not-exist"})  # 2.0's name
     assert r.status_code == 404, r.text
 
     after = client.get(f"/api/work-items/{wid}").json()
@@ -365,56 +396,6 @@ def test_patch_switching_chain_template_preserves_attachment_gate_trim(client, r
     assert [n["id"] for n in json.loads(after["materialized_chain"])["chain"]["nodes"]] == [
         "verify"
     ]
-
-
-def test_patch_sets_agent_overrides_and_records_an_event(client, repo):
-    wid = _paused(client, repo)
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"agent_overrides": {"model": "opus", "effort": "high"}},
-    )
-    assert r.status_code == 200, r.text
-
-    evs = client.get(f"/api/work-items/{wid}/events").json()
-    changed = [e for e in evs if e["type"] == "agent_overrides_changed"]
-    assert [e["payload"] for e in changed] == [{"overrides": {"model": "opus", "effort": "high"}}]
-
-
-def test_patch_clears_agent_overrides_with_an_empty_object(client, repo):
-    wid = _paused(client, repo)
-    client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "opus"}})
-
-    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
-    assert r.status_code == 200, r.text
-
-    row = client.get(f"/api/work-items/{wid}").json()
-    assert row["agent_overrides"] is None
-
-
-def test_patch_rejects_invalid_agent_overrides_with_422(client, repo):
-    wid = _paused(client, repo)
-
-    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"effort": "turbo"}})
-    assert r.status_code == 422, r.text
-
-
-def test_patch_accepts_agent_overrides_on_a_started_or_paused_item(client, repo):
-    """Unlike chain_template, a model/effort dial has no current_node_id
-    restriction -- it is the door to make a stuck item cheaper before its
-    next retry."""
-    wid = _paused(client, repo)
-    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "UPDATE work_items SET current_node_id = 'env_setup', status = 'paused' WHERE id = ?",
-        (wid,),
-    )
-    conn.commit()
-    conn.close()
-
-    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "haiku"}})
-    assert r.status_code == 200, r.text
 
 
 def test_get_work_item_reports_the_worktree_head(client, repo):

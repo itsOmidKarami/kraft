@@ -23,8 +23,7 @@ from support.server import child_env, output_of
 from kraft import cli, client
 from kraft.paths import RunDirs
 
-# `app` fixture: tests/conftest.py (sub-project A Task 4). It wires client.transport.http()
-# to the ASGI app with the lifespan entered per client.
+# `app` (tests/conftest.py) wires client.transport.http() to the ASGI app, lifespan per client.
 
 
 def test_health_returns_the_status_block(app):
@@ -46,7 +45,7 @@ def test_reindex_unknown_repo_is_a_readable_404(app):
 
 def test_reload_templates_returns_the_template_set(app):
     payload = asyncio.run(client.reload_templates())
-    assert set(payload) == {"valid", "invalid_templates", "refused_policy"}
+    assert set(payload) == {"valid", "invalid_templates", "refused_policy", "refused_intake"}
     assert {"quick-task", "default"} <= set(payload["valid"])
 
 
@@ -65,13 +64,15 @@ def test_reload_reports_invalid_templates_and_exits_1(app, capsys):
     assert "invalid: library.yaml" in capsys.readouterr().out
 
 
-def test_reload_reports_a_refused_policy_and_exits_1(app, capsys):
-    templates_dir = Path(os.environ["KRAFT_CONFIG_DIR"])
-    (templates_dir / "policy.yaml").write_text("default: [unclosed\n")
+@pytest.mark.parametrize(
+    "name, text", [("policy.yaml", "default: [unclosed\n"), ("intake.yaml", "interval_s: abc\n")]
+)
+def test_reload_reports_a_refused_policy_and_exits_1(app, capsys, name, text):
+    (Path(os.environ["KRAFT_CONFIG_DIR"]) / name).write_text(text)  # intake.yaml: R12F-01
     with pytest.raises(SystemExit) as caught:
         cli.main(["admin", "reload"])
     assert caught.value.code == 1
-    assert "refused: policy.yaml" in capsys.readouterr().out
+    assert f"refused: {name}" in capsys.readouterr().out
 
 
 def test_reload_refused_by_the_server_is_a_kraft_message(app, monkeypatch, capsys):
@@ -736,9 +737,8 @@ def test_shutdown_logs_an_unhandled_exception(tmp_path, monkeypatch, capsys):
 
 
 def test_a_foreground_start_writes_server_log_too(tmp_path, monkeypatch, capfd):
-    """Kraft-mqwg: only --detach used to leave a file.
-
-    `_redirect_output_to_log` dup2s the real process fds 1/2 -- pytest's own
+    """Kraft-mqwg: only --detach used to leave a file. `_redirect_output_to_log`
+    dup2s the real process fds 1/2 -- pytest's own
     fd-level capture already has those dup'd to its own buffer, so the
     exercise has to run with that capture suspended (`capfd.disabled()`), or
     it corrupts capture for every test that runs after this one in-process.

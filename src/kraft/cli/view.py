@@ -95,6 +95,11 @@ def _show_value(item: dict, key: str, value) -> str:
         return _usage_text(value)
     if key == "suggested_action" and value:
         return _suggestion_text(item)
+    if key == "title" and value:
+        # Every 2.0 door refuses an escape or a bidi override in a title, but
+        # 1.4 stored one as typed: printed raw it reaches the terminal. `view
+        # list` drops them (`render._cell`); so does this. `--json` is the row.
+        return "\n".join(render.plain_text(line) for line in str(value).splitlines())
     return str(value)
 
 

@@ -49,17 +49,35 @@ def config_dir(environ: Mapping[str, str] | None = None) -> Path:
     import still takes effect."""
     env = os.environ if environ is None else environ
     named = env.get("KRAFT_CONFIG_DIR") or env.get(LEGACY_CONFIG_DIR_VAR)
-    if named:
-        return Path(named)
     default = default_config_dir()
+    if named and not names_default_config_dir(named):
+        return Path(named)
     legacy = pre_2_config_dir()
-    if not default.exists() and legacy is not None and legacy != default:
+    renamed = legacy is None or legacy.is_symlink() or (default / "library.yaml").exists()
+    if not renamed and legacy != default:
         # Until the first 2.0 start renames it (`cli.admin.adopt_pre_2_home`),
-        # a 1.x home's files are where they were: `kraft admin doctor` or
-        # `kraft view list` run before that restart must read them, not
-        # report an empty home beside them.
+        # a 1.x home's files are where they were: `kraft admin doctor`,
+        # `kraft view list` and the start's own bind address, read before
+        # that rename, must read them, not an empty home beside them. That
+        # includes a `config/` made by hand before it (the harness guide's
+        # `config/harnesses`), which holds no `library.yaml` until the
+        # start merges the home into it -- the same test the merge uses.
         return legacy
     return default
+
+
+def names_default_config_dir(named: str | os.PathLike) -> bool:
+    """Whether a variable names `default_config_dir()` itself: read as if it
+    were unset, so a unit edited to the new default before the first 2.0
+    start still has its 1.x home adopted, not an empty one seeded beside it
+    (R12c-04). The last part is compared as spelled: `templates`, a link to
+    `config/` once renamed, still names `templates`."""
+
+    def spelled(path: Path) -> tuple[str, str]:
+        path = Path(os.path.abspath(path.expanduser()))
+        return os.path.realpath(path.parent), path.name
+
+    return spelled(Path(named)) == spelled(default_config_dir())
 
 
 def pre_2_config_dir() -> Path | None:

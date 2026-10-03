@@ -20,7 +20,10 @@ OTHER = {**SCHEDULE, "title": "monthly"}
     "case",
     [
         "already-carried",
+        "already-carried-by-settings",
         "a-trigger-intake-would-refuse",
+        "one-refused-the-rest-move",
+        "a-1.4-cron-out-of-range-stays",
         "an-intake-that-does-not-load",
         "symlinked-files",
         "nothing-to-move",
@@ -32,15 +35,23 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     but 2.0's schedule refuses (an `enabled: false`), or an `intake.yaml`
     that would not load, leaves the triggers where they are, still read: an
     `intake.yaml` that fails turns every schedule in it off. A symlinked file
-    is written where it points. A home with nothing to move is not written."""
+    is written where it points. A home with nothing to move is not written.
+    A schedule is compared as one (Settings writes `description: ''`), and
+    one refused trigger keeps only itself back (R12c-02)."""
     home = tmp_path / "config"
     home.mkdir()
     intake = {"enabled": False}
     triggers = [SCHEDULE, OTHER]
     if case == "already-carried":
         intake["schedules"] = [SCHEDULE]
+    elif case == "already-carried-by-settings":
+        intake["schedules"] = [{**SCHEDULE, "description": ""}]
     elif case == "a-trigger-intake-would-refuse":
         triggers = [{**SCHEDULE, "enabled": False}]
+    elif case == "one-refused-the-rest-move":
+        triggers = [{**SCHEDULE, "enabled": False}, OTHER]
+    elif case == "a-1.4-cron-out-of-range-stays":
+        triggers = [{**SCHEDULE, "cron": "0 24 * * *"}, OTHER]
     elif case == "an-intake-that-does-not-load":
         intake["interval_s"] = "often"
     elif case == "nothing-to-move":
@@ -68,9 +79,17 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     elif case == "nothing-to-move":
         assert lines == []
         assert {n: (files / n).stat().st_ino for n in before} == before  # not replaced
+    elif case in ("one-refused-the-rest-move", "a-1.4-cron-out-of-range-stays"):
+        assert after["policy.yaml"]["triggers"] == triggers[:1]
+        assert after["intake.yaml"]["schedules"] == [OTHER]
+        why = "triggers.0.enabled" if case.startswith("one") else "hour 24 is outside 0-23"
+        assert why in lines[1] and "next start moves them" in lines[1]
     else:
         assert "triggers" not in after["policy.yaml"]
-        assert after["intake.yaml"]["schedules"] == [SCHEDULE, OTHER]
+        schedules = [{"description": ""} if case.endswith("settings") else {}, {}]
+        assert after["intake.yaml"]["schedules"] == [
+            {**s, **extra} for s, extra in zip([SCHEDULE, OTHER], schedules, strict=True)
+        ]
         assert (files / "intake.yaml").read_text().startswith("# mine\n")
     if case == "symlinked-files":
         assert (home / "intake.yaml").is_symlink() and (home / "policy.yaml").is_symlink()
@@ -80,8 +99,9 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
 def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_path, where):
     """A 1.x `intake.yaml` `max_concurrent` and `policy.yaml` `triggers:` move
     to the file 2.0 reads them from, once, at the first start, each file
-    keeping its comments: in the home the start renames, and just the same in
-    one an operator points `KRAFT_CONFIG_DIR` at, which is never renamed."""
+    keeping its comments, and a moved trigger its own (R12D-03): in the home
+    the start renames, and just the same in one an operator points
+    `KRAFT_CONFIG_DIR` at, which is never renamed."""
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
     old = tmp_path / ("elsewhere" if where == "pointed-by-hand" else "home/templates")
     if where == "pointed-by-hand":
@@ -91,7 +111,9 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
     (old / "intake.yaml").write_text("# pickup\nenabled: false\nmax_concurrent: 1  # one\n")
     (old / "policy.yaml").write_text(
         "# caps\ndefault: {attempts: 1, wall_clock_s: 1}\n"
-        "triggers:\n  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}\n"
+        "triggers:\n  # the weekly one\n"
+        "  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}  # weekly\n"
+        "# the end\n"
     )
 
     home = cli.admin.prepare_home()
@@ -107,6 +129,12 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
     ]
     assert (home / "intake.yaml").read_text().startswith("# pickup\n")
     assert (home / "policy.yaml").read_text().startswith("# caps\n")
+    lines = (home / "intake.yaml").read_text().splitlines()
+    assert any("title: t}" in line and line.endswith("# weekly") for line in lines)
+    # The line above it too, and the list's indent as policy.yaml had it.
+    assert lines[lines.index("  # the weekly one") + 1].startswith("  - {cron:")
+    assert "# the end" not in (home / "intake.yaml").read_text()
+    assert "weekly" not in (home / "policy.yaml").read_text()
 
 
 @pytest.mark.parametrize(
@@ -114,6 +142,7 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
     [
         ("default", "config", "link"),
         ("templates-variable-at-the-default", "templates", "link"),
+        ("config-variable-at-the-default", "config", "link"),
         ("config-made-by-hand", "config", "link"),
         ("config-made-by-hand-with-a-clash", "config", "dir"),
         ("0x-update-interrupted", "config", "link"),
@@ -136,7 +165,8 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
     is read where it is. A `config/` beside a `templates/` the variable names
     stops the start: a merge could strand a clash where it reads. A
     `KRAFT_CONFIG_DIR` is a 2.0 operator's own choice, never moved or refused,
-    even naming `templates/` beside a `config/` (the e2e server's layout)."""
+    even naming `templates/` beside a `config/` (the e2e server's layout);
+    one naming the default `config/` is the default (R12c-04)."""
     bundled = tmp_path / "_bundled" / "config"
     bundled.mkdir(parents=True)
     (bundled / "library.yaml").write_text("tasks: {}\n")
@@ -146,6 +176,7 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
     elsewhere = tmp_path / "elsewhere"
     named_2 = {
         "pointed-by-hand": elsewhere,
+        "config-variable-at-the-default": h / "config",
         "config-variable-at-templates-beside-config": h / "templates",
     }
     monkeypatch.setenv("KRAFT_CONFIG_DIR", str(named_2.get(case, "")))
@@ -195,3 +226,34 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
         assert "merge them by hand" in capsys.readouterr().err
     else:
         assert (old / "access.yaml").read_text() == "port: 9999\n"
+
+
+def test_the_first_start_binds_the_address_of_the_home_it_finishes_moving(monkeypatch, tmp_path):
+    """The bind is read before the home moves, to probe the port; a 0.x
+    update stopped between its renames leaves no home under either name until
+    the start finishes it, so the start reads `access.yaml` again after the
+    move and binds that address, not the default (R12c-01)."""
+    bundled = tmp_path / "_bundled" / "config"
+    bundled.mkdir(parents=True)
+    (bundled / "library.yaml").write_text("tasks: {}\n")
+    monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
+    home = tmp_path / "home"
+    for name in ("KRAFT_CONFIG_DIR", "KRAFT_TEMPLATES_DIR", "KRAFT_HOST", "KRAFT_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KRAFT_HOME", str(home))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
+    staged = home / "templates.seeding"
+    staged.mkdir(parents=True)
+    (staged / "library.yaml").write_text("tasks: {}\n")
+    (staged / "access.yaml").write_text("port: 8927\n")
+    (staged / cli.admin.UPDATE_STAGED).write_text("templates.pre-v1-x\n")
+    bound = []
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: bound.append(self.config.port)
+    )
+
+    cli.admin._serve()
+
+    assert bound == [8927]
+    assert (paths.default_config_dir() / "access.yaml").read_text() == "port: 8927\n"

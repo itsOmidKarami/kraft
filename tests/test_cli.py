@@ -659,15 +659,23 @@ def test_config_dir_reads_the_new_variable_then_the_1x_one(monkeypatch, tmp_path
 @pytest.mark.parametrize("marker", ["library.yaml", "registry.yaml"], ids=["1.x", "0.x"])
 def test_config_dir_reads_a_home_not_yet_renamed_under_its_old_name(monkeypatch, tmp_path, marker):
     """Between the package upgrade and the first 2.0 start, `kraft admin
-    doctor` or `kraft view list` must find the 1.x home where it still is,
-    not report an empty `config/` beside it."""
+    doctor`, `kraft view list` and the start's bind address must find the 1.x
+    home where it still is, not report an empty `config/` beside it -- one
+    made by hand first included (`config/harnesses`, R12c-01): it holds no
+    library until the start merges the home in."""
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
     monkeypatch.delenv("KRAFT_CONFIG_DIR", raising=False)
     monkeypatch.delenv("KRAFT_TEMPLATES_DIR", raising=False)
     (tmp_path / "templates").mkdir()
     (tmp_path / "templates" / marker).write_text("")
     assert paths.config_dir() == tmp_path / "templates"
-    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "harnesses").mkdir(parents=True)
+    assert paths.config_dir() == tmp_path / "templates"
+    # Naming the default itself is the default (R12c-04).
+    assert (
+        paths.config_dir({"KRAFT_CONFIG_DIR": str(tmp_path / "config")}) == tmp_path / "templates"
+    )
+    (tmp_path / "config" / "library.yaml").write_text("")
     assert paths.config_dir() == tmp_path / "config"
 
 

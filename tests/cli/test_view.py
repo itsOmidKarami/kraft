@@ -101,3 +101,22 @@ def test_show_names_raise_budget_on_a_stop_it_can_raise(monkeypatch, capsys, sto
     assert "chain_definition" not in out
     cli.main(["view", "show", "w1", "--json"])
     assert json.loads(capsys.readouterr().out)["stop"] == stop
+
+
+def test_show_prints_a_title_1_4_stored_as_plain_text(monkeypatch, capsys):
+    """R12F-08: `view list` drops a 1.4-stored title's controls, and `view
+    show` printed them to the terminal: an escape and a bidi override."""
+    from kraft.client import transport
+
+    title = "first line\nsecond\tline \x1b[31mred\u202eevil"
+
+    async def get(path, **_):
+        return {"id": "w1", "status": "paused", "title": title, "chain_definition": {"nodes": []}}
+
+    monkeypatch.setattr(transport, "_get", get)
+    cli.main(["view", "show", "w1"])
+    out = capsys.readouterr().out
+    assert [c for c in out if c in "\x1b\u202e\t"] == []
+    assert "second line [31mredevil" in out
+    cli.main(["view", "show", "w1", "--json"])
+    assert json.loads(capsys.readouterr().out)["title"] == title

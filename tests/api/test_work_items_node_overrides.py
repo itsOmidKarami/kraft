@@ -1,5 +1,6 @@
-"""`PATCH /work-items/{id}` `node_overrides` on a started node: locked, except
-for the repair a stored-model stop names. A sibling of test_work_items.py."""
+"""`PATCH /work-items/{id}` overrides: `agent_overrides`, which a started
+item takes too, and `node_overrides` on a started node, locked except for the
+repair a stored-model stop names. A sibling of test_work_items.py."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from support.api import _paused
 from support.harness import v1_chain
 
 from kraft import overrides, store
@@ -107,3 +109,53 @@ def test_a_started_node_stays_locked_for_anything_else(client, repo, stored, fie
 
     assert r.status_code == 409
     assert "has started; its config is locked" in r.json()["detail"]
+
+
+def test_patch_sets_agent_overrides_and_records_an_event(client, repo):
+    wid = _paused(client, repo)
+
+    r = client.patch(
+        f"/api/work-items/{wid}",
+        json={"agent_overrides": {"model": "opus", "effort": "high"}},
+    )
+    assert r.status_code == 200, r.text
+
+    evs = client.get(f"/api/work-items/{wid}/events").json()
+    changed = [e for e in evs if e["type"] == "agent_overrides_changed"]
+    assert [e["payload"] for e in changed] == [{"overrides": {"model": "opus", "effort": "high"}}]
+
+
+def test_patch_clears_agent_overrides_with_an_empty_object(client, repo):
+    wid = _paused(client, repo)
+    client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "opus"}})
+
+    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {}})
+    assert r.status_code == 200, r.text
+
+    row = client.get(f"/api/work-items/{wid}").json()
+    assert row["agent_overrides"] is None
+
+
+def test_patch_rejects_invalid_agent_overrides_with_422(client, repo):
+    wid = _paused(client, repo)
+
+    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"effort": "turbo"}})
+    assert r.status_code == 422, r.text
+
+
+def test_patch_accepts_agent_overrides_on_a_started_or_paused_item(client, repo):
+    """Unlike chain_template, a model/effort dial has no current_node_id
+    restriction -- it is the door to make a stuck item cheaper before its
+    next retry."""
+    wid = _paused(client, repo)
+    db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE work_items SET current_node_id = 'env_setup', status = 'paused' WHERE id = ?",
+        (wid,),
+    )
+    conn.commit()
+    conn.close()
+
+    r = client.patch(f"/api/work-items/{wid}", json={"agent_overrides": {"model": "haiku"}})
+    assert r.status_code == 200, r.text
