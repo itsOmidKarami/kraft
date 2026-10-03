@@ -220,19 +220,29 @@ other: 1
 
 
 @pytest.mark.parametrize(
-    "removed",
-    [(0,), (1,), (2,), (0, 1), (0, 2), (1, 2)],
-    ids=["first", "middle", "last", "first-two", "first-and-last", "last-two"],
+    ("removed", "key"),
+    [
+        pytest.param((0,), "repos:", id="first"),
+        pytest.param((1,), "repos:", id="middle"),
+        pytest.param((2,), "repos:", id="last"),
+        pytest.param((0, 1), "repos:", id="first-two"),
+        pytest.param((0, 2), "repos:", id="first-and-last"),
+        pytest.param((1, 2), "repos:", id="last-two"),
+        pytest.param((0,), "repos:   # my repos", id="first-under-a-commented-key"),
+    ],
 )
-def test_a_removed_entrys_own_comment_goes_with_it_and_no_other(removed):
+def test_a_removed_entrys_own_comment_goes_with_it_and_no_other(removed, key):
     """ruamel keeps a comment line above an entry on the entry before it, so
     removing one took the next entry's comment and left its own labelling
-    the next entry (R12 review P2-3)."""
-    data = yaml.safe_load(ENTRIES)
+    the next entry (R12 review P2-3). The first entry's is the list's, or,
+    under a key with its own comment, on that comment's token."""
+    text = ENTRIES.replace("repos:", key, 1)
+    data = yaml.safe_load(text)
     kept = [e for i, e in enumerate(data["repos"]) if i not in removed]
-    out = preserve.rewrite(ENTRIES, {**data, "repos": kept})
+    out = preserve.rewrite(text, {**data, "repos": kept})
+    assert out.startswith(f"{key}\n")
     assert yaml.safe_load(out) == {**data, "repos": kept}
-    labels = [line.strip() for line in out.splitlines() if line.lstrip().startswith("#")]
+    labels = [line.strip() for line in out.splitlines()[1:] if line.lstrip().startswith("#")]
     names = {"/a": "# A: the api", "/b": "# B: the web", "/c": "# C: the cli"}
     assert labels == [names[e["path"]] for e in kept] + ["# after the list"]
     for entry in kept:

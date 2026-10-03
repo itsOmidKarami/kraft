@@ -322,8 +322,11 @@ def _drop_removed_entries_comments(seq: CommentedSeq, removed: set[int]) -> None
     removed entry's own leading comment is dropped with it, and the one it
     held for the entry after it moves to the kept entry now before that one,
     or above the list when none is. The first entry's own is the list's
-    (`seq.ca.comment`, shared with the parent key)."""
+    (`seq.ca.comment`, shared with the parent key). When the key has an
+    end-of-line comment (`repos:   # my repos`), it is the lines after that
+    comment on the key's own token."""
     lead = seq.ca.comment[1] if seq.ca.comment and seq.ca.comment[1] else []
+    on_key = seq.ca.comment[0] if seq.ca.comment and not lead else None
     kept_before = None
     for index, node in enumerate(seq):
         if id(node) not in removed:
@@ -342,6 +345,8 @@ def _drop_removed_entries_comments(seq: CommentedSeq, removed: set[int]) -> None
             lead[0].value = block.lstrip(" ") if block else ""
             for token in lead[1:]:
                 token.value = ""
+        elif on_key is not None:
+            on_key.value = on_key.value.partition("\n")[0] + "\n" + block
         elif block:
             lead = [CommentToken(block, CommentMark(0), None)]
             seq.ca.comment = [None, lead]
