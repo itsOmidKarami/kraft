@@ -41,11 +41,13 @@ from __future__ import annotations
 import functools
 import importlib.resources
 import json
+import math
 import re
 import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 
 
@@ -1251,3 +1253,30 @@ def read(log_path: Path, result_path: Path, reader: str | None = None) -> Usage 
     if reader is None:
         return None
     return from_envelope(READERS[reader].envelope(log_path))
+
+
+def usd(n: float) -> str:
+    """Dollars as the web UI's budget meter prints them (`format.ts` `usd`):
+    cents from $1 up, a tenth of a cent under it, so a stop under a dollar
+    names the same number as the meter beside it. Rounded half up on the
+    float's exact value, as JavaScript's `toFixed` does: Python's own format
+    rounds an exact binary tie to even, so $0.0625 would read $0.062 here and
+    $0.063 on the meter."""
+    if not math.isfinite(n):
+        return f"${n}"
+    step = Decimal("0.01") if n >= 1 else Decimal("0.001")
+    # Enough digits for any finite float: the default 28 refuses a cap of 1e26 and up.
+    with localcontext(prec=400):
+        return f"${Decimal(n).quantize(step, rounding=ROUND_HALF_UP)}"
+
+
+def cap_usd(n: float) -> str:
+    """A dollar cap as it was set: `usd`'s digits, and more where the cap has
+    more, so a cap of $0.0001 never reads "$0.000" (as if it were zero) and
+    one just raised to $0.0705 never reads as the $0.070 it replaced."""
+    if not math.isfinite(n):
+        return f"${n}"
+    exact = Decimal(repr(n))
+    if exact.as_tuple().exponent < (-2 if n >= 1 else -3):
+        return f"${exact:f}"
+    return usd(n)

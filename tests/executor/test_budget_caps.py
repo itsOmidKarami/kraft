@@ -485,14 +485,25 @@ def test_no_other_budget_stop_names_a_limit(breach):
         # An exact binary tie: toFixed(3) gives 0.063, Python's half-even format 0.062.
         (
             WorkItemBreach(scope="work_item", spent_usd=0.0625, cap_usd=0.0625),
-            "$0.063 spent on this work item, cap $0.063",
+            "$0.063 spent on this work item, cap $0.0625",
+        ),
+        # A cap is named as it was set: never "$0.000", as if it were zero,
+        # nor the $0.070 a raise to $0.0705 replaced.
+        (
+            WorkItemBreach(scope="work_item", spent_usd=0.035, cap_usd=0.0001),
+            "$0.035 spent on this work item, cap $0.0001.",
+        ),
+        (
+            UsdBreach(scope="usd", path="", spent_usd=0.105, cap_usd=0.0705, unknown_launches=0),
+            "$0.105 spent in the work item, cap $0.0705.",
         ),
     ],
-    ids=["item-cap", "budget_usd", "daily", "half-up-tie"],
+    ids=["item-cap", "budget_usd", "daily", "half-up-tie", "tiny-cap", "raised-cap"],
 )
 def test_a_budget_stop_names_dollars_as_the_meter_prints_them(breach, said):
     """Under a dollar the web UI's meter prints a tenth of a cent ($0.035), so
-    the stop's reason beside it does too, never a rounded $0.04."""
+    the stop's reason beside it does too, never a rounded $0.04. A cap is
+    named with as many digits as it was set with."""
     assert said in stops.budget_reason(breach)
 
 

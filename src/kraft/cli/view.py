@@ -79,7 +79,8 @@ def _usage_text(u: dict) -> str:
         f"{u['tokens_out']:,} out",
     ]
     if u.get("cost_usd"):
-        cost = f"${u['cost_usd']:.2f}"
+        # As the stop reasons and the web UI's meter print it (`format.ts` `usd`).
+        cost = usage.usd(u["cost_usd"])
         if u.get("cost_estimated"):
             parts.append(f"~{cost} (est.)")
         else:
