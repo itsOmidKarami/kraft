@@ -14,14 +14,15 @@ from collections.abc import Callable, Mapping, Sequence
 import yaml
 
 from kraft.api import config_check, deps
-from kraft.drafts import authored, resolve
+from kraft.drafts import authored, preserve, resolve
 from kraft.drafts.ops import OpError
 from kraft.templates.library import TemplateIssue
 
 
 class ConfigDraft:
     """One request's working copy of an area's files: each file's mapping as
-    written, dumped back whole (comments dropped) when an op touched it."""
+    written, written back over the file's own text when an op touched it, so
+    the comments stay (`preserve.rewrite`)."""
 
     def __init__(
         self, st, key: str, files: Mapping[str, str | None], *, exists: bool, names: Sequence[str]
@@ -53,8 +54,10 @@ class ConfigDraft:
         return self._maps[name]
 
     def finish(self) -> dict[str, str | None]:
+        """The files, each dirty one rewritten over its own text so the
+        comments and layout an op did not touch survive (`preserve.rewrite`)."""
         for name in self.dirty:
-            self.files[name] = authored.dump(self._maps[name])
+            self.files[name] = preserve.rewrite(self.files.get(name), self._maps[name])
         return self.files
 
 

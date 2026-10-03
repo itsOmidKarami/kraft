@@ -67,6 +67,7 @@ dependencies = [
     # The Kraft CA (P4b egress on VM runtimes; P6 credential injection later):
     # the extensions VERIFY_X509_STRICT needs, not a shell-out to openssl.
     "cryptography>=42",
+    "ruamel-yaml>=0.18",
 ]
 
 [project.optional-dependencies]
