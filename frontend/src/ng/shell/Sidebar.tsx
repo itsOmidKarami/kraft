@@ -9,12 +9,12 @@ import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
 import { useGroupCount } from "../board/counts";
-import { restartPending, restartWords, useHealth } from "./health";
+import { request } from "../http";
+import type { UpdateState } from "../settings/AboutPage";
+import { restartPending, useHealth } from "./health";
 
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
-
-export { restartPending };
 
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const [mode, setMode] = useState<SidebarMode>(currentSidebar);
@@ -24,6 +24,12 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const health = useHealth();
   const drafts = useDraftCounts();
   const location = useLocation();
+  // A newer release on the feed, read once; About has the rest.
+  const [behind, setBehind] = useState(false);
+  useEffect(() => {
+    request<UpdateState>("/update").then((r) => setBehind(r.status === 200 && r.body.behind === true), () => {});
+  }, []);
+  const update = behind || restartPending(health);
 
   // Unpinning only changes the mode: an unpinned sidebar is shown while the
   // pointer is over it (or keyboard focus is in it) and hides when it leaves,
@@ -74,7 +80,6 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
     );
   };
 
-  const bind = health ? `${health.bind ?? ""}${health.port != null ? `:${health.port}` : ""}` : "";
   const SearchIcon = NAV_ICON.search;
 
   return (
@@ -110,12 +115,10 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           {routesIn("settings").map(row)}
         </nav>
         <div className="ng-side-foot">
-          <NavLink to="/settings/about" end className="ng-side-meta ng-side-label">
-            {health ? `${bind}${health.version ? ` · v${health.version}` : ""}` : ""}
-          </NavLink>
-          {restartPending(health) && (
-            <NavLink to="/settings/about" end className="ng-side-meta ng-side-label is-warn">
-              {restartWords(health)}
+          {health?.version && (
+            <NavLink to="/settings/about" end className="ng-side-meta" aria-label={`Kraft v${health.version}${update ? ", update available" : ""}`}>
+              v{health.version}
+              {update && <span className="ng-side-update"><span className="ng-side-dot" />update</span>}
             </NavLink>
           )}
         </div>

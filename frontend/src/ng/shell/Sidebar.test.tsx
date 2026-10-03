@@ -9,6 +9,7 @@ import { ROUTES } from "./routes";
 import { Shell } from "./Shell";
 import { SIDEBAR_KEY } from "./sidebarPref";
 import * as drafts from "../templates/draft/draftApi";
+import * as http from "../http";
 import { countIn } from "../board/counts";
 
 const ITEM: WorkItem = {
@@ -40,6 +41,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, "getHealth").mockResolvedValue(HEALTH as never);
   vi.spyOn(drafts, "listDrafts").mockResolvedValue({ status: 200, body: [] });
+  vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { installed: "0.9.4", latest: "v0.9.4", channel: "stable", behind: false, checked_at: null } });
   useStore.setState({ workItems: {}, sessionsByItem: {}, eventsByItem: {}, connection: "open" } as never);
 });
 
@@ -56,7 +58,7 @@ describe("ng Sidebar", () => {
     expect(within(nav()).getByText("Settings")).toBeInTheDocument();
     expect(within(nav()).getByRole("link", { name: "Library" })).toHaveAttribute("aria-current", "page");
     expect(within(nav()).getByRole("link", { name: "Chains" })).not.toHaveAttribute("aria-current");
-    await screen.findByText("127.0.0.1:8765 · v0.9.4");
+    await screen.findByRole("link", { name: "Kraft v0.9.4" });
   });
 
   it("prints Search's shortcut for the platform: Ctrl+K off a Mac, ⌘K on one", async () => {
@@ -205,41 +207,30 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("img", { name: word })).toBeInTheDocument();
   });
 
-  it("reads the footer from /health and links About", async () => {
+  it("shows the version alone in the footer, linking About", async () => {
     mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.queryByRole("link", { name: /Current UI/ })).toBeNull();
-    expect(screen.queryByText(/restart to finish the update/)).toBeNull();
+    const foot = await screen.findByRole("link", { name: "Kraft v0.9.4" });
+    expect(foot).toHaveAttribute("href", "/settings/about");
+    expect(foot).toHaveTextContent(/^v0\.9\.4$/);
+    expect(screen.queryByText(/127\.0\.0\.1|restart|installed/)).toBeNull();
   });
 
-  it("says to restart when the version on disk is not the one this server runs", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, installed: "0.9.5" } as never);
+  it.each<[string, object, boolean]>([
+    ["the feed has a newer release", HEALTH, true],
+    ["a newer release is installed and waits on a restart", { ...HEALTH, installed: "0.9.5" }, false],
+    ["the server is too old to report what is installed (R10c-01)", (({ installed: _, ...h }) => h)(HEALTH), false],
+    ["an older release is installed (R10c-03)", { ...HEALTH, installed: "0.9.3" }, false],
+  ])("marks an update in the footer when %s", async (_, health, behind) => {
+    vi.mocked(api.getHealth).mockResolvedValue(health as never);
+    vi.mocked(http.request).mockResolvedValue({ status: 200, body: { installed: "0.9.4", latest: "v0.9.9", channel: "stable", behind, checked_at: null } });
     mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "v0.9.5 installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.getByRole("link", { name: "127.0.0.1:8765 · v0.9.4" })).toBeInTheDocument();
-  });
-});
-
-describe("ng Sidebar, against a server older than its interface (R10c-01)", () => {
-  it("says to restart when the server is too old to report what is installed", async () => {
-    const { installed: _, ...old } = HEALTH;
-    vi.mocked(api.getHealth).mockResolvedValue(old as never);
-    mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "a newer Kraft is installed: restart to finish the update" })).toHaveAttribute("href", "/settings/about");
-  });
-});
-
-describe("ng Sidebar, with an older release installed (R10c-03)", () => {
-  it("does not call a rollback an update to finish", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, installed: "0.9.3" } as never);
-    mount("/templates/chains");
-    expect(await screen.findByRole("link", { name: "v0.9.3 installed, older than this server: see About" })).toHaveAttribute("href", "/settings/about");
-    expect(screen.queryByText(/restart to finish the update/)).toBeNull();
+    const foot = await screen.findByRole("link", { name: "Kraft v0.9.4, update available" });
+    expect(foot).toHaveAttribute("href", "/settings/about");
+    expect(foot).toHaveTextContent(/^v0\.9\.4update$/);
   });
 });
 
-describe("ng Sidebar draft dots", () => {
-  const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
+describe("ng Sidebar draft dots", () => {  const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
 
   it("marks an area with an open draft and counts its problems, from GET /drafts", async () => {
     vi.mocked(drafts.listDrafts).mockResolvedValue({ status: 200, body: [draft("chains", "default", 0), draft("chains", "broken", 2), draft("library", "library", 0)] });
