@@ -629,11 +629,19 @@ def _check_title(title: str) -> None:
     show the item as a bare dash."""
     if not title.strip():
         raise HTTPException(422, "title cannot be empty")
+    _check_one_line(title)
     if len(title) > beads_mod.MAX_TITLE:
         raise HTTPException(
             422,
             f"title is {len(title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
+
+
+def _check_one_line(title: str) -> None:
+    """A title is one line: a line break in it broke `kraft view list`'s
+    table, the row wrapping under the ID column."""
+    if len(title.splitlines()) > 1:
+        raise HTTPException(422, "the title is one line: put the rest in the description instead")
 
 
 class TriggerBody(BaseModel):
@@ -934,6 +942,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
+    if body.title is not None:
+        _check_one_line(body.title)
 
     if body.node_overrides is not None:
         _validate_node_overrides(st, row, body.node_overrides)
