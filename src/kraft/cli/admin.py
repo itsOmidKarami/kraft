@@ -229,6 +229,10 @@ def adopt_pre_2_home(in_use: Path) -> bool:
     refuses is reported and the home read where it is (`paths.config_dir`).
     The keys 2.0 moved between files are `carry_moved_keys`'s, run by the
     same start."""
+    if os.environ.get("KRAFT_CONFIG_DIR"):
+        # A 2.0 name, set on purpose: the directory it names is the
+        # operator's, never renamed, merged into or refused, wherever it is.
+        return False
     home = default_config_dir()
     old = home.with_name("templates")
     # A 0.x update interrupted between its two renames left the home staged

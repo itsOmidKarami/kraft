@@ -158,9 +158,9 @@ def main() -> int:
     # `templates_dir/harnesses` while the daemon read `~/.kraft`, and set (a
     # developer's shell) seeded into the operator's real `~/.kraft` -- writing
     # fixture overlays into a live install (Kraft-261at) *and* diverging from
-    # CI in the opposite direction. `tmp/templates` is where
-    # `fake_templates_dir(tmp, ...)` puts the config anyway, so pinning
-    # `KRAFT_HOME=tmp` makes the two coincide by construction.
+    # CI in the opposite direction. The config is built at `tmp/config`, the
+    # 2.0 default under `KRAFT_HOME=tmp`, so the two coincide by construction
+    # and the daemon finds it the way an install does, with no variable.
     os.environ["KRAFT_HOME"] = str(tmp)
     # .engineering/ content so the indexer has something to find: the search
     # overlay spec needs real documents, not just a failing test (Kraft-bj9.6).
@@ -180,13 +180,15 @@ def main() -> int:
     # the worktree), and only fake-claude.sh honours it. Same binary also does
     # fake_agent.py's calc.py `fix` trick, so one command covers the
     # implementer too.
-    templates = fake_templates_dir(tmp, str(REPO / "fixtures" / "fake-claude.sh"))
+    fake_templates_dir(tmp, str(REPO / "fixtures" / "fake-claude.sh"), name="config")
 
     env = {
         **os.environ,
         "KRAFT_PORT": PORT,
         "KRAFT_RUN_DIR": str(tmp / "run"),
-        "KRAFT_CONFIG_DIR": str(templates),
+        # Blank, not set: a developer's shell must not point the daemon elsewhere.
+        "KRAFT_CONFIG_DIR": "",
+        "KRAFT_TEMPLATES_DIR": "",
         "KRAFT_BD_CWD": str(tracker),
         "KRAFT_FRONTEND_DIST": str(dist),
         "KRAFT_FAKE_CLAUDE": "fix",

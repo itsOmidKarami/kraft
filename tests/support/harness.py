@@ -245,14 +245,14 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
     return repo
 
 
-def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
+def fake_templates_dir(tmp_path: Path, agent_command: str, name: str = "templates") -> Path:
     """A throwaway templates dir holding the shipped V1 layout -- `library.yaml`,
     `chains/`, `harnesses.yaml` and `policy.yaml` -- with every agent profile
     launching `agent_command` (`seed_v1_library`). The product seed ships no
     legacy `steering/*.md` directory to migrate (Kraft-c82sp: the never-signal
     rule is now the opt-in `never-signal-processes-you-didnt-start` library
     profile, unselected by default), so there is none to copy in."""
-    d = tmp_path / "templates"
+    d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "config" / "policy.yaml", d / "policy.yaml")
     seed_v1_library(d, agent_command=agent_command)

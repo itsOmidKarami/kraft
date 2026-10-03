@@ -121,6 +121,7 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
         ("pointed-by-hand", "elsewhere", "dir"),
         ("a-2-0-home-beside-it", "config", "dir"),
         ("templates-variable-with-a-config-made-by-hand", "refused", "dir"),
+        ("config-variable-at-templates-beside-config", "templates", "dir"),
     ],
 )
 def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
@@ -133,7 +134,9 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
     it lacks; a clash stays put for the operator. A directory pointed at
     elsewhere, or a 2.0 home already there, is not touched; a refused rename
     is read where it is. A `config/` beside a `templates/` the variable names
-    stops the start: a merge could strand a clash where it reads."""
+    stops the start: a merge could strand a clash where it reads. A
+    `KRAFT_CONFIG_DIR` is a 2.0 operator's own choice, never moved or refused,
+    even naming `templates/` beside a `config/` (the e2e server's layout)."""
     bundled = tmp_path / "_bundled" / "config"
     bundled.mkdir(parents=True)
     (bundled / "library.yaml").write_text("tasks: {}\n")
@@ -141,7 +144,11 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
     h = tmp_path / "home"
     monkeypatch.setenv("KRAFT_HOME", str(h))
     elsewhere = tmp_path / "elsewhere"
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(elsewhere) if case == "pointed-by-hand" else "")
+    named_2 = {
+        "pointed-by-hand": elsewhere,
+        "config-variable-at-templates-beside-config": h / "templates",
+    }
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(named_2.get(case, "")))
     named = str(h / "templates") if case.startswith("templates-variable") else ""
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", named)
     old = h / "templates"
@@ -153,7 +160,7 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
         "access.yaml": "port: 9999\n",
     }.items():
         (old / name).write_text(text)
-    if case.startswith("config-made-by-hand") or case.endswith("config-made-by-hand"):
+    if "config-made-by-hand" in case or case.endswith("beside-config"):
         (h / "config" / "harnesses").mkdir(parents=True)
         if case.endswith("clash"):
             (h / "config" / "harnesses" / "theirs.yaml").write_text("y: 2\n")
