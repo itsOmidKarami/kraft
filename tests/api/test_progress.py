@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from support.api import _force_node
-from support.harness import _git
+from support.harness import git
 
 from kraft import events
 from kraft.config import git_read
@@ -35,10 +35,10 @@ def _worktree(wid: str, plan: str | None = PLAN) -> Path:
     """The item's worktree as `ensure_worktree` would leave it, plan artifact included."""
     wt = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
     wt.mkdir(parents=True, exist_ok=True)
-    _git(wt, "init", "-q", "-b", "main")
-    _git(wt, "config", "user.email", "t@t")
-    _git(wt, "config", "user.name", "t")
-    _git(wt, "commit", "-q", "--allow-empty", "-m", "base")
+    git(wt, "init", "-q", "-b", "main")
+    git(wt, "config", "user.email", "t@t")
+    git(wt, "config", "user.name", "t")
+    git(wt, "commit", "-q", "--allow-empty", "-m", "base")
     if plan is not None:
         doc = wt / ".engineering" / "plans" / f"{wid}.md"
         doc.parent.mkdir(parents=True)
@@ -118,7 +118,7 @@ def test_a_done_marked_task_does_not_drift_progress_through_the_api(client, repo
     wid = _paused_item(client, repo)
     wt = _worktree(wid, plan=plan)
     _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
-    _git(wt, "commit", "-q", "--allow-empty", "-m", "feat: Task 1: parse")
+    git(wt, "commit", "-q", "--allow-empty", "-m", "feat: Task 1: parse")
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
     _force_node(wid, "implementation", "active")
 
@@ -150,9 +150,9 @@ def test_commits_naming_a_task_move_progress_without_a_report(client, repo):
     wid = _paused_item(client, repo)
     wt = _worktree(wid)
     _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
-    _git(wt, "commit", "-q", "--allow-empty", "-m", "Task 2: from an earlier run")
+    git(wt, "commit", "-q", "--allow-empty", "-m", "Task 2: from an earlier run")
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
-    _git(wt, "commit", "-q", "--allow-empty", "-m", "feat: the parser (task 1)")
+    git(wt, "commit", "-q", "--allow-empty", "-m", "feat: the parser (task 1)")
     _force_node(wid, "implementation", "active")
 
     # Task 2 is the highest committed, from either run, so task 3 is current.
@@ -167,7 +167,7 @@ def test_a_bounced_run_with_no_reports_keeps_the_committed_progress(client, repo
     _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
     for n in (1, 2, 3):
-        _git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
+        git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))  # the bounce
     _force_node(wid, "implementation", "active")
 
@@ -276,7 +276,7 @@ def test_progress_is_null_on_a_rework_run_after_a_gate_rejection(client, repo):
     _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
     for n in (1, 2, 3):
-        _git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
+        git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
     conn = _db()
     try:
         events.append(conn, wid, "node_completed", {"node_id": "implementation"})

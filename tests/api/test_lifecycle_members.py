@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from support.api import _poll_events, _set_status
-from support.harness import _git, make_repo, make_repo_with_submodule
+from support.harness import git, make_repo, make_repo_with_submodule
 
 from kraft.adapters.forge.git import PUSHED_REFS
 from kraft.api.routes import lifecycle
@@ -37,7 +37,7 @@ def test_abandon_prunes_each_members_worktree_and_branch(client, tmp_path):
     assert worktree.is_dir() and worktrees() == 2, "fixture never made a member worktree"
     record = f"{PUSHED_REFS}/{branch}"
     for repo in (root, member_repo):
-        _git(repo, "update-ref", record, "HEAD")
+        git(repo, "update-ref", record, "HEAD")
     _set_status(wid, "paused")
 
     r = client.post(f"/api/work-items/{wid}/abandon")
@@ -70,8 +70,8 @@ def test_archive_keeps_a_members_branch_only_it_holds_commits_on(client, tmp_pat
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
     tracking = f"refs/remotes/origin/{branch}"
     for repo in (root, member_repo):
-        _git(repo, "update-ref", tracking, f"refs/heads/{branch}")
-    _git(worktree / "libs" / "a", "commit", "--allow-empty", "-m", "member work")
+        git(repo, "update-ref", tracking, f"refs/heads/{branch}")
+    git(worktree / "libs" / "a", "commit", "--allow-empty", "-m", "member work")
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
 
     r = client.post(f"/api/work-items/{wid}/archive")
@@ -90,7 +90,7 @@ async def test_a_member_repository_gone_before_abandon_leaves_the_rest_of_the_te
     since must not raise out and skip the refs and attachments after it."""
     repo = make_repo(tmp_path)
     worktree = tmp_path / "wt"
-    _git(repo, "worktree", "add", "-q", "-b", "kraft/w1", str(worktree))
+    git(repo, "worktree", "add", "-q", "-b", "kraft/w1", str(worktree))
     dropped = []
     monkeypatch.setattr(lifecycle.node_runs, "drop_refs", lambda _r, wid: dropped.append(wid))
 

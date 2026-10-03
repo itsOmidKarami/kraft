@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git
+from support.harness import git
 
 from kraft import builtins as kraft_builtins
 from kraft.config import git_read
@@ -73,7 +73,7 @@ def _hanging_smudge_filter(repo, pids, seconds: float) -> None:
     """The base adds `slow.txt` under a smudge filter that hangs, as an LFS
     filter can: the rebase's checkout of the base hangs in it, holding the
     worktree's `index.lock`."""
-    _git(repo, "config", "filter.slow.smudge", f"sh -c '{wtree.sleep_recorded(pids, seconds)}'")
+    git(repo, "config", "filter.slow.smudge", f"sh -c '{wtree.sleep_recorded(pids, seconds)}'")
     (repo / ".gitattributes").write_text("slow.txt filter=slow\n")
     wtree.commit(repo, "slow.txt", "slow\n", "a filtered file")
 

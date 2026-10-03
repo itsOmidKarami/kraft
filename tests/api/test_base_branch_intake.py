@@ -6,20 +6,19 @@ filed."""
 from __future__ import annotations
 
 import json
-import subprocess
 
 import pytest
-from support.harness import _git, make_repo
+from support.harness import git, make_repo
 
 
 @pytest.fixture
 def repo(tmp_path):
     """A repository whose origin has `main` and `release`."""
     bare = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], check=True)
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(bare))
     repo = make_repo(tmp_path)
-    _git(repo, "remote", "add", "origin", str(bare))
-    _git(repo, "push", "-q", "origin", "main", "main:release")
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "origin", "main", "main:release")
     return repo
 
 

@@ -11,7 +11,7 @@ import asyncio
 import json
 
 import pytest
-from support.harness import _git
+from support.harness import git
 
 from kraft import events
 from kraft.adapters import forge
@@ -210,8 +210,8 @@ async def test_a_new_head_after_a_base_change_asks_for_the_merge_again(run_forge
     fake = await _opened(_Counting(merge_delay=3), repo)
     assert (await run_forge(fake, "merge", "m1", repo=repo, **_MERGE))[0] == "waiting"
     (repo / "rebased.txt").write_text("the new base\n")
-    _git(repo, "add", "rebased.txt")
-    _git(repo, "commit", "-qm", "rebased onto the new base")
+    git(repo, "add", "rebased.txt")
+    git(repo, "commit", "-qm", "rebased onto the new base")
     await run_forge.database.write(lambda c: events.append(c, "w1", "base_change_restart", {}))
     assert (await run_forge(fake, "ci_poll", "c1", repo=repo))[0] == "done"
 

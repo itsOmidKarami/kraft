@@ -5,10 +5,10 @@ nothing else runs it except CI on a real pull request."""
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 from pathlib import Path
 
 import pytest
+from support.harness import commit_all, git
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "dev" / "check_removals.py"
 
@@ -122,18 +122,6 @@ def test_a_deleted_files_tests_are_declared_by_its_path(cr):
     assert cr.undeclared(removed, deleted, set(), body) == {"tests": [], "requirements": []}
 
 
-def _git(cwd, *args):
-    return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-
-def _commit_all(repo, message):
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", message)
-    return _git(repo, "rev-parse", "HEAD")
-
-
 def test_the_check_fails_a_silent_revert_and_passes_once_it_is_declared(
     cr, repo, tmp_path, monkeypatch, capsys
 ):
@@ -147,14 +135,14 @@ def test_the_check_fails_a_silent_revert_and_passes_once_it_is_declared(
     (repo / "ui" / "A.test.tsx").write_text("it('works', () => {})\n")
     (repo / "a.md").write_text("## REQ dropped\n\ntext\n\n## REQ moved\n\ntext\n")
     (repo / "b.md").write_text("# other\n")
-    base = _commit_all(repo, "base")
-    _git(repo, "checkout", "-qb", "pr")
+    base = commit_all(repo, "base")
+    git(repo, "checkout", "-qb", "pr")
     (repo / "test_kept.py").write_text("def test_stays(): pass\n")
     (repo / "test_renamed.py").write_text("def test_new_name(): pass\n")
     (repo / "ui" / "A.test.tsx").unlink()
     (repo / "a.md").write_text("# nothing left\n")
     (repo / "b.md").write_text("# other\n\n## REQ moved\n\ntext\n")
-    _commit_all(repo, "the PR")
+    commit_all(repo, "the PR")
     monkeypatch.chdir(repo)
     body = tmp_path / "body.md"
 
@@ -181,10 +169,10 @@ def test_a_binary_file_in_the_change_does_not_crash_the_check(cr, repo, tmp_path
     """Every changed file is read at both revisions; an added PNG (PR #233's
     extension icon) is not UTF-8 and must not crash the check."""
     (repo / "a.md").write_text("# doc\n")
-    base = _commit_all(repo, "base")
-    _git(repo, "checkout", "-qb", "pr")
+    base = commit_all(repo, "base")
+    git(repo, "checkout", "-qb", "pr")
     (repo / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff\xfe")
-    _commit_all(repo, "add an icon")
+    commit_all(repo, "add an icon")
     monkeypatch.chdir(repo)
     body = tmp_path / "body.md"
     body.write_text("## Summary\nAn icon.\n")
@@ -222,12 +210,12 @@ def test_a_dropped_parametrize_case_is_a_removal(cr, repo, tmp_path, monkeypatch
         "@pytest.mark.parametrize('v', [1, 2])\n"
         "def test_gone(v): pass\n"
     )
-    base = _commit_all(repo, "base")
-    _git(repo, "checkout", "-qb", "pr")
+    base = commit_all(repo, "base")
+    git(repo, "checkout", "-qb", "pr")
     (repo / "test_cases.py").write_text(
         "import pytest\n@pytest.mark.parametrize('v', [1], ids=['ok'])\ndef test_kept(v): pass\n"
     )
-    _commit_all(repo, "drop cases")
+    commit_all(repo, "drop cases")
     monkeypatch.chdir(repo)
     body = tmp_path / "body.md"
     body.write_text("## Removed tests\n- test_cases.py::test_kept -- not the cases\n")
@@ -262,10 +250,10 @@ def test_a_test_newly_marked_skip_is_a_removal(cr, repo, tmp_path, monkeypatch, 
     """A skipped test pins nothing, the same as a deleted one; a `skipif`
     still runs wherever its condition is false, so it does not count."""
     (repo / "test_skip.py").write_text("import pytest\ndef test_a(): pass\n")
-    base = _commit_all(repo, "base")
-    _git(repo, "checkout", "-qb", "pr")
+    base = commit_all(repo, "base")
+    git(repo, "checkout", "-qb", "pr")
     (repo / "test_skip.py").write_text(f"import pytest\n{after}")
-    _commit_all(repo, "skip it")
+    commit_all(repo, "skip it")
     monkeypatch.chdir(repo)
     removed, _, _ = cr.removals(base, "HEAD")
     assert removed == ({"test_skip.py::test_a"} if skipped else set())
@@ -402,10 +390,10 @@ def test_a_wildcard_must_name_a_replacement_that_exists_at_head(
     (repo / "tests" / "test_n.py").write_text(
         "def test_cluster_one(): pass\ndef test_cluster_two(): pass\n"
     )
-    base = _commit_all(repo, "base")
-    _git(repo, "checkout", "-qb", "pr")
+    base = commit_all(repo, "base")
+    git(repo, "checkout", "-qb", "pr")
     (repo / "tests" / "test_n.py").write_text("def test_folded(): pass\n")
-    _commit_all(repo, "fold the cluster")
+    commit_all(repo, "fold the cluster")
     monkeypatch.chdir(repo)
     body = tmp_path / "body.md"
     pattern = "tests/test_n.py::test_cluster_*"

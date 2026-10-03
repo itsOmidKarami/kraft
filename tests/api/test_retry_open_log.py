@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -12,7 +11,7 @@ from pathlib import Path
 import pytest
 from support.api import WALK_TIMEOUT, _completed_item
 from support.harness import (
-    _git,
+    commit_all,
     make_repo_with_engineering,
 )
 
@@ -561,11 +560,7 @@ def test_retry_rebases_the_worktree_onto_a_moved_head(client, repo):
 
     # repo's default branch moves on while the item sits stopped
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
-    new_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    new_head = commit_all(repo, "moved on")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "the tests pass now"})
     assert r.status_code == 200, r.text

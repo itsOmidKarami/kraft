@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import signal
-import subprocess
 import time
 from pathlib import Path
 
 import httpx
 import pytest
 from support.api import _started
-from support.harness import _git
+from support.harness import commit_all, git
 
 from kraft.config import git_read
 
@@ -247,11 +246,7 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(monkeypatch, repo, client
 
     # repo's default branch moves on while the item sits paused
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
-    new_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    new_head = commit_all(repo, "moved on")
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     r = client.post(f"/api/work-items/{wid}/resume", json={})
@@ -293,8 +288,7 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(monkeypatc
     )
 
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
+    commit_all(repo, "moved on")
 
     import kraft.builtins as builtins_mod
 
@@ -306,7 +300,7 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(monkeypatc
             # something else (a later chain node, a concurrent walk)
             # moves the worktree off the commit refresh_worktree_base
             # just produced, before resume's caller reads HEAD back.
-            _git(worktree_arg, "checkout", "-q", "--detach", "HEAD~1")
+            git(worktree_arg, "checkout", "-q", "--detach", "HEAD~1")
         return new_head
 
     monkeypatch.setattr(builtins_mod, "refresh_worktree_base", racy_refresh)
@@ -348,8 +342,7 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
     (worktree / "test_calc.py").write_text(edited)
 
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
+    commit_all(repo, "moved on")
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     r = client.post(f"/api/work-items/{wid}/resume", json={})
@@ -401,13 +394,11 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
 
     # the branch already has a commit touching calc.py, as an earlier node would
     (worktree / "calc.py").write_text("def add(a, b):\n    return a - b - 1  # bug: should be +\n")
-    _git(worktree, "add", "-A")
-    _git(worktree, "commit", "-m", "worktree edit")
+    commit_all(worktree, "worktree edit")
 
     # repo's default branch changes the same line while the item sits paused
     (repo / "calc.py").write_text("def add(a, b):\n    return a - b - 2  # bug: should be +\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "conflicting edit")
+    commit_all(repo, "conflicting edit")
 
     # The initial running-agent setup needed the 30s "slow" mode so pause
     # had something real to interrupt; the escalation this test drives
@@ -463,9 +454,9 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, r
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
-    _git(repo, "remote", "add", "origin", str(origin))
-    _git(repo, "push", "-q", "-u", "origin", "main")
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(origin))
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "-u", "origin", "main")
 
     wid = _started(
         client, {"repo": str(repo), "title": "pushed resume", "chain_template": "quick-task"}
@@ -479,11 +470,10 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, r
         "the item to read paused",
     )
     worktree = Path(item_before["worktree_path"])
-    _git(worktree, "push", "-q", "-u", "origin", item_before["branch"])
+    git(worktree, "push", "-q", "-u", "origin", item_before["branch"])
 
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
+    commit_all(repo, "moved on")
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     r = client.post(f"/api/work-items/{wid}/resume", json={})

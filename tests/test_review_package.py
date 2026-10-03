@@ -5,10 +5,9 @@ the same change, so `review.read_change` backs both `GET /work-items/{wid}/diff`
 and the package a review agent is handed by path.
 """
 
-import subprocess
 from pathlib import Path
 
-from support.harness import make_repo
+from support.harness import commit_all, make_repo
 
 from kraft import config, review
 
@@ -39,10 +38,7 @@ def test_read_change_lists_commits_past_the_base(tmp_path):
     repo = make_repo(tmp_path)
     base = _head(repo)
     (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n")
-    config.git_read(repo, "add", "-A")
-    import subprocess
-
-    subprocess.run(["git", "commit", "-m", "fix add"], cwd=repo, capture_output=True, check=True)
+    commit_all(repo, "fix add")
 
     change = review.read_change(repo, base)
     assert change is not None
@@ -62,11 +58,7 @@ def test_the_package_carries_more_context_than_the_gate_viewer(tmp_path):
     Read into the whole review surface."""
     repo = make_repo(tmp_path)
     (repo / "wide.py").write_text("\n".join(f"line{i} = {i}" for i in range(40)) + "\n")
-    config.git_read(repo, "add", "-A")
-    import subprocess
-
-    subprocess.run(["git", "commit", "-m", "wide"], cwd=repo, capture_output=True, check=True)
-    base = _head(repo)
+    base = commit_all(repo, "wide")
     lines = (repo / "wide.py").read_text().splitlines()
     lines[20] = "line20 = 999"
     (repo / "wide.py").write_text("\n".join(lines) + "\n")
@@ -128,10 +120,7 @@ def test_read_change_with_head_excludes_uncommitted_work(tmp_path):
     repo = make_repo(tmp_path)
     base = _head(repo)
     (repo / "doc.md").write_text("landed paperwork\n")
-    config.git_read(repo, "add", "-A")
-    subprocess.run(
-        ["git", "commit", "-m", "land the doc"], cwd=repo, capture_output=True, check=True
-    )
+    commit_all(repo, "land the doc")
     (repo / "calc.py").write_text("in flight code\n")
     (repo / "brand_new.py").write_text("x = 1\n")
 
@@ -145,12 +134,6 @@ def test_read_change_with_head_excludes_uncommitted_work(tmp_path):
     assert len(landed.commits) == 1 and "land the doc" in landed.commits[0]
 
 
-def _commit(repo, message):
-    config.git_read(repo, "add", "-A")
-    subprocess.run(["git", "commit", "-m", message], cwd=repo, capture_output=True, check=True)
-    return _head(repo)
-
-
 def test_the_package_diffs_from_the_given_head_when_one_is_known(tmp_path):
     """Kraft-s7c04.1: 43717ee6 re-measured the same 38-file / +2216-line diff
     seven times. From round 1 the reviewer needs the round's own change; the
@@ -161,7 +144,7 @@ def test_the_package_diffs_from_the_given_head_when_one_is_known(tmp_path):
     # tracked, so both would land in a whole-branch diff.
     (repo / "round0.py").write_text("reviewed already\n")
     (repo / "round1.py").write_text("untouched so far\n")
-    reviewed = _commit(repo, "round 0")
+    reviewed = commit_all(repo, "round 0")
     (repo / "round1.py").write_text("the new fix\n")
     results = tmp_path / "results"
     results.mkdir()
@@ -183,7 +166,7 @@ def test_the_package_says_where_the_range_starts_and_how_to_widen_it(tmp_path):
     repo = make_repo(tmp_path)
     base = _head(repo)
     (repo / "a.py").write_text("x\n")
-    reviewed = _commit(repo, "round 0")
+    reviewed = commit_all(repo, "round 0")
     (repo / "b.py").write_text("y\n")
     results = tmp_path / "results"
     results.mkdir()
@@ -198,7 +181,7 @@ def test_no_since_is_the_whole_branch(tmp_path):
     repo = make_repo(tmp_path)
     base = _head(repo)
     (repo / "a.py").write_text("x\n")
-    _commit(repo, "round 0")
+    commit_all(repo, "round 0")
     (repo / "b.py").write_text("y\n")
     results = tmp_path / "results"
     results.mkdir()
@@ -214,10 +197,7 @@ def test_write_package_still_spans_base_to_working_tree(tmp_path):
     repo = make_repo(tmp_path)
     base = _head(repo)
     (repo / "doc.md").write_text("landed paperwork\n")
-    config.git_read(repo, "add", "-A")
-    subprocess.run(
-        ["git", "commit", "-m", "land the doc"], cwd=repo, capture_output=True, check=True
-    )
+    commit_all(repo, "land the doc")
     (repo / "calc.py").write_text("in flight code\n")
     results = tmp_path / "results"
     results.mkdir()

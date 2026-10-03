@@ -3,11 +3,10 @@
 That `dispatch_node` puts them in the prompt, in order, is test_dispatch's."""
 
 import pytest
-from support.harness import _git, entry_of, v1_named_chain
+from support.harness import commit_all, entry_of, git, v1_named_chain, write
 from support.store_fixtures import mk_item
 
 from kraft import store
-from kraft.config import git_read
 from kraft.executor import prompts
 from kraft.findings import Finding, JobRef
 from kraft.templates.models import AgentTask
@@ -214,12 +213,10 @@ def test_format_findings_renders_job_refs():
 
 def _upstream_moved(repo, files: dict[str, str], message: str):
     """Commit `files` in `repo`; returns (old_base, new_base)."""
-    old_base = git_read(repo, "rev-parse", "HEAD")
+    old_base = git(repo, "rev-parse", "HEAD")
     for name, text in files.items():
-        (repo / name).write_text(text)
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", message)
-    return old_base, git_read(repo, "rev-parse", "HEAD")
+        write(repo, name, text)
+    return old_base, commit_all(repo, message)
 
 
 def test_rebase_drift_note_names_commits_and_files(repo):

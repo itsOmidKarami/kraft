@@ -1,27 +1,17 @@
 """`local_files`: carrying ignored, uncommitted files (a `.python-version`
 pin, say) from the developer's checkout into a new worktree (Kraft-gxcmy)."""
 
-import subprocess
-
 from support import worktree as wtree
-from support.harness import _git, entry_of
+from support.harness import commit_all, entry_of, git, write
 
 from kraft import builtins as kraft_builtins
-from kraft.config import git_read
-
-
-def _commit(cwd, name, text, message):
-    """Write `name` under `cwd` and commit everything; returns the new HEAD."""
-    (cwd / name).write_text(text)
-    _git(cwd, "add", "-A")
-    _git(cwd, "commit", "-m", message)
-    return git_read(cwd, "rev-parse", "HEAD")
 
 
 async def test_setup_runs_after_local_files_are_carried(database, run_dirs, repo):
     """Kraft-gxcmy: uv picks an interpreter when it runs, so a pin that lands
     after the toolchain is a pin that changed nothing."""
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
 
     await wtree.make_item(database, repo)
@@ -42,19 +32,15 @@ async def test_setup_runs_after_local_files_are_carried(database, run_dirs, repo
 
 def _linked_worktree(repo, tmp_path, name="wt"):
     wt = tmp_path / name
-    subprocess.run(
-        ["git", "worktree", "add", "-q", str(wt), "-b", name],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
+    git(repo, "worktree", "add", "-q", str(wt), "-b", name)
     return wt
 
 
 def test_carry_local_files_copies_an_ignored_untracked_file(tmp_path, repo):
     """The whole point of Kraft-gxcmy: the pin exists in the developer's
     checkout and nowhere in the worktree, because it was never committed."""
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
     wt = _linked_worktree(repo, tmp_path)
 
@@ -64,10 +50,7 @@ def test_carry_local_files_copies_an_ignored_untracked_file(tmp_path, repo):
     assert refused == []
     assert (wt / ".python-version").read_text() == "3.11\n"
     # and invisible to git, so `open_mr`'s dirty-worktree guard never sees it
-    status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=wt, capture_output=True, text=True
-    )
-    assert status.stdout == ""
+    assert git(wt, "status", "--porcelain") == ""
 
 
 def test_carry_local_files_refuses_a_file_the_worktree_would_not_ignore(tmp_path, repo):
@@ -84,7 +67,8 @@ def test_carry_local_files_refuses_a_file_the_worktree_would_not_ignore(tmp_path
 
 
 def test_carry_local_files_skips_a_symlinked_destination(tmp_path, repo):
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
     wt = _linked_worktree(repo, tmp_path)
     outside = tmp_path / "outside.txt"
@@ -99,7 +83,8 @@ def test_carry_local_files_skips_a_symlinked_destination(tmp_path, repo):
 
 
 def test_carry_local_files_leaves_an_existing_destination_alone(tmp_path, repo):
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
     wt = _linked_worktree(repo, tmp_path)
     (wt / ".python-version").write_text("3.12\n")
@@ -112,7 +97,8 @@ def test_carry_local_files_leaves_an_existing_destination_alone(tmp_path, repo):
 
 
 def test_carry_local_files_ignores_a_source_that_is_not_there(tmp_path, repo):
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     wt = _linked_worktree(repo, tmp_path)
 
     carried, refused = kraft_builtins._carry_local_files(repo, wt, [".python-version"])
@@ -141,7 +127,8 @@ def test_carry_local_files_refuses_a_directory_entry_missing_its_trailing_slash(
 
 async def test_ensure_worktree_without_local_files_is_unchanged(database, run_dirs, repo):
     """The feature is opt-in: an unconfigured repo must behave exactly as before."""
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
 
     await wtree.make_item(database, repo, chain_template="default")
@@ -152,7 +139,8 @@ async def test_ensure_worktree_without_local_files_is_unchanged(database, run_di
 def test_uncarried_local_files_names_root_files_missing_from_the_worktree(tmp_path, repo):
     """An unconfigured repo is the default, so the gap has to be visible
     without anyone having configured anything (Kraft-gxcmy)."""
-    _commit(repo, ".gitignore", ".venv/\n.env\n", "ignore local state")
+    write(repo, ".gitignore", ".venv/\n.env\n")
+    commit_all(repo, "ignore local state")
     (repo / ".python-version").write_text("3.11\n")  # untracked, not ignored
     (repo / ".env").write_text("TOKEN=x\n")  # untracked and ignored
     (repo / ".venv").mkdir()  # a directory: never reported
@@ -165,7 +153,8 @@ def test_uncarried_local_files_names_root_files_missing_from_the_worktree(tmp_pa
 
 
 def test_uncarried_local_files_omits_what_was_carried(tmp_path, repo):
-    _commit(repo, ".gitignore", ".python-version\n", "ignore the pin")
+    write(repo, ".gitignore", ".python-version\n")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
     wt = _linked_worktree(repo, tmp_path)
     kraft_builtins._carry_local_files(repo, wt, [".python-version"])

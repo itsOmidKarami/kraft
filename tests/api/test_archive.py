@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from support.api import _poll_events, _post_default, _set_status
-from support.harness import _git
+from support.harness import git
 
 from kraft.adapters.forge.git import PUSHED_REFS
 from kraft.api.routes import lifecycle
@@ -49,10 +49,10 @@ def test_archive_keeps_a_branch_only_it_holds_commits_on(client, repo, pushed_to
     branch = client.get(f"/api/work-items/{wid}").json()["branch"]
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
     # A tag holds what the item made so far, so only the commit below counts.
-    _git(repo, "tag", "so-far", branch)
-    _git(worktree, "commit", "--allow-empty", "-m", "work nobody pushed")
+    git(repo, "tag", "so-far", branch)
+    git(worktree, "commit", "--allow-empty", "-m", "work nobody pushed")
     if pushed_to:
-        _git(repo, "update-ref", f"{pushed_to}/{branch}", f"refs/heads/{branch}")
+        git(repo, "update-ref", f"{pushed_to}/{branch}", f"refs/heads/{branch}")
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
 
     r = client.post(f"/api/work-items/{wid}/archive")
@@ -80,9 +80,9 @@ def test_archive_rescues_commits_on_a_detached_head(client, repo):
     _poll_events(client, wid, "gate_requested")
     branch = client.get(f"/api/work-items/{wid}").json()["branch"]
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
-    _git(repo, "tag", "so-far", branch)
-    _git(worktree, "checkout", "-q", "--detach")
-    _git(worktree, "commit", "--allow-empty", "-m", "detached work")
+    git(repo, "tag", "so-far", branch)
+    git(worktree, "checkout", "-q", "--detach")
+    git(worktree, "commit", "--allow-empty", "-m", "detached work")
     head = git_read(worktree, "rev-parse", "HEAD")
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
 
@@ -103,10 +103,10 @@ def test_archive_keeps_the_worktree_when_the_rescue_fails(client, repo):
     _poll_events(client, wid, "gate_requested")
     branch = client.get(f"/api/work-items/{wid}").json()["branch"]
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
-    _git(repo, "tag", "so-far", branch)
-    _git(repo, "branch", "kraft/rescued", branch)
-    _git(worktree, "checkout", "-q", "--detach")
-    _git(worktree, "commit", "--allow-empty", "-m", "detached work")
+    git(repo, "tag", "so-far", branch)
+    git(repo, "branch", "kraft/rescued", branch)
+    git(worktree, "checkout", "-q", "--detach")
+    git(worktree, "commit", "--allow-empty", "-m", "detached work")
     client.post(f"/api/work-items/{wid}/cancel", json={"reason": "later"})
 
     r = client.post(f"/api/work-items/{wid}/archive")
@@ -150,8 +150,8 @@ def test_the_rescue_skips_a_repository_that_is_gone(repo, tmp_path):
     git from: it must not raise out of archive. The worktree here still
     reads (its git lives elsewhere), so the rescue gets as far as git."""
     worktree = tmp_path / "wt"
-    _git(repo, "worktree", "add", "-q", "--detach", str(worktree))
-    _git(worktree, "commit", "--allow-empty", "-m", "detached work")
+    git(repo, "worktree", "add", "-q", "--detach", str(worktree))
+    git(worktree, "commit", "--allow-empty", "-m", "detached work")
 
     assert lifecycle._rescue_detached_head(tmp_path / "gone", worktree, "w1") == {}
 
