@@ -458,7 +458,7 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
         except preserve.RewriteError as exc:
             # Written over its own text it would not read back as itself
             # (R13d-01): a file without its comments beats one Kraft refuses.
-            moved.append(f"{name}: written without its comments, as keeping them {exc}")
+            moved.append(f"{name}: written without its comments: keeping them, {exc}")
             return authored.dump(preserve.plain(new))
 
     # Both texts are made before either is written. A moved list keeps the
