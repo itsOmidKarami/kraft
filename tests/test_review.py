@@ -191,6 +191,25 @@ def test_a_range_across_sides_is_every_diff_line_between_its_ends(tmp_path):
     assert spans.endswith("+added")
 
 
+def test_a_renamed_file_is_quoted_from_both_of_its_paths(tmp_path):
+    """R11E-05: a renamed file's thread is on its new path. Diffed by that
+    path alone, git saw an added file: the old side had no quote, and lines
+    the rename left alone were quoted as added."""
+    repo, base, _head = _quoting(tmp_path)
+    old = (repo / "q.py").read_text().splitlines()
+    _git(repo, "mv", "q.py", "r.py")
+    renamed = _commit(repo, {"r.py": "\n".join([old[0], "line 2 fixed", *old[2:]]) + "\n"})
+    fork = _git(repo, "rev-parse", f"{renamed}~2")
+
+    assert review.quote_range(repo, fork, renamed, "r.py", "new", 1, 3) == (
+        " line 1\n+line 2 fixed\n line 3"
+    )
+    assert review.quote_range(repo, fork, renamed, "r.py", "old", 2, 3) == "-line 2\n line 3"
+    assert review.quote_range(repo, fork, renamed, "r.py", "new", 2, 2, "old") == (
+        "-line 2\n+line 2 fixed"
+    )
+
+
 def test_a_range_that_cannot_be_read_has_no_quote(tmp_path):
     repo, base, head = _quoting(tmp_path)
     assert review.quote_range(repo, base, head, "q.py", "new", 90, 91) is None

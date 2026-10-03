@@ -325,6 +325,19 @@ def _clip_quote(lines: list[str]) -> str | None:
     return "\n".join(lines[:QUOTE_LINES] + (["…"] if len(lines) > QUOTE_LINES else []))
 
 
+def _renamed_from(worktree: Path, base: str, head: str, path: str) -> str | None:
+    """The path `path` had at `base`, when `base..head` renamed it there."""
+    out = _config.git_read(
+        worktree, "diff", "-M", "--name-status", "-z", "--diff-filter=R", base, head, strip=False
+    )
+    tokens = (out or "").split("\0")
+    # `R<score>`, the old path, the new path, per rename.
+    for i in range(0, len(tokens) - 2, 3):
+        if tokens[i].startswith("R") and tokens[i + 2] == path:
+            return tokens[i + 1]
+    return None
+
+
 def quote_range(
     worktree: Path,
     base: str,
@@ -347,9 +360,22 @@ def quote_range(
     if not (_SHA.fullmatch(base) and _SHA.fullmatch(head)):
         return None
     unentered = _sandbox.SUBMODULES_UNENTERED
+    # A renamed file's thread is on its new path, and its old side is the old
+    # path's lines: diffed by one path alone, git saw no rename, quoted no old
+    # side, and marked every line of the new file added (R11E-05).
+    old_path = _renamed_from(worktree, base, head, path) or path
     # A path, not a pathspec: `*` must not quote whatever file it matches.
     diff = _config.git_read(
-        worktree, "--literal-pathspecs", "diff", unentered, base, head, "--", path, strip=False
+        worktree,
+        "--literal-pathspecs",
+        "diff",
+        unentered,
+        "-M",
+        base,
+        head,
+        "--",
+        *dict.fromkeys((old_path, path)),
+        strip=False,
     )
     if diff is None:
         return None
@@ -370,10 +396,10 @@ def quote_range(
                 out.append("…")
             out.append(lines[i].kind + lines[i].text)
         return _clip_quote(out)
-    rev = base if side == "old" else head
+    rev, at = (base, old_path) if side == "old" else (head, path)
     # `cat-file blob` answers with the file or fails: `git show rev:<path>`
     # printed the commit itself for `rev:*` on a newer git.
-    content = _config.git_read(worktree, "cat-file", "blob", f"{rev}:{path}", strip=False)
+    content = _config.git_read(worktree, "cat-file", "blob", f"{rev}:{at}", strip=False)
     # A binary file is no lines to quote, as the diff draws none for it.
     if content is None or "\0" in content:
         return None
