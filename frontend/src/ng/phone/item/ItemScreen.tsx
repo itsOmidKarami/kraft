@@ -1,6 +1,6 @@
 import { EllipsisVertical } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
@@ -83,6 +83,21 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "board": return navigate("/");
     }
   };
+  // `?raise=1`, from the board's Raise cap / Raise budget: the address is cleaned first, then the sheet opens over this screen,
+  // so Back from the sheet lands here. An item that cannot raise the stop just shows its card, which says why.
+  const [params, setParams] = useSearchParams();
+  const asked = useRef(false);
+  useEffect(() => {
+    if (params.get("raise") === "1") {
+      asked.current = true;
+      setParams((p) => { const n = new URLSearchParams(p); n.delete("raise"); return n; }, { replace: true });
+    } else if (asked.current) {
+      asked.current = false;
+      if (bar.primary?.id === "raise") go("raise");
+    }
+    // Once per arrival: the param is gone after this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
   const button = (a: Act | null, primary: boolean) =>
     a && (
       <Button key={a.id} className={`ph-btn${primary ? " ph-btn-primary" : ""}`} variant={a.danger ? "danger" : primary ? "primary" : "secondary"} disabled={busy} onClick={() => go(a.id)}>

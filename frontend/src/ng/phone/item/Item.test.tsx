@@ -382,6 +382,21 @@ describe("raising the cap that stopped the item (R73)", () => {
     await userEvent.type(box, `${v}{Enter}`);
   };
 
+  it("?raise=1, from the board's Raise cap, opens the sheet over the item, and Back lands on the item", async () => {
+    mount(capped(limit()), "/work-items/w1?raise=1");
+    expect(await screen.findByRole("dialog", { name: /Raise the running time cap/ })).toBeInTheDocument();
+    expect(where()).toBe("/work-items/w1");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByRole("button", { name: "Raise cap" })).toBeInTheDocument();
+  });
+
+  it("?raise=1 on a stop the item cannot raise shows its card and no sheet", async () => {
+    mount(capped(), "/work-items/w1?raise=1");
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("without stop.limit a cap stop keeps Steer and Retry and offers no raise", async () => {
     mount(capped());
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
