@@ -210,8 +210,11 @@ def seed_home(templates_dir: Path) -> bool:
     A directory made before the first start, holding only what the docs say
     to write there (a `sandbox.yaml`, a `detectors.yaml`), has no
     `library.yaml`: each bundled file it lacks is added beside the ones it
-    has. A home with a `library.yaml` was seeded, and one with a legacy
+    has, and the whole directory is then the operator's alone, as a seeded
+    one is. A home with a `library.yaml` was seeded, and one with a legacy
     registry is a pre-V1 home for `kraft admin update`; neither is touched.
+    Nor is a directory holding none of Kraft's config names: a mistyped
+    `KRAFT_TEMPLATES_DIR` must not fill some other directory with it.
     """
     from kraft.templates.library import LIBRARY_FILE, is_pre_v1
 
@@ -229,6 +232,8 @@ def seed_home(templates_dir: Path) -> bool:
             "with. This build shipped without them — reinstall with `just install`, "
             "or point KRAFT_TEMPLATES_DIR at a config directory."
         )
+    if templates_dir.exists() and not _holds_config(templates_dir):
+        return False
     # Build beside the target and rename: an interrupted copy must not leave a
     # half-seeded home that every later start then treats as already seeded.
     staging = _stage_bundle(templates_dir)
@@ -240,7 +245,37 @@ def seed_home(templates_dir: Path) -> bool:
     for entry in sorted(staging.iterdir(), key=lambda p: p.name == LIBRARY_FILE):
         _move_missing(entry, templates_dir / entry.name)
     shutil.rmtree(staging, ignore_errors=True)
+    _operators_alone(templates_dir)
     return True
+
+
+def _holds_config(directory: Path) -> bool:
+    """Empty (dotfiles aside), or holding at least one name Kraft's config
+    uses: a templates directory someone started, not an unrelated one."""
+    names = {p.name for p in directory.iterdir() if not p.name.startswith(".")}
+    known = {p.name for p in (BUNDLED / "templates").iterdir()}
+    return not names or bool(names & (known | set(MACHINE_CONFIG) | CONFIG_EXTRAS))
+
+
+#: Config files a templates directory can hold that are neither bundled nor
+#: carried across a major update: read when present, never seeded.
+CONFIG_EXTRAS = frozenset({"sandbox.yaml", "detectors.yaml"})
+
+
+def _operators_alone(root: Path) -> None:
+    """`root` and everything under it the operator's alone, as every file
+    Kraft saves there is (`config.write_text` creates 0600) and as `run/` is:
+    directories 0700, files 0600. A symlink is left as it is."""
+    root.chmod(0o700)
+    for parent, dirs, files in os.walk(root):
+        for name in dirs:
+            path = os.path.join(parent, name)
+            if not os.path.islink(path):
+                os.chmod(path, 0o700)
+        for name in files:
+            path = os.path.join(parent, name)
+            if not os.path.islink(path):
+                os.chmod(path, 0o600)
 
 
 def _move_missing(source: Path, target: Path) -> None:
@@ -268,15 +303,9 @@ def _stage_bundle(templates_dir: Path) -> Path:
     # Deliberately not `.yaml`, so nothing that globs this directory's YAML
     # ever reads the stamp as configuration.
     (staging / ".seeded-version").write_text(f"{_version()}\n")
-    # The operator's alone, as every file Kraft saves there is (`config.
-    # write_text` creates 0600) and as `run/` is: the copy would otherwise
-    # carry the package's 0644 until its first save from Settings.
-    staging.chmod(0o700)
-    for parent, dirs, files in os.walk(staging):
-        for name in dirs:
-            os.chmod(os.path.join(parent, name), 0o700)
-        for name in files:
-            os.chmod(os.path.join(parent, name), 0o600)
+    # The copy would otherwise carry the package's 0644 until its first save
+    # from Settings.
+    _operators_alone(staging)
     return staging
 
 

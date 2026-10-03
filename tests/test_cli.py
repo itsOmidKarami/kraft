@@ -113,7 +113,9 @@ def test_a_templates_dir_made_before_the_first_start_gets_the_rest_seeded(monkey
     _bundle(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
     (home / "chains").mkdir(parents=True)
+    home.chmod(0o755)
     (home / "sandbox.yaml").write_text("cli: podman\n")
+    (home / "sandbox.yaml").chmod(0o644)
     (home / "policy.yaml").write_text("loops: {mine: 1}\n")
     (home / "chains" / "mine.yaml").write_text("id: mine\n")
 
@@ -123,10 +125,23 @@ def test_a_templates_dir_made_before_the_first_start_gets_the_rest_seeded(monkey
     assert (home / "chains" / "mine.yaml").read_text() == "id: mine\n"
     assert (home / "library.yaml").read_text() == "tasks: {}\n"
     assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
-    assert (home / "library.yaml").stat().st_mode & 0o777 == 0o600
     assert not (home / "notify.yaml").exists()
     assert not home.with_name("templates.seeding").exists()
+    modes = {p.relative_to(home).as_posix(): p.stat().st_mode & 0o777 for p in home.rglob("*")}
+    assert (home.stat().st_mode & 0o777, modes.pop("chains")) == (0o700, 0o700)
+    assert set(modes.values()) == {0o600}, modes
     assert cli.seed_home(home) is False
+
+
+def test_a_directory_holding_no_kraft_config_is_not_seeded(monkeypatch, tmp_path):
+    """A mistyped KRAFT_TEMPLATES_DIR naming somebody's project: left alone."""
+    _bundle(monkeypatch, tmp_path)
+    elsewhere = tmp_path / "project"
+    elsewhere.mkdir()
+    (elsewhere / "README.md").write_text("mine\n")
+
+    assert cli.seed_home(elsewhere) is False
+    assert [p.name for p in elsewhere.iterdir()] == ["README.md"]
 
 
 def test_a_pre_v1_home_is_left_for_the_major_update(monkeypatch, tmp_path):
