@@ -51,9 +51,10 @@ Stdlib only; `dev/check_tests.py` is loaded by path for its `_test_files` and
 `_parse`, so both tools read the same set of files the same way (and a parse
 failure is a failure here too). `measure(root)` is the seam: a repo root in,
 a plain dict out. `main` only prints it, as text or `--json`;
-`--print-helper-allowlist` emits `{"<name>#<sha1[:8]>": copies}` for every
-duplicated helper, the key shape a checker allowlist uses. `--root` points at
-another checkout.
+`--print-helper-ceiling` emits the `DUPLICATE_HELPER_CEILING` line
+`dev/check_tests.py`'s rule (e) holds, computed by that checker's own
+grouping over both testpaths (the "duplicated helpers" numbers above count
+`tests/` only). `--root` points at another checkout.
 
 `--diff BASE HEAD` is the other mode: what one pull request does to the tree,
 as the markdown comment `.github/workflows/tests-nudge.yml` posts (the
@@ -159,7 +160,7 @@ def helper_fingerprint(fn: ast.FunctionDef, module: ast.Module | None = None) ->
 
 
 def helper_key(name: str, fingerprint: str) -> str:
-    """`<name>#<first 8 hex of sha1(fingerprint)>`: how an allowlist names a group."""
+    """`<name>#<first 8 hex of sha1(fingerprint)>`: a group's name, unique per body."""
     return f"{name}#{hashlib.sha1(fingerprint.encode()).hexdigest()[:8]}"
 
 
@@ -411,18 +412,24 @@ def format_report(shape: dict) -> str:
     return "\n".join(out)
 
 
-def format_helper_allowlist(shape: dict) -> str:
-    rows = sorted(shape["duplicated_helpers"]["groups"], key=lambda g: g["key"])
-    return "{\n" + "".join(f'    "{g["key"]}": {g["copies"]},\n' for g in rows) + "}"
+def helper_ceiling(root: Path = ROOT) -> tuple[dict[str, int], list[str]]:
+    """Rule (e)'s two numbers for `root`, and any parse failures: what
+    `dev/check_tests.py` itself computes, over the files its `main()` walks
+    (`plugins/kraft-lite/tests/` included), so a ceiling seeded from here is
+    the one the check holds the tree to."""
+    ck = _checker(root)
+    trees, support, errors = ck.trees_and_support()
+    return ck.duplicate_helper_totals(ck.duplicate_helper_counts(trees, support)), errors
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--json", action="store_true", help="print the numbers as JSON")
     parser.add_argument(
-        "--print-helper-allowlist",
+        "--print-helper-ceiling",
         action="store_true",
-        help='print {"<name>#<sha1[:8]>": copies} for every duplicated helper',
+        help="print rule (e)'s DUPLICATE_HELPER_CEILING for dev/check_tests.py: duplicated "
+        "helper groups and copies over both testpaths, as that checker counts them",
     )
     parser.add_argument(
         "--root", type=Path, default=ROOT, help="repo root to measure (default: this checkout)"
@@ -437,14 +444,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.diff:
         return run_diff(*args.diff, root=args.root)
+    if args.print_helper_ceiling:
+        totals, errors = helper_ceiling(args.root)
+        print("\n".join(errors) if errors else f"DUPLICATE_HELPER_CEILING = {json.dumps(totals)}")
+        return 1 if errors else 0
     shape = measure(args.root)
     if shape["parse_errors"]:
         print("\n".join(shape["parse_errors"]))
         return 1
     if args.json:
         print(json.dumps(shape, indent=2))
-    elif args.print_helper_allowlist:
-        print(format_helper_allowlist(shape))
     else:
         print(format_report(shape))
     return 0
