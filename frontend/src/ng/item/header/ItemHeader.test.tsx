@@ -195,6 +195,24 @@ describe("ItemHeader", () => {
     expect(writes(calls)).toEqual([]);
     await userEvent.click(within(card).getByRole("button", { name: "Pause now" }));
     await waitFor(() => expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/pause", body: {} }]));
+    // R12b-08: the card and its Pause now are gone; the focus fell to the page.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Pause$/ })).toHaveFocus());
+  });
+
+  // R12b-08: a card's own button had the focus, and went with the card once its action was done.
+  it.each([
+    ["Cancel…", "Cancel this item?", "Reason", "Cancel item", "POST /work-items/w1/cancel"],
+    ["Escalate…", "Escalate this item", "Message", "Escalate", "POST /work-items/w1/escalate"],
+  ])("hands the focus to the main button once %s is done", async (opener, card, field, send, route) => {
+    stubFetch({ ...WRITES, ...acceptWrites(route), "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "b", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }] });
+    show({ display_status: "failed", status: "needs_human", stop: { kind: "failed", node: "verification", task: null, resume_at: null, reason: null } });
+    await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: opener }));
+    const dialog = await screen.findByRole("dialog", { name: card });
+    await userEvent.type(within(dialog).getByRole("textbox", { name: new RegExp(field) }), "not needed");
+    await userEvent.click(within(dialog).getByRole("button", { name: send }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: card })).toBeNull());
+    await waitFor(() => expect(document.querySelector(".item-main-action")).toHaveFocus());
   });
 
   // R11b-01: /pause answers every stopped item 409, so a needs-you stop's main button is its way on, never Pause.
@@ -204,10 +222,12 @@ describe("ItemHeader", () => {
     ["question", /Answer/, { handler: "onAnswer" as const }],
     ["mr_closed", /Reopen MR/, { write: { method: "POST", path: "/work-items/w1/reopen-mr", body: {} } }],
     ["stuck", /Retry/, { write: { method: "POST", path: "/work-items/w1/retry", body: { path: "verification" } } }],
-  ] as const)("a needs-you %s stop's main button is %s, and it acts", async (kind, name, want: { handler?: keyof Handlers; arg?: string; write?: object }) => {
+    // R12b-01: a stuck fix loop stops on its judge, a task no retry path names: 422 until it retried the node.
+    ["stuck", /Retry/, { task: "verification.fix_loop.judge", write: { method: "POST", path: "/work-items/w1/retry", body: { path: "verification" } } }],
+  ] as const)("a needs-you %s stop's main button is %s, and it acts", async (kind, name, want: { handler?: keyof Handlers; arg?: string; write?: object; task?: string }) => {
     const calls = stubFetch(WRITES);
     const handlers = { onRaise: vi.fn(), onGate: vi.fn(), onAnswer: vi.fn() };
-    show({ display_status: "needs_you", status: "needs_human", stop: { kind, node: "verification", resume_at: null, reason: null } }, handlers);
+    show({ display_status: "needs_you", status: "needs_human", stop: { kind, node: "verification", task: want.task ?? null, resume_at: null, reason: null } }, handlers);
     expect(screen.queryByRole("button", { name: /Pause/ })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name }));
     if (want.handler) {
