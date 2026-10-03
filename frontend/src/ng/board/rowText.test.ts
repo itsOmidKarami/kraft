@@ -15,6 +15,8 @@ describe("reasonTail", () => {
       [row("needs_you", { stop: stop("gate", { node: "chain_revision_approval" }), pending_gate: null }), "approve chain revision"],
       [row("needs_you", { stop: stop("question", { reason: "needs_context: keep the legacy header?" }) }), "agent asks: keep the legacy header?"],
       [row("needs_you", { stop: stop("cap", { reason: "Running time hit its 8h cap" }) }), "Running time hit its 8h cap"],
+      // A budget stop's reason is two sentences; the row keeps the first, cents and all.
+      [row("needs_you", { stop: stop("budget", { reason: "budget cap reached: $0.035 spent on this work item, cap $0.030. Nothing new was started; a running agent was not interrupted." }) }), "budget cap reached: $0.035 spent on this work item, cap $0.030"],
       [row("needs_you", { stop: stop("conflict") }), "waiting for you at verification"],
       [row("failed", { stop: stop("failed", { node: "merge_request" }) }), "failed at merge request"],
       [row("needs_you", { stop: stop("gate"), pending_gate: "spec-approval" }), "approve spec"],

@@ -1,12 +1,12 @@
 import { EllipsisVertical } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
-import { act } from "../../item/actions";
+import { act, draftWaits } from "../../item/actions";
 import { isEscalation } from "../../item/nodeGraph";
-import { budgetRaise, headerState } from "../../item/status";
+import { budgetRaise, headerState, neverStarted } from "../../item/status";
 import { pathSel, placeUrl } from "../../item/url";
 import type { ItemDetail } from "../../item/useItem";
 import { useCompare } from "../../review/useReview";
@@ -51,7 +51,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
   const { lines } = useLog(session && !ended ? session.id : null, live);
-  const compare = useCompare(item.id, "base", "latest", false, item.head_sha);
+  const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item));
   const files = compare.state === "ready" ? (compare.data.files ?? []) : [];
   const adds = files.reduce((n, f) => n + f.insertions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
@@ -67,7 +67,12 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "steer": case "reject": case "answer": case "escalate": case "cancel": case "complete": return navigate(itemUrl(item.id, `?compose=${id}`));
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
-      case "resume": case "start": return void run(act.resume(item.id), id === "start" ? "Started." : "Resumed.");
+      case "resume": return void run(act.resume(item.id), "Resumed.");
+      // Start never applies a draft: with one, the sheet asks first, as the desktop's Review & apply does.
+      case "start": return void draftWaits(item.id).then((waits) => {
+        if (waits) sheet.open("start-draft");
+        else void run(act.resume(item.id), "Started.");
+      });
       case "retry": return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}), "Retrying.");
       case "retry-now": return void run(act.retry(item.id), "Retrying.");
       case "reopen-mr": return void run(act.reopenMr(item.id), "MR reopened.");
@@ -97,6 +102,16 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
           <h1 className="ph-item-title">{item.title}</h1>
           {text && <p className={`ph-brief${brief ? " ph-is-open" : ""}`}>{text}</p>}
           {longBrief && <button type="button" className="ph-linkbtn" aria-expanded={brief} onClick={() => setBrief(!brief)}>{brief ? "less" : "more"}</button>}
+          {!!item.attachments?.length && (
+            <p className="ph-attached">
+              <span className="ph-item-meta">attached</span>
+              {item.attachments.map((a) => (
+                <button key={a.kind} type="button" className="ph-linkbtn" onClick={() => navigate(itemUrl(item.id, `?attached=${encodeURIComponent(a.kind)}`))}>
+                  {a.kind} <span className="ph-underline">{a.path.split("/").at(-1)}</span>
+                </button>
+              ))}
+            </p>
+          )}
           {files.length > 0 && (
             <button type="button" className="ph-linkbtn ph-diff-link" onClick={() => navigate(reviewUrl(item.id, gate && item.pending_gate ? `?gate=${encodeURIComponent(gate)}` : ""))}>
               <span>{files.length} {files.length === 1 ? "file" : "files"}</span>
@@ -143,12 +158,41 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
 /** The sheets over the item: pause, ⋮, and the budget raise. */
 function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
   const { busy, run } = useDo(reload);
+  // One start per sheet: a second tap while the first is in flight sends nothing.
+  const starting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [sheet.openId]);
   const cap = item.budget_cap?.cap_usd ?? 0;
   const kebab = useMemo(() => kebabOf(item), [item]);
 
   if (sheet.is("pause")) return <PauseSheet item={item} node={node} sheet={sheet} reload={reload} />;
+  // Start found a draft (R9b-01 on the phone): what the desktop's Review & apply asks, here.
+  if (sheet.is("start-draft"))
+    return (
+      <ChoiceSheet
+        title="Start with unapplied changes?"
+        text="This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft."
+        options={[{ value: "apply", label: "Apply and start" }, { value: "without", label: "Start without them" }]}
+        onPick={async (v) => {
+          if (starting.current) return;
+          starting.current = true;
+          try {
+            if (v === "apply") {
+              const a = await act.applyDraft(item.id);
+              if (!a.ok) return void showToast(a.error);
+            }
+            const r = await act.resume(item.id);
+            if (!r.ok) return void showToast(r.error);
+            showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
+            sheet.close();
+            reload();
+          } finally {
+            starting.current = false;
+          }
+        }}
+        onClose={sheet.close}
+      />
+    );
   if (sheet.is("kebab"))
     return (
       <ChoiceSheet

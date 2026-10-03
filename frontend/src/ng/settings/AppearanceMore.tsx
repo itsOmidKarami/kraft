@@ -2,6 +2,7 @@ import type { BoardOpenIn, Theme } from "../../types";
 import { DEFAULT_PREFS, type DiffPrefs } from "../review/prefs";
 import { Segmented } from "../ui/Segmented";
 import { Switch } from "../ui/Switch";
+import { onMac } from "../keys";
 
 type Scheme = NonNullable<Theme["code_scheme"]>;
 type Mode = "light" | "dark";
@@ -84,7 +85,7 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
         <div className="set-diff-cols">
           <div className="set-diff-controls">
             <h3 className="set-sub">Layout</h3>
-            <Segmented label="Layout" options={[{ value: "unified", label: "Unified" }, { value: "split", label: "Side by side" }]} value={diff.layout} onChange={(v) => setDiff({ layout: v })} />
+            <Segmented label="Layout" options={[{ value: "split", label: "Side-by-side" }, { value: "unified", label: "Inline" }]} value={diff.layout} onChange={(v) => setDiff({ layout: v })} />
             <h3 className="set-sub">Added and removed colours</h3>
             <div className="set-cards" role="group" aria-label="Added and removed colours">
               {DIFF_COLOURS.map((c) => (
@@ -125,7 +126,7 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
         <div className="set-row">
           <span className="set-row-label">Open items in</span>
           <Segmented<BoardOpenIn> label="Open items in" options={[{ value: "peek", label: "Peek" }, { value: "full", label: "Full page" }]} value={theme.board.open_in} onChange={(v) => save({ board: { ...theme.board, open_in: v } })} />
-          <span className="set-hint">What a row click does; ⌘-click always opens the page.</span>
+          <span className="set-hint">What a row click does; {onMac() ? "⌘-click" : "Ctrl+click"} always opens the page.</span>
         </div>
       </section>
     </div>

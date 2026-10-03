@@ -1,8 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { KraftEvent, WorkItemDocument } from "../../../types";
-import { acceptWrites, detail, stubFetch } from "../testkit";
+import { resetHarnessOptions } from "../../templates/panes/useHarnessOptions";
+import { ItemDraftProvider } from "../draft/context";
+import { answer, ov } from "../draft/testkit";
+import { acceptWrites, detail, fresh, stubFetch } from "../testkit";
 import * as toast from "../../ui/Toast";
 import { ChainConfig, ChainOverview, STILL_STOPPED } from "./ChainPane";
 
@@ -44,10 +47,17 @@ describe("ChainOverview", () => {
     await userEvent.click(screen.getByRole("button", { name: "ui.md" }));
     expect(onDoc).toHaveBeenCalledWith(docs[0]);
     unmount();
-    // The board's peek has no documents to open: the names still show, as text.
+    // With no indexed document to open (the board's peek, or any item before it starts),
+    // a name opens the copy Kraft kept at intake.
+    const calls = stubFetch({ "GET /work-items/w1/attachments/spec": [200, { title: "Workspace spec", path: "docs/specs/ws.md", content: "# Workspace spec\n\nShare one **worktree**.", truncated: false }] });
     const peek = render(<ChainOverview item={detail({ attachments })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ui.md");
-    expect(screen.queryByRole("button", { name: "ws.md" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "ws.md" }));
+    const viewer = await screen.findByRole("dialog", { name: "Workspace spec" });
+    expect(await within(viewer).findByText("worktree")).toBeInTheDocument();
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /work-items/w1/attachments/spec"]);
+    await userEvent.click(within(viewer).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     peek.unmount();
     render(<ChainOverview item={detail({ attachments: [] })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.queryByText("attached")).toBeNull();
@@ -119,6 +129,30 @@ describe("ChainConfig", () => {
   it("lists the item's own cap whenever it set one, beside a lower policy cap", () => {
     show({ budget_set: 1, budget_usd: 20, budget_cap: { cap_usd: 5, source: "item", key: "policy.budget_usd", spent_usd: 1 }, policy_override: { budget_usd: 5, max_attempts: 4 } });
     expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["budget $20.00", "budget_usd $5.00 · item policy", "max_attempts 4 · item policy"]);
+  });
+
+  /** A never-started item's Config also draws its agents' rows, which read the harnesses. */
+  const HARNESS = { "GET /harnesses/profiles": [200, { profiles: [{ id: "claude", provider: "claude" }], agent_profiles: [] }], "GET /harnesses": [200, []] } as Record<string, [number, unknown]>;
+
+  it("lists an item-wide model and effort set before start, never saying nothing changed under them", async () => {
+    resetHarnessOptions();
+    const calls = stubFetch({ ...WRITES, ...HARNESS });
+    render(<ChainConfig item={fresh({ agent_overrides: { model: "claude-sonnet-4-5", effort: "low" }, node_overrides: { verification: { model: "opus" } } })} policy={null} reload={() => {}} editBudget={false} onEditBudget={() => {}} />);
+    expect(screen.queryByText(/Nothing changed/)).toBeNull();
+    const listed = screen.getAllByRole("listitem").map((li) => li.textContent);
+    expect(listed).toEqual(["every agent task model claude-sonnet-4-5, effort low · item-wide reset", "verification model opus · node reset"]);
+    await userEvent.click(screen.getAllByRole("button", { name: "reset" })[0]);
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { agent_overrides: {} } }]));
+  });
+
+  it("lists what the draft holds as not applied yet, leaving out an edit the run has passed", async () => {
+    resetHarnessOptions();
+    stubFetch({ ...HARNESS, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 }), ov("plan.write.plan", { model: "x" }, undefined, true)]) });
+    const it = fresh();
+    render(<ItemDraftProvider item={it} reload={() => {}}><ChainConfig item={it} policy={null} reload={() => {}} editBudget={false} onEditBudget={() => {}} /></ItemDraftProvider>);
+    expect(await screen.findByText("implementation policy.budget_usd → 2")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["implementation policy.budget_usd → 2 · in the draft, not applied yet"]);
+    expect(screen.queryByText(/Nothing changed/)).toBeNull();
   });
 
   it("says nothing changed without overrides, and resets a node override", async () => {

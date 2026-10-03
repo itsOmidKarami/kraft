@@ -6,9 +6,12 @@ import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
 import type { Applied } from "../draft/applied";
 import { appliedRows } from "../draft/AppliedRows";
+import { useDraft } from "../draft/context";
+import { lines } from "../draft/view";
 import { age, eventLine } from "../events";
 import type { ItemDetail } from "../useItem";
 import { chainName } from "../chainName";
+import { DocViewer } from "../DocViewer";
 import { budgetRaise, neverStarted } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
@@ -35,8 +38,10 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
     return line ? [{ e, line }] : [];
   }).slice(0, 20);
   const live = !["done", "archived", "cancelled"].includes(item.display_status ?? "");
+  const [attached, setAttached] = useState<string | null>(null);
   return (
     <>
+      {attached && <DocViewer source={{ kind: "attachment", workItemId: item.id, attachment: attached }} onClose={() => setAttached(null)} />}
       <dl className="item-facts ip-facts">
         <div><dt>status</dt><dd>{statusLine(item)}</dd></div>
         {sum && <div><dt>progress</dt><dd>{sum.nodes_done} of {sum.nodes_total} nodes · {sum.gates_passed} {sum.gates_passed === 1 ? "gate" : "gates"} passed</dd></div>}
@@ -51,7 +56,9 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
                 return (
                   <span key={a.kind} className="ip-attached">
                     {a.kind}{" "}
-                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button> : <span className="is-mono" title={a.path}>{name}</span>}
+                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button>
+                      // Not indexed yet (before start nothing is): it reads from the copy Kraft kept at intake.
+                      : <button type="button" className="item-link is-mono" title={a.path} onClick={() => setAttached(a.kind)}>{name}</button>}
                   </span>
                 );
               })}
@@ -163,9 +170,13 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
   const used = item.usage?.total;
   const overrides = Object.entries(item.node_overrides ?? {});
   const draftRows = appliedRows(applied);
-  // Before the item starts, its agents' model and effort have rows of their own.
+  // Before the item starts, its agents' model and effort have rows of their own,
+  // and are listed below with the rest of what this item changes.
   const fresh = notStarted(item);
-  const agent = fresh ? null : item.agent_overrides;
+  const agent = Object.entries(item.agent_overrides ?? {}).filter(([, v]) => v != null);
+  // What the item's draft holds and the run has not passed: not applied until Review & apply.
+  const d = useDraft();
+  const pending = d ? lines(d.ops).filter((l) => !d.ops[l.index].passed) : [];
   const reset = async (body: Record<string, unknown>) => {
     setError(null);
     const r = await act.patch(item.id, body);
@@ -199,19 +210,20 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
       {fresh && <ItemAgentRows item={item} reload={reload} />}
 
       <h3 className="ip-h">Changed for this item</h3>
-      {!ownCap && !ownPolicy.length && !overrides.length && !draftRows.length && !(agent && Object.keys(agent).length) ? (
+      {!ownCap && !ownPolicy.length && !overrides.length && !draftRows.length && !agent.length && !pending.length ? (
         <p className="item-muted">Nothing changed. This item runs the chain and policy as frozen.</p>
       ) : (
         <ul className="ip-overrides">
           {ownCap && <li><span className="is-mono">budget</span> {item.budget_usd != null ? usd(item.budget_usd) : "no cap"}{policyCap != null && <span className="item-muted"> · policy {usd(policyCap)}</span>}</li>}
           {ownPolicy.map(([k, v]) => <li key={k}><span className="is-mono">{k}</span> {v} <span className="item-muted">· item policy</span></li>)}
-          {agent && Object.keys(agent).length > 0 && (
-            <li><span className="is-mono">model</span> {Object.entries(agent).map(([k, v]) => `${k} ${v}`).join(", ")} <button type="button" className="item-link" onClick={() => reset({ agent_overrides: {} })}>reset</button></li>
+          {agent.length > 0 && (
+            <li><span className="is-mono">every agent task</span> {agent.map(([k, v]) => `${k} ${v}`).join(", ")} <span className="item-muted">· item-wide</span> <button type="button" className="item-link" onClick={() => reset({ agent_overrides: {} })}>reset</button></li>
           )}
           {overrides.map(([node, o]) => (
-            <li key={node}><span className="is-mono">{node}</span> {Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")} <button type="button" className="item-link" onClick={() => reset({ node_overrides: { [node]: {} } })}>reset</button></li>
+            <li key={node}><span className="is-mono">{node}</span> {Object.entries(o).map(([k, v]) => `${k} ${v}`).join(", ")} <span className="item-muted">· node</span> <button type="button" className="item-link" onClick={() => reset({ node_overrides: { [node]: {} } })}>reset</button></li>
           ))}
           {draftRows.map((r) => <li key={r.path}><span className="is-mono">{r.path}</span> {r.text} <span className="item-muted">applied by the draft</span></li>)}
+          {pending.map((l) => <li key={`${l.index}-${l.text}`}><span className="is-mono">{l.text.replace(/^[~+»-] /, "").replace(/\s+/g, " ")}</span> <span className="item-draft">· in the draft, not applied yet</span></li>)}
         </ul>
       )}
       {error && <p className="item-error" role="alert">{error}</p>}

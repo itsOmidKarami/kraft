@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import * as api from "../../api";
@@ -128,6 +128,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     if (added) keep({ step, reached, path, name: added, disabled, noSetup, repoPath, missing });
   }, [added, step, reached, path, disabled, noSetup, repoPath, missing]);
   // Fixed in Templates › Repos and back here: what it said is read again, not kept stale.
+  const reread0 = useRef(false);
   useEffect(() => {
     if (!repoPath || (!disabled && !noSetup)) return;
     const reread = () => {
@@ -139,6 +140,13 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
         setNoSetup(entry.setup_command == null);
       }, () => {});
     };
+    // And once on arriving: the wizard's own Templates › Repos link and the
+    // sidebar are in-app routes, so fixing it there and coming back fires
+    // neither event (R9a-06).
+    if (!reread0.current) {
+      reread0.current = true;
+      reread();
+    }
     window.addEventListener("focus", reread);
     document.addEventListener("visibilitychange", reread);
     return () => {

@@ -106,7 +106,7 @@ describe("Appearance (O.4)", () => {
     await userEvent.click(await screen.findByRole("switch", { name: /Wrap long lines/ }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: true, one_file_at_a_time: true } }));
     await userEvent.click(await row(/^Layout/));
-    await userEvent.click(screen.getByRole("radio", { name: "Side by side" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Side-by-side" }));
     await waitFor(() => expect(put).toHaveBeenLastCalledWith({ diff: expect.objectContaining({ layout: "split", wrap_lines: true }) }));
     await userEvent.click(await row(/^Added and removed colours/));
     await userEvent.click(screen.getByRole("radio", { name: /Colour-blind safe/ }));

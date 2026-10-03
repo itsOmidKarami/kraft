@@ -75,8 +75,8 @@ export function ItemAgentRows({ item, reload }: { item: ItemDetail; reload: () =
     <>
       <h3 className="ip-h">Every agent task</h3>
       <div className="cfg">
-        <OverrideRow label="model" kind="text" own={own.model ?? undefined} given={c.model} suggest={c.models} problem={errors.model} onSave={(v) => put("model", v)} onReset={() => put("model", undefined)} />
-        <OverrideRow label="effort" kind="enum" own={own.effort ?? undefined} given={c.effort} options={c.efforts} problem={errors.effort} onSave={(v) => put("effort", v)} onReset={() => put("effort", undefined)} />
+        <OverrideRow label="model" kind="text" scope="item-wide" own={own.model ?? undefined} given={c.model} suggest={c.models} problem={errors.model} onSave={(v) => put("model", v)} onReset={() => put("model", undefined)} />
+        <OverrideRow label="effort" kind="enum" scope="item-wide" own={own.effort ?? undefined} given={c.effort} options={c.efforts} problem={errors.effort} onSave={(v) => put("effort", v)} onReset={() => put("effort", undefined)} />
       </div>
       <p className="item-muted">Saved at once. A node's own setting wins over this one.</p>
     </>
@@ -95,8 +95,8 @@ export function NodeOverrideRows({ item, node, policy, reload }: { item: ItemDet
   const chain = materialized(item);
   const loop = chain?.chain.nodes.find((n) => n.id === node.id)?.fix_loop;
   const put = (key: keyof NodeFields, value: unknown) => void send(key, { node_overrides: { [node.id]: { [key]: value ?? null } } });
-  const row = (key: keyof NodeFields, props: Omit<React.ComponentProps<typeof OverrideRow>, "own" | "onSave" | "onReset" | "problem">) => (
-    <OverrideRow key={key} {...props} own={own[key] ?? undefined} problem={errors[key]} onSave={(v) => put(key, v)} onReset={() => put(key, undefined)} />
+  const row = (key: keyof NodeFields, props: Omit<React.ComponentProps<typeof OverrideRow>, "own" | "onSave" | "onReset" | "problem" | "scope">) => (
+    <OverrideRow key={key} {...props} scope="node" own={own[key] ?? undefined} problem={errors[key]} onSave={(v) => put(key, v)} onReset={() => put(key, undefined)} />
   );
   const all = item.agent_overrides ?? {};
   const wide = (v: string | null | undefined, chainValue: Given): Given => (v ? { value: v, source: "item-wide" } : chainValue);

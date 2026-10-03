@@ -6,7 +6,7 @@ import type { KraftEvent, Policy } from "../../types";
 import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
 import { request } from "../http";
-import { act, type Done } from "../item/actions";
+import { act, askStartUrl, draftWaits, type Done } from "../item/actions";
 import { Banner, QuestionCard } from "../item/Banner";
 import { age, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
@@ -63,8 +63,10 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       {...common}
       crumbs={[{ label: "Board", onClick: onClose }, { label: repoName(item.repo), onClick: () => onRepo(item.repo) }]}
       icon="workflow"
-      title={item.bead_id || shortId(item.id)}
-      sub={`${fresh ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
+      // The item's title heads the peek and names its landmark; the id follows in the line under it (R7b-16).
+      title={item.title}
+      prose
+      sub={`${item.bead_id || shortId(item.id)} · ${fresh ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
       tabs={[{ value: "overview", label: "Overview" }, { value: "activity", label: "Activity" }, { value: "config", label: "Config" }]}
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}
@@ -160,10 +162,22 @@ function Footer({ item, reload, offline, onOpen, onRaise }: { item: ItemDetail; 
     return r.ok;
   };
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
+  const navigate = useNavigate();
+  const startHere = async () => {
+    setBusy(true);
+    setError(null);
+    const waits = await draftWaits(item.id);
+    setBusy(false);
+    // The item page asks what its header's Start asks: Apply and start, or Start without them.
+    if (waits) return navigate(askStartUrl(item.id));
+    await run(act.resume(item.id));
+  };
   const main = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onRaise();
-    if (hs.main === "resume" || hs.main === "start") return void run(act.resume(item.id));
+    if (hs.main === "resume") return void run(act.resume(item.id));
+    // Start never applies a draft: with one, the item page asks first (R9b-01's other door).
+    if (hs.main === "start") return void startHere();
     if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));

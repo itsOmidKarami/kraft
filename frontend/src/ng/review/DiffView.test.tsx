@@ -421,6 +421,20 @@ describe("the + lane", () => {
   it("hides it with visibility, shown on hover, on the pick's last line and on focus", () => {
     expect(rule(".rv-plus")).toMatch(/visibility:\s*hidden/);
     expect(rule(".rv-plus")).not.toMatch(/opacity/);
-    expect(css).toMatch(/:hover > \.rv-plus, \.rv-plus\.is-head, \.rv-plus:focus-visible \{ visibility: visible; \}/);
+    expect(css).toMatch(/\n\[data-hover\] > \.rv-plus, \.rv-plus\.is-head, \.rv-plus:focus-visible \{ visibility: visible; \}/);
+    // No `:hover` rule reaches the + : on a huge diff every row answered to it on each crossing.
+    expect(css).not.toMatch(/:hover[^{,\n]*\.rv-plus\b[^{\n]*\{[^}]*visibility/);
+  });
+  it("moves the hover mark to the one line under the pointer, its own half in split, and off when the pointer leaves", () => {
+    render(<View prefs={{ layout: "split" }} />);
+    const lines = document.querySelector<HTMLElement>(".rv-lines")!;
+    const marked = () => [...lines.querySelectorAll("[data-hover]")];
+    fireEvent.mouseOver(row(/self.max_items = max_items/).querySelector(".rv-code")!);
+    expect(marked()).toEqual([row(/self.max_items = max_items/)]);
+    expect(marked()[0]).toHaveClass("rv-half");
+    fireEvent.mouseOver(row(/max_items=None/).querySelector(".rv-num")!);
+    expect(marked()).toEqual([row(/max_items=None/)]);
+    fireEvent.mouseLeave(lines);
+    expect(marked()).toEqual([]);
   });
 });

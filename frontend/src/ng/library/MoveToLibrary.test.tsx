@@ -79,7 +79,7 @@ describe("Move to library", () => {
     await u.type(field, "lint_task{Enter}");
     await waitFor(() => expect(draft.ops).toHaveBeenCalledTimes(1));
     expect(draft.ops).toHaveBeenCalledWith([{ op: "move_to_library", path: "lint.main.run", name: "lint_task" }], { quiet: true });
-    expect(await screen.findByText("Moved to the library as tasks.lint_task · ⌘Z undoes it")).toBeInTheDocument();
+    expect(await screen.findByText("Moved to the library as tasks.lint_task · Ctrl+Z undoes it")).toBeInTheDocument();
   });
 
   it("shows the server's refusal on the card and stays", async () => {

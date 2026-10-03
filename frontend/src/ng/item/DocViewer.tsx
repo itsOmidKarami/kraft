@@ -7,7 +7,13 @@ import { Markdown } from "../ui/Markdown";
 import { showToast } from "../ui/Toast";
 import { detailOf, request } from "../http";
 
-export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string };
+export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string } | { kind: "attachment"; workItemId: string; attachment: string };
+
+const urlOf = (s: DocSource) =>
+  s.kind === "document" ? `/documents/${encodeURIComponent(s.id)}`
+  : s.kind === "artifact" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifact`
+  // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
+  : `/work-items/${encodeURIComponent(s.workItemId)}/attachments/${encodeURIComponent(s.attachment)}`;
 type Viewed = { title: string; path: string; content: string; truncated?: boolean };
 
 /** The editors the server can launch (`POST /documents/{id}/open`); null is the system default. */
@@ -30,11 +36,10 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
-    const url = source.kind === "document" ? `/documents/${encodeURIComponent(source.id)}` : `/work-items/${encodeURIComponent(source.workItemId)}/artifact`;
-    request<Viewed>(url).then((r) => (r.status === 200 ? setDoc(r.body) : setError(detailOf(r.body))));
+    request<Viewed>(urlOf(source)).then((r) => (r.status === 200 ? setDoc(r.body) : setError(detailOf(r.body))));
     // The `by` line is display only: a new label must not read the document again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source.kind, source.kind === "document" ? source.id : source.workItemId]);
+  }, [urlOf(source)]);
   const open = async (editor: string | null) => {
     if (source.kind !== "document") return;
     const r = await request(`/documents/${encodeURIComponent(source.id)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });

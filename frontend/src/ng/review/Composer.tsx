@@ -7,7 +7,7 @@ import { Menu } from "../ui/Menu";
 import { isMixed, isOneLine, startSideOf, type LineRange } from "./range";
 import type { Anchor, Side } from "./rows";
 import { LABELS, codeBlock, lineRef, rangeName } from "./Thread";
-import { sendOnModEnter } from "../keys";
+import { mod, sendOnModEnter } from "../keys";
 
 /** Where a comment goes: a range of a file's lines, or the whole file. */
 export interface Target {
@@ -153,7 +153,7 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
       ) : (
         <div className="rv-row-actions">
           <span className="rv-muted rv-notes">
-            <span>{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ⌘↵ ${editing ? "save" : "add to review"}`}</span>
+            <span>{preview ? "Rendered preview · Continue editing to change the text" : `Markdown supported · ${mod("↵")} ${editing ? "save" : "add to review"}`}</span>
             {/* Ranges have no button of their own: say how to make one where one line was picked. */}
             {r && isOneLine(r) && !editing && !preview && <span>Drag the + or Shift-click to comment on several lines</span>}
           </span>

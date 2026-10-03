@@ -34,10 +34,14 @@ export function DraftConfig({ path, saying }: { path: string; saying?: string })
     <>
       <Head>Override for this item</Head>
       <div className="cfg">{fields.map((f) => <Row key={`${f.group}.${f.key}`} f={f} path={path} chain={chain} h={h} listed={listed} given={chain ? wider(d.raw, path, f) ?? given(chain, d.raw, path, f, h, repo) : null} />)}</div>
+      <Note>Saved as a draft, not applied yet: Review &amp; apply applies these{chain ? ", and Start asks about them first" : ""}.</Note>
+      <Note>{`A cap here is this ${SCOPE[path.split(".").length - 1]}'s own. The item's budget still applies.`}</Note>
       {path.split(".").length === 3 && <Note>The run reads an override when it reaches this task.{!task || task.kind === "agent" ? " A prompt override replaces the whole prompt for this item." : ""}</Note>}
     </>
   );
 }
+
+const SCOPE = ["node", "step", "task"];
 
 /** The task fields a kind has: an agent's model and prompt, a subprocess's command; a cap applies to any. */
 const applies = (f: DraftField, kind: string) =>
@@ -91,6 +95,7 @@ function Row({ f, path, chain, h, listed, given }: { f: DraftField; path: string
       options={options}
       suggest={f.key === "model" && task ? modelSuggestions(providers, listed, h) : undefined}
       problem={problem?.message}
+      scope="draft"
       placeholder={f.key === "prompt" ? "Replaces the whole prompt for this item" : undefined}
       onSave={(value) => void d.draft.edit((ops) => setField(ops, path, f.group, f.key, value), path)}
       onReset={() => void d.draft.edit((ops) => setField(ops, path, f.group, f.key, undefined), path)}

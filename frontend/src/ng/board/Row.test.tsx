@@ -41,6 +41,11 @@ describe("Row", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
+  it("describes its action by the item, so five \"Review to approve\" buttons are told apart", () => {
+    mount("needs_you", { stop: { kind: "gate", node: "spec_approval", reason: null, resume_at: null }, pending_gate: "spec_approval" });
+    expect(screen.getByRole("button", { name: "Review to approve" })).toHaveAccessibleDescription("Design the cache");
+  });
+
   it("turns the action off while offline and shows an action's error on the row", () => {
     mount("paused", {}, { offline: true, error: "work item is active, not paused" });
     expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();

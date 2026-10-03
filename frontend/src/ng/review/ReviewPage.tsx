@@ -125,6 +125,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               <Button onClick={() => setPlace({ from: "base", to: "latest" })}>Compare from base</Button>
             </div>
           )}
+          {compare.state === "ready" && comments.whole}
           {compare.state === "ready" && (
             <DiffView
               files={files}

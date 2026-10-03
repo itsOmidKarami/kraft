@@ -16,6 +16,8 @@ type Props = {
   taskKind?: TaskKind;
   gate?: boolean;
   title: string;
+  /** The title is prose (an item's title), not an id: set in the text face. */
+  prose?: boolean;
   sub?: string;
   prob?: { msg: string; fix?: string };
   /** A control above the tabs that every tab reads, such as the item page's attempt switcher. */
@@ -39,7 +41,7 @@ type Props = {
 
 /** The side pane over a canvas (Inspector.dc.html): crumb, icon and title,
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
-export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, bar, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, titleEdit, onIcon, footer, children }: Props) {
+export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, prose, sub, prob, bar, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, titleEdit, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
@@ -47,6 +49,16 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
     if (!open && fromKeys.current) railBtn.current?.focus();
     fromKeys.current = false;
   }, [open]);
+  // The rename field closing (Enter, Esc, a blank blur) takes the focus with it:
+  // it goes back to the title it replaced, not to the page (R9b-09).
+  const titleBtn = useRef<HTMLButtonElement>(null);
+  const editing = !!titleEdit;
+  const wasEditing = useRef(editing);
+  useEffect(() => {
+    const was = wasEditing.current;
+    wasEditing.current = editing;
+    if (was && !editing && (!document.activeElement || document.activeElement === document.body)) titleBtn.current?.focus();
+  }, [editing]);
   const glyph = gate ? <span className="pane-diamond" aria-hidden="true" /> : <NodeIcon name={icon} kind={taskKind} size={14} />;
 
   if (!open)
@@ -90,7 +102,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
               {glyph}<ChevronDown size={10} aria-hidden />
             </button>
           ) : <span className="pane-glyph">{glyph}</span>}
-          {titleEdit ?? <h2 className="pane-title">{onTitle ? <button type="button" className="pane-title-btn" title="Rename" onClick={onTitle}>{title}</button> : title}</h2>}
+          {titleEdit ?? <h2 className={`pane-title${prose ? " is-prose" : ""}`}>{onTitle ? <button ref={titleBtn} type="button" className="pane-title-btn" title="Rename" onClick={onTitle}>{title}</button> : title}</h2>}
           {onFocus && <button type="button" className="pane-focus" title="Open the node view (double-click)" onClick={onFocus}>Focus <Maximize2 size={12} /></button>}
         </div>
         {sub && <p className="pane-sub">{sub}</p>}

@@ -22,9 +22,14 @@ describe("Banner", () => {
   it("shows a budget stop with Raise cap, which opens the budget editor in Config", async () => {
     const onRaise = vi.fn();
     render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "Running time hit its 8h cap", scope: "work_item" }) })} onOpenGate={() => {}} onRaise={onRaise} reload={() => {}} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Running time hit its 8h cap at verification.");
+    expect(screen.getByRole("status")).toHaveTextContent("Stopped at verification. Running time hit its 8h cap.");
     await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
     expect(onRaise).toHaveBeenCalled();
+  });
+
+  it("says where it stopped before a two-sentence reason, not tacked on after it", () => {
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { node: "plan", reason: "budget cap reached: $0.035 spent on this work item, cap $0.030. Nothing new was started; a running agent was not interrupted.", scope: "work_item" }) })} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/^✦Stopped at plan\. Budget cap reached: \$0\.035 spent on this work item, cap \$0\.030\. Nothing new was started; a running agent was not interrupted\.Raise cap$/);
   });
 
   it("offers no raise for a budget stop the item cannot raise, and says where it is raised", () => {

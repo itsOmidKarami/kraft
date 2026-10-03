@@ -19,6 +19,7 @@ import { Composer } from "./Composer";
 import { Peek, type PeekTab } from "./Peek";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { useBulk } from "./bulk";
+import { usePeekFocus } from "./peekFocus";
 import "./board.css";
 import { countIn } from "./counts";
 
@@ -78,6 +79,8 @@ export function BoardPage() {
   const [peekTab, setPeekTab] = useState<PeekTab>("overview");
   const [budgetEdit, setBudgetEdit] = useState(false);
   const [body, bodyW] = useWidth();
+  const bodyEl = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useCallback((el: HTMLDivElement | null) => { body(el); bodyEl.current = el; }, [body]);
   const size = useResizable("board", bodyW);
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
@@ -178,6 +181,9 @@ export function BoardPage() {
     return () => document.removeEventListener("pointerdown", onDown);
   }, [query.sel, setQuery]);
 
+  // What the peek covers leaves the tab order, and Tab from the selected row goes into it.
+  usePeekFocus(bodyEl, query.sel, size.width);
+
   // ↑/↓ move between rows, across groups.
   const onListKey = (e: KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -255,7 +261,7 @@ export function BoardPage() {
         />
       </div>
 
-      <div className="board-body" ref={body}>
+      <div className="board-body" ref={bodyRef}>
         {/* The peek overlays the list: the list keeps its width with it open. */}
         <div className="board-list" onKeyDown={onListKey}>
           <div className="board-list-inner">

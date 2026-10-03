@@ -18,6 +18,9 @@ export const firstFocusable = (root: HTMLElement | null): HTMLElement | null =>
  *    what opened it already moved focus in, or `focusIn` is false (a toggle
  *    that opens on hover or focus and moves in only on a key);
  *  - ↑/↓, Home and End move between its menu items, and Tab leaves a menu as Escape does;
+ *  - Tab and Shift+Tab cycle inside a dialog (a confirm card, a small form), as
+ *    in a dialog: closing it on Tab would lose what was typed, and leaving it
+ *    open would send focus to the top of the page;
  *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere. */
 export function Popover({ anchor, open, onClose, children, role, label, focusIn = true }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -86,6 +89,14 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
     if (e.key === "Tab" && role === "menu") {
       e.preventDefault();
       return closeBack();
+    }
+    if (e.key === "Tab" && role === "dialog") {
+      const all = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const at = document.activeElement;
+      const to = e.shiftKey ? (at === all[0] ? all.at(-1) : null) : at === all.at(-1) ? all[0] : null;
+      if (to || !all.length) e.preventDefault();
+      to?.focus();
+      return;
     }
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>(ITEMS)];
     const n = items.length;

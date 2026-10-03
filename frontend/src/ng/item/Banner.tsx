@@ -8,6 +8,9 @@ import { budgetRaise, NOT_RAISABLE } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
+/** A stop's reason as a sentence of its own: a capital first letter and a full stop. */
+const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replace(/\.*$/, "")}.`;
+
 /** The reason banner (Decisions §4): only when the item needs you at a gate
  *  or a cap; the action is the filled button. */
 export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail; onOpenGate: (gate: string) => void; onRaise: () => void; reload: () => void }) {
@@ -29,8 +32,9 @@ export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
         <span className="item-banner-text">
-          {(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached")).replace(/\.$/, "")}
-          {stop.node && <> at <code>{stop.node}</code></>}.
+          {/* Where first: the reason can be two sentences, and a node tacked on after them read as part of the last. */}
+          {stop.node && <>Stopped at <code>{stop.node}</code>. </>}
+          {sentence(stop.reason ?? (stop.kind === "budget" ? "The budget ran out" : "A limit was reached"))}
           {stop.kind === "budget" && !budgetRaise(item) && <> {NOT_RAISABLE}</>}
         </span>
         {/* A cap that names its limit opens that limit's editor; any other cap stop opens the Config it can only point at,

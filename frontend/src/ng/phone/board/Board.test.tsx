@@ -84,6 +84,19 @@ describe("the phone board (B)", () => {
     expect(where()).not.toContain("f=");
   });
 
+  it("has a Not started chip, so the four chips add up to All", async () => {
+    put(gate("g1"), item("r2", "running"), item("n3", "paused", { current_node_id: null }), item("n4", "paused", { current_node_id: null }), item("d5", "done"));
+    mount();
+    await act(async () => {});
+    const chips = screen.getAllByRole("button", { name: /^(Needs you|Running|Not started|Done)\d+$/ }).map((b) => b.textContent);
+    expect(chips).toEqual(["Needs you1", "Running1", "Not started2", "Done1"]);
+    expect(screen.getByRole("button", { name: /^All\d+$/ })).toHaveTextContent("All5");
+    await userEvent.click(screen.getByRole("button", { name: /^Not started/ }));
+    expect(where()).toContain("/?f=not_started");
+    expect(screen.getByText("Item n3")).toBeInTheDocument();
+    expect(screen.queryByText("Item r2")).toBeNull();
+  });
+
   it("opens an item on a tap of the card", async () => {
     put(item("r1", "running"));
     mount();

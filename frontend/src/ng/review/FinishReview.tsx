@@ -84,7 +84,10 @@ export function BottomBar({ item, gate, threads, readOnly, onFinish, submit }: {
       {bar.published ? (
         <>
           <Button onClick={() => onFinish("request_changes")}>Request changes</Button>
-          <Button variant="primary" disabled={!!block} title={block ?? undefined} onClick={async () => setError(await submit("approve", ""))}>Approve</Button>
+          {/* With comments pending, Approve would send them as the gate passes, where no agent acts on
+              them: it opens Finish your review on Approve instead, which lists them first. */}
+          <Button variant={bar.pending ? undefined : "primary"} disabled={!!block} title={block ?? undefined} onClick={async () => (bar.pending ? onFinish("approve") : setError(await submit("approve", "")))}>Approve</Button>
+          {bar.pending > 0 && <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>}
         </>
       ) : (
         <Button variant="primary" onClick={() => onFinish()}>Finish review</Button>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import HTTPException, Request
 
@@ -8,7 +9,7 @@ from kraft import config as config_mod
 from kraft import events, review, store
 from kraft.api import api_router, deps
 from kraft.api.routes import board
-from kraft.executor import stops
+from kraft.executor import entry, stops
 from kraft.index import ingest as ingest_mod
 from kraft.templates import revision
 from kraft.worker.worktree_read import read_worktree_file
@@ -298,6 +299,38 @@ async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | 
         await _refuse_artifact(st, wid, rel, reason)
         return None
     return result.text, result.truncated
+
+
+@api_router.get("/work-items/{wid}/attachments/{kind}")
+async def get_work_item_attachment(wid: str, kind: str, request: Request):
+    """A spec or plan attached at intake, read from the copy Kraft stored then.
+
+    Before the item starts there is no worktree and nothing indexed, so this is
+    the only way to read what was attached. It is the snapshot under
+    `run/attachments/<wid>/`, the one the worktree will get, read with the same
+    containment walk as a gate's artifact."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)  # 404s on an unknown work item
+    a = next((a for a in entry.attachments_of(row) if a.get("kind") == kind), None)
+    if a is None:
+        raise HTTPException(404, f"this work item has no {kind} attached")
+    source = a.get("source")
+    result = (
+        read_worktree_file(st.run_dirs.attachments / wid, Path(source).name, DIFF_MAX_BYTES)[0]
+        if source
+        else None
+    )
+    if result is None:
+        raise HTTPException(404, f"Kraft no longer has the copy of this work item's {kind}")
+    fm, body = ingest_mod.split_front_matter(result.text)
+    return {
+        "work_item_id": wid,
+        "kind": kind,
+        "path": a["path"],
+        "title": ingest_mod.derive_title(a["path"], fm, body),
+        "content": body,
+        "truncated": result.truncated,
+    }
 
 
 @api_router.get("/work-items/{wid}/artifact")

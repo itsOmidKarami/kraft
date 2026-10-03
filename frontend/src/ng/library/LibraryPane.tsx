@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Inspector } from "../graph/Inspector";
 import { detailOf } from "../http";
-import { isTextField } from "../keys";
+import { isTextField, mod } from "../keys";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import type { useResizable } from "../graph/useResizable";
@@ -142,7 +142,7 @@ export function LibraryPane({ draft, path, uses, names, open, size, goTo, onLibr
     closeCard();
     if (a.status !== 200) return;
     const broken = (a.body.ops?.[0]?.result?.broken as unknown[] | undefined)?.length ?? 0;
-    showToast(`Removed ${path}${broken ? ` · ${plural(broken, "use")} now broken` : ""} · ⌘Z undoes it`);
+    showToast(`Removed ${path}${broken ? ` · ${plural(broken, "use")} now broken` : ""} · ${mod("Z")} undoes it`);
     onRemoved(path);
   };
   // A copy is a new empty component of the same kind with the original's YAML set into it: one request, one undo.

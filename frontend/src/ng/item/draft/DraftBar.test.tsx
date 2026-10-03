@@ -52,7 +52,7 @@ describe("DraftBar", () => {
     expect(screen.getByTestId("rv")).toHaveTextContent("true");
   });
 
-  it("disables Review & apply while a problem or a passed op stands, and says why", async () => {
+  it("disables Review & apply while a problem stands, and says why", async () => {
     show(answer([ov("merge_request.open.open_draft")], [{ op: 0, message: "over the cap" }]));
     const b = await screen.findByRole("button", { name: "Review & apply" });
     expect(b).toBeDisabled();
@@ -60,10 +60,13 @@ describe("DraftBar", () => {
     expect(screen.getByText("1 PROBLEM")).toBeInTheDocument();
   });
 
-  it("counts a passed op as a problem though the server lists none", async () => {
+  it("counts a passed op as a problem though the server lists none, and leaves Review open to take it out", async () => {
     show(answer([ov("plan.write.plan", true)]));
     expect(await screen.findByText("1 PROBLEM")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review & apply" })).toBeDisabled();
+    const b = screen.getByRole("button", { name: "Review & apply" });
+    expect(b).toBeEnabled();
+    await userEvent.click(b);
+    expect(screen.getByTestId("rv")).toHaveTextContent("true");
   });
 
   it("steps the badge through the problems, selecting each one's node", async () => {

@@ -11,7 +11,7 @@ import { Menu } from "../ui/Menu";
 import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
 import { Ticks } from "./Ticks";
-import { sendOnModEnter } from "../keys";
+import { mod, sendOnModEnter } from "../keys";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -135,7 +135,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
       <div className="composer-row">
         <NodeGlyph kind="slot" size="sm" mark="add" />
         <input className="composer-title" aria-label="Title" placeholder="Title" autoFocus value={d.title} onChange={(e) => set({ title: e.target.value })} />
-        <span className="composer-hint">⌘↵ create and start</span>
+        <span className="composer-hint">{mod("↵")} create and start</span>
       </div>
       <div className="composer-indent">
         <textarea className="composer-brief" aria-label="Brief" placeholder="A line of brief. Every node reads it." rows={1} value={d.brief} onChange={(e) => set({ brief: e.target.value })} />

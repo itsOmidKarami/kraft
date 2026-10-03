@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -126,6 +128,21 @@ def budget_breach(
     return None
 
 
+def _usd(n: float) -> str:
+    """Dollars as the web UI's budget meter prints them (`format.ts` `usd`):
+    cents from $1 up, a tenth of a cent under it, so a stop under a dollar
+    names the same number as the meter beside it. Rounded half up on the
+    float's exact value, as JavaScript's `toFixed` does: Python's own format
+    rounds an exact binary tie to even, so $0.0625 would read $0.062 here and
+    $0.063 on the meter."""
+    if not math.isfinite(n):
+        return f"${n}"
+    step = Decimal("0.01") if n >= 1 else Decimal("0.001")
+    # Enough digits for any finite float: the default 28 refuses a cap of 1e26 and up.
+    with localcontext(prec=400):
+        return f"${Decimal(n).quantize(step, rounding=ROUND_HALF_UP)}"
+
+
 def budget_reason(breach: Breach) -> str:
     tail = " Nothing new was started; a running agent was not interrupted."
     if isinstance(breach, TokenBreach):
@@ -140,18 +157,18 @@ def budget_reason(breach: Breach) -> str:
             return (
                 f"budget_usd cannot be checked: {breach.unknown_launches} launch(es) in "
                 f"{where} reported no cost, and unknown spend is never counted as free "
-                f"(${breach.spent_usd:.2f} known, cap ${breach.cap_usd:.2f})." + tail
+                f"({_usd(breach.spent_usd)} known, cap {_usd(breach.cap_usd)})." + tail
             )
         return (
-            f"budget_usd reached: ${breach.spent_usd:.2f} spent in {where}, "
-            f"cap ${breach.cap_usd:.2f}." + tail
+            f"budget_usd reached: {_usd(breach.spent_usd)} spent in {where}, "
+            f"cap {_usd(breach.cap_usd)}." + tail
         )
     where = (
         "this work item" if isinstance(breach, WorkItemBreach) else "today, across every work item"
     )
     return (
-        f"budget cap reached: ${breach.spent_usd:.2f} spent on {where}, "
-        f"cap ${breach.cap_usd:.2f}." + tail
+        f"budget cap reached: {_usd(breach.spent_usd)} spent on {where}, "
+        f"cap {_usd(breach.cap_usd)}." + tail
     )
 
 

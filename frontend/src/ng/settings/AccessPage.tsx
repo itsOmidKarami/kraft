@@ -132,9 +132,15 @@ export function AccessPage() {
     if (h === location.hostname) return err("host", "can't remove the host you're connected as");
     void put("host", { allowed_hosts: access.allowed_hosts.filter((x) => x !== h) });
   };
+  // Undo takes back what waits on a restart, and only that: each key with a
+  // restart item goes back to what is running. A key with none is already
+  // what runs, or is held by KRAFT_HOST / KRAFT_PORT, whose value must never
+  // be written into access.yaml (R9a-10).
   const undo = async () => {
     if (!health) return;
-    await put("bind", { bind: health.bind ?? access.bind, port: health.port ?? access.port });
+    const pending = (k: "bind" | "port") => items.some((i) => i.id === `access.${k}`);
+    const body = { ...(pending("bind") && health.bind != null && { bind: health.bind }), ...(pending("port") && health.port != null && { port: health.port }) };
+    if (Object.keys(body).length) await put("bind", body);
   };
   const revoke = async (s: AuthSession) => {
     setRevoking(null);

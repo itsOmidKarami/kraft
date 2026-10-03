@@ -6,7 +6,7 @@ import type { KraftEvent, ReviewThread } from "../../../types";
 import { rejectTarget } from "../../item/graph";
 import { useEvents } from "../../item/useEvents";
 import { useItem, type ItemDetail } from "../../item/useItem";
-import { approveBlock } from "../../review/finish";
+import { approveBlock, drafts } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
 import { readReview } from "../../review/url";
@@ -14,6 +14,7 @@ import { useArtifact, useCompare, useThreads } from "../../review/useReview";
 import { Button } from "../../ui/Button";
 import { Markdown } from "../../ui/Markdown";
 import { Doc } from "../doc/Doc";
+import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { useBack } from "../nav/trail";
 import { ActionBar } from "../ui/Rows";
@@ -69,6 +70,9 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   const adds = files.reduce((n, f) => n + f.insertions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const open = threads.filter((t) => t.state !== "resolved").length;
+  // Your comments not sent yet: Approve would send them as the gate passes, where no agent acts on them (R9b-04 on the phone).
+  const pending = drafts(threads).length;
+  const sheet = useSheet();
   const verdict = gate ? autoVerdict(events, gate) : null;
   const block = approveBlock(item, gate, threads);
   const target = (item.pending_gate === gate ? item.fix_target?.node : null) ?? (gate ? rejectTarget(item.chain_definition.nodes, gate) : null);
@@ -77,8 +81,9 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
 
   if (params.get("compose") === "reject") return <ReviewComposer target={target} submit={submit} />;
 
-  const sub = hasDoc && artifact?.state === "ready" ? artifact.data.path : [`${files.length} ${files.length === 1 ? "file" : "files"}`, `+${adds} −${dels}`, open ? `${open} open ${open === 1 ? "thread" : "threads"}` : null].filter(Boolean).join(" · ");
+  const sub = hasDoc && artifact?.state === "ready" ? artifact.data.path : [`${files.length} ${files.length === 1 ? "file" : "files"}`, `+${adds} −${dels}`, open ? `${open} open ${open === 1 ? "thread" : "threads"}` : null, pending ? `${pending} pending` : null].filter(Boolean).join(" · ");
   const approve = async () => {
+    sheet.close();
     setBusy(true);
     setError(null);
     const e = await submit("approve", "");
@@ -151,8 +156,17 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
       {block && <p className="ph-block-reason" role="status">{block}</p>}
       <ActionBar>
         <Button className="ph-btn" onClick={reject} disabled={busy || !gate}>Request changes</Button>
-        <Button className="ph-btn ph-btn-primary" variant="primary" onClick={approve} disabled={busy || !!block}>Approve</Button>
+        <Button className="ph-btn ph-btn-primary" variant="primary" onClick={pending ? () => sheet.open("approve-drafts") : approve} disabled={busy || !!block}>Approve</Button>
       </ActionBar>
+      {sheet.is("approve-drafts") && (
+        <ConfirmSheet
+          title={`Approve and send ${pending} ${pending === 1 ? "comment" : "comments"}?`}
+          text={`Your pending ${pending === 1 ? "comment goes" : "comments go"} out with the approval, as the gate passes: no agent acts on ${pending === 1 ? "it" : "them"}. To have them acted on, Request changes instead.`}
+          busy={busy}
+          confirm={{ label: "Approve", run: () => void approve() }}
+          onClose={sheet.close}
+        />
+      )}
     </>
   );
 }

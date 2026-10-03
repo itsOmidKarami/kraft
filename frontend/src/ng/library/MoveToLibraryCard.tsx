@@ -7,6 +7,7 @@ import { LIBRARY_FILE } from "../templates/draft/view";
 import { IdCard } from "../templates/menus/IdCard";
 import { useLibrary } from "../templates/useLibrary";
 import { moveLines, type Movable } from "./moveToLibrary";
+import { mod } from "../keys";
 
 /** Move to library (Decisions §9, R47): the exec node or task becomes a library component and the chain keeps
  *  `{ id, extends }`. The card names the id, says what the library gains and what the chain keeps, and refuses a
@@ -39,13 +40,13 @@ export function MoveToLibraryCard({ anchor, draft, path, id, own, what, onMoved,
       taken={taken}
       go="Move"
       refused={refused}
-      note={<><span className="lib-line">{lines.gains}</span><span className="lib-line">{lines.keeps}</span><span className="lib-line">⌘Z undoes it. Publishing writes both files.</span></>}
+      note={<><span className="lib-line">{lines.gains}</span><span className="lib-line">{lines.keeps}</span><span className="lib-line">{mod("Z")} undoes it. Publishing writes both files.</span></>}
       onChange={setName}
       onGo={async (to) => {
         const a = await draft.ops([{ op: "move_to_library", path, name: to }], { quiet: true });
         if (a.status !== 200) return setRefused(detailOf(a.body));
         onClose();
-        showToast(`Moved to the library as ${what.section}.${to} · ⌘Z undoes it`);
+        showToast(`Moved to the library as ${what.section}.${to} · ${mod("Z")} undoes it`);
         onMoved();
       }}
       onClose={onClose}

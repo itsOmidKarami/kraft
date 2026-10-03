@@ -68,14 +68,18 @@ export function barText(threads: ReviewThread[], item: Pick<WorkItem, "pending_g
       title: "Your review",
       text: `${pend.length} pending, ${pend.filter((t) => t.label === "must_fix").length} must fix, ${pend.filter((t) => !t.label).length} unlabeled`,
       agent: agentReplies ? `${agentReplies} agent ${agentReplies === 1 ? "reply" : "replies"}` : null,
+      pending: pend.length,
     };
   }
   const resolved = threads.filter((t) => t.state === "resolved").length;
   const atGate = !!gate && item.pending_gate === gate;
+  // A later round's comments wait as drafts too: the bar says so, and Finish review sends them.
+  const pending = drafts(threads).length;
   return {
     published: true,
     title: `${resolved} of ${threads.length} resolved`,
-    text: !atGate ? "Not at a gate, so Approve is unavailable" : openMustFix(threads) ? "Approve unlocks when must-fix threads are resolved" : "Ready to approve",
+    text: `${pending ? `${pending} pending · ` : ""}${!atGate ? "Not at a gate, so Approve is unavailable" : openMustFix(threads) ? "Approve unlocks when must-fix threads are resolved" : "Ready to approve"}`,
     agent: null,
+    pending,
   };
 }

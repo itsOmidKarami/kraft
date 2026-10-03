@@ -123,5 +123,40 @@ describe("ng Popover", () => {
       expect(screen.getByRole("menu")).toBeInTheDocument();
       expect(trigger).toHaveFocus();
     });
+
+    it("keeps Tab inside a dialog, cycling last to first and back, with the dialog still open", async () => {
+      function Card() {
+        const anchor = useRef<HTMLButtonElement>(null);
+        const [open, setOpen] = useState(false);
+        return (
+          <>
+            <button ref={anchor} onClick={() => setOpen(true)}>trigger</button>
+            <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} role="dialog" label="Cancel this item?">
+              <textarea aria-label="Reason" />
+              <button disabled>Cancel item</button>
+              <button>Keep it going</button>
+            </Popover>
+          </>
+        );
+      }
+      render(<Card />);
+      fireEvent.click(screen.getByRole("button", { name: "trigger" }));
+      const reason = screen.getByRole("textbox", { name: "Reason" });
+      const keep = screen.getByRole("button", { name: "Keep it going" });
+      await waitFor(() => expect(reason).toHaveFocus());
+      keep.focus();
+      fireEvent.keyDown(keep, { key: "Tab" });
+      expect(reason).toHaveFocus();
+      fireEvent.keyDown(reason, { key: "Tab", shiftKey: true });
+      expect(keep).toHaveFocus();
+      expect(screen.getByRole("dialog", { name: "Cancel this item?" })).toBeInTheDocument();
+    });
+
+    it("leaves a Tab between a dialog's own fields to the browser", async () => {
+      render(<><button>before</button><Popover anchor={{ current: null }} open onClose={() => {}} role="dialog" label="d"><button>a</button><button>b</button></Popover></>);
+      const a = screen.getByRole("button", { name: "a" });
+      a.focus();
+      expect(fireEvent.keyDown(a, { key: "Tab" })).toBe(true);
+    });
   });
 });

@@ -25,8 +25,8 @@ const mount = () =>
     </MemoryRouter>,
   );
 
-const GATED = item({ id: "wi_gate", title: "Gated work", status: "needs_human", pending_gate: "human_review", repo: "/r/alpha" });
-const PLAIN = item({ id: "wi_plain", title: "Plain work", status: "active", repo: "/r/beta", bead_id: "kraft-has" });
+const GATED = item({ id: "wi_gate", title: "Gated work", status: "needs_human", display_status: "needs_you", stop: { kind: "gate" } as never, pending_gate: "human_review", repo: "/r/alpha" });
+const PLAIN = item({ id: "wi_plain", title: "Plain work", status: "active", display_status: "running", current_node_id: "implementation", repo: "/r/beta", bead_id: "kraft-has" });
 const DOC: SearchResult = {
   id: "d1", repo: "/r/alpha", source_kind: "artifact", kind: "spec", title: "Caching spec", path: "spec.md",
   snippet: "the [cache] layer", score: 1, links: [{ work_item_id: "wi_gate" } as never],
@@ -95,6 +95,22 @@ describe("SearchOverlay", () => {
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
     expect(screen.getByText("Filters narrow Documents only")).toBeInTheDocument();
     expect(screen.queryByText("kraft-has", { exact: false })).toBeNull();
+  });
+
+  it("says what the board says of an item, and puts a failed one under Needs you with the gates", async () => {
+    const FRESH = item({ id: "wi_new", title: "Fresh work", status: "paused", display_status: "paused", current_node_id: null, repo: "/r/beta" });
+    const FAILED = item({ id: "wi_fail", title: "Failed work", status: "needs_human", display_status: "failed", current_node_id: "plan", repo: "/r/beta" });
+    useStore.setState({ workItems: { wi_gate: GATED, wi_plain: PLAIN, wi_new: FRESH, wi_fail: FAILED } } as never);
+    mount();
+    const { user, input } = await open();
+    await user.type(input, "work");
+    await screen.findByText("Caching spec");
+    const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
+    expect(within(section("Needs you")).getByText("Gated work").closest("[role=option]")).toHaveTextContent("alpha · approve human review");
+    expect(within(section("Needs you")).getByText("Failed work").closest("[role=option]")).toHaveTextContent("beta · failed at plan");
+    expect(within(section("Work items")).getByText("Fresh work").closest("[role=option]")).toHaveTextContent("beta · not started");
+    expect(within(section("Work items")).getByText("Plain work").closest("[role=option]")).toHaveTextContent("beta · implementation");
+    expect(screen.getByRole("listbox")).not.toHaveTextContent(/needs_human|· paused|· active/);
   });
 
   it("moves with ↑/↓, clamped at both ends, with aria-activedescendant following", async () => {

@@ -7,6 +7,7 @@ import { FallbackRows } from "./Fallback";
 import type { PaneKind } from "./describe";
 import { useProviders } from "../../harnesses/useProviders";
 import { effortsFor, useHarnessOptions } from "./useHarnessOptions";
+import { autoEscalates } from "../escalateWords";
 
 export type PaneCtx = {
   r: Result;
@@ -122,7 +123,7 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
   const fixSteps = normalise(fix)?.steps ?? [];
   const esc = node?.escalation as Task | null | undefined;
   const onFailure = node?.on_failure as NodeA | null | undefined;
-  const delay = Math.round((r.policy_values?.auto_escalate_delay_s ?? 0) / 60);
+  const delay = autoEscalates(r.policy_values?.auto_escalate_delay_s ?? 0);
   const lone = steps.length === 1 && steps[0].id === "main";
   return (
     <>
@@ -139,7 +140,7 @@ function NodeOverview({ ctx }: { ctx: PaneCtx }) {
       <Head>Handling</Head>
       <Kv k="produces" v={produces.length ? produces.join(", ") : "nothing"} mono muted={!produces.length} />
       <Kv k="fix loop" v={fix ? `${plural(fixSteps.length, "repair step")}${fix.judge ? " · judge" : ""}` : "none"} muted={!fix} onClick={() => ctx.goTo(fix ? `${path}.fix_loop` : path)} />
-      <Kv k="escalation" v={esc ? str(esc.id) : `none · auto after ${delay}m`} mono={!!esc} muted={!esc} onClick={esc ? () => ctx.goTo(`${path}.escalation.${str(esc.id)}`) : undefined} />
+      <Kv k="escalation" v={esc ? str(esc.id) : `none · auto-escalates ${delay}`} mono={!!esc} muted={!esc} onClick={esc ? () => ctx.goTo(`${path}.escalation.${str(esc.id)}`) : undefined} />
       <Kv k="on failure" v={onFailure ? "node handler" : "none"} muted={!onFailure} />
     </>
   );

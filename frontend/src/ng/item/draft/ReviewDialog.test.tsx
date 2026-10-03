@@ -63,7 +63,23 @@ describe("ReviewDialog", () => {
     open({ [DRAFT]: answer([ov("plan.write.plan", { model: "x" }, undefined, true)]) });
     const d = await dialog();
     expect(within(d).getByRole("button", { name: "Apply" })).toBeDisabled();
-    expect(within(d).getByText("✕ 1 edit the run has passed")).toBeInTheDocument();
+    expect(within(d).getByText(/✕ 1 edit the run has passed/)).toBeInTheDocument();
+  });
+
+  it("takes the passed edits out of the draft so the rest can apply", async () => {
+    const answers: Record<string, [number, unknown]> = { [DRAFT]: answer([ov("plan.write.plan", { model: "x" }, undefined, true), add("scan", "verification")], [], withScan) };
+    answers["PUT /work-items/w1/draft"] = answer([add("scan", "verification")], [], withScan);
+    const { calls } = open(answers);
+    const d = await dialog();
+    await userEvent.click(within(d).getByRole("button", { name: "Remove it from the draft" }));
+    await waitFor(() => expect(sent(calls, "PUT").map((c) => c.body)).toEqual([{ ops: [{ op: "add_node", after: "verification", node: { id: "scan", extends: "security" } }] }]));
+    await waitFor(() => expect(within(d).getByRole("button", { name: "Apply" })).toBeEnabled());
+  });
+
+  it("closes once removing the passed edits leaves nothing", async () => {
+    open({ [DRAFT]: answer([ov("plan.write.plan", { model: "x" }, undefined, true)]), "PUT /work-items/w1/draft": answer([]) });
+    await userEvent.click(within(await dialog()).getByRole("button", { name: "Remove it from the draft" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("applies once for a double click, toasts, reloads the item and closes", async () => {

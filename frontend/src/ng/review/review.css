@@ -113,7 +113,8 @@
    shown on hover, on the pick's last line, and on focus. Hidden, it takes no tap and leaves the a11y tree. */
 .rv-row:not(.is-split), .rv-half { position: relative; box-sizing: border-box; padding-left: 22px; }
 .rv-plus { position: absolute; top: 1px; left: 2px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-sub); cursor: pointer; visibility: hidden; }
-:is(.rv-row:not(.is-split), .rv-half):hover > .rv-plus, .rv-plus.is-head, .rv-plus:focus-visible { visibility: visible; }
+/* Hover is the data-hover the diff moves to the line under the pointer: a `:hover` rule here cost every row of a huge diff on each crossing. */
+[data-hover] > .rv-plus, .rv-plus.is-head, .rv-plus:focus-visible { visibility: visible; }
 .rv-plus:hover { background: var(--line); color: var(--text); }
 .rv-plus:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rv-after { position: sticky; left: 0; box-sizing: border-box; width: 100cqi; padding: 8px 12px 8px 60px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-family: var(--font-sans); }
@@ -121,7 +122,8 @@
 /* Threads and the composer (prototype 433–486). */
 .rv-thread, .rv-composer { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; color: var(--text-sub); }
 .rv-thread + .rv-thread, .rv-thread + .rv-composer { margin-top: 8px; }
-.rv-thread.is-resolved { opacity: .75; }
+/* A resolved thread steps back by its frame, not its text: an opacity took its 12px text under 4.5:1. */
+.rv-thread.is-resolved { border-style: dashed; border-color: var(--line); background: transparent; }
 .rv-thread-head, .rv-composer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
 .rv-who { color: var(--text); font-weight: 500; }
 .rv-status { color: var(--text-muted); }
@@ -158,6 +160,7 @@
 .rv-line-chip.is-new { background: color-mix(in oklab, var(--rv-add, var(--diff-add-theme)) 22%, transparent); }
 .rv-notes { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .rv-elsewhere { margin: 0 16px 24px; }
+.rv-whole { margin-top: 16px; }
 .rv-elsewhere h2 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 
 /* Bottom bar and Finish your review (prototype 496–526). */

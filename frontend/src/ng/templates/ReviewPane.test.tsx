@@ -46,6 +46,14 @@ describe("Review & publish pane", () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled());
   });
 
+  it("says why a publish was refused, not nothing", async () => {
+    const shown = vi.spyOn(toast, "showToast");
+    const { onDone } = mount({ result: { changes: CHANGES }, answers: { publish: { status: 404, body: { detail: "no draft of chains 'default'" } } } });
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(shown).toHaveBeenCalledWith("Couldn't publish: no draft of chains 'default'"));
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it("lists an edit to the chain itself, whose path is empty, as the chain", () => {
     mount({ result: { changes: [{ path: "", kind: "change" as const, summary: "description" }] } });
     expect(screen.getByRole("heading", { name: "Draft · 1 change" })).toBeInTheDocument();

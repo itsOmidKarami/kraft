@@ -11,7 +11,10 @@ import { lines, PASSED } from "./view";
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Review & apply (Decisions §5): the exact change, the checks, when the run
- *  reaches it, then Apply, Back to editing or Discard draft. */
+ *  reaches it, then Apply, Back to editing or Discard draft. Opened by Start on
+ *  an item whose draft holds changes, it asks first: Apply and start, or Start
+ *  without them, which leaves them in the draft. Start never applies a draft on
+ *  its own, and a change it left behind is passed once the run reaches it. */
 export function ReviewDialog() {
   const d = useDraft();
   return d?.reviewing && d.draft.view ? <Review /> : null;
@@ -32,13 +35,27 @@ function Review() {
   const adds = d.ops.flatMap((o) => (o.op === "add_node" && !o.passed ? [o] : []));
   const budget = view.checks.budget;
   const close = () => d.setReviewing(false);
+  const start = d.starting;
 
   const run = async () => {
     setBusy(true);
     const o = await apply();
     setBusy(false);
     if (o.kind === "moved") setMoved(o.passed);
-    else if (o.kind === "applied" || o.kind === "gone") close();
+    else if (o.kind === "applied" || o.kind === "gone") {
+      close();
+      if (o.kind === "applied") start?.();
+    }
+  };
+  const startWithout = () => { close(); start?.(); };
+  // An edit the run has passed can never apply, and it holds the rest back: take it out of the draft.
+  const dropPassed = async () => {
+    const gone = new Set(passed.map((i) => i.index));
+    setBusy(true);
+    await d.draft.edit((ops) => ops.filter((_, i) => !gone.has(i)));
+    setBusy(false);
+    setMoved(0);
+    if (gone.size === d.ops.length) close();
   };
   const discard = async () => {
     setBusy(true);
@@ -51,7 +68,7 @@ function Review() {
   };
 
   return (
-    <Dialog title={`Apply ${n} ${plural(n, "change", "changes")} to this item?`} onClose={close} className="idr-review"
+    <Dialog title={start ? `Start with ${n} unapplied ${plural(n, "change", "changes")}?` : `Apply ${n} ${plural(n, "change", "changes")} to this item?`} onClose={close} className="idr-review"
       footer={asking ? (
         <>
           <span className="idr-ask">Discard this draft? It cannot be brought back.</span>
@@ -62,10 +79,11 @@ function Review() {
         <>
           <Button className="idr-danger idr-left" onClick={() => setAsking(true)}>Discard draft</Button>
           <Button onClick={close}>Back to editing</Button>
-          <Button variant="primary" disabled={blocked || busy} onClick={run}>Apply</Button>
+          {start && <Button disabled={busy} onClick={startWithout}>Start without them</Button>}
+          <Button variant="primary" disabled={blocked || busy} onClick={run}>{start ? "Apply and start" : "Apply"}</Button>
         </>
       )}>
-      <p className="idr-sub">Only this item changes. The chain template and other items stay as they are.</p>
+      <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain template and other items stay as they are.</p>
       {blocked && (
         <ul className="idr-probs" aria-label="Problems">
           {d.issues.map((i) => (
@@ -83,7 +101,10 @@ function Review() {
       <p className="idr-h">checked against policy</p>
       <ul className="idr-checks">
         <li className={problems.length ? "is-bad" : "is-ok"}>{problems.length ? `✕ ${problems.length} ${plural(problems.length, "problem", "problems")} to fix first` : "✓ resolves"}</li>
-        <li className={passed.length ? "is-bad" : "is-ok"}>{passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed` : "✓ only nodes that have not run"}</li>
+        <li className={passed.length ? "is-bad" : "is-ok"}>
+          {passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
+          {passed.length > 0 && <> <button type="button" className="item-link" disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</button></>}
+        </li>
         <li className="is-ok">{budget.cap_usd == null ? "✓ no dollar cap on this item" : `✓ spent ${usd(budget.spent_usd ?? 0)} of the ${usd(budget.cap_usd)} budget`}</li>
       </ul>
       {moved > 0 && <p className="idr-moved" role="alert">The run moved past {moved} {plural(moved, "edit", "edits")} while you were reviewing. {PASSED}</p>}

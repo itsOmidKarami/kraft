@@ -465,3 +465,40 @@ def test_no_other_budget_stop_names_a_limit(breach):
     """Each of these is raised somewhere else (or by no higher cap), so a
     `limit` would send the UI to an edit that does not move the stop."""
     assert stops.budget_limit(breach) is None
+
+
+@pytest.mark.parametrize(
+    "breach,said",
+    [
+        (
+            WorkItemBreach(scope="work_item", spent_usd=0.035, cap_usd=0.03),
+            "$0.035 spent on this work item, cap $0.030",
+        ),
+        (
+            UsdBreach(scope="usd", path="", spent_usd=0.0351, cap_usd=0.5, unknown_launches=0),
+            "$0.035 spent in the work item, cap $0.500",
+        ),
+        (
+            DailyBreach(scope="daily", spent_usd=12.5, cap_usd=10.0),
+            "$12.50 spent on today, across every work item, cap $10.00",
+        ),
+        # An exact binary tie: toFixed(3) gives 0.063, Python's half-even format 0.062.
+        (
+            WorkItemBreach(scope="work_item", spent_usd=0.0625, cap_usd=0.0625),
+            "$0.063 spent on this work item, cap $0.063",
+        ),
+    ],
+    ids=["item-cap", "budget_usd", "daily", "half-up-tie"],
+)
+def test_a_budget_stop_names_dollars_as_the_meter_prints_them(breach, said):
+    """Under a dollar the web UI's meter prints a tenth of a cent ($0.035), so
+    the stop's reason beside it does too, never a rounded $0.04."""
+    assert said in stops.budget_reason(breach)
+
+
+def test_a_huge_cap_is_named_never_a_crash():
+    """`budget_usd` takes any positive number, and a launch with no reported
+    cost names the cap it could not check: 1e30 needs more digits than
+    Decimal's default 28 to print, and the stop must still say it."""
+    breach = UsdBreach(scope="usd", path="", spent_usd=0.5, cap_usd=1e30, unknown_launches=1)
+    assert "cap $1000000000000000019884624838656.00" in stops.budget_reason(breach)

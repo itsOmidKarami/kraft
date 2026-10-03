@@ -21,6 +21,8 @@ const CHIPS = [
   { f: "all", label: "All" },
   { f: "needs", label: "Needs you" },
   { f: "running", label: "Running" },
+  // The desktop's fourth group: without it the chips never added up to All (R8b-12).
+  { f: "not_started", label: "Not started" },
   { f: "done", label: "Done" },
 ] as const;
 type Chip = (typeof CHIPS)[number]["f"];
@@ -59,7 +61,7 @@ export function Board() {
   const inRepo = (i: WorkItem) => !repo || i.repo === repo;
   const scoped = items.filter(inRepo);
   const count = (g: GroupKey) => scoped.filter((i) => groupOf(i) === g).length;
-  const counts: Record<Chip, number> = { all: scoped.length, needs: count("needs"), running: count("running"), done: count("done") };
+  const counts: Record<Chip, number> = { all: scoped.length, needs: count("needs"), running: count("running"), not_started: count("not_started"), done: count("done") };
 
   const groups = useMemo(
     () => groupsOf(items, { filter: { q: "", repo, chain: "" }, group: "status", sort: "attention", doneCap: showAll ? null : (prefs?.show_done ?? 5) }),

@@ -159,6 +159,16 @@ describe("FirstRun", () => {
     expect(screen.queryByText(/set its test command and Enable it/)).not.toBeInTheDocument();
   });
 
+  it("reads the repo again on arriving back by an in-app link, with no focus event", async () => {
+    // Where the wizard got to before its Templates › Repos link: no setup command then.
+    localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 1, reached: 1, path: "/code/acme", name: "acme", disabled: false, noSetup: true, repoPath: "/code/acme", missing: [] }));
+    const repos = vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/acme", enabled: true, setup_command: "" }] } as never);
+    mount();
+    await waitFor(() => expect(repos).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText(/No setup command found/)).not.toBeInTheDocument());
+    expect(screen.getByText("Added acme")).toBeInTheDocument();
+  });
+
   it("sends the probe's scopes when it found a nested one", async () => {
     const scopes = [{ paths: ["pyproject.toml", "src/**"], command: "uv run pytest -q" }, { paths: ["frontend/**"], command: "npm test" }];
     vi.spyOn(api, "probeRepo").mockResolvedValue({ ...PROBE, test_scopes: scopes });

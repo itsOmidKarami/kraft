@@ -22,6 +22,10 @@ type Props = {
   problem?: string | null;
   /** What a long field's empty editor says it is for. */
   placeholder?: string;
+  /** Where a value this item sets lives, as its chip says: saved for every
+   *  agent task (`item-wide`) or for one node (`node`), or only in the item's
+   *  draft until Review & apply applies it (`draft`). */
+  scope: Scope;
   onSave: (value: unknown) => void;
   onReset: () => void;
 };
@@ -41,10 +45,18 @@ const SOURCES: Record<string, string> = {
   harness: "the harness's default",
 };
 
+export type Scope = "item-wide" | "node" | "draft";
+/** What an own value's chip and dot say in full. */
+const SCOPES: Record<Scope, string> = {
+  "item-wide": SOURCES["item-wide"],
+  node: SOURCES.node,
+  draft: "in this item's draft, not applied yet",
+};
+
 /** One Config row a person overrides for this item in place (Decisions §5
  *  Editing the chain): the value, ✎ to edit it, ↺ to drop the override. A
  *  value this item does not set says where it comes from. */
-export function OverrideRow({ label, hint, kind, own: set, given, options, suggest, problem, placeholder, onSave, onReset }: Props) {
+export function OverrideRow({ label, hint, kind, own: set, given, options, suggest, problem, placeholder, scope, onSave, onReset }: Props) {
   const own = set !== undefined;
   const [editing, setEditing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -75,8 +87,8 @@ export function OverrideRow({ label, hint, kind, own: set, given, options, sugge
       {editing ? <Editor label={label} kind={kind} options={kind === "bool" ? ["on", "off"] : options} suggest={suggest} placeholder={placeholder} onSave={save} onCancel={(keys) => { close(keys); setErr(null); }} /> : (
         <span className={`cfg-v${own || given ? "" : " is-unset"}${kind === "long" ? " is-prose" : ""}`}>{own ? word(set, kind) : given?.value ?? "as the chain gives it"}</span>
       )}
-      {own && <span className="cfg-dot" aria-label="overridden for this item" />}
-      {own ? <span className="cfg-chip is-own">this item</span> : given && !editing && <span className="cfg-chip" title={SOURCES[given.source] ?? given.source}>{given.source}</span>}
+      {own && <span className={`cfg-dot${scope === "draft" ? " is-draft" : ""}`} aria-label={SCOPES[scope]} />}
+      {own ? <span className={`cfg-chip is-own${scope === "draft" ? " is-draft" : ""}`} title={SCOPES[scope]}>{scope}</span> : given && !editing && <span className="cfg-chip" title={SOURCES[given.source] ?? given.source}>{given.source}</span>}
       {!editing && (
         <>
           <IconButton ref={pencil} label={`Override ${label}`} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden /></IconButton>

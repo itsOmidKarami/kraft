@@ -6,6 +6,8 @@ import { docTitle, repoName } from "../../format";
 import { useStore } from "../../store";
 import type { Bead, SearchResult, WorkItem } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
+import { groupOf } from "../board/model";
+import { reasonTail } from "../board/rowText";
 import { Kbd } from "../ui/Kbd";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
@@ -36,11 +38,14 @@ function Snippet({ text }: { text: string }) {
   return <>{text.split(/(\[[^\]]*\])/).map((p, i) => (p.startsWith("[") && p.endsWith("]") ? <mark key={i}>{p.slice(1, -1)}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
 }
 
+/** What the board's row says of an item, not its stored status: "not started", "approve spec", "failed at plan". */
+const stateWords = (i: WorkItem) => (groupOf(i) === "not_started" ? "not started" : reasonTail(i));
+
 const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => void): Row => ({
   id: `${section}:${i.id}`,
   section,
   label: i.title,
-  sub: [repoName(i.repo), section === "needs" ? i.pending_gate : i.status].filter(Boolean).join(" · "),
+  sub: [repoName(i.repo), stateWords(i)].filter(Boolean).join(" · "),
   note: "opens the work item",
   open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
 });
@@ -89,7 +94,8 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
 
   const rows = useMemo(() => {
     const all = Object.values(workItems);
-    const needsYou = all.filter((i) => i.pending_gate && i.status === "needs_human" && (!query || has(i.title, query) || has(i.id, query)));
+    // Needs you is the board's group: a gate, a question, a stop, a failure, an item paused mid-chain.
+    const needsYou = all.filter((i) => groupOf(i) === "needs" && (!query || has(i.title, query) || has(i.id, query)));
     const taken = new Set(needsYou.map((i) => i.id));
     const rest = all.filter((i) => !taken.has(i.id));
     const items = query

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ import { Toaster } from "../nav/Toaster";
 import { Item } from "./Item";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/budget/raise", "POST /work-items/w1/cancel", "POST /work-items/w1/gates/plan_approval/reject", "POST /work-items/w1/pause", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
+const WRITES = acceptWrites("POST /work-items/w1/draft/apply", "PATCH /work-items/w1", "POST /work-items/w1/budget/raise", "POST /work-items/w1/cancel", "POST /work-items/w1/gates/plan_approval/reject", "POST /work-items/w1/pause", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
 const SESSION = { id: "s1", work_item_id: "w1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, thread: 1, round: 0, created_at: "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", exited_at: null };
@@ -22,6 +22,7 @@ function mount(it: ReturnType<typeof detail>, path: string | { pathname: string;
   const calls = stubFetch({ ...WRITES,
     "GET /work-items/w1": [200, it],
     "GET /work-items/w1/compare": [200, { files: [] }],
+    "GET /work-items/w1/draft": [200, { ops: [] }],
     "GET /worker-sessions/s1/log": [200, { lines: [{ n: 1, t: "0:03", src: "agent", text: "loaded review_package", summary: "loaded review_package" }] }],
     ...answers,
   });
@@ -64,6 +65,50 @@ describe("the item screen (C)", () => {
     expect(screen.queryByText("PAUSED")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+  });
+
+  it("before start: lists the attached spec and plan, opens Kraft's copy of one, and asks for no diff", async () => {
+    const attachments = [{ kind: "spec" as const, path: "docs/specs/ws.md" }, { kind: "plan" as const, path: "docs/plans/ui.md" }];
+    const calls = mount(item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [], attachments }), "/work-items/w1", {
+      "GET /work-items/w1/attachments/plan": [200, { title: "UI plan", path: "docs/plans/ui.md", content: "# UI plan\n\nStep **one**.", truncated: false }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "plan ui.md" }));
+    expect(where()).toBe("/work-items/w1?attached=plan");
+    expect(await screen.findByRole("heading", { name: "UI plan" })).toBeInTheDocument();
+    expect(screen.getByText("one")).toBeInTheDocument();
+    // A never-started item has no worktree to compare: the server would answer 409.
+    expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
+  });
+
+  describe("Start with a draft (R9b-01 on the phone)", () => {
+    const NEVER = () => item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [] });
+    const DRAFT = { "GET /work-items/w1/draft": [200, { ops: [{ op: "override", path: "implementation", policy: { budget_usd: 2 }, passed: false }] }] } as Record<string, [number, unknown]>;
+
+    it("asks first, then Apply and start applies the draft before it starts", async () => {
+      const calls = mount(NEVER(), "/work-items/w1", DRAFT);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const sheet = await screen.findByRole("dialog", { name: "Start with unapplied changes?" });
+      expect(posts(calls)).toEqual([]);
+      await userEvent.click(within(sheet).getByRole("button", { name: "Apply and start" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
+    });
+
+    it("Start without them starts and leaves the draft", async () => {
+      const calls = mount(NEVER(), "/work-items/w1", DRAFT);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("a double tap on Apply and start applies and starts once", async () => {
+      const calls = mount(NEVER(), "/work-items/w1", DRAFT);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const apply = within(await screen.findByRole("dialog")).getByRole("button", { name: "Apply and start" });
+      // Two taps before the first apply answers.
+      fireEvent.click(apply);
+      fireEvent.click(apply);
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
+    });
   });
 
   it("opens a node on a tap of its row", async () => {

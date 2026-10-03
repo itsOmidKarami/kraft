@@ -188,7 +188,18 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
         { once: true },
       );
     };
+    // The line under the pointer shows its +: one attribute moved on mouseover, not a
+    // `:hover` rule every row of a huge diff answers to on each crossing (R9b-06). An
+    // attribute, not a class, so a row React draws again keeps it.
+    let hovered: HTMLElement | null = null;
+    const hover = (line: HTMLElement | null) => {
+      if (line === hovered) return;
+      hovered?.removeAttribute("data-hover");
+      line?.setAttribute("data-hover", "");
+      hovered = line;
+    };
     const onOver = (e: MouseEvent) => {
+      hover(e.target instanceof Element ? e.target.closest<HTMLElement>(".rv-half, .rv-row:not(.is-split)") : null);
       const d = drag.current;
       const row = rowOf(e.target);
       if (!d || !row || row.dataset.hunk !== d.hunk) return;
@@ -205,7 +216,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
-    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, onPlus: (a) => () => plus(a), onOver };
+    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null) };
   }, [file.path]);
   const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean } | null>(null);
 
@@ -272,7 +283,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           ) : !pf.hunks.length ? (
             <p className="rv-file-msg">{pf.status === "renamed" ? "Renamed with no changes" : "No changes to show"}</p>
           ) : (
-            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift extends, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver}>
+            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift extends, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
               {rows.map((r, i) => (
                 <RowView
                   key={i}
@@ -314,6 +325,7 @@ interface Gutter {
   startDrag: (a: Anchor, plus: boolean) => (e: MouseEvent) => void;
   onPlus: (a: Anchor) => () => void;
   onOver: (e: MouseEvent) => void;
+  onLeave: () => void;
 }
 
 const NONE: ReactNode[] = [];

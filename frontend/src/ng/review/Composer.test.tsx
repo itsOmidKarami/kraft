@@ -252,4 +252,12 @@ describe("useComments", () => {
     expect(container.querySelectorAll(".rv-thread")).toHaveLength(3);
     expect(screen.getByRole("region", { name: "Threads on files not in this comparison" }).querySelectorAll(".rv-thread")).toHaveLength(2);
   });
+
+  it("lists a thread on no file as on the whole change, not on a file missing from the comparison", () => {
+    const whole = { id: "w", file_path: null, side: null, start_line: null, end_line: null, comments: [], draft: false, state: "open", label: null } as unknown as ReviewThread;
+    const { result } = hook([], { target: "latest", sha: null }, [whole]);
+    render(<>{result.current.whole}{result.current.elsewhere}</>);
+    expect(screen.getByRole("region", { name: "On the whole change" }).querySelectorAll(".rv-thread")).toHaveLength(1);
+    expect(screen.queryByRole("region", { name: "Threads on files not in this comparison" })).toBeNull();
+  });
 });

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -226,5 +229,18 @@ describe("profile and entry panes", () => {
     await userEvent.click(screen.getByRole("button", { name: "+ Profile" }));
     await waitFor(() => expect(server.ops).toHaveLength(2));
     expect(server.ops[1]).toEqual([{ op: "add_profile", name: "profile" }]);
+  });
+});
+
+describe("the inspector's choices", () => {
+  // jsdom lays nothing out: this reads the rule. A permission mode's seven options on one
+  // line ran the claude inspector 127px past its 379px pane (R7b-14).
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "harnesses.css"), "utf-8");
+  it("wrap a field's segmented choice inside the pane", () => {
+    const at = css.indexOf("\n.hn-field .segmented {");
+    expect(at).toBeGreaterThan(-1);
+    const body = css.slice(css.indexOf("{", at) + 1, css.indexOf("}", at));
+    expect(body).toMatch(/flex-wrap:\s*wrap/);
+    expect(body).toMatch(/max-width:\s*100%/);
   });
 });

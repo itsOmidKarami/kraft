@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { sendOnModEnter } from "./keys";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mod, sendOnModEnter } from "./keys";
 
 function Box({ send, ready = true }: { send: () => void; ready?: boolean }) {
   const [text, setText] = useState("");
@@ -35,5 +35,26 @@ describe("sendOnModEnter", () => {
     fireEvent.keyDown(box, { key: "Enter", ctrlKey: true, altKey: true });
     fireEvent.keyDown(box, { key: "Enter", metaKey: true, isComposing: true });
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("mod", () => {
+  const as = (platform: string, userAgent = "Mozilla/5.0") => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent);
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it("prints ⌘ on a Mac and an iPad, and Ctrl+ off one, as the handlers take either", () => {
+    as("MacIntel");
+    expect(mod("K")).toBe("⌘K");
+    as("iPad");
+    expect(mod("↵")).toBe("⌘↵");
+    as("Linux x86_64");
+    expect(mod("K")).toBe("Ctrl+K");
+    as("Win32");
+    expect(mod("Z")).toBe("Ctrl+Z");
+    as("", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
+    expect(mod("K")).toBe("⌘K");
   });
 });

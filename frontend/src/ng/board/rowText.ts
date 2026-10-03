@@ -16,6 +16,9 @@ export const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
 /** A gate id as what it decides: `spec_approval` reads "spec", so the row says "approve spec". */
 export const gateWords = (id: string) => nodeWords(id.replace(/[_-]approval$/, ""));
 
+/** Up to the first full stop that ends a sentence, not one inside "$0.04". */
+const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
+
 /** The reason tail after the meta: one short line per status and stop kind. */
 export function reasonTail(i: Row, now = Date.now()): string {
   const node = nodeWords(nodeOf(i));
@@ -25,6 +28,9 @@ export function reasonTail(i: Row, now = Date.now()): string {
         switch (i.stop?.kind) {
           case "gate": return `approve ${gateWords(i.pending_gate ?? nodeOf(i))}`;
           case "question": return `agent asks: ${(i.stop.reason ?? "").replace(/^needs_context:\s*/, "")}`.trim();
+          // A cap or budget stop's reason goes on to what was not interrupted: the row keeps its first sentence.
+          case "cap":
+          case "budget": return i.stop.reason ? firstSentence(i.stop.reason) : `waiting for you at ${node}`;
           default: return i.stop?.reason ?? `waiting for you at ${node}`;
         }
       case "failed": return `failed at ${node}`;

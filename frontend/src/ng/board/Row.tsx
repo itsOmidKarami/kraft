@@ -29,6 +29,9 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
   const act = own ? null : rowAction(item);
   const id = item.bead_id || shortId(item.id);
   const hot = groupOf(item) === "needs";
+  // A row's action is named by what it does ("Review to approve") and described by its item:
+  // five alike in a row read the same to a screen reader without it (R8b-11).
+  const titleId = `board-title-${item.id}`;
   const click = (e: MouseEvent) => (e.metaKey || e.ctrlKey ? onOpen(item.id) : onSelect(item.id));
   const key = (e: KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -44,7 +47,7 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
       <input type="checkbox" className="board-check" checked={checked} onChange={() => onCheck(item.id)} aria-label={`Select ${item.title}`} />
       <NodeGlyph kind={g.kind} size="sm" state={g.state} icon={g.icon} sel={selected} />
       <button type="button" className="board-row-main" aria-current={selected || undefined} onClick={click} onDoubleClick={() => onOpen(item.id)} onKeyDown={key} onKeyUp={(e) => e.key === " " && e.preventDefault()}>
-        <span className="board-title" title={item.title}>{item.title}</span>
+        <span className="board-title" id={titleId} title={item.title}>{item.title}</span>
         <span className="board-meta">
           <span className="board-meta-repo" title={item.repo}>{repoName(item.repo)}</span>
           <span className="board-sep" aria-hidden>·</span>
@@ -59,9 +62,9 @@ export function Row({ item, selected, checked, offline, now, error, onSelect, on
       </button>
       <Ticks ticks={ticksOf(item)} />
       <span className="board-act">
-        {own && <button type="button" className="btn btn-secondary board-act-btn" disabled={offline} onClick={own.run}>{own.label}</button>}
+        {own && <button type="button" className="btn btn-secondary board-act-btn" aria-describedby={titleId} disabled={offline} onClick={own.run}>{own.label}</button>}
         {act && (
-          <button type="button" className={`btn ${act.kind === "gate" ? "btn-secondary" : "btn-primary"} board-act-btn`} disabled={offline} onClick={() => onAction(item, act)}>
+          <button type="button" className={`btn ${act.kind === "gate" ? "btn-secondary" : "btn-primary"} board-act-btn`} aria-describedby={titleId} disabled={offline} onClick={() => onAction(item, act)}>
             {act.label}
           </button>
         )}

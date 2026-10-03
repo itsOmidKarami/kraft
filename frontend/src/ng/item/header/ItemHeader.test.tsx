@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import { item } from "../../../testFixtures";
+import { ItemDraftProvider } from "../draft/context";
+import { ReviewDialog } from "../draft/ReviewDialog";
+import { answer, ov } from "../draft/testkit";
 import { acceptWrites, detail, inShell, stubFetch } from "../testkit";
 import { ItemHeader } from "./ItemHeader";
 
@@ -61,6 +64,59 @@ describe("ItemHeader", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null } }]);
+  });
+
+  describe("Start with a draft", () => {
+    const NEVER = { status: "paused", display_status: "paused", current_node_id: null } as const;
+    const DRAFT = { ...WRITES, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 })]), "POST /work-items/w1/draft/apply": answer([]) };
+    const mount = (reload = vi.fn(), path?: string) => {
+      const it = detail(NEVER);
+      inShell(<ItemDraftProvider item={it} reload={reload}><ItemHeader item={it} reload={reload} onSettings={() => {}} onRunLog={() => {}} /><ReviewDialog /></ItemDraftProvider>, path);
+      return reload;
+    };
+    // The draft's own read and the shell's are reads: only these two matter.
+    const sends = (calls: { method: string; path: string }[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
+
+    it("asks first instead of starting past the draft, and Apply and start applies it before it starts", async () => {
+      const calls = stubFetch(DRAFT);
+      const reload = mount();
+      await screen.findByText("DRAFT · 1 CHANGE");
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Apply and start" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(reload).toHaveBeenCalled();
+    });
+
+    it("starts without applying only when told to, leaving the draft", async () => {
+      const calls = stubFetch(DRAFT);
+      mount();
+      await screen.findByText("DRAFT · 1 CHANGE");
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("arriving with ?start=1 (a Start from the peek) asks the same question, once, and starts only when told", async () => {
+      const calls = stubFetch(DRAFT);
+      mount(vi.fn(), "/work-items/w1?start=1");
+      const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
+      expect(sends(calls)).toEqual([]);
+      await userEvent.click(within(d).getByRole("button", { name: "Start without them" }));
+      await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("Back to editing starts nothing", async () => {
+      const calls = stubFetch(DRAFT);
+      mount();
+      await screen.findByText("DRAFT · 1 CHANGE");
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Back to editing" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(sends(calls)).toEqual([]);
+    });
   });
 
   it("asks before pausing, then pauses", async () => {
