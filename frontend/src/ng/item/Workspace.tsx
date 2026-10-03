@@ -64,10 +64,14 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const [editBudget, setEditBudget] = useState(false);
   const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Every second while an agent or a check runs, so "running 12s" counts; every
+  // 30 s otherwise. It read "running 0s" for up to 30 s (R10a-06).
+  const ticking = item.worker_sessions.some((s) => s.status === "running" || s.status === "pending");
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), ticking ? 1_000 : 30_000);
     return () => clearInterval(t);
-  }, []);
+  }, [ticking]);
 
   const state: PaneState = { level: place.node ? "node" : "chain", node: place.node, sel: place.sel, open: pane_.open, userCollapsed: pane_.userCollapsed };
   const go = (to: Place) => {
