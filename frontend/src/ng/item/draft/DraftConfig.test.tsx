@@ -36,6 +36,8 @@ describe("DraftConfig", () => {
   it("offers policy rows only on a node or a step", async () => {
     await show("merge_request");
     expect((await screen.findAllByRole("button", { name: /^Override / }))).toHaveLength(4);
+    // A node's cap is its own: the item's budget meter is a different one.
+    expect(screen.getByText("A cap here is this node's own. The item's budget still applies.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Override model" })).toBeNull();
   });
 

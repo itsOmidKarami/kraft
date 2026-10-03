@@ -38,7 +38,8 @@ describe("ItemAgentRows", () => {
     const reload = vi.fn();
     render(<ItemAgentRows item={fresh({ agent_overrides: { effort: "high" } })} reload={reload} />);
     expect(await screen.findByText("each task's own")).toBeInTheDocument();
-    expect(row("effort")).toHaveTextContent("highthis item");
+    // Its own value names its scope, as the docs do: item-wide, not "this item".
+    expect(row("effort")).toHaveTextContent(/^efforthighitem-wide/);
     await userEvent.click(screen.getByRole("button", { name: "Override model" }));
     await userEvent.type(screen.getByRole("combobox", { name: "model" }), "opus-4{Enter}");
     await waitFor(() => expect(patches()).toEqual([{ agent_overrides: { effort: "high", model: "opus-4" } }]));
@@ -147,7 +148,7 @@ describe("NodeOverrideRows", () => {
     render(<NodeOverrideRows item={detail({ ...API_ITEM })} node={{ ...verification, fix_loop: "verification.fix_loop" }} policy={policy} reload={() => {}} />);
     expect(await screen.findByRole("button", { name: "Override fix loop attempts" })).toBeInTheDocument();
     expect(row("fix loop attempts")).toHaveTextContent("5item policy");
-    expect(row("effort")).toHaveTextContent("lowthis item");
+    expect(row("effort")).toHaveTextContent("lownode");
   });
 
   it("sets one field on the node, merged by the server", async () => {
@@ -162,7 +163,7 @@ describe("NodeOverrideRows", () => {
 
   it("drops one field with a null, in one PATCH", async () => {
     show(fresh({ node_overrides: { verification: { attempts: 4, model: "haiku" } } }));
-    expect(row("model")).toHaveTextContent("haikuthis item");
+    expect(row("model")).toHaveTextContent(/^modelhaikunode/);
     await userEvent.click(screen.getByRole("button", { name: "Reset model" }));
     await waitFor(() => expect(patches()).toEqual([{ node_overrides: { verification: { model: null } } }]));
   });
