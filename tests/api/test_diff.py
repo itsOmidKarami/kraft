@@ -8,22 +8,17 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
-import subprocess
 from pathlib import Path
 
 import pytest
 from support.api import _completed_item
-from support.harness import connected_repo, make_repo, v1_chain, v1_item
+from support.harness import commit_all, connected_repo, git, make_repo, v1_chain, v1_item, write
 
 from kraft import store
 from kraft.paths import RunDirs
 
 #: No default repo entry for an unconnected repo, as before this used the shared client.
 pytestmark = pytest.mark.api_client(default_setup=False)
-
-
-def _write(path, text):
-    path.write_text(text)
 
 
 @pytest.fixture
@@ -61,10 +56,9 @@ def item_without_base_ref(client, seeded_item, tmp_path):
 def test_diff_splits_landed_commits_from_in_flight_work(client, seeded_item, worktree):
     """Kraft-nceo. The chain's own committed docs are not the change under
     review, and must not spend the viewer's open-line budget ahead of it."""
-    _write(worktree / "doc.md", "landed paperwork\n")
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
-    subprocess.run(["git", "commit", "-m", "land the doc"], cwd=worktree, check=True)
-    _write(worktree / "calc.py", "in flight code\n")
+    write(worktree, "doc.md", "landed paperwork\n")
+    commit_all(worktree, "land the doc")
+    write(worktree, "calc.py", "in flight code\n")
 
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
 
@@ -85,8 +79,8 @@ def test_diff_landed_is_empty_when_nothing_is_committed(client, seeded_item, wor
     the page reads exactly as it did before the split."""
     # roll the worktree back to base_ref so nothing at all is committed past it
     base = client.get(f"/api/work-items/{seeded_item}/diff").json()["base_ref"]
-    subprocess.run(["git", "reset", "--hard", base], cwd=worktree, check=True)
-    _write(worktree / "calc.py", "in flight code\n")
+    git(worktree, "reset", "--hard", base)
+    write(worktree, "calc.py", "in flight code\n")
 
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["landed"]["files"] == []
@@ -105,12 +99,11 @@ def test_diff_landed_and_in_flight_truncate_independently(
 
     monkeypatch.setattr(artifacts, "DIFF_MAX_BYTES", 200)
     for i in range(20):
-        _write(worktree / f"landed{i}.py", "x = 1\n" * 100)
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
-    subprocess.run(["git", "commit", "-m", "bulk"], cwd=worktree, check=True)
+        write(worktree, f"landed{i}.py", "x = 1\n" * 100)
+    commit_all(worktree, "bulk")
     for i in range(20):
-        _write(worktree / f"flight{i}.py", "y = 2\n" * 100)
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+        write(worktree, f"flight{i}.py", "y = 2\n" * 100)
+    git(worktree, "add", "-A")
 
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["truncated"] is True
@@ -135,7 +128,7 @@ def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree)
     Uncommitted end to end (nothing landed): the added line is new to HEAD, so
     it is a genuine `+`, not a context line the split would have re-labelled.
     """
-    _write(worktree / "calc.py", "changed\n\n")
+    write(worktree, "calc.py", "changed\n\n")
 
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()["diff"]
     # the blank line the agent added is the last line of the hunk: stripped, it
@@ -144,14 +137,11 @@ def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree)
 
 
 def test_diff_lists_untracked_without_adding_them(client, seeded_item, worktree):
-    _write(worktree / "new_file.py", "x = 1\n")
+    write(worktree, "new_file.py", "x = 1\n")
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert "new_file.py" in body["untracked"]
     assert "new_file.py" not in body["diff"]
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"], cwd=worktree, capture_output=True, text=True
-    )
-    assert staged.stdout.strip() == ""  # read-only: nothing was staged
+    assert git(worktree, "diff", "--cached", "--name-only") == ""  # read-only: nothing was staged
 
 
 def test_diff_leaves_out_krafts_own_untracked_notes(client, seeded_item, worktree):
@@ -159,8 +149,8 @@ def test_diff_leaves_out_krafts_own_untracked_notes(client, seeded_item, worktre
     # review diff must not show them as changed files (Kraft-tugdf.22).
     for note in (".engineering/sessions/note.md", "docs/superpowers/plan.md"):
         (worktree / note).parent.mkdir(parents=True, exist_ok=True)
-        _write(worktree / note, "notes\n")
-    _write(worktree / "new_file.py", "x = 1\n")
+        write(worktree, note, "notes\n")
+    write(worktree, "new_file.py", "x = 1\n")
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["untracked"] == ["new_file.py"]
 
@@ -170,8 +160,8 @@ def test_diff_lists_untracked_files_inside_a_new_directory(client, seeded_item, 
     # `?? sub/` line unless asked for `-uall`; a new module directory must
     # show every file it added, not one path standing in for both.
     (worktree / "sub").mkdir()
-    _write(worktree / "sub" / "a.py", "a = 1\n")
-    _write(worktree / "sub" / "b.py", "b = 1\n")
+    write(worktree, "sub/a.py", "a = 1\n")
+    write(worktree, "sub/b.py", "b = 1\n")
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert "sub/a.py" in body["untracked"]
     assert "sub/b.py" in body["untracked"]
@@ -208,8 +198,8 @@ def test_diff_truncates_at_a_file_boundary(client, seeded_item, worktree, monkey
 
     monkeypatch.setattr(artifacts, "DIFF_MAX_BYTES", 200)
     for i in range(20):
-        _write(worktree / f"f{i}.py", "x = 1\n" * 100)
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
+        write(worktree, f"f{i}.py", "x = 1\n" * 100)
+    git(worktree, "add", "-A")
 
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
     assert body["truncated"] is True
@@ -260,15 +250,13 @@ def _item_with_a_live_session(client, tmp_path, sandboxed: bool) -> str:
     wid = "w-live"
     st = client.app.state
     worktree = make_repo(st.run_dirs.worktrees, name=wid)
-    _write(worktree / "calc.py", "edited\n")
+    write(worktree, "calc.py", "edited\n")
     policy = {"policy": {"sandbox": {"kind": "docker", "image": "img"}}} if sandboxed else {}
     task = {"id": "t", "kind": "subprocess", "command": "true"}
     chain = v1_chain(
         [{"id": "implementation", "kind": "exec", "tasks": [task], **policy}], repo=worktree
     )
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=worktree, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    head = git(worktree, "rev-parse", "HEAD")
 
     async def seed():
         await v1_item(st.db, chain, repo=worktree, wid=wid, status="paused")
@@ -324,16 +312,14 @@ def test_compare_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed)
 
 
 def test_diff_ignore_whitespace_drops_whitespace_only_files(client, seeded_item, worktree):
-    _write(worktree / "ws.txt", "a\nb\n")
-    _write(worktree / "doc.md", "a\nb\n")
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
-    subprocess.run(["git", "commit", "-m", "land"], cwd=worktree, check=True)
-    _write(worktree / "ws.txt", "  a\n  b\n")
-    _write(worktree / "doc.md", "  a\n  b\n")
-    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
-    subprocess.run(["git", "commit", "-m", "indent"], cwd=worktree, check=True)
-    _write(worktree / "calc.py", "x\n")
-    _write(worktree / "ws.txt", "    a\n    b\n")
+    write(worktree, "ws.txt", "a\nb\n")
+    write(worktree, "doc.md", "a\nb\n")
+    commit_all(worktree, "land")
+    write(worktree, "ws.txt", "  a\n  b\n")
+    write(worktree, "doc.md", "  a\n  b\n")
+    commit_all(worktree, "indent")
+    write(worktree, "calc.py", "x\n")
+    write(worktree, "ws.txt", "    a\n    b\n")
 
     url = f"/api/work-items/{seeded_item}/diff"
     plain = client.get(url).json()

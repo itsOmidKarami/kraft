@@ -4,11 +4,8 @@ tests/api/test_repos.py."""
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-
 import pytest
-from support.harness import make_repo, make_repo_with_submodule
+from support.harness import ALLOW_FILE, git, make_repo, make_repo_with_submodule
 
 #: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
 pytestmark = pytest.mark.api_client(default_setup=False)
@@ -48,24 +45,6 @@ def test_connecting_a_workspace_declares_it_with_its_submodules_as_members(tmp_p
     }
 
 
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "-c",
-            "protocol.file.allow=always",
-            *args,
-        ],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-    )
-
-
 @pytest.mark.parametrize("shape", ["member-is-its-origin", "both-clone-one-remote"])
 def test_a_member_connected_before_its_root_is_the_workspace_member(tmp_path, client, shape):
     """Kraft-d7aj3. The member is connected on its own first; the root's
@@ -76,11 +55,11 @@ def test_a_member_connected_before_its_root_is_the_workspace_member(tmp_path, cl
         root, member = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
     else:
         remote, member = tmp_path / "pkg.git", tmp_path / "member"
-        _git(tmp_path, "clone", "-q", "--bare", str(make_repo(tmp_path, name="pkg")), str(remote))
-        _git(tmp_path, "clone", "-q", str(remote), str(member))
+        git(tmp_path, "clone", "-q", "--bare", str(make_repo(tmp_path, name="pkg")), str(remote))
+        git(tmp_path, "clone", "-q", str(remote), str(member))
         root = make_repo(tmp_path, name="ws")
-        _git(root, "submodule", "add", "-q", str(remote), "libs/a")
-        _git(root, "commit", "-q", "-m", "add submodule")
+        git(root, *ALLOW_FILE, "submodule", "add", "-q", str(remote), "libs/a")
+        git(root, "commit", "-q", "-m", "add submodule")
     client.post("/api/repos", json={"path": str(member), "test_command": "make test"})
     client.post("/api/repos", json={"path": str(root), "enabled": False})
 
@@ -105,18 +84,18 @@ def test_a_submodule_is_not_matched_to_an_entry_nobody_connected_for_it(tmp_path
     lib = make_repo(tmp_path, name="lib")
     if shape == "the-root-itself":
         root = make_repo(tmp_path, name="ws")
-        _git(root, "remote", "add", "origin", str(root))
-        _git(root, "submodule", "add", "-q", str(root), "docs")
+        git(root, "remote", "add", "origin", str(root))
+        git(root, *ALLOW_FILE, "submodule", "add", "-q", str(root), "docs")
         rel = "docs"
     else:
         other = make_repo(tmp_path, name="other")
-        _git(other, "submodule", "add", "-q", str(lib), "libs/lib")
-        _git(other, "commit", "-q", "-m", "add submodule")
+        git(other, *ALLOW_FILE, "submodule", "add", "-q", str(lib), "libs/lib")
+        git(other, "commit", "-q", "-m", "add submodule")
         client.post("/api/repos", json={"path": str(other), "enabled": False})
         root = make_repo(tmp_path, name="ws")
-        _git(root, "submodule", "add", "-q", str(lib), "libs/lib")
+        git(root, *ALLOW_FILE, "submodule", "add", "-q", str(lib), "libs/lib")
         rel = "libs/lib"
-    _git(root, "commit", "-q", "-m", "add submodule")
+    git(root, "commit", "-q", "-m", "add submodule")
     client.post("/api/repos", json={"path": str(root), "enabled": False})
 
     body = client.get("/api/repos").json()

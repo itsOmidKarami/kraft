@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, entry_of, make_repo, make_repo_with_submodule, v1_chain
+from support.harness import ALLOW_FILE, entry_of, git, make_repo, make_repo_with_submodule, v1_chain
 from support.workspace import workspace_target
 
 from kraft import store
@@ -41,7 +41,7 @@ async def test_a_workspace_member_is_a_linked_worktree_of_its_connected_reposito
     the member's repository, and the root still counts it initialized."""
     root, sub = make_repo_with_submodule(tmp_path)
     # As in a clone that never ran `submodule init`: Kraft makes it active.
-    _git(root, "config", "--remove-section", "submodule.repos/pkg")
+    git(root, "config", "--remove-section", "submodule.repos/pkg")
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
     gitlink = git_read(root, "rev-parse", "HEAD:repos/pkg")
 
@@ -65,7 +65,7 @@ async def test_a_member_from_an_operators_submodule_checkout_is_a_worktree_of_it
     The member is still the item's own checkout, and an edit in it never
     shows in the operator's."""
     root, _sub = make_repo_with_submodule(tmp_path)
-    _git(root, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+    git(root, *ALLOW_FILE, "submodule", "update", "--init")
     operators = root / "repos" / "pkg"
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
 
@@ -118,8 +118,8 @@ async def test_a_retry_after_a_later_member_failed_records_each_member_once(
     the retry would record the earlier member a second time."""
     root, sub = make_repo_with_submodule(tmp_path)
     pkg2 = make_repo(tmp_path, name="pkg2")
-    _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(pkg2), "repos/pkg2")
-    _git(root, "commit", "-qm", "a second member")
+    git(root, *ALLOW_FILE, "submodule", "add", str(pkg2), "repos/pkg2")
+    git(root, "commit", "-qm", "a second member")
     await _workspace_item(database, root, {"pkg": "repos/pkg", "pkg2": "repos/pkg2"})
     paths = {"repos/pkg": sub, "repos/pkg2": pkg2}
     first, later = store.merge_rank_order(list(paths))
@@ -192,10 +192,10 @@ async def test_a_member_branch_already_in_the_repository_is_reused_only_at_the_g
     root, sub = make_repo_with_submodule(tmp_path)
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
     branch = wtree.branch(database)
-    _git(sub, "branch", branch)
+    git(sub, "branch", branch)
     if not at_gitlink:
-        _git(sub, "commit", "-q", "--allow-empty", "-m", "elsewhere")
-        _git(sub, "branch", "-f", branch)
+        git(sub, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+        git(sub, "branch", "-f", branch)
     tip = git_read(sub, "rev-parse", branch)
 
     if at_gitlink:

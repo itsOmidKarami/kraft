@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, entry_of, make_repo, v1_chain
+from support.harness import commit_all, entry_of, make_repo, v1_chain
 from support.workspace import repositories, workspace_item
 
 from kraft.executor import dispatch
@@ -201,8 +201,7 @@ async def test_a_changed_path_in_an_area_runs_its_setup_then_its_scope(
     worktree = await wtree.ensure(database, run_dirs, repo)
     (worktree / "services" / "api").mkdir(parents=True)
     (worktree / "services" / "api" / "app.py").write_text("x = 1\n")
-    _git(worktree, "add", "-A")
-    _git(worktree, "commit", "-qm", "touch the api area")
+    commit_all(worktree, "touch the api area")
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
     node = chain.chain.nodes[0]
 

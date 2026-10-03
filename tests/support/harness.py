@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -55,16 +56,47 @@ def entry_of(fields: dict) -> Any:
 _FIXED_DATE = "2026-01-01T00:00:00+00:00"
 
 
-def _git(cwd: Path, *args: str) -> None:
-    env = {**os.environ, "GIT_AUTHOR_DATE": _FIXED_DATE, "GIT_COMMITTER_DATE": _FIXED_DATE}
-    subprocess.run(
+def git(cwd: Path, *args: str, env: Mapping[str, str] | None = None) -> str:
+    """`git *args` in `cwd`, its stdout stripped; raises on a non-zero exit.
+
+    The suite's one git helper. Every call commits as `t <t@t>` at
+    `_FIXED_DATE`, so it needs no identity configured anywhere and the same
+    tree built twice has the same SHAs. `env` is the environment those two
+    are laid over, `os.environ` unless given (a test that must run git
+    outside `sandbox.harden_host_git_env`'s pins passes
+    `sandbox.unhardened_git_env()`).
+
+        head = git(repo, "rev-parse", "HEAD")
+    """
+    env = {
+        **(os.environ if env is None else env),
+        "GIT_AUTHOR_DATE": _FIXED_DATE,
+        "GIT_COMMITTER_DATE": _FIXED_DATE,
+    }
+    return subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
         cwd=cwd,
         capture_output=True,
         text=True,
         check=True,
         env=env,
-    )
+    ).stdout.strip()
+
+
+#: `git -c` for a submodule cloned from a local path, which git (>= 2.38.1)
+#: refuses otherwise: `git(root, *ALLOW_FILE, "submodule", "add", ...)`.
+ALLOW_FILE = ("-c", "protocol.file.allow=always")
+
+
+def write(root: Path, name: str, body: str) -> Path:
+    """Write `body` to `root / name`, making its parent directories; return the path.
+
+    spec = write(tmp_path, ".engineering/spec.md", "# Spec\\n")
+    """
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    return path
 
 
 _repo_template: Path | None = None
@@ -79,17 +111,17 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     if _repo_template is None:
         tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-", dir=PROCESS_TMP)) / "sample"
         shutil.copytree(_SUPPORT / "sample_repo", tpl)
-        _git(tpl, "init", "-q", "-b", "main")
-        _git(tpl, "config", "user.email", "t@t")
-        _git(tpl, "config", "user.name", "t")
+        git(tpl, "init", "-q", "-b", "main")
+        git(tpl, "config", "user.email", "t@t")
+        git(tpl, "config", "user.name", "t")
         # A commit below spawns git's detached auto-maintenance, which creates
         # and deletes `.git/objects/maintenance.lock` in the background. A
         # `copytree` of this template (or of a copy made from it, since config
         # is inherited) that lists that file and then finds it gone fails.
-        _git(tpl, "config", "maintenance.auto", "false")
-        _git(tpl, "config", "gc.auto", "0")
-        _git(tpl, "add", "-A")
-        _git(tpl, "commit", "-m", "init")
+        git(tpl, "config", "maintenance.auto", "false")
+        git(tpl, "config", "gc.auto", "0")
+        git(tpl, "add", "-A")
+        git(tpl, "commit", "-m", "init")
         atexit.register(shutil.rmtree, tpl.parent, ignore_errors=True)
         _repo_template = tpl
     dest = tmp_path / name
@@ -97,7 +129,7 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     # The copy's index still carries the template's stat data (inode, mtime),
     # so plumbing that does not refresh -- `git diff-index HEAD` -- would call
     # every tracked file modified. A fresh build would not.
-    _git(dest, "update-index", "-q", "--refresh")
+    git(dest, "update-index", "-q", "--refresh")
     return dest
 
 
@@ -125,12 +157,17 @@ def connected_repo(tmp_path: Path, name: str = "sample") -> Path:
     return connect_repo(make_repo(tmp_path, name))
 
 
-def commit_all(repo: Path, message: str = "files") -> None:
-    """Commit everything in `repo`'s working copy: what `kraft repo connect`
-    probes is the committed tree a work item's worktree is cut from, so a
-    file a test writes is invisible to it until committed."""
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "--allow-empty", "-m", message)
+def commit_all(repo: Path, message: str = "files") -> str:
+    """Commit everything in `repo`'s working copy and return the new HEAD:
+    what `kraft repo connect` probes is the committed tree a work item's
+    worktree is cut from, so a file a test writes is invisible to it until
+    committed.
+
+        head = commit_all(repo, "add calc")
+    """
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
 
 
 def make_repo_with_submodule(
@@ -144,8 +181,8 @@ def make_repo_with_submodule(
     """
     sub = make_repo(tmp_path, name="pkg")
     root = make_repo(tmp_path, name="ws")
-    _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(sub), submodule_path)
-    _git(root, "commit", "-m", "add submodule")
+    git(root, *ALLOW_FILE, "submodule", "add", str(sub), submodule_path)
+    git(root, "commit", "-m", "add submodule")
     return root, sub
 
 
@@ -153,11 +190,8 @@ def make_repo_with_engineering(tmp_path: Path, files: dict[str, str], name: str 
     """make_repo(), then add repo-relative `files` (path -> text), commit, return the repo."""
     dest = make_repo(tmp_path, name)
     for rel, text in files.items():
-        fp = dest / rel
-        fp.parent.mkdir(parents=True, exist_ok=True)
-        fp.write_text(text)
-    _git(dest, "add", "-A")
-    _git(dest, "commit", "-m", "add engineering docs")
+        write(dest, rel, text)
+    commit_all(dest, "add engineering docs")
     return dest
 
 
@@ -180,11 +214,11 @@ def _bd_template(real: bool) -> Path:
     """
     if real not in _bd_templates:
         tpl = Path(tempfile.mkdtemp(prefix="kraft-bd-tpl-", dir=PROCESS_TMP))
-        _git(tpl, "init", "-q", "-b", "main")
-        _git(tpl, "config", "user.email", "t@t")
-        _git(tpl, "config", "user.name", "t")
-        _git(tpl, "config", "maintenance.auto", "false")
-        _git(tpl, "config", "gc.auto", "0")
+        git(tpl, "init", "-q", "-b", "main")
+        git(tpl, "config", "user.email", "t@t")
+        git(tpl, "config", "user.name", "t")
+        git(tpl, "config", "maintenance.auto", "false")
+        git(tpl, "config", "gc.auto", "0")
         if real:
             subprocess.run(
                 ["bd", "init", "--prefix", "TEST"],

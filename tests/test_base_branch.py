@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, entry_of, make_repo, v1_chain
+from support.harness import commit_all, entry_of, git, make_repo, v1_chain, write
 
 from kraft import builtins as kraft_builtins
 from kraft.config import base_ignore_args, git_read
@@ -25,12 +25,11 @@ _RESTART = {"on_base_changed": {"restart_from": "m"}}
 
 def _land(other, branch, name):
     """Commit `name` on `branch` in `other` and push it to origin; the new tip."""
-    _git(other, "checkout", "-q", branch)
-    (other / name).write_text(f"landed on {branch}\n")
-    _git(other, "add", "-A")
-    _git(other, "commit", "-q", "-m", f"{branch}: {name}")
-    _git(other, "push", "-q", "origin", branch)
-    return git_read(other, "rev-parse", "HEAD")
+    git(other, "checkout", "-q", branch)
+    write(other, name, f"landed on {branch}\n")
+    head = commit_all(other, f"{branch}: {name}")
+    git(other, "push", "-q", "origin", branch)
+    return head
 
 
 @pytest.fixture
@@ -39,15 +38,13 @@ def origin(tmp_path):
     which carries `release.txt` that `main` does not; plus `other`, a second
     clone through which commits land on origin but not in `repo`."""
     bare = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], check=True)
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(bare))
     repo = make_repo(tmp_path)
-    _git(repo, "remote", "add", "origin", str(bare))
-    _git(repo, "push", "-q", "-u", "origin", "main")
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "-u", "origin", "main")
     other = tmp_path / "other"
-    subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True)
-    _git(other, "config", "user.email", "o@o")
-    _git(other, "config", "user.name", "o")
-    _git(other, "checkout", "-q", "-b", "release")
+    git(tmp_path, "clone", "-q", str(bare), str(other))
+    git(other, "checkout", "-q", "-b", "release")
     _land(other, "release", "release.txt")
     return repo, other
 
@@ -199,12 +196,11 @@ def test_the_ignore_rules_come_from_the_items_base_branch(origin, rule):
     into. Byte for byte (R11s-01): a rule naming a path that is not UTF-8
     still names that path, not one with a replacement character."""
     repo, other = origin
-    _git(other, "checkout", "-q", "release")
+    git(other, "checkout", "-q", "release")
     (other / ".gitignore").write_bytes(rule)
-    _git(other, "add", "-A")
-    _git(other, "commit", "-q", "-m", "ignore release-only")
-    _git(other, "push", "-q", "origin", "release")
-    _git(repo, "fetch", "-q", "origin")
+    commit_all(other, "ignore release-only")
+    git(other, "push", "-q", "origin", "release")
+    git(repo, "fetch", "-q", "origin")
 
     with base_ignore_args(repo, "release") as args:
         rules = Path(args[1].split("=", 1)[1]).read_bytes()
@@ -343,8 +339,7 @@ async def test_the_merge_request_lists_the_commits_it_adds_to_its_base(
     await _item_on(database, repo, "release")
     worktree = await wtree.ensure(database, run_dirs, repo)
     (worktree / "work.txt").write_text("the item's work\n")
-    _git(worktree, "add", "-A")
-    _git(worktree, "commit", "-q", "-m", "the item's work")
+    commit_all(worktree, "the item's work")
     fake = forge.FakeForge()
     monkeypatch.setattr(forge.run, "resolve", lambda _name: fake)
 
@@ -417,8 +412,8 @@ async def test_a_base_branch_gone_from_origin_is_a_stop_naming_it(
     no longer exists -- but stop and name the branch."""
     repo, other = origin
     if fetched_before:
-        _git(repo, "fetch", "-q", "origin", "release:refs/remotes/origin/release")
-    _git(other, "push", "-q", "origin", "--delete", "release")
+        git(repo, "fetch", "-q", "origin", "release:refs/remotes/origin/release")
+    git(other, "push", "-q", "origin", "--delete", "release")
     await _item_on(database, repo, "release")
 
     with pytest.raises(kraft_builtins.BaseBranchMissing, match="base branch 'release'"):
@@ -432,7 +427,7 @@ async def test_the_pre_mr_rebase_onto_a_vanished_base_is_a_config_stop(database,
     repo, other = origin
     await _item_on(database, repo, "release")
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _git(other, "push", "-q", "origin", "--delete", "release")
+    git(other, "push", "-q", "origin", "--delete", "release")
 
     status = await kraft_builtins.mr_rebase(
         database,

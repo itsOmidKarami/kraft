@@ -13,10 +13,10 @@ import ast
 import hashlib
 import importlib.util
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
+from support.harness import commit_all, git, write
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "dev" / "test_shape_report.py"
 
@@ -31,12 +31,6 @@ def _load():
 @pytest.fixture(scope="module")
 def report():
     return _load()
-
-
-def _write(root: Path, rel: str, text: str) -> None:
-    path = root / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
 
 
 # `_git` here and in test_b.py is the same helper written two ways: a
@@ -88,10 +82,10 @@ async def test_four(n):
 
 @pytest.fixture
 def tree(tmp_path):
-    _write(tmp_path, "tests/test_a.py", _A)
-    _write(tmp_path, "tests/test_b.py", _B)
+    write(tmp_path, "tests/test_a.py", _A)
+    write(tmp_path, "tests/test_b.py", _B)
     # the plugin's own testpath is not `tests/`: its tests stay out of every number
-    _write(tmp_path, "plugins/kraft-lite/tests/test_p.py", "def test_p():\n    assert 1\n")
+    write(tmp_path, "plugins/kraft-lite/tests/test_p.py", "def test_p():\n    assert 1\n")
     return tmp_path
 
 
@@ -106,7 +100,7 @@ def test_counts_functions_and_parametrize_cases(report, tree):
 def test_counts_a_helper_body_defined_in_two_files_once_per_file(report, tree):
     # a third file defines `_git` with a different body: its own group of one,
     # not a third copy of the duplicated one.
-    _write(
+    write(
         tree,
         "tests/test_c.py",
         "def _git(*args):\n    return list(args)\n\n\ndef test_c():\n    assert _git()\n",
@@ -146,10 +140,8 @@ def test_verbatim_repeat_lines_need_five_sightings_and_real_length(report, tmp_p
         f"def test_r{i}():\n    rare = compute_something_else(1)\n    assert rare\n\n\n"
         for i in range(4)
     )
-    _write(
-        tmp_path,
-        "tests/test_dup.py",
-        "from collections.abc import Mapping\n" * 5 + "\n\n" + body,
+    write(
+        tmp_path, "tests/test_dup.py", "from collections.abc import Mapping\n" * 5 + "\n\n" + body
     )
     shape = report.measure(tmp_path)
     # only `result = compute_something(alpha, beta)` x5 qualifies: `x = 1` is
@@ -163,17 +155,17 @@ def test_densest_modules_rank_by_tests_per_100_code_lines(report, tmp_path):
         f"x{i} = {i}\n" for i in range(150)
     )
     small = "".join(f"y{i} = {i}\n" for i in range(149))
-    _write(tmp_path, "src/kraft/mod.py", big)
-    _write(tmp_path, "src/kraft/mod_more.py", big)
-    _write(tmp_path, "src/kraft/pkg/__init__.py", "")
-    _write(tmp_path, "src/kraft/pkg/under.py", small)
+    write(tmp_path, "src/kraft/mod.py", big)
+    write(tmp_path, "src/kraft/mod_more.py", big)
+    write(tmp_path, "src/kraft/pkg/__init__.py", "")
+    write(tmp_path, "src/kraft/pkg/under.py", small)
     one = "def test_a():\n    assert 1\n"
-    _write(tmp_path, "tests/test_mod.py", one + "\n\n" + one.replace("test_a", "test_b"))
+    write(tmp_path, "tests/test_mod.py", one + "\n\n" + one.replace("test_a", "test_b"))
     # `test_mod_more.py` mirrors `mod_more.py`, not `mod.py`
-    _write(tmp_path, "tests/test_mod_more.py", one)
+    write(tmp_path, "tests/test_mod_more.py", one)
     # `test_mod_extra.py` has no module of its own, so it belongs to `mod`
-    _write(tmp_path, "tests/test_mod_extra.py", one)
-    _write(tmp_path, "tests/pkg/test_under.py", one)
+    write(tmp_path, "tests/test_mod_extra.py", one)
+    write(tmp_path, "tests/pkg/test_under.py", one)
     modules = {m["module"]: m for m in report.measure(tmp_path)["densest_modules"]}
     assert set(modules) == {"mod.py", "mod_more.py"}  # `pkg/under.py` has 149 code lines
     assert (modules["mod.py"]["tests"], modules["mod.py"]["code_lines"]) == (3, 150)
@@ -236,10 +228,10 @@ def test_fingerprint_reads_each_top_level_binding_shape(report, binding, appende
 
 def test_helpers_over_different_module_constants_are_not_one_group(report, tmp_path):
     row = "def _row(**f):\n    return {**DEFAULTS, **f}\n\n\ndef test_r():\n    assert _row()\n"
-    _write(tmp_path, "tests/test_a.py", "DEFAULTS = {'a': 1}\n" + row)
-    _write(tmp_path, "tests/test_b.py", "DEFAULTS = {'b': 2}\n" + row)
+    write(tmp_path, "tests/test_a.py", "DEFAULTS = {'a': 1}\n" + row)
+    write(tmp_path, "tests/test_b.py", "DEFAULTS = {'b': 2}\n" + row)
     assert report.measure(tmp_path)["duplicated_helpers"]["names"] == 0
-    _write(tmp_path, "tests/test_c.py", "DEFAULTS = {'a': 1}\n" + row)
+    write(tmp_path, "tests/test_c.py", "DEFAULTS = {'a': 1}\n" + row)
     assert report.measure(tmp_path)["duplicated_helpers"]["groups"][0]["files"] == [
         "tests/test_a.py",
         "tests/test_c.py",
@@ -257,7 +249,7 @@ def test_print_helper_allowlist_keys_by_name_and_fingerprint_hash(report, tree, 
 
 
 def test_a_file_that_does_not_parse_fails_the_report(report, tree, capsys):
-    _write(tree, "tests/test_broken.py", "def test_x(:\n")
+    write(tree, "tests/test_broken.py", "def test_x(:\n")
     assert report.main(["--root", str(tree)]) == 1
     assert "test_broken.py" in capsys.readouterr().out
 
@@ -301,20 +293,14 @@ _BASE = {
 def _git_repo(root: Path, files: dict[str, str | None]) -> str:
     """Commit `files` over whatever `root` holds (`None` deletes one) and return
     the new commit's sha."""
-    from support.harness import commit_all
-
     if not (root / ".git").exists():
-        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+        git(root, "init", "-q", "-b", "main")
     for rel, text in files.items():
         if text is None:
             (root / rel).unlink()
         else:
-            _write(root, rel, text)
-    commit_all(root)
-    out = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
-    )
-    return out.stdout.strip()
+            write(root, rel, text)
+    return commit_all(root)
 
 
 def _nudge(report, tmp_path, capsys, head_files: dict[str, str | None]) -> tuple[str, int]:
@@ -452,14 +438,7 @@ def test_diff_mode_follows_a_moved_file_instead_of_calling_it_all_new(report, tm
 
 
 def _worktrees(root: Path) -> int:
-    listed = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return listed.stdout.count("worktree ")
+    return git(root, "worktree", "list", "--porcelain").count("worktree ")
 
 
 def test_diff_mode_exits_0_and_leaves_no_worktree_behind_when_it_cannot_measure(

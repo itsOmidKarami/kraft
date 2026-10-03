@@ -10,12 +10,11 @@ does what the task would have done to the worktree.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.harness import entry_of
+from support.harness import entry_of, git, write
 from support.workspace import workspace_item
 
 from kraft import store
@@ -24,12 +23,6 @@ from kraft.executor.context import READ_ONLY_VIOLATED, LaunchContext
 from kraft.templates import models as tm
 
 NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
-
-
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    ).stdout.strip()
 
 
 def _launches(monkeypatch, during=None) -> list:
@@ -69,10 +62,6 @@ def _reason(it) -> str:
     return it.events("work_item_needs_human")[-1]["payload"]["reason"]
 
 
-def _write(name: str, text: str = "x\n"):
-    return lambda cwd: (cwd / name).write_text(text)
-
-
 # -- the check -------------------------------------------------------------------------
 
 
@@ -88,13 +77,13 @@ async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it
         "on_failure": {"tasks": [_sub("fix")]},
     }
     it = await item_on([_node([step])])
-    _git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
-    launched = _launches(monkeypatch, _write("calc.py", "edited\n"))
+    git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
+    launched = _launches(monkeypatch, lambda cwd: write(cwd, "calc.py", "edited\n"))
 
     assert await _walk(it) == "needs_human"
 
     assert launched == ["build.check.review"]
-    assert _git(it.repo, "show", "--name-only", "--format=", "HEAD") == "calc.py"
+    assert git(it.repo, "show", "--name-only", "--format=", "HEAD") == "calc.py"
     assert it.status() == "needs_human"
     assert it.row()["stop_kind"] == "failed"
     assert _reason(it) == "build.check is read_only, but it changed the worktree: calc.py"
@@ -110,9 +99,9 @@ async def test_an_untracked_file_is_a_change_and_an_ignored_one_is_not(
 ):
     it = await item_on([_node([{"id": "check", "read_only": True, "tasks": [_sub("t")]}])])
     (it.repo / ".gitignore").write_text("*.log\n")
-    _git(it.repo, "add", ".gitignore")
-    _git(it.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "ignore logs")
-    _launches(monkeypatch, _write(name))
+    git(it.repo, "add", ".gitignore")
+    git(it.repo, "commit", "-qm", "ignore logs")
+    _launches(monkeypatch, lambda cwd: write(cwd, name, "x\n"))
 
     status = await _walk(it)
 
@@ -152,7 +141,7 @@ async def test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_ins
 
 async def test_a_step_that_is_not_read_only_is_not_checked(item_on, monkeypatch):
     it = await item_on([_node([{"id": "check", "tasks": [_sub("t")]}])])
-    _launches(monkeypatch, _write("new.txt"))
+    _launches(monkeypatch, lambda cwd: write(cwd, "new.txt", "x\n"))
 
     assert await _walk(it) == "ok"
     assert it.events("read_only_violated") == []
@@ -204,13 +193,13 @@ async def test_a_sandboxed_read_only_step_that_plants_a_repository_is_not_read_b
     sandbox = {"policy": {"sandbox": {"kind": "docker", "image": "kraft/policy:1"}}}
     step = {"id": "check", "read_only": True, "tasks": [_sub("t")]}
     it = await item_on([_node([step], **sandbox)])
-    head = _git(it.repo, "rev-parse", "HEAD")
+    head = git(it.repo, "rev-parse", "HEAD")
     await it.database.write(lambda c: store.set_base_ref(c, it.id, head))
 
     def plant(cwd: Path) -> None:
         nested = cwd / "vendor" / "x"
         nested.mkdir(parents=True)
-        _git(nested, "init", "-q", "-b", "main")
+        git(nested, "init", "-q", "-b", "main")
 
     _launches(monkeypatch, plant)
 

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
-from support.harness import _git, fake_docker_bin, make_repo
+from support.harness import fake_docker_bin, git, make_repo
 from support.worktree import make_item
 
 from kraft.adapters import subprocess as sp
@@ -48,12 +48,12 @@ async def test_a_session_commits_in_a_member_as_the_root(
     (tmp_path / "empty.gitconfig").write_text("")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty.gitconfig"))
     root, member_repo = make_repo(tmp_path, "root"), make_repo(tmp_path, "member")
-    _git(root, "config", "user.email", "root@example.com")
+    git(root, "config", "user.email", "root@example.com")
     if member_email:
-        _git(member_repo, "config", "user.email", member_email)
+        git(member_repo, "config", "user.email", member_email)
     else:
-        _git(member_repo, "config", "--unset", "user.email")
-    _git(member_repo, "worktree", "add", "-q", "-b", "kraft/w1", str(root / "m"))
+        git(member_repo, "config", "--unset", "user.email")
+    git(member_repo, "worktree", "add", "-q", "-b", "kraft/w1", str(root / "m"))
     before = (member_repo / ".git" / "config").read_text()
     await make_item(database, root)
     sandbox = {}

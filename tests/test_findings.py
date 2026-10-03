@@ -3,6 +3,7 @@ import json
 import uuid
 
 import pytest
+from support.harness import write
 
 from kraft.findings import (
     BlindJob,
@@ -17,14 +18,12 @@ from kraft.findings import (
 )
 
 
-def _write(tmp_path, data):
-    p = tmp_path / "r.json"
-    p.write_text(json.dumps(data))
-    return p
+def _findings(tmp_path, data):
+    return write(tmp_path, "r.json", json.dumps(data))
 
 
 def test_parse_reads_a_finding(tmp_path):
-    p = _write(
+    p = _findings(
         tmp_path,
         {
             "status": "failed",
@@ -71,7 +70,7 @@ def test_parse_an_unusable_result_file_yields_nothing(tmp_path, raw):
 
 
 def test_parse_drops_bad_entries_individually(tmp_path):
-    p = _write(
+    p = _findings(
         tmp_path,
         {
             "findings": [
@@ -88,7 +87,7 @@ def test_parse_drops_bad_entries_individually(tmp_path):
 
 
 def test_parse_counted_reports_how_many_entries_were_dropped(tmp_path):
-    p = _write(
+    p = _findings(
         tmp_path,
         {
             "findings": [
@@ -110,7 +109,7 @@ def test_parse_counted_counts_nothing_for_an_unusable_file(tmp_path):
 
 
 def test_optional_file_and_line(tmp_path):
-    p = _write(
+    p = _findings(
         tmp_path,
         {
             "findings": [
@@ -185,7 +184,7 @@ def test_a_new_defect_in_the_same_file_still_gets_its_own_identity():
 
 def test_same_as_is_dropped_unless_it_looks_like_a_fingerprint(tmp_path):
     """A model asked for a tag will sometimes write a sentence."""
-    p = _write(
+    p = _findings(
         tmp_path,
         {
             "findings": [
@@ -204,7 +203,7 @@ def test_same_as_is_dropped_unless_it_looks_like_a_fingerprint(tmp_path):
 
 def test_same_as_survives_the_result_file(tmp_path):
     tag = "0123456789abcdef"
-    p = _write(
+    p = _findings(
         tmp_path,
         {"findings": [{"severity": "minor", "message": "m", "source_plugin": "p", "same_as": tag}]},
     )
@@ -315,7 +314,7 @@ def test_from_payload_extra_keys_does_not_raise(tmp_path):
 
 
 def test_parse_line_bool_yields_none(tmp_path):
-    p = _write(
+    p = _findings(
         tmp_path,
         {
             "findings": [

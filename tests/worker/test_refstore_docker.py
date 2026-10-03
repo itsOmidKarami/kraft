@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, git
 from support.sandbox_image import build_git_image
 from support.workspace import nested_repositories, repositories, workspace_item
 
@@ -25,12 +25,6 @@ from .test_host_git_trust import PROGRAM_KEYS
 BRANCH = "kraft/item-1"
 
 
-def _git(cwd, *args):
-    return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-
 @pytest.fixture(
     params=[
         pytest.param("docker", marks=pytest.mark.e2e("docker")),
@@ -43,9 +37,9 @@ def git_image(request, tmp_path, monkeypatch):
 
 def test_a_sandboxed_worker_moves_only_its_own_branch(repo, tmp_path, git_image):
     wt = tmp_path / "wt"
-    _git(repo, "worktree", "add", "-q", "-b", BRANCH, str(wt))
-    main = _git(repo, "rev-parse", "main")
-    _git(repo, "branch", "doomed")
+    git(repo, "worktree", "add", "-q", "-b", BRANCH, str(wt))
+    main = git(repo, "rev-parse", "main")
+    git(repo, "branch", "doomed")
     store = refstore.prepare(tmp_path / "run", wt, BRANCH, session_id="s1")
     script = (
         "set -e; echo work > work.txt; git add work.txt; git commit -qm work;"
@@ -69,9 +63,9 @@ def test_a_sandboxed_worker_moves_only_its_own_branch(repo, tmp_path, git_image)
     ran = subprocess.run(argv, capture_output=True, text=True)
     assert ran.returncode == 0, ran.stderr
     assert refstore.sync(store, "s1") is None
-    assert _git(repo, "rev-parse", "main") == main
-    assert _git(repo, "log", "-1", "--format=%s", BRANCH) == "work"
-    assert _git(repo, "rev-parse", "--verify", "doomed")
+    assert git(repo, "rev-parse", "main") == main
+    assert git(repo, "log", "-1", "--format=%s", BRANCH) == "work"
+    assert git(repo, "rev-parse", "--verify", "doomed")
     # A rootless runtime maps container uids into a subordinate range: what
     # the worker wrote must still be the operator's to edit and remove.
     assert (wt / "work.txt").stat().st_uid == os.getuid()
@@ -90,9 +84,9 @@ _IDENTITY = {
 
 
 def _bare_origin(repo: Path, origin: Path) -> None:
-    _git(repo.parent, "init", "-q", "--bare", "-b", "main", str(origin))
-    _git(repo, "config", "remote.origin.url", str(origin))
-    _git(repo, "push", "-q", "origin", "main")
+    git(repo.parent, "init", "-q", "--bare", "-b", "main", str(origin))
+    git(repo, "config", "remote.origin.url", str(origin))
+    git(repo, "push", "-q", "origin", "main")
 
 
 def _parents(rel: Path) -> list[Path]:
@@ -191,8 +185,8 @@ async def test_a_sandboxed_workspace_worker_commits_in_root_and_member(
     _bare_origin(root, tmp_path / "root-origin.git")
     _bare_origin(m, tmp_path / "pkg-origin.git")
     wt, member = wt.resolve(), wt.resolve() / _REL
-    branch = _git(wt, "branch", "--show-current")
-    mains = {r: _git(r, "rev-parse", "main") for r in (root, m)}
+    branch = git(wt, "branch", "--show-current")
+    mains = {r: git(r, "rev-parse", "main") for r in (root, m)}
     checkout = stops.sandbox_checkout(row, launch, wt)
     assert None not in checkout.members.values()
     stores = refstore.prepare_stores(
@@ -241,6 +235,6 @@ async def test_a_sandboxed_workspace_worker_commits_in_root_and_member(
         await forge.assert_clean(repo, "main")
         await forge.git.push(repo, branch)
     for origin, subject in (("root-origin.git", "root work"), ("pkg-origin.git", "member work")):
-        assert subject in _git(tmp_path / origin, "log", "--format=%s", branch).splitlines()
-    assert {r: _git(r, "rev-parse", "main") for r in (root, m)} == mains
+        assert subject in git(tmp_path / origin, "log", "--format=%s", branch).splitlines()
+    assert {r: git(r, "rev-parse", "main") for r in (root, m)} == mains
     assert not marker.exists()

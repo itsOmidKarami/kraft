@@ -3,24 +3,21 @@
 onto the base the merge request targets."""
 
 import asyncio
+import contextlib
 import subprocess
 from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, make_repo
+from support.harness import commit_all, git, make_repo, write
 
 from kraft import builtins as kraft_builtins
 from kraft import caps, events
 from kraft.config import git_read
 
-_commit = wtree.commit
-
 
 def _porcelain(cwd):
-    return subprocess.run(
-        ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True, check=True
-    ).stdout.splitlines()
+    return git(cwd, "status", "--porcelain").splitlines()
 
 
 def test_restore_branch_recovers_from_a_stranded_mid_merge_diagnostic_branch(repo):
@@ -31,58 +28,37 @@ def test_restore_branch_recovers_from_a_stranded_mid_merge_diagnostic_branch(rep
     exactly that, whatever left the worktree there."""
     readme = repo / "README.md"
 
-    _git(repo, "checkout", "-b", "kraft/w1")
+    git(repo, "checkout", "-b", "kraft/w1")
     readme.write_text("item's own change\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "item work")
-    item_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout
+    item_head = commit_all(repo, "item work")
 
-    _git(repo, "checkout", "main")
+    git(repo, "checkout", "main")
     readme.write_text("diverging main change\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "main diverges")
+    commit_all(repo, "main diverges")
 
     # An agent's ad-hoc diagnosis: branch off the item's own branch, try a
     # merge, hit a conflict, and stop mid-merge without cleaning up.
-    _git(repo, "checkout", "kraft/w1")
-    _git(repo, "checkout", "-b", "_conflict_test")
-    subprocess.run(["git", "merge", "main"], cwd=repo, capture_output=True, text=True)
+    git(repo, "checkout", "kraft/w1")
+    git(repo, "checkout", "-b", "_conflict_test")
+    with contextlib.suppress(subprocess.CalledProcessError):
+        git(repo, "merge", "main")  # conflicts: that is the scenario
     assert any("README.md" in line for line in _porcelain(repo)), (
         "the scenario did not actually conflict"
     )
 
     kraft_builtins.restore_branch(repo, "kraft/w1", "main")
 
-    current = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert current == "kraft/w1"
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/w1"
     assert _porcelain(repo) == [], "the aborted merge left the tree dirty"
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout
-    assert head == item_head, "the item's own commit must be untouched"
+    assert git(repo, "rev-parse", "HEAD") == item_head, "the item's own commit must be untouched"
 
 
 def test_restore_branch_is_a_no_op_when_already_on_the_right_branch(repo):
-    _git(repo, "checkout", "-b", "kraft/w1")
+    git(repo, "checkout", "-b", "kraft/w1")
 
     kraft_builtins.restore_branch(repo, "kraft/w1", "main")
 
-    current = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert current == "kraft/w1"
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "kraft/w1"
 
 
 def test_refresh_worktree_base_returns_none_when_no_worktree(tmp_path, repo):
@@ -111,21 +87,22 @@ async def test_refresh_worktree_base_skips_when_branch_already_pushed(
     tmp_path, database, run_dirs, repo
 ):
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
-    _git(repo, "remote", "add", "origin", str(origin))
-    _git(repo, "push", "-q", "-u", "origin", "main")
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(origin))
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "-u", "origin", "main")
 
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
-    _git(worktree, "push", "-q", "-u", "origin", branch)
+    git(worktree, "push", "-q", "-u", "origin", branch)
     before = git_read(worktree, "rev-parse", "HEAD")
 
     # Origin's main moves on too (Kraft-m4sdz): a move only the local checkout
     # has is invisible to `upstream_head`, so without the push this took the
     # "already up to date" exit and never reached the pushed-branch guard.
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
-    _git(repo, "push", "-q", "origin", "main")
+    write(repo, "moved.txt", "moved on\n")
+    commit_all(repo, "moved on")
+    git(repo, "push", "-q", "origin", "main")
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result is None
@@ -137,10 +114,11 @@ async def test_refresh_worktree_base_rebases_and_returns_new_head(database, run_
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
 
-    _commit(worktree, "worktree_work.txt", "done in the worktree\n", "worktree work")
+    write(worktree, "worktree_work.txt", "done in the worktree\n")
+    commit_all(worktree, "worktree work")
 
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
-    new_head = git_read(repo, "rev-parse", "HEAD")
+    write(repo, "moved.txt", "moved on\n")
+    new_head = commit_all(repo, "moved on")
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result == new_head
@@ -161,11 +139,12 @@ async def test_refresh_worktree_base_advances_stale_base_ref_after_a_hand_rebase
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
 
-    new_head = _commit(repo, "moved.txt", "moved on\n", "moved on")
+    write(repo, "moved.txt", "moved on\n")
+    new_head = commit_all(repo, "moved on")
     # Stand in for the hand-rebase: the worktree's branch is fast-forwarded
     # onto the new upstream head directly, without going through
     # `refresh_worktree_base` -- so `base_ref` in the DB is left stale.
-    _git(worktree, "rebase", new_head)
+    git(worktree, "rebase", new_head)
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result == new_head
@@ -175,23 +154,20 @@ def _repo_with_origin(tmp_path):
     """`make_repo` pushed to a bare `origin`, plus a second clone standing in for
     everyone else -- what lands through it reaches origin but not `repo`."""
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(origin))
     repo = make_repo(tmp_path)
-    _git(repo, "remote", "add", "origin", str(origin))
-    _git(repo, "push", "-q", "-u", "origin", "main")
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "-u", "origin", "main")
     other = tmp_path / "other"
-    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
-    _git(other, "config", "user.email", "o@o")
-    _git(other, "config", "user.name", "o")
+    git(tmp_path, "clone", "-q", str(origin), str(other))
     return repo, other
 
 
 def _land_upstream(other, name):
-    (other / name).write_text("landed upstream\n")
-    _git(other, "add", "-A")
-    _git(other, "commit", "-m", f"upstream {name}")
-    _git(other, "push", "-q", "origin", "main")
-    return git_read(other, "rev-parse", "HEAD")
+    write(other, name, "landed upstream\n")
+    head = commit_all(other, f"upstream {name}")
+    git(other, "push", "-q", "origin", "main")
+    return head
 
 
 async def test_ensure_worktree_forks_from_origin_when_the_local_checkout_is_behind(
@@ -219,7 +195,8 @@ async def test_refresh_worktree_base_rebases_onto_origin_when_the_local_checkout
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
-    _commit(worktree, "worktree_work.txt", "done in the worktree\n", "worktree work")
+    write(worktree, "worktree_work.txt", "done in the worktree\n")
+    commit_all(worktree, "worktree work")
     upstream = _land_upstream(other, "upstream.txt")
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
@@ -233,13 +210,13 @@ async def test_refresh_worktree_base_falls_back_to_local_head_when_origin_is_unr
 ):
     # Offline, or credentials the server process cannot reach: the rebase still
     # happens against what the checkout has, rather than failing the resume.
-    _git(repo, "remote", "add", "origin", str(tmp_path / "gone.git"))
+    git(repo, "remote", "add", "origin", str(tmp_path / "gone.git"))
 
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
-    local = git_read(repo, "rev-parse", "HEAD")
+    write(repo, "moved.txt", "moved on\n")
+    local = commit_all(repo, "moved on")
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result == local
@@ -252,8 +229,9 @@ def test_upstream_head_falls_back_to_the_last_fetched_origin_ref_before_local_he
     # what the MR targets.
     repo, _ = _repo_with_origin(tmp_path)
     fetched = git_read(repo, "rev-parse", "origin/main")
-    _commit(repo, "local_only.txt", "never pushed\n", "local only")
-    _git(repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    write(repo, "local_only.txt", "never pushed\n")
+    commit_all(repo, "local only")
+    git(repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
 
     assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == fetched
 
@@ -262,7 +240,7 @@ def test_upstream_head_sees_origin_even_when_the_fetch_refspec_skips_the_default
     # A --single-branch clone of some other branch: a bare `fetch origin main`
     # would not update refs/remotes/origin/main, and the tip read back is stale.
     repo, other = _repo_with_origin(tmp_path)
-    _git(repo, "config", "remote.origin.fetch", "+refs/heads/other:refs/remotes/origin/other")
+    git(repo, "config", "remote.origin.fetch", "+refs/heads/other:refs/remotes/origin/other")
     upstream = _land_upstream(other, "upstream.txt")
 
     assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == upstream
@@ -273,20 +251,11 @@ async def test_refresh_worktree_base_raises_and_aborts_on_conflict(database, run
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
 
-    _commit(
-        worktree,
-        "calc.py",
-        "def add(a, b):\n    return a - b - 1  # bug: should be +\n",
-        "worktree edit",
-    )
-    worktree_head = git_read(worktree, "rev-parse", "HEAD")
+    write(worktree, "calc.py", "def add(a, b):\n    return a - b - 1  # bug: should be +\n")
+    worktree_head = commit_all(worktree, "worktree edit")
 
-    _commit(
-        repo,
-        "calc.py",
-        "def add(a, b):\n    return a - b - 2  # bug: should be +\n",
-        "conflicting edit",
-    )
+    write(repo, "calc.py", "def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+    commit_all(repo, "conflicting edit")
 
     with pytest.raises(RuntimeError, match="git rebase failed"):
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
@@ -300,8 +269,8 @@ async def test_mr_rebase_moves_the_base_and_records_a_done_session(database, run
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
 
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
-    new_head = git_read(repo, "rev-parse", "HEAD")
+    write(repo, "moved.txt", "moved on\n")
+    new_head = commit_all(repo, "moved on")
 
     status = await kraft_builtins.mr_rebase(
         database,
@@ -354,19 +323,11 @@ async def test_mr_rebase_raises_on_conflict(database, run_dirs, repo):
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
 
-    _commit(
-        worktree,
-        "calc.py",
-        "def add(a, b):\n    return a - b - 1  # bug: should be +\n",
-        "worktree edit",
-    )
+    write(worktree, "calc.py", "def add(a, b):\n    return a - b - 1  # bug: should be +\n")
+    commit_all(worktree, "worktree edit")
 
-    _commit(
-        repo,
-        "calc.py",
-        "def add(a, b):\n    return a - b - 2  # bug: should be +\n",
-        "conflicting edit",
-    )
+    write(repo, "calc.py", "def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+    commit_all(repo, "conflicting edit")
 
     with pytest.raises(RuntimeError, match="git rebase failed"):
         await kraft_builtins.mr_rebase(
@@ -394,9 +355,9 @@ async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(
     as up to date, or as dirty, and the item went on without its commits."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _commit(worktree, "work.txt", "work\n", "worktree work")
+    wtree.commit(worktree, "work.txt", "work\n", "worktree work")
     if shape != "up-to-date":
-        _commit(repo, "moved.txt", "moved on\n", "moved on")
+        wtree.commit(repo, "moved.txt", "moved on\n", "moved on")
     if shape == "tracked-change":
         (worktree / "work.txt").write_text("half-checked-out\n")
     (Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "rebase-merge").mkdir()
@@ -432,19 +393,11 @@ async def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subcl
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
 
-    _commit(
-        worktree,
-        "calc.py",
-        "def add(a, b):\n    return a - b - 1  # bug: should be +\n",
-        "worktree edit",
-    )
+    write(worktree, "calc.py", "def add(a, b):\n    return a - b - 1  # bug: should be +\n")
+    commit_all(worktree, "worktree edit")
 
-    _commit(
-        repo,
-        "calc.py",
-        "def add(a, b):\n    return a - b - 2  # bug: should be +\n",
-        "conflicting edit",
-    )
+    write(repo, "calc.py", "def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+    commit_all(repo, "conflicting edit")
 
     with pytest.raises(kraft_builtins.RebaseConflict):
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
@@ -467,7 +420,8 @@ async def test_mr_rebase_reports_a_moved_base_when_the_node_bounces(database, ru
 
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    write(repo, "moved.txt", "moved on\n")
+    commit_all(repo, "moved on")
     status = await kraft_builtins.mr_rebase(
         database,
         run_dirs,
@@ -531,7 +485,8 @@ async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
     `caps.TIME_CAPPED` -- not a new stop kind."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    write(repo, "moved.txt", "moved on\n")
+    commit_all(repo, "moved on")
     _hanging_pre_rebase_hook(repo, hung, seconds=30)
     hit = caps.Hit(scope="", field="time_cap_minutes", minutes=0, remaining_s=1.0)
     time_cap = caps.Deadline(at=caps.monotonic() + 1.0, hit=hit)
@@ -608,11 +563,14 @@ async def test_a_hanging_rebase_abort_is_bounded_and_says_so(
     monkeypatch.setattr(kraft_builtins, "REBASE_ABORT_TIMEOUT_S", 1.0)
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _commit(worktree, "calc.py", "def add(a, b):\n    return a - b - 1\n", "worktree edit")
+    write(worktree, "calc.py", "def add(a, b):\n    return a - b - 1\n")
+    commit_all(worktree, "worktree edit")
     if error is kraft_builtins.RebaseConflict:
-        _commit(repo, "calc.py", "def add(a, b):\n    return a - b - 2\n", "conflicting edit")
+        write(repo, "calc.py", "def add(a, b):\n    return a - b - 2\n")
+        commit_all(repo, "conflicting edit")
     else:
-        _commit(repo, "moved.txt", "moved on\n", "moved on")
+        write(repo, "moved.txt", "moved on\n")
+        commit_all(repo, "moved on")
     _hanging_rebase_hook(repo, tmp_path, hung, phases, seconds=10)
 
     started = caps.monotonic()
@@ -648,7 +606,8 @@ async def test_mr_rebase_moves_the_base_past_untracked_session_notes(database, r
     note = worktree / ".engineering" / "sessions" / "s0.md"
     note.parent.mkdir(parents=True)
     note.write_text("what the agent did\n")
-    new_head = _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+    write(repo, "upstream.txt", "landed meanwhile\n")
+    new_head = commit_all(repo, "upstream change")
 
     assert await _mr_rebase(database, run_dirs, repo, worktree, branch) == "done"
     assert wtree.base_ref(database) == new_head
@@ -673,9 +632,11 @@ async def test_the_setups_lockfile_is_set_aside_for_the_rebase(
     (worktree / "uv.lock").write_text("by the setup\n")
     await forge.record_setup_writes(worktree, before)
     if base_commits_one:
-        new_head = _commit(repo, "uv.lock", "committed on the base\n", "commit a lockfile")
+        write(repo, "uv.lock", "committed on the base\n")
+        new_head = commit_all(repo, "commit a lockfile")
     else:
-        new_head = _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+        write(repo, "upstream.txt", "landed meanwhile\n")
+        new_head = commit_all(repo, "upstream change")
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
@@ -696,7 +657,8 @@ async def test_an_untracked_file_the_base_would_overwrite_stops_for_a_person(
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
     (worktree / "notes.txt").write_text("the agent's, never added\n")
-    _commit(repo, "notes.txt", "the base's\n", "base adds notes.txt")
+    write(repo, "notes.txt", "the base's\n")
+    commit_all(repo, "base adds notes.txt")
     head = git_read(worktree, "rev-parse", "HEAD")
 
     with pytest.raises(kraft_builtins.RebaseBlocked) as blocked:
@@ -728,7 +690,8 @@ async def test_a_lockfile_recorded_with_no_digest_is_never_set_aside(database, r
     gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
     (gitdir / "kraft-setup-wrote").write_text("uv.lock\n")
     (worktree / "uv.lock").write_text("the setup's, then the agent's edit\n")
-    _commit(repo, "uv.lock", "committed on the base\n", "commit a lockfile")
+    write(repo, "uv.lock", "committed on the base\n")
+    commit_all(repo, "commit a lockfile")
 
     with pytest.raises(kraft_builtins.RebaseBlocked, match="untracked uv.lock"):
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
@@ -742,7 +705,8 @@ async def test_a_set_aside_a_killed_server_left_is_cleared(database, run_dirs, r
     stale = kraft_builtins.set_aside_dir(worktree)
     (stale / "sub").mkdir(parents=True)
     (stale / "sub" / "uv.lock").write_text("left by a SIGKILL\n")
-    _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+    write(repo, "upstream.txt", "landed meanwhile\n")
+    commit_all(repo, "upstream change")
 
     await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
@@ -756,7 +720,8 @@ async def test_a_failing_put_back_never_hides_the_rebases_own_error(
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
     (worktree / "notes.txt").write_text("the agent's\n")
-    _commit(repo, "notes.txt", "the base's\n", "base adds notes.txt")
+    write(repo, "notes.txt", "the base's\n")
+    commit_all(repo, "base adds notes.txt")
 
     def broken(*_a):
         raise OSError("disk full")

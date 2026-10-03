@@ -7,24 +7,16 @@ repository.
 Git is real: a root with one real submodule (`workspace_item`), whose own
 source repository stands in as the member's origin."""
 
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import _git
+from support.harness import commit_all, git, write
 from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspace_item
 
 from kraft import builtins as kraft_builtins
 from kraft import caps, store
 from kraft.config import git_read
 from kraft.executor.context import BASE_MOVED
-
-
-def _commit(cwd, name, text, message):
-    (cwd / name).write_text(text)
-    _git(cwd, "add", "-A")
-    _git(cwd, "commit", "-qm", message)
-    return git_read(cwd, "rev-parse", "HEAD")
 
 
 async def _workspace(
@@ -38,16 +30,18 @@ async def _workspace(
     row, _, root = await workspace_item(database, run_dirs, tmp_path, [task])
     member = root / "repos" / "pkg"
     if member_change is not None:
-        _commit(member, "calc.py", member_change, "member change")
+        write(member, "calc.py", member_change)
+        commit_all(member, "member change")
     if member_change is not None and root_commits_pointer:
-        _git(root, "add", "repos/pkg")
-        _git(root, "commit", "-qm", "wip: uncommitted work from t")
+        git(root, "add", "repos/pkg")
+        git(root, "commit", "-qm", "wip: uncommitted work from t")
     return row, root, member
 
 
 def _move_member_origin(tmp_path, text="landed meanwhile\n", name="moved.txt"):
     """The member's own origin (its source repository) moves on."""
-    return _commit(tmp_path / "pkg", name, text, "the member's main moves")
+    write(tmp_path / "pkg", name, text)
+    return commit_all(tmp_path / "pkg", "the member's main moves")
 
 
 async def _mr_rebase(database, run_dirs, row, root, **kw):
@@ -73,9 +67,7 @@ def _base_ref(database, row):
 
 
 def _porcelain(cwd):
-    return subprocess.run(
-        ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True, check=True
-    ).stdout
+    return git(cwd, "status", "--porcelain")
 
 
 @pytest.mark.parametrize(("bounce", "expected"), [(False, "done"), (True, BASE_MOVED)])
@@ -166,12 +158,15 @@ async def test_a_later_members_conflict_keeps_the_earlier_members_repoint(
     task = {"id": "t", "kind": "subprocess", "command": "true"}
     row, _, root = await workspace_item(database, run_dirs, tmp_path, [task], second=True)
     pkg, pkg2 = root / "repos" / "pkg", root / "repos" / "pkg2"
-    _commit(pkg, "lib.py", "x = 1\n", "member change")
-    _commit(pkg2, "calc.py", "ours\n", "member change")
-    _git(root, "add", "repos/pkg", "repos/pkg2")
-    _git(root, "commit", "-qm", "wip: uncommitted work from t")
+    write(pkg, "lib.py", "x = 1\n")
+    commit_all(pkg, "member change")
+    write(pkg2, "calc.py", "ours\n")
+    commit_all(pkg2, "member change")
+    git(root, "add", "repos/pkg", "repos/pkg2")
+    git(root, "commit", "-qm", "wip: uncommitted work from t")
     _move_member_origin(tmp_path)
-    _commit(tmp_path / "pkg2", "calc.py", "theirs\n", "the member's main moves")
+    write(tmp_path / "pkg2", "calc.py", "theirs\n")
+    commit_all(tmp_path / "pkg2", "the member's main moves")
 
     with pytest.raises(kraft_builtins.RebaseConflict, match=r"repos/pkg2"):
         await _mr_rebase(database, run_dirs, row, root)
@@ -181,9 +176,9 @@ async def test_a_later_members_conflict_keeps_the_earlier_members_repoint(
 
     # A person resolves `pkg2` and commits its pointer; the retry finds the
     # root still clean.
-    _git(pkg2, "rebase", "-q", "-X", "theirs", "origin/main")
-    _git(root, "add", "repos/pkg2")
-    _git(root, "commit", "-qm", "resolved pkg2")
+    git(pkg2, "rebase", "-q", "-X", "theirs", "origin/main")
+    git(root, "add", "repos/pkg2")
+    git(root, "commit", "-qm", "resolved pkg2")
     assert await _mr_rebase(database, run_dirs, row, root) == "done"
     assert _porcelain(root) == ""
 
@@ -195,7 +190,8 @@ async def test_a_member_that_runs_past_the_time_cap_stops_before_the_root(
     `capped_out`, `time_capped` -- and the root is never rebased after it."""
     row, root, member = await _workspace(database, run_dirs, tmp_path)
     _move_member_origin(tmp_path)
-    _commit(Path(row["repo"]), "root_moved.txt", "root moved\n", "the root's main moves")
+    write(Path(row["repo"]), "root_moved.txt", "root moved\n")
+    commit_all(Path(row["repo"]), "the root's main moves")
     root_head = git_read(root, "rev-parse", "HEAD")
     hooks = Path(git_read(member, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
     hooks.mkdir(parents=True, exist_ok=True)
@@ -226,11 +222,12 @@ def _move_root_pointer(tmp_path, root_source):
     """The root's own base moves `repos/pkg`'s pointer to a member commit the
     item's rebased member does not descend from."""
     pkg = tmp_path / "pkg"
-    _git(pkg, "checkout", "-qb", "side")
-    side = _commit(pkg, "side.txt", "side\n", "a member commit off main")
-    _git(pkg, "checkout", "-q", "main")
-    _git(root_source, "update-index", "--cacheinfo", f"160000,{side},repos/pkg")
-    _git(root_source, "commit", "-qm", "the root's main moves the pointer")
+    git(pkg, "checkout", "-qb", "side")
+    write(pkg, "side.txt", "side\n")
+    side = commit_all(pkg, "a member commit off main")
+    git(pkg, "checkout", "-q", "main")
+    git(root_source, "update-index", "--cacheinfo", f"160000,{side},repos/pkg")
+    git(root_source, "commit", "-qm", "the root's main moves the pointer")
 
 
 async def test_a_root_gitlink_conflict_says_how_to_resolve_it(database, run_dirs, tmp_path):
@@ -254,9 +251,11 @@ async def test_a_root_file_conflict_gets_no_gitlink_sentence(database, run_dirs,
     """A moved member alongside a root conflict on its own file is git's
     conflict alone: the sentence is only for a conflict on the moved pointers."""
     row, root, _ = await _workspace(database, run_dirs, tmp_path)
-    _commit(root, "root.txt", "ours\n", "root change")
+    write(root, "root.txt", "ours\n")
+    commit_all(root, "root change")
     _move_member_origin(tmp_path)
-    _commit(Path(row["repo"]), "root.txt", "theirs\n", "the root's main moves")
+    write(Path(row["repo"]), "root.txt", "theirs\n")
+    commit_all(Path(row["repo"]), "the root's main moves")
 
     with pytest.raises(kraft_builtins.RebaseConflict, match="CONFLICT") as raised:
         await _mr_rebase(database, run_dirs, row, root)
@@ -351,7 +350,8 @@ async def test_planted_state_in_a_members_admin_dir_never_moves_an_operator_ref(
     origin."""
     row, root, member = await _workspace(database, run_dirs, tmp_path)
     connected, branch = tmp_path / "pkg-connected", store.branch_for(row)
-    _commit(connected, "operator.txt", "the operator's own\n", "operator work")
+    write(connected, "operator.txt", "the operator's own\n")
+    commit_all(connected, "operator work")
     _move_member_origin(tmp_path)
     admin = Path(git_read(member, "rev-parse", "--absolute-git-dir"))
     main, orig = (
@@ -366,11 +366,11 @@ async def test_planted_state_in_a_members_admin_dir_never_moves_an_operator_ref(
     else:
         # An operator branch at the member's own commit, so nothing but the
         # guard stands between Kraft and moving it.
-        _git(connected, "branch", "side", branch)
+        git(connected, "branch", "side", branch)
     if kind == "MERGE_AUTOSTASH":
         (member / "calc.py").write_text("the worker's stash\n")
         stash = git_read(member, "stash", "create")
-        _git(member, "checkout", "--", "calc.py")
+        git(member, "checkout", "--", "calc.py")
         (admin / "MERGE_AUTOSTASH").write_text(f"{stash}\n")
     if kind == "HEAD" or door == "restore_branch":
         (admin / "HEAD").write_text("ref: refs/heads/side\n")

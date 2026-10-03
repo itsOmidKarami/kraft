@@ -8,29 +8,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import git, make_repo, write
 
 from kraft.adapters import forge
-from kraft.worker import sandbox
-
-
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=True,
-        env=sandbox.unhardened_git_env(),
-    ).stdout
 
 
 def _record(repo: Path) -> Path:
-    return Path(_git(repo, "rev-parse", "--absolute-git-dir").strip()) / forge.git.SETUP_WROTE
+    return Path(git(repo, "rev-parse", "--absolute-git-dir")) / forge.git.SETUP_WROTE
 
 
 def _setup_writes(repo: Path, name: str = "uv.lock", text: str = "by the setup\n") -> None:
@@ -43,9 +30,9 @@ def _setup_writes(repo: Path, name: str = "uv.lock", text: str = "by the setup\n
 
 def _sweep(repo: Path) -> list[str]:
     """Run the sweep; what its commit took."""
-    branch = _git(repo, "branch", "--show-current").strip()
+    branch = git(repo, "branch", "--show-current")
     asyncio.run(forge.commit_stragglers(repo, branch=branch, base="main", message="wip: t"))
-    return sorted(_git(repo, "show", "--name-only", "--format=", "HEAD").split())
+    return sorted(git(repo, "show", "--name-only", "--format=", "HEAD").split())
 
 
 def test_an_agents_edit_to_the_setups_lockfile_is_committed(tmp_path):
@@ -119,14 +106,13 @@ def test_a_record_from_before_digests_still_leaves_its_lockfile_out(tmp_path):
     assert _sweep(repo) == ["work.py"]
 
 
-def _write(repo: Path, files, text: str) -> None:
+def _write_each(repo: Path, files, text: str) -> None:
     """Write each of `files`; a `package.json` is the repo's own, so committed."""
     for f in files:
-        (repo / f).parent.mkdir(parents=True, exist_ok=True)
-        (repo / f).write_text(text)
+        write(repo, f, text)
         if f.endswith("package.json"):
-            _git(repo, "add", f)
-            _git(repo, "commit", "-q", "-m", "a package")
+            git(repo, "add", f)
+            git(repo, "commit", "-q", "-m", "a package")
 
 
 @pytest.mark.parametrize(
@@ -145,7 +131,7 @@ def test_a_directory_that_only_looks_like_an_install_is_committed(tmp_path, file
     beside a `package.json` the repo tracks, with no package manager's
     marker in it (R11E-04)."""
     repo = make_repo(tmp_path)
-    _write(repo, files, "work\n")
+    _write_each(repo, files, "work\n")
     added = [f for f in files if not f.endswith("package.json")]
     # A setup that runs after the agent wrote it did not make it.
     asyncio.run(forge.record_setup_writes(repo, asyncio.run(forge.lockfile_digests(repo))))
@@ -172,7 +158,7 @@ def test_a_real_install_is_left_out(tmp_path, files, install):
     """A `package.json` beside it is the repo's own, so committed first. A
     `node_modules` the setup made needs no marker: bun leaves none."""
     repo = make_repo(tmp_path)
-    _write(repo, [f for f in files if not f.startswith("setup:")], "installed\n")
+    _write_each(repo, [f for f in files if not f.startswith("setup:")], "installed\n")
     for f in files:
         if f.startswith("setup:"):
             _setup_writes(repo, f.removeprefix("setup:"))

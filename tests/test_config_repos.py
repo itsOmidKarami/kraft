@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
-from support.harness import commit_all, make_repo
+from support.harness import commit_all, make_repo, write
 
 from kraft import config
 from kraft.policy import SandboxPolicy
@@ -621,12 +621,6 @@ def test_a_key_one_typo_from_a_field_is_refused_naming_the_field(tmp_path, typo,
 # ── workspaces (`workspace-declares-root-and-members`) ──
 
 
-def _write(tmp_path, repos, workspaces):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
-    return path
-
-
 _WS_REPOS = [{"path": "/ws", "id": "ws"}, {"path": "/ws/libs/a", "id": "lib-a"}]
 
 
@@ -634,26 +628,26 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
     """The daemon's `repos.yaml` declares workspaces in the V1 shape, beside
     the repository list: a root and each member with its mount path, both
     naming a connected repository by `id`."""
-    path = _write(
-        tmp_path,
-        _WS_REPOS,
-        {
-            "ws": {
-                "root": "ws",
-                "root_pointer_default": "bump",
-                "members": {
-                    "a": {"repository": "lib-a", "path": "libs/a"},
-                    # A name prefix of `libs/a`, not inside it.
-                    "ab": {"repository": "lib-a", "path": "libs/ab"},
-                },
-            }
-        },
+    workspaces = {
+        "ws": {
+            "root": "ws",
+            "root_pointer_default": "bump",
+            "members": {
+                "a": {"repository": "lib-a", "path": "libs/a"},
+                # A name prefix of `libs/a`, not inside it.
+                "ab": {"repository": "lib-a", "path": "libs/ab"},
+            },
+        }
+    }
+    path = write(
+        tmp_path, "repos.yaml", yaml.safe_dump({"repos": _WS_REPOS, "workspaces": workspaces})
     )
     (ws,) = config.load_workspaces(path).values()
     assert (ws.id, ws.root, ws.root_pointer_default) == ("ws", "ws", "bump")
     assert ws.members["a"].repository == "lib-a"
     assert ws.members["a"].path == "libs/a"
-    assert config.load_workspaces(_write(tmp_path, _WS_REPOS, None)) == {}
+    path.write_text(yaml.safe_dump({"repos": _WS_REPOS, "workspaces": None}))
+    assert config.load_workspaces(path) == {}
 
 
 @pytest.mark.parametrize(
@@ -706,8 +700,9 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
     ],
 )
 def test_a_workspace_that_cannot_assemble_is_refused_at_load(tmp_path, repos, workspaces, match):
+    path = write(tmp_path, "repos.yaml", yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
     with pytest.raises(config.ConfigError, match=match):
-        config.load_workspaces(_write(tmp_path, repos, workspaces))
+        config.load_workspaces(path)
 
 
 @pytest.mark.parametrize("sandboxed", ["ws", "lib-a"], ids=["root", "member"])
@@ -718,7 +713,7 @@ def test_a_sandboxed_workspace_with_members_loads(tmp_path, sandboxed):
     sandbox = {"kind": "docker", "image": "img"}
     repos = [{**r, "sandbox": sandbox} if r["id"] == sandboxed else r for r in _WS_REPOS]
     workspaces = {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a", "path": "libs/a"}}}}
-    path = _write(tmp_path, repos, workspaces)
+    path = write(tmp_path, "repos.yaml", yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
     assert set(config.load_workspaces(path)) == {"ws"}
     (entry,) = [r for r in config.load_repos(path) if r.id == sandboxed]
     assert entry.sandbox.model_dump() == sandbox
@@ -728,7 +723,9 @@ def test_save_repos_keeps_the_workspaces_section(tmp_path):
     """Every Settings write goes through `save_repos` with the repository list
     alone; it must not drop the workspaces declared beside it."""
     workspaces = {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a", "path": "libs/a"}}}}
-    path = _write(tmp_path, _WS_REPOS, workspaces)
+    path = write(
+        tmp_path, "repos.yaml", yaml.safe_dump({"repos": _WS_REPOS, "workspaces": workspaces})
+    )
     config.save_repos(path, [r.model_dump() for r in config.load_repos(path)])
     assert yaml.safe_load(path.read_text())["workspaces"] == workspaces
 

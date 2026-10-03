@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 import threading
 
 import pytest
-from support.harness import make_repo_with_engineering
+from support.harness import commit_all, git, make_repo_with_engineering
 
 from kraft.index import ingest
-
-
-def _git(cwd, *args):
-    subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True)
 
 
 def _reconcile(*args, **kwargs):
@@ -93,17 +88,12 @@ def test_scan_repo_non_git_dir_returns_empty(tmp_path):
 SECRET = "SECRET_TOKEN=ghp_FAKEFAKEFAKE1234567890\n"
 
 
-def _commit(repo, message="change"):
-    _git(repo, "add", "-A")
-    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message)
-
-
 def _symlink_out(tmp_path, repo):
     """A committed symlink to a file outside the repo, as a malicious repo or
     a worker's merged branch could carry."""
     (tmp_path / "secret.txt").write_text(SECRET)
     (repo / ".engineering/specs/leak.md").symlink_to(tmp_path / "secret.txt")
-    _commit(repo)
+    commit_all(repo)
 
 
 def _symlink_in(tmp_path, repo):
@@ -111,7 +101,7 @@ def _symlink_in(tmp_path, repo):
     (repo / ".gitignore").write_text(".env\n")
     (repo / ".env").write_text(SECRET)
     (repo / ".engineering/specs/leak.md").symlink_to("../../.env")
-    _commit(repo)
+    commit_all(repo)
 
 
 def _directory_out(tmp_path, repo):
@@ -122,7 +112,7 @@ def _directory_out(tmp_path, repo):
     (outside / "leak.md").write_text(SECRET)
     (repo / ".engineering/notes/leak.md").parent.mkdir(parents=True)
     (repo / ".engineering/notes/leak.md").write_text("# placeholder\n")
-    _commit(repo)
+    commit_all(repo)
     for f in (repo / ".engineering/notes").iterdir():
         f.unlink()
     (repo / ".engineering/notes").rmdir()
@@ -172,7 +162,7 @@ def test_scan_repo_never_runs_the_repos_fsmonitor(tmp_path, monkeypatch):
     monitor = tmp_path / "monitor.sh"
     monitor.write_text(f"#!/bin/sh\ntouch {ran}\n")
     monitor.chmod(0o755)
-    _git(repo, "config", "core.fsmonitor", str(monitor))
+    git(repo, "config", "core.fsmonitor", str(monitor))
     assert [d.path for d in ingest.scan_repo(repo)] == [".engineering/specs/a.md"]
     assert not ran.exists()
 
@@ -215,7 +205,7 @@ def test_reconcile_edit_changes_hash_and_reextracts(conn, tmp_path):
     doc_id = _rows(conn, str(repo))[".engineering/specs/a.md"]["id"]
 
     (repo / ".engineering/specs/a.md").write_text("# A\nalpha bravo charlie\n")
-    _git(repo, "commit", "-am", "edit")
+    git(repo, "commit", "-am", "edit")
     s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 1, 0, 0)
     row = _rows(conn, str(repo))[".engineering/specs/a.md"]
@@ -230,8 +220,8 @@ def test_reconcile_rename_keeps_id(conn, tmp_path):
     _reconcile(conn, str(repo), ingest.scan_repo(repo))
     doc_id = _rows(conn, str(repo))[".engineering/specs/a.md"]["id"]
 
-    _git(repo, "mv", ".engineering/specs/a.md", ".engineering/specs/renamed.md")
-    _git(repo, "commit", "-m", "rename")
+    git(repo, "mv", ".engineering/specs/a.md", ".engineering/specs/renamed.md")
+    git(repo, "commit", "-m", "rename")
     s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 0, 1, 0)
     rows = _rows(conn, str(repo))
@@ -249,8 +239,8 @@ def test_reconcile_delete_removes_row_and_fts(conn, tmp_path):
         },
     )
     _reconcile(conn, str(repo), ingest.scan_repo(repo))
-    _git(repo, "rm", ".engineering/specs/b.md")
-    _git(repo, "commit", "-m", "rm b")
+    git(repo, "rm", ".engineering/specs/b.md")
+    git(repo, "commit", "-m", "rm b")
     s = _reconcile(conn, str(repo), ingest.scan_repo(repo))
     assert (s.inserted, s.updated, s.renamed, s.deleted) == (0, 0, 0, 1)
     assert set(_rows(conn, str(repo))) == {".engineering/specs/a.md"}

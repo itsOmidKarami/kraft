@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, entry_of
+from support.harness import entry_of, git
 
 from kraft import builtins as kraft_builtins
 
@@ -43,7 +43,7 @@ async def test_a_repo_with_no_commit_gets_no_worktree(tmp_path, database, run_di
     the tests would run without one of the repository's files."""
     repo = tmp_path / "fresh"
     repo.mkdir()
-    _git(repo, "init", "-q", "-b", "main")
+    git(repo, "init", "-q", "-b", "main")
     (repo / "Makefile").write_text("test:\n\ttrue\n")
     await wtree.make_item(database, repo)
     with pytest.raises(RuntimeError, match="has no commit to branch from"):
