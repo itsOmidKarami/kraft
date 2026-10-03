@@ -7,7 +7,7 @@ import { detailOf, jsonBody, request } from "../http";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
-import { olderServer, restartPending } from "../shell/health";
+import { installedOlder, olderServer, restartPending } from "../shell/health";
 
 export interface UpdateState {
   installed: string;
@@ -96,7 +96,11 @@ export function AboutPage() {
             <span className={`set-verdict is-${verdict.tone}`} role="status">{verdict.text}</span>
           </div>
           {error && <span className="set-error" role="alert">{error}</span>}
-          {restartPending(health) && (
+          {installedOlder(health) ? (
+            <p className="set-hint is-warn" role="status">
+              An older Kraft, {health!.installed}, is installed under this {health!.version} server. If you are rolling back, stop the server and restore the database from before the upgrade before you start it: a database {health!.version} migrated will not start an older release. See <a className="set-link" href="https://itsomidkarami.github.io/kraft/get-started/install#pin-or-roll-back-a-version" target="_blank" rel="noopener noreferrer">Pin or roll back a version</a>.
+            </p>
+          ) : restartPending(health) && (
             <p className="set-hint is-warn" role="status">
               {olderServer(health)
                 ? "This server runs a release older than the Kraft installed, too old to say which. "

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Health } from "../../types";
-import { olderServer, restartPending } from "./health";
+import { installedOlder, olderServer, restartPending } from "./health";
 
 const h = (over: Partial<Health>): Health => ({ status: "ok", invalid_templates: {}, invalid_policy: [], ...over });
 
@@ -20,5 +20,18 @@ describe("restartPending", () => {
   it("is not pending before /health has answered", () => {
     expect(restartPending(null)).toBe(false);
     expect(olderServer(undefined)).toBe(false);
+  });
+});
+
+// R10c-03: a rollback is not an update a restart finishes.
+describe("installedOlder", () => {
+  it.each([
+    ["1.4.0", "1.5.0", true],
+    ["1.5.0rc14", "1.5.0", true],
+    ["1.5.0", "1.5.0rc14", false],
+    ["1.5.1", "1.5.0", false],
+    ["0.0.0+source", "1.5.0", false],
+  ])("%s installed under %s: %s", (installed, version, older) => {
+    expect(installedOlder(h({ version, installed }))).toBe(older);
   });
 });

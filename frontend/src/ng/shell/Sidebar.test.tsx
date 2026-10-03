@@ -279,6 +279,15 @@ describe("ng Sidebar, against a server older than its interface (R10c-01)", () =
   });
 });
 
+describe("ng Sidebar, with an older release installed (R10c-03)", () => {
+  it("does not call a rollback an update to finish", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ ...HEALTH, installed: "0.9.3" } as never);
+    mount("/templates/chains");
+    expect(await screen.findByRole("link", { name: "v0.9.3 installed, older than this server: see About" })).toHaveAttribute("href", "/settings/about");
+    expect(screen.queryByText(/restart to finish the update/)).toBeNull();
+  });
+});
+
 describe("ng Sidebar draft dots", () => {
   const draft = (area: "chains" | "library" | "repos" | "policy" | "intake", key: string, problems: number) => ({ area, key, files: [], changes: 1, problems, updated_at: "" });
 

@@ -57,6 +57,14 @@ describe("ng AboutPage", () => {
     expect(await screen.findByText(/This server runs a release older than the Kraft installed/)).toHaveTextContent("kraft admin restart");
   });
 
+  it("says a rollback needs the database restored, not a restart (R10c-03)", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.5.0", installed: "1.4.0" });
+    render(<AboutPage />);
+    const note = await screen.findByText(/An older Kraft, 1\.4\.0, is installed under this 1\.5\.0 server/);
+    expect(note).toHaveTextContent("restore the database from before the upgrade");
+    expect(note).not.toHaveTextContent("kraft admin restart");
+  });
+
   it("reads an unreachable feed as unknown", async () => {
     served = () => reply(200, { ...UPDATE, latest: null, behind: null, checked_at: null });
     render(<AboutPage />);

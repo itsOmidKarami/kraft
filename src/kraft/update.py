@@ -218,6 +218,15 @@ def _parts(raw: str) -> tuple[int, ...]:
     return _rank(base[0]) or () if base else ()
 
 
+def is_older(version: str, than: str) -> bool:
+    """True when release `version` comes before release `than`: an older
+    Kraft installed under a newer running server, as a rollback leaves it.
+    False when either is not a release: a source checkout (`0.0.0+source`)
+    ranks below everything and is no rollback."""
+    a, b = _parts(version), _parts(than)
+    return a[:3] not in ((), (0, 0, 0)) and bool(b) and a < b
+
+
 def is_behind(release: Release | None) -> bool:
     if release is None:
         return False

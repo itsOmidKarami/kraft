@@ -82,16 +82,40 @@ def spa_shell(request: Request, dist, headers: dict[str, str] | None = None):
     return FileResponse(dist / "index.html", headers=headers)
 
 
+ROLLBACK_DOCS = (
+    "https://itsomidkarami.github.io/kraft/get-started/install#pin-or-roll-back-a-version"
+)
+
+
 def _restart_page(running: str, installed: str) -> str:
-    return (
+    head = (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         "<title>Kraft: restart to finish the update</title>"
         "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:36rem;margin:3rem auto;"
         "padding:0 16px;color:#1d1d1f;background:#fff}"
-        "@media (prefers-color-scheme:dark){body{color:#e8e8ea;background:#161618}}"
+        "@media (prefers-color-scheme:dark){body{color:#e8e8ea;background:#161618}"
+        "a{color:#8ab4f8}}"
         "code{font-size:.95em}</style></head><body>"
-        "<h1>Restart Kraft to finish the update</h1>"
+    )
+    if update_mod.is_older(installed, running):
+        # A rollback: the advice to restart would start the older release on a
+        # database a newer one migrated, which it refuses (R10c-03).
+        return (
+            head.replace("restart to finish the update", "an older release is installed")
+            + "<h1>An older Kraft is installed</h1>"
+            f"<p>Kraft {html.escape(installed)} is installed, but this server is still running "
+            f"{html.escape(running)}, a newer release. Its web interface is the older one, "
+            "which does not match the running server, so it is not shown.</p>"
+            "<p>If you are rolling back, stop the server and restore the database from before "
+            f"the upgrade before you start {html.escape(installed)}: a database "
+            f"{html.escape(running)} migrated will not start an older release. See "
+            f'<a href="{ROLLBACK_DOCS}">Pin or roll back a version</a>.</p>'
+            f"<p>To stay on {html.escape(running)}, install it again, then reload this page.</p>"
+            "</body></html>"
+        )
+    return (
+        head + "<h1>Restart Kraft to finish the update</h1>"
         f"<p>Kraft {html.escape(installed)} is installed, but this server is still running "
         f"{html.escape(running)}. Its web interface is the new one, which does not match the "
         "running server, so it is not shown.</p>"
