@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from kraft import auth as auth_mod
 from kraft import update as update_mod
 from kraft.api import api_router, deps
+from kraft.worker import reattach as reattach_mod
 
 #: Failed logins one address may make within `LOGIN_WINDOW_S` before it is
 #: refused with 429 until `LOGIN_WINDOW_S` has passed since the last of them.
@@ -111,11 +112,14 @@ async def health(request: Request):
     # `invalid_templates` so the SPA's health badge, `kraft admin health` and
     # `admin doctor` all show it (Kraft-n1zp9). The other chains still run.
     invalid = deps.invalid_templates(st)
+    summary = asdict(st.reattach_summary)
+    summary["unknown"] = st.db.read(lambda c: reattach_mod.still_orphaned(c, summary["unknown"]))
     return {
         "status": "degraded" if (invalid or invalid_policy) else "ok",
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
-        "reattach_summary": asdict(st.reattach_summary),
+        # `unknown` as it stands now, not as startup found it.
+        "reattach_summary": summary,
         "index": st.indexer.health(),
         # public: the login screen says which address it is asking a password for.
         # What the server is listening on, not access.yaml: `--port` or

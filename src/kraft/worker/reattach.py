@@ -61,6 +61,25 @@ class ReattachSummary:
     resumed_work_items: list[str] = field(default_factory=list)
 
 
+def still_orphaned(conn, unknown: list[str]) -> list[str]:
+    """Those of `unknown` (sessions startup could not confirm, which stopped
+    their items) that still stand: the item is still stopped, and has started
+    no session since. A retry that went on to complete must not leave
+    `/health`, and so `kraft admin doctor`, failing until the next restart."""
+    if not unknown:
+        return []
+    marks = ",".join("?" * len(unknown))
+    rows = conn.execute(
+        f"SELECT s.id FROM worker_sessions s JOIN work_items w ON w.id = s.work_item_id "
+        f"WHERE s.id IN ({marks}) AND w.status = 'needs_human' AND NOT EXISTS ("
+        "SELECT 1 FROM worker_sessions n WHERE n.work_item_id = s.work_item_id "
+        "AND n.rowid > s.rowid)",
+        tuple(unknown),
+    ).fetchall()
+    kept = {r["id"] for r in rows}
+    return [sid for sid in unknown if sid in kept]
+
+
 def _pid_alive(pid: int) -> bool:
     """True only if pid names a live process (a zombie/defunct child is NOT alive)."""
     try:
