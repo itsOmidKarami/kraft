@@ -11,7 +11,7 @@ import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("POST /work-items/w1/pause", "POST /work-items/w1/retry", "POST /work-items/w1/skip");
+const WRITES = acceptWrites("POST /work-items/w1/pause", "POST /work-items/w1/resume", "POST /work-items/w1/retry", "POST /work-items/w1/skip");
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
 const session = (over: Partial<WorkerSession>): WorkerSession => ({ id: "s1", work_item_id: "w1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, thread: 1, round: 0, created_at: "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", exited_at: null, model: "claude-sonnet-4-5", tokens_in: 100, tokens_out: 50, cost_usd: 0.15, wall_ms: 60000, ...over }) as WorkerSession;
@@ -48,10 +48,16 @@ describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () 
   it.each([
     ["running node", item("running"), "verification", ["pause", "skip"]],
     ["escalated node", item("escalated"), "verification", ["pause", "skip"]],
-    ["paused node", item("paused"), "verification", ["skip", "retry-node"]],
+    // R10b-01: /retry answers 409 to an item that is not stopped, so a paused node resumes and a waiting one pauses.
+    ["paused node", item("paused"), "verification", ["skip", "resume"]],
+    ["node waiting on CI", item("waiting", stop("wait")), "verification", ["pause", "skip"]],
+    // /skip refuses a rate-limited item: Pause, which /pause takes, then Skip or Resume.
+    ["rate-limited node", item("waiting", stop("rate_limit"), { status: "rate_limited" }), "verification", [null, "pause"]],
     ["failed node", item("failed", stop("failed")), "verification", ["skip", "retry-node"]],
     ["capped node", item("needs_you", stop("cap")), "verification", ["skip", "retry-node"]],
-    ["done node", item("running"), "plan", [null, "retry-from"]],
+    ["done node of a stopped item", item("failed", stop("failed")), "plan", [null, "retry-from"]],
+    ["done node of a running item", item("running"), "plan", [null, null]],
+    ["done node of a paused item", item("paused"), "plan", [null, null]],
     ["node not reached", item("running"), "merge_request", [null, null]],
     ["waiting gate", item("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval" }), "plan_approval", [null, "review"]],
     ["a gate not reached", item("running"), "plan_approval", [null, null]],
@@ -158,8 +164,15 @@ describe("the node's actions (D.6)", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "verification" } }]));
   });
 
+  it("a paused node resumes, and offers no Retry the server would refuse", async () => {
+    const calls = mount(item("paused"), "/work-items/w1/nodes/verification");
+    await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+    expect(screen.queryByRole("button", { name: "Retry node" })).toBeNull();
+  });
+
   it("a done node asks before it rewinds", async () => {
-    const calls = mount(item("running"), "/work-items/w1/nodes/plan");
+    const calls = mount(item("failed", stop("failed")), "/work-items/w1/nodes/plan");
     await userEvent.click(await screen.findByRole("button", { name: "Retry from here" }));
     expect(posts(calls)).toEqual([]);
     await userEvent.click(within(screen.getByRole("dialog", { name: "Retry from plan?" })).getByRole("button", { name: "Rewind and retry" }));

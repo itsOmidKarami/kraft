@@ -15,6 +15,7 @@ import { RootHeader } from "../nav/ScreenHeader";
 import { itemPath, needsDocument, reviewPath, type CardButton } from "./actions";
 import { Card } from "./Card";
 import { useListLoad, useNow } from "./useListLoad";
+import { OLDER_SERVER, olderServer, useHealth } from "../../shell/health";
 import "./board.css";
 
 const CHIPS = [
@@ -39,6 +40,8 @@ export function Board() {
   const now = useNow();
   const prefs = useBoardPrefs();
   const { load, offline } = useListLoad();
+  // R10c-01: an older server still running after an update says so over the board.
+  const health = useHealth();
   const byId = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(byId).filter((i) => i.display_status !== "archived"), [byId]);
   const [showAll, setShowAll] = useState(false);
@@ -133,6 +136,7 @@ export function Board() {
         ))}
       </div>
       <div className="ph-content ph-board">
+        {olderServer(health) && <p className="ph-restart" role="alert">{OLDER_SERVER} Run <code>kraft admin restart</code>.</p>}
         {load.state === "loading" && empty && <div className="ph-skeleton" aria-hidden="true"><span /><span /><span /></div>}
         {empty && load.state !== "loading" && (
           <p className="ph-empty">

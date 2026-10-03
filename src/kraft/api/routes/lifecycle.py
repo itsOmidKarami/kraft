@@ -593,8 +593,10 @@ async def pause_work_item(wid: str, request: Request):
     # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
     # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
     # is no session to signal in that state -- the wait is a row now -- so the
-    # write below is the whole operation.
-    if row["status"] not in ("active", "waiting"):
+    # write below is the whole operation. 'rate_limited' too (R10b-01's
+    # follow-up): the board offers Pause there, and nothing else stops the
+    # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
+    if row["status"] not in ("active", "waiting", "rate_limited"):
         raise HTTPException(409, f"work item is {row['status']}, not running")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
@@ -699,6 +701,14 @@ def review_reachable(row) -> bool:
         ):
             return True
     return not reached
+
+
+def _not_stopped(row) -> str:
+    """The 409 a retry on an item that is not stopped gets. A paused one is
+    told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
+    if row["status"] == "paused":
+        return "work item is paused, not stopped: resume it instead, or skip what it would run"
+    return "work item is not stopped"
 
 
 def not_paused(row) -> str:
@@ -1008,7 +1018,7 @@ async def _retry(wid: str, body: Retry, request: Request):
         # below is still the authoritative gate, but reaching it only after
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
-        raise HTTPException(409, "work item is not stopped")
+        raise HTTPException(409, _not_stopped(row))
     if body.path is None and not body.restart:
         rewind = st.db.read(lambda c: store.pending_rewind(c, wid))
         if rewind is not None:

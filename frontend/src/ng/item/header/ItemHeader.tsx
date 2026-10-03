@@ -93,11 +93,25 @@ export function ItemHeader({ item, reload, onSettings, onRunLog, cancelOpen, onC
     // Once per arrival: the param is gone after this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askedHere, draftStatus]);
+  // The draft this page read can be stale: one made in another tab or from the CLI since
+  // would be started past. Start reads it again first, as the peek and the phone do (R10b-07).
+  const startFresh = async () => {
+    if (!draft) return start();
+    setBusy(true);
+    const a = await draft.draft.reload();
+    setBusy(false);
+    if (a.status === 404) return start();
+    const ops = a.status === 200 ? (a.body as { ops?: { passed?: boolean }[] }).ops : undefined;
+    if (!Array.isArray(ops)) return setError("Could not read this item's draft, so it was not started: try again.");
+    if (ops.some((o) => !o.passed)) return draft.setReviewing(true, start);
+    start();
+  };
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onSettings();
     if (asksFirst()) return draft!.setReviewing(true, start);
-    if (hs.main === "resume" || hs.main === "start") return start();
+    if (hs.main === "start") return void startFresh();
+    if (hs.main === "resume") return start();
     if (hs.main === "retry") return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}));
     if (hs.main === "archive") return void run(act.archive(item.id));
     return void run(act.restore(item.id));

@@ -28,6 +28,7 @@ const ALLOWED = [
   "item/chainName",
   "item/nodeGraph",
   "item/graph",
+  "item/draft/view", // lines(): the draft's changes as the desktop's Start dialog lists them (R10b-12)
   "board/model",
   "board/counts", // the board's counts, one definition for every screen that shows one
   "board/rowText",
@@ -38,6 +39,7 @@ const ALLOWED = [
   "review/url",
   "review/finish",
   "review/patch",
+  "review/range", // rangeName and threadRange: a thread's lines named as the desktop names them
   "review/FinishReview", // useSubmit only: the one review submit the desktop sends
   "review/model",
   "templates/draft/useConfigDraft",
@@ -70,6 +72,7 @@ const ALLOWED = [
   "shell/useDraftCounts", // the draft dots of More
   "apply/store", // the apply state; Restart has one call site, behind the phone's own confirm
   "shell/routes", // the list of pages, as data: Search's Go to rows
+  "shell/health", // olderServer and useHealth: the restart banner over the board, one test for both layouts
 ];
 
 const ng = join(dirname(fileURLToPath(import.meta.url)), "..");

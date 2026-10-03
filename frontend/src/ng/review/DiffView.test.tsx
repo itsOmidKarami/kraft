@@ -117,6 +117,11 @@ describe("DiffView", () => {
     expect(write).toHaveBeenCalledWith(PATCH.split("diff --git a/logo.png")[0]);
   });
 
+  it("says in the lines' name that a range across sides is the composer pencil's, not Shift's (R10b-11)", () => {
+    render(<View onCompose={vi.fn()} />);
+    expect(screen.getByRole("group", { name: /^Lines of search\/cache.py/ })).toHaveAccessibleName(/Shift extends on its side, Enter comments \(its pencil starts the range on the other side\)/);
+  });
+
   it("picks by keyboard: arrows move, Shift extends on one side, Enter composes", () => {
     const onCompose = vi.fn();
     render(<View onCompose={onCompose} />);

@@ -81,6 +81,16 @@ describe("LeaveGuard", () => {
     expect(sent(calls, "DELETE")).toHaveLength(1);
   });
 
+  it("keeps focus in the dialog as Discard & continue asks and Keep goes back", async () => {
+    const { calls } = show({ [DRAFT]: answer(ops) });
+    await ready(calls);
+    await userEvent.click(screen.getByRole("link", { name: "Board" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Discard & continue" }));
+    expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.getByRole("button", { name: "Discard & continue" })).toHaveFocus();
+  });
+
   it("offers Review problems, and stays, when the draft has a problem", async () => {
     const { calls } = show({ [DRAFT]: answer(ops, [{ op: 0, message: "too big" }]) });
     await ready(calls);

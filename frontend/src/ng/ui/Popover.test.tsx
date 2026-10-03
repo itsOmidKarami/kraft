@@ -109,6 +109,33 @@ describe("ng Popover", () => {
       expect(trigger).toHaveFocus();
     });
 
+    // R10b-04: Cancel… from the item's ⋮ menu opened its card from a menu item that closed with
+    // the menu, so Escape had nothing to go back to and focus fell to the page.
+    it("hands focus to the anchor group's first control on Escape when what opened it is gone", async () => {
+      function Card() {
+        const group = useRef<HTMLDivElement>(null);
+        const [opener, setOpener] = useState(true);
+        const [open, setOpen] = useState(false);
+        return (
+          <>
+            <div ref={group}><button>main</button></div>
+            {opener && <button onClick={() => { setOpen(true); setOpener(false); }}>Cancel…</button>}
+            <Popover anchor={group} open={open} onClose={() => setOpen(false)} role="dialog" label="card">
+              <textarea aria-label="reason" />
+            </Popover>
+          </>
+        );
+      }
+      render(<Card />);
+      const opener = screen.getByRole("button", { name: "Cancel…" });
+      opener.focus();
+      fireEvent.click(opener);
+      await waitFor(() => expect(screen.getByLabelText("reason")).toHaveFocus());
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("button", { name: "main" })).toHaveFocus();
+    });
+
     it("closes a menu on Tab and hands focus back, rather than leaving it open with focus at the top of the page", async () => {
       const trigger = openIt();
       await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "one" })).toHaveFocus());

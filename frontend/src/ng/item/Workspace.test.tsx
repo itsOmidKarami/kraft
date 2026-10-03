@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WorkerSession } from "../../types";
 import { detail, fresh, stubFetch } from "./testkit";
 import { usePaneMemory, Workspace } from "./Workspace";
 
@@ -128,5 +129,25 @@ describe("Workspace", () => {
     mount("/work-items/w1?sel=plan");
     await userEvent.click(within(screen.getByRole("complementary", { name: "plan pane" })).getByRole("button", { name: "default" }));
     expect(where()).toBe("/work-items/w1");
+  });
+});
+
+// R10a-06: a running node read "running 0s" for up to 30 s, the clock ticking every 30 s.
+describe("the item page's clock", () => {
+  const running = { id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, round: 0, thread: 1, created_at: "2026-09-13T09:59:57Z", started_at: "2026-09-13T09:59:57Z", exited_at: null, model: "m", tokens_in: 1, tokens_out: 1, cost_usd: 0, wall_ms: null } as unknown as WorkerSession;
+  afterEach(() => vi.useRealTimers());
+
+  it("counts a running node's time every second", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(Date.parse("2026-09-13T10:00:00Z"));
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/nodes/verification"]}>
+        <Routes><Route path="/work-items/:id/nodes/:node" element={<Workspace item={detail({ worker_sessions: [running] })} version="1" reload={() => {}} />} /></Routes>
+      </MemoryRouter>,
+    );
+    const pane = screen.getByRole("complementary", { name: "verification pane" });
+    expect(within(pane).getByText(/exec node · running 3s/)).toBeInTheDocument();
+    await act(async () => void vi.advanceTimersByTime(5_000));
+    expect(within(pane).getByText(/exec node · running 8s/)).toBeInTheDocument();
   });
 });

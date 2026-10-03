@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -77,6 +78,16 @@ describe("Peek", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+  });
+
+  it("moves focus into the budget editor's field, and Enter saves the typed cap (R10a-05)", async () => {
+    const calls = mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
+    fireEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
+    const field = await screen.findByRole("textbox", { name: "Budget in dollars" });
+    expect(field).toHaveFocus();
+    await userEvent.clear(field);
+    await userEvent.type(field, "7{Enter}");
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: 7 } }]));
   });
 
   it("starts a never-started item with /resume", async () => {

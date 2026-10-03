@@ -26,6 +26,9 @@ export function useCompare(id: string, from: CompareTarget, to: CompareTarget, i
   return got;
 }
 
+/** How often an open review reads its threads again with no event to say so. */
+export const THREADS_POLL_MS = 15_000;
+
 /** The events after which the item's threads may have changed. */
 const THREAD_EVENTS = /^(thread_updated|review_submitted|rewind_requested|rewind_cancelled|reply_agent_.+)$/;
 
@@ -36,14 +39,37 @@ export function useThreads(id: string) {
   const relevant = useStore((s) => (s.eventsByItem[id] ?? []).filter((e) => THREAD_EVENTS.test(e.type)).length);
   const live = useRef(id);
   live.current = id;
+  // The last answer as read, so a poll that brings nothing new re-renders nothing (review L6).
+  const last = useRef<string | null>(null);
   const fetchNow = useCallback(() => {
     request<ReviewThread[]>(`/work-items/${encodeURIComponent(id)}/threads`).then(({ status, body }) => {
       if (live.current !== id) return;
-      if (status === 200) setGot({ state: "ready", data: body });
-      else setGot((g) => (g.state === "ready" ? g : { state: "error", status, error: detailOf(body) }));
+      if (status === 200) {
+        const text = `${id}\n${JSON.stringify(body)}`;
+        if (text === last.current) return;
+        last.current = text;
+        setGot({ state: "ready", data: body });
+      } else setGot((g) => (g.state === "ready" ? g : { state: "error", status, error: detailOf(body) }));
     });
   }, [id]);
   useEffect(fetchNow, [fetchNow]);
+  // A draft added from elsewhere (`kraft item comment`, another tab) writes no
+  // event, so the threads are read again when the page comes back into view,
+  // and every so often while it is shown (R9b-15): the bar counts pending
+  // comments, and Approve lists them.
+  useEffect(() => {
+    const again = () => {
+      if (document.visibilityState !== "hidden") fetchNow();
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    const t = setInterval(again, THREADS_POLL_MS);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+      clearInterval(t);
+    };
+  }, [fetchNow]);
   const first = useRef(true);
   useEffect(() => {
     if (first.current) return void (first.current = false);

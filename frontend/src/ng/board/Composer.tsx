@@ -292,6 +292,8 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
           {hits.filter((h) => h.path).map((h) => (
             <button key={h.id} type="button" className="menu-item composer-mono" onClick={() => pick(h.path!)}>{h.path}</button>
           ))}
+          {/* Said before a path outside is refused, with the way on (R10a-02). */}
+          <p className="composer-attach-note">The file must be inside the repo: it is committed on the item's branch. Copy one from elsewhere into the repo first, for example to <code>.engineering/{kind}s/</code>.</p>
         </div>
       </Popover>
     </>

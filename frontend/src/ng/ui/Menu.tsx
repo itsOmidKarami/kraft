@@ -21,7 +21,8 @@ export interface MenuItem {
 }
 
 /** A button that opens a list of actions. Focus moves into the list; ↑/↓,
- *  Home and End move it (Popover's keys); Escape, or picking an item, closes the list and
+ *  Home and End move it (Popover's keys), starting on the checked item of a
+ *  pick list; Escape, or picking an item, closes the list and
  *  hands focus back to the button. With `triggerClass` the trigger is a text
  *  button named by its own text (the list keeps `label`); `note` is a line
  *  under the items, `heading` a small title above them. */
@@ -36,7 +37,9 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
   const live = items.flatMap((it, i) => (it.disabled ? [] : [i]));
 
   useEffect(() => {
-    if (open) refs.current[live[0]]?.focus();
+    // A pick list opens on its checked entry, as a select does (R10b-11), else on its first.
+    const checked = live.find((i) => items[i].checked);
+    if (open) refs.current[checked ?? live[0]]?.focus();
     // Only on opening: the list is new then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);

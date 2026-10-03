@@ -136,6 +136,11 @@ describe("FinishDialog", () => {
     expect([...screen.getByRole("list", { name: "To send" }).querySelectorAll(".rv-mono")].map((e) => e.textContent)).toEqual(["a.py · lines +3 to +5", "a.py · lines −2 to +2", "a.py"]);
   });
 
+  it("names a thread on no file the whole change, as the page heads it, not \"item\" (R10b-06)", () => {
+    routed(<Finish threads={[th({ id: "t4", file_path: null, side: null, start_line: null, end_line: null, comments: [c({ id: "c4" })] })]} />);
+    expect([...screen.getByRole("list", { name: "To send" }).querySelectorAll(".rv-mono")].map((e) => e.textContent)).toEqual(["the whole change"]);
+  });
+
   it("counts your draft replies as things to send", () => {
     routed(<Finish threads={[th({ draft: false, comments: [c({ draft: false, review_id: "r" }), c({ id: "c2", body: "and the TTL?" })] })]} />);
     expect(screen.getByRole("list", { name: "To send" })).toHaveTextContent("and the TTL?");

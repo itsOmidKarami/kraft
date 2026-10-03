@@ -781,6 +781,18 @@ def test_an_updated_bundle_is_not_served_by_the_server_it_does_not_match(
     assert client.get("/assets/app.js").status_code == 200
 
 
+def test_a_rolled_back_install_is_told_to_restore_not_restart(dist, client, monkeypatch):
+    """R10c-03: "restart to finish the update" sent a rollback into the schema refusal."""
+    from kraft import update
+
+    client.app.state.version = "1.5.0"
+    monkeypatch.setattr(update, "installed", lambda: "1.4.0")
+    r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
+    assert r.status_code == 503 and "An older Kraft is installed" in r.text
+    assert "restore the database" in r.text and "pin-or-roll-back-a-version" in r.text
+    assert "kraft admin restart" not in r.text and "the new one" not in r.text
+
+
 def test_the_shell_is_served_while_the_installed_version_is_the_running_one(dist, client):
     r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
     assert r.status_code == 200

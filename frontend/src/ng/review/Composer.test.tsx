@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Compare, CompareFile, ReviewThread } from "../../types";
 import * as http from "../http";
@@ -77,6 +77,32 @@ describe("Composer", () => {
     compose(NEW);
     expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Comment on lines \+5 to \+6$/);
     expect(screen.queryByText(/Drag the \+/)).toBeNull();
+  });
+
+  // R10b-11: the ARIA radio group is one tab stop, moved with the arrows; the pencil opens on the checked line.
+  it("makes the Label chips one tab stop, moved and picked with the arrows", async () => {
+    render(<Composer target={{ path: "calc.py", range: { side: "new", start: 2, end: 2 } }} lines={[]} drafts={new Map()} onSubmit={vi.fn()} onCancel={() => {}} />);
+    const group = screen.getByRole("radiogroup", { name: "Label" });
+    expect(within(group).getAllByRole("radio").map((r) => r.tabIndex)).toEqual([0, -1, -1, -1]);
+    within(group).getByRole("radio", { name: "No label" }).focus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+    expect(within(group).getByRole("radio", { name: "Must fix" })).toHaveFocus();
+    expect(within(group).getByRole("radio", { name: "Must fix" })).toHaveAttribute("aria-checked", "true");
+    expect(within(group).getAllByRole("radio").map((r) => r.tabIndex)).toEqual([-1, 0, -1, -1]);
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" });
+    expect(within(group).getByRole("radio", { name: "Nit" })).toHaveFocus();
+  });
+
+  it("opens the pencil's menu on the checked start line, not the first", async () => {
+    const starts = [
+      { at: { side: "new" as const, line: 1 }, text: "def add(a, b):" },
+      { at: { side: "old" as const, line: 2 }, text: "    return a - b" },
+      { at: { side: "new" as const, line: 2 }, text: "    return a + b" },
+    ];
+    render(<Composer target={{ path: "calc.py", range: { side: "new", start: 2, end: 2 } }} lines={[]} starts={starts} onStart={vi.fn()} drafts={new Map()} onSubmit={vi.fn()} onCancel={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Change the start line" }));
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /^\+2/ })).toHaveFocus());
   });
 
   it("changes the start line from the header's pencil, the current one checked", () => {
@@ -193,7 +219,9 @@ describe("useComments", () => {
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("half a thought");
   });
 
-  it("drops a suggested change when the pencil moves the start, so it never replaces lines it was not written for", () => {
+  // R10b-09: the pencil used to drop a typed suggestion with no word. It is kept and
+  // the composer says which lines it was written for; across sides it is set aside, unsent.
+  it("keeps a typed suggested change when the pencil moves the start, saying which lines it was written for", () => {
     const { result } = renderHook(() => useComments({ itemId: "w1", compare: cmp({ target: "latest", sha: null }), files: [file([])], patch, threads: [], reload: () => {} }));
     act(() => result.current.openPick({ path: "a.py", side: "new", anchor: 2, head: 2 }));
     const first = render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
@@ -205,7 +233,26 @@ describe("useComments", () => {
     first.unmount();
     render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("use this");
+    expect(screen.getByRole("textbox", { name: "Suggested change" })).toHaveValue("z = CHANGED");
+    expect(screen.getByRole("status")).toHaveTextContent("Your suggested change was written for line +2. Check that it should replace lines +1 to +2, or remove it.");
+  });
+
+  it("sets a typed suggestion aside, unsent, when the pencil makes the range cross sides", async () => {
+    const req = vi.spyOn(http, "request").mockResolvedValue({ status: 201, body: {} });
+    const { result } = renderHook(() => useComments({ itemId: "w1", compare: cmp({ target: "latest", sha: null }), files: [file([])], patch, threads: [], reload: () => {} }));
+    act(() => result.current.openPick({ path: "a.py", side: "new", anchor: 2, head: 2 }));
+    const first = render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
+    fireEvent.change(first.container.querySelector("textarea")!, { target: { value: "use this" } });
+    fireEvent.click(screen.getByRole("button", { name: "± Suggest change" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Suggested change" }), { target: { value: "z = CHANGED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change the start line" }));
+    act(() => fireEvent.click(screen.getByRole("menuitemradio", { name: /^−2/ })));
+    first.unmount();
+    render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
     expect(screen.queryByRole("textbox", { name: "Suggested change" })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("is set aside: a suggestion replaces new lines only");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
+    expect(JSON.parse(req.mock.calls.at(-1)![1]!.body as string)).not.toHaveProperty("suggestion");
   });
 
   it("quotes a range thread's lines as they were stored, else as the diff shows them; one line is not quoted", () => {

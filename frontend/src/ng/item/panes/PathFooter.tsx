@@ -4,12 +4,15 @@ import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { sendOnModEnter } from "../../keys";
+import { retryable, skippable } from "../status";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
 /** A node's, step's or task's footer (Decisions §5 Pause on a path, §6 Skip):
  *  Pause, Skip and Retry in that order, by state. Skip and Retry confirm in
- *  the pane; Retry takes a steer when the item has an agent to read it. */
+ *  the pane; Retry takes a steer when the item has an agent to read it.
+ *  Retry is offered only on an item the server would retry (`retryable`): a
+ *  paused one has Resume, and a running or waiting one nothing (R10b-01). */
 export function PathFooter({ item, path, what, state: shown, reload, extra }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode }) {
   // An item that has ended runs nothing again: its chain refuses a retry (409), so none is offered (R8b-06).
   const state = ENDED.has(item.display_status ?? "") ? null : shown;
@@ -28,7 +31,8 @@ export function PathFooter({ item, path, what, state: shown, reload, extra }: { 
     reload();
   };
   const retry = () => run(act.retry(item.id, { path, ...(steer.trim() ? { steer: steer.trim() } : {}) }));
-  if (!state && !extra) return null;
+  const offerRetry = (state === "paused" || state === "stopped") && retryable(item);
+  if (!extra && state !== "running" && state !== "paused" && !offerRetry) return null;
   if (confirm === "skip")
     return (
       <div className="ip-confirm" role="group" aria-label={`Skip ${path}?`}>
@@ -58,8 +62,8 @@ export function PathFooter({ item, path, what, state: shown, reload, extra }: { 
       {extra}
       {state === "running" && <Button disabled={busy} onClick={() => run(act.pause(item.id))}>Pause</Button>}
       {state === "paused" && <Button disabled={busy} onClick={() => run(act.resume(item.id))}>Resume</Button>}
-      {(state === "running" || state === "paused") && <Button onClick={() => setConfirm("skip")}>Skip {what}</Button>}
-      {(state === "paused" || state === "stopped") && <Button onClick={() => setConfirm("retry")}>Retry</Button>}
+      {(state === "running" || state === "paused") && skippable(item) && <Button onClick={() => setConfirm("skip")}>Skip {what}</Button>}
+      {offerRetry && <Button onClick={() => setConfirm("retry")}>Retry</Button>}
       {error && <span className="item-error" role="alert">{error}</span>}
     </div>
   );

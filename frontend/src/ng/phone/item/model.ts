@@ -115,7 +115,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null
 }
 
 export type ActId =
-  | "pause" | "steer" | "resume" | "start" | "reject" | "review" | "raise" | "retry" | "retry-now" | "escalate" | "answer"
+  | "pause" | "steer" | "resume" | "start" | "reject" | "review" | "raise" | "retry" | "escalate" | "answer"
   | "cancel" | "reopen-mr" | "conflicts" | "board" | "restore"
   | "settings" | "open-mr" | "duplicate" | "archive" | "complete";
 export interface Act {
@@ -140,7 +140,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "running":
     case "escalated": return { secondary: a("pause", "Pause"), primary: a("steer", "Steer") };
     case "paused": return item.current_node_id ? { secondary: a("steer", "Steer"), primary: a("resume", "Resume") } : { secondary: null, primary: a("start", "Start") };
-    case "waiting": return stop?.kind === "rate_limit" || stop?.kind === "wait" ? { secondary: a("pause", "Pause"), primary: a("retry-now", "Retry now") } : { secondary: a("pause", "Pause"), primary: null };
+    // Kraft retries a waiting item by itself; /retry would answer it 409 (R10b-01).
+    case "waiting": return { secondary: a("pause", "Pause"), primary: null };
     case "failed": return { secondary: a("escalate", "Escalate"), primary: a("retry", "Retry") };
     case "needs_you":
       switch (stop?.kind) {

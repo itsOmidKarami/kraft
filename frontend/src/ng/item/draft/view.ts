@@ -1,5 +1,6 @@
 import type { ChainNode } from "../../../types";
 import type { Seam } from "../../graph/layout";
+import { fieldMeta, show } from "../../templates/fields";
 import type { DraftView, MarkedOp, Op, OverrideOp } from "./types";
 
 /** Ended by the server's own word for it (`display_status`): the chain does not run again. */
@@ -19,8 +20,12 @@ export function lines(ops: Op[]): Line[] {
     if (op.op === "add_node") return [{ index, tone: "add", text: `+ ${op.node.id}   after ${op.after}${op.node.extends ? ` · from the library (${op.node.extends})` : ""}` }];
     if (op.op === "remove_node") return [{ index, tone: "remove", text: `- ${op.node}` }];
     if (op.op === "skip") return [{ index, tone: "skip", text: `» skip ${op.path}` }];
+    // Each field by the label its Config row shows ("total cap → 45m"), not its YAML key (R10a-04).
     const fields = [...Object.entries(op.task_config ?? {}).map(([k, v]) => [k, v] as const), ...Object.entries(op.policy ?? {}).map(([k, v]) => [`policy.${k}`, v] as const)];
-    return fields.map(([k, v]): Line => ({ index, tone: "change", text: `~ ${op.path}   ${k} → ${val(v)}` }));
+    return fields.map(([k, v]): Line => {
+      const m = fieldMeta(k);
+      return { index, tone: "change", text: `~ ${op.path}   ${m.label} → ${typeof v === "string" || Array.isArray(v) ? val(v) : show(v, m.kind)}` };
+    });
   });
 }
 export const count = (ops: Op[]) => lines(ops).length;

@@ -216,7 +216,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const current = item.current_node_id === node.id;
   // Stepping onto the newest attempt drops the pin, so the pane follows the next one that starts;
   // an older attempt stays put while newer ones arrive, and the switcher's count shows them.
-  const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} />;
+  const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} />;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} />,

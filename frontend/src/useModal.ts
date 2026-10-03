@@ -10,8 +10,16 @@ const FOCUSABLE =
  * of the modal into the page behind it, which for a keyboard or screen-reader
  * user means the dialog is not really modal at all.
  */
-export function useModal<T extends HTMLElement>(onClose: () => void) {
+export function useModal<T extends HTMLElement>(onClose: () => void, returnTo?: () => HTMLElement | null | undefined) {
   const ref = useRef<T>(null);
+  // Read through refs, so a caller's inline `onClose` (a new closure each render)
+  // does not re-run the effect: its cleanup and setup moved focus, and a page
+  // that re-renders every second (a running item's clock) snapped focus back
+  // to the dialog's first control each time (review M2).
+  const close = useRef(onClose);
+  close.current = onClose;
+  const back = useRef(returnTo);
+  back.current = returnTo;
 
   useEffect(() => {
     const node = ref.current;
@@ -25,7 +33,7 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        close.current();
         return;
       }
       if (e.key !== "Tab" || !node) return;
@@ -49,9 +57,13 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      previouslyFocused?.focus?.();
+      // What opened it is gone, or nothing had focus (a dialog opened from an
+      // address, such as Start's `?start=1`): the dialog's own fallback (R10b-04).
+      const to = previouslyFocused && previouslyFocused !== document.body && previouslyFocused.isConnected ? previouslyFocused : back.current?.() ?? previouslyFocused;
+      to?.focus?.();
     };
-  }, [onClose]);
+    // Once per opening: the handlers are read through refs.
+  }, []);
 
   return ref;
 }

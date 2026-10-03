@@ -4,7 +4,7 @@ import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
 import type { Scope } from "../draft/types";
 import type { ConfigDraft } from "../draft/useConfigDraft";
-import { authoredAt, authoredNodes, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
+import { authoredAt, authoredNodes, liveChainId, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
 import { problemText } from "../problems";
 import { Config } from "./Config";
 import { ItemYaml } from "./ItemYaml";
@@ -73,8 +73,9 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   const [asking, setAsking] = useState(false);
   const [tab, setTab] = useState("overview");
   const r = draft.view!.result;
-  const chain = scope.key;
   const d = describe(r, scope, path);
+  // A chain renamed in the draft is titled and crumbed by its new id (R10b-02).
+  const chain = scope.area === "chains" ? liveChainId(r.model, scope.key) : scope.key;
   const ctx: PaneCtx = { r, scope, path, draft, goTo };
   const own = authoredAt(r, scope, path);
   const res = resolvedAt(r, path) ?? own;

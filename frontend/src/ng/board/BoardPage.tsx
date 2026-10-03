@@ -7,6 +7,7 @@ import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
 import { openPane } from "../item/Workspace";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
+import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
 import { Menu } from "../ui/Menu";
 import { chainOf, groupsOf, type GroupBy, type SortBy } from "./model";
@@ -85,6 +86,8 @@ export function BoardPage() {
   const itemsById = useStore((s) => s.workItems);
   const items = useMemo(() => Object.values(itemsById).filter((i) => i.display_status !== "archived"), [itemsById]);
   const { load, refresh, offline } = useListLoad();
+  // R10c-01: an older server still running after an update gets a banner, not only the footer line.
+  const health = useHealth();
   // A bulk answer with failures: those items stay checked (D.6).
   const last = useBulk((s) => s.last);
   useEffect(() => {
@@ -229,6 +232,12 @@ export function BoardPage() {
             Could not load the board{load.state === "error" ? `: ${load.error.replace(/\.$/, "")}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
           </span>
           <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
+        </div>
+      )}
+      {olderServer(health) && (
+        <div className="board-offline board-restart" role="alert">
+          <span className="board-offline-mark" aria-hidden>!</span>
+          <span className="board-offline-text">{OLDER_SERVER} Run <code>kraft admin restart</code>.</span>
         </div>
       )}
       <div className="board-filters">

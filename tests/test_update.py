@@ -167,6 +167,15 @@ def test_is_behind_of_nothing_is_false():
     assert update.is_behind(None) is False
 
 
+@pytest.mark.parametrize(
+    ("version", "than", "older"),
+    [("1.4.0", "1.5.0", True), ("1.5.0rc14", "1.5.0", True), ("1.5.0", "1.5.0rc14", False)]
+    + [("1.5.0", "1.5.0", False), ("0.0.0+source", "1.5.0", False), ("1.4.0", "x", False)],
+)
+def test_is_older_orders_two_releases(version, than, older):
+    assert update.is_older(version, than) is older
+
+
 @pytest.fixture
 def uv_tool(tmp_path, monkeypatch):
     """`uv_tool(receipt)`: this process as a uv tool install whose

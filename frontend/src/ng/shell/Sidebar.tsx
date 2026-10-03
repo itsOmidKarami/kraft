@@ -3,34 +3,18 @@ import { NavLink, useLocation } from "react-router-dom";
 import { Pin } from "lucide-react";
 import { Kbd } from "../ui/Kbd";
 import { useStore } from "../../store";
-import * as api from "../../api";
-import type { Health } from "../../types";
 import { NAV_ICON } from "../icons";
 import { isTextField, mod } from "../keys";
 import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
 import { useGroupCount } from "../board/counts";
+import { installedOlder, olderServer, restartPending, useHealth } from "./health";
 
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
 
-/** `kraft admin update` replaced the package, but this server still runs the old one. */
-export function restartPending(health: Health | null | undefined): boolean {
-  return !!health?.installed && !!health.version && health.installed !== health.version;
-}
-
-/** Polled like the shipped sidebar's own `useHealth`. */
-function useHealth(): Health | null {
-  const [health, setHealth] = useState<Health | null>(null);
-  useEffect(() => {
-    const load = () => api.getHealth().then(setHealth).catch(() => {});
-    load();
-    const t = setInterval(load, 60_000);
-    return () => clearInterval(t);
-  }, []);
-  return health;
-}
+export { restartPending };
 
 export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   const [mode, setMode] = useState<SidebarMode>(currentSidebar);
@@ -158,7 +142,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           </NavLink>
           {restartPending(health) && (
             <NavLink to="/settings/about" end className="ng-side-meta ng-side-label is-warn" onClick={went}>
-              v{health?.installed} installed: restart to finish the update
+              {olderServer(health) ? "a newer Kraft is installed: restart to finish the update" : installedOlder(health) ? `v${health?.installed} installed, older than this server: see About` : `v${health?.installed} installed: restart to finish the update`}
             </NavLink>
           )}
           <button

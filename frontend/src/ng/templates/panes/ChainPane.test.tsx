@@ -240,6 +240,15 @@ describe("closed-set fields", () => {
     expect(screen.queryByText(/is not an action/)).toBeNull();
   });
 
+  it("links the refusal to its field, so a screen reader hears the reason with \"invalid\" (R10b-08)", async () => {
+    builtin();
+    await userEvent.clear(action());
+    await userEvent.type(action(), "kraft.bogus_thing");
+    await userEvent.tab();
+    expect(action()).toHaveAttribute("aria-invalid", "true");
+    expect(action()).toHaveAccessibleDescription("“kraft.bogus_thing” is not an action. Pick one from the list.");
+  });
+
   it("never sends a required action empty: clearing it on the way to another value saves nothing", async () => {
     const { draft } = builtin();
     await userEvent.clear(action());

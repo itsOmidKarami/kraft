@@ -230,9 +230,40 @@ def _chains(st, key: str, raw: dict, files: dict, published: dict) -> dict:
         "resolved": resolved,
         "problems": problems,
         "sources": sources,
-        "changes": [*_chain_changes(before, after), *changes(_flat(before), _flat(after))],
+        "changes": [
+            *_renamed(key, id, files, published),
+            *_chain_changes(before, after),
+            *changes(_flat(before), _flat(after)),
+        ],
         "impact": impact,
     }
+
+
+def _renamed(
+    key: str, id: str, files: Mapping[str, str | None], published: Mapping[str, str | None]
+) -> list[dict]:
+    """One `rename` row, at the chain's own path, when the draft moved the
+    chain to a new id: the ids are not among the keys `_chain_changes` and
+    `_flat` compare, so a rename alone used to read "No changes" while its
+    publish deleted `chains/<key>.yaml` (R10b-02). A chain never published
+    has no file to move: its publish creates the new one."""
+    if id == key or files.get(f"chains/{key}.yaml") is not None:
+        return []
+    moves = (
+        f"publish moves chains/{key}.yaml to chains/{id}.yaml"
+        if published.get(f"chains/{key}.yaml") is not None
+        else f"publish creates chains/{id}.yaml"
+    )
+    return [
+        {
+            "path": "",
+            "kind": "rename",
+            "summary": f"chain id {key} → {id} · {moves}, and new items name it {id}",
+            "fields": ["id"],
+            "from": key,
+            "to": id,
+        }
+    ]
 
 
 def _chain_changes(before: Mapping, after: Mapping) -> list[dict]:

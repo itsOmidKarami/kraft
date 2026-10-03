@@ -137,11 +137,13 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
         <Button onClick={() => send(cap + 10)}>+$10</Button>
         {!limit && <Button onClick={() => send(null)}>No cap</Button>}
       </div>
-      <div className="item-actions">
-        <label className="item-check">$ <input aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} /></label>
-        <Button variant="primary" disabled={!(Number(value) > 0)} onClick={() => send(Number(value))}>Save</Button>
+      {/* A form, focused on open: Enter saves the typed cap and Escape cancels, so the editor
+          Raise cap and ✎ open needs no pointer (R10a-05). */}
+      <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (Number(value) > 0) void send(Number(value)); }}>
+        <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
+        <Button type="submit" variant="primary" disabled={!(Number(value) > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
-      </div>
+      </form>
       {error && <p className="item-error" role="alert">{error}</p>}
     </div>
   );

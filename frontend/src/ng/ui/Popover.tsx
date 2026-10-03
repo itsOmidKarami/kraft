@@ -78,7 +78,11 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
   function closeBack() {
     onClose();
     // Still inside: nobody took focus back, and it would fall to the page as this unmounts.
-    if (ref.current?.contains(document.activeElement)) (opener.current?.isConnected ? opener.current : anchor.current)?.focus();
+    // An opener that is gone (a menu item that closed with its menu) hands focus to the
+    // anchor, or the anchor's first control when the anchor is a group (R10b-04).
+    if (!ref.current?.contains(document.activeElement)) return;
+    const a = anchor.current;
+    (opener.current?.isConnected ? opener.current : a && !a.matches(FOCUSABLE) ? firstFocusable(a) ?? a : a)?.focus();
   }
 
   // ↑/↓, Home and End over the menu items; a list that handles its own keys prevents the default first.

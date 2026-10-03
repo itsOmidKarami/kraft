@@ -62,6 +62,7 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
   const act1 = (a: NodeAct) => {
     switch (a.id) {
       case "pause": return sheet.open("pause");
+      case "resume": return void run(act.resume(item.id), "Resumed.");
       case "skip": return sheet.open("skip");
       case "retry-from": return sheet.open("rewind");
       case "retry-node": return void run(act.retry(item.id, { path: nodeId }), `Retrying ${nodeId} from its first step.`);

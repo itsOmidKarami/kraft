@@ -133,7 +133,8 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
           {toSend.map(({ thread: t, comment: c }) => (
             <li key={c.id}>
               {t.label && <span className={`rv-tag is-${t.label}`}>{{ must_fix: "MUST FIX", question: "QUESTION", nit: "NIT" }[t.label]}</span>}
-              <span className="rv-mono rv-muted">{t.file_path ?? "item"}{where(t)}</span>
+              {/* A thread on no file is "on the whole change", as the page heads it (R10b-06). */}
+              <span className="rv-mono rv-muted">{t.file_path ?? "the whole change"}{where(t)}</span>
               <span className="rv-finish-text">{c.body}</span>
             </li>
           ))}

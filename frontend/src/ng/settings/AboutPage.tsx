@@ -7,6 +7,7 @@ import { detailOf, jsonBody, request } from "../http";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
 import "./settings.css";
+import { installedOlder, olderServer, restartPending } from "../shell/health";
 
 export interface UpdateState {
   installed: string;
@@ -95,9 +96,16 @@ export function AboutPage() {
             <span className={`set-verdict is-${verdict.tone}`} role="status">{verdict.text}</span>
           </div>
           {error && <span className="set-error" role="alert">{error}</span>}
-          {health?.installed && health.version && health.installed !== health.version && (
+          {installedOlder(health) ? (
             <p className="set-hint is-warn" role="status">
-              This server is still running {health.version}, and {health.installed} is installed. Restart it to finish the update: <code>kraft admin restart</code>
+              An older Kraft, {health!.installed}, is installed under this {health!.version} server. If you are rolling back, stop the server and restore the database from before the upgrade before you start it: a database {health!.version} migrated will not start an older release. See <a className="set-link" href="https://itsomidkarami.github.io/kraft/get-started/install#pin-or-roll-back-a-version" target="_blank" rel="noopener noreferrer">Pin or roll back a version</a>.
+            </p>
+          ) : restartPending(health) && (
+            <p className="set-hint is-warn" role="status">
+              {olderServer(health)
+                ? "This server runs a release older than the Kraft installed, too old to say which. "
+                : `This server is still running ${health!.version}, and ${health!.installed} is installed. `}
+              Restart it to finish the update: <code>kraft admin restart</code>
             </p>
           )}
           <p className="set-hint">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>

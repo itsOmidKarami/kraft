@@ -5,7 +5,7 @@ import { Composer, targetKey, type Draft, type StartOption, type Target } from "
 import { rangeOfPick, type Pick } from "./DiffView";
 import { unresolved } from "./model";
 import type { PatchFile } from "./patch";
-import { isMixed, isOneLine, lineIndex, placeOf as placeInIndex, quoteOf, rangeBetween, type LineRange } from "./range";
+import { isMixed, isOneLine, lineIndex, placeOf as placeInIndex, quoteOf, rangeBetween, rangeName, type LineRange } from "./range";
 import type { Anchor } from "./rows";
 import { Thread, threadRange } from "./Thread";
 
@@ -73,7 +73,8 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     const r = target.range;
     // A suggestion left as the lines it was filled from changes nothing: it is not sent.
     const changes = r && d.suggest !== null && d.suggest !== newLines(patch.get(target.path), r.start, r.end).join("\n");
-    const suggestion = changes && !isMixed(r) ? { start_line: r.start, end_line: r.end, replacement: d.suggest! } : null;
+    // Only on new lines: one set aside on a range across sides, or on old lines, is not sent.
+    const suggestion = changes && r.side === "new" && !isMixed(r) ? { start_line: r.start, end_line: r.end, replacement: d.suggest! } : null;
     const quote = r ? quoteOf(r, indexOf(target.path)) : [];
     let res;
     if (editing) res = await request(`/threads/${editing.id}`, jsonBody("PATCH", { body: d.body.trim(), label: d.label, suggestion }));
@@ -120,11 +121,12 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   const retarget = (o: NonNullable<typeof open>, start: Anchor) => {
     const r = o.target.range!;
     const target = { path: o.target.path, range: rangeBetween(start, { side: r.side, line: r.end }, indexOf(o.target.path)) };
-    // The text so far goes with it; a suggested change does not: it was
-    // written for the old lines, and would replace the new range's.
+    // The text so far goes with it, a typed suggested change too: it was written
+    // for the old lines, so the composer says so (and sets it aside on a range
+    // across sides) instead of dropping it unsaid (R10b-09).
     const d = drafts.get(targetKey(o.target));
     drafts.delete(targetKey(o.target));
-    if (d) drafts.set(targetKey(target), { ...d, suggest: null });
+    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: d.wrote ?? rangeName(r) });
     setOpen({ ...o, target });
     onRetarget?.(target);
   };

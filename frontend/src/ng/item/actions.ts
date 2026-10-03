@@ -53,7 +53,15 @@ export const askStartUrl = (id: string) => `${at(id)}?start=1`;
  *  has not passed, it asks. A draft it cannot read asks too, rather than start
  *  past one it could not see. */
 export async function draftWaits(id: string): Promise<boolean> {
+  return (await draftToStart(id)).waits;
+}
+
+/** `draftWaits`, with the ops it would ask about (the ones the run has not
+ *  passed), for a surface that lists them before it asks (the phone's sheet, R10b-12). */
+export async function draftToStart(id: string): Promise<{ waits: boolean; ops: { passed?: boolean }[] }> {
   const d = await request<{ ops?: { passed?: boolean }[] }>(`${at(id)}/draft`);
-  if (d.status === 404) return false;
-  return !(d.status === 200 && Array.isArray(d.body?.ops) && d.body.ops.every((o) => o.passed));
+  if (d.status === 404) return { waits: false, ops: [] };
+  const read = d.status === 200 && Array.isArray(d.body?.ops);
+  const ops = read ? d.body.ops!.filter((o) => !o.passed) : [];
+  return { waits: !read || ops.length > 0, ops };
 }

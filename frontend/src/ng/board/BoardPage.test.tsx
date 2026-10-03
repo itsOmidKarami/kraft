@@ -55,6 +55,26 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe("BoardPage, against a server older than its interface (R10c-01)", () => {
+  it("says over the board to restart when /health has a version but no installed", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "1.5.0rc14" } as never);
+    put(item("w1", "running"));
+    board();
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("This server is older than its web interface");
+    expect(banner).toHaveTextContent("Run kraft admin restart.");
+  });
+
+  it("says nothing when the server reports what is installed", async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "1.5.0", installed: "1.5.0" } as never);
+    put(item("w1", "running"));
+    board();
+    await screen.findByText("Item w1");
+    await waitFor(() => expect(api.getHealth).toHaveBeenCalled());
+    expect(screen.queryByText(/older than its web interface/)).toBeNull();
+  });
+});
+
 describe("BoardPage", () => {
   it("shows first-run only when no repo is connected", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });

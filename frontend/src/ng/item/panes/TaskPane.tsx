@@ -5,8 +5,10 @@ import { FileText } from "../../icons";
 import { lookWord, sessionLook } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
-/** ‹ attempt n of m › above every tab: which session the tabs show (Decisions §6 Attempts). */
-export function AttemptSwitcher({ sessions, at, onAt, now }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number }) {
+/** ‹ attempt n of m › above every tab: which session the tabs show (Decisions §6 Attempts).
+ *  On the escalation each session is a turn of its thread, so it reads ‹ turn n of m ›
+ *  as the Thread tab counts them, not "attempt 5 of 5" beside "5 turns" (R10b-06). */
+export function AttemptSwitcher({ sessions, at, onAt, now, turns }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number; turns?: boolean }) {
   const i = sessions.indexOf(at);
   const look = sessionLook(at, now);
   const earlier = useRef<HTMLButtonElement>(null);
@@ -24,13 +26,21 @@ export function AttemptSwitcher({ sessions, at, onAt, now }: { sessions: WorkerS
   return (
     <div className="ip-attempts">
       <span className="ip-attempt-box">
-        <button ref={earlier} type="button" className="ip-attempt-btn" aria-label="Earlier attempt" disabled={i <= 0} onClick={() => step(i - 1)}>‹</button>
-        <span>attempt {at.attempt} of {sessions.at(-1)!.attempt}{at.round ? ` · round ${at.round + 1}` : ""}</span>
-        <button ref={later} type="button" className="ip-attempt-btn" aria-label="Later attempt" disabled={i >= sessions.length - 1} onClick={() => step(i + 1)}>›</button>
+        <button ref={earlier} type="button" className="ip-attempt-btn" aria-label={turns ? "Earlier turn" : "Earlier attempt"} disabled={i <= 0} onClick={() => step(i - 1)}>‹</button>
+        <span>{turns ? turnWords(sessions, at) : `attempt ${at.attempt} of ${sessions.at(-1)!.attempt}${at.round ? ` · round ${at.round + 1}` : ""}`}</span>
+        <button ref={later} type="button" className="ip-attempt-btn" aria-label={turns ? "Later turn" : "Later attempt"} disabled={i >= sessions.length - 1} onClick={() => step(i + 1)}>›</button>
       </span>
       <span className={`ip-attempt-state${look.running ? " is-live" : look.state === "failed" ? " is-bad" : ""}`}>{lookWord(look)}</span>
     </div>
   );
+}
+
+/** "turn 2 of 3": the escalation's session among its own thread's, as the Thread tab counts
+ *  them ("thread 2 · 1 turn"), with "· thread 2" once there is more than one. */
+function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
+  const mine = sessions.filter((s) => s.thread === at.thread);
+  const many = mine.length < sessions.length;
+  return `turn ${mine.indexOf(at) + 1} of ${mine.length}${many ? ` · thread ${at.thread}` : ""}`;
 }
 
 const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);

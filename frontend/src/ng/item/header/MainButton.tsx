@@ -66,7 +66,9 @@ export function MainButton({ main, panel, archivable, busy, onMain, onItem, grou
 
   return (
     <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
-      <button type="button" className={`item-main-action is-${main}`} onClick={onMain} disabled={busy}>
+      {/* aria-disabled, not disabled, while busy: a browser takes focus off a button it
+          disables, and the focus of Start, Apply and start or Resume fell to the page (R10b-04). */}
+      <button type="button" className={`item-main-action is-${main}`} onClick={() => !busy && onMain()} aria-disabled={busy || undefined}>
         <Icon size={13} aria-hidden /> {MAIN_LABEL[main]}
       </button>
       {panel.length > 0 && (

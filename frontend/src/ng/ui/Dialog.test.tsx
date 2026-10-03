@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { Dialog } from "./Dialog";
 
 describe("ng Dialog", () => {
+  it("keeps focus where it is when its page re-renders it with a new onClose (review M2)", () => {
+    const onClose = vi.fn();
+    const view = (n: number) => <Dialog title="Log" onClose={() => onClose(n)}><button>sys</button><button>tool</button></Dialog>;
+    const { rerender } = render(view(1));
+    expect(screen.getByRole("button", { name: "sys" })).toHaveFocus();
+    screen.getByRole("button", { name: "tool" }).focus();
+    // A running item's clock re-renders the page every second, each time with a fresh closure.
+    rerender(view(2));
+    rerender(view(3));
+    expect(screen.getByRole("button", { name: "tool" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledWith(3);
+  });
+
   it("takes focus itself when it holds nothing focusable, so Escape reaches it and not the pane behind", () => {
     const behind = vi.fn((e: React.KeyboardEvent) => e.stopPropagation());
     const onClose = vi.fn();

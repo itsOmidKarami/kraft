@@ -282,6 +282,38 @@ def test_a_renamed_chain_keeps_its_draft_and_publishes_under_the_new_id(client, 
     assert (templates_dir / "chains" / "quick.yaml").read_text() == text
 
 
+def test_a_chain_rename_is_a_change_in_the_draft_and_in_what_publish_answers(client):
+    """R10b-02: a rename alone read "0 changes" and "No changes" in review,
+    and publish answered `changes: []`, while it moved the chain's file."""
+    rename = {"op": "rename", "path": "", "id": "verify_tests"}
+    r = post_ops(client, rename, key="quick-task")
+    row = {
+        "path": "",
+        "kind": "rename",
+        "summary": "chain id quick-task → verify_tests · publish moves chains/quick-task.yaml "
+        "to chains/verify_tests.yaml, and new items name it verify_tests",
+        "fields": ["id"],
+        "from": "quick-task",
+        "to": "verify_tests",
+    }
+    assert r.json()["result"]["changes"] == [row]
+    listed = {(d["key"], d["changes"]) for d in client.get("/api/drafts").json()}
+    assert ("quick-task", 1) in listed
+
+    published = client.post("/api/drafts/chains/quick-task/publish").json()
+    assert published["changes"] == [row]
+
+
+def test_renaming_a_chain_never_published_says_publish_creates_it(client):
+    """Review L4: with no published file there is nothing to move."""
+    assert post_ops(client, {"op": "new_chain"}, ADD_GATE, key="copy1").status_code == 200
+    r = post_ops(client, {"op": "rename", "path": "", "id": "copy2"}, key="copy1")
+    [row] = [c for c in r.json()["result"]["changes"] if c["kind"] == "rename"]
+    assert row["summary"] == (
+        "chain id copy1 → copy2 · publish creates chains/copy2.yaml, and new items name it copy2"
+    )
+
+
 def test_a_fragment_yaml_error_answers_its_line_and_column(client):
     r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": "id: spec\nkind: [\n"})
     assert (r.status_code, r.json()["line"], r.json()["col"]) == (422, 3, 1)

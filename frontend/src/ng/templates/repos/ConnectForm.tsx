@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import { Kv } from "../panes/controls";
 import type { MissingTool, ProbeCandidate, ProbeStop } from "../../../types/settings";
-import { missingLine, others, readFrom, setupLine, stopLine, testsLine } from "./evidence";
+import { missingLine, NO_COMMIT_WHY, others, readFrom, setupLine, stopLine, testsLine } from "./evidence";
 
 /** `POST /repos/probe`'s answer, the fields Connect reads. */
 export interface Probe {
@@ -73,8 +73,14 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Check again goes as it re-probes: focus then lands on what comes next, not the page (review L1).
+  const field = useRef<HTMLInputElement>(null);
+  const again = useRef<HTMLButtonElement>(null);
+  const submit = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
   const check = async () => {
     if (!path.trim() || busy) return;
+    refocus.current = probe?.read_from === null;
     setBusy(true);
     setError(null);
     setProbe(null);
@@ -97,18 +103,31 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
     else setError(detailOf(a.body));
   };
 
+  // A repo with no commit cannot connect yet: Connect stays off with the reason beside it,
+  // and Check again (or Enter) reads it again once it has one, without editing the path (R10a-01).
+  const noCommit = probe?.read_from === null;
+  useEffect(() => {
+    if (!refocus.current || busy) return;
+    refocus.current = false;
+    const to = noCommit ? again.current : submit.current && !submit.current.disabled ? submit.current : field.current;
+    to?.focus();
+  }, [probe, busy, noCommit]);
   const stopped = !!probe?.stopped?.length;
   const saved = probe ? [probe.test_command, probe.setup_command, ...(probe.test_scopes ?? []).map((s) => s.command)] : [];
   const alsoTest = probe ? others(probe.candidates, "test", saved) : null;
   const alsoSetup = probe ? others(probe.candidates, "setup", saved) : null;
 
   return (
-    <form className="rp-connect" onSubmit={(e) => { e.preventDefault(); void (probe ? connect() : check()); }}>
+    <form className="rp-connect" onSubmit={(e) => { e.preventDefault(); void (probe && !noCommit ? connect() : check()); }}>
       <label className="rp-connect-label" htmlFor="rp-connect-path">Path to a git repository</label>
       <div className="rp-connect-line">
-        <input id="rp-connect-path" className="rp-search" autoFocus spellCheck={false} placeholder="~/src/product" value={path} onChange={(e) => { setPath(e.target.value); setProbe(null); setError(null); }} />
-        <Button type="submit" disabled={busy || !path.trim() || probe?.read_from === null || (!!gains && !Object.keys(gains).length)}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
+        <input ref={field} id="rp-connect-path" className="rp-search" autoFocus spellCheck={false} placeholder="~/src/product" value={path} onChange={(e) => { setPath(e.target.value); setProbe(null); setError(null); }} />
+        {/* While the repo has no commit, Check again is the form's submit, so Enter in the
+            field re-probes: a disabled default button blocks implicit submission (review L2). */}
+        {noCommit && <Button ref={again} type="submit" disabled={busy}>Check again</Button>}
+        <Button ref={submit} type={noCommit ? "button" : "submit"} disabled={busy || !path.trim() || noCommit || (!!gains && !Object.keys(gains).length)} aria-describedby={noCommit ? "rp-connect-why" : undefined}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
       </div>
+      {noCommit && <p id="rp-connect-why" className="rp-err" role="status">{NO_COMMIT_WHY}</p>}
       {error && <p className="rp-err" role="alert">{error}</p>}
       {probe && (
         <div className="rp-probe" aria-label="What was found">
@@ -129,7 +148,7 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
           {alsoTest && <p className="rp-connect-note">Also found for tests: {alsoTest}</p>}
           {alsoSetup && <p className="rp-connect-note">Also found for setup: {alsoSetup}</p>}
           {gains && <p className="rp-connect-note">{Object.keys(gains).length ? `Already connected: Update saves ${gainedLine(gains)}.` : "Already connected, and nothing it leaves undecided was found."}</p>}
-          {!gains && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connects enabled." : `${stopped ? "No test command proposed" : "No tests found"}: connects disabled until you set a test command in Templates › Repos.`}</p>}
+          {!gains && !noCommit && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connects enabled." : `${stopped ? "No test command proposed" : "No tests found"}: connects disabled until you set a test command in Templates › Repos.`}</p>}
         </div>
       )}
     </form>

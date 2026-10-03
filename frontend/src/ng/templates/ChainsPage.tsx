@@ -20,7 +20,7 @@ import { draftsChanged, postOps } from "./draft/draftApi";
 import * as api from "../../api";
 import { Button } from "../ui/Button";
 import { useConfigDraft, type ConfigDraft } from "./draft/useConfigDraft";
-import { authoredNodes, chainFile, counts, kindOf } from "./draft/view";
+import { authoredNodes, chainFile, counts, kindOf, liveChainId } from "./draft/view";
 import { CHAIN_SEL, pathOf, selOf, type TSel } from "./sel";
 import "./templates.css";
 
@@ -270,6 +270,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
   };
 
   const n = counts(r);
+  // The id a rename in the draft moved the chain to (R10b-02).
+  const liveId = liveChainId(r.model, chain);
   const paneOpen = review ? reviewOpen : s.open;
   const reserve = size.overlay ? 0 : paneOpen ? size.width : 40;
   const sel = s.sel as TSel;
@@ -285,7 +287,7 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
     <div className="tpl-page" ref={frame}>
       <HeaderTail>
         <span className="tpl-crumb-sep" aria-hidden>›</span>
-        <Switcher chain={chain} onGo={requestGo} startDup={dupTick} />
+        <Switcher chain={chain} renamedTo={liveId !== chain ? liveId : undefined} onGo={requestGo} startDup={dupTick} />
         {s.level === "node" && s.node && (
           <>
             <span className="tpl-crumb-sep" aria-hidden>›</span>

@@ -28,6 +28,8 @@ export interface Draft {
   label: ThreadLabel | null;
   /** null: no suggested change. */
   suggest: string | null;
+  /** The range a kept suggestion was written for, once the pencil moved the start (R10b-09). */
+  wrote?: string;
 }
 export const EMPTY: Draft = { body: "", label: null, suggest: null };
 
@@ -55,6 +57,7 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
+  const chips = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => box.current?.focus(), []);
   const set = (patch: Partial<Draft>) => {
     const next = { ...d, ...patch };
@@ -121,9 +124,18 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
           />
         )}
         <span className="rv-muted" aria-hidden="true">·</span>
-        <span role="radiogroup" aria-label="Label" className="rv-chips">
-          {LABELS.map(([k, text]) => (
-            <button key={text} type="button" role="radio" aria-checked={d.label === k} className={`rv-chip${d.label === k ? " is-on" : ""}`} onClick={() => set({ label: k })}>
+        {/* One tab stop, the checked chip; the arrows move the choice, as the ARIA radio group does (R10b-11). */}
+        <span role="radiogroup" aria-label="Label" className="rv-chips" onKeyDown={(e) => {
+          const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+          if (!step) return;
+          e.preventDefault();
+          const at = LABELS.findIndex(([k]) => k === d.label);
+          const to = (at + step + LABELS.length) % LABELS.length;
+          set({ label: LABELS[to][0] });
+          chips.current[to]?.focus();
+        }}>
+          {LABELS.map(([k, text], i) => (
+            <button key={text} ref={(el) => void (chips.current[i] = el)} type="button" role="radio" aria-checked={d.label === k} tabIndex={d.label === k ? 0 : -1} className={`rv-chip${d.label === k ? " is-on" : ""}`} onClick={() => set({ label: k })}>
               {text}
             </button>
           ))}
@@ -135,6 +147,14 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
         <div className="rv-preview"><Markdown text={d.body || "Nothing to preview"} code={codeBlock} /></div>
       ) : (
         <textarea ref={box} className="rv-textarea" aria-label="Comment" placeholder={r ? `Leave a comment on ${where.toLowerCase()}` : "Comment on this file"} value={d.body} onChange={(e) => set({ body: e.target.value })} />
+      )}
+      {d.suggest !== null && d.wrote && (
+        // The pencil moved the start: the typed suggestion is kept, never dropped unsaid (R10b-09).
+        <p className="rv-moved" role="status">
+          {suggests
+            ? `Your suggested change was written for ${d.wrote.toLowerCase()}. Check that it should replace ${where.toLowerCase()}, or remove it.`
+            : `Your suggested change, written for ${d.wrote.toLowerCase()}, is set aside: a suggestion replaces new lines only. Move the start back to the new side to bring it back.`}
+        </p>
       )}
       {d.suggest !== null && suggests && (
         <div className="rv-suggest">
@@ -160,7 +180,7 @@ export function Composer({ target, lines, starts, onStart, drafts, editing, onSu
           <span className="rv-spacer" />
           {suggests && gap && <span className="rv-muted">No suggestion across lines the diff doesn't show</span>}
           {suggests && (
-            <Button aria-pressed={d.suggest !== null} disabled={gap && d.suggest === null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null })}>± Suggest change</Button>
+            <Button aria-pressed={d.suggest !== null} disabled={gap && d.suggest === null} onClick={() => set({ suggest: d.suggest === null ? lines.join("\n") : null, wrote: undefined })}>± Suggest change</Button>
           )}
           <Button onClick={() => (dirty ? setAsking(true) : cancel())}>Cancel</Button>
           <Button variant="primary" disabled={!ready} title={d.body.trim() ? undefined : "A comment needs some text"} onClick={submit}>

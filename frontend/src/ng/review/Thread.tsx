@@ -5,8 +5,7 @@ import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import { languageOf, tokenizeSide } from "./tokenize";
 import { sendOnModEnter } from "../keys";
-import { isOneLine, startSideOf, type LineRange } from "./range";
-import type { Side } from "./rows";
+import { lineRef, rangeName, threadRange } from "./range";
 
 /** Fenced code in a comment, coloured by the review's own tokenizer. */
 export function codeBlock(text: string, lang: string | undefined): ReactNode {
@@ -24,18 +23,8 @@ const TAG: Record<ThreadLabel, string> = { must_fix: "MUST FIX", question: "QUES
 const CLAIM: Record<NonNullable<ReviewComment["claim"]>, string> = { fixed: "✓ claimed fixed", answered: "✓ answered", should_fix: "should fix" };
 const STATUS = (t: ReviewThread) => (t.draft ? "pending" : t.state);
 
-/** A line as the diff marks it: `−4` on the old side, `+5` on the new. */
-export const lineRef = (side: Side, line: number) => `${side === "old" ? "−" : "+"}${line}`;
-
-/** "Line +5", "Lines +5 to +7", "Lines −2 to +2": where a line comment sits, as its composer and its thread name it. */
-export const rangeName = (r: LineRange) =>
-  isOneLine(r) ? `Line ${lineRef(r.side, r.start)}` : `Lines ${lineRef(startSideOf(r), r.start)} to ${lineRef(r.side, r.end)}`;
-
-/** A thread's range, or null on a file or the whole item. */
-export const threadRange = (t: ReviewThread): LineRange | null =>
-  t.start_line === null || !t.side
-    ? null
-    : { side: t.side, start: t.start_line, end: t.end_line ?? t.start_line, ...(t.start_side && t.start_side !== t.side && { startSide: t.start_side }) };
+// Pure, in `range` so the phone's review names a range the same way (R10b-03).
+export { lineRef, rangeName, threadRange };
 
 /** The lines a range covers, as the diff draws them. */
 export function Quote({ lines }: { lines: string[] }) {

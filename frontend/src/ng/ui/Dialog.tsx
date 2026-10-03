@@ -6,8 +6,9 @@ import "./ui.css";
 /** A modal: focus moves in and stays in, Escape or a press on the backdrop
  *  closes it (not while `dirty`), and focus goes back where it was. */
 /** `className` lets a page size its own dialog with a class it owns (R59: only ui/ styles `.dialog`). */
-export function Dialog({ title, onClose, children, footer, dirty, className }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; dirty?: boolean; className?: string }) {
-  const ref = useModal<HTMLDivElement>(onClose);
+/** `returnTo`: where focus goes on close when what opened the dialog is gone, or nothing had focus. */
+export function Dialog({ title, onClose, children, footer, dirty, className, returnTo }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; dirty?: boolean; className?: string; returnTo?: () => HTMLElement | null | undefined }) {
+  const ref = useModal<HTMLDivElement>(onClose, returnTo);
   const id = useId();
   return createPortal(
     <div className="dialog-backdrop" {...backdropProps(onClose, dirty)}>

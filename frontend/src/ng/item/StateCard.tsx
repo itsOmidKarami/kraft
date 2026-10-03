@@ -102,17 +102,16 @@ function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Waiting on the provider", where, node: stop.node,
       text: `${harness ?? "The agent"} hit its rate limit. Kraft retries by itself, so nothing needs doing.`,
       facts: fs,
-      actions: [
-        { label: "Retry now", primary: true, run: () => run(act.retry(item.id)) },
-        ...allowed.slice(0, 1).map((alt) => ({ label: `Use ${alt} for this attempt`, run: () => run(act.retry(item.id, { ...(node && stop.task ? { path: actionPath(node, stop.task) } : {}), task_config: { harness: alt } })) })),
-      ],
+      // No Retry now and no "use another harness" here: /retry claims only a
+      // stopped item and answers a waiting one 409 (R10b-01). Pause is the header's.
+      actions: [],
     };
   }
   if (status === "waiting" && stop?.kind === "wait")
     return {
       tone: "info", glyph: <Clock size={14} aria-hidden />, title: "Waiting on CI", where, node: stop.node, text: stop.reason ?? undefined,
       facts: stop.resume_at ? [["next check", until(stop.resume_at)]] : [],
-      actions: [{ label: "Retry now", primary: true, run: () => run(act.retry(item.id)) }],
+      actions: [],
     };
   // B5 (R2): the worker capability is built elsewhere; until the server sends
   // these fields this branch is unreachable and the item shows its plain waiting status.

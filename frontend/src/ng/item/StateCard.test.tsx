@@ -49,24 +49,22 @@ describe("StateCard", () => {
     expect(where).toBe("/templates/repos");
   });
 
-  it("waiting on the provider: Retry now, and the fallback only when policy allows it", async () => {
-    const calls = stubFetch(WRITES);
+  // R10b-01: /retry claims only a stopped item, so a waiting one offers no Retry now
+  // and no harness switch (each answered 409); the fallback the policy allows is a fact.
+  it("waiting on the provider: says Kraft retries by itself, names the allowed fallback, and offers no Retry the server would refuse", () => {
+    stubFetch(WRITES);
     const s = stop("rate_limit", { node: "verification", task: "verification.review.code_review", facts: { harness: "claude-code", fallback: ["codex", "gemini"], fallback_allowed: ["codex"] } });
     show({ display_status: "waiting", stop: s, rate_limit: { count: 2, cap: 5 } });
     const card = screen.getByRole("region", { name: "Waiting on the provider" });
     expect(card).toHaveTextContent("2 of 5 used");
-    await userEvent.click(within(card).getByRole("button", { name: "Use codex for this attempt" }));
-    await userEvent.click(within(card).getByRole("button", { name: "Retry now" }));
-    await waitFor(() => expect(posts(calls)).toHaveLength(2));
-    expect(posts(calls)).toEqual([
-      { method: "POST", path: "/work-items/w1/retry", body: { path: "verification.review.code_review", task_config: { harness: "codex" } } },
-      { method: "POST", path: "/work-items/w1/retry", body: {} },
-    ]);
+    expect(card).toHaveTextContent("codex is allowed by the harness list");
+    expect(card).toHaveTextContent("Kraft retries by itself");
+    expect(within(card).queryByRole("button", { name: /Retry|for this attempt/ })).toBeNull();
   });
 
-  it("waiting on the provider with no allowed fallback has no fallback button", () => {
-    show({ display_status: "waiting", stop: stop("rate_limit", { facts: { fallback: ["codex"], fallback_allowed: [] } }) });
-    expect(screen.queryByRole("button", { name: /for this attempt/ })).toBeNull();
+  it("waiting on CI offers no Retry now: the server would refuse it", () => {
+    show({ display_status: "waiting", stop: stop("wait", { reason: "waiting for CI" }) });
+    expect(within(screen.getByRole("region", { name: "Waiting on CI" })).queryByRole("button", { name: /Retry/ })).toBeNull();
   });
 
   it("worker lost: rendered only with the B5 fields, and never for another kind (R2)", async () => {

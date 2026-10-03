@@ -32,3 +32,4 @@
 .ph-empty { margin: 24px 2px; font-size: 13.5px; color: var(--text-muted); }
 .ph-skeleton { display: flex; flex-direction: column; gap: 10px; }
 .ph-skeleton > span { height: 96px; border-radius: 12px; background: var(--surface); }
+.ph-restart { margin: 8px 2px 0; padding: 10px 12px; border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent); border-radius: 10px; background: color-mix(in oklab, var(--warn) 10%, var(--bg)); font-size: 13px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }

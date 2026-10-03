@@ -39,8 +39,13 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
   const send = (t: string) => {
     if (!closed || !listed || (!empty(t) && !unlisted(t, listed).length)) onText(t);
   };
+  const note = stray && !focused ? stray : sub;
+  // The note under the field is its description, so a refusal is read with the
+  // field and not only seen under it: "invalid" alone gave no reason (R10b-08).
+  const noteId = `${id}-note`;
   const props = {
     id,
+    "aria-describedby": note ? noteId : undefined,
     value: text,
     placeholder,
     autoFocus,
@@ -57,7 +62,6 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
       send(e.target.value);
     },
   };
-  const note = stray && !focused ? stray : sub;
   return (
     <div className="tpl-pf">
       <label htmlFor={id} className="tpl-pf-label">{label}</label>
@@ -77,7 +81,7 @@ export function PauseText({ label, value, onText, onBlur, long, rows = 3, placeh
           onPick={() => onBlur?.()}
         />
       ) : <input spellCheck={false} {...props} />}
-      {note && <p className={`tpl-pf-sub${bad || (stray && !focused) ? " is-bad" : ""}`}>{note}</p>}
+      {note && <p id={noteId} className={`tpl-pf-sub${bad || (stray && !focused) ? " is-bad" : ""}`}>{note}</p>}
     </div>
   );
 }

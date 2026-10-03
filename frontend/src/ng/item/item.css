@@ -40,6 +40,7 @@
 .item-main-toggle { flex: none; width: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
 .item-main-action:not(:disabled):is(:hover, :focus-visible), .item-main-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); color: var(--text); }
 .item-main-action:focus-visible, .item-main-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.item-main-action[aria-disabled="true"] { cursor: progress; color: var(--text-muted); }
 .item-panel { box-sizing: border-box; min-width: 118px; }
 .item-panel-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .item-panel-item.is-warn:not(:disabled) { color: var(--warn); }

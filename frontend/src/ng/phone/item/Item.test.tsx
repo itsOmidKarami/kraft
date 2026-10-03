@@ -93,6 +93,13 @@ describe("the item screen (C)", () => {
       await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
     });
 
+    it("lists the changes it would apply, as the desktop's dialog does (R10b-12)", async () => {
+      mount(NEVER(), "/work-items/w1", DRAFT);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const sheet = await screen.findByRole("dialog", { name: "Start with unapplied changes?" });
+      expect(within(sheet).getByLabelText("Changes")).toHaveTextContent("~ implementation budget ($) → 2");
+    });
+
     it("Start without them starts and leaves the draft", async () => {
       const calls = mount(NEVER(), "/work-items/w1", DRAFT);
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));
@@ -322,7 +329,6 @@ describe("pair actions that call straight through", () => {
   it.each([
     ["paused mid-chain → Resume", item("paused"), "Resume", "POST /work-items/w1/resume"],
     ["failed → Retry from the failed node", item("failed", stop("failed")), "Retry", "POST /work-items/w1/retry"],
-    ["rate limited → Retry now", item("waiting", stop("rate_limit")), "Retry now", "POST /work-items/w1/retry"],
     ["MR closed → Reopen", item("needs_you", stop("mr_closed", { facts: { ref: 142 } })), "Reopen MR", "POST /work-items/w1/reopen-mr"],
   ])("%s", async (_n, it, label, call) => {
     const calls = mount(it);
