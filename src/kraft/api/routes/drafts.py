@@ -24,6 +24,7 @@ from kraft.drafts import authored, item, ops, policy_caps, resolve, store
 from kraft.policy import PolicyError
 from kraft.templates import revision
 from kraft.templates.library import LIBRARY_FILE
+from kraft.templates.models import AgentTask
 
 
 def _area(area: str, key: str) -> store.Area:
@@ -400,6 +401,40 @@ def _chain(row):
     return chain
 
 
+def _added_checks(st, evaluated: item.Evaluated) -> list[dict]:
+    """What Review & apply says of each node the draft adds that resolved: the
+    harnesses its agent tasks run on (materializing the chain already refused one
+    outside `allowed_harnesses`, as a problem on that op, so these are allowed)
+    and what the instance's finished runs of a node of that id cost, per item.
+    `estimate_usd` is null for an id nothing has run yet."""
+    failed = {p["op"] for p in evaluated.problems}
+    nodes = {n.id: n for n in evaluated.chain.chain.nodes}
+    out = []
+    for i, op in enumerate(evaluated.ops):
+        if op["op"] != "add_node" or op["passed"] or i in failed or op["node"]["id"] not in nodes:
+            continue
+        node_id = op["node"]["id"]
+        harnesses = sorted(
+            {t.task.harness for t in nodes[node_id].tasks() if isinstance(t.task, AgentTask)}
+        )
+        estimate = st.db.read(
+            lambda c, node_id=node_id: c.execute(
+                "SELECT AVG(spent) FROM (SELECT SUM(cost_usd) AS spent FROM worker_sessions "
+                "WHERE node_id = ? AND cost_usd IS NOT NULL GROUP BY work_item_id)",
+                (node_id,),
+            ).fetchone()[0]
+        )
+        out.append(
+            {
+                "op": i,
+                "node": node_id,
+                "harnesses": harnesses,
+                "estimate_usd": None if estimate is None else round(float(estimate), 2),
+            }
+        )
+    return out
+
+
 def _item_view(st, row, draft: dict | None) -> dict:
     evaluated = item.evaluate(
         _chain(row), row["current_node_id"], draft["ops"] if draft else [], st.library
@@ -408,7 +443,10 @@ def _item_view(st, row, draft: dict | None) -> dict:
     return {
         "ops": evaluated.ops,
         "problems": evaluated.problems,
-        "checks": {"budget": {"spent_usd": cap["spent_usd"], "cap_usd": cap["cap_usd"]}},
+        "checks": {
+            "budget": {"spent_usd": cap["spent_usd"], "cap_usd": cap["cap_usd"]},
+            "added": _added_checks(st, evaluated),
+        },
         "nodes": [items.node_view(n) for n in evaluated.chain.chain.nodes],
         "base_seq": draft["base_seq"] if draft else None,
         "updated_at": draft["updated_at"] if draft else None,
