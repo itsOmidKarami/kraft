@@ -57,6 +57,17 @@ describe("useThreads", () => {
     expect(calls("/threads")).toHaveLength(3);
   });
 
+  it("keeps the same threads, not a new array, when a read brings nothing new (review L6)", async () => {
+    vi.mocked(http.request).mockImplementation(async () => ({ status: 200, body: [{ id: "t1" }] }));
+    const { result } = renderHook(() => useThreads("w1"));
+    await act(async () => {});
+    const first = result.current.state === "ready" ? result.current.data : null;
+    expect(first).toEqual([{ id: "t1" }]);
+    await act(async () => void vi.advanceTimersByTime(THREADS_POLL_MS));
+    expect(calls("/threads")).toHaveLength(2);
+    expect(result.current.state === "ready" && result.current.data).toBe(first);
+  });
+
   it("reads once, then once per burst of this item's thread events, never for others", async () => {
     renderHook(() => useThreads("w1"));
     expect(calls("/threads")).toHaveLength(1);

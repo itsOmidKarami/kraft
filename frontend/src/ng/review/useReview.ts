@@ -39,11 +39,17 @@ export function useThreads(id: string) {
   const relevant = useStore((s) => (s.eventsByItem[id] ?? []).filter((e) => THREAD_EVENTS.test(e.type)).length);
   const live = useRef(id);
   live.current = id;
+  // The last answer as read, so a poll that brings nothing new re-renders nothing (review L6).
+  const last = useRef<string | null>(null);
   const fetchNow = useCallback(() => {
     request<ReviewThread[]>(`/work-items/${encodeURIComponent(id)}/threads`).then(({ status, body }) => {
       if (live.current !== id) return;
-      if (status === 200) setGot({ state: "ready", data: body });
-      else setGot((g) => (g.state === "ready" ? g : { state: "error", status, error: detailOf(body) }));
+      if (status === 200) {
+        const text = `${id}\n${JSON.stringify(body)}`;
+        if (text === last.current) return;
+        last.current = text;
+        setGot({ state: "ready", data: body });
+      } else setGot((g) => (g.state === "ready" ? g : { state: "error", status, error: detailOf(body) }));
     });
   }, [id]);
   useEffect(fetchNow, [fetchNow]);
