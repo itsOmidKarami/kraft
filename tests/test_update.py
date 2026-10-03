@@ -52,6 +52,15 @@ def test_latest_reads_the_newest_release(cache, monkeypatch):
     assert release.wheel_url == "https://x/w.whl"
 
 
+def test_latest_asks_for_a_full_page_of_releases(cache, monkeypatch):
+    """GitHub's default page is 30 releases: a cycle of 30 pre-releases after
+    a final would push it off the page, and stable would see no update."""
+    urls = []
+    monkeypatch.setattr(update, "_fetch", lambda url, _t: urls.append(url) or RELEASE_JSON)
+    update.latest()
+    assert urls == [f"{update.RELEASES_URL}?per_page=100"]
+
+
 def test_latest_caches_to_disk(cache, monkeypatch):
     monkeypatch.setattr(update, "_fetch", _fetch(RELEASE_JSON))
     update.latest()

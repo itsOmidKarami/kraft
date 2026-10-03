@@ -192,7 +192,9 @@ def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
         if cached is not None:
             return cached
     try:
-        release = _parse(_fetch(RELEASES_URL, TIMEOUT), channel)
+        # The most a page holds: GitHub's default 30 is one long pre-release
+        # cycle, which would push the newest final off it.
+        release = _parse(_fetch(f"{RELEASES_URL}?per_page=100", TIMEOUT), channel)
     except Exception:  # noqa: BLE001
         # Deliberately bare: httpx raises a dozen types, json another, and a
         # version check is never worth turning a working command into a
