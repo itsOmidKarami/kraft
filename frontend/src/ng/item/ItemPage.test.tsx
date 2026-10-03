@@ -54,6 +54,15 @@ describe("ItemPage", () => {
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toHaveFocus();
   });
 
+  // R12b-11: an archived item's page asked for its diff, and the 404 went to the console on every load.
+  it("asks for no diff once the item's worktree is gone", async () => {
+    const calls = stubFetch({ "GET /work-items/w1": [200, detail({ status: "archived", display_status: "archived", worktree_exists: false })] });
+    mount();
+    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1")).toBe(true));
+    expect(calls.some((c) => c.path.endsWith("/diff"))).toBe(false);
+  });
+
   // R12b-06: on a time cap the header's Raise cap only opened Config, which has no row for that cap.
   it("opens the cap's own editor from the header's Raise cap on a stop that names its limit", async () => {
     const limit = { path: "", key: "time_cap_minutes", value: 1, maximum: null };

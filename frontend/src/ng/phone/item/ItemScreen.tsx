@@ -53,7 +53,8 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
   const { lines } = useLog(session && !ended ? session.id : null, live);
-  const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item));
+  // Nothing to compare before a start, or once the worktree is gone (archived: R12b-11); the server answers 409 or 404.
+  const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item) || item.worktree_exists === false);
   const files = compare.state === "ready" ? (compare.data.files ?? []) : [];
   const adds = files.reduce((n, f) => n + f.insertions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);

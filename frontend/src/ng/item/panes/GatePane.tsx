@@ -21,7 +21,7 @@ export function gateDecision(events: KraftEvent[], gate: string) {
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
  *  on, open threads, what it decides on, where reject goes, its status. */
 export function GateBody({ item, version, gate, events }: { item: ItemDetail; version: string; gate: ChainNode; events: KraftEvent[] }) {
-  const files = useDiffFiles(item.id, runVersion(item));
+  const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false);
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   useEffect(() => {
     let live = true;
