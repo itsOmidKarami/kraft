@@ -52,6 +52,12 @@ describe("ng CSS", () => {
     expect(css).toMatch(/\.ip-log-wrap > \.ip-log\s*{[^}]*overflow:\s*auto/);
   });
 
+  it("keeps the review footer's buttons on one line, the summary giving way", () => {
+    const css = readFileSync(join(here, "review/review.css"), "utf-8");
+    expect(css).toMatch(/\.rv-bar \.btn\s*{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap/);
+    expect(css).toMatch(/\.rv-bar > \.rv-muted\s*{[^}]*text-overflow:\s*ellipsis/);
+  });
+
   it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
     const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
     const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);
