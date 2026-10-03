@@ -60,6 +60,21 @@ def test_an_answers_reason_is_one_line(body, line):
     assert client.detail_of(body) == line
 
 
+def test_a_models_own_refusal_reads_without_pydantics_prefix():
+    """`kraft item comment --lines 4-2` printed `422: Value error, start_line
+    must be ...`: the sentence is Kraft's, the "Value error, " pydantic's."""
+    body = {
+        "detail": [
+            {
+                "type": "value_error",
+                "loc": ["body"],
+                "msg": "Value error, start_line must be >= 1 and <= end_line",
+            }
+        ]
+    }
+    assert client.detail_of(body) == "start_line must be >= 1 and <= end_line"
+
+
 def test_a_connect_the_server_has_not_answered_in_time_says_it_may_still_save(monkeypatch):
     """The client gave up at 30 s while the probe ran on for up to 120, then
     saved: a raw ReadTimeout, then "already connected"."""

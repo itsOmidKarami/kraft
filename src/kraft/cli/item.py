@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import client
+from kraft import client, render
 from kraft.cli import common
 
 _POLICY_HELP = (
@@ -314,6 +314,10 @@ _LABELS = {"must-fix": "must_fix", "question": "question", "nit": "nit"}
 def _cmd_comment(ns: argparse.Namespace) -> None:
     if ns.suggest is not None and ns.lines is None:
         ns._parser.error("--suggest needs --lines")
+    if ns.start_side is not None and ns.lines is None:
+        ns._parser.error("--start-side needs --lines")
+    if ns.suggest is not None and "old" in (ns.side, ns.start_side):
+        ns._parser.error("--suggest replaces new-side lines, so it takes no old-side range")
     start, end = ns.lines if ns.lines else (None, None)
     common.emit(
         asyncio.run(
@@ -327,11 +331,23 @@ def _cmd_comment(ns: argparse.Namespace) -> None:
                 side=ns.side,
                 label=_LABELS[ns.label] if ns.label else None,
                 suggestion=ns.suggest,
+                start_side=ns.start_side,
             )
         ),
-        common._render_action,
+        _render_comment,
         ns.json,
     )
+
+
+def _render_comment(result: dict) -> str:
+    """A new thread as `kraft view threads` names it, with the lines it
+    quotes, which is what the agent will read; a reply as its fields."""
+    if "comments" not in result:
+        return common._render_action(result)
+    lines = [f"drafted thread {result['id']} on {render.thread_where(result)}"]
+    lines += ["    | " + line for line in (result.get("quote") or "").splitlines()]
+    lines.append("it goes out with your next kraft item review")
+    return "\n".join(lines)
 
 
 def _cmd_resolve(ns: argparse.Namespace) -> None:
@@ -540,7 +556,17 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     comment.add_argument("--reply", metavar="THREAD", help="reply to this thread instead")
     comment.add_argument("--file", dest="file_path", help="the file this comment is about")
     comment.add_argument("--lines", type=_lines, metavar="A[-B]", help="a line range in --file")
-    comment.add_argument("--side", choices=["old", "new"], help="default: new")
+    comment.add_argument(
+        "--side",
+        choices=["old", "new"],
+        help="the side B is on (and A, unless --start-side); default: new",
+    )
+    comment.add_argument(
+        "--start-side",
+        choices=["old", "new"],
+        help="the side A is on, for a range across sides: --lines 3-2 --start-side old "
+        "--side new is old line 3 through new line 2",
+    )
     comment.add_argument("--label", choices=["must-fix", "question", "nit"])
     comment.add_argument("--suggest", metavar="TEXT", help="a suggested replacement for --lines")
     comment.set_defaults(func=_cmd_comment, _parser=comment)

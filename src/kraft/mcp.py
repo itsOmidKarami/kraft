@@ -446,14 +446,30 @@ def build() -> MCPServer:
         side: str | None = None,
         label: str | None = None,
         suggestion: str | None = None,
+        start_side: str | None = None,
+        quote: str | None = None,
     ) -> dict:
         """Leave a draft review comment on a Kraft work item: a new thread, or a
         reply when `thread_id` is given. Drafts reach no agent until
         submit_review sends them. `label` is must_fix, question or nit; a line
         range needs `file_path`, `start_line`, `end_line` and `side` (old or
-        new, default new)."""
+        new, default new), which is `end_line`'s side. `start_side` is
+        `start_line`'s when it differs: old line 3 through new line 2 is
+        `start_side` old, `side` new. `quote` is the range's lines, each led by
+        its diff mark; left out, Kraft quotes them from the diff. `suggestion`
+        replaces new-side lines, so it needs a range on the new side alone."""
         return await client.add_review_comment(
-            body, work_item_id, thread_id, file_path, start_line, end_line, side, label, suggestion
+            body,
+            work_item_id,
+            thread_id,
+            file_path,
+            start_line,
+            end_line,
+            side,
+            label,
+            suggestion,
+            start_side=start_side,
+            quote=quote,
         )
 
     @server.tool()

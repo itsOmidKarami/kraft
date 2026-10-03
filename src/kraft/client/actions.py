@@ -589,9 +589,14 @@ async def add_review_comment(
     side: str | None = None,
     label: str | None = None,
     suggestion: str | None = None,
+    *,
+    start_side: str | None = None,
+    quote: str | None = None,
 ) -> dict:
     """A draft review comment: a new thread, or a reply when `thread_id` is given.
-    Drafts go out with the next `submit_review`.
+    Drafts go out with the next `submit_review`. `side` is `end_line`'s, and
+    `start_side` `start_line`'s when it differs: a range across sides. With no
+    `quote`, the server quotes the range from the diff.
 
     A reply needs no client-side self-action guard: the server already refuses
     a worker session on `POST /threads/{id}/comments` with 403, and a human
@@ -604,7 +609,13 @@ async def add_review_comment(
     payload: dict = {"body": body, "file_path": file_path, "label": label}
     if start_line is not None:
         end = end_line or start_line
-        payload.update(side=side or "new", start_line=start_line, end_line=end)
+        payload.update(
+            side=side or "new",
+            start_line=start_line,
+            end_line=end,
+            start_side=start_side,
+            quote=quote,
+        )
         if suggestion is not None:
             payload["suggestion"] = {
                 "start_line": start_line,

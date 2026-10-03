@@ -68,7 +68,7 @@ kraft item progress K [ID]                  # a worker saying it started plan ta
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked
 kraft view compare [ID] --from T --to T [--nodes a,b] [--stat|--name-only] [-w]  # T: base|attempt:N|last_review|latest
-kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new]] [--label must-fix|question|nit] [--suggest "..."]
+kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new] [--start-side old|new]] [--label must-fix|question|nit] [--suggest "..."]
 kraft item comment --reply THREAD --body "..."
 kraft item resolve THREAD / kraft item reopen THREAD
 kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N]
