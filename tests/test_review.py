@@ -1,33 +1,21 @@
 from __future__ import annotations
 
-import subprocess
 import types
 
-from support.harness import make_repo
+from support.harness import commit_all, git, make_repo, write
 
 from kraft import review
 from kraft.templates.models import AgentTask, SubprocessTask, TaskKind
 
 
-def _git(cwd, *args):
-    return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-
-def _commit(repo, files: dict[str, str]):
-    for name, text in files.items():
-        (repo / name).write_text(text)
-        _git(repo, "add", name)
-    _git(repo, "commit", "-qm", "c")
-    return _git(repo, "rev-parse", "HEAD")
-
-
 def test_touched_by_attributes_files_to_runs_inside_the_window(tmp_path):
     repo = make_repo(tmp_path)
-    c0 = _git(repo, "rev-parse", "HEAD")
-    c1 = _commit(repo, {"a.py": "1\n"})
-    c2 = _commit(repo, {"a.py": "2\n", "b.py": "1\n"})
+    c0 = git(repo, "rev-parse", "HEAD")
+    write(repo, "a.py", "1\n")
+    c1 = commit_all(repo)
+    write(repo, "a.py", "2\n")
+    write(repo, "b.py", "1\n")
+    c2 = commit_all(repo)
     runs = [
         {"node_id": "impl", "start_sha": c0, "end_sha": c1},
         {"node_id": "verify", "start_sha": c1, "end_sha": c2},
@@ -92,8 +80,9 @@ def thread_on(file_path):
 def test_the_target_is_the_node_that_wrote_the_threads_file(tmp_path):
     # current = check_ci (index 2); a thread on the file implementation wrote
     repo = make_repo(tmp_path)
-    c0 = _git(repo, "rev-parse", "HEAD")
-    c1 = _commit(repo, {"a.py": "1\n"})
+    c0 = git(repo, "rev-parse", "HEAD")
+    write(repo, "a.py", "1\n")
+    c1 = commit_all(repo)
     runs = [{"node_id": "implementation", "start_sha": c0, "end_sha": c1}]
     idx, why = review.changes_target(repo, NODES, 2, [thread_on("a.py")], runs)
     assert NODES[idx].id == "implementation" and "a.py" in why
@@ -111,9 +100,11 @@ def test_a_file_only_a_subprocess_node_touched_targets_the_earlier_working_node(
     (a subprocess task alone is never "working") nor `verify` (a subprocess
     task plus a skilled agent task -- still not "working")."""
     repo = make_repo(tmp_path)
-    c0 = _git(repo, "rev-parse", "HEAD")
-    c1 = _commit(repo, {"a.py": "1\n"})
-    c2 = _commit(repo, {"b.py": "1\n"})
+    c0 = git(repo, "rev-parse", "HEAD")
+    write(repo, "a.py", "1\n")
+    c1 = commit_all(repo)
+    write(repo, "b.py", "1\n")
+    c2 = commit_all(repo)
     runs = [
         {"node_id": "implementation", "start_sha": c0, "end_sha": c1},
         {"node_id": "check_ci", "start_sha": c1, "end_sha": c2},
@@ -124,13 +115,12 @@ def test_a_file_only_a_subprocess_node_touched_targets_the_earlier_working_node(
 
 def test_a_renamed_file_survives_the_diff_filter(tmp_path):
     repo = make_repo(tmp_path)
-    _commit(repo, {"keep.py": "x = 1\n" * 20})
-    c1 = _git(repo, "rev-parse", "HEAD")
-    _git(repo, "mv", "keep.py", "moved.py")
+    write(repo, "keep.py", "x = 1\n" * 20)
+    c1 = commit_all(repo)
+    git(repo, "mv", "keep.py", "moved.py")
     (repo / "other.py").write_text("y\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "mv")
-    change = review.read_change(repo, c1, head=_git(repo, "rev-parse", "HEAD"))
+    commit_all(repo, "mv")
+    change = review.read_change(repo, c1, head=git(repo, "rev-parse", "HEAD"))
     paths = {review.new_path(f["path"]) for f in change.files}
     assert paths == {"moved.py", "other.py"}
     kept = review.filter_diff(change.diff, {"moved.py"})
@@ -139,13 +129,14 @@ def test_a_renamed_file_survives_the_diff_filter(tmp_path):
 
 def test_ignore_whitespace_drops_whitespace_only_files_from_patch_and_counts(tmp_path):
     repo = make_repo(tmp_path)
-    c1 = _commit(repo, {"ws.txt": "a\nb\n", "mixed.txt": "a\nb\n", "same.txt": "x\n" * 20})
-    _git(repo, "mv", "same.txt", "moved.txt")
+    write(repo, "ws.txt", "a\nb\n")
+    write(repo, "mixed.txt", "a\nb\n")
+    write(repo, "same.txt", "x\n" * 20)
+    c1 = commit_all(repo)
+    git(repo, "mv", "same.txt", "moved.txt")
     (repo / "ws.txt").write_text("  a\n  b\n")
     (repo / "mixed.txt").write_text("  a\nchanged\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "edit")
-    head = _git(repo, "rev-parse", "HEAD")
+    head = commit_all(repo, "edit")
 
     plain = review.read_change(repo, c1, head=head)
     quiet = review.read_change(repo, c1, head=head, ignore_whitespace=True)
@@ -164,9 +155,11 @@ def _quoting(tmp_path):
     they are far apart, so the file is long)."""
     repo = make_repo(tmp_path)
     old = [f"line {n}" for n in range(1, 21)]
-    base = _commit(repo, {"q.py": "\n".join(old) + "\n"})
+    write(repo, "q.py", "\n".join(old) + "\n")
+    base = commit_all(repo)
     new = old[:1] + ["line 2 fixed"] + old[2:15] + ["added"] + old[15:]
-    head = _commit(repo, {"q.py": "\n".join(new) + "\n"})
+    write(repo, "q.py", "\n".join(new) + "\n")
+    head = commit_all(repo)
     return repo, base, head
 
 
@@ -197,9 +190,10 @@ def test_a_renamed_file_is_quoted_from_both_of_its_paths(tmp_path):
     the rename left alone were quoted as added."""
     repo, base, _head = _quoting(tmp_path)
     old = (repo / "q.py").read_text().splitlines()
-    _git(repo, "mv", "q.py", "r.py")
-    renamed = _commit(repo, {"r.py": "\n".join([old[0], "line 2 fixed", *old[2:]]) + "\n"})
-    fork = _git(repo, "rev-parse", f"{renamed}~2")
+    git(repo, "mv", "q.py", "r.py")
+    write(repo, "r.py", "\n".join([old[0], "line 2 fixed", *old[2:]]) + "\n")
+    renamed = commit_all(repo)
+    fork = git(repo, "rev-parse", f"{renamed}~2")
 
     assert review.quote_range(repo, fork, renamed, "r.py", "new", 1, 3) == (
         " line 1\n+line 2 fixed\n line 3"
@@ -218,7 +212,8 @@ def test_a_range_that_cannot_be_read_has_no_quote(tmp_path):
     assert review.quote_range(repo, base, "--output=x", "q.py", "new", 1, 1) is None
     assert not (repo / "x").exists()
     # A binary file is no lines: the diff draws none for it either.
-    binary = _commit(repo, {"b.dat": "a\0b\nc\n"})
+    write(repo, "b.dat", "a\0b\nc\n")
+    binary = commit_all(repo)
     assert review.quote_range(repo, head, binary, "b.dat", "new", 1, 1) is None
 
 

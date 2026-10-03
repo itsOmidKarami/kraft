@@ -13,10 +13,8 @@ tests/test_builtins_rebase.py's. The default chain's own shape (rebase before
 open, no restart on `merge_request_feedback`) is
 tests/executor/test_default_chain.py's."""
 
-import subprocess
-
 import pytest
-from support.harness import _git, entry_of
+from support.harness import commit_all, entry_of, git
 
 from kraft import builtins as kraft_builtins
 from kraft import store
@@ -54,18 +52,17 @@ async def test_a_pushed_branch_is_not_force_rewritten_on_re_entry(item_on, run_d
     )
     branch = store.branch_for(it.row())
     origin = run_dirs.base / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
-    _git(repo, "remote", "add", "origin", str(origin))
-    _git(repo, "push", "-q", "-u", "origin", "main")
-    _git(worktree, "push", "-q", "-u", "origin", branch)
+    git(repo, "init", "-q", "--bare", "-b", "main", str(origin))
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "-u", "origin", "main")
+    git(worktree, "push", "-q", "-u", "origin", branch)
     before = git_read(worktree, "rev-parse", "HEAD")
     before_base_ref = it.row()["base_ref"]
     # Origin's main moves again after the push -- something to rebase onto,
     # if the guard did not stop it.
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
-    _git(repo, "push", "-q", "origin", "main")
+    commit_all(repo, "moved on")
+    git(repo, "push", "-q", "origin", "main")
 
     node = it.chain.chain.nodes[0]
     status = await dispatch.dispatch_node(

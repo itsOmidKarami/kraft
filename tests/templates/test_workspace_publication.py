@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import _git, entry_of
+from support.harness import commit_all, entry_of, git
 from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspace_item
 
 from kraft import events, store
@@ -28,12 +27,6 @@ def _task(id, **fields):
 
 
 # ── publication order ──
-
-
-def _git_out(cwd, *args) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    ).stdout.strip()
 
 
 class _LandingForge(forge.FakeForge):
@@ -74,19 +67,13 @@ class _LandingForge(forge.FakeForge):
         if self.raise_on_merge and Path(repo).name == self.refuse:
             raise forge.ForgeError("merge refused: the branch is protected")
         await super().merge(repo=repo, branch=branch, mr=mr)
-        subprocess.run(
-            ["git", "push", "-q", "origin", "HEAD:main"],
-            cwd=repo,
-            check=True,
-            capture_output=True,
-            env={**os.environ, "FORGE_LANDS": "1"},
-        )
+        git(repo, "push", "-q", "origin", "HEAD:main", env={**os.environ, "FORGE_LANDS": "1"})
         self.order.append(("merge", Path(repo).name))
 
     async def mark_ready(self, *, repo, branch, mr):
         await super().mark_ready(repo=repo, branch=branch, mr=mr)
         root = not Path(repo).name.startswith("pkg")
-        pointer = _git_out(repo, "rev-parse", "HEAD:repos/pkg") if root else None
+        pointer = git(repo, "rev-parse", "HEAD:repos/pkg") if root else None
         self.order.append(("ready", Path(repo).name, pointer))
 
 
@@ -114,26 +101,25 @@ async def _publishable(
     members = ["pkg", "pkg2"] if item.get("second") else ["pkg"]
     origin = tmp_path / "root-origin.git"
     if not origin.exists():
-        _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
-        _git(root, "remote", "add", "origin", str(origin))
+        git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
+        git(root, "remote", "add", "origin", str(origin))
     if root_denies_push:
         hook = origin / "hooks" / "pre-receive"
         hook.write_text(
             "#!/bin/sh\n[ -n \"$FORGE_LANDS\" ] && exit 0\necho 'protected branch' >&2\nexit 1\n"
         )
         hook.chmod(0o755)
-    _git(worktree, "fetch", "-q", "origin")
+    git(worktree, "fetch", "-q", "origin")
     for member in members:
-        _git(tmp_path / member, "config", "receive.denyCurrentBranch", "updateInstead")
+        git(tmp_path / member, "config", "receive.denyCurrentBranch", "updateInstead")
         if member in untouched:
             continue
         (worktree / "repos" / member / "lib.py").write_text("x = 1\n")
-        _git(worktree / "repos" / member, "add", "-A")
-        _git(worktree / "repos" / member, "commit", "-qm", "member change")
+        commit_all(worktree / "repos" / member, "member change")
     if root_source:
         (worktree / "root.txt").write_text("root source\n")
-        _git(worktree, "add", "root.txt")
-        _git(worktree, "commit", "-qm", "root source change")
+        git(worktree, "add", "root.txt")
+        git(worktree, "commit", "-qm", "root source change")
     return row, worktree, origin
 
 
@@ -181,8 +167,8 @@ async def test_child_merge_precedes_workspace_pointer_update(
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
     assert fake.order == [("merge", "pkg")]
-    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
-    assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
+    merged = git(tmp_path / "pkg", "rev-parse", "main")
+    assert git(origin, "rev-parse", "main:repos/pkg") == merged
     assert len(fake.opened) == 1, "the member's merge request only; the bump needed none"
 
 
@@ -193,8 +179,8 @@ class _OvertakenForge(_LandingForge):
     async def merge(self, *, repo, branch="", mr):
         await super().merge(repo=repo, branch=branch, mr=mr)
         if Path(repo).name.startswith("pkg"):
-            origin = Path(_git_out(repo, "remote", "get-url", "origin"))
-            _git(origin, "commit", "-q", "--allow-empty", "-m", "landed after the item's merge")
+            origin = Path(git(repo, "remote", "get-url", "origin"))
+            git(origin, "commit", "-q", "--allow-empty", "-m", "landed after the item's merge")
 
 
 async def test_the_pointer_bump_moves_only_merged_members_and_to_what_merged(
@@ -207,17 +193,17 @@ async def test_the_pointer_bump_moves_only_merged_members_and_to_what_merged(
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", second=True, untouched=("pkg2",)
     )
-    untouched = _git_out(origin, "rev-parse", "main:repos/pkg2")
-    _git(tmp_path / "pkg2", "commit", "-q", "--allow-empty", "-m", "upstream, never built here")
-    merged = _git_out(worktree / "repos" / "pkg", "rev-parse", "HEAD")
+    untouched = git(origin, "rev-parse", "main:repos/pkg2")
+    git(tmp_path / "pkg2", "commit", "-q", "--allow-empty", "-m", "upstream, never built here")
+    merged = git(worktree / "repos" / "pkg", "rev-parse", "HEAD")
     fake = _OvertakenForge()
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
-    assert _git_out(tmp_path / "pkg", "rev-parse", "main") != merged, "someone landed after it"
-    assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
-    assert _git_out(origin, "rev-parse", "main:repos/pkg2") == untouched
+    assert git(tmp_path / "pkg", "rev-parse", "main") != merged, "someone landed after it"
+    assert git(origin, "rev-parse", "main:repos/pkg") == merged
+    assert git(origin, "rev-parse", "main:repos/pkg2") == untouched
 
 
 async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their_own(
@@ -229,7 +215,7 @@ async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", base_branch="release"
     )
-    before = _git_out(origin, "rev-parse", "main")
+    before = git(origin, "rev-parse", "main")
     fake = _LandingForge()
     compared = []
     source_changed = forge.run.git.source_changed
@@ -245,9 +231,9 @@ async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their
 
     assert set(compared) == {"release"}, "the root's own changes are against its base"
     assert fake.opened_base == {1: "main"}, "the member's merge request, into its own default"
-    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
-    assert _git_out(origin, "rev-parse", "release:repos/pkg") == merged
-    assert _git_out(origin, "rev-parse", "main") == before
+    merged = git(tmp_path / "pkg", "rev-parse", "main")
+    assert git(origin, "rev-parse", "release:repos/pkg") == merged
+    assert git(origin, "rev-parse", "main") == before
 
 
 def _base_ref(database, row) -> str | None:
@@ -274,13 +260,13 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     pipeline here still answers for the head before the rebase."""
     row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
     (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
-    _git(tmp_path / "pkg", "add", "moved.txt")
-    _git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
-    moved = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    git(tmp_path / "pkg", "add", "moved.txt")
+    git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
+    moved = git(tmp_path / "pkg", "rev-parse", "main")
     member = worktree / "repos" / "pkg"
     fake = forge.FakeForge(
         ci_states=["success"],
-        ci_shas=[_git_out(member, "rev-parse", "HEAD")],
+        ci_shas=[git(member, "rev-parse", "HEAD")],
         mergeable=False,
         merge_detail="conflict",
     )
@@ -295,8 +281,8 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
         has_rebase_bounce=bounce,
     )
 
-    assert _git_out(member, "merge-base", "--is-ancestor", moved, "HEAD") == ""
-    assert _git_out(member, "log", "-1", "--format=%ce") == ROOT_EMAIL
+    assert git(member, "merge-base", "--is-ancestor", moved, "HEAD") == ""
+    assert git(member, "log", "-1", "--format=%ce") == ROOT_EMAIL
     assert (result, fake.merged) == (expected, [])
     assert _base_ref(database, row) == base_ref
 
@@ -314,14 +300,14 @@ async def test_the_default_root_pointer_policy_leaves_the_root_unchanged(
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer=pointer, legacy=legacy
     )
-    before = _git_out(origin, "rev-parse", "main")
+    before = git(origin, "rev-parse", "main")
     fake = _LandingForge()
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
     assert fake.order == [("merge", "pkg")]
-    assert _git_out(origin, "rev-parse", "main") == before
+    assert git(origin, "rev-parse", "main") == before
 
 
 async def test_pointer_bump_falls_back_to_merge_request_when_push_is_denied(
@@ -334,16 +320,16 @@ async def test_pointer_bump_falls_back_to_merge_request_when_push_is_denied(
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", root_denies_push=True
     )
-    before = _git_out(origin, "rev-parse", "main")
+    before = git(origin, "rev-parse", "main")
     fake = _LandingForge(awaiting={row["id"]: 1})
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "waiting"
 
-    assert _git_out(origin, "rev-parse", "main") == before, "the refused push changed nothing"
+    assert git(origin, "rev-parse", "main") == before, "the refused push changed nothing"
     (pointer_mr,) = [n for n, r in fake._opened_repo.items() if r == str(worktree)]
     assert fake.opened[pointer_mr] == store.branch_for(row)
-    assert _git_out(worktree, "rev-parse", "HEAD:repos/pkg") == _git_out(
+    assert git(worktree, "rev-parse", "HEAD:repos/pkg") == git(
         tmp_path / "pkg", "rev-parse", "main"
     )
     assert _repos(database, row)["root"] == "open"
@@ -369,7 +355,7 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
-    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    merged = git(tmp_path / "pkg", "rev-parse", "main")
     root = row["id"]
     assert fake.order[1:] == [
         ("merge", "pkg"),
@@ -391,7 +377,7 @@ async def test_a_root_merge_request_opened_for_source_since_reverted_is_still_me
     )
     fake = _LandingForge()
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
-    _git(worktree, "revert", "--no-edit", "HEAD")
+    git(worktree, "revert", "--no-edit", "HEAD")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
@@ -460,7 +446,7 @@ async def test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the
     assert ("merge", root) in fake.order and _repos(database, row)["root"] == "open"
     assert await _walk(database, run_dirs, row, fake, monkeypatch) == "completed"
 
-    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    merged = git(tmp_path / "pkg", "rev-parse", "main")
     root_reads = [e for e in fake.order if e[1] == root]
     assert root_reads[0] == ("ready", root, merged), "read before the root was ready"
     assert fake.order.index(("merge", "pkg")) < fake.order.index(root_reads[0])
@@ -545,9 +531,7 @@ async def test_a_fallback_pointer_merge_request_is_followed_to_its_merge(
     assert await _walk(database, run_dirs, row, fake, monkeypatch) == "completed"
 
     assert pointer_mr in fake.merged
-    assert _git_out(origin, "rev-parse", "main:repos/pkg") == _git_out(
-        tmp_path / "pkg", "rev-parse", "main"
-    )
+    assert git(origin, "rev-parse", "main:repos/pkg") == git(tmp_path / "pkg", "rev-parse", "main")
     assert _pending(database, row) == ["external_approval"]
     assert _repos(database, row)["root"] == "merged"
 
@@ -574,14 +558,14 @@ async def test_blocked_child_merge_leaves_the_root_unchanged(
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", second=second, root_source=root_source
     )
-    before = _git_out(origin, "rev-parse", "main")
+    before = git(origin, "rev-parse", "main")
     fake = _LandingForge(refuse="pkg2" if second else "pkg", raise_on_merge=refused)
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == status
 
     assert fake.order == landed
-    assert _git_out(origin, "rev-parse", "main") == before
+    assert git(origin, "rev-parse", "main") == before
     assert _repos(database, row)["root"] != "merged"
 
 

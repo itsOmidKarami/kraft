@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from pathlib import Path
 
 import pytest
 from support.api import _client
-from support.harness import isolated_bd, make_repo_with_engineering
+from support.harness import commit_all, isolated_bd, make_repo_with_engineering
 
 from kraft.adapters import beads
 
@@ -17,11 +16,6 @@ pytestmark = pytest.mark.api_client(env={"KRAFT_INDEX_REPOS": ""})
 def _indexing(tmp_path, monkeypatch, repo):
     """A client whose startup index covers `repo` (`KRAFT_INDEX_REPOS`)."""
     return _client(tmp_path, monkeypatch, env={"KRAFT_INDEX_REPOS": str(repo)})
-
-
-def _commit(repo: Path, msg: str) -> None:
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-m", msg], check=True, capture_output=True)
 
 
 def test_search_documents_and_rescan(tmp_path, monkeypatch):
@@ -67,7 +61,7 @@ def test_search_documents_and_rescan(tmp_path, monkeypatch):
         assert client.get("/api/documents/nope").status_code == 404
 
         (repo / ".engineering/specs/new.md").write_text("# New\nfresh material here\n")
-        _commit(repo, "new spec")
+        commit_all(repo, "new spec")
         rr = client.post("/api/index/rescan", params={"repo": str(repo)})
         assert rr.status_code == 200
         assert rr.json()["stats"]["inserted"] == 1

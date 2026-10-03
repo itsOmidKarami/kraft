@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 from support import worktree as wtree
 from support.harness import (
-    _git,
+    ALLOW_FILE,
     entry_of,
+    git,
     make_repo,
     make_repo_with_submodule,
     v1_chain,
@@ -77,8 +78,8 @@ async def workspace_item(
     connected = {"pkg": pkg}
     if second:
         pkg2 = make_repo(tmp_path, name="pkg2")
-        _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(pkg2), "repos/pkg2")
-        _git(root, "commit", "-qm", "add a second submodule")
+        git(root, *ALLOW_FILE, "submodule", "add", str(pkg2), "repos/pkg2")
+        git(root, "commit", "-qm", "add a second submodule")
         mounts["pkg2"] = "repos/pkg2"
         connected["pkg2"] = pkg2
     target = (
@@ -98,14 +99,14 @@ async def workspace_item(
     if base_branch:
         # The base the item names has to be on origin before its checkout is
         # cut from it (Kraft-wz6vz).
-        _git(root, "branch", base_branch)
-        _git(tmp_path, "clone", "-q", "--bare", str(root), str(tmp_path / "root-origin.git"))
-        _git(root, "remote", "add", "origin", str(tmp_path / "root-origin.git"))
+        git(root, "branch", base_branch)
+        git(tmp_path, "clone", "-q", "--bare", str(root), str(tmp_path / "root-origin.git"))
+        git(root, "remote", "add", "origin", str(tmp_path / "root-origin.git"))
     await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
     # Each member checked out of its connected repository, as the walk does
     # with `launch.repositories` (Kraft-ju36l); a legacy item has no ids.
     for m, origin in ({} if legacy or nested else connected).items():
-        _git(tmp_path, "clone", "-q", str(origin), str(tmp_path / f"{m}-connected"))
+        git(tmp_path, "clone", "-q", str(origin), str(tmp_path / f"{m}-connected"))
     connect = nested_repositories(root, mounts) if nested else repositories(tmp_path, *connected)
     worktree = await wtree.ensure(
         database, run_dirs, root, repositories=None if legacy else connect
@@ -122,7 +123,7 @@ def only_the_root_has_an_identity(monkeypatch, tmp_path, row) -> None:
     """No commit identity anywhere git would look -- environment, global or
     system config, a member's connected repository -- but in the item's root
     repository, whose email becomes `ROOT_EMAIL` (Kraft-ju36l, J3)."""
-    _git(Path(row["repo"]), "config", "user.email", ROOT_EMAIL)
+    git(Path(row["repo"]), "config", "user.email", ROOT_EMAIL)
     for name in [k for k in os.environ if k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))]:
         monkeypatch.delenv(name)
     (tmp_path / "no-identity.gitconfig").write_text("[user]\n\tuseConfigOnly = true\n")
@@ -141,8 +142,8 @@ def member_checkout(tmp_path, branch: str, *, nested: bool = False) -> SimpleNam
 
     root, sub = make_repo_with_submodule(tmp_path)
     wt = tmp_path / "wt"
-    _git(root, "worktree", "add", "-q", "-b", branch, str(wt))
+    git(root, "worktree", "add", "-q", "-b", branch, str(wt))
     m = root / "repos" / "pkg" if nested else sub
-    _git(m, "worktree", "add", "-q", "-b", branch, str(wt / "repos" / "pkg"))
+    git(m, "worktree", "add", "-q", "-b", branch, str(wt / "repos" / "pkg"))
     members = {"repos/pkg": member_gitdirs(m, wt, "repos/pkg")}
     return SimpleNamespace(root=root, m=m, wt=wt, checkout=Checkout(wt, members))

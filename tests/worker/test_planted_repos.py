@@ -14,35 +14,24 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, make_repo
+from support.harness import entry_of, git, make_repo
 
 from kraft.worker import sandbox
-
-
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    ).stdout.strip()
 
 
 def _nested(parent: Path, rel: str) -> tuple[Path, str]:
     """A plain repository at `parent/rel` with one commit, no config of its own."""
     path = parent / rel
     path.mkdir(parents=True)
-    _git(path, "init", "-q", "-b", "main")
+    git(path, "init", "-q", "-b", "main")
     (path / "f").write_text("x\n")
-    _git(path, "add", "f")
-    _git(path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "n")
-    return path, _git(path, "rev-parse", "HEAD")
+    git(path, "add", "f")
+    git(path, "commit", "-q", "-m", "n")
+    return path, git(path, "rev-parse", "HEAD")
 
 
 def _gitlink(repo: Path, rel: str, sha: str) -> None:
-    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{sha},{rel}")
-
-
-def _commit(repo: Path, msg: str = "c") -> str:
-    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", msg)
-    return _git(repo, "rev-parse", "HEAD")
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{sha},{rel}")
 
 
 @pytest.fixture
@@ -61,7 +50,7 @@ def test_an_untracked_nested_repository_is_found_with_no_commit(repo):
 def test_a_committed_gitlink_is_found_with_the_commit_it_records(repo):
     _, sha = _nested(repo, "libs/a")
     _gitlink(repo, "libs/a", sha)
-    _commit(repo)
+    git(repo, "commit", "-qm", "c")
     assert sandbox.nested_repos(repo) == {"libs/a": sha}
 
 
@@ -86,11 +75,11 @@ def test_an_unreadable_worktree_is_none_not_empty(tmp_path):
     ["untracked-nested-repo", "populated-gitlink", "gitlink-added-since-base"],
 )
 def test_a_repository_the_worker_made_is_planted(repo, shape):
-    base = _git(repo, "rev-parse", "HEAD")
+    base = git(repo, "rev-parse", "HEAD")
     nested, sha = _nested(repo, "sub")
     if shape != "untracked-nested-repo":
         _gitlink(repo, "sub", sha)
-        _commit(repo)
+        git(repo, "commit", "-qm", "c")
     if shape == "gitlink-added-since-base":
         # Unpopulated: only the gitlink's being new since base makes it the worker's.
         subprocess.run(["rm", "-rf", str(nested)], check=True)
@@ -101,7 +90,8 @@ def test_a_repository_the_worker_made_is_planted(repo, shape):
 def test_a_gitlink_base_already_had_and_left_unpopulated_is_not_planted(repo):
     nested, sha = _nested(repo, "sub")
     _gitlink(repo, "sub", sha)
-    base = _commit(repo)
+    git(repo, "commit", "-qm", "c")
+    base = git(repo, "rev-parse", "HEAD")
     subprocess.run(["rm", "-rf", str(nested)], check=True)
     nested.mkdir()
     assert sandbox.planted_repos(repo, base) == []
@@ -110,11 +100,12 @@ def test_a_gitlink_base_already_had_and_left_unpopulated_is_not_planted(repo):
 def test_a_gitlink_moved_since_base_is_planted(repo):
     nested, sha = _nested(repo, "sub")
     _gitlink(repo, "sub", sha)
-    base = _commit(repo)
+    git(repo, "commit", "-qm", "c")
+    base = git(repo, "rev-parse", "HEAD")
     subprocess.run(["rm", "-rf", str(nested)], check=True)
     nested.mkdir()
     _gitlink(repo, "sub", "1" * 40)
-    _commit(repo, "move")
+    git(repo, "commit", "-qm", "move")
     assert sandbox.planted_repos(repo, base) == ["sub"]
 
 
@@ -164,7 +155,7 @@ def test_the_hardened_environment_really_keeps_status_out_of_a_gitlink(repo):
     gitlink clean -- it compared the recorded commit and never looked inside."""
     nested, sha = _nested(repo, "sub")
     _gitlink(repo, "sub", sha)
-    _commit(repo)
+    git(repo, "commit", "-qm", "c")
     (nested / "f").write_text("edited inside\n")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG_")}
     unpinned = subprocess.run(
@@ -221,14 +212,14 @@ def _launch(repo: Path, sandbox: dict | None) -> LaunchContext:
 
 
 def test_a_planted_repository_stops_a_sandboxed_item_naming_its_path(repo):
-    base = _git(repo, "rev-parse", "HEAD")
+    base = git(repo, "rev-parse", "HEAD")
     _nested(repo, "vendor/x")
     with pytest.raises(RuntimeError, match="vendor/x"):
         stops.refuse_planted_repos(_row(repo, base), _launch(repo, _SANDBOX), repo)
 
 
 def test_a_clean_sandboxed_worktree_goes_through(repo):
-    base = _git(repo, "rev-parse", "HEAD")
+    base = git(repo, "rev-parse", "HEAD")
     checked = stops.refuse_planted_repos(_row(repo, base), _launch(repo, _SANDBOX), repo)
     assert checked == sandbox.Checkout(repo, {})
 
@@ -236,7 +227,7 @@ def test_a_clean_sandboxed_worktree_goes_through(repo):
 def test_an_unsandboxed_item_never_even_looks(repo, monkeypatch):
     """An unsandboxed item costs no git spawn: the planted-repo scan is not
     called at all, whatever its worktree holds."""
-    base = _git(repo, "rev-parse", "HEAD")
+    base = git(repo, "rev-parse", "HEAD")
     _nested(repo, "vendor/x")
     calls = []
     monkeypatch.setattr(sandbox, "planted_repos", lambda *a, **k: calls.append(a) or ["x"])
@@ -252,14 +243,14 @@ def test_an_unreadable_repos_yaml_stops_an_item_with_members_rather_than_reads_a
     from kraft import config
     from kraft.api import deps
 
-    row = _row(repo, _git(repo, "rev-parse", "HEAD")) | {"submodules": '["repos/pkg"]'}
+    row = _row(repo, git(repo, "rev-parse", "HEAD")) | {"submodules": '["repos/pkg"]'}
     launch = LaunchContext(repo_entry=deps._PoisonedRepoEntry(config.ConfigError("broken")))
     with pytest.raises(RuntimeError, match="cannot tell whether w1 runs sandboxed"):
         stops.refuse_planted_repos(row, launch, repo)
 
 
 def test_an_unreadable_index_stops_rather_than_reads_as_clean(repo, monkeypatch):
-    base = _git(repo, "rev-parse", "HEAD")
+    base = git(repo, "rev-parse", "HEAD")
     monkeypatch.setattr(sandbox, "planted_repos", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="cannot read its index"):
         stops.refuse_planted_repos(_row(repo, base), _launch(repo, _SANDBOX), repo)
@@ -294,7 +285,7 @@ def test_the_sweep_leaves_an_undeclared_nested_repository_out(repo, monkeypatch)
     _nested(repo, "vendor/x")
     committed, calls = _sweep(repo, monkeypatch)
     assert committed
-    tracked = _git(repo, "ls-files", "-s").splitlines()
+    tracked = git(repo, "ls-files", "-s").splitlines()
     assert any(line.endswith("\twork.txt") for line in tracked)
     assert not any(line.endswith("\tvendor/x") for line in tracked)
     add = next(c for c in calls if "add" in c)
@@ -304,7 +295,7 @@ def test_the_sweep_leaves_an_undeclared_nested_repository_out(repo, monkeypatch)
 def test_the_sweep_stages_a_declared_mount_and_never_enters_it_on_status(repo, monkeypatch):
     _, sha = _nested(repo, "sub")
     _gitlink(repo, "sub", sha)
-    _commit(repo)
+    git(repo, "commit", "-qm", "c")
     committed, calls = _sweep(repo, monkeypatch, mounts=("sub",))
     add = next(c for c in calls if "add" in c)
     assert ":(exclude,literal)sub" not in add
@@ -332,7 +323,7 @@ class _Db:
     ],
 )
 def test_host_git_waits_only_for_a_live_sandboxed_session(repo, live, sandboxed, refused):
-    row = _row(repo, _git(repo, "rev-parse", "HEAD"))
+    row = _row(repo, git(repo, "rev-parse", "HEAD"))
     launch = _launch(repo, _SANDBOX if sandboxed else None)
     if refused:
         with pytest.raises(RuntimeError, match="the diff is available once work item w1"):
@@ -366,12 +357,12 @@ async def test_kraft_created_members_pass_and_their_pointer_moves_are_not_plante
     tmp_path, database, run_dirs
 ):
     wt, _sub, expected = await _member_checkout(database, run_dirs, tmp_path)
-    base = _git(wt, "rev-parse", "HEAD")
+    base = git(wt, "rev-parse", "HEAD")
     (wt / _REL / "work.txt").write_text("member work\n")
-    _git(wt / _REL, "add", "work.txt")
-    _commit(wt / _REL)
-    _git(wt, "add", _REL)
-    _commit(wt, "move the member's pointer")
+    git(wt / _REL, "add", "work.txt")
+    git(wt / _REL, "commit", "-qm", "c")
+    git(wt, "add", _REL)
+    git(wt, "commit", "-qm", "move the member's pointer")
 
     assert sandbox.foreign_members(wt, expected) == []
     assert sandbox.planted_repos(wt, base, mounts=[_REL]) == []
@@ -428,7 +419,7 @@ async def test_an_old_layout_member_is_foreign(tmp_path, database, run_dirs):
 async def test_a_repository_nested_inside_a_member_is_planted(tmp_path, database, run_dirs):
     wt, _sub, _ = await _member_checkout(database, run_dirs, tmp_path)
     _nested(wt / _REL, "vendor/x")
-    assert sandbox.planted_repos(wt / _REL, _git(wt, "rev-parse", f"HEAD:{_REL}")) == ["vendor/x"]
+    assert sandbox.planted_repos(wt / _REL, git(wt, "rev-parse", f"HEAD:{_REL}")) == ["vendor/x"]
 
 
 async def test_a_connected_path_that_is_only_a_directory_in_another_repository_has_no_gitdirs(
@@ -452,7 +443,7 @@ async def test_a_member_symlinked_into_another_worktree_never_yields_that_ones_a
     and a member reached through a symlink has no gitdirs at all."""
     wt, sub, expected = await _member_checkout(database, run_dirs, tmp_path)
     victim = tmp_path / "victim"
-    _git(sub, "worktree", "add", "-q", "-b", "kraft/victim", str(victim))
+    git(sub, "worktree", "add", "-q", "-b", "kraft/victim", str(victim))
     link = wt / _REL / ".git" if swapped == "gitfile" else wt / _REL
     if swapped == "gitfile":
         link.unlink()

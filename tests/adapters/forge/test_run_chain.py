@@ -6,11 +6,19 @@ a `FakeForge`; git is real."""
 from __future__ import annotations
 
 import shlex
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, isolated_bd, make_repo_with_submodule, v1_resolved
+from support.harness import (
+    ALLOW_FILE,
+    commit_all,
+    entry_of,
+    git,
+    isolated_bd,
+    make_repo_with_submodule,
+    v1_resolved,
+    write,
+)
 from support.workspace import workspace_target
 
 from kraft import builtins as _builtins
@@ -24,16 +32,6 @@ from .nodes import back_half, forge_node
 NO_SETUP = entry_of({"setup_command": ""})
 ON_A_FORGE = entry_of({"setup_command": "", "forge": "github"})
 RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
-
-
-def _git(cwd, *args):
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd, check=True)
-
-
-def _commit(repo: Path, rel: str, text: str, message: str = "m") -> None:
-    (repo / rel).write_text(text)
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", message)
 
 
 def _policy(tmp_path, text: str):
@@ -116,8 +114,8 @@ async def test_an_implementation_that_committed_nothing_stops_before_any_merge_r
     """Kraft-vz8e: the worker committed nothing, `open_mr` opened an empty
     MR anyway, and `mr_checks` waited out its cap on CI that never ran. The
     item stops at `open_mr` for a human, naming why, with nothing opened."""
-    subprocess.run(["git", "clone", "--bare", "-q", str(repo), str(tmp_path / "o.git")], check=True)
-    _git(repo, "remote", "add", "origin", str(tmp_path / "o.git"))
+    git(tmp_path, "clone", "--bare", "-q", str(repo), str(tmp_path / "o.git"))
+    git(repo, "remote", "add", "origin", str(tmp_path / "o.git"))
     it = await item_on([forge_node("open_mr", "mr.open_draft"), forge_node("mr_checks", "mr.ci")])
     await _builtins.ensure_worktree(
         database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
@@ -244,7 +242,8 @@ async def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(
     conflict is an ordinary task failure (`rebase-conflict-requires-explicit-
     handler`; the handler's own path is tests/executor/test_base_change.py)."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    _commit(repo, ".gitignore", ".engineering/\n", "gitignore .engineering")
+    write(repo, ".gitignore", ".engineering/\n")
+    commit_all(repo, "gitignore .engineering")
     verify = {
         "id": "verify",
         "kind": "exec",
@@ -255,8 +254,10 @@ async def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(
         database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
     )
     original_base = it.row()["base_ref"]
-    _commit(worktree, "calc.py", "def add(a, b):\n    return a - b - 1  # bug: should be +\n")
-    _commit(repo, "calc.py", "def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+    write(worktree, "calc.py", "def add(a, b):\n    return a - b - 1  # bug: should be +\n")
+    commit_all(worktree)
+    write(repo, "calc.py", "def add(a, b):\n    return a - b - 2  # bug: should be +\n")
+    commit_all(repo)
     fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
     # Kraft-lpdd: about the rebase's own stop, not the auto-escalate trigger.
     pol = _policy(
@@ -288,11 +289,11 @@ async def test_planted_operation_state_at_a_conflict_rebase_stops_for_a_person(
     worktree = await _builtins.ensure_worktree(
         database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
     )
-    _commit(worktree, "calc.py", "one\n")
-    _commit(repo, "calc.py", "two\n")
-    gitdir = subprocess.run(
-        ["git", "rev-parse", "--absolute-git-dir"], cwd=worktree, capture_output=True, text=True
-    ).stdout.strip()
+    write(worktree, "calc.py", "one\n")
+    commit_all(worktree)
+    write(repo, "calc.py", "two\n")
+    commit_all(repo)
+    gitdir = git(worktree, "rev-parse", "--absolute-git-dir")
     (Path(gitdir) / "rebase-merge").mkdir()
     fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
     branch = store.branch_for(it.row())
@@ -315,7 +316,8 @@ async def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_config
     `forge.merge` once the rebased head is confirmed green, or the walk sails
     on to completion with the branch never merged (code-review)."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    _commit(repo, ".gitignore", ".engineering/\n", "gitignore .engineering")
+    write(repo, ".gitignore", ".engineering/\n")
+    commit_all(repo, "gitignore .engineering")
 
     class ResolvesAfterRebase(forge.FakeForge):
         async def push(self, *, repo, branch):
@@ -331,7 +333,8 @@ async def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_config
         database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
     )
     # Origin moves in a way the branch does not touch: the forced rebase is clean.
-    _commit(repo, "moved.txt", "moved on\n", "moved on upstream")
+    write(repo, "moved.txt", "moved on\n")
+    commit_all(repo, "moved on upstream")
 
     assert await walk(fake, it) == "completed"
 
@@ -381,9 +384,9 @@ def _with_origin(tmp_path, it, worktree):
     `origin/<default>`, so with none, root always reads as "no changes"."""
     origin = tmp_path / "origin.git"
     root = Path(it.repo)
-    subprocess.run(["git", "clone", "--bare", "-q", str(root), str(origin)], check=True)
-    _git(root, "remote", "add", "origin", str(origin))
-    _git(worktree, "fetch", "-q", "origin")
+    git(tmp_path, "clone", "--bare", "-q", str(root), str(origin))
+    git(root, "remote", "add", "origin", str(origin))
+    git(worktree, "fetch", "-q", "origin")
 
 
 @pytest.mark.parametrize("policy_name", ["bump", "ignore"])
@@ -400,8 +403,10 @@ async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
     _with_origin(tmp_path, it, worktree)
     # Both halves change: a member with nothing beyond its base opens no
     # merge request at all (Kraft-vz8e).
-    _commit(worktree / "repos" / "pkg", "new.txt", "x\n")
-    _commit(worktree, "root-change.txt", "x\n", "root change")
+    write(worktree / "repos" / "pkg", "new.txt", "x\n")
+    commit_all(worktree / "repos" / "pkg")
+    write(worktree, "root-change.txt", "x\n")
+    commit_all(worktree, "root change")
     fake = _RecordingForge(ci_states=["success"])
 
     assert await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch) == "done"
@@ -425,8 +430,9 @@ async def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(
     review: its pointer follows the root-pointer policy instead."""
     it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "bump")
     _with_origin(tmp_path, it, worktree)
-    _commit(worktree / "repos" / "pkg", "new.txt", "x\n")  # the agent's half: submodule only
-    _git(worktree, "commit", "-q", "-am", "the pointer, committed in root too")
+    write(worktree / "repos" / "pkg", "new.txt", "x\n")
+    commit_all(worktree / "repos" / "pkg")  # the agent's half: submodule only
+    git(worktree, "commit", "-q", "-am", "the pointer, committed in root too")
     fake = forge.FakeForge(ci_states=["success"])
 
     await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch)
@@ -516,7 +522,8 @@ async def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_rep
     it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "bump")
     # A member with an MR to merge has changed: an untouched one is never a
     # target at all (Kraft-j14jn).
-    _commit(worktree / "repos" / "pkg", "new.txt", "x\n")
+    write(worktree / "repos" / "pkg", "new.txt", "x\n")
+    commit_all(worktree / "repos" / "pkg")
     calls: list[Path] = []
 
     async def fake_run_one(*args, **kwargs):
@@ -554,7 +561,8 @@ async def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(
     it, worktree, _ = await _multi_repo_item(
         item_on, database, run_dirs, tmp_path, "ignore", sub="repos/packages"
     )
-    _commit(worktree / "repos" / "packages", "metrics.py", "ATTRS = 6\n")
+    write(worktree / "repos" / "packages", "metrics.py", "ATTRS = 6\n")
+    commit_all(worktree / "repos" / "packages")
     fake = forge.FakeForge(ci_states=["success"])
 
     assert await walk(fake, it) == "completed"
@@ -581,8 +589,9 @@ async def test_a_member_changed_without_being_selected_stops_publication(
         item_on, database, run_dirs, tmp_path, "ignore", select=False
     )
     sub = worktree / "repos" / "pkg"
-    _git(worktree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "repos/pkg")
-    _commit(sub, "new.txt", "x\n")
+    git(worktree, *ALLOW_FILE, "submodule", "update", "--init", "repos/pkg")
+    write(sub, "new.txt", "x\n")
+    commit_all(sub)
     fake = forge.FakeForge(ci_states=["success"])
 
     assert await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch) == "failed"

@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.harness import write
 
 from kraft.adapters.forge import mr as mr_ops
 from kraft.adapters.forge.mr import MRMeta
@@ -14,14 +15,12 @@ from kraft.adapters.forge.mr import MRMeta
 WID = "a" * 32
 
 
-def _write(worktree: Path, front: str, body: str) -> None:
-    d = worktree / ".engineering" / "mr_metas"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{WID}.md").write_text(f"---\n{front}---\n{body}")
+def _meta(worktree: Path, front: str, body: str) -> Path:
+    return write(worktree, f".engineering/mr_metas/{WID}.md", f"---\n{front}---\n{body}")
 
 
 def test_read_mr_meta_reads_every_field(tmp_path):
-    _write(
+    _meta(
         tmp_path,
         "work_item_ids: [x]\ntitle: Publish auto-escalate controls\n"
         "labels: [release::minor, area::ui]\nassignees: [omid]\nreviewers: [ada, grace]\n",
@@ -40,14 +39,14 @@ def test_read_mr_meta_absent_is_empty_not_an_error(tmp_path):
 
 
 def test_read_mr_meta_front_matter_only_has_no_description(tmp_path):
-    _write(tmp_path, "title: T\n", "\n   \n")
+    _meta(tmp_path, "title: T\n", "\n   \n")
     assert mr_ops.read_mr_meta(tmp_path, WID).description == ""
 
 
 def test_read_mr_meta_malformed_front_matter_keeps_the_body(tmp_path):
     # split_front_matter already degrades bad YAML to ({}, body): the
     # description survives, the structured fields do not.
-    _write(tmp_path, "title: [unclosed\n", "Body survives.\n")
+    _meta(tmp_path, "title: [unclosed\n", "Body survives.\n")
     meta = mr_ops.read_mr_meta(tmp_path, WID)
     assert meta.title is None and meta.labels == ()
     assert meta.description == "Body survives."
@@ -63,7 +62,7 @@ def test_read_mr_meta_refuses_a_symlink_out_of_the_worktree(tmp_path):
 
 
 def test_read_mr_meta_drops_hostile_and_oversized_values(tmp_path):
-    _write(
+    _meta(
         tmp_path,
         "title: |\n  real title\n  second line\n"
         "labels: ['--web-url=http://evil', ok, '', 'has\\nnewline', 'x', 'y', 'z',"
@@ -81,7 +80,7 @@ def test_read_mr_meta_drops_hostile_and_oversized_values(tmp_path):
 
 
 def test_read_mr_meta_drops_an_over_long_scalar(tmp_path):
-    _write(tmp_path, f"labels: ['{'x' * 201}', keep]\n", "Body.\n")
+    _meta(tmp_path, f"labels: ['{'x' * 201}', keep]\n", "Body.\n")
     assert mr_ops.read_mr_meta(tmp_path, WID).labels == ("keep",)
 
 

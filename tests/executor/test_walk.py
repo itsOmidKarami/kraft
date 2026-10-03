@@ -10,7 +10,14 @@ from pathlib import Path
 
 import pytest
 from support.fake_beads import ON_FAKE_AND_REAL_BD
-from support.harness import _git, entry_of, fake_harness_home, isolated_bd, make_repo, v1_resolved
+from support.harness import (
+    commit_all,
+    entry_of,
+    fake_harness_home,
+    isolated_bd,
+    make_repo,
+    v1_resolved,
+)
 
 from kraft import events, executor, store
 from kraft import findings as _findings
@@ -181,8 +188,7 @@ async def test_run_once_threads_local_files_from_the_launch_context(item_on, rep
     actually runs in production -- so deleting that one line left the whole
     suite green. This test fails if it is."""
     (repo / ".gitignore").write_text(".python-version\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "ignore the pin")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
     # No env node in V1: the worktree is prepared before the first node runs.
     it = await item_on([_exec("work", _sub("noop", ["true"]))])
