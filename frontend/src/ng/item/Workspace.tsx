@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { create } from "zustand";
 import * as api from "../../api";
 import type { Policy, WorkItemDocument } from "../../types";
-import { openingView } from "../graph/camera";
+import { EDITOR_FIT, openingView } from "../graph/camera";
 import { Inspector } from "../graph/Inspector";
 import { StageGraph } from "../graph/StageGraph";
 import { ChainStrip } from "../graph/ChainStrip";
@@ -26,6 +26,7 @@ import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import { runVersion, type ItemDetail } from "./useItem";
 import { chainName } from "./chainName";
+import { notStarted } from "./chainValues";
 
 const PAGE = "item";
 
@@ -162,6 +163,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             onSeam={draft ? (at, seam) => setAdding({ at, seam }) : undefined}
             selected={selectedNode}
             opening={openingView(item.display_status ?? "", hasCurrent)}
+            // Not started, it opens readable, as its draft page and the Chains editor do: no smaller than 80%, not a 30% fit.
+            fit={notStarted(item) ? EDITOR_FIT : undefined}
             reserve={reserve}
             cover={cover}
             onSelect={(node) => pick({ kind: "node", node })}

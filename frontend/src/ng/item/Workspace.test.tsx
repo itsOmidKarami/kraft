@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { detail, stubFetch } from "./testkit";
+import { detail, fresh, stubFetch } from "./testkit";
 import { usePaneMemory, Workspace } from "./Workspace";
 
 beforeEach(() => {
@@ -36,6 +36,12 @@ describe("Workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "plan, node, done" }));
     expect(where()).toBe("/work-items/w1?sel=plan");
     expect(screen.getByRole("complementary", { name: "plan pane" })).toBeInTheDocument();
+  });
+
+  it("opens a never-started item's chain readable, at no less than 80%, as its draft page does", () => {
+    render(<MemoryRouter initialEntries={["/work-items/w1"]}><Workspace item={fresh()} version="1" reload={() => {}} /></MemoryRouter>);
+    // jsdom has no layout, so a plain fit would floor at 30%.
+    expect((document.querySelector(".canvas-world") as HTMLElement).style.transform).toContain("scale(0.8)");
   });
 
   it("names the chain of an item filed with no chain by the chain it runs (Kraft-9d8b2.52)", () => {
