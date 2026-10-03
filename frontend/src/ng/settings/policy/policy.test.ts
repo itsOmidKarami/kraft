@@ -52,6 +52,10 @@ describe("Policy numbers", () => {
     expect(parse("usd", "Infinity")).toEqual({ error: "Type the amount plainly, like 1000 or 1.5." });
     expect(parse("usd", "0", true)).toEqual({ value: 0 });
     expect(parse("tok", "1e3")).toEqual({ error: "Enter a number above 0." });
+    // r12 review: a leading point is a number; a cap in force re-saves unchanged.
+    expect(parse("s-as-min", ".5")).toEqual({ value: 30 });
+    expect(parse("min", ".5")).toEqual({ error: "Enter a whole number." });
+    expect(parse("usd", raw("usd", 1.234))).toEqual({ value: 1.234 });
     expect(parse("min", "")).toEqual({ value: null });
     expect(parse("min", "0")).toEqual({ error: "Enter a number above 0." });
     expect(parse("s", "0", true)).toEqual({ value: 0 });

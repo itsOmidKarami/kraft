@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, dollars, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -117,6 +117,11 @@ describe("dollars", () => {
     ["Infinity", NaN], ["0x10", NaN], ["0b11", NaN], ["1e3", NaN], ["-5", NaN],
   ])("reads %j as %d", (typed, amount) => {
     expect(dollars(typed)).toBe(amount);
+  });
+
+  // r12 review: a cap of $1.234 was prefilled "1.234", which it then refused as ambiguous.
+  it.each([1.234, 12.345, 123.456, 0.035, 5, 1.5, 1234.5])("reads back %d as it prefills it", (amount) => {
+    expect(dollars(dollarsText(amount))).toBe(amount);
   });
 });
 

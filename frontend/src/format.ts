@@ -273,6 +273,14 @@ export function dollars(text: string): number {
   return /^(\d+(\.\d+)?|\.\d+)$/.test(plain) ? Number(plain) : NaN;
 }
 
+/** An amount as a field starts with it, read back by `dollars` as the same
+ *  amount: a cap of $1.234 written "1.234" is the shape `dollars` refuses as
+ *  ambiguous, so re-saving it unchanged failed (r12 review); "1.2340" is not. */
+export const dollarsText = (n: number): string => {
+  const s = String(n);
+  return /^[1-9]\d{0,2}\.\d{3}$/.test(s) ? `${s}0` : s;
+};
+
 /** What to say when `dollars` refused what was typed. */
 export const DOLLARS_HINT = "Type the amount plainly, like 1000 or 1.5.";
 

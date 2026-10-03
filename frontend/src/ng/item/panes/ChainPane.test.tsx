@@ -104,6 +104,14 @@ describe("ChainConfig", () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  // r12 review: a cap of $1.234 was prefilled "1.234", which the editor then refused as ambiguous.
+  it("re-saves a cap in force with three decimals unchanged", async () => {
+    const calls = stubFetch(WRITES);
+    render(<ChainConfig item={detail({ budget_cap: { cap_usd: 1.234, source: "item", spent_usd: 1 } })} policy={null} reload={() => {}} editBudget onEditBudget={() => {}} />);
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: 1.234 } }]));
+  });
+
   // An item with no budget meter has no ✎: the focus goes back to what opened the editor (Raise cap).
   it("hands the focus back to what opened the editor when there is no ✎", async () => {
     stubFetch(WRITES);
