@@ -8,12 +8,13 @@ from typing import Literal
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 from kraft import config as config_mod
 from kraft import executor, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads as beads_mod
-from kraft.api import api_router, deps
+from kraft.api import SENTENCE_ERROR, api_router, deps
 from kraft.api.routes import board, gates
 from kraft.executor import entry
 from kraft.overrides import (
@@ -36,14 +37,20 @@ class Attachment(BaseModel):
 
 def _one_chain(data: object) -> object:
     """`chain` and its pre-2.0 name `chain_template` are one field: a body
-    naming two different chains is refused, not settled by which name wins."""
+    naming two different chains is refused, not settled by which name wins,
+    in one sentence naming both."""
     if (
         isinstance(data, dict)
         and data.get("chain") is not None
         and data.get("chain_template") is not None
         and data["chain"] != data["chain_template"]
     ):
-        raise ValueError("`chain` and `chain_template` name different chains; send `chain` alone")
+        raise PydanticCustomError(
+            SENTENCE_ERROR,
+            "`chain` {chain} and `chain_template` {chain_template} name different chains; "
+            "send `chain` alone",
+            {"chain": repr(data["chain"]), "chain_template": repr(data["chain_template"])},
+        )
     return data
 
 
