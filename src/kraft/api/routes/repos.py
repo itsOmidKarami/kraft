@@ -204,10 +204,16 @@ def _editable_repos(st, path: str | None = None) -> tuple[list[dict], dict | Non
     """The connected entries as the plain mappings `save_repos` writes -- the
     writer's boundary, where a route edits and re-saves what it read -- and
     the one connected at `path` (`deps._connected`), if any. Loaded through
-    `RepoEntry` first, so a legacy shape is migrated on the way."""
+    `RepoEntry` first, so a legacy shape is migrated on the way.
+
+    Each holds the fields its entry sets and nothing it leaves to a default:
+    saving one entry rewrote every entry with every field spelled out (23
+    keys after a re-connect, `id: null`, `env: {}` and the rest), in a file
+    people diff and edit by hand (R10a-07). A default left out reads back the
+    same."""
     models = config_mod.load_repos(deps.repos_path(st))
     found = deps._connected(models, path) if path is not None else None
-    repos = [r.model_dump_repo() for r in models]
+    repos = [r.model_dump_repo(exclude_unset=True) for r in models]
     return repos, next((d for m, d in zip(models, repos, strict=True) if m is found), None)
 
 
@@ -488,7 +494,11 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
             )
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
-    return entry
+    # The whole entry, defaults included, as the answer always was:
+    # `kraft repo connect` reads the saved entry back from it, and a client
+    # of the API may read any field. Only the file keeps to what was set.
+    full = config_mod.RepoEntry.model_validate(entry, context={"unrecognised_keys_reported": True})
+    return full.model_dump_repo()
 
 
 @api_router.delete("/repos", status_code=204)
@@ -502,7 +512,8 @@ async def remove_repo(request: Request, path: str):
     if live := st.db.read(open_counts_by_repo).get(entry["path"]):
         raise HTTPException(
             409,
-            f"{entry['path']} has {live} open item(s); finish or cancel them first",
+            f"{entry['path']} has {live} open item(s), paused ones included; complete, "
+            "cancel or abandon them first (kraft item complete, cancel, or abandon --yes)",
         )
     kept = [r for r in repos if r["path"] != entry["path"]]
     # A workspace still naming it would no longer load; refused, not dropped.

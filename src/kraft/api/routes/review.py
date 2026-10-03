@@ -7,6 +7,7 @@ Human routes refuse a worker session outright: agents speak only through
 
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -14,9 +15,11 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from kraft import config as config_mod
 from kraft import executor, review_reply, store
+from kraft import review as review_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board, lifecycle
 from kraft.api.routes import gates as gate_routes
+from kraft.executor import stops
 
 
 class Suggestion(BaseModel):
@@ -27,6 +30,12 @@ class Suggestion(BaseModel):
 
 #: A quote is the lines a comment's range covered; the review page sends at most 200.
 QUOTE_MAX_CHARS = 64_000
+
+
+def _clipped(quote: str | None) -> str | None:
+    if quote is None or len(quote) <= QUOTE_MAX_CHARS:
+        return quote
+    return quote[: QUOTE_MAX_CHARS - 1] + "…"
 
 
 class ThreadIn(BaseModel):
@@ -49,9 +58,7 @@ class ThreadIn(BaseModel):
     @field_validator("quote")
     @classmethod
     def _clip_quote(cls, quote: str | None) -> str | None:
-        if quote is None or len(quote) <= QUOTE_MAX_CHARS:
-            return quote
-        return quote[: QUOTE_MAX_CHARS - 1] + "…"
+        return _clipped(quote)
 
     @model_validator(mode="after")
     def _ranges(self):
@@ -60,6 +67,12 @@ class ThreadIn(BaseModel):
             raise ValueError("side, start_line and end_line are all set or all omitted")
         if self.start_line is None and (self.start_side is not None or self.quote is not None):
             raise ValueError("start_side and quote need a line range")
+        # A path in the repository, as `PUT /viewed` takes one: it is read by
+        # host git to quote the range.
+        if self.file_path is not None and (
+            self.file_path.startswith("/") or ".." in self.file_path.split("/")
+        ):
+            raise ValueError("file_path must be a path inside the repository")
         if self.start_line is not None:
             if self.file_path is None:
                 raise ValueError("a line range needs a file_path")
@@ -70,7 +83,11 @@ class ThreadIn(BaseModel):
             elif not 1 <= self.start_line <= self.end_line:
                 raise ValueError("start_line must be >= 1 and <= end_line")
         _check_suggestion(
-            self.suggestion, self.start_line, self.end_line, _across(self.side, self.start_side)
+            self.suggestion,
+            self.start_line,
+            self.end_line,
+            _across(self.side, self.start_side),
+            self.side,
         )
         if not self.body.strip():
             raise ValueError("body is empty")
@@ -82,7 +99,11 @@ def _across(side: str | None, start_side: str | None) -> bool:
 
 
 def _check_suggestion(
-    s: Suggestion | None, start: int | None, end: int | None, across: bool = False
+    s: Suggestion | None,
+    start: int | None,
+    end: int | None,
+    across: bool = False,
+    side: str | None = None,
 ) -> None:
     if s is None:
         return
@@ -91,6 +112,10 @@ def _check_suggestion(
     # A suggestion replaces new-side lines; a range across sides is not one run of them.
     if across:
         raise ValueError("a suggestion needs a range on one side")
+    # Nor are old-side lines, which the change already removed or kept: replacing
+    # "lines 2-3" would edit the new file's lines 2-3, which are other lines.
+    if side == "old":
+        raise ValueError("a suggestion replaces new-side lines, not a range on the old side")
     if not (start <= s.start_line <= s.end_line <= end):
         raise ValueError(f"the suggestion's lines must sit inside {start}-{end}")
 
@@ -99,7 +124,11 @@ def _check_row_suggestion(s: Suggestion | None, row) -> None:
     """`_check_suggestion` against a stored thread's range, as a 422."""
     try:
         _check_suggestion(
-            s, row["start_line"], row["end_line"], _across(row["side"], row["start_side"])
+            s,
+            row["start_line"],
+            row["end_line"],
+            _across(row["side"], row["start_side"]),
+            row["side"],
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -143,13 +172,14 @@ async def list_threads(wid: str, request: Request):
 async def create_thread(wid: str, body: ThreadIn, request: Request):
     _refuse_agents(request)
     st = request.app.state
-    deps._live_work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     gate = board._pending_gate(st, wid)
     anchor = body.anchor_sha or config_mod.git_read(
         st.run_dirs.worktrees / wid, "rev-parse", "HEAD"
     )
     if not anchor:
         raise HTTPException(409, "this work item has no commit to anchor a thread to")
+    quote = body.quote if body.quote is not None else await _quote(st, row, body, anchor)
     tid = await st.db.write(
         lambda c: store.create_thread(
             c,
@@ -163,12 +193,43 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
             start_line=body.start_line,
             end_line=body.end_line,
             start_side=body.start_side,
-            quote=body.quote,
+            quote=quote,
             label=body.label,
             suggestion=body.suggestion.model_dump() if body.suggestion else None,
         )
     )
     return _one(st, wid, tid)
+
+
+async def _quote(st, row, body: ThreadIn, anchor: str) -> str | None:
+    """The range's lines, when the client sent none: the CLI and MCP draw no
+    diff to quote from, and a thread with no quote reaches the agent as a bare
+    line number (R10F-04). Best effort: None when the lines cannot be read,
+    and never host git in a sandboxed worktree a live session can write."""
+    if body.start_line is None or not row["base_ref"]:
+        return None
+    worktree = st.run_dirs.worktrees / row["id"]
+    if not worktree.is_dir():
+        return None
+    try:
+        stops.refuse_live_sandboxed_session(
+            st.db, row, deps.launch(st, row["repo"]), what="a quote"
+        )
+    except RuntimeError:
+        return None
+    # Off the event loop: two git calls on the worktree.
+    quote = await asyncio.to_thread(
+        review_mod.quote_range,
+        worktree,
+        row["base_ref"],
+        anchor,
+        body.file_path,
+        body.side,
+        body.start_line,
+        body.end_line,
+        body.start_side,
+    )
+    return _clipped(quote)
 
 
 def _draft_thread_or_409(st, tid):

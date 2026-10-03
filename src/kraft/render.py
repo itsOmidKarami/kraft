@@ -316,20 +316,34 @@ def diff_body(payload: dict) -> str:
     return "\n".join([*out, *_diff_trailer(payload)])
 
 
+#: A line as the diff marks it: `-4` on the old side, `+5` on the new.
+_SIDE_MARK = {"old": "-", "new": "+"}
+
+
+def thread_where(t: dict) -> str:
+    """Where a review thread sits, as the review page names it: `path:+5`,
+    `path:+5 to +7`, `path:-2 to -3`, or `path:-2 to +2` for a range across
+    sides (old line 2 through new line 2). Every line carries its side, so a
+    comment on removed line 8 never reads like one on added line 8 (R10a-08).
+    A file alone, or the whole change, has no lines."""
+    if not t.get("file_path"):
+        return "(whole change)"
+    if t.get("start_line") is None:
+        return t["file_path"]
+    side = t.get("side") or "new"
+    start_side = t.get("start_side") or side
+    start = f"{_SIDE_MARK[start_side]}{t['start_line']}"
+    end = f"{_SIDE_MARK[side]}{t['end_line']}"
+    return f"{t['file_path']}:{start}" + ("" if start == end else f" to {end}")
+
+
 def threads(items: list) -> str:
     """One block per thread: id, where, label/state/draft, then each comment."""
     if not items:
         return "no review threads"
     out = []
     for t in items:
-        where = t["file_path"] or "(whole change)"
-        start_side = t.get("start_side") or t.get("side")
-        if t["start_line"] is not None and start_side != t.get("side"):
-            # Across sides: old line 2 through new line 2 reads `-2 to +2`, as the diff marks them.
-            mark = {"old": "-", "new": "+"}
-            where += f":{mark[start_side]}{t['start_line']} to {mark[t['side']]}{t['end_line']}"
-        elif t["start_line"] is not None:
-            where += f":{t['start_line']}-{t['end_line']}"
+        where = thread_where(t)
         tags = " ".join(filter(None, [t["label"], t["state"], "draft" if t["draft"] else None]))
         out.append(f"{t['id']}  {where}  [{tags}]")
         for c in t["comments"]:

@@ -23,7 +23,8 @@ kraft item set-attachments [ID] --drop spec     # removes it, puts its gate back
 
 Filing snapshots the spec and plan into Kraft's storage, so editing the
 original file changes nothing until it is re-attached. Check the plan for the
-same wording, then confirm the stored copy with `kraft view docs ID`. Once the item has
+same wording, then confirm the stored copy with `kraft view docs ID --attachment spec`
+(or `plan`; `get_attachment` over MCP). Once the item has
 started the call answers 409: its worktree already holds the documents,
 committed on its branch, and steering is the only route.
 

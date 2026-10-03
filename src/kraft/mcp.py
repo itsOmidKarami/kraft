@@ -89,6 +89,13 @@ def build() -> MCPServer:
         return await client.artifact(work_item_id)
 
     @server.tool()
+    async def get_attachment(kind: str, work_item_id: str | None = None) -> dict:
+        """The spec or plan (`kind`) attached when the work item was filed, as
+        Kraft stored it then: readable before the item starts, when nothing
+        else holds it. 404 when the item has no such attachment."""
+        return await client.attachment(kind, work_item_id)
+
+    @server.tool()
     async def search(q: str, limit: int = 20) -> dict:
         """Search Kraft's cross-repo index of specs, plans, and session
         summaries. Use this before writing a spec, to find whether the decision
@@ -446,14 +453,30 @@ def build() -> MCPServer:
         side: str | None = None,
         label: str | None = None,
         suggestion: str | None = None,
+        start_side: str | None = None,
+        quote: str | None = None,
     ) -> dict:
         """Leave a draft review comment on a Kraft work item: a new thread, or a
         reply when `thread_id` is given. Drafts reach no agent until
         submit_review sends them. `label` is must_fix, question or nit; a line
         range needs `file_path`, `start_line`, `end_line` and `side` (old or
-        new, default new)."""
+        new, default new), which is `end_line`'s side. `start_side` is
+        `start_line`'s when it differs: old line 3 through new line 2 is
+        `start_side` old, `side` new. `quote` is the range's lines, each led by
+        its diff mark; left out, Kraft quotes them from the diff. `suggestion`
+        replaces new-side lines, so it needs a range on the new side alone."""
         return await client.add_review_comment(
-            body, work_item_id, thread_id, file_path, start_line, end_line, side, label, suggestion
+            body,
+            work_item_id,
+            thread_id,
+            file_path,
+            start_line,
+            end_line,
+            side,
+            label,
+            suggestion,
+            start_side=start_side,
+            quote=quote,
         )
 
     @server.tool()

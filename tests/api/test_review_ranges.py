@@ -49,3 +49,46 @@ def test_a_long_quote_is_clipped_and_never_blocks_the_comment(client, gated):
     assert r.status_code == 201, r.text[:200]
     quote = r.json()["quote"]
     assert len(quote) == 64_000 and quote.endswith("…")
+
+
+@_REVIEW
+def test_a_thread_sent_with_no_quote_is_quoted_from_the_diff(client, gated):
+    """The CLI and MCP draw no diff, so they send no quote: the server quotes
+    the range, and the agent reads the lines, as for one made on the page."""
+    import subprocess
+
+    from api.test_review import _worktree
+
+    wt = _worktree(client, gated)
+    (wt / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "commit", "-qam", "fix"], cwd=wt, check=True)
+    r = _new_thread(client, gated, file_path="calc.py", start_line=1, end_line=2)
+    assert r.status_code == 201, r.text
+    assert r.json()["quote"] == " def add(a, b):\n+    return a + b"
+    old = _new_thread(client, gated, file_path="calc.py", side="old", start_line=2, end_line=2)
+    assert old.json()["quote"] == "-    return a - b  # bug: should be +"
+    sent = _new_thread(client, gated, file_path="calc.py", start_line=2, end_line=2, quote="+x")
+    assert sent.json()["quote"] == "+x"
+
+
+@_REVIEW
+def test_a_suggestion_on_old_side_lines_is_refused(client, gated):
+    """A suggestion replaces new-side lines: on an old-side range it would
+    replace other lines than the ones it was written against."""
+    fix = {"start_line": 3, "end_line": 3, "replacement": "x"}
+    assert _new_thread(client, gated, side="old", suggestion=fix).status_code == 422
+    tid = _new_thread(client, gated, side="old").json()["id"]
+    assert client.patch(f"/api/threads/{tid}", json={"suggestion": fix}).status_code == 422
+    assert _new_thread(client, gated, suggestion=fix).status_code == 201
+
+
+@_REVIEW
+def test_a_thread_on_a_path_outside_the_repo_is_refused(client, gated):
+    """Host git reads `file_path` to quote the range: it is a path in the
+    repository, as `PUT /viewed` takes one."""
+    for path in ("/etc/passwd", "../other/calc.py", "a/../../calc.py"):
+        r = _new_thread(client, gated, file_path=path)
+        assert r.status_code == 422, (path, r.text)
+        assert "file_path must be a path inside the repository" in r.text
+    assert client.get(f"/api/work-items/{gated}/threads").json() == []

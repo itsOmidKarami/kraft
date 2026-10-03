@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import client
+from kraft import client, render
 from kraft.cli import common
 
 _POLICY_HELP = (
@@ -105,22 +105,39 @@ def _render_created(result: dict) -> str:
     )
 
 
+async def _gate_of(ns: argparse.Namespace) -> str:
+    """The gate `--gate` names, else the one pending, which the summary line
+    names: resolved here rather than in the client, the same one read."""
+    if ns.gate:
+        return ns.gate
+    return await client.actions._pending_gate_of(client.context._forbid_self_action(ns.id))
+
+
 def _cmd_approve(ns: argparse.Namespace) -> None:
-    common.emit(
-        asyncio.run(client.approve_gate(ns.gate, ns.id, ns.digest)), common._render_action, ns.json
-    )
+    async def go():
+        gate = await _gate_of(ns)
+        return gate, await client.approve_gate(gate, ns.id, ns.digest)
+
+    gate, result = asyncio.run(go())
+    common.emit(result, common.item_action(f"approved {gate} on {{id}}"), ns.json)
 
 
 def _cmd_reject(ns: argparse.Namespace) -> None:
-    common.emit(
-        asyncio.run(client.reject_gate(ns.note, ns.gate, ns.id, ns.node)),
-        common._render_action,
-        ns.json,
-    )
+    # Before the gate is looked up: a missing note is the caller's to fix
+    # whatever the item is waiting on.
+    if not ns.note.strip():
+        raise ValueError("a reject note is required: say what is wrong")
+
+    async def go():
+        gate = await _gate_of(ns)
+        return gate, await client.reject_gate(ns.note, gate, ns.id, ns.node)
+
+    gate, result = asyncio.run(go())
+    common.emit(result, common.item_action(f"rejected {gate} on {{id}}"), ns.json)
 
 
 def _cmd_pause(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.pause(ns.id)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.pause(ns.id)), common.item_action("paused {id}"), ns.json)
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -147,7 +164,7 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
             "abandon deletes the worktree and the item's branch: uncommitted work and "
             f"commits you never pushed are lost. {keep} To go ahead, pass --yes"
         )
-    common.emit(asyncio.run(client.abandon(ns.id)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.abandon(ns.id)), common.item_action("abandoned {id}"), ns.json)
 
 
 def _cmd_resume(ns: argparse.Namespace) -> None:
@@ -159,39 +176,91 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
         steers[path] = text
     common.emit(
         asyncio.run(client.resume(ns.steer, ns.id, steers=steers or None)),
-        common._render_action,
+        common.item_action("resumed {id}", small=_resumed),
         ns.json,
     )
+
+
+def _resumed(result: dict) -> str:
+    """resume's usual answer: the node it went on from, and the agent tasks
+    a steer reached. No node is an item that had never started."""
+    node = result.get("node_id")
+    line = f"resumed {result['id']} at {node}" if node else f"started {result['id']}"
+    if steered := result.get("steered"):
+        line += f"; steered {', '.join(steered)}"
+    return line
+
+
+def _rerun_at(result: dict) -> str:
+    """Where a retry's run starts, from its usual answer, and its attempt."""
+    where = result.get("path") or result.get("node_id") or "its first node"
+    attempt = result.get("attempt")
+    return f"{where}, attempt {attempt}" if attempt else str(where)
 
 
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common._render_action,
+        common.item_action("retried {id}", small=lambda r: f"retried {r['id']} at {_rerun_at(r)}"),
         ns.json,
     )
 
 
 def _cmd_raise_budget(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.raise_budget(ns.usd, ns.id)), common._render_action, ns.json)
+    cap = "no cap" if ns.usd is None else f"${ns.usd:g}"
+    common.emit(
+        asyncio.run(client.raise_budget(ns.usd, ns.id)),
+        common.item_action(
+            f"raised the cap on {{id}} to {cap} and retried it",
+            small=lambda r: f"raised the cap on {r['id']} to {cap}; retried at {_rerun_at(r)}",
+        ),
+        ns.json,
+    )
+
+
+def _skipping(ns: argparse.Namespace) -> str:
+    """What `skip` passes over, read before it runs, as the server picks it:
+    `--path`, else the pending gate, else the current node. An item that
+    cannot be read here costs the line its name, not the skip."""
+    if ns.path:
+        return ns.path
+    try:
+        item = asyncio.run(client.get_work_item(ns.id))
+    except Exception:  # noqa: BLE001
+        return "the current node"
+    return item.get("pending_gate") or item.get("current_node_id") or "the current node"
 
 
 def _cmd_skip(ns: argparse.Namespace) -> None:
+    what = "" if ns.json else _skipping(ns)
     common.emit(
-        asyncio.run(client.skip(ns.note, ns.id, path=ns.path)), common._render_action, ns.json
+        asyncio.run(client.skip(ns.note, ns.id, path=ns.path)),
+        common.item_action(f"skipped {what} on {{id}}"),
+        ns.json,
     )
 
 
 def _cmd_complete(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.complete(ns.reason, ns.id, close_beads=ns.close_beads)),
-        common._render_action,
+        common.item_action(
+            "marked {id} complete" + ("; its beads are closed" if ns.close_beads else ""),
+            status=False,
+        ),
         ns.json,
     )
 
 
 def _cmd_cancel(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.cancel(ns.reason, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.cancel(ns.reason, ns.id)),
+        common.item_action(
+            "cancelled {id}; its worktree and branch stay (kraft item abandon {id} --yes "
+            "deletes them)",
+            status=False,
+        ),
+        ns.json,
+    )
 
 
 def _cmd_progress(ns: argparse.Namespace) -> None:
@@ -284,6 +353,10 @@ _LABELS = {"must-fix": "must_fix", "question": "question", "nit": "nit"}
 def _cmd_comment(ns: argparse.Namespace) -> None:
     if ns.suggest is not None and ns.lines is None:
         ns._parser.error("--suggest needs --lines")
+    if ns.start_side is not None and ns.lines is None:
+        ns._parser.error("--start-side needs --lines")
+    if ns.suggest is not None and "old" in (ns.side, ns.start_side):
+        ns._parser.error("--suggest replaces new-side lines, so it takes no old-side range")
     start, end = ns.lines if ns.lines else (None, None)
     common.emit(
         asyncio.run(
@@ -297,11 +370,23 @@ def _cmd_comment(ns: argparse.Namespace) -> None:
                 side=ns.side,
                 label=_LABELS[ns.label] if ns.label else None,
                 suggestion=ns.suggest,
+                start_side=ns.start_side,
             )
         ),
-        common._render_action,
+        _render_comment,
         ns.json,
     )
+
+
+def _render_comment(result: dict) -> str:
+    """A new thread as `kraft view threads` names it, with the lines it
+    quotes, which is what the agent will read; a reply as its fields."""
+    if "comments" not in result:
+        return common._render_action(result)
+    lines = [f"drafted thread {result['id']} on {render.thread_where(result)}"]
+    lines += ["    | " + line for line in (result.get("quote") or "").splitlines()]
+    lines.append("it goes out with your next kraft item review")
+    return "\n".join(lines)
 
 
 def _cmd_resolve(ns: argparse.Namespace) -> None:
@@ -319,7 +404,7 @@ def _cmd_review(ns: argparse.Namespace) -> None:
         print(
             f"request-changes -> {result['target']} ({result['target_reason']}), {result['action']}"
         )
-    common.emit(result, common._render_action, ns.json)
+    common.emit(result, common.item_action(f"sent your review ({ns.outcome}) on {{id}}"), ns.json)
 
 
 def _cmd_set_policy(ns: argparse.Namespace) -> None:
@@ -356,8 +441,19 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     # Two flags rather than a repeatable `--attach kind=path`: there are exactly
     # two kinds, the server refuses a duplicate kind, and these document
     # themselves in --help.
-    create.add_argument("--spec", help="attach a spec that already exists; skips the spec node")
-    create.add_argument("--plan", help="attach a plan that already exists; skips the plan node")
+    # Inside the repo: the copy is committed on the item's branch (R10a-02).
+    create.add_argument(
+        "--spec",
+        metavar="PATH",
+        help="attach a spec that already exists, a file inside the repo (e.g. under "
+        ".engineering/specs/); skips the spec node",
+    )
+    create.add_argument(
+        "--plan",
+        metavar="PATH",
+        help="attach a plan that already exists, a file inside the repo (e.g. under "
+        ".engineering/plans/); skips the plan node",
+    )
     create.add_argument(
         "--auto-gate",
         action=argparse.BooleanOptionalAction,
@@ -510,7 +606,17 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     comment.add_argument("--reply", metavar="THREAD", help="reply to this thread instead")
     comment.add_argument("--file", dest="file_path", help="the file this comment is about")
     comment.add_argument("--lines", type=_lines, metavar="A[-B]", help="a line range in --file")
-    comment.add_argument("--side", choices=["old", "new"], help="default: new")
+    comment.add_argument(
+        "--side",
+        choices=["old", "new"],
+        help="the side B is on (and A, unless --start-side); default: new",
+    )
+    comment.add_argument(
+        "--start-side",
+        choices=["old", "new"],
+        help="the side A is on, for a range across sides: --lines 3-2 --start-side old "
+        "--side new is old line 3 through new line 2",
+    )
     comment.add_argument("--label", choices=["must-fix", "question", "nit"])
     comment.add_argument("--suggest", metavar="TEXT", help="a suggested replacement for --lines")
     comment.set_defaults(func=_cmd_comment, _parser=comment)
@@ -562,8 +668,16 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="replace or drop a not-yet-started item's spec/plan, instead of re-filing it",
     )
     set_attachments.add_argument("id", nargs="?")
-    set_attachments.add_argument("--spec", help="the revised spec, re-copied into Kraft")
-    set_attachments.add_argument("--plan", help="the revised plan, re-copied into Kraft")
+    set_attachments.add_argument(
+        "--spec",
+        metavar="PATH",
+        help="the revised spec, a file inside the repo, re-copied into Kraft",
+    )
+    set_attachments.add_argument(
+        "--plan",
+        metavar="PATH",
+        help="the revised plan, a file inside the repo, re-copied into Kraft",
+    )
     set_attachments.add_argument(
         "--drop",
         action="append",

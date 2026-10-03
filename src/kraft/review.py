@@ -273,3 +273,114 @@ def filter_diff(diff: str, keep: set[str]) -> str:
         if old in keep or new in keep:
             out.append(c)
     return "\n".join(out)
+
+
+#: At most this many lines are quoted with a comment, as the review page sends
+#: (`Comments.tsx`'s `QUOTE_LINES`); past it, `…` stands for the rest.
+QUOTE_LINES = 200
+
+_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+#: A commit as `quote_range` takes one: never anything git could read as an option.
+_SHA = re.compile(r"[0-9a-f]{7,64}")
+
+
+class _DiffLine(NamedTuple):
+    kind: str  # " ", "+" or "-"
+    old: int | None
+    new: int | None
+    text: str
+    hunk: int
+
+
+def _diff_lines(diff: str) -> list[_DiffLine]:
+    """One file's unified diff as its lines, each with its line number on
+    each side it is on: `review/range.ts`'s `lineIndex`, in Python."""
+    out: list[_DiffLine] = []
+    old = new = 0
+    hunk = -1
+    for line in diff.splitlines():
+        if m := _HUNK.match(line):
+            old, new, hunk = int(m.group(1)), int(m.group(2)), hunk + 1
+            continue
+        if hunk < 0 or not line or line[0] not in " +-":
+            continue
+        kind, text = line[0], line[1:]
+        out.append(
+            _DiffLine(
+                kind,
+                old if kind != "+" else None,
+                new if kind != "-" else None,
+                text,
+                hunk,
+            )
+        )
+        old += kind != "+"
+        new += kind != "-"
+    return out
+
+
+def _clip_quote(lines: list[str]) -> str | None:
+    if not lines:
+        return None
+    return "\n".join(lines[:QUOTE_LINES] + (["…"] if len(lines) > QUOTE_LINES else []))
+
+
+def quote_range(
+    worktree: Path,
+    base: str,
+    head: str,
+    path: str,
+    side: str,
+    start: int,
+    end: int,
+    start_side: str | None = None,
+) -> str | None:
+    """The lines a comment's range covers in `base..head`, each led by its
+    diff mark, as the review page quotes them (`range.ts`'s `quoteOf`), or
+    None when they cannot be read. A one-side range is that side's lines
+    `start` to `end`, a line the diff leaves alone read from the file; a range
+    across sides is every diff line between its two ends, `…` between hunks.
+
+    For a comment made where no diff is drawn -- `kraft item comment`, MCP's
+    `add_review_comment` -- so that the agent reading the thread gets the
+    lines it is about, as it does for one made on the review page."""
+    if not (_SHA.fullmatch(base) and _SHA.fullmatch(head)):
+        return None
+    unentered = _sandbox.SUBMODULES_UNENTERED
+    # A path, not a pathspec: `*` must not quote whatever file it matches.
+    diff = _config.git_read(
+        worktree, "--literal-pathspecs", "diff", unentered, base, head, "--", path, strip=False
+    )
+    if diff is None:
+        return None
+    lines = _diff_lines(diff)
+    if start_side is not None and start_side != side:
+        at = {
+            (side_, n): i
+            for i, d in enumerate(lines)
+            for side_, n in (("old", d.old), ("new", d.new))
+            if n is not None
+        }
+        lo, hi = at.get((start_side, start)), at.get((side, end))
+        if lo is None or hi is None or lo > hi:
+            return None
+        out: list[str] = []
+        for i in range(lo, hi + 1):
+            if i > lo and lines[i].hunk != lines[i - 1].hunk:
+                out.append("…")
+            out.append(lines[i].kind + lines[i].text)
+        return _clip_quote(out)
+    rev = base if side == "old" else head
+    # `cat-file blob` answers with the file or fails: `git show rev:<path>`
+    # printed the commit itself for `rev:*` on a newer git.
+    content = _config.git_read(worktree, "cat-file", "blob", f"{rev}:{path}", strip=False)
+    if content is None:
+        return None
+    text = content.splitlines()
+    if not 1 <= start <= end <= len(text):
+        return None
+    changed = {d.old if side == "old" else d.new for d in lines if d.kind != " "} - {None}
+    mark = "-" if side == "old" else "+"
+    return _clip_quote(
+        [(mark if n in changed else " ") + text[n - 1] for n in range(start, end + 1)]
+    )

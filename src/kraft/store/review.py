@@ -11,7 +11,7 @@ import json
 import sqlite3
 import uuid
 
-from kraft import events
+from kraft import events, render
 from kraft.store import _now as _now  # test seam for wall-clock checks
 
 __all__ = [
@@ -437,28 +437,12 @@ _NOTE_HEAD = (
 )
 
 
-def thread_where(t: dict) -> str:
-    """`path:5-7`, or `path:-2 to +2` for a range across sides (old line 2
-    through new line 2, as the diff marks them); a file alone, or the whole
-    change."""
-    if not t["file_path"]:
-        return "(whole change)"
-    if t["start_line"] is None:
-        return t["file_path"]
-    side = t.get("side")
-    start_side = t.get("start_side") or side
-    if start_side == side:
-        return f"{t['file_path']}:{t['start_line']}-{t['end_line']}"
-    mark = {"old": "-", "new": "+"}
-    return f"{t['file_path']}:{mark[start_side]}{t['start_line']} to {mark[side]}{t['end_line']}"
-
-
 def render_threads(threads: list[dict]) -> str:
     blocks = []
     for t in threads:
         if t["state"] == "resolved":
             continue
-        head = f"[{t['id']}] {thread_where(t)}" + (f" ({t['label']})" if t["label"] else "")
+        head = f"[{t['id']}] {render.thread_where(t)}" + (f" ({t['label']})" if t["label"] else "")
         first, *replies = t["comments"]
         lines = [head]
         # The lines as the reviewer saw them, before what they said about them.

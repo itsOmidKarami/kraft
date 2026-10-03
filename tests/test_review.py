@@ -156,3 +156,54 @@ def test_ignore_whitespace_drops_whitespace_only_files_from_patch_and_counts(tmp
     assert "ws.txt" not in quiet.diff and "ws.txt" in plain.diff
     mixed = next(f for f in quiet.files if f["path"] == "mixed.txt")
     assert (mixed["insertions"], mixed["deletions"]) == (1, 1)
+
+
+def _quoting(tmp_path):
+    """A base with five lines, and a head that replaces line 2 and adds one
+    after line 4, in two hunks (git's three lines of context join them unless
+    they are far apart, so the file is long)."""
+    repo = make_repo(tmp_path)
+    old = [f"line {n}" for n in range(1, 21)]
+    base = _commit(repo, {"q.py": "\n".join(old) + "\n"})
+    new = old[:1] + ["line 2 fixed"] + old[2:15] + ["added"] + old[15:]
+    head = _commit(repo, {"q.py": "\n".join(new) + "\n"})
+    return repo, base, head
+
+
+def test_a_one_side_range_is_quoted_with_each_lines_diff_mark(tmp_path):
+    """What `kraft item comment --lines` stores when it sends no quote: the
+    lines on that side, a changed one marked, one the diff left alone not."""
+    repo, base, head = _quoting(tmp_path)
+    quote = review.quote_range(repo, base, head, "q.py", "new", 1, 3)
+    assert quote == " line 1\n+line 2 fixed\n line 3"
+    old = review.quote_range(repo, base, head, "q.py", "old", 2, 3)
+    assert old == "-line 2\n line 3"
+
+
+def test_a_range_across_sides_is_every_diff_line_between_its_ends(tmp_path):
+    repo, base, head = _quoting(tmp_path)
+    assert review.quote_range(repo, base, head, "q.py", "new", 2, 2, "old") == (
+        "-line 2\n+line 2 fixed"
+    )
+    # From old line 2 to the added line 16: the two hunks apart, with `…` between.
+    spans = review.quote_range(repo, base, head, "q.py", "new", 2, 16, "old")
+    assert spans.startswith("-line 2\n+line 2 fixed\n") and "\n…\n" in spans
+    assert spans.endswith("+added")
+
+
+def test_a_range_that_cannot_be_read_has_no_quote(tmp_path):
+    repo, base, head = _quoting(tmp_path)
+    assert review.quote_range(repo, base, head, "q.py", "new", 90, 91) is None
+    assert review.quote_range(repo, base, head, "missing.py", "new", 1, 1) is None
+    # Never anything git could read as an option: `git diff --output=x` writes x.
+    assert review.quote_range(repo, base, "--output=x", "q.py", "new", 1, 1) is None
+    assert not (repo / "x").exists()
+
+
+def test_a_file_path_is_a_path_not_a_pathspec(tmp_path):
+    """`--file '*'` quoted whichever file the glob matched."""
+    repo, base, head = _quoting(tmp_path)
+    assert review.quote_range(repo, base, head, "*", "new", 1, 2) is None
+    # Across sides only the diff is read: as a pathspec, `*` read q.py's.
+    assert review.quote_range(repo, base, head, "*", "new", 2, 2, "old") is None
+    assert review.quote_range(repo, base, head, "q.*", "new", 2, 2, "old") is None

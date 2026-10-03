@@ -733,3 +733,13 @@ def test_probe_repo_root_scope_globs_match_files_inside_its_directories(repo):
     assert "pyproject.toml" in root["paths"]
     src_pattern = next(p for p in root["paths"] if p.startswith("src"))
     assert fnmatch.fnmatchcase("src/kraft/config.py", src_pattern)
+
+
+def test_repo_help_says_disconnect_is_refused_while_an_item_is_open(capsys):
+    """R10F-03: it said "work items are untouched", and answers 409 while
+    the repo has an item that has not ended."""
+    with pytest.raises(SystemExit):
+        cli.main(["repo", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "forget a repo; refused while it has an item that has not ended" in text
+    assert "untouched" not in text

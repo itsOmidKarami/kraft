@@ -288,7 +288,7 @@ def test_render_note_lists_unresolved_threads_with_suggestions_and_replies():
     ]
     note = store.render_note(threads, "Two things.")
     assert note.startswith("Two things.")
-    assert "[t1] a.py:3-4 (must_fix)" in note
+    assert "[t1] a.py:+3 to +4 (must_fix)" in note
     assert "s = set()" in note and "> implementation: a list is intentional" in note
     assert "kraft item reply t1" not in note  # the footer names the verb once, generically
     assert "kraft item reply <thread-id>" in note
@@ -298,7 +298,8 @@ def test_render_note_lists_unresolved_threads_with_suggestions_and_replies():
 def test_render_threads_names_a_range_across_sides_and_quotes_its_lines():
     """What a worker reads: a removed line through its replacement is `-2 to +2`,
     with the lines as the reviewer saw them ahead of the comment. A thread with
-    no `start_side` or quote, as every older one, reads as before."""
+    no `start_side` or quote, as every older one, reads as one side; an
+    old-side range carries its mark too, so it never reads as new lines."""
 
     def thread(tid, **kw):
         t = {
@@ -315,11 +316,13 @@ def test_render_threads_names_a_range_across_sides_and_quotes_its_lines():
 
     across = thread("t1", start_side="old", quote="-    return a - b\n+    return a + b")
     older = thread("t2", start_line=3, end_line=4)
-    out = store.render_threads([across, older])
+    removed = thread("t3", side="old", start_line=3, end_line=4)
+    out = store.render_threads([across, older, removed])
     assert (
         "[t1] calc.py:-2 to +2 (must_fix)\n"
         "    | -    return a - b\n"
         "    | +    return a + b\n"
         "keep the sign"
     ) in out
-    assert "[t2] calc.py:3-4 (must_fix)\nkeep the sign" in out
+    assert "[t2] calc.py:+3 to +4 (must_fix)\nkeep the sign" in out
+    assert "[t3] calc.py:-3 to -4 (must_fix)\nkeep the sign" in out

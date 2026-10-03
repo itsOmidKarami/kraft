@@ -525,7 +525,9 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
     connect.set_defaults(func=_cmd_connect)
 
     disconnect = subs.add_parser(
-        "disconnect", parents=[common], help="forget a repo (work items are untouched)"
+        "disconnect",
+        parents=[common],
+        help="forget a repo; refused while it has an item that has not ended",
     )
     disconnect.add_argument("path", nargs="?", help="default: the current directory")
     disconnect.set_defaults(func=_cmd_disconnect)

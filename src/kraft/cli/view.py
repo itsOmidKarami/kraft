@@ -98,8 +98,28 @@ def _show_value(item: dict, key: str, value) -> str:
     return str(value)
 
 
-def _render_show(item: dict) -> str:
-    return render.kv([(key, _show_value(item, key, value)) for key, value in item.items()])
+def _render_show(item: dict, full: dict | None = None) -> str:
+    pairs = [(key, _show_value(item, key, value)) for key, value in item.items()]
+    if full is not None and (hint := _raise_hint(full)) and not item.get("suggested_action"):
+        at = next((i + 1 for i, (key, _) in enumerate(pairs) if key == "stop_reason"), len(pairs))
+        pairs.insert(at, ("next", hint))
+    return render.kv(pairs)
+
+
+def _raise_hint(item: dict) -> str | None:
+    """The command for a budget stop the item can raise: its own cap, or its
+    policy's item-wide `budget_usd`. The board's Raise cap button, which a CLI
+    reader was never pointed at (R10a-10). A node's, a token or the daily cap
+    is not one `raise-budget` takes (`item/status.ts`'s `budgetRaise`)."""
+    stop = item.get("stop") or {}
+    if item.get("status") != "needs_human" or stop.get("kind") != "budget":
+        return None
+    if not (stop.get("limit") or stop.get("scope") == "work_item"):
+        return None
+    return (
+        f"kraft item raise-budget {item['id']} --usd N (raises the cap that stopped it, "
+        "and retries it; --usd none lifts it)"
+    )
 
 
 def _render_search(payload: dict) -> str:
@@ -121,8 +141,13 @@ def _cmd_list(ns: argparse.Namespace) -> None:
 
 
 def _cmd_show(ns: argparse.Namespace) -> None:
-    item = asyncio.run(client.get_work_item(ns.id, full=ns.json))
-    common.emit(item, _render_show, ns.json)
+    # The whole detail either way, one request: the table prints the trimmed
+    # fields, and reads the stop's kind off the rest.
+    item = asyncio.run(client.get_work_item(ns.id, full=True))
+    if ns.json:
+        common.emit(item, str, True)
+        return
+    print(_render_show(client.trim_work_item(item), item))
 
 
 def _cmd_search(ns: argparse.Namespace) -> None:
@@ -295,7 +320,35 @@ def _cmd_compare(ns: argparse.Namespace) -> None:
 
 
 def _cmd_docs(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.documents(ns.id)), _render_docs, ns.json)
+    if ns.attachment:
+        payload = asyncio.run(client.attachment(ns.attachment, ns.id))
+        if ns.json:
+            common.emit(payload, str, True)
+            return
+        render.page(payload.get("content", ""), force_plain=ns.no_pager)
+        return
+    docs = asyncio.run(client.documents(ns.id))
+    if ns.json:
+        common.emit(docs, str, True)
+        return
+    print(_docs_text(docs, asyncio.run(client.get_work_item(ns.id))))
+
+
+def _docs_text(docs: list[dict], item: dict) -> str:
+    """The indexed documents, then what was attached at filing that the index
+    does not hold yet: before an item starts, that is all it has, and a bare
+    "(nothing)" read as though it had no spec (R10F-06)."""
+    indexed = {d.get("path") for d in docs}
+    attached = [a for a in item.get("attachments") or [] if a.get("path") not in indexed]
+    if not attached:
+        return _render_docs(docs)
+    blocks = [_render_docs(docs)] if docs else []
+    blocks.append(
+        "attached when it was filed:\n"
+        + render.table(attached, [("KIND", "kind"), ("PATH", "path")])
+        + f"\nread one: kraft view docs {item['id']} --attachment {attached[0]['kind']}"
+    )
+    return "\n\n".join(blocks)
 
 
 def _cmd_doc(ns: argparse.Namespace) -> None:
@@ -400,8 +453,18 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     compare.add_argument("--no-pager", action="store_true")
     compare.set_defaults(func=_cmd_compare)
 
-    docs = subs.add_parser("docs", parents=[common], help="documents linked to a work item")
+    docs = subs.add_parser(
+        "docs",
+        parents=[common],
+        help="documents linked to a work item, and the spec or plan it was filed with",
+    )
     docs.add_argument("id", nargs="?")
+    docs.add_argument(
+        "--attachment",
+        choices=["spec", "plan"],
+        help="print the spec or plan attached when the item was filed, as Kraft stored it",
+    )
+    docs.add_argument("--no-pager", action="store_true")
     docs.set_defaults(func=_cmd_docs)
 
     doc = subs.add_parser("doc", parents=[common], help="print one document, or open it")

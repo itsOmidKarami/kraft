@@ -34,6 +34,11 @@ the same value `kraft admin mcp` hands an agent. These verbs do not:
 | `admin install-service`, `uninstall-service` | None. |
 | `admin mcp`, `admin permission-hook` | None; these speak a protocol on stdio. |
 
+Without `--json`, an `item` verb that changes the item's state prints one line
+saying what it did and where the item stands now, such as
+`approved spec_approval on 4f2c…; the item is now running`. The item itself is
+in `--json`, or in `kraft view show`.
+
 `kraft view logs --json` and `kraft view events -f --json` print NDJSON, one
 object per line, because a stream has no end on which to close an array.
 `kraft view events --json` without `-f` prints one JSON array.

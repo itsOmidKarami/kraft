@@ -68,7 +68,7 @@ kraft item progress K [ID]                  # a worker saying it started plan ta
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked
 kraft view compare [ID] --from T --to T [--nodes a,b] [--stat|--name-only] [-w]  # T: base|attempt:N|last_review|latest
-kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new]] [--label must-fix|question|nit] [--suggest "..."]
+kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new] [--start-side old|new]] [--label must-fix|question|nit] [--suggest "..."]
 kraft item comment --reply THREAD --body "..."
 kraft item resolve THREAD / kraft item reopen THREAD
 kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N]
@@ -77,7 +77,7 @@ kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is 
 kraft view events [ID] [--after N] [--type T]
 kraft view watch                            # live board, needs a terminal
 kraft view diff [ID] [--stat|--name-only] [-w]   # truncation and untracked always shown
-kraft view docs [ID] / kraft view doc DOC_ID [--open [EDITOR]]
+kraft view docs [ID] [--attachment spec|plan] / kraft view doc DOC_ID [--open [EDITOR]]  # --attachment: what it was filed with
 kraft view artifact [ID]                    # the doc the pending gate is about
 kraft repo list                             # `*` marks the repo you are in
 kraft repo connect [PATH] [--test-command C] [--setup-command C] [--no-tests] [-y] [--verify [--timeout MIN] [--on-host]]

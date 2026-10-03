@@ -44,6 +44,26 @@ from kraft import cli, client
                 "side": None,
                 "label": "must_fix",
                 "suggestion": "x",
+                "start_side": None,
+                "quote": None,
+            },
+        ),
+        (
+            ["item", "comment", "7", "--body", "hi", "--file", "a.py", "--lines", "3-2"]
+            + ["--start-side", "old", "--side", "new"],
+            "add_review_comment",
+            {
+                "body": "hi",
+                "work_item_id": "7",
+                "thread_id": None,
+                "file_path": "a.py",
+                "start_line": 3,
+                "end_line": 2,
+                "side": "new",
+                "label": None,
+                "suggestion": None,
+                "start_side": "old",
+                "quote": None,
             },
         ),
         (
@@ -59,6 +79,8 @@ from kraft import cli, client
                 "side": None,
                 "label": None,
                 "suggestion": None,
+                "start_side": None,
+                "quote": None,
             },
         ),
         (["item", "resolve", "T1"], "resolve_thread", {"thread_id": "T1"}),
@@ -71,6 +93,7 @@ from kraft import cli, client
     ],
     ids=[
         "comment-new-thread",
+        "comment-across-sides",
         "comment-reply",
         "resolve-thread",
         "reopen-thread",
@@ -120,6 +143,43 @@ def test_review_request_changes_json_is_pure_json_even_with_a_target(app, monkey
     assert json.loads(capsys.readouterr().out)["target"] == "plan"
 
 
+@pytest.mark.parametrize(
+    "flags",
+    [["--side", "old"], ["--start-side", "old", "--side", "new"]],
+    ids=["old-side", "across-sides"],
+)
+def test_comment_refuses_a_suggestion_on_old_side_lines(app, capsys, flags):
+    """A suggestion replaces new-side lines: `--side old --suggest` would tell
+    the agent to replace other lines than the ones it is about (R10F-04)."""
+    argv = ["item", "comment", "7", "--body", "x", "--file", "a.py", "--lines", "2-3"]
+    with pytest.raises(SystemExit) as caught:
+        cli.main([*argv, *flags, "--suggest", "y"])
+    assert caught.value.code == 2
+    assert "--suggest replaces new-side lines" in capsys.readouterr().err
+
+
+def test_a_new_thread_prints_where_it_is_and_the_lines_it_quotes(app, monkeypatch, capsys):
+    async def fake(*_a, **_kw):
+        return {
+            "id": "t1",
+            "file_path": "calc.py",
+            "side": "old",
+            "start_side": "old",
+            "start_line": 2,
+            "end_line": 2,
+            "quote": "-    return a - b",
+            "comments": [{"author": "you", "body": "x", "draft": True}],
+        }
+
+    monkeypatch.setattr(client, "add_review_comment", fake)
+    cli.main(["item", "comment", "7", "--body", "x", "--file", "calc.py", "--lines", "2"])
+    assert capsys.readouterr().out.splitlines() == [
+        "drafted thread t1 on calc.py:-2",
+        "    | -    return a - b",
+        "it goes out with your next kraft item review",
+    ]
+
+
 def test_comment_needs_lines_for_a_suggestion(app, capsys):
     with pytest.raises(SystemExit) as caught:
         cli.main(["item", "comment", "--body", "x", "--suggest", "y"])
@@ -145,12 +205,12 @@ def test_view_threads_renders_a_block_per_thread(app, monkeypatch, capsys):
     monkeypatch.setattr(client, "threads", fake_threads)
     cli.main(["view", "threads", "w1"])
     out = capsys.readouterr().out
-    assert "t1" in out and "a.py:3-4" in out and "fix this" in out
+    assert "t1" in out and "a.py:+3 to +4" in out and "fix this" in out
 
 
 def test_view_threads_names_a_range_across_sides_by_its_marks(app, monkeypatch, capsys):
-    """Old line 2 through new line 2 reads `-2 to +2`; a range on one side, with
-    `start_side` its own `side`, still reads `3-4`."""
+    """Old line 2 through new line 2 reads `-2 to +2`; a range on one side marks
+    its side too (R10a-08), so removed lines 3-4 never read like added ones."""
 
     def thread(tid, start_side, side, start, end):
         return {
@@ -167,13 +227,20 @@ def test_view_threads_names_a_range_across_sides_by_its_marks(app, monkeypatch, 
         }
 
     async def fake_threads(work_item_id=None, open_only=False):
-        return [thread("t1", "old", "new", 2, 2), thread("t2", "new", "new", 3, 4)]
+        return [
+            thread("t1", "old", "new", 2, 2),
+            thread("t2", "new", "new", 3, 4),
+            thread("t3", "old", "old", 3, 4),
+            thread("t4", "new", "new", 8, 8),
+        ]
 
     monkeypatch.setattr(client, "threads", fake_threads)
     cli.main(["view", "threads", "w1"])
     out = capsys.readouterr().out
     assert "t1  calc.py:-2 to +2  [open]" in out
-    assert "t2  calc.py:3-4  [open]" in out
+    assert "t2  calc.py:+3 to +4  [open]" in out
+    assert "t3  calc.py:-3 to -4  [open]" in out
+    assert "t4  calc.py:+8  [open]" in out
 
 
 def test_view_compare_forwards_targets_and_stats_the_files(app, monkeypatch, capsys):

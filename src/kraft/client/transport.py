@@ -90,7 +90,10 @@ def _invalid_field(error: object) -> str:
     # was wrong: a field may itself be named `body`.
     if where and where[0] in ("body", "query", "path"):
         where = where[1:]
-    return f"{'.'.join(where)}: {error['msg']}" if where else str(error["msg"])
+    # A model's own check raises `ValueError`, which pydantic reports as
+    # "Value error, <what it said>": the type is pydantic's, the sentence ours.
+    msg = str(error["msg"]).removeprefix("Value error, ")
+    return f"{'.'.join(where)}: {msg}" if where else msg
 
 
 # The lead some raised messages carry themselves: `kraft 404: ...` from the

@@ -167,7 +167,10 @@ def test_remove_repo_with_a_running_item_is_a_problem_and_blocks_publish(client,
     seed_item(client, connected)
     body = resolved(client, {"op": "remove_repo", "path": connected})
     assert body["impact"]["running"] == {connected: 1}
-    assert any("open item(s); finish or cancel them first" in m for m in messages(body))
+    assert any(
+        "open item(s), paused ones included; complete, cancel or abandon them first" in m
+        for m in messages(body)
+    )
     assert [(c["path"], c["kind"]) for c in body["changes"]] == [(connected, "remove")]
     assert client.post(f"{URL}/publish").status_code == 422
 
