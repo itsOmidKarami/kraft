@@ -19,7 +19,8 @@
 .item-facts > div { display: contents; }
 .item-facts dt { font: 12px ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .item-facts dd { margin: 0; color: var(--text-sub); overflow-wrap: anywhere; }
-.item-card-pop { display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); padding: 10px 8px; }
+/* A card under a button (Popover `notch`): it scrolls itself, so the popover can let the notch out. */
+.item-card-pop { display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 32px)); max-height: 60vh; overflow: auto; box-sizing: border-box; padding: 10px 8px; }
 .item-pop-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
 
 /* Header row (Decisions §1): others need you, elapsed, badge, main button + ⋮. */
