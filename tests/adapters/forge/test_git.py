@@ -509,14 +509,15 @@ def test_commit_stragglers_leaves_out_only_the_lockfile_the_setup_wrote(tmp_path
     the `uv.lock` it wrote. That one stays out; a `uv.lock` the agent made,
     or an edit to one the repo tracks, is work."""
     repo = _repo_with_origin(tmp_path)
-    (repo / "web").mkdir()
+    for d in ("web", "api"):
+        (repo / d).mkdir()
+        (repo / d / "pyproject.toml").write_text("[project]\n")
     (repo / "web" / "uv.lock").write_text("version = 1\n")
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "web's lockfile")
+    _git(repo, "commit", "-q", "-m", "two projects, web's locked")
     before = asyncio.run(forge.untracked_lockfiles(repo))
     (repo / "uv.lock").write_text("by the setup\n")
     asyncio.run(forge.record_setup_writes(repo, before))
-    (repo / "api").mkdir()
     (repo / "api" / "uv.lock").write_text("by the agent\n")
     (repo / "web" / "uv.lock").write_text("version = 2\n")
 
