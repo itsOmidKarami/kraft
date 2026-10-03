@@ -243,6 +243,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
   });
   const empty = query && docs.load !== "loading" && beads.load !== "loading" && !shown.length && docs.load !== "error" && beads.load !== "error";
   const tabLabel = (l: string, n: number) => (query ? `${l} ${n}` : l);
+  const filtersOn = [sourceKind, kind.trim()].filter(Boolean).length;
 
   return (
     <div className="dialog-backdrop ng-search-backdrop" {...backdropProps(onClose)}>
@@ -267,28 +268,28 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
           <button type="button" className="ng-search-mode" aria-label={`Search mode: ${mode}. Change mode`} onClick={() => setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length])}>{mode}</button>
           <Kbd>esc</Kbd>
         </div>
-        <Tabs
-          id={uid}
-          label="Search scope"
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { value: "all", label: tabLabel("All", count(["needs", "items", "docs", "beads"])) },
-            { value: "items", label: tabLabel("Items", count(["needs", "items"])) },
-            { value: "docs", label: tabLabel("Documents", count(["docs"])) },
-            { value: "beads", label: tabLabel("Beads", count(["beads"])) },
-          ]}
-        />
-        {query && (
+        <div className="ng-search-tabrow">
+          <Tabs
+            id={uid}
+            label="Search scope"
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { value: "all", label: tabLabel("All", count(["needs", "items", "docs", "beads"])) },
+              { value: "items", label: tabLabel("Items", count(["needs", "items"])) },
+              { value: "docs", label: tabLabel("Documents", count(["docs"])) },
+              { value: "beads", label: tabLabel("Beads", count(["beads"])) },
+            ]}
+          />
+          <button type="button" className="ng-search-filter" aria-expanded={filters} aria-label={filtersOn ? `Filters, ${filtersOn} on` : "Filters"} onClick={() => setFilters((f) => !f)}>
+            Filters{filtersOn > 0 && <span className="ng-search-filter-n" aria-hidden>{filtersOn}</span>}
+          </button>
+        </div>
+        {(filters || filtersOn > 0) && (
           <div className="ng-search-filters">
-            <button type="button" aria-expanded={filters} onClick={() => setFilters((f) => !f)}>Filters</button>
-            <span>Filters narrow Documents only</span>
-            {filters && (
-              <>
-                <label>Source<select value={sourceKind} onChange={(e) => setSourceKind(e.target.value)}><option value="">any</option><option value="artifact">artifact</option><option value="session_summary">session summary</option></select></label>
-                <label>Kind<input value={kind} onChange={(e) => setKind(e.target.value)} /></label>
-              </>
-            )}
+            <label className="ng-search-fchip"><span>source</span><select value={sourceKind} onChange={(e) => setSourceKind(e.target.value)}><option value="">any</option><option value="artifact">artifact</option><option value="session_summary">session summary</option></select></label>
+            <label className="ng-search-fchip"><span>kind</span><input value={kind} placeholder="any" size={8} onChange={(e) => setKind(e.target.value)} /></label>
+            <span className="ng-search-fnote">Filters narrow Documents only</span>
           </div>
         )}
         <div role="listbox" id={`${uid}-panel`} aria-labelledby={`${uid}-tab-${tab}`} className="ng-search-list">

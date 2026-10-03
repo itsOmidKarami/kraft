@@ -72,12 +72,12 @@ describe("SearchOverlay", () => {
     expect(await screen.findByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
-  it("shows Needs you, Recent and Go to chips with no query, and no counts or Filters", async () => {
+  it("shows Needs you, Recent and Go to chips with no query, no counts, and Filters at the right of the tab row", async () => {
     mount();
     await open();
     expect(headings()).toEqual(["Needs you", "Recent", "Go to"]);
     expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Filters" })).toBeNull();
+    expect(document.querySelector(".ng-search-tabrow")!.lastElementChild).toBe(screen.getByRole("button", { name: "Filters" }));
     expect(search).not.toHaveBeenCalled();
   });
 
@@ -93,8 +93,27 @@ describe("SearchOverlay", () => {
     expect(screen.getByRole("tab", { name: "Documents 2" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Beads 1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
-    expect(screen.getByText("Filters narrow Documents only")).toBeInTheDocument();
     expect(screen.queryByText("kraft-has", { exact: false })).toBeNull();
+  });
+
+  it("shows the filters as chips, label and value, under the tab row, and counts the ones on", async () => {
+    mount();
+    const { user, input } = await open();
+    await user.type(input, "cache");
+    await screen.findByTitle("Caching spec");
+    expect(document.querySelector(".ng-search-filters")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    const chips = [...document.querySelectorAll(".ng-search-fchip")];
+    expect(chips.map((c) => c.firstElementChild!.textContent)).toEqual(["source", "kind"]);
+    expect(screen.getByText("Filters narrow Documents only")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "source" }), "artifact");
+    await user.type(screen.getByRole("textbox", { name: "kind" }), "spec");
+    const button = screen.getByRole("button", { name: "Filters, 2 on" });
+    expect(button).toHaveTextContent("Filters2");
+    await waitFor(() => expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ source_kind: "artifact", kind: "spec" })));
+    // Folded, the chips of filters that are on stay in view.
+    await user.click(button);
+    expect(document.querySelectorAll(".ng-search-fchip")).toHaveLength(2);
   });
 
   it("says what the board says of an item, and puts a failed one under Needs you with the gates", async () => {
