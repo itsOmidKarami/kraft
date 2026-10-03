@@ -17,6 +17,10 @@ from kraft.templates.environment import WorkItemTarget
 _ONE_NODE = [
     {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
 ]
+#: A node that rebases itself (R11E-06): an `mr_rebase` task, and a span to
+#: restart when that moves the base.
+_REBASE = {"id": "rebase", "kind": "builtin", "ref": "kraft.mr_rebase"}
+_RESTART = {"on_base_changed": {"restart_from": "m"}}
 
 
 def _land(other, branch, name):
@@ -211,18 +215,18 @@ def test_the_ignore_rules_come_from_the_items_base_branch(origin, rule):
 
 @pytest.mark.parametrize(
     ("node", "rebased"),
-    [("spec", ["release"]), ("merge_request_feedback", [])],
-    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+    [("spec", ["release"]), ("merge_request_feedback", ["release"])],
+    ids=["onto-the-base", "before-a-node-that-only-declares-on_base_changed"],
 )
 @pytest.mark.parametrize("door, stopped", [("retry", "needs_human"), ("resume", "paused")])
 def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
     client, origin, monkeypatch, door, stopped, node, rebased
 ):
     """`/retry` and `/resume` rebase the worktree before the walk: onto the
-    item's base branch, like every other rebase. Not when the item stands at
-    a node with `on_base_changed` (R11E-06): it rebases itself, and the
-    door's rebase took the move from it, so the span it restarts on a move
-    never ran on the new base."""
+    item's base branch, like every other rebase. Also before the default
+    chain's `merge_request_feedback`, which declares `on_base_changed` but
+    has no rebase of its own to leave it to (R11E-06; the self-retry test
+    below has the node that does)."""
     from support.api import _force_node
 
     from kraft import executor
@@ -252,15 +256,14 @@ def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
     ("chain", "rebased"),
     [
         (_ONE_NODE, ["release"]),
-        (
-            [
-                {**_ONE_NODE[0], "id": "m"},
-                {**_ONE_NODE[0], "on_base_changed": {"restart_from": "m"}},
-            ],
-            [],
-        ),
+        ([{**_ONE_NODE[0], "id": "m"}, {**_ONE_NODE[0], **_RESTART}], ["release"]),
+        ([{**_ONE_NODE[0], "id": "m"}, {**_ONE_NODE[0], **_RESTART, "tasks": [_REBASE]}], []),
     ],
-    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+    ids=[
+        "onto-the-base",
+        "before-a-node-that-only-declares-on_base_changed",
+        "not-before-a-node-that-rebases-itself",
+    ],
 )
 async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     item_on, run_dirs, repo, monkeypatch, chain, rebased
