@@ -22,8 +22,9 @@ export function newLines(pf: PatchFile | undefined, a: number, b: number): strin
 const placeOf = (t: ReviewThread) => (t.start_line === null ? `${t.file_path}|top` : `${t.file_path}|${t.side}|${t.end_line}`);
 
 /** Threads and the composer, placed in the diff (W8 F). `after` and `top`
- *  feed DiffView's slots; `elsewhere` lists the threads with no place in what
- *  is drawn (another file, a line outside the hunks). */
+ *  feed DiffView's slots; `whole` lists the threads on no file, and
+ *  `elsewhere` those with no place in what is drawn (another file, a line
+ *  outside the hunks). */
 export function useComments({ itemId, compare, files, patch, threads, reload, onClose, onRetarget }: {
   itemId: string;
   compare: Compare | null;
@@ -58,10 +59,13 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   }
   const at = new Map<string, ReviewThread[]>();
   const elsewhere: ReviewThread[] = [];
+  // A thread on no file (`kraft item comment --body` alone) is about the whole change, not a file missing here (R8b-08).
+  const whole: ReviewThread[] = [];
   for (const t of threads) {
     if (open?.editing?.id === t.id) continue;
     const k = placeOf(t);
-    if (t.file_path && visible.has(k)) at.set(k, [...(at.get(k) ?? []), t]);
+    if (!t.file_path) whole.push(t);
+    else if (visible.has(k)) at.set(k, [...(at.get(k) ?? []), t]);
     else elsewhere.push(t);
   }
 
@@ -166,6 +170,7 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   return {
     after: (path: string, a: Anchor) => slot(`${path}|${a.side}|${a.line}`),
     top: (path: string) => slot(`${path}|top`),
+    whole: whole.length ? <section className="rv-elsewhere rv-whole" aria-label="On the whole change"><h2>On the whole change</h2>{whole.map(card)}</section> : null,
     elsewhere: elsewhere.length ? <section className="rv-elsewhere" aria-label="Threads on files not in this comparison"><h2>Threads on files not in this comparison</h2>{elsewhere.map(card)}</section> : null,
     openPick: (p: Pick) => setOpen({ editing: null, target: { path: p.path, range: rangeOfPick(p, indexOf(p.path)) } }),
     /** The ranges of a file's open threads, for the diff to shade. */

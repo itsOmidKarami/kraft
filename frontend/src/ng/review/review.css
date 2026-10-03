@@ -160,6 +160,7 @@
 .rv-line-chip.is-new { background: color-mix(in oklab, var(--rv-add, var(--diff-add-theme)) 22%, transparent); }
 .rv-notes { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .rv-elsewhere { margin: 0 16px 24px; }
+.rv-whole { margin-top: 16px; }
 .rv-elsewhere h2 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
 
 /* Bottom bar and Finish your review (prototype 496–526). */
