@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
 import { docBody } from "../../format";
 import type { WorkItemDocument } from "../../types";
+import { backdropProps, useModal } from "../../useModal";
+import { X } from "../icons";
 import { Button } from "../ui/Button";
-import { Dialog } from "../ui/Dialog";
+import { IconButton } from "../ui/IconButton";
 import { Markdown } from "../ui/Markdown";
 import { showToast } from "../ui/Toast";
 import { detailOf, request } from "../http";
@@ -28,13 +31,16 @@ export const EDITORS: { id: string | null; name: string }[] = [
 /** Where in the chain a document was written: node › task › attempt. */
 export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.split(".").at(-1), d.attempt ? `attempt ${d.attempt}` : ""].filter(Boolean).join(" › ") : "");
 
-/** A document over the page (prototype lines 278–283, GAP §2 #9): an indexed
- *  document opens in an editor and copies its path; a gate's artifact, read
- *  off the worktree with no index row or absolute path, shows only its text. */
+/** A document in a drawer over the page's right side (prototype lines 278–283,
+ *  GAP §2 #9): an indexed document opens in an editor and copies its path; a
+ *  gate's artifact, read off the worktree with no index row or absolute path,
+ *  shows only its text. A press on the scrim or Escape closes it. */
 export function DocViewer({ source, onClose }: { source: DocSource; onClose: () => void }) {
   const [doc, setDoc] = useState<Viewed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const ref = useModal<HTMLDivElement>(onClose);
+  const titleId = useId();
   useEffect(() => {
     request<Viewed>(urlOf(source)).then((r) => (r.status === 200 ? setDoc(r.body) : setError(detailOf(r.body))));
     // The `by` line is display only: a new label must not read the document again.
@@ -46,34 +52,37 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
     setNote(r.status === 200 ? `Opened in ${EDITORS.find((e) => e.id === editor)?.name}.` : detailOf(r.body));
   };
   const indexed = source.kind === "document";
-  return (
-    <Dialog
-      className="dv-dialog"
-      title={doc?.title ?? "Document"}
-      onClose={onClose}
-      footer={(
-        <div className="dv-footer">
-          {indexed && doc && (
+  const by = source.kind === "document" ? source.by : undefined;
+  return createPortal(
+    <div className="dv-scrim" {...backdropProps(onClose)}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="dv-drawer">
+        <header className="dv-head">
+          <div className="dv-head-text">
+            <h2 id={titleId} className="dv-title">{doc?.title ?? "Document"}</h2>
+            {doc && <p className="dv-path is-mono">{doc.path}</p>}
+            {by && <p className="dv-by">written by {by}</p>}
+          </div>
+          <div className="dv-actions">
+            {indexed && doc && (
+              <>
+                {EDITORS.map((e) => <Button key={e.name} onClick={() => open(e.id)}>{e.name}</Button>)}
+                <Button onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+              </>
+            )}
+            <IconButton label="Close" onClick={onClose}><X size={16} aria-hidden /></IconButton>
+          </div>
+        </header>
+        {note && <p className="dv-note item-muted" role="status">{note}</p>}
+        <div className="dv-body">
+          {error ? <p className="item-error" role="alert">{error}</p> : !doc ? <p className="item-muted">Reading…</p> : (
             <>
-              <span className="item-muted">Open in</span>
-              {EDITORS.map((e) => <Button key={e.name} onClick={() => open(e.id)}>{e.name}</Button>)}
-              <Button onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+              <Markdown text={docBody(doc.content, doc.title)} />
+              {doc.truncated && <p className="item-muted">The document is longer than the server serves; open it in an editor for the rest.</p>}
             </>
           )}
-          <Button className="dv-close" onClick={onClose}>Close</Button>
         </div>
-      )}
-    >
-      <div className="dv">
-        {doc && <p className="dv-path"><span className="is-mono">{doc.path}</span>{source.kind === "document" && source.by && <> · {source.by}</>}</p>}
-        {note && <p className="item-muted" role="status">{note}</p>}
-        {error ? <p className="item-error" role="alert">{error}</p> : !doc ? <p className="item-muted">Reading…</p> : (
-          <div className="dv-body">
-            <Markdown text={docBody(doc.content, doc.title)} />
-            {doc.truncated && <p className="item-muted">The document is longer than the server serves; open it in an editor for the rest.</p>}
-          </div>
-        )}
       </div>
-    </Dialog>
+    </div>,
+    document.body,
   );
 }

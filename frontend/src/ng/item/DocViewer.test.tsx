@@ -47,13 +47,31 @@ describe("DocViewer", () => {
     const onClose = vi.fn();
     const { unmount } = render(<DocViewer source={{ kind: "artifact", workItemId: "w1" }} onClose={onClose} />);
     await screen.findByText("Step one.");
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Close"]);
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Close"]);
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     unmount();
     render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={onClose} />);
     await screen.findByText("no size bound");
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([...EDITORS.map((e) => e.name), "Copy path", "Close"]);
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([...EDITORS.map((e) => e.name), "Copy path", "Close"]);
+  });
+
+  it("is a drawer whose header stacks the title, the path and who wrote it", async () => {
+    stubFetch({ "GET /documents/d1": [200, doc] });
+    render(<DocViewer source={{ kind: "document", id: "d1", by: "review › code_review › attempt 2" }} onClose={() => {}} />);
+    const drawer = await screen.findByRole("dialog", { name: "Review notes" });
+    expect(drawer).toHaveClass("dv-drawer");
+    expect([...drawer.querySelector(".dv-head-text")!.children].map((c) => c.textContent)).toEqual(["Review notes", doc.path, "written by review › code_review › attempt 2"]);
+  });
+
+  it("closes on a press on the scrim, not on one inside the drawer", async () => {
+    stubFetch({ "GET /documents/d1": [200, doc] });
+    const onClose = vi.fn();
+    render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={onClose} />);
+    await userEvent.click(await screen.findByText("no size bound"));
+    expect(onClose).not.toHaveBeenCalled();
+    await userEvent.click(document.querySelector(".dv-scrim")!);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("closes on Escape and hands focus back", async () => {
