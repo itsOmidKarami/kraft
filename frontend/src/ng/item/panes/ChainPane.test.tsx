@@ -76,8 +76,8 @@ describe("ChainConfig", () => {
 
   // R11a-03: the field opened with the caret after the cap, so typing 0.03 saved $100.03.
   // R11b-03: the field that had the focus is gone after Escape, Cancel or a save; ✎ takes it back.
-  // A decimal comma is a point: "0,03" left Save off and saved nothing (#504 review).
-  it.each([["{Escape}", null], ["Cancel", null], ["7{Enter}", 7], ["0,03{Enter}", 0.03]] as const)("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close, saved) => {
+  // A decimal comma is a point: "0,03" left Save off and saved nothing (#504 review); a grouping one is not: "1,000" saved $1.00 (R12b-10).
+  it.each([["{Escape}", null], ["Cancel", null], ["7{Enter}", 7], ["0,03{Enter}", 0.03], ["1,000{Enter}", 1000]] as const)("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close, saved) => {
     const calls = stubFetch(WRITES);
     function Editing() {
       const [on, setOn] = useState(false);

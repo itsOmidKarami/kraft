@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { repoName, tokens, usd } from "../../../format";
+import { dollars, repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -120,8 +120,8 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
     : undefined;
   const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
   const [value, setValue] = useState(String(cap || ""));
-  // A decimal comma, as a comma-decimal locale or iOS's decimal keypad types it, is a point.
-  const amount = Number(value.trim().replace(",", "."));
+  // A decimal comma, as a comma-decimal locale or iOS's decimal keypad types it, is a point; "1,000" is a thousand.
+  const amount = dollars(value);
   const [error, setError] = useState<string | null>(null);
   const send = async (usdCap: number | null) => {
     let r;

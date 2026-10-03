@@ -250,6 +250,25 @@ export function usd(n: number, complete = true, estimated = false): string {
   return complete ? amount : `${amount}+`;
 }
 
+/** A typed dollar amount. A comma is a decimal point when it is the only
+ *  separator and does not group thousands (a comma-decimal locale, iOS's
+ *  decimal keypad: "0,5"); "1,000" and "1,000.50" group thousands, as do
+ *  "1.000,50"'s points. It read "1,000" as $1.00 (R12b-10). NaN for what
+ *  reads neither way ("1,00,0", "1.000.000,5,0"). */
+export function dollars(text: string): number {
+  const t = text.trim().replace(/^\$\s*/, "");
+  const grouped = (int: string, sep: string) => new RegExp(`^[1-9]\\d{0,2}(\\${sep}\\d{3})+$`).test(int);
+  const comma = t.includes(","), point = t.includes(".");
+  if (comma && point) {
+    const dec = t.lastIndexOf(",") > t.lastIndexOf(".") ? "," : ".";
+    const at = t.lastIndexOf(dec);
+    const int = t.slice(0, at), frac = t.slice(at + 1);
+    return grouped(int, dec === "," ? "." : ",") && /^\d+$/.test(frac) ? Number(`${int.replace(/[.,]/g, "")}.${frac}`) : NaN;
+  }
+  if (comma) return grouped(t, ",") ? Number(t.replace(/,/g, "")) : /^\d*,\d+$/.test(t) ? Number(t.replace(",", ".")) : NaN;
+  return Number(t);
+}
+
 /** A repo's own name — the last segment of its path.
  *
  * The absolute path repeats on every board row, in the detail meta line and in
