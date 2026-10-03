@@ -54,8 +54,8 @@
             </div>
         </aside>
         <h2>
-            <span class="text">173 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">169<span class="text"> run</span></button>
+            <span class="text">174 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">170<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">4<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_apply_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 20:07 +0000
+            created at 2026-10-03 20:21 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -430,11 +430,14 @@
     <p class="run"><span class="n"><a id="t348" href="#t348">348</a></span><span class="t">        <span class="key">for</span> <span class="nam">task</span> <span class="key">in</span> <span class="nam">tasks</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t349" href="#t349">349</a></span><span class="t">            <span class="nam">task</span><span class="op">.</span><span class="nam">cancel</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t350" href="#t350">350</a></span><span class="t">        <span class="key">await</span> <span class="nam">asyncio</span><span class="op">.</span><span class="nam">gather</span><span class="op">(</span><span class="op">*</span><span class="nam">tasks</span><span class="op">,</span> <span class="nam">return_exceptions</span><span class="op">=</span><span class="key">True</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t351" href="#t351">351</a></span><span class="t">        <span class="key">await</span> <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">egress_tls</span><span class="op">.</span><span class="nam">close</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t352" href="#t352">352</a></span><span class="t">        <span class="key">await</span> <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">egress_channels</span><span class="op">.</span><span class="nam">close_all</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t353" href="#t353">353</a></span><span class="t">        <span class="key">await</span> <span class="nam">proxy_serving</span><span class="op">.</span><span class="nam">__aexit__</span><span class="op">(</span><span class="key">None</span><span class="op">,</span> <span class="key">None</span><span class="op">,</span> <span class="key">None</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t354" href="#t354">354</a></span><span class="t">        <span class="nam">channel_mod</span><span class="op">.</span><span class="nam">install</span><span class="op">(</span><span class="key">None</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t355" href="#t355">355</a></span><span class="t">        <span class="key">await</span> <span class="nam">database</span><span class="op">.</span><span class="nam">close</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t351" href="#t351">351</a></span><span class="t">        <span class="com"># After the walks: a cancelled walk stops its own git and aborts what</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t352" href="#t352">352</a></span><span class="t">        <span class="com"># it left. Ended before that, a `git rebase` read as a conflict.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t353" href="#t353">353</a></span><span class="t">        <span class="nam">_builtins</span><span class="op">.</span><span class="nam">end_running_git_groups</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t354" href="#t354">354</a></span><span class="t">        <span class="key">await</span> <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">egress_tls</span><span class="op">.</span><span class="nam">close</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t355" href="#t355">355</a></span><span class="t">        <span class="key">await</span> <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">egress_channels</span><span class="op">.</span><span class="nam">close_all</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t356" href="#t356">356</a></span><span class="t">        <span class="key">await</span> <span class="nam">proxy_serving</span><span class="op">.</span><span class="nam">__aexit__</span><span class="op">(</span><span class="key">None</span><span class="op">,</span> <span class="key">None</span><span class="op">,</span> <span class="key">None</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t357" href="#t357">357</a></span><span class="t">        <span class="nam">channel_mod</span><span class="op">.</span><span class="nam">install</span><span class="op">(</span><span class="key">None</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t358" href="#t358">358</a></span><span class="t">        <span class="key">await</span> <span class="nam">database</span><span class="op">.</span><span class="nam">close</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -444,7 +447,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_apply_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 20:07 +0000
+            created at 2026-10-03 20:21 +0000
         </p>
     </div>
 </footer>
