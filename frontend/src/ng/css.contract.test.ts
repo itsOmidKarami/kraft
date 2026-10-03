@@ -46,6 +46,13 @@ describe("ng CSS", () => {
     expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
   });
 
+  it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
+    const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
+    const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);
+    expect(z("\\.dialog-backdrop")).toBeLessThan(z("\\.popover"));
+    expect(z("\\.popover")).toBeLessThan(z("\\.toasts"));
+  });
+
   // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
   // shipped css.contract.test.ts, which the cutover deletes.
   it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {
