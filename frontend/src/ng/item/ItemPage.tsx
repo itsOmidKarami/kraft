@@ -13,6 +13,7 @@ import { Brief, DiffLine, Title } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
 import { openBudgetEditor, Workspace } from "./Workspace";
+import { openLimitEditor } from "./RaiseLimit";
 import { runVersion, useItem, type ItemDetail } from "./useItem";
 import "./item.css";
 
@@ -48,8 +49,10 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   const openGate = useSelect(item.id);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
-  // Raise cap (the banner's and the header's) opens the budget editor on a budget stop, as the peek's does (R11a-05).
+  // Raise cap (the banner's and the header's) opens the banner's editor on a stop that names its limit (R12b-06),
+  // and the budget editor on a budget stop, as the peek's does (R11a-05).
   const raise = () => {
+    if (item.stop?.limit) return openLimitEditor(item.id);
     if (item.stop?.kind === "budget") openBudgetEditor(item.id);
     settings();
   };

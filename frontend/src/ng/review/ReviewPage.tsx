@@ -6,6 +6,7 @@ import { usePageItem } from "../shell/pageItem";
 import { ItemHeader } from "../item/header/ItemHeader";
 import { placeUrl } from "../item/url";
 import { openBudgetEditor } from "../item/Workspace";
+import { openLimitEditor } from "../item/RaiseLimit";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
@@ -95,7 +96,11 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         item={item}
         reload={reload}
         onSettings={() => toItem({ sel: { kind: "chain" }, tab: "config" })}
-        onRaise={() => { if (item.stop?.kind === "budget") openBudgetEditor(item.id); toItem({ sel: { kind: "chain" }, tab: "config" }); }}
+        onRaise={() => {
+          if (item.stop?.limit) return void (openLimitEditor(item.id), toItem({}));
+          if (item.stop?.kind === "budget") openBudgetEditor(item.id);
+          toItem({ sel: { kind: "chain" }, tab: "config" });
+        }}
         onGate={(gate) => setPlace({ gate, doc: true })}
         onRunLog={() => toItem({ sel: { kind: "chain" } })}
       />

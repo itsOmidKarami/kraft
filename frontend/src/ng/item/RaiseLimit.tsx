@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { create } from "zustand";
 import type { StopLimit, WorkItem } from "../../types";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -13,6 +14,23 @@ const WHAT: Record<StopLimit["key"], { label: (path: string) => string; unit: st
   time_cap_minutes: { label: () => "Running-time cap", unit: "minutes" },
   total_time_cap_minutes: { label: () => "Total-time cap", unit: "minutes" },
 };
+
+/** A request to open a cap stop's RaiseLimit, which the Banner owns: the
+ *  header's, the peek's and the review page's Raise cap ask, as the banner's
+ *  own button does (R12b-06; a time cap's led to Config, which has no row for
+ *  it). As `openBudgetEditor`: for one item, taken once, within a few seconds. */
+const useLimitAsk = create<{ id: string | null; at: number }>(() => ({ id: null, at: 0 }));
+const LIMIT_ASK_MS = 5_000;
+export const openLimitEditor = (id: string, at = Date.now()) => useLimitAsk.setState({ id, at });
+export function useLimitAsked(id: string, take: () => void) {
+  const asked = useLimitAsk((s) => s.id === id && Date.now() - s.at < LIMIT_ASK_MS);
+  useEffect(() => {
+    if (!asked) return;
+    useLimitAsk.setState({ id: null, at: 0 });
+    take();
+    // Once per ask: `take` is a fresh closure each render.
+  }, [asked]);
+}
 
 /** A cap stop's one limit, raised: PATCH the item's policy, keeping the rest
  *  of its override (`override`), then retry the node. */
