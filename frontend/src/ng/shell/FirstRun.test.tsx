@@ -19,6 +19,7 @@ beforeEach(() => {
   // The probe reveals its rows on a clock; the tests play it out instead of waiting for it.
   vi.useFakeTimers({ shouldAdvanceTime: true });
   calls = [];
+  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok", bind: "127.0.0.1", port: 4317 } as never);
   vi.spyOn(api, "getTemplates").mockResolvedValue([CHAIN]);
   vi.spyOn(api, "getPolicy").mockResolvedValue(POLICY);
@@ -77,6 +78,20 @@ describe("FirstRun", () => {
     expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
     const probes = screen.getByRole("list", { name: "What Kraft probes" });
     expect([...probes.querySelectorAll("li")].map((li) => li.textContent)).toEqual([".gitmodulesafter you add", ".beads/after you add", "test commandafter you add", "forge remoteafter you add"]);
+  });
+
+  it("suggests the checkout the server runs in, filling the path on a click, and nothing when there is none", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [], suggested: "/code/acme" });
+    const user = setup();
+    const { unmount } = mount();
+    await user.click(await screen.findByRole("button", { name: "/code/acme" }));
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveValue("/code/acme");
+    expect(screen.queryByText(/^Try/)).toBeNull();
+    unmount();
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [], suggested: null });
+    mount();
+    await act(async () => {});
+    expect(screen.queryByText(/^Try/)).toBeNull();
   });
 
   it("skips to the chain step without a repo", async () => {

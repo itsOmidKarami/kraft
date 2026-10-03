@@ -111,6 +111,12 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     api.getHealth().then((h) => h.bind && h.port != null && setAddress(`${h.bind}:${h.port}`)).catch(() => {});
   }, []);
 
+  // The checkout the server was started in, when it is one and not connected: step 1's "Try".
+  const [suggested, setSuggested] = useState<string | null>(null);
+  useEffect(() => {
+    api.getRepos().then((r) => setSuggested(r.suggested ?? null)).catch(() => {});
+  }, []);
+
   const [saved] = useState(savedFirstRun);
   const [step, setStep] = useState(saved?.step ?? 1);
   const [reached, setReached] = useState(saved?.reached ?? 1);
@@ -288,6 +294,9 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
                   onKeyDown={(e) => e.key === "Enter" && (probe && !noCommit ? probed && !added && doAdd() : doProbe())} />
               </Field>
+              {suggested && !added && path !== suggested && (
+                <p className="fr-try">Try <button type="button" className="fr-try-path" onClick={() => { setPath(suggested); setProbe(null); setShown(0); setError(null); pathField.current?.focus(); }}>{suggested}</button></p>
+              )}
               <div className="fr-actions">
                 {added ? (
                   <Button variant="primary" onClick={() => go(2)}>Continue</Button>

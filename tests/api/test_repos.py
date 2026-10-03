@@ -110,6 +110,29 @@ def _set_origin(repo, url):
     subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
 
 
+@pytest.mark.parametrize(
+    "cwd, connect, suggested",
+    [
+        pytest.param("sample", False, "sample", id="a checkout is suggested"),
+        pytest.param("sample/src", False, "sample", id="from inside it, its top"),
+        pytest.param("plain", False, None, id="outside a checkout, nothing"),
+        pytest.param("sample", True, None, id="already connected, nothing"),
+    ],
+)
+def test_lists_the_servers_own_checkout_as_the_suggested_repo(
+    tmp_path, client, monkeypatch, cwd, connect, suggested
+):
+    """First-run offers the git checkout the server was started in (BD-2)."""
+    repo = make_repo(tmp_path)
+    (repo / "src").mkdir(exist_ok=True)
+    (tmp_path / "plain").mkdir()
+    if connect:
+        assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
+    monkeypatch.chdir(tmp_path / cwd)
+    got = client.get("/api/repos").json()["suggested"]
+    assert (got and Path(got).resolve()) == (suggested and (tmp_path / suggested).resolve())
+
+
 def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir):
     repo = make_repo(tmp_path)
     created = client.post(
