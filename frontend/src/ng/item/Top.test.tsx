@@ -49,6 +49,21 @@ describe("Title, leaving the field", () => {
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
   });
 
+  it("saves a second rename ended by a click away, after a first one ended with Enter", async () => {
+    const calls = stubFetch(WRITES);
+    const { rerender } = render(<><Title id="w1" title="Old" onSaved={() => {}} /><button>elsewhere</button></>);
+    await userEvent.click(screen.getByRole("button", { name: "Old" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "New{Enter}");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
+    rerender(<><Title id="w1" title="New" onSaved={() => {}} /><button>elsewhere</button></>);
+    await userEvent.click(screen.getByRole("button", { name: "New" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "Newer");
+    await userEvent.click(screen.getByRole("button", { name: "elsewhere" }));
+    await waitFor(() => expect(writes(calls).map((c) => (c as { body?: unknown }).body)).toEqual([{ title: "New" }, { title: "Newer" }]));
+  });
+
   it("sends one save on Enter, not a second one when the field then goes away", async () => {
     const calls = stubFetch(WRITES);
     render(<Title id="w1" title="Old" onSaved={() => {}} />);

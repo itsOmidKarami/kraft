@@ -42,7 +42,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
   if (!editing)
     return (
       <h1 className="item-title">
-        <button type="button" className="item-title-btn" title="Rename" onClick={() => setEditing(true)}>{title}</button>
+        <button type="button" className="item-title-btn" title="Rename" onClick={() => { settled.current = false; setEditing(true); }}>{title}</button>
       </h1>
     );
   return (
