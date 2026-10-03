@@ -120,6 +120,16 @@ describe("DiffLine", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it.each([
+    [[], "1 file +2 −1 · Review changes"],
+    [[{ state: "open" }, { state: "resolved" }, { state: "claimed" }], "1 file +2 −1 · 2 open threads · Review changes"],
+    [[{ state: "open" }], "1 file +2 −1 · 1 open thread · Review changes"],
+  ])("counts the open review threads between the diff and Review changes: %j", async (threads, text) => {
+    stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }], "GET /work-items/w1/threads": [200, threads] });
+    render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText(/1 file/)).toHaveTextContent(text));
+  });
+
   it("reads the diff again on each read of the item, and an older read that answers late does not win", async () => {
     const reads = holdFetch(/\/work-items\/w1\/diff/);
     const { rerender } = render(<MemoryRouter><DiffLine id="w1" version="1" /></MemoryRouter>);
