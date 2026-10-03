@@ -1,4 +1,4 @@
-import { Ban, Bell, Bot, Box, ChartColumn, Check, CircleDot, Cog, Download, FileText, GitBranch, GitCompare, GitPullRequest, Inbox, Info, Kanban, Layers, LibraryBig, Lock, Palette, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { Ban, Bell, Bot, Box, ChartColumn, Check, CircleAlert as CircleAlertIcon, CircleDot, Clock as ClockIcon, Cog, Download, FileText, Flag, GitBranch, GitCompare, GitPullRequest, Inbox, Info, Kanban, Layers, LibraryBig, Lock, MessageSquare as MessageSquareIcon, Palette, Pause as PauseIcon, RefreshCw, Scale, ScrollText, Search, Shield, ShieldCheck, Siren, SlidersHorizontal, Sparkles, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { createElement, type ReactElement } from "react";
 import { useIconSet } from "./iconSet";
 
@@ -20,6 +20,8 @@ export type TaskKind = keyof typeof KIND_ICON;
 const NODE_ICONS: Record<string, LucideIcon> = {
   // ux2-W6: a cancelled item's row glyph (AreaBoard draws `ban`).
   // a finished item's row glyph (BD-6).
+  // a phone board row's glyph says the item's state (PH-11).
+  flag: Flag, "message-square": MessageSquareIcon, "circle-alert": CircleAlertIcon, pause: PauseIcon, clock: ClockIcon,
   ban: Ban, bot: Bot, box: Box, check: Check, "circle-dot": CircleDot, cog: Cog, "file-text": FileText, "git-branch": GitBranch, "git-compare": GitCompare,
   "git-pull-request": GitPullRequest, inbox: Inbox, layers: Layers, scale: Scale, "scroll-text": ScrollText,
   "refresh-cw": RefreshCw, search: Search, shield: Shield, "shield-check": ShieldCheck, siren: Siren, sparkles: Sparkles, terminal: Terminal, workflow: Workflow,

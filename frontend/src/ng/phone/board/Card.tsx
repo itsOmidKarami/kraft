@@ -1,10 +1,11 @@
 import { ago, repoName, shortId } from "../../../format";
 import type { WorkItem } from "../../../types";
 import { chainOf, groupOf } from "../../board/model";
-import { glyphOf, reasonTail, ticksOf } from "../../board/rowText";
+import { reasonTail, ticksOf } from "../../board/rowText";
 import { NodeGlyph } from "../../graph/NodeGlyph";
 import { Button } from "../../ui/Button";
 import { cardButtons, type CardButton } from "./actions";
+import { stateGlyph } from "./glyph";
 
 export interface CardProps {
   item: WorkItem;
@@ -19,7 +20,7 @@ export interface CardProps {
 /** One board card (the prototype's Board rows): glyph, title and meta, the tick
  *  strip, the reason tail, and the pair of inline actions. */
 export function Card({ item, now, offline, busy, error, onOpen, onButton }: CardProps) {
-  const g = glyphOf(item);
+  const g = stateGlyph(item);
   const hot = groupOf(item) === "needs";
   const buttons = cardButtons(item);
   return (
