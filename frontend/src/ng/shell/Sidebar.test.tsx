@@ -297,7 +297,6 @@ describe("ng Sidebar draft dots", () => {
     const chains = await within(nav()).findByRole("link", { name: "Chains, unpublished draft, 2 problems" });
     expect(chains).toHaveAttribute("aria-current", "page");
     expect(chains.querySelector(".ng-side-count")).toHaveTextContent("2");
-    expect(chains.querySelector(".ng-side-mark.is-bad")).not.toBeNull();
     const library = within(nav()).getByRole("link", { name: "Library, unpublished draft" });
     expect(library.querySelector(".ng-side-count")).toBeNull();
     expect(within(nav()).getByRole("link", { name: "Harnesses" }).querySelector(".ng-side-dot")).toBeNull();

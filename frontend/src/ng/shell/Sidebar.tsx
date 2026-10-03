@@ -99,7 +99,6 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
       >
         <span className="ng-side-ico">
           <r.icon size={16} aria-hidden />
-          {area && <span className={`ng-side-mark${area.problems ? " is-bad" : ""}`} aria-hidden />}
         </span>
         <span className="ng-side-label" aria-hidden>{r.label}</span>
         {board && needsYou > 0 && <span className="ng-side-dot" aria-hidden />}
@@ -118,6 +117,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
 
   return (
     <div className="ng-side" data-dismissed={dismissed || undefined} onPointerEnter={() => setDismissed(false)} onPointerLeave={() => setDismissed(false)} onFocus={() => setDismissed(false)}>
+      <div className="ng-side-edge" aria-hidden />
       <aside ref={ref} className="ng-sidebar" aria-label="Sidebar" onKeyDown={onKeyDown}>
         <div className="ng-side-head">
           <span className={`ng-side-live-dot ${connection === "open" ? "ok" : "warn"}`} role="img" aria-label={connectionWord(connection)} />

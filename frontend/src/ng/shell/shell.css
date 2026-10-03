@@ -28,17 +28,21 @@
 .ng-placeholder p { margin: 0 0 12px; font-size: 12.5px; color: var(--text-sub); }
 
 /* Sidebar. Layout width comes from <html data-sidebar>, which boot sets before
-   its first await; with the attribute absent it is pinned. The
-   custom properties carry the pinned state so the reveal and the dismissed
-   cases each need one rule. Keyboard focus reveals a rail, and a click's focus
-   does not: a clicked row would otherwise hold it open after the pointer left. */
-:root { --ng-side-w: 210px; --ng-side-label: visible; --ng-side-mark: hidden; }
-:root[data-sidebar="rail"] { --ng-side-w: 40px; --ng-side-label: hidden; --ng-side-mark: visible; }
-.ng-side { position: relative; flex: none; width: var(--ng-side-w); }
-.ng-sidebar { position: absolute; inset: 0 auto 0 0; z-index: 20; box-sizing: border-box; width: var(--ng-sb-w, var(--ng-side-w)); display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: 12.5px; transition: width 120ms ease 180ms; }
-.ng-side:not([data-dismissed]) .ng-sidebar:is(:hover, :has(:focus-visible)) { --ng-sb-w: 210px; --ng-sb-label: visible; --ng-sb-mark: hidden; transition-delay: 0s; box-shadow: 0 0 0 1px var(--line), 8px 0 18px -8px var(--line); }
-.ng-side-label { visibility: var(--ng-sb-label, var(--ng-side-label)); white-space: nowrap; transition: visibility 0s linear 180ms; }
-.ng-sidebar:is(:hover, :has(:focus-visible)) .ng-side-label { transition-delay: 0s; }
+   its first await; with the attribute absent it is pinned. Unpinned takes no
+   width at all: an 8px strip on the left edge reveals it as a 210px overlay,
+   which hides 180ms after the pointer leaves. Keyboard focus reveals it too,
+   and a click's focus does not: a clicked row would otherwise hold it open
+   after the pointer left. Hidden by transform, not visibility, so its rows
+   stay in the tab order. */
+:root { --ng-side-w: 210px; }
+:root[data-sidebar="rail"] { --ng-side-w: 0px; }
+.ng-side { position: relative; z-index: 20; flex: none; width: var(--ng-side-w); }
+.ng-side-edge { display: none; position: absolute; inset: 0 auto 0 0; width: 8px; }
+:root[data-sidebar="rail"] .ng-side-edge { display: block; }
+.ng-sidebar { position: absolute; inset: 0 auto 0 0; box-sizing: border-box; width: 210px; display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: 12.5px; }
+:root[data-sidebar="rail"] .ng-sidebar { transform: translateX(-100%); transition: transform 120ms ease 180ms; }
+:root[data-sidebar="rail"] .ng-side:not([data-dismissed]):is(:hover, :has(:focus-visible)) .ng-sidebar { transform: none; transition-delay: 0s; box-shadow: 8px 0 18px -8px var(--line); }
+.ng-side-label { white-space: nowrap; }
 .ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px; border-bottom: 1px solid var(--line); }
 .ng-side-brand { font-weight: 600; font-size: 13px; }
 .ng-side-live { font-size: 11.5px; }
@@ -54,11 +58,8 @@
 .ng-side-kbd { margin-left: auto; }
 .ng-side-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: auto; position: relative; }
 .ng-sidebar .ng-side-row { position: relative; }
-/* A draft area's row (Decisions §10): an amber dot and a red problem count at
-   the right; on the rail, where the label is hidden, one dot on the icon. */
-.ng-side-ico { position: relative; display: inline-flex; flex: none; }
-.ng-side-mark { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 1.5px var(--side); visibility: var(--ng-sb-mark, var(--ng-side-mark)); }
-.ng-side-mark.is-bad { background: var(--bad); }
+/* A draft area's row (Decisions §10): an amber dot and a red problem count at the right. */
+.ng-side-ico { display: inline-flex; flex: none; }
 .ng-side-badges { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .ng-side-badges .ng-side-dot { margin-left: 0; }
 .ng-side-count { min-width: 14px; font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; color: var(--bad); }

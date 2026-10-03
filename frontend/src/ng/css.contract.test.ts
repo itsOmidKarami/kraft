@@ -35,6 +35,12 @@ describe("ng CSS", () => {
     expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-mid"));
   });
 
+  it("takes an unpinned sidebar to no width, and keeps its overlay 180ms after the pointer leaves", () => {
+    const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
+    expect(css).toMatch(/:root\[data-sidebar="rail"\]\s*{\s*--ng-side-w:\s*0px;/);
+    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*\b180ms\b/);
+  });
+
   // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
   // shipped css.contract.test.ts, which the cutover deletes.
   it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {
