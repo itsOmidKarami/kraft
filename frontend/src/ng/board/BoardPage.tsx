@@ -54,6 +54,9 @@ function useListLoad() {
   return { load, refresh, offline: load.state === "error" || connection === "reconnecting" };
 }
 
+/** The read's error without its request line ("(GET /work-items?…)"): the banner says what broke, not which call. */
+const bannerError = (e: string) => e.replace(/ \((?:GET|POST|PUT|PATCH|DELETE) [^)]*\)/, "").replace(/\.$/, "");
+
 /** A minute's clock for the rows' ages and "retry in". */
 function useNow() {
   const [now, setNow] = useState(() => Date.now());
@@ -254,7 +257,7 @@ export function BoardPage() {
         <div className="board-offline" role="alert">
           <span className="board-offline-mark" aria-hidden>!</span>
           <span className="board-offline-text">
-            Could not load the board{load.state === "error" ? `: ${load.error.replace(/\.$/, "")}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
+            Could not load the board{load.state === "error" ? `: ${bannerError(load.error)}` : ": the live connection dropped"}. Showing what was loaded before; actions are off until it reconnects.
           </span>
           <button type="button" className="btn btn-danger" onClick={refresh}>Retry now</button>
         </div>

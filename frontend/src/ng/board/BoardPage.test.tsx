@@ -268,10 +268,10 @@ describe("BoardPage", () => {
 
   it("goes offline when the read fails: the banner carries the error, rows stay, actions are off; Retry now reads again", async () => {
     put(item("p1", "paused"));
-    const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items) — it may have stopped."));
+    const list = vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server (GET /work-items?include_abandoned=true) — it may have stopped."));
     board();
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server (GET /work-items) — it may have stopped. Showing what was loaded before");
+    expect(banner).toHaveTextContent("Could not load the board: could not reach the Kraft server — it may have stopped. Showing what was loaded before");
     expect(screen.getByText("OFFLINE")).toBeInTheDocument();
     expect(screen.getByText("Item p1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
