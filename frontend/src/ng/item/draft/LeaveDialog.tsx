@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
@@ -49,6 +49,16 @@ function Leave({ onStay, go }: { onStay: () => void; go: () => void }) {
   const d = useDraft()!;
   const apply = useApply();
   const [asking, setAsking] = useState(false);
+  // The footer swaps its buttons, so the pressed one unmounts: focus goes to Keep,
+  // and back to the button that asked when Keep is pressed.
+  const keep = useRef<HTMLButtonElement>(null);
+  const ask = useRef<HTMLButtonElement>(null);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asking) keep.current?.focus();
+    else if (asked.current) ask.current?.focus();
+    asked.current ||= asking;
+  }, [asking]);
   const [busy, setBusy] = useState(false);
   const blocked = d.issues.length > 0;
   const n = d.changes;
@@ -75,12 +85,12 @@ function Leave({ onStay, go }: { onStay: () => void; go: () => void }) {
       footer={asking ? (
         <>
           <span className="idr-ask">Discard this draft and continue? It cannot be brought back.</span>
-          <Button onClick={() => setAsking(false)}>Keep</Button>
+          <Button ref={keep} onClick={() => setAsking(false)}>Keep</Button>
           <Button className="idr-danger" disabled={busy} onClick={discard}>Discard & continue</Button>
         </>
       ) : (
         <>
-          <Button className="idr-danger idr-left" onClick={() => setAsking(true)}>Discard &amp; continue</Button>
+          <Button ref={ask} className="idr-danger idr-left" onClick={() => setAsking(true)}>Discard &amp; continue</Button>
           <Button onClick={onStay}>Stay</Button>
           <Button variant="primary" disabled={busy} onClick={run}>{blocked ? "Review problems" : "Apply & continue"}</Button>
         </>

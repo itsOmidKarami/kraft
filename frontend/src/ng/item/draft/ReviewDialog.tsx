@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usd } from "../../../format";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
@@ -25,6 +25,16 @@ function Review() {
   const apply = useApply();
   const select = useSelect(d.raw.id);
   const [asking, setAsking] = useState(false);
+  // The footer swaps its buttons, so the pressed one unmounts: focus goes to Keep,
+  // and back to the button that asked when Keep is pressed.
+  const keep = useRef<HTMLButtonElement>(null);
+  const ask = useRef<HTMLButtonElement>(null);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asking) keep.current?.focus();
+    else if (asked.current) ask.current?.focus();
+    asked.current ||= asking;
+  }, [asking]);
   const [busy, setBusy] = useState(false);
   const [moved, setMoved] = useState(0);
   const view = d.draft.view!;
@@ -79,12 +89,12 @@ function Review() {
       footer={asking ? (
         <>
           <span className="idr-ask">Discard this draft? It cannot be brought back.</span>
-          <Button onClick={() => setAsking(false)}>Keep</Button>
+          <Button ref={keep} onClick={() => setAsking(false)}>Keep</Button>
           <Button className="idr-danger" disabled={busy} onClick={discard}>Discard</Button>
         </>
       ) : (
         <>
-          <Button className="idr-danger idr-left" onClick={() => setAsking(true)}>Discard draft</Button>
+          <Button ref={ask} className="idr-danger idr-left" onClick={() => setAsking(true)}>Discard draft</Button>
           {/* Focus opens on the primary, or on Back to editing while it is blocked; never on Discard draft (R10b-05). */}
           <Button data-autofocus={blocked ? true : undefined} onClick={close}>Back to editing</Button>
           {start && <Button disabled={busy} onClick={startWithout}>Start without them</Button>}

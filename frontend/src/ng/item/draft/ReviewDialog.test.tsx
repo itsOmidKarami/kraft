@@ -156,6 +156,14 @@ describe("ReviewDialog", () => {
     await waitFor(() => expect(sent(calls, "DELETE")).toHaveLength(1));
   });
 
+  it("keeps focus in the dialog as Discard draft asks and Keep goes back", async () => {
+    open({});
+    await userEvent.click(within(await dialog()).getByRole("button", { name: "Discard draft" }));
+    expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.getByRole("button", { name: "Discard draft" })).toHaveFocus();
+  });
+
   it("sends nothing for Back to editing or Escape", async () => {
     const { calls } = open({});
     await userEvent.click(within(await dialog()).getByRole("button", { name: "Back to editing" }));
