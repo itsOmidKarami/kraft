@@ -2,6 +2,7 @@ import type { BoardOpenIn, Theme } from "../../types";
 import { DEFAULT_PREFS, type DiffPrefs } from "../review/prefs";
 import { Segmented } from "../ui/Segmented";
 import { Switch } from "../ui/Switch";
+import { onMac } from "../keys";
 
 type Scheme = NonNullable<Theme["code_scheme"]>;
 type Mode = "light" | "dark";
@@ -125,7 +126,7 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
         <div className="set-row">
           <span className="set-row-label">Open items in</span>
           <Segmented<BoardOpenIn> label="Open items in" options={[{ value: "peek", label: "Peek" }, { value: "full", label: "Full page" }]} value={theme.board.open_in} onChange={(v) => save({ board: { ...theme.board, open_in: v } })} />
-          <span className="set-hint">What a row click does; ⌘-click always opens the page.</span>
+          <span className="set-hint">What a row click does; {onMac() ? "⌘-click" : "Ctrl+click"} always opens the page.</span>
         </div>
       </section>
     </div>

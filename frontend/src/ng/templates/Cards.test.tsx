@@ -264,7 +264,7 @@ describe("remove", () => {
     expect(within(g).getByRole("button", { name: "spec_approval, gate" }).querySelector(".is-prob")).not.toBeNull();
     await userEvent.click(within(card).getByRole("button", { name: "Remove node" }));
     expect(post).toHaveBeenCalledWith("chains", "default", [{ op: "remove", path: "spec" }], undefined);
-    await toasted("Removed spec · 1 reference now broken · ⌘Z undoes it");
+    await toasted("Removed spec · 1 reference now broken · Ctrl+Z undoes it");
     expect(screen.queryByRole("complementary", { name: "spec pane" })).toBeNull();
     expect(within(g).getByRole("button", { name: "spec_approval, gate" }).querySelector(".is-prob")).toBeNull();
   });

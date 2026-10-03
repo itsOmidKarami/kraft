@@ -6,7 +6,7 @@ import { useStore } from "../../store";
 import * as api from "../../api";
 import type { Health } from "../../types";
 import { NAV_ICON } from "../icons";
-import { isTextField } from "../keys";
+import { isTextField, mod } from "../keys";
 import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
@@ -144,7 +144,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           <button type="button" className="ng-side-row" aria-label="Search" aria-keyshortcuts="Meta+K Control+K" onClick={() => { if (mode === "rail") retract(); onSearch?.(); }}>
             <SearchIcon size={16} aria-hidden />
             <span className="ng-side-label" aria-hidden>Search</span>
-            <span className="ng-side-kbd ng-side-label" aria-hidden><Kbd>⌘K</Kbd></span>
+            <span className="ng-side-kbd ng-side-label" aria-hidden><Kbd>{mod("K")}</Kbd></span>
           </button>
           {routesIn("top").map(row)}
           <div className="ng-side-group ng-side-group-templates"><span className="ng-side-label">Templates</span></div>

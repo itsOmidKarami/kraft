@@ -3,6 +3,7 @@ import { Button } from "../../ui/Button";
 import { Popover } from "../../ui/Popover";
 import { focusSoon } from "../menus/focus";
 import type { Ref } from "./refs";
+import { mod } from "../../keys";
 
 /** Remove (Decisions §9 Remove): a small card at the button. What points at
  *  the item is listed (and marked red on the canvas while the card is open);
@@ -22,7 +23,7 @@ export function RemoveCard({ anchor, label, refs, note, onRemove, onClose }: { a
           </>
         )}
         {note && <p className="tpl-menu-note">{note}</p>}
-        <p className="tpl-menu-note">⌘Z undoes it.</p>
+        <p className="tpl-menu-note">{mod("Z")} undoes it.</p>
         <div className="card-acts">
           <button ref={keep} type="button" className="btn btn-secondary" onClick={onClose}>Keep</button>
           <Button variant="danger" onClick={onRemove}>{label}</Button>

@@ -59,6 +59,17 @@ describe("ng Sidebar", () => {
     await screen.findByText("127.0.0.1:8765 · v0.9.4");
   });
 
+  it("prints Search's shortcut for the platform: Ctrl+K off a Mac, ⌘K on one", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+    const { unmount } = mount();
+    expect(screen.getByRole("button", { name: /^Search/ })).toHaveTextContent("Ctrl+K");
+    expect(screen.queryByText("⌘K")).toBeNull();
+    unmount();
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    mount();
+    expect(screen.getByRole("button", { name: /^Search/ })).toHaveTextContent("⌘K");
+  });
+
   it("keeps every row in the tab order, so the rail works without a pointer", async () => {
     mount();
     await userEvent.tab(); // skip link

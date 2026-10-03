@@ -73,7 +73,7 @@ describe("Library: remove", () => {
     expect(post).not.toHaveBeenCalled();
     await u.click(within(card).getByRole("button", { name: "Remove task" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("library", "library", [{ op: "remove", path: "tasks.implementer" }], undefined));
-    expect(await screen.findByText("Removed tasks.implementer · 1 use now broken · ⌘Z undoes it")).toBeInTheDocument();
+    expect(await screen.findByText("Removed tasks.implementer · 1 use now broken · Ctrl+Z undoes it")).toBeInTheDocument();
     expect(where()).toBe("/templates/library/tasks.code_review");
   });
 

@@ -22,6 +22,7 @@ import { MoveToLibraryCard } from "../../library/MoveToLibraryCard";
 import { movable } from "../../library/moveToLibrary";
 import { detailOf } from "../../http";
 import "./panes.css";
+import { mod } from "../../keys";
 
 const FIXED_ICON: Partial<Record<PaneKind, string>> = { chain: "workflow", fixloop: "refresh-cw", judge: "scale" };
 const TABS = [{ value: "overview", label: "Overview" }, { value: "config", label: "Config" }];
@@ -153,7 +154,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
     closeCard();
     if (a.status !== 200) return;
     const broken = (a.body.ops?.[0]?.result?.broken as unknown[] | undefined)?.length ?? 0;
-    showToast(`Removed ${path}${broken ? ` · ${plural(broken, "reference")} now broken` : ""} · ⌘Z undoes it`);
+    showToast(`Removed ${path}${broken ? ` · ${plural(broken, "reference")} now broken` : ""} · ${mod("Z")} undoes it`);
     onRemoved?.();
   };
   const pickBase = async (base: string) => {
