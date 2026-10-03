@@ -102,8 +102,9 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
       facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
       actions: [
         retryFrom(item, node, run),
-        // An infrastructure stop (a token, a forge, a remote) is fixed in the repo's settings.
-        ...(stop.kind === "infra" ? [{ label: "Fix in Repos", run: h.onRepos }] : []),
+        // An infrastructure stop (a token, a forge, a remote) is fixed in the repo's settings. The stop names no
+        // cause the label could name ("Fix the token in Repos"), so it says where to look.
+        ...(stop.kind === "infra" ? [{ label: "Check the repo settings", run: h.onRepos }] : []),
         { label: "Escalate…", run: h.onEscalate },
       ],
     };

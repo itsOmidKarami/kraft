@@ -63,10 +63,10 @@ describe("StateCard", () => {
     expect(h.onEscalate).toHaveBeenCalled();
   });
 
-  it("an infra failure's Fix in Repos opens the item's repo in Settings › Repos (WI-4)", async () => {
+  it("an infra failure's Check the repo settings opens the item's repo in Settings › Repos (WI-4)", async () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("infra") });
-    await userEvent.click(within(screen.getByRole("region", { name: "Failed" })).getByRole("button", { name: "Fix in Repos" }));
+    await userEvent.click(within(screen.getByRole("region", { name: "Failed" })).getByRole("button", { name: "Check the repo settings" }));
     expect(where).toBe("/settings/repos/%2Fcode%2Fkraft-plugins");
   });
 
