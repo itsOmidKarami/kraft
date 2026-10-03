@@ -181,6 +181,23 @@ Two things bite when you move or add a nested test:
   `python -m kraft.intent`, which exits 1 on a broken pin, so repoint them in
   the same change and confirm with `just intent`.
 
+### Writing tests
+
+Read `docs/testing.md` before the first test. The short version a worker needs:
+
+- **A fix adds a row, not a function.** Find the test that covers the behavior
+  and add a `parametrize` case with an `id`. A new `def test_` is for a new
+  behavior.
+- **Grep `tests/support/` before writing a helper.** `support.harness` has
+  `make_repo`, `commit_all`, `connect_repo` and the `v1_*` chain builders;
+  `support.api` has the client pollers (`_poll_events`, `_await_gate`,
+  `_post_default`); `tests/conftest.py` has `database`, `run_dirs`, `repo`,
+  `client`, `templates_dir`, `item_on`, `bd`. `just check-tests` refuses a
+  helper body that already exists elsewhere.
+- **Declare a fold in one line:** `tests/x.py::test_prefix_* -- folded into ...`
+  under `## Removed tests`, and repoint intent pins with
+  `just intent-repoint OLD NEW`.
+
 ### Marking a task already done in a reused plan
 
 A plan attached to one work item is sometimes reused for a later item that
