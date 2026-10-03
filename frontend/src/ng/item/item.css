@@ -200,10 +200,8 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-files .is-mono { overflow-wrap: anywhere; }
 .ip-notes { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--text); }
 
-/* Document viewer (prototype lines 278–283): a full-height drawer on the right
-   over a scrim. The scrim is the dialog backdrop's dark mix: a colour literal
-   may only live in the generated theme.css. */
-.dv-scrim { position: fixed; inset: 0; z-index: 60; background: color-mix(in oklab, var(--side) 70%, transparent); }
+/* Document viewer (prototype lines 278–283): a full-height drawer on the right over a scrim. */
+.dv-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim); }
 .dv-drawer { position: fixed; inset: 0 0 0 auto; box-sizing: border-box; width: min(560px, 92vw); display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); }
 .dv-drawer.is-full { inset: 0; width: auto; border-left: 0; }
 .dv-drawer:focus-visible { outline: none; }
