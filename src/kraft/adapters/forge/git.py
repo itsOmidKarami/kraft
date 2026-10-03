@@ -153,10 +153,13 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
 
-#: Lockfiles a package manager writes by itself where a repo commits none:
-#: `uv sync` in a pyproject with no `uv.lock`, as an entry connected before
-#: the probe stopped proposing it for one still runs.
-WRITTEN_LOCKFILES = frozenset({"uv.lock"})
+#: Lockfiles a package manager writes by itself where a repo commits none,
+#: each with the command that makes one to commit: `uv sync` in a pyproject
+#: with no `uv.lock`, as an entry connected before the probe stopped
+#: proposing it for one still runs, and `cargo fetch` in a crate with no
+#: `Cargo.lock`, which the probe proposes.
+LOCK_COMMANDS = {"uv.lock": "uv lock", "Cargo.lock": "cargo generate-lockfile"}
+WRITTEN_LOCKFILES = frozenset(LOCK_COMMANDS)
 
 #: In the worktree's own git dir (`git rev-parse --absolute-git-dir`): a JSON
 #: object naming the untracked `WRITTEN_LOCKFILES` its setup command wrote,

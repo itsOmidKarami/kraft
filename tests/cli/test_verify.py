@@ -203,6 +203,16 @@ def test_a_uv_lock_the_setup_wrote_is_named_as_a_lockfile_not_a_change(tmp_path)
     assert "Commit one (uv lock)" in said
 
 
+def test_a_cargo_lock_the_setup_wrote_is_named_with_cargos_advice(tmp_path):
+    """Connect proposes `cargo fetch` for a crate, which writes a `Cargo.lock`
+    where none is committed, and `--verify` then failed on it."""
+    repo = _repo(tmp_path)
+    ok, said = _verify(_entry(repo, setup_command="echo v1 > Cargo.lock", test_command="true"))
+    assert ok, said
+    assert "left Cargo.lock, a lockfile the repo does not commit" in said
+    assert "Commit one (cargo generate-lockfile)" in said
+
+
 def test_a_test_writes_no_bytecode_as_a_work_items_test_does_not(tmp_path):
     """Dispatch runs a test with PYTHONDONTWRITEBYTECODE=1; verify did not,
     and reported `__pycache__/` as files every work item would commit."""

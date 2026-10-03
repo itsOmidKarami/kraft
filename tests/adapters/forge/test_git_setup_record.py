@@ -159,3 +159,13 @@ def test_a_real_install_is_left_out(tmp_path, files, install):
             _git(repo, "commit", "-q", "-m", "a package")
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == [install]
+
+
+def test_a_cargo_lock_the_setup_wrote_is_left_out(tmp_path):
+    """`cargo fetch`, which connect proposes for a crate, writes one where
+    the crate commits none."""
+    repo = make_repo(tmp_path)
+    _setup_writes(repo, "Cargo.lock")
+    (repo / "work.py").write_text("x = 1\n")
+
+    assert _sweep(repo) == ["work.py"]
