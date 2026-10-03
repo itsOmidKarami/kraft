@@ -24,10 +24,10 @@ const uv = (args, opts = {}) => spawnSync("uv", ["run", "python", ...args], { cw
 let daemon;
 let code = 1;
 try {
-  // Same dev home `just dev` builds: the tracked templates (minus the machine's
+  // Same dev home `just dev` builds: the tracked config (minus the machine's
   // access.yaml) and the throwaway repo the seed items work on.
-  cpSync(join(repoRoot, "templates"), join(home, "templates"), { recursive: true });
-  rmSync(join(home, "templates", "access.yaml"), { force: true });
+  cpSync(join(repoRoot, "config"), join(home, "config"), { recursive: true });
+  rmSync(join(home, "config", "access.yaml"), { force: true });
   if (uv(["dev/seed.py", "--repo-only"]).status !== 0) throw new Error("building the seed repo failed");
   daemon = spawn("uv", ["run", "python", "-m", "kraft"], { cwd: repoRoot, env, stdio: "inherit" });
   let up = false;
