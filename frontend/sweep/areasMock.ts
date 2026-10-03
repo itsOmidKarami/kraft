@@ -43,9 +43,9 @@ const TOOL_CEILING = ["Read", "Grep"];
 const RUNNING: Record<string, number> = { "/Users/me/src/platform": 1 };
 
 const repoSeed = (): Obj[] => [
-  { path: "/Users/me/src/product_root", name: "product_root", default_chain_template: "default", steering: ["project-standards"], test_command: "pytest -q", setup_command: "uv sync", intent_dir: "docs/intent", models: { claude: "opus" }, forge: "gitlab", project: "acme/product_root", enabled: true, managed: true },
-  { path: "/Users/me/src/platform", name: "platform", default_chain_template: "default", steering: ["never-signal-processes-you-didnt-start"], test_command: "make test", setup_command: "uv sync", forge: "gitlab", project: "acme/platform", policy: { time_cap_minutes: 60 }, enabled: true, managed: true },
-  { path: "/Users/me/src/docs-site", name: "docs-site", default_chain_template: "docs_only", test_command: "npm test", setup_command: "npm ci", forge: "github", project: "acme/docs-site", enabled: false, managed: true },
+  { path: "/Users/me/src/product_root", name: "product_root", default_chain: "default", steering: ["project-standards"], test_command: "pytest -q", setup_command: "uv sync", intent_dir: "docs/intent", models: { claude: "opus" }, forge: "gitlab", project: "acme/product_root", enabled: true, managed: true },
+  { path: "/Users/me/src/platform", name: "platform", default_chain: "default", steering: ["never-signal-processes-you-didnt-start"], test_command: "make test", setup_command: "uv sync", forge: "gitlab", project: "acme/platform", policy: { time_cap_minutes: 60 }, enabled: true, managed: true },
+  { path: "/Users/me/src/docs-site", name: "docs-site", default_chain: "docs_only", test_command: "npm test", setup_command: "npm ci", forge: "github", project: "acme/docs-site", enabled: false, managed: true },
   { path: "/Users/me/src/product_root/plugins", name: "plugins", managed: false },
 ];
 

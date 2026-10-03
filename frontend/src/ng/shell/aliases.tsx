@@ -10,9 +10,12 @@ import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom"
 export const ALIASES: [from: string, to: string][] = [
   ["/search", "/"],
   ["/settings/intake", "/settings/auto-intake"],
+  ["/templates/repos/:repo", "/settings/repos/:repo"],
   ["/templates/repos/*", "/settings/repos"],
   ["/settings/chains/*", "/templates/chains"],
   ["/settings/library/*", "/templates/library"],
+  ["/templates/harnesses/profiles/:name", "/settings/harnesses?profile=:name"],
+  ["/templates/harnesses/:id", "/settings/harnesses?harness=:id"],
   ["/templates/harnesses/*", "/settings/harnesses"],
   ["/settings/templates/*", "/templates/chains"],
   ["/settings/plugins/*", "/templates/chains"],

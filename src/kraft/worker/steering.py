@@ -66,7 +66,7 @@ def select(names: Sequence[str], profiles: Mapping[str, str], *, where: str) -> 
     if missing:
         raise SteeringError(
             f"{where}: steering {missing[0]!r} is not a steering profile in "
-            "templates/library.yaml; define it under `steering:` there "
+            "config/library.yaml; define it under `steering:` there "
             "(Templates › Library), or remove the name"
         )
     selected = {n: profiles[n] for n in names}

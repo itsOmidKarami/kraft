@@ -116,6 +116,7 @@ def build() -> MCPServer:
         skip_nodes: list[str] | None = None,
         budget_usd: float | None = None,
         node_overrides: dict | None = None,
+        chain_template: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -152,11 +153,12 @@ def build() -> MCPServer:
         its spend in dollars (unset, the policy's cap applies -- this door can
         set a cap but not lift one); `node_overrides` is `{node_id: {field:
         value}}`, the fields `set_node_overrides` takes. Leave all three out
-        unless a human asked for them."""
+        unless a human asked for them. `chain_template` is `chain`'s 1.x
+        name, still read; pass `chain`."""
         return await client.create_work_item(
             title,
             repo=repo,
-            chain=chain,
+            chain=chain or chain_template,
             description=description,
             attachments=attachments,
             auto_gate=auto_gate,

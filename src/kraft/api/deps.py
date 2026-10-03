@@ -378,7 +378,7 @@ def library_or_503(st):
     work, leave the Settings screens reachable.
     """
     if st.library is None:
-        detail = "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"])
+        detail = "; ".join(getattr(st, "invalid_library", None) or ["config/library.yaml"])
         raise HTTPException(503, f"template library invalid, refusing work: {detail}")
     return st.library
 

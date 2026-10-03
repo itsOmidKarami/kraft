@@ -225,8 +225,8 @@ beads stores its issues in), or close beads. Kraft does those itself.
 
 A worker's environment is built from an allowlist, not inherited from whatever
 shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy
-vars, the eight `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`,
-`KRAFT_CONFIG_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`,
+vars, the nine `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`,
+`KRAFT_CONFIG_DIR` and its 1.x name `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`,
 `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`) plus the ones Kraft sets per session, and
 the agent's credential var. Any other `KRAFT_*` var, and anything else a
 repo needs, is declared in its `repos.yaml` entry — `env:` for literal values,

@@ -183,7 +183,7 @@ def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, temp
     r = client.post("/api/repos", json={"path": str(repo), "steering": ["does-not-exist"]})
     assert r.status_code == 422, r.text
     # Naming the name, and where steering profiles live.
-    assert "'does-not-exist' is not a steering profile in templates/library.yaml" in r.text
+    assert "'does-not-exist' is not a steering profile in config/library.yaml" in r.text
     # a rejected write never got persisted
     assert not repos_yaml.exists()
     assert client.get("/api/repos").json()["repos"] == []

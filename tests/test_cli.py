@@ -691,7 +691,7 @@ def test_seed_home_adopts_a_pre_2_templates_directory_instead_of_seeding(
 
     assert cli.seed_home(home) is False
 
-    assert not old.exists()
+    assert old.is_symlink() and old.resolve() == home.resolve()
     assert (home / marker).is_file()
     assert (home / "policy.yaml").read_text() == "default: {attempts: 1, wall_clock_s: 1}\n"
     assert not (home / "access.yaml").exists()  # adopted, not seeded over
@@ -720,7 +720,7 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
     home = cli.admin.prepare_home()
 
     assert home == (old if where == "pointed-by-hand" else paths.default_config_dir())
-    assert old.exists() == (where == "pointed-by-hand")
+    assert old.is_symlink() == (where == "renamed")
     intake = yaml.safe_load((home / "intake.yaml").read_text())
     policy = yaml.safe_load((home / "policy.yaml").read_text())
     assert "max_concurrent" not in intake and policy["max_concurrent"] == 1
@@ -733,21 +733,67 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize(
-    "case",
-    ["pointed-by-hand", "no-library", "config-exists"],
+    "case, in_use, templates_is",
+    [
+        ("default", "config", "link"),
+        ("templates-variable-at-the-default", "templates", "link"),
+        ("config-made-by-hand", "config", "link"),
+        ("config-made-by-hand-with-a-clash", "config", "dir"),
+        ("0x-update-interrupted", "config", "link"),
+        ("rename-refused", "templates", "dir"),
+        ("pointed-by-hand", "elsewhere", "dir"),
+        ("a-2-0-home-beside-it", "config", "dir"),
+    ],
 )
-def test_a_templates_directory_is_adopted_only_at_the_default_location(monkeypatch, tmp_path, case):
-    """A directory an operator pointed `KRAFT_CONFIG_DIR` at is theirs to
-    name; a `templates/` with no library was never a seeded home; and a home
-    already on `config/` keeps whatever sits beside it."""
-    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
-    old = tmp_path / "home" / "templates"
-    old.mkdir(parents=True)
-    if case != "no-library":
-        (old / "library.yaml").write_text("tasks: {}\n")
-    target = tmp_path / "elsewhere" if case == "pointed-by-hand" else paths.default_config_dir()
-    if case == "config-exists":
-        target.mkdir()
+def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
+    monkeypatch, tmp_path, capsys, case, in_use, templates_is
+):
+    """The rename follows the directory the start reads, 1.4's service-unit
+    `KRAFT_TEMPLATES_DIR` at the default included, and never seeds over the
+    operator's repos. `templates` is left as a link, so a 1.4 process still
+    running finds its `access.yaml`. A `config/` made by hand first gets what
+    it lacks; a clash stays put for the operator. A directory pointed at
+    elsewhere, or a 2.0 home already there, is not touched; a refused rename
+    is read where it is."""
+    _bundle(monkeypatch, tmp_path)
+    h = tmp_path / "home"
+    monkeypatch.setenv("KRAFT_HOME", str(h))
+    elsewhere = tmp_path / "elsewhere"
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(elsewhere) if case == "pointed-by-hand" else "")
+    named = str(h / "templates") if case == "templates-variable-at-the-default" else ""
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", named)
+    old = h / "templates"
+    (old / "harnesses").mkdir(parents=True)
+    (old / "harnesses" / "mine.yaml").write_text("x: 1\n")
+    for name, text in {
+        "library.yaml": "tasks: {}\n",
+        "repos.yaml": "repos: [mine]\n",
+        "access.yaml": "port: 9999\n",
+    }.items():
+        (old / name).write_text(text)
+    if case.startswith("config-made-by-hand"):
+        (h / "config" / "harnesses").mkdir(parents=True)
+        if case.endswith("clash"):
+            (h / "config" / "harnesses" / "theirs.yaml").write_text("y: 2\n")
+    elif case == "a-2-0-home-beside-it":
+        (h / "config").mkdir()
+        (h / "config" / "library.yaml").write_text("tasks: {}\n")
+    elif case == "0x-update-interrupted":
+        old.rename(h / "templates.seeding")
+        (h / "templates.seeding" / cli.admin.UPDATE_STAGED).write_text("templates.pre-v1-x\n")
+    elif case == "rename-refused":
+        monkeypatch.setattr(Path, "rename", lambda *a: (_ for _ in ()).throw(OSError(16, "busy")))
 
-    assert cli.admin.adopt_pre_2_home(target) is False
-    assert old.exists()
+    got = cli.admin.prepare_home()
+
+    assert got == {"config": h / "config", "templates": old, "elsewhere": elsewhere}[in_use]
+    assert old.is_symlink() == (templates_is == "link")
+    if case not in ("pointed-by-hand", "a-2-0-home-beside-it"):
+        # Never seeded over: the operator's repos are where every reader looks.
+        assert yaml.safe_load((got / "repos.yaml").read_text()) == {"repos": ["mine"]}
+    if case.endswith("clash"):
+        assert sorted(p.name for p in (h / "config" / "harnesses").iterdir()) == ["theirs.yaml"]
+        assert (old / "harnesses" / "mine.yaml").is_file()
+        assert "merge them by hand" in capsys.readouterr().err
+    else:
+        assert (old / "access.yaml").read_text() == "port: 9999\n"

@@ -823,7 +823,7 @@ async def run_setup_command(
             f"no setup_command declared for {repo} in repos.yaml, so {worktree.name}'s "
             'worktree cannot be prepared. Declare one (use "" for a repo that '
             "deliberately needs no preparation), or tick No setup needed under "
-            "Templates › Repos."
+            "Settings › Repos."
         )
     if not cmd:
         return ""

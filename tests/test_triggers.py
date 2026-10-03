@@ -81,10 +81,12 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(tmp_path, stub_app):
     assert await triggers.tick(app, now=now) == []
 
 
-async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app):
+@pytest.mark.parametrize("policy_file, want", [("readable", ["new", "old"]), ("broken", ["new"])])
+async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app, policy_file, want):
     """2.0: schedules live in `intake.yaml` (`config.Intake.schedules`); a
     `policy.yaml` still naming `triggers:` fires too, keyed apart so neither
-    double-files the other's minute."""
+    double-files the other's minute. A `policy.yaml` that does not load
+    (`st.policy` None) stops only its own triggers."""
     repo = isolated_bd(tmp_path)
     pol = policy.Policy(
         loops={},
@@ -104,14 +106,15 @@ async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app):
         ],
     }
 
-    app = stub_app(**_state(tmp_path, policy_obj=pol), intake=intake)
+    policy_obj = pol if policy_file == "readable" else None
+    app = stub_app(**_state(tmp_path, policy_obj=policy_obj), intake=intake)
     _connect(tmp_path, repo)
     now = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
     filed = await triggers.tick(app, now=now)
     titles = app.state.db.read(
         lambda c: [r["title"] for r in c.execute("SELECT title FROM work_items ORDER BY title")]
     )
-    assert (len(filed), titles) == (2, ["new", "old"])
+    assert (len(filed), titles) == (len(want), want)
     assert await triggers.tick(app, now=now) == []
 
 

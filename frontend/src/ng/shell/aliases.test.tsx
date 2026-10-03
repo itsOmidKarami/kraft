@@ -45,6 +45,19 @@ describe("shipped addresses", () => {
     expect(screen.queryByRole("heading", { name: "Not found" })).toBeNull();
   });
 
+  // The 2.0 release candidates' addresses for a repo and a harness, under
+  // Templates, land on the same thing under Settings.
+  it.each([
+    ["/templates/repos/kraft", "/settings/repos/kraft", ""],
+    ["/templates/harnesses/profiles/fast", "/settings/harnesses", "?profile=fast"],
+    ["/templates/harnesses/claude", "/settings/harnesses", "?harness=claude"],
+  ])("%s lands on %s%s", async (from, path, search) => {
+    window.history.pushState({}, "", from);
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe(path));
+    expect(window.location.search).toBe(search);
+  });
+
   it("keeps the query string and adds no history entry", async () => {
     window.history.pushState({}, "", "/settings/chains?chain=default");
     const depth = window.history.length;

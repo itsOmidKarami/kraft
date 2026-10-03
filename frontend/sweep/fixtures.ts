@@ -68,7 +68,7 @@ export function repo(path: string, i: number, long = false) {
   const name = path.split("/").pop()!;
   return {
     path, name,
-    default_chain_template: i % 3 === 2 ? "quick-task" : "default",
+    default_chain: i % 3 === 2 ? "quick-task" : "default",
     test_command: i % 4 === 3 ? null : long ? "uv run pytest -q tests/ --maxfail=1 --disable-warnings -p no:cacheprovider" : "uv run pytest -q",
     test_scopes: long && i % 2 === 0 ? [{ paths: ["frontend/**"], command: "cd frontend && npm test -- --run" }] : null,
     forge: i % 2 === 0 ? "gitlab" : "github",

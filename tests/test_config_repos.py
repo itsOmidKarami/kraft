@@ -33,7 +33,17 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
 @pytest.mark.parametrize(
     ("entry", "expected"),
     [
+        ({"gitlab_project": "group/repo"}, {"forge": "gitlab", "project": "group/repo"}),
         ({"forge": "github", "project": "o/r"}, {"forge": "github", "project": "o/r"}),
+        (
+            {"forge": "github", "project": "o/r", "gitlab_project": "g/r"},
+            {"forge": "github", "project": "o/r"},
+        ),
+        # a hand-edited half-migrated entry: `project` set, `forge` absent
+        (
+            {"project": "group/kept", "gitlab_project": "group/legacy"},
+            {"forge": None, "project": "group/kept"},
+        ),
         ({}, {"forge": None, "project": None}),
         ({"forge": "gitea", "project": "t/r"}, {"forge": "gitea"}),
         ({}, {"sandbox": None}),
@@ -65,7 +75,10 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ),
     ],
     ids=[
+        "reads-a-legacy-gitlab-project",
         "passes-through-the-new-shape",
+        "the-new-shape-wins-over-legacy",
+        "an-explicit-project-survives-a-legacy-key",
         "forge-and-project-default-to-none",
         "keeps-an-unknown-forge",
         "sandbox-defaults-to-none",
@@ -203,6 +216,14 @@ def test_repo_entry_empty_string_items_use_pydantic_inner_constraints(field):
     with pytest.raises(ValidationError) as exc:
         config.RepoEntry.model_validate({"path": "/a", field: [""]})
     assert exc.value.errors()[0]["type"] == "string_too_short"
+
+
+def test_save_repos_round_trip_drops_legacy_key(tmp_path):
+    path = tmp_path / "repos.yaml"
+    config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
+    config.save_repos(path, [r.model_dump() for r in config.load_repos(path)])
+    assert "gitlab_project" not in path.read_text()
+    assert "forge: gitlab" in path.read_text()
 
 
 def test_load_repos_hands_over_the_model_not_a_dump_of_it(tmp_path):
@@ -478,15 +499,26 @@ def _entry(tmp_path, **extra):
     return path
 
 
-def test_an_unrecognised_key_loads_with_a_warning_naming_it_and_the_repo(tmp_path, caplog):
+@pytest.mark.parametrize(
+    "key, says",
+    [("legacy_widget", "remove it"), ("default_model", "per harness profile")],
+    ids=["unknown", "retired-names-its-successor"],
+)
+def test_an_unrecognised_key_loads_with_a_warning_naming_it_and_the_repo(
+    tmp_path, caplog, monkeypatch, key, says
+):
     """Refusing every unknown key would break installs carrying retired ones,
     but none may pass silently: an operator reading the log learns it binds
-    nothing."""
+    nothing, once per process (the file is re-read on every request), and a
+    key an older Kraft wrote is told what replaced it."""
+    monkeypatch.setattr(config, "_RENAME_WARNED", set())
     with caplog.at_level(logging.WARNING, logger="kraft.config"):
-        (entry,) = config.load_repos(_entry(tmp_path, legacy_widget=1))
+        (entry,) = config.load_repos(_entry(tmp_path, **{key: 1}))
+        config.load_repos(_entry(tmp_path, **{key: 1}))
 
     assert entry.path == "/r"
-    assert any("legacy_widget" in r.message and "/r" in r.message for r in caplog.records)
+    said = [r.message for r in caplog.records if key in r.message and "/r" in r.message]
+    assert len(said) == 1 and says in said[0], said
 
 
 def test_a_caller_that_reports_unrecognised_keys_itself_gets_no_warning(caplog):

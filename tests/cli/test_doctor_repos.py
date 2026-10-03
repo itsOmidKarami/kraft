@@ -42,7 +42,7 @@ def test_doctor_reports_a_connected_repo_with_no_setup_command(app, tmp_path):
     row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("setup "))
     assert not row["ok"]
     assert "setup_command" in row["detail"]
-    assert "tick No setup needed under Templates › Repos" in row["detail"]
+    assert "tick No setup needed under Settings › Repos" in row["detail"]
 
 
 @pytest.mark.parametrize(
@@ -80,19 +80,30 @@ def test_doctor_warns_on_a_member_and_its_detected_stub(
         assert str(clone.resolve()) in rows[0]["detail"]
 
 
-def test_doctor_fails_a_repo_entry_carrying_an_unrecognised_key(app, tmp_path):
-    """Kraft-4hn34: a key that binds nothing is a failing check, naming it."""
+@pytest.mark.parametrize(
+    "key, ok, says",
+    [
+        ("legacy_widget", False, "remove them"),
+        ("default_model", True, "per harness profile"),
+        ("submodules", True, "repos.yaml entry of its own"),
+    ],
+    ids=["an-unknown-key-fails", "a-retired-key-warns-naming-its-successor", "submodules"],
+)
+def test_doctor_fails_a_repo_entry_carrying_an_unrecognised_key(app, tmp_path, key, ok, says):
+    """Kraft-4hn34: a key that binds nothing is a failing check, naming it. A
+    key an older Kraft wrote is no typo: a warning saying what replaced it,
+    not a failure every upgraded home's `doctor && ...` trips on."""
     repo = make_repo(tmp_path, name="stale")
     asyncio.run(client.ensure_repo(str(repo)))
     path = tmp_path / "templates" / "repos.yaml"
     data = yaml.safe_load(path.read_text())
-    data["repos"][0]["legacy_widget"] = 1
+    data["repos"][0][key] = 1
     path.write_text(yaml.safe_dump(data))
 
     row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("keys "))
 
-    assert not row["ok"]
-    assert "legacy_widget" in row["detail"]
+    assert (row["ok"], row.get("warn", False)) == (ok, ok)
+    assert key in row["detail"] and says in row["detail"]
 
 
 def test_doctor_passes_a_repo_entry_carrying_a_renamed_key(app, tmp_path):

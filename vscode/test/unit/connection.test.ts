@@ -16,6 +16,15 @@ describe("locations", () => {
     const l = locations({ KRAFT_HOME: "/k", KRAFT_RUN_DIR: "/r" }, "/home/u");
     expect(l).toEqual({ home: "/k", templatesDir: "/k/config", runDir: "/r" });
   });
+  it.each([
+    ["a 1.x home not yet renamed", ["/k/templates/library.yaml"], "/k/templates"],
+    ["a 0.x home not yet renamed", ["/k/templates/registry.yaml"], "/k/templates"],
+    ["a renamed home", ["/k/config", "/k/templates/library.yaml"], "/k/config"],
+    ["a templates/ that holds no home", ["/k/templates"], "/k/config"],
+  ])("reads %s where Kraft does", (_, present, want) => {
+    const l = locations({ KRAFT_HOME: "/k" }, "/home/u", (p) => present.includes(p));
+    expect(l.templatesDir).toBe(want);
+  });
 });
 
 describe("baseUrl", () => {

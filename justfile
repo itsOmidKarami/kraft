@@ -46,7 +46,7 @@ fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 # password hash, and a dev instance must stay on unauthenticated loopback.
 _dev-home:
     @mkdir -p .dev
-    @[ -d .dev/config ] || cp -R config .dev/config
+    @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || cp -R config .dev/config
     @rm -f .dev/config/access.yaml
     @{{dev_env}} uv run python dev/seed.py --repo-only
 

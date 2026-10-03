@@ -26,6 +26,7 @@ from kraft.paths import (
     BUNDLED,
     RunDirs,
     config_dir,
+    default_config_dir,
     default_run_dir,
     default_skills_dir,
 )
@@ -177,6 +178,23 @@ def _restart_check(payload: dict) -> dict:
     return _check("restart", True, f"{who} runs the installed version ({here})")
 
 
+def _config_row(templates: Path) -> dict:
+    """The directory in use, and a warning when a 1.x `templates/` still sits
+    beside `config/` as a directory of its own (not the link the 2.0 rename
+    leaves): one of the two is not read, and whatever it holds is invisible."""
+    home = default_config_dir()
+    old = home.with_name("templates")
+    if old.is_dir() and not old.is_symlink() and home.is_dir() and any(old.iterdir()):
+        return _check(
+            "config",
+            True,
+            f"{templates}; {old} and {home} both exist and only one is read: "
+            f"merge what {old} holds into {home} and remove it",
+            warn=True,
+        )
+    return _check("config", True, str(templates))
+
+
 def _config_checks() -> list[dict]:
     templates = config_dir()
     if not templates.is_dir():
@@ -195,7 +213,7 @@ def _config_checks() -> list[dict]:
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
-    checks = [_check("config", True, str(templates))]
+    checks = [_config_row(templates)]
     try:
         access = config.Access.load(templates / "access.yaml")
         # Loaded as written, so this is the only place a bad one shows.
@@ -1080,7 +1098,7 @@ def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict
     advice = (
         f"connect proposes `{found}` now: run `kraft repo connect {repo.path}` again to save it"
         if found
-        else 'set one under Templates › Repos, or `""` if it has no tests'
+        else 'set one under Settings › Repos, or `""` if it has no tests'
     )
     return _check(
         name, True, f"no test command, so its work items stop at verify; {advice}", warn=True
@@ -1145,7 +1163,7 @@ async def _repo_checks() -> list[dict]:
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
                     f' (use "" if this repo deliberately needs no preparation){again}, or tick '
-                    "No setup needed under Templates › Repos",
+                    "No setup needed under Settings › Repos",
                 )
             )
         if (tests := _tests_check(repo, probed)) is not None:
@@ -1153,14 +1171,17 @@ async def _repo_checks() -> list[dict]:
         unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
         if unrecognised:
             # Loaded, with a warning nobody may be reading: a key that binds
-            # nothing is exactly what a typo looks like (Kraft-4hn34).
-            checks.append(
-                _check(
-                    f"keys {_label(repo)}",
-                    False,
-                    f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
-                )
+            # nothing is exactly what a typo looks like (Kraft-4hn34). A key an
+            # older Kraft wrote is not a typo: a warning naming what replaced
+            # it, not a failure an upgraded `doctor && ...` trips on.
+            retired = [k for k in unrecognised if k in config.RETIRED_REPO_KEYS]
+            unknown = [k for k in unrecognised if k not in config.RETIRED_REPO_KEYS]
+            detail = "; ".join(
+                [f"repos.yaml keys nothing reads: {', '.join(unknown)} -- remove them"]
+                * bool(unknown)
+                + [f"{k} is no longer read: {config.RETIRED_REPO_KEYS[k]}" for k in retired]
             )
+            checks.append(_check(f"keys {_label(repo)}", not unknown, detail, warn=not unknown))
         if (policy := repo.effective_sandbox) is not None and policy.kind == "kit":
             # The rows below read the docker policy it lowers to.
             policy, found = await _kit_checks(repo, policy)

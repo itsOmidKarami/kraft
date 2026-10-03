@@ -31,7 +31,8 @@ def default_config_dir() -> Path:
     """Where an install keeps its configuration: the policy, the connected
     repositories, the harness profiles, access, and the templates (the library
     and the chains) an item is filed from. `config/` since 2.0; a home still
-    holding the 1.x `templates/` is renamed once at start (`cli.admin.adopt_pre_2_home`)."""
+    holding the 1.x `templates/` is renamed once at start, leaving `templates`
+    as a link to it (`cli.admin.adopt_pre_2_home`)."""
     return kraft_home() / "config"
 
 
@@ -90,8 +91,17 @@ def default_harnesses_dir() -> Path:
     `cli.seed_home` -- a seeded copy would freeze at whichever version the
     operator first installed, which is the drift measured live on 2026-09-13
     (Kraft-717xy).
+
+    1.x kept it at `$KRAFT_HOME/templates/harnesses` whatever
+    `KRAFT_TEMPLATES_DIR` named, so a home whose config lived elsewhere has
+    it there, in a `templates/` the 2.0 rename never adopts: read until a
+    `config/harnesses` exists.
     """
-    return default_config_dir() / "harnesses"
+    current = default_config_dir() / "harnesses"
+    legacy = kraft_home() / "templates" / "harnesses"
+    if not current.is_dir() and legacy.is_dir():
+        return legacy
+    return current
 
 
 #: Built SPA and default config, copied in by `just install`. Absent in a plain

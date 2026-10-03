@@ -204,42 +204,112 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
         raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
 
 
-def adopt_pre_2_home(config_dir: Path) -> bool:
+def adopt_pre_2_home(in_use: Path) -> bool:
     """The 2.0 rename: a home whose config still sits in 1.x's `templates/`
-    is renamed to `config/`, once, before anything reads it. True if it did.
+    becomes `config/`, once, before anything reads it. True if it moved
+    anything.
 
-    Only the default location is adopted: `config_dir` is `$KRAFT_HOME/config`
-    (not an operator's `KRAFT_CONFIG_DIR`), it does not exist, and `templates/`
-    beside it is a 1.x home (a `library.yaml`) or a 0.x one (a `registry.yaml`,
-    which `kraft admin update` then replaces where it now is). A home pointed
-    at by hand is the operator's to name. Nothing is copied: one rename, and
-    the old name is gone, so no later start can read a stale copy. The keys
-    2.0 moved between files are `carry_moved_keys`'s, run by the same start."""
-    if config_dir != default_config_dir() or config_dir.exists() or config_dir.is_symlink():
+    `in_use` is the directory this process reads (`paths.config_dir()`). Only
+    a home at the default location is adopted, so `in_use` must be
+    `$KRAFT_HOME/config` or `$KRAFT_HOME/templates` itself: 1.4's
+    `install-service` wrote `KRAFT_TEMPLATES_DIR` into the unit with exactly
+    that default, and the rename must follow it, not seed an empty `config/`
+    beside it. A directory pointed at anywhere else is the operator's to name.
+    `templates/` must be a 1.x home (a `library.yaml`) or a 0.x one (a
+    `registry.yaml`, which `kraft admin update` then replaces where it now is).
+
+    One rename, then `templates` is left as a relative link to `config`: a 1.4
+    process still running (an MCP server under an agent, 1.4's own
+    `update --restart` waiting on the port) keeps finding its `access.yaml`,
+    and a rollback to 1.4 finds the home where it looks. A `config/` already
+    made before this start (the harness guide's `mkdir -p
+    ~/.kraft/config/harnesses`) holding no `library.yaml` gets each entry it
+    lacks moved in instead; an entry both hold is left in `templates/`, and
+    `kraft admin doctor` names both directories. A rename the filesystem
+    refuses is reported and the home read where it is (`paths.config_dir`).
+    The keys 2.0 moved between files are `carry_moved_keys`'s, run by the
+    same start."""
+    home = default_config_dir()
+    old = home.with_name("templates")
+    # A 0.x update interrupted between its two renames left the home staged
+    # under the old name: finish it there first, or it is stranded.
+    finish_interrupted_update(old)
+    if old.is_symlink() or not old.is_dir():
         return False
-    old = pre_2_config_dir()
-    if old is None or old != config_dir.with_name("templates"):
+    if os.path.realpath(in_use) not in (os.path.realpath(home), os.path.realpath(old)):
         return False
-    old.rename(config_dir)
-    print(
-        f"kraft: moved {old} to {config_dir}: the config directory is config/ since 2.0",
-        file=sys.stderr,
-    )
+    if pre_2_config_dir() != old:
+        return False
+    try:
+        if not home.exists() and not home.is_symlink():
+            old.rename(home)
+            moved = [f"moved {old} to {home}"]
+        elif home.is_dir() and not home.is_symlink() and not (home / "library.yaml").exists():
+            moved = _merge_into(old, home)
+        else:
+            return False
+        if not old.exists():
+            old.symlink_to(home.name, target_is_directory=True)
+    except OSError as e:
+        print(
+            f"kraft: could not move {old} to {home} ({e}); reading it where it is. "
+            "Move it by hand with the server stopped.",
+            file=sys.stderr,
+        )
+        return False
+    for line in moved:
+        print(f"kraft: {line}: the config directory is config/ since 2.0", file=sys.stderr)
+    if old.is_dir() and not old.is_symlink():
+        left = ", ".join(sorted(p.name for p in old.iterdir()))
+        print(
+            f"kraft: {old} still holds {left}, which {home} also has; "
+            "merge them by hand (kraft admin doctor names both)",
+            file=sys.stderr,
+        )
     return True
+
+
+def _merge_into(old: Path, home: Path) -> list[str]:
+    """Move each entry of `old` that `home` lacks (or holds only as an empty
+    directory) into `home`; `old` is removed once nothing is left in it."""
+    moved = []
+    for entry in sorted(old.iterdir()):
+        target = home / entry.name
+        if target.is_dir() and not target.is_symlink() and not any(target.iterdir()):
+            target.rmdir()
+        if target.exists() or target.is_symlink():
+            continue
+        entry.rename(target)
+        moved.append(f"moved {entry} to {target}")
+    if not any(old.iterdir()):
+        old.rmdir()
+    return moved
 
 
 def carry_moved_keys(config_dir: Path) -> list[str]:
     """Move what 2.0 reads from another file: `intake.yaml`'s `max_concurrent`
     into `policy.yaml` (unless it already sets one), and `policy.yaml`'s
-    `triggers:` onto `intake.yaml`'s `schedules:`. Each file is rewritten over
-    its own text (`drafts.preserve`), so its comments stay. Returns a line per
-    move; a file that does not parse is left alone, and its reader says why."""
+    `triggers:` onto `intake.yaml`'s `schedules:`. Run by every start, in
+    whichever directory is in use; a home with nothing left to move is not
+    written. Returns a line per move.
+
+    Each file is rewritten over its own text (`drafts.preserve`), so its
+    comments stay, and through a symlink to wherever the file really is. The
+    triggers move only if `intake.yaml` then still loads (`config.Intake`):
+    1.4 ignored a key 2.0's schedule refuses (an `enabled: false`), and an
+    `intake.yaml` that fails to load turns auto-intake off with every
+    schedule in it. Left where they are, they are still read and fire. Only
+    the entries `schedules:` lacks are added, and `intake.yaml` is written
+    first: a start interrupted between the two writes moves nothing twice.
+    A file that does not parse is left alone, and its reader says why."""
+    import pydantic
     import yaml
 
+    from kraft.config import Intake, write_text
     from kraft.drafts import preserve
 
     def load(name: str) -> tuple[Path, str, dict] | None:
-        path = config_dir / name
+        path = Path(os.path.realpath(config_dir / name))
         try:
             text = path.read_text() if path.is_file() else ""
             data = yaml.safe_load(text) if text.strip() else {}
@@ -255,27 +325,46 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
         intake,
         policy,
     )
-    if "max_concurrent" in intake_data:
-        value = intake_data.pop("max_concurrent")
-        if "max_concurrent" not in policy_data and isinstance(value, int):
-            policy_data["max_concurrent"] = value
+    new_intake, new_policy = dict(intake_data), dict(policy_data)
+    if "max_concurrent" in new_intake:
+        value = new_intake.pop("max_concurrent")
+        if "max_concurrent" not in new_policy and isinstance(value, int):
+            new_policy["max_concurrent"] = value
             moved.append(
                 f"intake.yaml: max_concurrent {value} moved to policy.yaml, which reads it"
             )
         else:
             moved.append("intake.yaml: dropped max_concurrent; policy.yaml's is the one read")
-    triggers = policy_data.pop("triggers", None)
+    triggers = new_policy.get("triggers")
     if isinstance(triggers, list) and triggers:
-        schedules = intake_data.get("schedules")
-        intake_data["schedules"] = [*(schedules if isinstance(schedules, list) else []), *triggers]
-        moved.append(f"policy.yaml: {len(triggers)} trigger(s) moved to intake.yaml's schedules")
-    elif triggers is not None:
+        have = new_intake.get("schedules")
+        have = have if isinstance(have, list) else []
+        add = [t for t in triggers if t not in have]
+        candidate = {**new_intake, "schedules": [*have, *add]}
+        try:
+            Intake.model_validate(candidate)
+        except pydantic.ValidationError as e:
+            why = e.errors()[0]
+            where = ".".join(str(p) for p in why["loc"])
+            moved.append(
+                f"policy.yaml: triggers left where they are, still read: intake.yaml's "
+                f"schedules would refuse them ({where}: {why['msg']})"
+            )
+        else:
+            new_intake = candidate
+            del new_policy["triggers"]
+            dupes = len(triggers) - len(add)
+            moved.append(
+                f"policy.yaml: {len(add)} trigger(s) moved to intake.yaml's schedules"
+                + (f" ({dupes} already there)" if dupes else "")
+            )
+    elif isinstance(triggers, list):
+        del new_policy["triggers"]
         moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
-    if moved:
-        from kraft.config import write_text
-
-        write_text(intake_path, preserve.rewrite(intake_text, intake_data))
-        write_text(policy_path, preserve.rewrite(policy_text, policy_data))
+    if new_intake != intake_data:
+        write_text(intake_path, preserve.rewrite(intake_text, new_intake))
+    if new_policy != policy_data:
+        write_text(policy_path, preserve.rewrite(policy_text, new_policy))
     return moved
 
 
@@ -712,7 +801,7 @@ def prepare_home() -> Path:
     exit "already running" anyway. Until that check every reader finds a 1.x
     home under its old name (`paths.config_dir`), which is where `_bind` and
     the address probe read it."""
-    adopt_pre_2_home(default_config_dir())
+    adopt_pre_2_home(config_dir())
     templates_dir = config_dir()
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
@@ -862,9 +951,10 @@ def _start_detached() -> None:
     if running is not None:
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
-    # After the check, never before it: see `prepare_home`. The child's own
-    # `_serve` finds the home prepared and leaves it alone.
-    templates_dir = prepare_home()
+    # Not prepared here: two detached starts racing past this read would both
+    # rename and seed. The child's `_serve` prepares the home once it holds
+    # the lock (`prepare_home`); until then the home is read where it is.
+    templates_dir = config_dir()
     # Resolved (and validated — refuses a password-less LAN bind) here too, so
     # a bad access.yaml fails this shell instead of showing up only as a child
     # that exited before ever writing a pidfile.

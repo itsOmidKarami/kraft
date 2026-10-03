@@ -215,6 +215,17 @@ _RENAMED_KEYS = {"default_chain_template": "default_chain"}
 #: request, and one line per process is what an operator needs.
 _RENAME_WARNED: set[tuple[object, str]] = set()
 
+#: Keys an older `repos.yaml` entry may still carry that nothing reads since
+#: 2.0, and what replaced each: the loader's warning and `kraft admin
+#: doctor`'s `keys` row say it instead of "remove it".
+RETIRED_REPO_KEYS = {
+    "default_model": "set a model per harness profile under 'models:', then remove it",
+    "default_root_merge_policy": "a workspace's 'root_pointer_default' replaces it; remove it",
+    "submodules": "connect each submodule as a repos.yaml entry of its own "
+    "(`kraft repo connect` in its directory), then remove it",
+    "allow_cross_repo": "nothing replaces it; remove it",
+}
+
 #: A harness profile id, the key of `RepoEntry.models`: the same rule as
 #: `kraft.templates.environment.Identifier`, the id a task's `harness:` names.
 _PROFILE_ID = r"^[a-z][a-z0-9_-]*$"
@@ -309,10 +320,18 @@ class RepoEntry(BaseModel):
         """Read a key under its pre-2.0 name: `config/` is seeded once and
         never overwritten, so a rename lives in the reader rather than in a
         migration that rewrites a user's file. The next save writes the new
-        name; a file naming both keeps the new one."""
+        name; a file naming both keeps the new one. A pre-forge
+        `gitlab_project` is read as `forge: gitlab` and `project:`."""
         if not isinstance(data, dict):
             return data
         data = dict(data)
+        legacy = data.pop("gitlab_project", None)
+        # Both `forge` and `project` must be absent: a hand-edited
+        # half-migrated entry carrying an explicit `project` beside the legacy
+        # key keeps its own. The next save writes the new shape.
+        if data.get("forge") is None and data.get("project") is None and legacy:
+            data["forge"] = "gitlab"
+            data["project"] = legacy
         for old, new in _RENAMED_KEYS.items():
             if old in data:
                 value = data.pop(old)
@@ -410,9 +429,13 @@ class RepoEntry(BaseModel):
                 raise ValueError(
                     f"repos.yaml: {self.path}: unknown key {key!r}: did you mean {meant!r}?"
                 )
-            if not quiet:
+            if not quiet and (self.path, key) not in _RENAME_WARNED:
+                _RENAME_WARNED.add((self.path, key))
                 logger.warning(
-                    "repos.yaml: %s: unrecognised key %r binds nothing; remove it", self.path, key
+                    "repos.yaml: %s: %r binds nothing; %s",
+                    self.path,
+                    key,
+                    RETIRED_REPO_KEYS.get(key, "remove it"),
                 )
         return self
 

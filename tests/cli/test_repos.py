@@ -112,7 +112,7 @@ def test_connect_says_when_it_found_no_setup_command(app, capsys, repo):
     assert (
         "setup command: none found for the root" in out and '`""` if it needs no preparation' in out
     )
-    assert "tick No setup needed under Templates › Repos" in out
+    assert "tick No setup needed under Settings › Repos" in out
 
 
 def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):

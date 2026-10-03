@@ -275,7 +275,7 @@ def repo_warning(entry) -> str | None:
     if not stops:
         return None
     return (
-        f"{entry.path} " + "; and it ".join(stops) + ". Set it in Templates › Repos, "
+        f"{entry.path} " + "; and it ".join(stops) + ". Set it in Settings › Repos, "
         "or run `kraft repo connect` there again, before you start this item"
     )
 

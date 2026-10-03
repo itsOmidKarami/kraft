@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from kraft.paths import RunDirs
+import pytest
+
+from kraft.paths import RunDirs, default_harnesses_dir
 
 
 def test_rundirs_derives_paths():
@@ -26,3 +28,24 @@ def test_rundirs_ensure_makes_the_run_dir_private_and_tightens_an_old_one(tmp_pa
     base.chmod(0o755)
     RunDirs(base).ensure()
     assert base.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    "present, want",
+    [
+        ([], "config/harnesses"),
+        (["templates/harnesses"], "templates/harnesses"),
+        (["templates/harnesses", "config/harnesses"], "config/harnesses"),
+    ],
+    ids=["neither", "only-the-1x-one", "both"],
+)
+def test_the_harness_overlay_is_read_where_1x_kept_it_until_config_has_one(
+    tmp_path, monkeypatch, present, want
+):
+    """1.x kept the overlay in `$KRAFT_HOME/templates/harnesses` whatever
+    `KRAFT_TEMPLATES_DIR` named, in a `templates/` the 2.0 rename never
+    adopts when the config lived elsewhere."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    for d in present:
+        (tmp_path / d).mkdir(parents=True)
+    assert default_harnesses_dir() == tmp_path / want

@@ -1,9 +1,13 @@
-"""`kraft admin doctor`'s `moved keys` row: the config keys 2.0 moved or
-renamed, still read under their old names, named where each lives now."""
+"""What `kraft admin doctor` says about the 2.0 moves: the `moved keys` row
+(config keys moved or renamed, still read under their old names, named where
+each lives now) and the `config` row's warning about a `templates/` left
+beside `config/`."""
 
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 
 from kraft import doctor
 
@@ -35,3 +39,25 @@ def test_doctor_names_each_key_2_0_moved_and_still_reads(tmp_path, monkeypatch):
     (live / "theme.yaml").write_text("board: {group_by: chain}\n")
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "moved keys")
     assert (check["ok"], check.get("warn", False)) == (True, False)
+
+
+@pytest.mark.parametrize("templates", ["a-directory-of-its-own", "the-link-the-rename-leaves"])
+def test_doctor_warns_when_a_1x_templates_directory_sits_beside_config(
+    tmp_path, monkeypatch, templates
+):
+    """A `config/` made by hand before the first 2.0 start, beside a 1.x home
+    whose clash the rename left: one of the two is unread. The link the
+    rename leaves is no such thing."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", "")
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", "")
+    (tmp_path / "config" / "chains").mkdir(parents=True)
+    if templates == "a-directory-of-its-own":
+        (tmp_path / "templates" / "harnesses").mkdir(parents=True)
+    else:
+        (tmp_path / "templates").symlink_to("config", target_is_directory=True)
+
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "config")
+    warned = templates == "a-directory-of-its-own"
+    assert (check["ok"], check.get("warn", False)) == (True, warned), check["detail"]
+    assert ("both exist" in check["detail"]) == warned

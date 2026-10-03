@@ -141,7 +141,7 @@ def test_intake_refuses_a_repository_naming_a_profile_the_library_lacks(tmp_path
         )
 
     assert r.status_code == 422, r.text
-    assert "'gone' is not a steering profile in templates/library.yaml" in r.json()["detail"]
+    assert "'gone' is not a steering profile in config/library.yaml" in r.json()["detail"]
 
 
 def test_a_library_save_removing_a_profile_a_repository_names_is_refused(tmp_path, monkeypatch):

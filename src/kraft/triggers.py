@@ -49,8 +49,8 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
     an incident (spec, Kraft-7izl).
     """
     st = app.state
-    if getattr(st, "policy", None) is None:
-        return []
+    # No early return on a broken policy.yaml: `schedules` leaves out only the
+    # legacy triggers it holds, and intake.yaml's still fire.
     now = now or datetime.now(UTC)
     stamp = now.strftime("%Y-%m-%dT%H:%M")
     filed: list[str] = []

@@ -22,6 +22,10 @@ budget:
   work_item_usd: 10     # per item
   daily_usd: 50
 
+schedules:
+  - {cron: '0 9 * * 1', title: weekly}
+
+# why the archive
 archive:
   after_days: 30
 """
@@ -45,8 +49,26 @@ archive:
         pytest.param(
             lambda d: d.pop("archive"),
             ["# why the budget"],
-            ["archive", "after_days"],
+            ["archive:", "after_days"],
             id="a-dropped-key-takes-its-lines",
+        ),
+        pytest.param(
+            lambda d: d.pop("schedules"),
+            ["# why the archive", "daily_usd: 50"],
+            ["weekly"],
+            id="a-dropped-list-keeps-the-next-keys-comment",
+        ),
+        pytest.param(
+            lambda d: d.__setitem__("schedules", [{"cron": "0 8 * * *", "title": "daily"}]),
+            ["# why the archive", "daily"],
+            ["weekly"],
+            id="a-replaced-list-keeps-the-next-keys-comment",
+        ),
+        pytest.param(
+            lambda d: d["budget"].pop("daily_usd"),
+            ["# why the archive", "work_item_usd: 10     # per item"],
+            ["daily_usd"],
+            id="a-dropped-nested-key-keeps-what-follows",
         ),
         pytest.param(
             lambda d: d["default"].__setitem__("attempts", 5),
@@ -83,15 +105,24 @@ def test_rewrite_falls_back_to_a_plain_dump_with_nothing_to_keep(text):
     assert yaml.safe_load(out) == {"a": 1, "b": {"c": [1, 2]}}
 
 
-def test_the_shipped_policy_keeps_its_documentation_through_an_edit():
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: (d["budget"].update(work_item_usd=25), d.update(max_concurrent=5)),
+        lambda d: d.pop("archive"),
+        lambda d: d.pop("budget"),
+        lambda d: d["budget"].pop("daily_usd"),
+    ],
+    ids=["an-edit", "dropping-archive", "dropping-budget", "dropping-budget-daily-usd"],
+)
+def test_the_shipped_policy_keeps_its_documentation_through_an_edit(change):
     """The seeded `policy.yaml` is mostly the documentation of its keys; one
-    Settings click must not delete it."""
+    Settings click must not delete it. Dropping a key once deleted the block
+    after it: 106 lines of the levels and maxima after `archive`."""
     text = SHIPPED_POLICY.read_text()
     data = yaml.safe_load(text)
-    data["budget"]["work_item_usd"] = 25
-    data["max_concurrent"] = 5
+    change(data)
     out = preserve.rewrite(text, data)
     assert yaml.safe_load(out) == data
     comments = [line for line in text.splitlines() if line.startswith("#")]
-    assert comments and all(line in out for line in comments)
-    assert "work_item_usd: 25" in out and "max_concurrent: 5" in out
+    assert comments and [line for line in comments if line not in out] == []

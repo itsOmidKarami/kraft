@@ -150,10 +150,16 @@ def test_kraft_mcp_starts_over_real_stdio(tmp_path):
     assert version == installed()
 
 
-def test_create_work_item_forwards_auto_gate(monkeypatch):
+@pytest.mark.parametrize(
+    "named, chain",
+    [({}, None), ({"chain": "quick"}, "quick"), ({"chain_template": "quick"}, "quick")],
+    ids=["unnamed", "chain", "the-1x-chain-template"],
+)
+def test_create_work_item_forwards_auto_gate(monkeypatch, named, chain):
     """The tool declared `auto_gate` and called the client positionally, one
     argument short, so an agent asking for `auto_gate=False` silently got
-    `True` and had no way to find out."""
+    `True` and had no way to find out. An agent written for 1.x names the
+    chain `chain_template`, which must not be filed on the default chain."""
     seen = {}
 
     async def fake(*args, **kwargs):
@@ -162,12 +168,14 @@ def test_create_work_item_forwards_auto_gate(monkeypatch):
 
     monkeypatch.setattr(mcp.client, "create_work_item", fake)
     asyncio.run(
-        mcp.build().call_tool("create_work_item", {"title": "t", "repo": "/r", "auto_gate": False})
+        mcp.build().call_tool(
+            "create_work_item", {"title": "t", "repo": "/r", "auto_gate": False, **named}
+        )
     )
     assert seen["kwargs"].get("auto_gate") is False
     assert seen["args"] == ("t",), "every other argument should be passed by keyword"
-    # unnamed, so the server applies the repo's default chain (Kraft-9efnk.11)
-    assert seen["kwargs"]["chain"] is None
+    # unnamed, the server applies the repo's default chain (Kraft-9efnk.11)
+    assert seen["kwargs"]["chain"] == chain
 
 
 def test_the_items_own_policy_reaches_the_api_from_both_tools(monkeypatch):
