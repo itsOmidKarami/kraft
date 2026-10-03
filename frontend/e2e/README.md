@@ -71,12 +71,12 @@ Env it sets for the child `python -m kraft`:
 | --- | --- |
 | `KRAFT_PORT` | ephemeral by default; pin one explicitly via `KRAFT_PORT` |
 | `KRAFT_RUN_DIR` | `<tmp>/run` |
-| `KRAFT_TEMPLATES_DIR` | fake templates dir (the V1 library, its chains, harness profiles and policy) |
+| `KRAFT_CONFIG_DIR` | fake templates dir (the V1 library, its chains, harness profiles and policy) |
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |
 | `KRAFT_INDEX_REPOS` | the sample repo, seeded with two `.engineering/` documents so search has something to find |
-| `KRAFT_HOME` | `<tmp>` — pinned, never inherited: the V1 `fake` harness overlay is written to `$KRAFT_HOME/templates/harnesses`, which is the only place the daemon reads it from |
+| `KRAFT_HOME` | `<tmp>` — pinned, never inherited: the V1 `fake` harness overlay is written to `$KRAFT_HOME/config/harnesses`, which is the only place the daemon reads it from |
 
 It polls the port it picked (or the one you pinned) until `/api/health` answers 200, then prints:
 

@@ -96,7 +96,7 @@ def test_the_seeded_default_chain_publishes_in_the_required_order():
     final gate; only then ready, external approval, merge."""
     from kraft.templates.library import TemplateLibrary
 
-    chain = TemplateLibrary.from_yaml_dir(Path(__file__).parents[2] / "templates").resolve_chain(
+    chain = TemplateLibrary.from_yaml_dir(Path(__file__).parents[2] / "config").resolve_chain(
         "default"
     )
     order = []

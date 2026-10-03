@@ -428,7 +428,7 @@ async def test_a_chain_can_run_two_harnesses(tmp_path, repo, fake_agent):
     # `codex` overlaid like the fixture overlays `claude`: the bundled
     # declaration, launching the fake agent.
     bundled = (_REPO_ROOT / "src" / "kraft" / "harnesses" / "codex.yaml").read_text()
-    overlay = Path(os.environ["KRAFT_HOME"]) / "templates" / "harnesses" / "codex.yaml"
+    overlay = Path(os.environ["KRAFT_HOME"]) / "config" / "harnesses" / "codex.yaml"
     fake_codex = json.dumps([sys.executable, str(_FAKE_AGENT), "codex", "exec"])
     overlay.write_text(bundled.replace("command: [codex, exec]", f"command: {fake_codex}"))
     write_harness_profiles(overlay.parents[1], {"codex": {"provider": "codex"}})
@@ -629,7 +629,7 @@ async def test_an_unavailable_selected_harness_stops_for_a_human(
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "empty-home"))
     templates = tmp_path / "templates"
     templates.mkdir()
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     if profiles is not None:
         (templates / "harnesses.yaml").write_text(json.dumps({"harnesses": profiles}))
     task = _agent("write", harness=selected, prompt="Produce the specification.")
@@ -658,7 +658,7 @@ def _seeded(tmp_path, monkeypatch):
     there would pass on a setup no operator has."""
     templates = seed_v1_library(tmp_path / "templates")
     shutil.rmtree(templates / "steering", ignore_errors=True)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     return templates
 
 
@@ -688,7 +688,7 @@ async def _dispatch_seeded(
     agent's argv log, one argument per line (so a multi-line prompt spans
     several)."""
     templates = _seeded(tmp_path, monkeypatch)
-    shipped = (_REPO_ROOT / "templates" / "harnesses.yaml").read_text()
+    shipped = (_REPO_ROOT / "config" / "harnesses.yaml").read_text()
     # The executable only: provider, enabled and defaults stay as shipped.
     (templates / "harnesses.yaml").write_text(
         shipped.replace("executable: codex", f"executable: {_FAKE_CLAUDE_SH}").replace(

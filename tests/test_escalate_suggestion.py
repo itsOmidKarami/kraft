@@ -30,7 +30,7 @@ async def _instruction(monkeypatch, tmp_path, database, run_dirs, *, auto=False,
     human with a suggested skip, or paused after that."""
     templates = tmp_path / "templates"
     write_harness_profiles(templates, {"claude": {"provider": "claude"}})
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     seen = {}
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):

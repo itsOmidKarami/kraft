@@ -46,7 +46,7 @@ The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
 enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file
-origin: templates/library.yaml -- The four pins here are the whole sentence ("one `library.yaml`" plus "one selectable chain per file"), and they are left exactly as they were. A fifth entry here for `test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library` was removed again: that test verifies harness-profile coverage, which is a different sentence, and a pin claiming more than its test proves is worse than an honest gap. It is pinned where it belongs, under `harness-profile-has-safe-instance-configuration`. This requirement says nothing about `harnesses.yaml`, and should not.
+origin: config/library.yaml -- The four pins here are the whole sentence ("one `library.yaml`" plus "one selectable chain per file"), and they are left exactly as they were. A fifth entry here for `test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library` was removed again: that test verifies harness-profile coverage, which is a different sentence, and a pin claiming more than its test proves is worse than an honest gap. It is pinned where it belongs, under `harness-profile-has-safe-instance-configuration`. This requirement says nothing about `harnesses.yaml`, and should not.
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -157,7 +157,7 @@ The shipped `implementer` task SHALL carry a `time_cap_minutes` default of
 120, so a runaway implementation run in either shipped chain stops for a
 person.
 enforced-by: tests/templates/test_time_caps.py::test_the_shipped_implementer_runs_under_a_default_time_cap[default], tests/templates/test_time_caps.py::test_the_shipped_implementer_runs_under_a_default_time_cap[quick-task]
-origin: templates/library.yaml §implementer -- Kraft-nxqft; every successful implementer run on record finished inside 96 minutes (p99 73)
+origin: config/library.yaml §implementer -- Kraft-nxqft; every successful implementer run on record finished inside 96 minutes (p99 73)
 
 ## REQ selected-skill-must-be-available
 
@@ -267,7 +267,7 @@ migrated) and SHALL launch every task as before; a fresh seed SHALL get the
 library and the profiles it selects together; the capability manifest SHALL
 tell an older home how to adopt profiles.
 enforced-by: tests/test_agent_profiles.py::test_the_shipped_library_selects_profiles_and_launches_as_before, tests/test_agent_profiles.py::test_an_rc_home_keeps_its_files_and_launches_as_before, tests/test_agent_profiles.py::test_a_fresh_seed_gets_the_library_and_its_profiles_together, tests/test_agent_profiles.py::test_the_capability_manifest_tells_an_rc_home_about_profiles
-origin: templates/library.yaml -- Kraft-ps1ao. `templates/harnesses.yaml` ships the tiers; `cli/admin.py` §seed_home copies the bundle whole; `capabilities.py` §MANIFEST carries the adoption line.
+origin: config/library.yaml -- Kraft-ps1ao. `config/harnesses.yaml` ships the tiers; `cli/admin.py` §seed_home copies the bundle whole; `capabilities.py` §MANIFEST carries the adoption line.
 
 ## REQ node-override-extra-prompt-is-appended
 
@@ -1456,14 +1456,14 @@ fix loop, and SHALL repair a failing test or a failing review in the
 verification node after it, whose fix loop re-runs the tests and the review
 and SHALL NOT re-run the implementing agent.
 enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[review-red], tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
-origin: templates/library.yaml -- `fix-loop-remeasures-the-whole-node` reruns a node from its first step, so on the merged `implementation` node every test failure re-ran the implementer; splitting the node makes a repair re-run only the tests and the review. The walks use the seed's own changed-test-scope `builtin`, which `walk._IN_PROCESS_KINDS` had counted as Kraft's own code: every red test stopped with "reinstall and restart" instead of opening the fix loop.
+origin: config/library.yaml -- `fix-loop-remeasures-the-whole-node` reruns a node from its first step, so on the merged `implementation` node every test failure re-ran the implementer; splitting the node makes a repair re-run only the tests and the review. The walks use the seed's own changed-test-scope `builtin`, which `walk._IN_PROCESS_KINDS` had counted as Kraft's own code: every red test stopped with "reinstall and restart" instead of opening the fix loop.
 
 ## REQ default-chain-reviews-only-green-tests
 
 The default chain's in-loop code review SHALL run only after the
 changed-test-scope verification in the same node has passed.
 enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer
-origin: templates/library.yaml -- the review is the verification node's second step, and a step group stops at its first failure (`exec-node-orders-concurrent-task-groups`), so no new mechanism is needed.
+origin: config/library.yaml -- the review is the verification node's second step, and a step group stops at its first failure (`exec-node-orders-concurrent-task-groups`), so no new mechanism is needed.
 
 ## REQ pre-draft-gate-shows-a-work-brief
 
@@ -1481,7 +1481,7 @@ The default chain SHALL write the merge request's title, labels, reviewers and
 description in an execution node before the one that opens the draft, and SHALL
 open the draft with them.
 enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_library.py::test_resolution_types_every_task_in_the_design_chain
-origin: templates/chains/default.yaml -- The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
+origin: config/chains/default.yaml -- The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
 
 ## REQ default-chain-rebases-before-opening-the-draft
 
@@ -1491,7 +1491,7 @@ request, and SHALL persist the moved base as the item's own `base_ref`. A
 rebase already onto a pushed branch (a rejected-review or crashed-retry
 re-entry into this node) SHALL NOT be force-rewritten.
 enforced-by: tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared], tests/executor/test_mr_rebase_dispatch.py::test_a_pushed_branch_is_not_force_rewritten_on_re_entry, tests/executor/test_default_chain.py::test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback
-origin: templates/chains/default.yaml §draft_merge_request -- Kraft-3llig. `draft_merge_request` opened against whatever `base` was when the worktree was cut, since nothing rebased it first; `builtins.mr_rebase` already existed for exactly this (`refresh_worktree_base` right before `open_mr`) but `BuiltinAction` had no member naming it, so no chain could reach it. Bound as `kraft.mr_rebase`, not a `ForgeAction`, because the rebase itself is pure local git -- the node's other task is the one that talks to the forge. The node moved from the `tasks` shorthand to `steps` so the rebase finishes before `open` runs rather than racing it (`exec-node-orders-concurrent-task-groups`). The pushed-branch guard (`refresh_worktree_base`'s own, `force=False` here) covers the re-entry case: a reviewer already reading the branch is not silently rewritten.
+origin: config/chains/default.yaml §draft_merge_request -- Kraft-3llig. `draft_merge_request` opened against whatever `base` was when the worktree was cut, since nothing rebased it first; `builtins.mr_rebase` already existed for exactly this (`refresh_worktree_base` right before `open_mr`) but `BuiltinAction` had no member naming it, so no chain could reach it. Bound as `kraft.mr_rebase`, not a `ForgeAction`, because the rebase itself is pure local git -- the node's other task is the one that talks to the forge. The node moved from the `tasks` shorthand to `steps` so the rebase finishes before `open` runs rather than racing it (`exec-node-orders-concurrent-task-groups`). The pushed-branch guard (`refresh_worktree_base`'s own, `force=False` here) covers the re-entry case: a reviewer already reading the branch is not silently rewritten.
 
 ## REQ mr-rebase-is-bounded-by-its-task-time-cap
 
@@ -1555,7 +1555,7 @@ When the default chain's post-draft feedback moves the worktree base, the
 system SHALL restart at the verification node, so the rebased head is tested
 and reviewed again before the chain goes on.
 enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
-origin: templates/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `final_review`.
+origin: config/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `final_review`.
 
 ## REQ an-undeclared-conflict-rebase-waits-for-the-rebased-heads-ci
 

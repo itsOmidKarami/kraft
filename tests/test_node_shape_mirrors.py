@@ -20,7 +20,7 @@ LEGACY_ROW_ONLY = frozenset({"rebase_bounce_to", "auto_escalate_stuck", "auto_es
 
 
 def _projected_fields() -> set[str]:
-    chain = TemplateLibrary.from_yaml_dir(ROOT / "templates").resolve_chain("default")
+    chain = TemplateLibrary.from_yaml_dir(ROOT / "config").resolve_chain("default")
     return {key for node in chain.nodes for key in store.node_view(node)}
 
 

@@ -109,7 +109,7 @@ def test_the_fixture_gives_escalation_a_fake_agent_so_the_guard_has_nothing_to_c
 
     templates = tmp_path / "templates"
     seed_v1_library(templates, agent_command=str(Path("fixtures/fake-claude.sh").resolve()))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
 
     profile = agent.harness_profile(escalate.ESCALATION_TASK.harness, harness.load(None))
     declared = yaml.safe_load((default_harnesses_dir() / f"{profile.provider}.yaml").read_text())

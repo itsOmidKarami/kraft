@@ -29,7 +29,7 @@ flagged as you type.
 2. Start it: run `kraft`.
 3. Open VS Code. The extension finds the running Kraft on its own: it reads
    `KRAFT_HOST` and `KRAFT_PORT`, then `bind` and `port` from
-   `$KRAFT_HOME/templates/access.yaml`, and falls back to `127.0.0.1:8765`. Set
+   `$KRAFT_HOME/config/access.yaml`, and falls back to `127.0.0.1:8765`. Set
    `kraft.url` only when Kraft listens somewhere else.
 
 If Kraft isn't running, the board shows **Kraft isn't running — Start**, which
@@ -68,7 +68,7 @@ your comments.
 
 ![policy.yaml with an unknown severity flagged by the running Kraft](media/screenshot-config.png)
 
-Kraft's config files under `$KRAFT_HOME/templates` (`policy.yaml`,
+Kraft's config files under `$KRAFT_HOME/config` (`policy.yaml`,
 `harnesses.yaml`, `chains/*.yaml` and the rest) are checked by the running
 Kraft as you edit, with the line at fault flagged. With
 [Red Hat YAML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
@@ -90,7 +90,7 @@ startup.
 ## Settings
 
 - `kraft.url`: where Kraft listens. Empty reads `KRAFT_HOST` and `KRAFT_PORT`,
-  then `bind` and `port` from `$KRAFT_HOME/templates/access.yaml`.
+  then `bind` and `port` from `$KRAFT_HOME/config/access.yaml`.
 - `kraft.notifications`: `all`, `gates` or `off`, which states raise a
   notification. `gates` announces only gates; `all` also announces an item that
   stopped and needs you.

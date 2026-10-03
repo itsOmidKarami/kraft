@@ -13,7 +13,6 @@ to it and the manual run are `test_egress_docker.py`'s:
 """
 
 import asyncio
-import os
 import shlex
 import shutil
 import ssl
@@ -25,7 +24,7 @@ import pytest
 from support.harness import entry_of
 
 from kraft import harness
-from kraft.paths import RunDirs, default_templates_dir
+from kraft.paths import RunDirs, config_dir
 from kraft.policy import SandboxCredential
 from kraft.worker import ca
 
@@ -74,7 +73,7 @@ async def api(probed):  # noqa: F811
     every request it saw. A test CA signs it, and the daemon trusts that CA
     through `sandbox.yaml`, never the Kraft CA."""
     test_ca = RunDirs(Path(tempfile.mkdtemp(prefix="kraft-e2e-ca-"))).ensure()
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     sandbox_yaml = templates / "sandbox.yaml"
     ca_bundle = ca.ensure_ca(test_ca)[0]
     sandbox_yaml.write_text(f"{sandbox_yaml.read_text()}ca_bundle: {ca_bundle}\n")

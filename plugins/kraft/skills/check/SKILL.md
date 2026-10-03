@@ -13,7 +13,7 @@ connection error.
 Run `kraft admin templates lint` and `kraft admin doctor`. Between them they
 carry the drift this skill exists to narrate:
 
-- **lint** - every chain in `~/.kraft/templates/chains/` that does not resolve
+- **lint** - every chain in `~/.kraft/config/chains/` that does not resolve
   against `library.yaml`, each with its reason: a reference to a component that
   isn't declared, a component extending one of another kind, a policy a chain
   widens past `policy.yaml`. It exits 1 on any error. A chain that does not
@@ -46,7 +46,7 @@ things are stale" rather than a string they have to parse themselves.
 ## What doctor cannot check
 
 For every agent task in the live library and chains
-(`~/.kraft/templates/library.yaml` and `chains/*.yaml`) whose `skill: X` names
+(`~/.kraft/config/library.yaml` and `chains/*.yaml`) whose `skill: X` names
 a skill where `X` contains a `:` - a reference into this agent's own plugin
 system, not a method Kraft ships - check `X` against the skills currently
 available to you (the list your own session already has). The Kraft server
@@ -64,7 +64,7 @@ same library can be fully served on one machine and missing skills on another.
 Report-only until the human says to act. Then, for each item they pick:
 
 1. State the exact edit before making it - which line in
-   `~/.kraft/templates/library.yaml` or the live chain file under `chains/`,
+   `~/.kraft/config/library.yaml` or the live chain file under `chains/`,
    or which of `set_chain_template` / `set_node_overrides` /
    `set_agent_overrides` for a per-item override instead of the shared file.
 2. Wait for confirmation.

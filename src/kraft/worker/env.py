@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 #:
 #: The `KRAFT_*` names below are a property of the install, not of a repo, so
 #: they belong here rather than behind `env_passthrough`: `KRAFT_HOME`,
-#: `KRAFT_RUN_DIR`, `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`
+#: `KRAFT_RUN_DIR`, `KRAFT_CONFIG_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`
 #: and `KRAFT_PORT` are what a worker's own `kraft` CLI and MCP client use to
 #: find the instance that launched them (`paths.kraft_home`,
 #: `transport.base_url`, `transport.http`) -- without them a worker started
@@ -67,6 +67,8 @@ BASELINE = frozenset(
         "NODE_EXTRA_CA_CERTS",
         "KRAFT_HOME",
         "KRAFT_RUN_DIR",
+        "KRAFT_CONFIG_DIR",
+        # The 1.x name of KRAFT_CONFIG_DIR, still honoured (`paths.config_dir`).
         "KRAFT_TEMPLATES_DIR",
         "KRAFT_SKILLS_DIR",
         "KRAFT_HOST",

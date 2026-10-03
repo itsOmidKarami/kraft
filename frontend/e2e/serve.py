@@ -150,7 +150,7 @@ def main() -> int:
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="kraft-e2e-"))
     # Pinned *before* the fixtures are built, and inherited by the child below.
     # `seed_v1_library` writes the `fake`/`claude` harness overlays into
-    # `$KRAFT_HOME/templates/harnesses`, which is the only place
+    # `$KRAFT_HOME/config/harnesses`, which is the only place
     # `paths.default_harnesses_dir()` looks -- so whatever this process seeds
     # against and whatever the daemon reads have to be the same home, or every
     # V1 agent task dies with "harness 'fake' is not available". Two ways that
@@ -186,7 +186,7 @@ def main() -> int:
         **os.environ,
         "KRAFT_PORT": PORT,
         "KRAFT_RUN_DIR": str(tmp / "run"),
-        "KRAFT_TEMPLATES_DIR": str(templates),
+        "KRAFT_CONFIG_DIR": str(templates),
         "KRAFT_BD_CWD": str(tracker),
         "KRAFT_FRONTEND_DIST": str(dist),
         "KRAFT_FAKE_CLAUDE": "fix",

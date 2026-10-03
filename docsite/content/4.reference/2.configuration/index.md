@@ -5,7 +5,7 @@ navigation:
 description: Where Kraft's configuration files live and which file controls what.
 ---
 
-Kraft's configuration is a set of YAML files under `$KRAFT_HOME/templates/` (default `~/.kraft/templates/`); this page maps each file to its reference page.
+Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (default `~/.kraft/config/`); this page maps each file to its reference page.
 
 Kraft seeds the directory from the packaged defaults on first run and never
 overwrites it afterwards, so an upgrade cannot clobber an edited policy. The
@@ -17,7 +17,7 @@ equally supported.
 - `kraft admin templates lint` checks the whole library and every chain at
   once, and writes nothing.
 
-`KRAFT_HOME` and `KRAFT_TEMPLATES_DIR` move this directory. See
+`KRAFT_HOME` and `KRAFT_CONFIG_DIR` move this directory. See
 [Environment variables](/reference/configuration/environment-variables) for
 those and every other variable Kraft reads.
 

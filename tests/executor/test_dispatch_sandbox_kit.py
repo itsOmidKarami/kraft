@@ -12,7 +12,7 @@ from support.harness import entry_of, v1_chain, v1_resolved, v1_walk
 from kraft import builtins as kraft_builtins
 from kraft import executor
 from kraft.executor import dispatch
-from kraft.paths import default_templates_dir
+from kraft.paths import default_config_dir
 from kraft.policy import TemplatePolicyOverride
 from kraft.templates.models import ResolvedChain
 from kraft.worker import kit
@@ -45,7 +45,7 @@ _TASK = [
 def fetched(monkeypatch) -> list[str]:
     """`kit.fetch` answering the claude worker Kit, recorded; `sandbox.yaml`
     binding its credential."""
-    templates = default_templates_dir()
+    templates = default_config_dir()
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(yaml.safe_dump({"credentials": EXPECTED["bindings"]}))
     calls: list[str] = []

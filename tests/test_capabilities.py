@@ -55,8 +55,8 @@ def test_the_mr_rebase_entry_gives_the_exact_shipped_yaml():
     existing install without one -- the `how` an operator pastes in must be
     the *shipped* YAML, not a paraphrase that drifts from it."""
     [entry] = [c for c in capabilities.MANIFEST if c.version == "1.0.3" and c.name == "mr_rebase"]
-    library = (ROOT / "templates" / "library.yaml").read_text()
-    chain = (ROOT / "templates" / "chains" / "default.yaml").read_text()
+    library = (ROOT / "config" / "library.yaml").read_text()
+    chain = (ROOT / "config" / "chains" / "default.yaml").read_text()
     assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in library
     assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in entry.how
     steps = (
@@ -94,7 +94,7 @@ def test_the_never_signal_steering_entry_gives_the_exact_shipped_yaml():
         for c in capabilities.MANIFEST
         if c.version == "1.1.0" and c.name == "never_signal_steering"
     ]
-    library = (ROOT / "templates" / "library.yaml").read_text()
+    library = (ROOT / "config" / "library.yaml").read_text()
     block = (
         "  never-signal-processes-you-didnt-start:\n"
         "    instructions: >-\n"
@@ -132,7 +132,7 @@ def test_the_shipped_templates_have_adopted_every_capability():
     edit adds: doctor stops listing it once an operator hand-merges it
     (Kraft-9efnk.36)."""
     for c in capabilities.MANIFEST:
-        assert capabilities.adopted(c, ROOT / "templates"), c.name
+        assert capabilities.adopted(c, ROOT / "config"), c.name
 
 
 def test_a_live_dir_without_the_key_has_not_adopted_it(tmp_path):

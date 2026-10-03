@@ -37,7 +37,7 @@ import pytest
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
-from kraft.paths import RunDirs, default_templates_dir
+from kraft.paths import RunDirs, config_dir
 from kraft.worker import channel
 from kraft.worker.backends import docker
 from kraft.worker.egress import SANDBOX_EGRESS_REFUSED, EgressProxy
@@ -129,7 +129,7 @@ def probed(request, monkeypatch, short_run) -> docker.Runtime:
         # podman on macOS is a client of podman machine, whose connection is
         # under the operator's real HOME; KRAFT_HOME still isolates Kraft.
         monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
     relay = docker._forward._sandbox_host(os.environ).relay_image

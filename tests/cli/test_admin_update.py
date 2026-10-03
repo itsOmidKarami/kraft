@@ -28,7 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def _pre_v1_home(root: Path) -> tuple[Path, dict[str, bytes]]:
     """A realistic pre-V1 templates home under `root`, and its `MACHINE_CONFIG`
     files' original bytes (what `replace_pre_v1_config` must carry across
-    untouched). Shaped after `~/.kraft/templates.pre-v1-20260922-192004` on
+    untouched). Shaped after `~/.kraft/config.pre-v1-20260922-192004` on
     this machine (`access.yaml`, `repos.yaml`, `intake.yaml`, `theme.yaml`,
     `steering/`, `policy.yaml`) plus a pre-V1 `harnesses.yaml` (no
     `profiles:` block -- that key did not exist before V1)."""
@@ -173,7 +173,7 @@ def test_update_follows_the_installed_versions_channel_unless_told_otherwise(
 ):
     """An rc install used to compare against the stable feed and be told v1.4.0
     was the newest release, while doctor (which uses its own channel) said rc12."""
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
     asked = []
 
     def latest(**kwargs):
@@ -202,7 +202,7 @@ def test_a_1_5_candidate_install_updates_to_the_2_0_candidate(monkeypatch, tmp_p
         for tag in ["v2.0.0rc1", *(f"v1.5.0rc{n}" for n in range(14, 0, -1)), "v1.4.0"]
     ]
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
     monkeypatch.setattr(update, "_fetch", lambda *_: feed)
     monkeypatch.setattr(update, "installed", lambda: "1.5.0rc14")
     monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)

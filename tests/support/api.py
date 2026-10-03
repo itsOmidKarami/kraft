@@ -76,7 +76,7 @@ def _client(
     if host:
         monkeypatch.setenv("KRAFT_HOST", host)
     monkeypatch.setenv(
-        "KRAFT_TEMPLATES_DIR",
+        "KRAFT_CONFIG_DIR",
         str(templates_dir or fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))),
     )
     # Hermetic against a real frontend/dist appearing (3B `npm run build`);

@@ -239,7 +239,7 @@ def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
 
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "claude")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "claude")))
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
@@ -626,7 +626,7 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
 
     from kraft.templates.library import TemplateLibrary
 
-    seed = TemplateLibrary.from_yaml_dir(Path(__file__).resolve().parents[1] / "templates")
+    seed = TemplateLibrary.from_yaml_dir(Path(__file__).resolve().parents[1] / "config")
     custom = v1_resolved(
         [
             {

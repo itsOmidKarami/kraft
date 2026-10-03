@@ -46,7 +46,7 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     templates = tmp_path / "templates"
     templates.mkdir()
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
 
     class Host:

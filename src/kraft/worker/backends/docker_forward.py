@@ -36,7 +36,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from kraft.config import ConfigError
-from kraft.paths import default_run_dir, default_templates_dir
+from kraft.paths import config_dir, default_run_dir
 
 #: Where the combined bundle is mounted in every container. Fixed, never a
 #: host path: a backend with no shared filesystem puts it at the same place.
@@ -151,7 +151,7 @@ def _read_pem(path: Path) -> list[str]:
 def _sandbox_host(environ: Mapping[str, str]):
     from kraft import config
 
-    templates = Path(environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir(environ)
     return config.SandboxHost.load(templates / config.SandboxHost.FILE)
 
 

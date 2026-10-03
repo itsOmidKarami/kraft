@@ -35,7 +35,7 @@ async def _walk_from(node, item_on, tmp_path, monkeypatch):
     """One walk of a `KRAFT_FAIL` item from `node`: `(item, status, argv of
     every agent launch)`."""
     templates = seed_v1_library(tmp_path / "templates", agent_command=str(FAKE_CLAUDE))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     argv_log = tmp_path / "argv.log"
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argv_log))
     monkeypatch.setattr(

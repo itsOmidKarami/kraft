@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from kraft import policy
 
-_SHIPPED = Path(__file__).parent.parent / "templates" / "policy.yaml"
+_SHIPPED = Path(__file__).parent.parent / "config" / "policy.yaml"
 
 
 def test_policy_input_rejects_wrong_scalar_bounds_and_shapes():
@@ -670,7 +670,7 @@ def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
 def test_the_shipped_policy_yaml_has_no_unknown_key():
     """The refusal above must not refuse the seed a fresh install copies."""
     parsed = policy.PolicyInput.from_yaml(
-        Path(__file__).resolve().parents[1] / "templates" / "policy.yaml"
+        Path(__file__).resolve().parents[1] / "config" / "policy.yaml"
     )
     # A real field off the shipped file, not just "it parsed": extra="forbid"
     # would have raised on an unknown key, but a bare no-raise wouldn't prove

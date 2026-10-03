@@ -132,7 +132,7 @@ def proxy(internet, run_dirs, tmp_path):
         await internet.start()
         environ = {
             "SSL_CERT_FILE": str(ca.ensure_ca(internet.origin_ca)[0]),
-            "KRAFT_TEMPLATES_DIR": str(tmp_path / "templates"),
+            "KRAFT_CONFIG_DIR": str(tmp_path / "templates"),
             **(env or {}),
         }
         p = egress.EgressProxy(connect=internet.connect, getaddrinfo=_getaddrinfo, environ=environ)

@@ -129,7 +129,7 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path | None, env: dic
         env=child_env(
             {
                 "KRAFT_RUN_DIR": str(run_dir),
-                "KRAFT_TEMPLATES_DIR": str(templates_dir),
+                "KRAFT_CONFIG_DIR": str(templates_dir),
                 **({"KRAFT_BD_CWD": str(bd_cwd)} if bd_cwd is not None else {}),
                 "KRAFT_PORT": str(port),
                 **(env or {}),

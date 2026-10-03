@@ -178,7 +178,7 @@ def unknown_gates() -> list[str]:
     that does not exist sends a reader looking for it."""
     from kraft.templates.library import TemplateLibrary
 
-    library = TemplateLibrary.from_yaml_dir(ROOT / "templates")
+    library = TemplateLibrary.from_yaml_dir(ROOT / "config")
     # Every node, not only gates: `external_approval` is an exec node, and a
     # real one.
     gates = {n.id for id in library.chain_ids for n in library.resolve_chain(id).nodes}

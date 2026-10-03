@@ -748,7 +748,7 @@ def test_a_top_level_repositories_key_fails_loudly(tmp_path):
 def test_the_seeded_repos_yaml_connects_nothing():
     """Kraft-tsh75: a fresh install starts with no repository, not a phantom
     smoke-test one at a path that does not exist on the machine."""
-    seeded = Path(__file__).resolve().parents[1] / "templates" / "repos.yaml"
+    seeded = Path(__file__).resolve().parents[1] / "config" / "repos.yaml"
     assert config.load_repos(seeded) == []
 
 

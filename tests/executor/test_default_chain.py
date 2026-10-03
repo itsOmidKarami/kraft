@@ -19,7 +19,7 @@ from kraft.executor import gates
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import BuiltinTask
 
-SEEDED = Path(__file__).resolve().parents[2] / "templates"
+SEEDED = Path(__file__).resolve().parents[2] / "config"
 NO_SETUP = entry_of({"setup_command": ""})
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(3, 3600))
 

@@ -21,7 +21,7 @@ def test_the_shipped_never_signal_profile_is_byte_identical_to_the_old_safety_ru
     this loads straight into the launched prompt. Pinned against the text
     written out here rather than a surviving constant, since `SAFETY_RULES`
     itself is gone."""
-    library = TemplateLibrary.from_yaml_dir(ROOT / "templates")
+    library = TemplateLibrary.from_yaml_dir(ROOT / "config")
     old_safety_rules = (
         "Never signal a process you did not start. If something is already "
         "listening on a port you need, it is not a stale leftover to clear -- it "

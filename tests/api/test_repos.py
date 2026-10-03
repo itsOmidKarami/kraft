@@ -546,7 +546,7 @@ def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
 
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
@@ -774,7 +774,7 @@ def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, 
     templates_dir = fake_templates_dir(tmp_path, "claude")
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
     import kraft.api as api

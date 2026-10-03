@@ -139,7 +139,7 @@ def test_a_library_check_without_a_running_library_still_resolves_the_chains(ctx
 def test_lint_reports_a_profile_its_harness_has_no_model_for(tmp_path):
     """`profile: fast` has no Codex model: a task pairing it with a codex
     harness used to lint clean and fail only at launch (Kraft-9efnk.34)."""
-    shutil.copytree(Path(__file__).resolve().parents[2] / "templates", tmp_path, dirs_exist_ok=True)
+    shutil.copytree(Path(__file__).resolve().parents[2] / "config", tmp_path, dirs_exist_ok=True)
     library = tmp_path / "library.yaml"
     text = library.read_text()
     assert "harness: claude\n    profile: strong" in text
@@ -179,7 +179,7 @@ def test_a_library_icon_is_linted_as_its_component(ctx):
 
 
 def test_lint_reports_an_unknown_icon_in_a_chain_and_in_the_library(tmp_path):
-    shutil.copytree(Path(__file__).resolve().parents[2] / "templates", tmp_path, dirs_exist_ok=True)
+    shutil.copytree(Path(__file__).resolve().parents[2] / "config", tmp_path, dirs_exist_ok=True)
     (tmp_path / "chains" / "solo.yaml").write_text(_with_icon("no-such-icon"))
     (tmp_path / "library.yaml").write_text(_library_with_icon(tmp_path))
     messages = {i["message"] for i in config_check.lint_report(tmp_path)["issues"]}

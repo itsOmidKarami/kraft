@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,8 +27,29 @@ def default_run_dir() -> Path:
     return kraft_home() / "run"
 
 
-def default_templates_dir() -> Path:
-    return kraft_home() / "templates"
+def default_config_dir() -> Path:
+    """Where an install keeps its configuration: the policy, the connected
+    repositories, the harness profiles, access, and the templates (the library
+    and the chains) an item is filed from. `config/` since 2.0; a home still
+    holding the 1.x `templates/` is renamed once at start (`cli.admin.adopt_pre_2_home`)."""
+    return kraft_home() / "config"
+
+
+#: The 1.x name of `default_config_dir()`. Read when the current one is unset,
+#: so a shell, a service unit or a Kit built for 1.x keeps pointing at the same
+#: directory; written nowhere.
+LEGACY_CONFIG_DIR_VAR = "KRAFT_TEMPLATES_DIR"
+
+
+def config_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """The config directory this process runs against: `KRAFT_CONFIG_DIR`, else
+    the 1.x `KRAFT_TEMPLATES_DIR`, else `default_config_dir()`. Read at call
+    time, never at import, so a test or a reload that sets the variable after
+    import still takes effect."""
+    env = os.environ if environ is None else environ
+    return Path(
+        env.get("KRAFT_CONFIG_DIR") or env.get(LEGACY_CONFIG_DIR_VAR) or default_config_dir()
+    )
 
 
 def default_skills_dir() -> Path:
@@ -50,7 +72,7 @@ def default_harnesses_dir() -> Path:
     operator first installed, which is the drift measured live on 2026-09-13
     (Kraft-717xy).
     """
-    return kraft_home() / "templates" / "harnesses"
+    return default_config_dir() / "harnesses"
 
 
 #: Built SPA and default config, copied in by `just install`. Absent in a plain

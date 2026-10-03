@@ -666,7 +666,7 @@ def machine(tmp_path, monkeypatch):
     rootful docker) labels its containers."""
     templates = tmp_path / "templates"
     templates.mkdir()
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
 
     def go(yaml="", enforcing=False, labels=True):
         (templates / "sandbox.yaml").write_text(yaml)

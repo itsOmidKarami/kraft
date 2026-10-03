@@ -72,7 +72,7 @@ def test_a_daemon_that_is_down_is_named_not_reported_as_slow(tmp_path, monkeypat
     )
     (bin_dir / "docker").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
     monkeypatch.setattr(docker, "_INFO_FAILED", {})
 
     refusal = docker.detect_runtime().refusal()
@@ -90,7 +90,7 @@ def slow_podman(tmp_path, monkeypatch):
     templates = tmp_path / "templates"
     templates.mkdir()
     (templates / "sandbox.yaml").write_text("cli: podman\n")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     monkeypatch.setattr(docker, "_ask_limits", lambda cli, engine: docker.LIMITS)
     monkeypatch.setattr(docker, "missing_executable", lambda *a: _false())
     monkeypatch.setattr(docker, "_RUNTIME", None)

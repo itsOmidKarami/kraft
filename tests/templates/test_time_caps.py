@@ -572,7 +572,7 @@ def test_the_shipped_implementer_runs_under_a_default_time_cap(chain_id):
     spend: the incident ran 68 minutes and $9.46 with nothing bounding it.
     The value clears every successful implementer run on record (the longest
     96 minutes), so it binds only a run that has already gone wrong."""
-    seeded = Path(__file__).resolve().parents[2] / "templates"
+    seeded = Path(__file__).resolve().parents[2] / "config"
     chain = (
         TemplateLibrary.from_yaml_dir(seeded)
         .resolve_chain(chain_id)

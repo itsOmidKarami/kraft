@@ -28,7 +28,7 @@ async def test_a_member_symlinked_to_another_worktree_never_launches_a_turn(
     into another checkout of the same connected repository. The turn, which
     runs no drift check of its own, must not mount that checkout's admin dir
     or take over its ref store: it never launches."""
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     policy = InstancePolicy.from_input(InstancePolicyInput()).apply_template_override(
         TemplatePolicyOverride(
             sandbox=SandboxPolicy(

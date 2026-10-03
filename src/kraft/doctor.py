@@ -24,9 +24,9 @@ from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
     RunDirs,
+    config_dir,
     default_run_dir,
     default_skills_dir,
-    default_templates_dir,
 )
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
@@ -177,26 +177,24 @@ def _restart_check(payload: dict) -> dict:
 
 
 def _config_checks() -> list[dict]:
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     if not templates.is_dir():
         # Every row still reports, as a skip: every check this function can emit
         # emits on every path, so a caller reading the run by name never has to
         # ask whether a row is missing because it passed, because it was skipped,
         # or because an earlier branch returned before reaching it.
         return [
-            _check(
-                "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
-            ),
+            _check("config", False, f"{templates} does not exist — start `kraft` once to seed it"),
             _chain_templates_check(),
-            _check("chains", True, "skipped: no templates dir", skipped=True),
+            _check("chains", True, "skipped: no config dir", skipped=True),
             # Nothing seeded yet, so nothing to upgrade: the first start seeds
             # every capability and stamps the version.
-            _check("capabilities", True, "skipped: no templates dir", skipped=True),
-            _check("detectors.yaml", True, "skipped: no templates dir", skipped=True),
+            _check("capabilities", True, "skipped: no config dir", skipped=True),
+            _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
-    checks = [_check("templates", True, str(templates))]
+    checks = [_check("config", True, str(templates))]
     try:
         access = config.Access.load(templates / "access.yaml")
         # Loaded as written, so this is the only place a bad one shows.
@@ -305,7 +303,7 @@ def _chain_templates_check() -> dict:
     Always `ok`: which nodes a repo's chain actually runs is an operator's own
     edit, not a fault.
     """
-    shipped_dir = BUNDLED / "templates"
+    shipped_dir = BUNDLED / "config"
     if not (shipped_dir / CHAINS_DIR).is_dir():
         return _check("chain_templates", True, "skipped: not an installed Kraft", skipped=True)
     shipped = _chain_template_files(shipped_dir)
@@ -313,10 +311,10 @@ def _chain_templates_check() -> dict:
         return _check(
             "chain_templates", True, "skipped: no chain templates in this version", skipped=True
         )
-    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live_dir = config_dir()
     if not live_dir.is_dir():
         # A home never started: nothing is missing from a copy not made yet.
-        return _check("chain_templates", True, "skipped: no templates dir", skipped=True)
+        return _check("chain_templates", True, "skipped: no config dir", skipped=True)
     live = _chain_template_files(live_dir)
     parts = []
     for name, shipped_ids in shipped.items():
@@ -362,7 +360,7 @@ def _capabilities_check() -> dict:
     the live library carries per-task `model`/`effort` choices the shipped
     defaults do not, so overwriting destroys operator intent.
     """
-    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live_dir = config_dir()
     stamp_path = live_dir / ".seeded-version"
     try:
         stamp = stamp_path.read_text().strip() or None
@@ -402,13 +400,13 @@ def _agent_checks() -> list[dict]:
     """One PATH check per harness profile the live library's chains select,
     plus one failure row per harness file or profile table that failed to load.
 
-    Read from disk, the same `KRAFT_TEMPLATES_DIR` precedence dispatch reads
+    Read from disk, the same `KRAFT_CONFIG_DIR` precedence dispatch reads
     `harnesses.yaml` by (`agent.harness_profile`). A chain that does not resolve
     selects nothing here: `/health` already names the library error, and a
     second copy of it helps nobody. A shipped profile nothing selects is not a
     missing dependency and gets no row.
     """
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     harnesses = harness.load(None)
     checks: list[dict] = []
     try:
@@ -691,7 +689,7 @@ def _launches_direct_asker(entries: list[config.RepoEntry]) -> bool:
     own row fails, and this one must not pass on a guess."""
     if entries and all(e.effective_sandbox is not None for e in entries):
         return False
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     harnesses = harness.load(None)
     direct = _direct_askers(harnesses)
     try:
@@ -780,7 +778,7 @@ def _runs_forge_tasks() -> bool:
     A library that cannot be read means no forge checks: `/health` already
     reports that failure, and a second copy of it per repo helps nobody.
     """
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     return any(
         isinstance(t.task, ForgeTask)
         for chain in _resolved_chains(live)
@@ -1054,7 +1052,7 @@ async def _repo_checks() -> list[dict]:
     # instructions, the same shape `api.deps.library_steering` hands
     # `steering.select`. `None` when the library itself does not load --
     # `_chains_check` already reports that failure.
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     profiles = _library_steering(live)
     # Retyped from the wire: the checks below read the entry the loader
     # models, not a dict whose keys each one must spell right. The loader's

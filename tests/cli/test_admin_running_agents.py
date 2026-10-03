@@ -143,7 +143,7 @@ def test_stop_lists_active_items_but_never_asks(board, terminal, tmp_path, monke
 def test_update_restart_asks_before_installing(
     board, terminal, restarted, tmp_path, monkeypatch, capsys, answer, installs
 ):
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
     release = SimpleNamespace(tag="v9.9.9")
     monkeypatch.setattr(update, "latest", lambda **k: release)
     monkeypatch.setattr(update, "installed", lambda: "1.0.0")
@@ -172,7 +172,7 @@ def test_stop_does_not_wait_on_a_server_that_never_answers(tmp_path, monkeypatch
     hung = socket.socket()
     hung.bind(("127.0.0.1", 0))
     hung.listen(8)  # the kernel completes the handshake; nobody ever reads or replies
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
     monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
     monkeypatch.setenv("KRAFT_PORT", str(hung.getsockname()[1]))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))

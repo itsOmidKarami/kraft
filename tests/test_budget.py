@@ -298,7 +298,7 @@ def test_shipped_policy_has_real_spend_caps():
     what a fresh install *gets*, and a seeded home is whatever the developer
     running the suite happens to have.
     """
-    shipped = Path(__file__).parents[1] / "templates" / "policy.yaml"
+    shipped = Path(__file__).parents[1] / "config" / "policy.yaml"
     loaded = policy.load_policy(shipped)
     assert loaded.budget.work_item_usd == 10
     assert loaded.budget.daily_usd == 50

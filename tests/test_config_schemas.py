@@ -12,7 +12,7 @@ import yaml
 from kraft import config_schemas
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATES = ROOT / "templates"
+TEMPLATES = ROOT / "config"
 
 
 def validator(name: str) -> jsonschema.Draft202012Validator:

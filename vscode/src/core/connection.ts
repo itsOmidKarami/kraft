@@ -11,7 +11,7 @@ export function locations(env: NodeJS.ProcessEnv, homedir: string): Locations {
   const home = env.KRAFT_HOME || join(homedir, ".kraft");
   return {
     home,
-    templatesDir: env.KRAFT_TEMPLATES_DIR || join(home, "templates"),
+    templatesDir: env.KRAFT_CONFIG_DIR || env.KRAFT_TEMPLATES_DIR || join(home, "config"),
     runDir: env.KRAFT_RUN_DIR || join(home, "run"),
   };
 }

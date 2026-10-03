@@ -42,7 +42,7 @@ def _live(tmp_path, monkeypatch, task: dict, *, profiles=PROFILES) -> Path:
     (live / "harnesses.yaml").write_text(
         yaml.safe_dump({"harnesses": HARNESSES, "profiles": profiles})
     )
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
     return live
 
 

@@ -38,8 +38,8 @@ from kraft.templates.models import (
 ROOT = Path(__file__).resolve().parents[2]
 
 #: What `just bundle` copies into the wheel and `cli.seed_home` copies into a
-#: fresh `$KRAFT_HOME/templates`.
-SEEDED = ROOT / "templates"
+#: fresh `$KRAFT_HOME/config`.
+SEEDED = ROOT / "config"
 
 DESIGN_DOC = ROOT / "docs" / "templates-v1-design.md"
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 #: Method files that ship with Kraft. Read from the package, never from
-#: `$KRAFT_HOME/templates/`, because `cli.seed_home` copies templates once and
+#: `$KRAFT_HOME/config/`, because `cli.seed_home` copies templates once and
 #: never again — a shipped method would then be frozen at whichever version the
 #: operator first installed.
 BUNDLED = Path(__file__).parent / "skills"

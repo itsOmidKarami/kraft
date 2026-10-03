@@ -8,13 +8,13 @@ describe("locations", () => {
   it("defaults under ~/.kraft", () => {
     expect(locations({}, "/home/u")).toEqual({
       home: "/home/u/.kraft",
-      templatesDir: "/home/u/.kraft/templates",
+      templatesDir: "/home/u/.kraft/config",
       runDir: "/home/u/.kraft/run",
     });
   });
   it("honours KRAFT_HOME and the per-dir overrides", () => {
     const l = locations({ KRAFT_HOME: "/k", KRAFT_RUN_DIR: "/r" }, "/home/u");
-    expect(l).toEqual({ home: "/k", templatesDir: "/k/templates", runDir: "/r" });
+    expect(l).toEqual({ home: "/k", templatesDir: "/k/config", runDir: "/r" });
   });
 });
 

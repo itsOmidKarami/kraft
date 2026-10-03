@@ -216,8 +216,8 @@ def test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library(tmp_path)
     from kraft import harness
 
     table = te.HarnessProfileTable.from_yaml(
-        _REPO_ROOT / "templates" / "harnesses.yaml", harnesses=harness.load(None).valid
+        _REPO_ROOT / "config" / "harnesses.yaml", harnesses=harness.load(None).valid
     )
-    library = _yaml.safe_load((_REPO_ROOT / "templates" / "library.yaml").read_text())
+    library = _yaml.safe_load((_REPO_ROOT / "config" / "library.yaml").read_text())
     named = {t["harness"] for t in library["tasks"].values() if t.get("harness")}
     assert named and named <= set(table.profiles), sorted(named - set(table.profiles))

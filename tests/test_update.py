@@ -458,20 +458,20 @@ def _tree(root: pathlib.Path) -> dict[str, bytes]:
 
 @pytest.fixture
 def legacy_home(tmp_path, monkeypatch):
-    """A pre-V1 `$KRAFT_HOME/templates`, a V1 bundle to replace it with (the
+    """A pre-V1 `$KRAFT_HOME/config`, a V1 bundle to replace it with (the
     repository's own `templates/`), and a release feed that is already current,
     so `kraft admin update` has only the configuration to do."""
     from kraft import cli
 
-    repo_templates = pathlib.Path(__file__).resolve().parents[1] / "templates"
+    repo_templates = pathlib.Path(__file__).resolve().parents[1] / "config"
     bundle = tmp_path / "_bundled"
-    shutil.copytree(repo_templates, bundle / "templates")
+    shutil.copytree(repo_templates, bundle / "config")
     monkeypatch.setattr(cli.admin, "BUNDLED", bundle)
     home = tmp_path / "home" / "templates"
     for name, text in {**LEGACY_ONLY, **MACHINE}.items():
         (home / name).parent.mkdir(parents=True, exist_ok=True)
         (home / name).write_text(text)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home))
     monkeypatch.setattr(update, "latest", lambda **_: update.Release("v1.0.0", "u"))
     monkeypatch.setattr(update, "installed", lambda: "1.0.0")
     return home

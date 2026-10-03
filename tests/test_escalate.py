@@ -40,7 +40,7 @@ def escalation_profile(tmp_path, monkeypatch):
     write_harness_profiles(
         templates, {"claude": {"provider": "claude", "defaults": {"model": "sonnet"}}}
     )
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     return templates
 
 

@@ -179,7 +179,7 @@ def _seeded_default_chain():
 
     from kraft.templates.library import TemplateLibrary
 
-    root = Path(__file__).resolve().parents[1] / "templates"
+    root = Path(__file__).resolve().parents[1] / "config"
     return TemplateLibrary.from_yaml_dir(root).resolve_chain("default")
 
 

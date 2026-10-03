@@ -33,7 +33,7 @@ def test_repo_list_reads_a_missing_enabled_key_as_enabled(app, capsys):
     """Ruling 212: an absent `enabled` means enabled. Written by hand, since
     `POST /repos` always writes an explicit value -- this is the shape of an
     entry that predates the field."""
-    repos_yaml = Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "repos.yaml"
+    repos_yaml = Path(os.environ["KRAFT_CONFIG_DIR"]) / "repos.yaml"
     repos_yaml.write_text(yaml.safe_dump({"repos": [{"path": "/r", "name": "r"}]}))
     cli.main(["repo", "list"])
     row = next(line for line in capsys.readouterr().out.splitlines() if "/r" in line)
@@ -360,7 +360,7 @@ def test_connect_verify_json_says_why_it_failed(app, capsys, repo):
 
 def test_reconnecting_survives_a_broken_detectors_file(app, capsys, repo, tmp_path):
     cli.main(["repo", "connect", str(repo)])
-    templates = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    templates = Path(os.environ["KRAFT_CONFIG_DIR"])
     (templates / "detectors.yaml").write_text("detectorz: []\n")
     cli.main(["repo", "connect", str(repo)])
     assert "already connected" in capsys.readouterr().out
@@ -590,7 +590,7 @@ def test_disconnect_removes_an_entry_registered_under_a_worktree_path(
         capture_output=True,
     )
 
-    repos_yaml = Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "repos.yaml"
+    repos_yaml = Path(os.environ["KRAFT_CONFIG_DIR"]) / "repos.yaml"
     on_disk = yaml.safe_load(repos_yaml.read_text())
     on_disk["repos"].append({"path": str(worktree), "name": "stale", "enabled": True})
     repos_yaml.write_text(yaml.safe_dump(on_disk))

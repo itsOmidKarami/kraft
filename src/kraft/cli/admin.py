@@ -25,7 +25,7 @@ import yaml
 
 from kraft import client, config, permission_hooks, pidfile, render
 from kraft.cli import common, templates
-from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.paths import BUNDLED, RunDirs, config_dir, default_config_dir, default_run_dir
 from kraft.policy import CarriedPolicy
 
 #: launchd label / systemd unit name. One daemon, one name -- not
@@ -41,6 +41,8 @@ _SYSTEMD_UNIT = "kraft.service"
 _INSTANCE_ENV_VARS = (
     "KRAFT_HOME",
     "KRAFT_RUN_DIR",
+    "KRAFT_CONFIG_DIR",
+    # Its 1.x name, carried so a shell still pointing with it supervises the same instance.
     "KRAFT_TEMPLATES_DIR",
     "KRAFT_SKILLS_DIR",
     "KRAFT_HOST",
@@ -195,17 +197,44 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
         raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
 
 
+def adopt_pre_2_home(config_dir: Path) -> bool:
+    """The 2.0 rename: a home whose config still sits in 1.x's `templates/`
+    is renamed to `config/`, once, before anything reads it. True if it did.
+
+    Only the default location is adopted: `config_dir` is `$KRAFT_HOME/config`
+    (not an operator's `KRAFT_CONFIG_DIR`), it does not exist, and `templates/`
+    beside it holds a `library.yaml`. A home pointed at by hand is the
+    operator's to name. Nothing is copied: one rename, and the old name is gone,
+    so no later start can read a stale copy."""
+    from kraft.templates.library import LIBRARY_FILE
+
+    if config_dir != default_config_dir() or config_dir.exists() or config_dir.is_symlink():
+        return False
+    old = config_dir.with_name("templates")
+    if not (old / LIBRARY_FILE).is_file():
+        return False
+    old.rename(config_dir)
+    print(
+        f"kraft: moved {old} to {config_dir}: the config directory is config/ since 2.0",
+        file=sys.stderr,
+    )
+    return True
+
+
 def seed_home(templates_dir: Path) -> bool:
     """Copy the packaged config into a home that has none. True if it seeded.
+
+    A 1.x home is adopted first (`adopt_pre_2_home`), so its `templates/` is
+    never re-seeded beside a fresh `config/`.
 
     Only ever creates. An upgrade must not overwrite a policy the operator
     edited, and `access.yaml` is never bundled — it holds a password hash and a
     bind address that belong to one machine. `notify.yaml` is never bundled
     either, for the same reason: it usually holds a webhook URL with a bearer
     token embedded, and that belongs to one machine too. Reachable today by
-    anyone who points `KRAFT_TEMPLATES_DIR` at a checkout with a live
+    anyone who points `KRAFT_CONFIG_DIR` at a checkout with a live
     notify.yaml and runs `just install` -- if either file ever slips into
-    `BUNDLED / "templates"`, it must still not reach a seeded home.
+    `BUNDLED / "config"`, it must still not reach a seeded home.
 
     A directory made before the first start, holding only what the docs say
     to write there (a `sandbox.yaml`, a `detectors.yaml`), has no
@@ -214,23 +243,25 @@ def seed_home(templates_dir: Path) -> bool:
     one is. A home with a `library.yaml` was seeded, and one with a legacy
     registry is a pre-V1 home for `kraft admin update`; neither is touched.
     Nor is a directory holding none of Kraft's config names: a mistyped
-    `KRAFT_TEMPLATES_DIR` must not fill some other directory with it.
+    `KRAFT_CONFIG_DIR` must not fill some other directory with it.
     """
     from kraft.templates.library import LIBRARY_FILE, is_pre_v1
 
+    if adopt_pre_2_home(templates_dir):
+        return False
     if finish_interrupted_update(templates_dir):
         return False
     if templates_dir.exists() and (
         (templates_dir / LIBRARY_FILE).exists() or is_pre_v1(templates_dir)
     ):
         return False
-    if not (BUNDLED / "templates").is_dir():
+    if not (BUNDLED / "config").is_dir():
         if templates_dir.exists():
             return False  # a config directory pointed at by hand, in a source checkout
         raise SystemExit(
             f"kraft: no config in {templates_dir} and no bundled defaults to seed it "
             "with. This build shipped without them — reinstall with `just install`, "
-            "or point KRAFT_TEMPLATES_DIR at a config directory."
+            "or point KRAFT_CONFIG_DIR at a config directory."
         )
     if templates_dir.exists() and not _holds_config(templates_dir):
         return False
@@ -253,7 +284,7 @@ def _holds_config(directory: Path) -> bool:
     """Empty (dotfiles aside), or holding at least one name Kraft's config
     uses: a templates directory someone started, not an unrelated one."""
     names = {p.name for p in directory.iterdir() if not p.name.startswith(".")}
-    known = {p.name for p in (BUNDLED / "templates").iterdir()}
+    known = {p.name for p in (BUNDLED / "config").iterdir()}
     return not names or bool(names & (known | set(MACHINE_CONFIG) | CONFIG_EXTRAS))
 
 
@@ -293,7 +324,7 @@ def _stage_bundle(templates_dir: Path) -> Path:
     for the caller to rename into place. Returns the staging directory."""
     staging = templates_dir.with_name(templates_dir.name + ".seeding")
     shutil.rmtree(staging, ignore_errors=True)
-    shutil.copytree(BUNDLED / "templates", staging)
+    shutil.copytree(BUNDLED / "config", staging)
     (staging / "access.yaml").unlink(missing_ok=True)
     (staging / "notify.yaml").unlink(missing_ok=True)
     # What this home was seeded from, for `capabilities.added_since` (Kraft-hxt6x).
@@ -346,7 +377,7 @@ def replace_pre_v1_config(templates_dir: Path, backup: Path) -> CarriedPolicy | 
     old -> backup, staged -> home. Between them the home is missing, and
     `finish_interrupted_update` -- run by the next start and the next update --
     completes the swap from the marked staging instead of seeding over it."""
-    if not (BUNDLED / "templates").is_dir():
+    if not (BUNDLED / "config").is_dir():
         raise SystemExit(
             "kraft admin update: this build shipped no bundled configuration to install; "
             "reinstall with `just install`. Nothing was changed."
@@ -611,7 +642,7 @@ class _SignalLoggingServer(uvicorn.Server):
 
 
 def _serve() -> None:
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates_dir = config_dir()
     pid_path = _pid_path()
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = RunDirs(pid_path.parent).logs / "server.log"
@@ -744,7 +775,7 @@ def _start_detached() -> None:
     same pidfile `_serve` always has, so `admin stop`/`health`/`doctor` never
     need to know a server was started this way.
     """
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates_dir = config_dir()
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
     run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
@@ -1142,7 +1173,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
 
     # The configuration first: a pre-V1 home is what a legacy install's first V1
     # binary finds, and that binary is the one running this.
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates_dir = config_dir()
     finish_interrupted_update(templates_dir)
     if is_pre_v1(templates_dir):
         _accept_major_update(templates_dir, ns.yes)

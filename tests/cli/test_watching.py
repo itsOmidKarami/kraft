@@ -65,7 +65,7 @@ def test_stream_log_follows_a_session_and_stops_when_it_stops(tmp_path, monkeypa
     run_dir = tmp_path / "run"
     with running_server(run_dir=run_dir, templates_dir=templates) as srv:
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-        monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
         monkeypatch.setenv("KRAFT_PORT", str(srv.port))
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
         response = srv.client.post(
@@ -287,7 +287,7 @@ def test_stream_events_yields_a_frame_when_a_work_item_is_created(tmp_path, monk
     run_dir = tmp_path / "run"
     with running_server(run_dir=run_dir, templates_dir=templates) as srv:
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-        monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
         monkeypatch.setenv("KRAFT_PORT", str(srv.port))
 

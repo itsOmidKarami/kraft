@@ -33,7 +33,7 @@ from kraft.api import deps
 from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
-from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, default_templates_dir
+from kraft.paths import BUNDLED, RunDirs, config_dir, default_run_dir, default_skills_dir
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker import steering as steering_mod
@@ -87,8 +87,8 @@ async def lifespan(app: FastAPI):
     app.state.egress_tls = channel_mod.TLSListener(app.state.egress_channels, run_dirs)
     await app.state.egress_tls.start()
     # Read the templates dir at startup, not import time, so tests (and reloads)
-    # that set KRAFT_TEMPLATES_DIR after import still take effect.
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    # that set KRAFT_CONFIG_DIR after import still take effect.
+    templates_dir = config_dir()
     # Set on app.state now (not after reattach below, where it lived before) so
     # `launch` — which reads st.templates_dir — can build a launch context for
     # a reattached work item's resume.

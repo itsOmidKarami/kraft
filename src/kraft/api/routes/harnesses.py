@@ -163,7 +163,7 @@ def _provider_view(h: harness_mod.Harness) -> dict:
         "kind": h.kind,
         "command": list(h.command),
         "path": str(h.path),
-        # From $KRAFT_HOME/templates/harnesses/ rather than the package.
+        # From $KRAFT_HOME/config/harnesses/ rather than the package.
         "override": h.path is not None and h.path.parent != harness_mod.BUNDLED,
         "capabilities": {
             name: {

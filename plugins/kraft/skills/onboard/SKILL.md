@@ -53,10 +53,10 @@ zero exit code says the command ran, not that what it did was right.
    (`sh -c 'cd web && npm test'`). Read those back too.
 
    Once a repo is connected, `ensure_repo` leaves it alone. Correct it by
-   editing this repo's entry in `~/.kraft/templates/repos.yaml` directly, and
+   editing this repo's entry in `~/.kraft/config/repos.yaml` directly, and
    say what you changed. The running server reads that file fresh on each
    request, so no restart is needed. A convention Kraft keeps getting wrong
-   across repos belongs in `~/.kraft/templates/detectors.yaml` instead: see
+   across repos belongs in `~/.kraft/config/detectors.yaml` instead: see
    https://itsomidkarami.github.io/kraft/reference/configuration/repos/detectors
 
    If the repo has submodules, connect writes each `.gitmodules` path as its

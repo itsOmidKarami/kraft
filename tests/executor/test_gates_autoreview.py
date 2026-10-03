@@ -290,7 +290,7 @@ async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_pat
     )
     fake_harness_home(tmp_path, ["true"])
     write_agent_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates",
+        Path(os.environ["KRAFT_HOME"]) / "config",
         {"deep": {"model": {"fake": "opus"}, "fallback": [{"model": "haiku"}]}},
     )
     launched = []
