@@ -70,7 +70,7 @@ Answers applied as new commits on this branch (ID first):
 | 5 | All three update triggers kept. No change. | none |
 | 6 | Checked in the browser: with the ⋮ menu open, a toast overlapping it is the top element (toasts z 70, popover z 65, dialog z 60), so no fix was needed. That order is now pinned in `css.contract.test.ts`. | `c04f63285` D3 |
 
-Side note on 6: a toast that appears under the pointer while the main button's hover menu is open makes that menu close, because the pointer has "left" it. This is not a stacking issue and was left as is.
+Follow-up to 6: toasts do overlap the item header (fixed top-right, as the header's main button is). A toast under the pointer used to close the main button's hover menu, because the pointer had "left" it. Fixed in an H4 follow-up commit: when the pointer leaves for the toast region, the toast counts as part of the hover area, and the 160ms close starts only when the pointer leaves both. Tested and mutation-checked in `MainButton.test.tsx`.
 
 Verification after these commits:
 - `just test-ui`: 207 files, 2454 tests passed.

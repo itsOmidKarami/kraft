@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +53,43 @@ describe("MainButton", () => {
     await open();
     expect(await screen.findByRole("menu", { name: "Item actions" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "More actions" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it.each([
+    ["leaves for the page", false],
+    ["leaves for a toast over the button, and then the toast", true],
+  ])("closes the hover menu 160ms after the pointer %s", async (_, viaToast) => {
+    vi.useFakeTimers();
+    render(<><Harness /><div className="toasts"><div className="toast">Copied</div></div></>);
+    const group = document.querySelector(".item-main")!;
+    const toasts = document.querySelector(".toasts")!;
+    fireEvent.mouseEnter(group);
+    expect(screen.getByRole("menu", { name: "Item actions" })).toBeInTheDocument();
+    fireEvent.mouseLeave(group, { relatedTarget: viaToast ? toasts.firstElementChild : document.body });
+    if (viaToast) {
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(screen.getByRole("menu", { name: "Item actions" })).toBeInTheDocument();
+      fireEvent.mouseLeave(toasts, { relatedTarget: document.body });
+    }
+    act(() => void vi.advanceTimersByTime(150));
+    expect(screen.getByRole("menu", { name: "Item actions" })).toBeInTheDocument();
+    act(() => void vi.advanceTimersByTime(20));
+    expect(screen.queryByRole("menu")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("keeps the hover menu open when the pointer comes back from a toast to the button", () => {
+    vi.useFakeTimers();
+    render(<><Harness /><div className="toasts"><div className="toast">Copied</div></div></>);
+    const group = document.querySelector(".item-main")!;
+    const toasts = document.querySelector(".toasts")!;
+    fireEvent.mouseEnter(group);
+    fireEvent.mouseLeave(group, { relatedTarget: toasts.firstElementChild });
+    fireEvent.mouseLeave(toasts, { relatedTarget: group });
+    fireEvent.mouseEnter(group);
+    act(() => void vi.advanceTimersByTime(1000));
+    expect(screen.getByRole("menu", { name: "Item actions" })).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("runs the main action from the menu's first row, but not from its ▴ over ▾; a panel item from its row; Archive disabled until done or cancelled", async () => {

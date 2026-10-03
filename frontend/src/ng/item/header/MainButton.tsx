@@ -55,15 +55,29 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
     focusFirst.current = true;
     setOpen(true);
   };
+  // A toast that shows up over the button (they sit top-right, as the header
+  // does) is part of the hover area: the close waits until the pointer leaves it too.
+  const onToast = useRef<{ el: Element; off: () => void } | null>(null);
   const hover = (on: boolean) => {
     if (!menu) return;
     if (leave.current) clearTimeout(leave.current);
+    onToast.current?.el.removeEventListener("mouseleave", onToast.current.off);
+    onToast.current = null;
     if (on) setOpen(true);
     else leave.current = setTimeout(close, 160);
   };
+  const left = (e: React.MouseEvent) => {
+    const toasts = e.relatedTarget instanceof Element ? e.relatedTarget.closest(".toasts") : null;
+    if (!menu || !toasts) return hover(false);
+    if (leave.current) clearTimeout(leave.current);
+    const off = () => hover(false);
+    toasts.addEventListener("mouseleave", off);
+    onToast.current = { el: toasts, off };
+  };
+  useEffect(() => () => onToast.current?.el.removeEventListener("mouseleave", onToast.current.off), []);
 
   return (
-    <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={left}>
       {/* aria-disabled, not disabled, while busy: a browser takes focus off a button it
           disables, and the focus of Start, Apply and start or Resume fell to the page (R10b-04). */}
       <button ref={button} type="button" className={`item-main-action is-${main}`} aria-disabled={busy || undefined} onClick={act}>
@@ -83,7 +97,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
         close();
         if (list.current?.contains(document.activeElement)) toggle.current?.focus();
       }} role="menu" label="Item actions" focusIn={false}>
-        <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+        <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={left}>
           <button ref={(el) => void (refs.current[0] = el)} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={`menu-item item-panel-item item-panel-main is-${main}`} onClick={() => { close(); button.current?.focus(); act(); }}>
             <Icon size={13} aria-hidden /> <span className="item-main-label">{MAIN_LABEL[main]}</span>
             {/* Over ▾: a press there, meant to open the menu, must not run the action. */}
