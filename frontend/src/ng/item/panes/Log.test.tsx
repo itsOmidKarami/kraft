@@ -42,6 +42,15 @@ describe("Log", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("opens at its newest line, scrolling the <pre> it fills the pane with", async () => {
+    stubFetch(answer as never);
+    const height = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
+    render(<Log sessionId="s1" running={false} title="t" />);
+    await screen.findByText(/reading cache\.py/);
+    expect(screen.getByLabelText("Log lines").scrollTop).toBe(900);
+    height.mockRestore();
+  });
+
   it("reads again while the session runs, and not once it ended", async () => {
     vi.useFakeTimers();
     const calls = stubFetch(answer as never);

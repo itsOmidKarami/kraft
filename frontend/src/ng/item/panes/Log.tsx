@@ -48,7 +48,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
   const count = lines ? `${shown.length} lines` : "Reading…";
   if (error) return <p className="item-muted">{error}</p>;
   return (
-    <>
+    <div className="ip-log-wrap">
       <div className="ip-log-head">
         <span className="item-muted">{count}</span>
         {controls}
@@ -65,7 +65,7 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
           {body(true)}
         </LogScreen>
       )}
-    </>
+    </div>
   );
 }
 
@@ -87,6 +87,7 @@ function LogScreen({ title, crumb, count, controls, onClose, children }: { title
   );
 }
 
+/** The <pre> is the scroller, in the pane as in full screen: following keeps it at the newest line. */
 function LogBody({ lines, follow, big }: { lines: LogLine[]; follow: boolean; big: boolean }) {
   const ref = useRef<HTMLPreElement>(null);
   useEffect(() => {

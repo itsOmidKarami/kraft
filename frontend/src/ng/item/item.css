@@ -171,6 +171,9 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .ip-follow { font-size: 12px; }
 .ip-full { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+/* The log fills the pane body and its <pre> scrolls, so follow has something to move. */
+.ip-log-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ip-log-wrap > .ip-log { flex: 1 1 auto; min-height: 120px; overflow: auto; }
 .ip-log { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 11.5px/1.6 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Full screen: the viewport, not a dialog box. The timestamp is its own column,
    so a wrapped line does not run under it. */

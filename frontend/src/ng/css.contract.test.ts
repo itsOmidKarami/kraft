@@ -46,6 +46,12 @@ describe("ng CSS", () => {
     expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
   });
 
+  it("scrolls a pane's log in its own <pre>, which fills the pane body, so follow has something to move", () => {
+    const css = readFileSync(join(here, "item/item.css"), "utf-8");
+    expect(css).toMatch(/\.ip-log-wrap\s*{[^}]*height:\s*100%/);
+    expect(css).toMatch(/\.ip-log-wrap > \.ip-log\s*{[^}]*overflow:\s*auto/);
+  });
+
   it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
     const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
     const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);
