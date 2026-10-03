@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_board_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 21:19 +0000
+            created at 2026-10-03 23:06 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -196,17 +196,17 @@
     <p class="run"><span class="n"><a id="t114" href="#t114">114</a></span><span class="t">    <span class="nam">invalid</span> <span class="op">=</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">invalid_templates</span><span class="op">(</span><span class="nam">st</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t115" href="#t115">115</a></span><span class="t">    <span class="nam">summary</span> <span class="op">=</span> <span class="nam">asdict</span><span class="op">(</span><span class="nam">st</span><span class="op">.</span><span class="nam">reattach_summary</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t116" href="#t116">116</a></span><span class="t">    <span class="nam">summary</span><span class="op">[</span><span class="str">&quot;unknown&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">reattach_mod</span><span class="op">.</span><span class="nam">still_orphaned</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">summary</span><span class="op">[</span><span class="str">&quot;unknown&quot;</span><span class="op">]</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t117" href="#t117">117</a></span><span class="t">    <span class="com"># An `intake.yaml` that does not load leaves auto-intake off and every</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t118" href="#t118">118</a></span><span class="t">    <span class="com"># schedule unfired, which nothing else would say (R12E-03).</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t117" href="#t117">117</a></span><span class="t">    <span class="com"># An `intake.yaml` that does not load leaves auto-intake off and its</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t118" href="#t118">118</a></span><span class="t">    <span class="com"># schedules unfired, which nothing else would say (R12E-03).</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t119" href="#t119">119</a></span><span class="t">    <span class="nam">invalid_intake</span> <span class="op">=</span> <span class="nam">getattr</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="str">&quot;invalid_intake&quot;</span><span class="op">,</span> <span class="key">None</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t120" href="#t120">120</a></span><span class="t">    <span class="key">return</span> <span class="op">{</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t121" href="#t121">121</a></span><span class="t">        <span class="str">&quot;status&quot;</span><span class="op">:</span> <span class="str">&quot;degraded&quot;</span> <span class="key">if</span> <span class="op">(</span><span class="nam">invalid</span> <span class="key">or</span> <span class="nam">invalid_policy</span> <span class="key">or</span> <span class="nam">invalid_intake</span><span class="op">)</span> <span class="key">else</span> <span class="str">&quot;ok&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t122" href="#t122">122</a></span><span class="t">        <span class="str">&quot;invalid_templates&quot;</span><span class="op">:</span> <span class="nam">invalid</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t123" href="#t123">123</a></span><span class="t">        <span class="str">&quot;invalid_policy&quot;</span><span class="op">:</span> <span class="nam">invalid_policy</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t124" href="#t124">124</a></span><span class="t">        <span class="str">&quot;invalid_intake&quot;</span><span class="op">:</span> <span class="nam">invalid_intake</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t125" href="#t125">125</a></span><span class="t">        <span class="com"># True when the server started on that file, so auto-intake and every</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t126" href="#t126">126</a></span><span class="t">        <span class="com"># schedule are off; False when a reload refused it and the running</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t127" href="#t127">127</a></span><span class="t">        <span class="com"># ones are kept.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t125" href="#t125">125</a></span><span class="t">        <span class="com"># True when the server started on that file, so auto-intake and its</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t126" href="#t126">126</a></span><span class="t">        <span class="com"># schedules are off (a trigger left in policy.yaml still fires); False</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t127" href="#t127">127</a></span><span class="t">        <span class="com"># when a reload refused it and the running ones are kept.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t128" href="#t128">128</a></span><span class="t">        <span class="str">&quot;intake_off&quot;</span><span class="op">:</span> <span class="nam">bool</span><span class="op">(</span><span class="nam">getattr</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="str">&quot;intake_off&quot;</span><span class="op">,</span> <span class="key">False</span><span class="op">)</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t129" href="#t129">129</a></span><span class="t">        <span class="com"># `unknown` as it stands now, not as startup found it.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t130" href="#t130">130</a></span><span class="t">        <span class="str">&quot;reattach_summary&quot;</span><span class="op">:</span> <span class="nam">summary</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
@@ -244,7 +244,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_board_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 21:19 +0000
+            created at 2026-10-03 23:06 +0000
         </p>
     </div>
 </footer>
