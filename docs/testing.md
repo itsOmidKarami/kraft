@@ -67,9 +67,12 @@ fixture refuses to answer a `param == "bd"` request against the fake).
 
 ## Shape
 
-- **One behaviour, one test.** When several tests differ only in inputs or
-  expected values, use `@pytest.mark.parametrize` with readable `ids=`.
-  Don't copy-paste bodies.
+- **One behaviour, one test; one case, one row.** A fix to a behavior that
+  already has a test adds a `parametrize` case to that test, with a readable
+  `id`, not a new function. A new function is for a new behavior. When you
+  find yourself writing `test_x_with_a_malformed_file`,
+  `test_x_with_invalid_utf8`, `test_x_with_permission_denied`, that is one
+  behavior ("x reports a bad file cleanly") and three rows.
 
   ```python
   @pytest.mark.parametrize("after_days", [None, 0], ids=["none", "zero"])
@@ -157,7 +160,7 @@ breaks.
 1. Change the code under test so the behaviour the test names is wrong (a
    mutation): flip a comparison, drop a branch, change a default, delete a
    guard.
-2. Run that one test with `just test <path> -k <name>`.
+2. Run that one case: `just test <path> -k 'name and case_id'`.
 3. Confirm it fails — and fails for the reason you broke, not for an
    unrelated setup error. If it still passes, the test pins nothing; fix
    the test, not the changelog entry.
@@ -185,7 +188,11 @@ one of the five shapes above.
 
 **Removing a test means accounting for it:** name what replaces it, or
 state what it uniquely pinned — "nothing, proven by mutation" is a valid
-answer, but it has to be checked, not assumed.
+answer, but it has to be checked, not assumed. A declared id may end its
+function part with `*`, matching every removed test in that same file whose
+id starts with that prefix (the path part stays literal):
+`tests/test_x.py::test_prefix_* -- folded into tests/test_x.py::test_table[...]`.
+A fold declares its cluster in one line and proves one mutation per row.
 
 CI holds a pull request to that. `dev/check_removals.py`, run by the
 `removals declared` job, fails when the PR deletes a test function (or a
@@ -215,7 +222,9 @@ green — their tests left with them (Kraft-79382).
 
 **Intent pins:** `docs/intent/*.md` reference test ids by name. Renaming or
 parametrizing a pinned test means repointing it in the same change. Run
-`just intent` and `tests/test_intent_origins.py`.
+`just intent` and `tests/test_intent_origins.py`. `just intent-repoint OLD NEW`
+rewrites every pin on `OLD` (or `OLD[case]`) to `NEW` in one go, and refuses
+when `NEW` does not collect.
 
 ## Running
 
@@ -296,3 +305,7 @@ the docsite coverage check guards against: silent success is worse than a
 loud, wrong failure).
 
 Run it directly: `uv run python dev/check_tests.py`, or `just check-tests`.
+
+`just shape-report` (`dev/test_shape_report.py`) judges nothing, it measures
+`tests/`: test functions and collected cases, lines, verbatim-repeat lines,
+helpers copied across files, and the modules with the most tests per code line.

@@ -211,6 +211,10 @@ test-py version *ARGS:
 intent:
     uv run python -m kraft.intent
 
+# Move every enforced-by pin on OLD (or OLD[case]) to NEW; refuses when NEW does not collect.
+intent-repoint OLD NEW:
+    uv run python -m kraft.intent --repoint "{{OLD}}" "{{NEW}}"
+
 # Refresh src/kraft/prices.json from models.dev (Kraft-wz83s). Never fetched at
 # runtime -- this is the only thing that ever hits the network for it. Review the
 # diff before committing: a price change is worth a look, not a rubber stamp.
@@ -224,6 +228,12 @@ refresh-prices:
 [doc("Check the test suite against docs/testing.md's mechanical rules")]
 check-tests:
     uv run python dev/check_tests.py
+
+# How big and how repetitive tests/ is: functions, collected cases, lines,
+# verbatim-repeat lines, duplicated helpers, densest modules. `--json` for tools.
+[doc("Print the shape of tests/: size, repeats, duplicated helpers, densest modules")]
+shape-report:
+    uv run python dev/test_shape_report.py
 
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
