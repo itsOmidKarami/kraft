@@ -500,8 +500,8 @@ async def test_adopting_a_session_leaves_its_backgrounded_child_alone(
     item, database, run_dirs, tmp_path
 ):
     """The one exception in §5: a session Kraft adopted after a restart is
-    meant to outlive the process that launched it. Killing its group on
-    adoption would undo the reattach feature outright."""
+    meant to outlive the process that launched it: killing its group on adoption
+    would undo reattach. Once it ends, its group ends too, as a launched one's."""
     pidfile = tmp_path / "grandchild.pid"
     _result(run_dirs, "s1")
     grandchild = None
@@ -514,9 +514,10 @@ async def test_adopting_a_session_leaves_its_backgrounded_child_alone(
                 await asyncio.sleep(0.1)
             grandchild = int(pidfile.read_text().strip())
             summary, adopted = await reattach.reattach(database, run_dirs)
+            os.kill(grandchild, 0)  # adopted, and still alive: no ProcessLookupError
             await adopted["s1"]
         assert summary.adopted == ["s1"]
-        os.kill(grandchild, 0)  # still alive: no ProcessLookupError
+        assert not reattach._pid_alive(grandchild), "it ends with its session's group"
     finally:
         if grandchild:
             try:

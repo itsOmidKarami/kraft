@@ -78,23 +78,35 @@ def _hanging_smudge_filter(repo, pids, seconds: float) -> None:
     wtree.commit(repo, "slow.txt", "slow\n", "a filtered file")
 
 
-@pytest.mark.parametrize("lock", ["stale", "held"])
+@pytest.mark.parametrize("lock", ["stale", "retaken", "never-started"])
 async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_started(
     database, run_dirs, repo, hung, monkeypatch, lock
 ):
     """R11E-02: a smudge filter that hangs mid-rebase was left running past
     the time cap, and the abort failed silently on the `index.lock` the killed
     git left, so the item went on mid-rebase without its commits. The whole
-    process group is killed, a lock nothing holds any more is cleared, and
-    the abort runs. One that cannot run says so: the worktree is a person's."""
+    process group is killed, the lock it left is cleared, and the abort runs.
+    A lock that is not the one read right after the kill is another git's,
+    kept: the abort cannot run, and says so. A `pre-rebase` hook killed at
+    the cap started no rebase, so there is nothing to abort or to report."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
     work = wtree.commit(worktree, "work.txt", "work\n", "worktree work")
-    _hanging_smudge_filter(repo, hung, seconds=60)
-    if lock == "held":
-        # As if another git in this worktree were still alive.
-        monkeypatch.setattr(kraft_builtins, "_clear_stale_index_lock", lambda _wt: False)
+    if lock == "never-started":
+        hook = repo / ".git" / "hooks" / "pre-rebase"
+        hook.write_text("#!/bin/sh\n" + wtree.sleep_recorded(hung, 60))
+        hook.chmod(0o755)
+        wtree.commit(repo, "moved.txt", "moved on\n", "moved on")
+    else:
+        _hanging_smudge_filter(repo, hung, seconds=60)
+    if lock == "retaken":
+        # As if a person's git took the lock again between the kill and the abort.
+        read = iter([(1, 1)])
+        real = kraft_builtins._lock_identity
+        monkeypatch.setattr(
+            kraft_builtins, "_lock_identity", lambda wt: next(read, None) or real(wt)
+        )
 
     with pytest.raises(kraft_builtins.RebaseTimedOut) as raised:
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main", timeout=2.0)
@@ -102,10 +114,13 @@ async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_sta
     [pid] = hung.read_text().split()
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid), 0)
-    if lock == "stale":
-        assert "--abort" not in str(raised.value)
-        assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
-        assert git_read(worktree, "rev-parse", "HEAD") == work
-    else:
+    if lock == "retaken":
         assert "`git rebase --abort` failed" in str(raised.value)
         assert str(raised.value).endswith("was left mid-rebase for a human")
+        return
+    if lock == "never-started":
+        assert str(raised.value) == f"git rebase timed out after 2s for {worktree}"
+    else:
+        assert "--abort" not in str(raised.value)
+    assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+    assert git_read(worktree, "rev-parse", "HEAD") == work

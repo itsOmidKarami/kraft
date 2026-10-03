@@ -1255,10 +1255,13 @@ async def refresh_worktree_base(
             # same clean-up a conflict's abort below does. The `index.lock`
             # the killed git held is stale only when that group is gone and
             # the lock was not there before it started.
+            # Which lock that is, read now: one a live git takes after this is
+            # another file, and is never removed.
+            killed_lock = _lock_identity(worktree)
             await _abort_rebase(
                 worktree,
                 RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}"),
-                stale_lock=exc.group_gone and not lock_before,
+                stale_lock=killed_lock if exc.group_gone and not lock_before else None,
             )
         if done.returncode != 0:
             _refuse_unstarted_rebase(worktree, done)
@@ -1492,11 +1495,24 @@ def _index_lock(worktree: Path) -> Path:
     return Path(gitdir or worktree / ".git") / "index.lock"
 
 
-def _clear_stale_index_lock(worktree: Path) -> bool:
+def _lock_identity(worktree: Path) -> tuple[int, int] | None:
+    """`(st_ino, st_mtime_ns)` of `worktree`'s `index.lock`, None when absent."""
+    try:
+        st = os.lstat(_index_lock(worktree))
+    except OSError:
+        return None
+    return st.st_ino, st.st_mtime_ns
+
+
+def _clear_stale_index_lock(worktree: Path, identity: tuple[int, int] | None) -> bool:
     """Remove the `index.lock` a killed `git rebase` left, so the abort can
     take the index. Only called when that git's process group is gone and the
-    lock was not there before it started. True when there was one."""
+    lock was not there before it started, and only the very lock read right
+    after the kill (`identity`): one a person's own git has taken since is
+    theirs. True when it was removed."""
     lock = _index_lock(worktree)
+    if identity is None or _lock_identity(worktree) != identity:
+        return False
     try:
         lock.unlink()
     except FileNotFoundError:
@@ -1513,7 +1529,10 @@ def _with_note(error: RebaseConflict | RebaseTimedOut, note: str) -> RuntimeErro
 
 
 async def _abort_rebase(
-    worktree: Path, error: RebaseConflict | RebaseTimedOut, *, stale_lock: bool = False
+    worktree: Path,
+    error: RebaseConflict | RebaseTimedOut,
+    *,
+    stale_lock: tuple[int, int] | None = None,
 ) -> NoReturn:
     """`git rebase --abort` in `worktree`, then raise `error`. An abort that
     fails, or runs past `REBASE_ABORT_TIMEOUT_S`, still raises `error`'s own
@@ -1522,12 +1541,20 @@ async def _abort_rebase(
     leave it clean. Never silent: a failed abort the item walked past left
     HEAD detached at the base without the item's commits (R11E-02).
 
-    `stale_lock`: the timed-out rebase's `index.lock` may be cleared and the
-    abort tried once more (`_clear_stale_index_lock`)."""
+    A rebase that never started (a `pre-rebase` hook killed at the time
+    cap) left nothing to abort: `error` is raised as it is.
+
+    `stale_lock`: the identity of the timed-out rebase's `index.lock`, which
+    may be cleared and the abort tried once more (`_clear_stale_index_lock`)."""
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is not None and not any(
+        os.path.lexists(Path(gitdir, d)) for d in ("rebase-merge", "rebase-apply")
+    ):
+        raise error
     args = ["git", "-C", str(worktree), "rebase", "--abort"]
     try:
         done = await asyncio.to_thread(_run_git_group, args, timeout=REBASE_ABORT_TIMEOUT_S)
-        if done.returncode != 0 and stale_lock and _clear_stale_index_lock(worktree):
+        if done.returncode != 0 and _clear_stale_index_lock(worktree, stale_lock):
             done = await asyncio.to_thread(_run_git_group, args, timeout=REBASE_ABORT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         raise _with_note(

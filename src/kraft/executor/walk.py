@@ -33,6 +33,8 @@ from kraft.executor.context import (
 )
 from kraft.store import _now as _now
 from kraft.templates.models import (
+    BuiltinAction,
+    BuiltinTask,
     ExecNode,
     ForgeTask,
     GateNode,
@@ -61,8 +63,11 @@ def chain_of(row) -> MaterializedChain:
 
 
 def rebases_itself(row, node_id: str | None) -> bool:
-    """Whether node `node_id` of `row`'s chain declares `on_base_changed`: it
-    rebases onto the base itself and restarts its span when that moved it.
+    """Whether node `node_id` of `row`'s chain rebases onto the base itself
+    (an `mr_rebase` task) and declares `on_base_changed`, so it restarts its
+    span when that moved it. Declaring `on_base_changed` alone is not enough:
+    the default chain's `merge_request_feedback` does, with no rebase of its
+    own, and a door that skipped its rebase there would leave it unrebased.
     A door that rebased first (`/retry`, `/resume`, a gate's self-retry)
     took that move from it: the node then found nothing to rebase, and the
     span it guards never ran on the new base (R11E-06)."""
@@ -76,7 +81,11 @@ def rebases_itself(row, node_id: str | None) -> bool:
     return (
         node is not None
         and isinstance(node.node, ExecNode)
-        and (node.node.on_base_changed is not None)
+        and node.node.on_base_changed is not None
+        and any(
+            isinstance(t.task, BuiltinTask) and t.task.ref is BuiltinAction.MR_REBASE
+            for t in node.tasks()
+        )
     )
 
 
