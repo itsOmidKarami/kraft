@@ -123,6 +123,11 @@ def _cmd_approve(ns: argparse.Namespace) -> None:
 
 
 def _cmd_reject(ns: argparse.Namespace) -> None:
+    # Before the gate is looked up: a missing note is the caller's to fix
+    # whatever the item is waiting on.
+    if not ns.note.strip():
+        raise ValueError("a reject note is required: say what is wrong")
+
     async def go():
         gate = await _gate_of(ns)
         return gate, await client.reject_gate(ns.note, gate, ns.id, ns.node)
@@ -171,15 +176,32 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
         steers[path] = text
     common.emit(
         asyncio.run(client.resume(ns.steer, ns.id, steers=steers or None)),
-        common.item_action("resumed {id}"),
+        common.item_action("resumed {id}", small=_resumed),
         ns.json,
     )
+
+
+def _resumed(result: dict) -> str:
+    """resume's usual answer: the node it went on from, and the agent tasks
+    a steer reached. No node is an item that had never started."""
+    node = result.get("node_id")
+    line = f"resumed {result['id']} at {node}" if node else f"started {result['id']}"
+    if steered := result.get("steered"):
+        line += f"; steered {', '.join(steered)}"
+    return line
+
+
+def _rerun_at(result: dict) -> str:
+    """Where a retry's run starts, from its usual answer, and its attempt."""
+    where = result.get("path") or result.get("node_id") or "its first node"
+    attempt = result.get("attempt")
+    return f"{where}, attempt {attempt}" if attempt else str(where)
 
 
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common.item_action("retried {id}"),
+        common.item_action("retried {id}", small=lambda r: f"retried {r['id']} at {_rerun_at(r)}"),
         ns.json,
     )
 
@@ -188,15 +210,32 @@ def _cmd_raise_budget(ns: argparse.Namespace) -> None:
     cap = "no cap" if ns.usd is None else f"${ns.usd:g}"
     common.emit(
         asyncio.run(client.raise_budget(ns.usd, ns.id)),
-        common.item_action(f"raised the cap on {{id}} to {cap} and retried it"),
+        common.item_action(
+            f"raised the cap on {{id}} to {cap} and retried it",
+            small=lambda r: f"raised the cap on {r['id']} to {cap}; retried at {_rerun_at(r)}",
+        ),
         ns.json,
     )
 
 
+def _skipping(ns: argparse.Namespace) -> str:
+    """What `skip` passes over, read before it runs, as the server picks it:
+    `--path`, else the pending gate, else the current node. An item that
+    cannot be read here costs the line its name, not the skip."""
+    if ns.path:
+        return ns.path
+    try:
+        item = asyncio.run(client.get_work_item(ns.id))
+    except Exception:  # noqa: BLE001
+        return "the current node"
+    return item.get("pending_gate") or item.get("current_node_id") or "the current node"
+
+
 def _cmd_skip(ns: argparse.Namespace) -> None:
+    what = "" if ns.json else _skipping(ns)
     common.emit(
         asyncio.run(client.skip(ns.note, ns.id, path=ns.path)),
-        common.item_action(f"skipped {ns.path} on {{id}}" if ns.path else "skipped on {id}"),
+        common.item_action(f"skipped {what} on {{id}}"),
         ns.json,
     )
 

@@ -174,7 +174,11 @@ def test_approve_prints_one_line_naming_the_pending_gate(monkeypatch, capsys):
             "raise_budget",
             "raised the cap on w1 to $2.5 and retried it; the item is now running",
         ),
-        (["item", "skip", "w1"], "skip", "skipped on w1; the item is now running"),
+        (
+            ["item", "skip", "w1"],
+            "skip",
+            "skipped the current node on w1; the item is now running",
+        ),
         (
             ["item", "skip", "w1", "--path", "verify.main"],
             "skip",
@@ -223,13 +227,96 @@ def test_a_stopped_item_says_where_to_read_why(monkeypatch, capsys):
     assert out == "retried w1; the item is now stopped for a person: kraft view show w1 says why\n"
 
 
-def test_a_small_answer_still_reads_as_its_fields(monkeypatch, capsys):
-    """resume's usual answer is a handful of keys, not a row."""
+@pytest.mark.parametrize(
+    ("argv", "fn", "answer", "said"),
+    [
+        (
+            ["item", "resume", "w1"],
+            "resume",
+            {"id": "w1", "node_id": "plan", "steer": "go", "steered": ["plan.main.author"]},
+            "resumed w1 at plan; steered plan.main.author",
+        ),
+        (
+            ["item", "resume", "w1"],
+            "resume",
+            {"id": "w1", "node_id": None, "steer": None, "steered": []},
+            "started w1",
+        ),
+        (
+            ["item", "retry", "w1"],
+            "retry",
+            {"id": "w1", "node_id": "verify", "path": None, "loop": None, "attempt": 3},
+            "retried w1 at verify, attempt 3",
+        ),
+        (
+            ["item", "retry", "w1", "--path", "verify.main"],
+            "retry",
+            {"id": "w1", "node_id": "verify", "path": "verify.main", "attempt": 2},
+            "retried w1 at verify.main, attempt 2",
+        ),
+        (
+            ["item", "raise-budget", "w1", "--usd", "25"],
+            "raise_budget",
+            {"id": "w1", "node_id": "plan", "path": None, "attempt": 2},
+            "raised the cap on w1 to $25; retried at plan, attempt 2",
+        ),
+        (
+            ["item", "raise-budget", "w1", "--usd", "none"],
+            "raise_budget",
+            {"id": "w1", "node_id": "plan", "path": None, "attempt": None},
+            "raised the cap on w1 to no cap; retried at plan",
+        ),
+    ],
+    ids=["resume", "start", "retry", "retry-path", "raise-budget", "raise-budget-no-cap"],
+)
+def test_a_small_answer_reads_as_one_line_too(monkeypatch, capsys, argv, fn, answer, said):
+    """resume, retry and raise-budget usually answer a handful of keys, not
+    the row: they printed those as a block, and raise-budget never said the
+    new cap."""
 
     async def fake(*_a, **_kw):
-        return {"id": "w1", "node_id": "spec", "steer": None, "steered": []}
+        return answer
 
-    monkeypatch.setattr(cli.item.client, "resume", fake)
-    cli.main(["item", "resume", "w1"])
-    out = capsys.readouterr().out
-    assert "node_id  spec" in out and "resumed" not in out
+    monkeypatch.setattr(cli.item.client, fn, fake)
+    cli.main(argv)
+    assert capsys.readouterr().out == said + "\n"
+    cli.main([*argv, "--json"])
+    assert json.loads(capsys.readouterr().out) == answer
+
+
+@pytest.mark.parametrize(
+    ("item", "said"),
+    [
+        ({"pending_gate": "plan_approval", "current_node_id": "plan_approval"}, "plan_approval"),
+        ({"pending_gate": None, "current_node_id": "verify"}, "verify"),
+    ],
+    ids=["gate", "node"],
+)
+def test_skip_names_what_it_skipped(monkeypatch, capsys, item, said):
+    """It printed "skipped on <id>": the pending gate, else the current node,
+    as the server picks it."""
+
+    async def get_work_item(item_id=None, **_):
+        return {"id": item_id, **item}
+
+    async def skip(*_a, **_kw):
+        return dict(_ROW)
+
+    monkeypatch.setattr(cli.item.client, "get_work_item", get_work_item)
+    monkeypatch.setattr(cli.item.client, "skip", skip)
+    cli.main(["item", "skip", "w1"])
+    assert capsys.readouterr().out == f"skipped {said} on w1; the item is now running\n"
+
+
+def test_reject_asks_for_its_note_before_it_looks_for_a_gate(monkeypatch, capsys):
+    """A blank note said "no gate is pending" on an item with none, before
+    the note it was missing."""
+
+    async def get(path, **_):
+        return {"id": "w1", "pending_gate": None}
+
+    monkeypatch.setattr("kraft.client.transport._get", get)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["item", "reject", "w1", "--note", "  "])
+    assert caught.value.code == 1
+    assert "a reject note is required" in capsys.readouterr().err

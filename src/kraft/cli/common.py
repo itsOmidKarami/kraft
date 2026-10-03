@@ -71,16 +71,17 @@ def item_now(row: dict) -> str:
     return _NOW.get(row["status"], row["status"])
 
 
-def item_action(done, *, status: bool = True):
+def item_action(done, *, status: bool = True, small=None):
     """The renderer for a verb whose answer may be the item's whole row: one
     line saying what was done (`done`, a format string taking `{id}`, or a
     function of the answer) and, unless `status` is off, what the item is now.
-    Any other answer is small, and reads as `_render_action`'s kv block.
-    `--json` is untouched: `emit` prints the payload itself."""
+    Any other answer is small: `small` renders it when given, else it reads
+    as `_render_action`'s kv block. `--json` is untouched: `emit` prints the
+    payload itself."""
 
     def render(result: dict) -> str:
         if not _is_item_row(result):
-            return _render_action(result)
+            return small(result) if small else _render_action(result)
         head = done(result) if callable(done) else done.format(id=result["id"])
         return f"{head}; the item is now {item_now(result)}" if status else head
 
