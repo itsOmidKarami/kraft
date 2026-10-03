@@ -136,8 +136,16 @@ def _cmd_reject(ns: argparse.Namespace) -> None:
     common.emit(result, common.item_action(f"rejected {gate} on {{id}}"), ns.json)
 
 
+def _paused(result: dict) -> str:
+    stopped = len(result.get("paused_sessions") or [])
+    how = f", stopping {stopped} running session{'s' if stopped != 1 else ''}" if stopped else ""
+    return f"paused {result['id']}{how}; kraft item resume {result['id']} carries on"
+
+
 def _cmd_pause(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.pause(ns.id)), common.item_action("paused {id}"), ns.json)
+    common.emit(
+        asyncio.run(client.pause(ns.id)), common.item_action("paused {id}", small=_paused), ns.json
+    )
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -278,7 +286,12 @@ def _cmd_reply(ns: argparse.Namespace) -> None:
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
-        common._render_action,
+        common.item_action(
+            "asked an agent about {id}",
+            small=lambda r: (
+                f"asked an agent about {r['id']}'s stop; kraft view show {r['id']} follows it"
+            ),
+        ),
         ns.json,
     )
 
