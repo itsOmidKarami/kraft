@@ -35,7 +35,7 @@ def schedules(st) -> list[tuple[str, Trigger]]:
     intake = getattr(st, "intake", None) or {}
     for index, entry in enumerate(intake.get("schedules") or []):
         out.append((f"intake.yaml schedule {index}", Trigger(**entry)))
-    have = {trig for _, trig in out}
+    have = [trig for _, trig in out]
     pol = getattr(st, "policy", None)
     for index, trig in enumerate(pol.triggers if pol is not None else ()):
         # One left in policy.yaml beside its copy in intake.yaml (re-made on
