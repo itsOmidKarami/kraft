@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Diamond, Search } from "lucide-react";
+import { Box, CircleDot, Diamond, FileText, Plus, Search, type LucideIcon } from "lucide-react";
 import * as api from "../../api";
 import { docTitle, repoName, shortId } from "../../format";
 import { useStore } from "../../store";
@@ -25,14 +25,19 @@ interface Row {
   snippet?: string;
   /** What Enter does, in the footer. */
   note: string;
-  /** A glyph before the title: the gate diamond on a row that reviews a gate. */
-  glyph?: "gate";
+  /** Its kind's icon: an item a box, a gate to review a diamond, a document a page, a bead a circle-dot, a page its nav icon. */
+  icon: LucideIcon;
+  /** A short status after the title (a document's kind, a bead's status). */
+  tag?: string;
+  /** Where it lives: the repo, or the sidebar group of a page. */
+  where?: string;
   open: () => void;
 }
 
 /** The board's composer (W6 brief A.2). */
-const NEW_ITEM = { path: "/?new=1", label: "New work item" };
+const NEW_ITEM = { path: "/?new=1", label: "New work item", icon: Plus, group: null };
 const has = (hay: string, q: string) => hay.toLowerCase().includes(q.toLowerCase());
+const GROUP = { templates: "Templates", settings: "Settings" } as const;
 const SECTIONS: Record<Row["section"], string> = { needs: "Needs you", items: "Work items", docs: "Documents", beads: "Beads", goto: "Go to" };
 
 /** FTS brackets the matched terms: [like] this. */
@@ -51,7 +56,7 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         section,
         label: `Review ${i.pending_gate}`,
         sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
-        glyph: "gate",
+        icon: Diamond,
         note: `reviews ${i.title}`,
         open: () => go(`/work-items/${encodeURIComponent(i.id)}/review`),
       }
@@ -59,7 +64,9 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         id: `${section}:${i.id}`,
         section,
         label: i.title,
-        sub: [repoName(i.repo), stateWords(i)].filter(Boolean).join(" · "),
+        sub: stateWords(i),
+        icon: Box,
+        where: repoName(i.repo),
         note: "opens the work item",
         open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
       };
@@ -125,7 +132,9 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
           id: `docs:${r.id}`,
           section: "docs",
           label: docTitle({ ...r, ...r.links[0], content: r.snippet.replace(/[[\]]/g, "") }),
-          sub: `${r.kind ?? r.source_kind} · ${repoName(r.repo)}`,
+          icon: FileText,
+          tag: r.kind ?? r.source_kind,
+          where: repoName(r.repo),
           snippet: r.snippet,
           note: wid ? "opens the document on its work item" : "opens the document",
           // The query goes along, so the viewer can find it in the text.
@@ -138,7 +147,9 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
           id: `beads:${b.id}`,
           section: "beads",
           label: b.title,
-          sub: [b.id, b.status].filter(Boolean).join(" · "),
+          sub: b.id,
+          icon: CircleDot,
+          tag: b.status ?? undefined,
           note: "drafts a work item that implements this bead",
           open: () => navigate(`/work-items/new?${new URLSearchParams({ title: b.title, bead: b.id })}`),
         })),
@@ -146,6 +157,8 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
         id: `goto:${r.path}`,
         section: "goto",
         label: r.label,
+        icon: r.icon,
+        where: r.group === "templates" || r.group === "settings" ? GROUP[r.group] : undefined,
         note: `goes to ${r.label}`,
         open: () => navigate(r.path),
       })),
@@ -199,9 +212,15 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
             >
               {s === "goto" && !query ? r.label : (
                 <>
-                  <span className="ng-search-title" title={r.label}>{r.glyph && <Diamond size={12} aria-hidden className="ng-search-glyph" />}{r.label}</span>
-                  {r.sub && <span className="ng-search-sub">{r.sub}</span>}
-                  {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
+                  <r.icon size={14} aria-hidden className={`ng-search-ico${r.icon === Diamond ? " is-gate" : ""}`} />
+                  <span className="ng-search-main">
+                    <span className="ng-search-title" title={r.label}>{r.label}</span>
+                    {r.sub && <span className="ng-search-sub">{r.sub}</span>}
+                    {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
+                  </span>
+                  {r.tag && <span className="ng-search-tag">{r.tag}</span>}
+                  {r.where && <span className="ng-search-where">{r.where}</span>}
+                  {r === row && <span className="ng-search-key" aria-hidden>⏎</span>}
                 </>
               )}
             </div>

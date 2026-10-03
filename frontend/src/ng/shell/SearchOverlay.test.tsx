@@ -110,10 +110,38 @@ describe("SearchOverlay", () => {
     const gate = within(section("Needs you")).getByText("Review human_review").closest("[role=option]")!;
     expect(gate).toHaveTextContent("Review human_reviewwi_gate · alpha");
     expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
-    expect(within(section("Needs you")).getByText("Failed work").closest("[role=option]")).toHaveTextContent("beta · failed at plan");
-    expect(within(section("Work items")).getByText("Fresh work").closest("[role=option]")).toHaveTextContent("beta · not started");
-    expect(within(section("Work items")).getByText("Plain work").closest("[role=option]")).toHaveTextContent("beta · implementation");
+    const says = (row: string) => {
+      const o = screen.getByText(row).closest("[role=option]")!;
+      return [o.querySelector(".ng-search-sub")?.textContent, o.querySelector(".ng-search-where")?.textContent];
+    };
+    expect(within(section("Needs you")).getByText("Failed work")).toBeInTheDocument();
+    expect(says("Failed work")).toEqual(["failed at plan", "beta"]);
+    expect(says("Fresh work")).toEqual(["not started", "beta"]);
+    expect(says("Plain work")).toEqual(["implementation", "beta"]);
     expect(screen.getByRole("listbox")).not.toHaveTextContent(/needs_human|· paused|· active/);
+  });
+
+  it("gives each kind of row its icon, a status tag and where it lives, and ⏎ on the active row only", async () => {
+    mount();
+    const { user, input } = await open();
+    await user.type(input, "r");
+    await screen.findByText("Caching spec");
+    const row = (name: string) => within(screen.getByRole("listbox")).getByText(name).closest("[role=option]")!;
+    const parts = (name: string) => {
+      const o = row(name);
+      return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".ng-search-tag")?.textContent, o.querySelector(".ng-search-where")?.textContent];
+    };
+    expect(parts("Review human_review")).toEqual(["lucide-diamond", undefined, undefined]);
+    expect(parts("Plain work")).toEqual(["lucide-box", undefined, "beta"]);
+    expect(parts("Caching spec")).toEqual(["lucide-file-text", "spec", "alpha"]);
+    expect(parts("New bead")).toEqual(["lucide-circle-dot", "open", undefined]);
+    expect(parts("Appearance")).toEqual(["lucide-palette", undefined, "Settings"]);
+    expect(parts("Repos")).toEqual(["lucide-git-branch", undefined, "Templates"]);
+    expect(screen.getAllByText("⏎", { selector: ".ng-search-key" })).toHaveLength(1);
+    expect(options()[0].querySelector(".ng-search-key")).not.toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(options()[0].querySelector(".ng-search-key")).toBeNull();
+    expect(options()[1].querySelector(".ng-search-key")).not.toBeNull();
   });
 
   it("moves with ↑/↓, clamped at both ends, with aria-activedescendant following", async () => {

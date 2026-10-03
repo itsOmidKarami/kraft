@@ -13,12 +13,18 @@
 .ng-search-filters select, .ng-search-filters input { height: 22px; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); font-size: 11.5px; }
 .ng-search-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 6px 8px; }
 .ng-search-head { padding: 8px 8px 4px; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
-.ng-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+/* icon · title, sub and snippet · tag · where · ⏎ (active row only). */
+.ng-search-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto 14px; align-items: start; gap: 0 10px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.ng-search-ico { margin-top: 2px; color: var(--text-muted); }
+.ng-search-ico.is-gate { color: var(--warn); }
+.ng-search-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ng-search-tag { padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font: 10.5px/16px ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: nowrap; }
+.ng-search-where { font-size: 11.5px; line-height: 18px; color: var(--text-muted); white-space: nowrap; }
+.ng-search-key { grid-column: 5; font-size: 12px; line-height: 18px; color: var(--text-muted); }
 .ng-search-row[aria-selected="true"], .ng-search-chip[aria-selected="true"] { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--focus); }
 .ng-search-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
-.ng-search-glyph { margin-right: 6px; vertical-align: -1px; color: var(--warn); }
 .ng-search-sub { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
-.ng-search-snippet { grid-column: 1 / -1; font-size: 12px; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ng-search-snippet { font-size: 12px; color: var(--text-sub); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ng-search-snippet mark { background: transparent; color: var(--text); font-weight: 600; text-decoration: underline; }
 .ng-search-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 6px; }
 .ng-search-chip { padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--text-sub); cursor: pointer; }
