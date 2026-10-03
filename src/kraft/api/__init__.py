@@ -15,6 +15,8 @@ Nothing outside this package imports anything from here except `app` --
 from __future__ import annotations
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
 from kraft import config as config_mod
@@ -112,6 +114,21 @@ async def _bad_config_file(request: Request, exc: config_mod.ConfigError) -> JSO
     (`_validate_repos`, `probe_repo`, `_launch`) never reaches this handler —
     only an *uncaught* `ConfigError` does."""
     return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's own 422, less pydantic's "Value error, " ahead of a sentence
+    a model's validator wrote: `start_line must be >= 1 and <= end_line` is
+    Kraft's, the prefix pydantic's. The CLI and MCP stripped it on their side;
+    a raw HTTP caller got it as sent (R11F-06). The shape is FastAPI's."""
+    errors = [
+        {**e, "msg": e["msg"].removeprefix("Value error, ")}
+        if isinstance(e, dict) and isinstance(e.get("msg"), str)
+        else e
+        for e in exc.errors()
+    ]
+    return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
 
 
 @app.exception_handler(404)

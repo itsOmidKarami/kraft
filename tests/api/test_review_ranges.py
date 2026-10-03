@@ -35,6 +35,13 @@ def test_a_range_across_sides_round_trips_and_takes_no_suggestion(client, gated)
     ]
     for kw in refused:
         assert _new_thread(client, gated, **kw).status_code == 422, kw
+    # A model's own sentence, without pydantic's "Value error, " ahead of it,
+    # for a raw HTTP caller too, not only the CLI and MCP (R11F-06).
+    backwards = _new_thread(client, gated, start_line=4, end_line=2)
+    assert backwards.status_code == 422
+    assert [e["msg"] for e in backwards.json()["detail"]] == [
+        "start_line must be >= 1 and <= end_line"
+    ]
     tid = across["id"]
     assert client.patch(f"/api/threads/{tid}", json={"suggestion": fix}).status_code == 422
     reply = {"body": "like this", "suggestion": fix}
