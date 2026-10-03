@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_intent_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 16:34 +0000
+            created at 2026-10-03 16:48 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -224,12 +224,12 @@
     <p class="pln"><span class="n"><a id="t142" href="#t142">142</a></span><span class="t">        <span class="com"># misleading answer the API&#x27;s 503 replaced.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t143" href="#t143">143</a></span><span class="t">        <span class="nam">logger</span><span class="op">.</span><span class="nam">warning</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t144" href="#t144">144</a></span><span class="t">            <span class="str">&quot;auto-intake: the template library is invalid (%s), skipping&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t145" href="#t145">145</a></span><span class="t">            <span class="str">&quot;; &quot;</span><span class="op">.</span><span class="nam">join</span><span class="op">(</span><span class="nam">getattr</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="str">&quot;invalid_library&quot;</span><span class="op">,</span> <span class="key">None</span><span class="op">)</span> <span class="key">or</span> <span class="op">[</span><span class="str">&quot;templates/library.yaml&quot;</span><span class="op">]</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t145" href="#t145">145</a></span><span class="t">            <span class="str">&quot;; &quot;</span><span class="op">.</span><span class="nam">join</span><span class="op">(</span><span class="nam">getattr</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="str">&quot;invalid_library&quot;</span><span class="op">,</span> <span class="key">None</span><span class="op">)</span> <span class="key">or</span> <span class="op">[</span><span class="str">&quot;config/library.yaml&quot;</span><span class="op">]</span><span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t146" href="#t146">146</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t147" href="#t147">147</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t148" href="#t148">148</a></span><span class="t">    <span class="nam">chain</span> <span class="op">=</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">resolve_chain</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">chain_template_for</span><span class="op">(</span><span class="nam">repo</span><span class="op">,</span> <span class="key">None</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t149" href="#t149">149</a></span><span class="t">    <span class="key">if</span> <span class="nam">chain</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t150" href="#t150">150</a></span><span class="t">        <span class="nam">logger</span><span class="op">.</span><span class="nam">warning</span><span class="op">(</span><span class="str">&quot;auto-intake: %s has no valid chain template, skipping&quot;</span><span class="op">,</span> <span class="nam">repo</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t150" href="#t150">150</a></span><span class="t">        <span class="nam">logger</span><span class="op">.</span><span class="nam">warning</span><span class="op">(</span><span class="str">&quot;auto-intake: %s has no valid chain, skipping&quot;</span><span class="op">,</span> <span class="nam">repo</span><span class="op">.</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t151" href="#t151">151</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t152" href="#t152">152</a></span><span class="t">    <span class="com"># Spec &#167;5 is &quot;an auto-started item passes no gate automatically&quot;. A template</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t153" href="#t153">153</a></span><span class="t">    <span class="com"># with no gate at all satisfies that by having nothing to pass, which is the</span>&nbsp;</span><span class="r"></span></p>
@@ -338,7 +338,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_intent_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 16:34 +0000
+            created at 2026-10-03 16:48 +0000
         </p>
     </div>
 </footer>
