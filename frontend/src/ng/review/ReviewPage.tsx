@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { isTextField } from "../keys";
 import type { ReviewOutcome } from "../../types";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
@@ -8,6 +9,7 @@ import { placeUrl } from "../item/url";
 import { openBudgetEditor } from "../item/Workspace";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { useItem, type ItemDetail } from "../item/useItem";
+import { materialized, producerOf } from "../item/chainValues";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
@@ -84,13 +86,30 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const submit = useSubmit(item, place.gate, threadList, threads.reload, artifact?.state === "ready" ? artifact.data.digest : null);
   // Finish your review: closed, or open on an outcome (the bar's Request changes opens it there).
   const [finish, setFinish] = useState<{ outcome?: ReviewOutcome } | null>(null);
+  // Escape on the page goes back to the item, as the gate review's × does (GR-1). Whatever is open
+  // over it keeps its own: the gate review, a menu, a dialog, a composer, the tree over the diff.
+  const back = useRef(() => {});
+  back.current = () => toItem({ sel: { kind: "chain" } });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || isTextField(e.target)) return;
+      if (e.target instanceof Element && e.target.closest('[role="menu"], [role="dialog"], .popover')) return;
+      back.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const select = (file: string) => {
     setPlace({ file });
     if (overlay) setTreeOpen(false);
   };
 
   return (
-    <div className={`review-page${diff.plainCode ? " is-plain-code" : ""}`} onKeyDown={(e) => e.key === "Escape" && overlay && treeOpen && setTreeOpen(false)}>
+    <div className={`review-page${diff.plainCode ? " is-plain-code" : ""}`} onKeyDown={(e) => {
+      if (e.key !== "Escape" || !overlay || !treeOpen) return;
+      e.preventDefault();
+      setTreeOpen(false);
+    }}>
       <h1 className="review-visually-hidden">Review changes: {item.title}</h1>
       <ItemHeader
         item={item}
@@ -183,6 +202,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           threads={threadList}
           isViewed={viewed.isViewed}
           doc={artifact}
+          by={producerOf(materialized(item), place.gate)}
           approve={() => submit("approve", "")}
           onReviewChanges={(file) => setPlace({ doc: false, ...(file && { file }) })}
           onRequestChanges={() => {

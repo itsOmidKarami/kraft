@@ -2,6 +2,7 @@ import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
 import { isEscalation } from "./nodeGraph";
+import { materialized, nodeTaskKind } from "./chainValues";
 import type { ItemDetail } from "./useItem";
 
 const kindOf = (n: ApiNode) => n.kind ?? "exec";
@@ -33,12 +34,13 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   const capped = stop && (stop.kind === "cap" || stop.kind === "budget") ? stop.node : null;
   const deciders = gateDeciders(events);
   const byNode = new Map((item.usage?.by_node ?? []).map((r) => [r.node, r]));
+  const frozen = materialized(item);
 
   const nodes = api.map((n, i): ChainNode => {
     const ss = item.worker_sessions.filter((s) => s.node_id === n.id);
     const work = ss.filter((s) => !isEscalation(s));
     const attempt = Math.max(0, ...work.map((s) => s.attempt));
-    const out: ChainNode = { id: n.id, kind: kindOf(n), icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, esc: ss.some(isEscalation) && capped !== n.id, attempt: attempt || undefined };
+    const out: ChainNode = { id: n.id, kind: kindOf(n), icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, taskKind: nodeTaskKind(frozen, n.id), esc: ss.some(isEscalation) && capped !== n.id, attempt: attempt || undefined };
     if (cur < 0 || i > cur) return { ...out, state: "todo" };
     if (i < cur) {
       const ms = byNode.get(n.id)?.wall_ms;

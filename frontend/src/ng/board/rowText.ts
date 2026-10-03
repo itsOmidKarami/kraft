@@ -55,7 +55,7 @@ export function reasonTail(i: Row, now = Date.now()): string {
 
 export type RowAction =
   | { label: string; kind: "gate"; gate: string }
-  | { label: string; kind: "peek"; tab: "overview" | "config" }
+  | { label: string; kind: "peek"; tab: "overview" | "config"; budget?: boolean }
   | { label: string; kind: "resume" };
 
 /** The one action a row offers, or none. */
@@ -67,9 +67,9 @@ export function rowAction(i: Row): RowAction | null {
     case "gate": return { label: "Review to approve", kind: "gate", gate: i.pending_gate ?? nodeOf(i) };
     case "question": return { label: "Answer", kind: "peek", tab: "overview" };
     case "cap": return { label: "Raise cap", kind: "peek", tab: "config" };
-    // A row carries neither the stop's limit nor the item's spend, so it cannot tell the item's own cap from a daily
-    // or token one the server will not raise: the peek's banner can (`budgetRaise`), and offers the raise or Retry.
-    case "budget": return { label: "Open", kind: "peek", tab: "overview" };
+    // A row carries neither the stop's limit nor its scope: the peek it opens picks the editor that raises this
+    // cap (`budgetRaise`), or stays on the banner that says why the item can't, with Retry.
+    case "budget": return { label: "Raise budget", kind: "peek", tab: "config", budget: true };
     // A stuck loop's way on is Retry, on the peek's card (R11a-01): the row said Open.
     case "stuck": return { label: "Retry…", kind: "peek", tab: "overview" };
     default: return { label: "Open", kind: "peek", tab: "overview" };
@@ -81,7 +81,9 @@ export function glyphOf(i: Row): { kind: GlyphKind; icon?: string; state: GlyphS
   const nodes: ChainNode[] = i.chain_definition?.nodes ?? [];
   const n = nodes.find((x) => x.id === i.current_node_id) ?? nodes[nodes.length - 1];
   const kind: GlyphKind = n?.kind === "gate" ? "gate" : "exec";
-  const icon = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned") ? "ban" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
+  const dropped = i.display_status === "cancelled" || (i.display_status === "archived" && i.status === "abandoned");
+  const finished = i.display_status === "done" || (i.display_status === "archived" && !dropped);
+  const icon = dropped ? "ban" : finished ? "check" : n && (n.steps?.length ?? 0) > 1 ? "layers" : undefined;
   const state: GlyphState = (() => {
     switch (i.display_status) {
       case "failed": return "failed";
@@ -106,8 +108,10 @@ export function ticksOf(i: Row): Tick[] {
   const ended = i.display_status === "done" || i.display_status === "cancelled" || i.display_status === "archived";
   const at = nodes.findIndex((n) => n.id === i.current_node_id);
   const hot = groupOf(i) === "needs" || i.display_status === "escalated";
-  return nodes.map((n, k) => ({
+  const ticks: Tick[] = nodes.map((n, k) => ({
     gate: n.kind === "gate",
     state: ended || (at >= 0 && k < at) ? "done" : at >= 0 && k === at ? (hot ? "hot" : "current") : "todo",
   }));
+  // An ended item reads as finished at a glance: the nodes between two gates are one dash (BD-6).
+  return ended ? ticks.filter((t, k) => t.gate || !ticks[k - 1] || ticks[k - 1].gate) : ticks;
 }

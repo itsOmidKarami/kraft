@@ -182,7 +182,8 @@ def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch, in
     details = [row["detail"] for row in asyncio.run(doctor.run_checks()) if row["name"] == "health"]
     assert len(details) == 4
     assert any("quick-task.yaml" in d for d in details)
-    assert any(d.startswith("invalid intake.yaml") and "'61'" in d and said in d for d in details)
+    (line,) = [d for d in details if d.startswith("invalid intake.yaml")]
+    assert "'61'" in line and said in line and ("policy.yaml still fires" in line) is intake_off
 
 
 def test_a_missing_vector_extra_is_advice_not_a_failure():

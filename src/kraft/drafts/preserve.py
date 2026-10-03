@@ -53,7 +53,41 @@ def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
     _merge(doc, data)
     out = io.StringIO()
     yaml.dump(doc, out)
-    return _keep_flow_lines(text, out.getvalue())
+    written = _keep_flow_lines(text, out.getvalue())
+    _reads_back(written, data)
+    return written
+
+
+class RewriteError(ValueError):
+    """A rewrite over the file's text that does not read back as the mapping
+    it was given: the caller writes it plainly (`plain`) or refuses, and
+    never writes it (R13d-01)."""
+
+
+def _reads_back(written: str, data: Mapping) -> None:
+    """Raise `RewriteError` unless `written` parses, as Kraft's readers parse
+    it, to `data`."""
+    try:
+        back = pyyaml.safe_load(written)
+    except pyyaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        raise RewriteError(f"it would not parse{where}") from exc
+    if (back or {}) != plain(data):
+        raise RewriteError("it would read back as other values")
+
+
+def plain(value: object) -> object:
+    """`value` as plain `dict`/`list`/scalars, ruamel's node and scalar types
+    included, for `authored.dump` and for comparing with what PyYAML reads."""
+    if isinstance(value, Mapping):
+        return {plain(k): plain(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [plain(v) for v in value]
+    for kind in (bool, int, float, str):
+        if isinstance(value, kind):
+            return kind(value)
+    return value
 
 
 def _yaml() -> YAML:
@@ -322,8 +356,11 @@ def _drop_removed_entries_comments(seq: CommentedSeq, removed: set[int]) -> None
     removed entry's own leading comment is dropped with it, and the one it
     held for the entry after it moves to the kept entry now before that one,
     or above the list when none is. The first entry's own is the list's
-    (`seq.ca.comment`, shared with the parent key)."""
-    lead = seq.ca.comment[1] if seq.ca.comment and seq.ca.comment[1] else []
+    (`seq.ca.comment`, shared with the parent key). When the key has an
+    end-of-line comment (`repos:   # my repos`), it is the lines after that
+    comment on the key's own token."""
+    lead = seq.ca.comment[1] if seq.ca.comment and seq.ca.comment[1] else None
+    on_key = seq.ca.comment[0] if seq.ca.comment and lead is None else None
     kept_before = None
     for index, node in enumerate(seq):
         if id(node) not in removed:
@@ -337,11 +374,14 @@ def _drop_removed_entries_comments(seq: CommentedSeq, removed: set[int]) -> None
         if kept_before is not None:
             if block:
                 _put_block(seq, kept_before, block)
-        elif lead:
-            # Still at the top: the next entry's comment is the list's first.
-            lead[0].value = block.lstrip(" ") if block else ""
-            for token in lead[1:]:
-                token.value = ""
+        elif lead is not None:
+            # Still at the top: the next entry's comment is the list's first,
+            # in place (the parent key holds the same list), at column 0: an
+            # emptied token at its own column still wrote that indent before
+            # the next `- `, which then did not parse (R13d-01).
+            lead[:] = [CommentToken(block, CommentMark(0), None)]
+        elif on_key is not None:
+            on_key.value = on_key.value.partition("\n")[0] + "\n" + block
         elif block:
             lead = [CommentToken(block, CommentMark(0), None)]
             seq.ca.comment = [None, lead]

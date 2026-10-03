@@ -52,7 +52,7 @@ describe("rowAction", () => {
     expect(a(row("needs_you", { stop: stop("question") }))).toMatchObject({ label: "Answer", kind: "peek", tab: "overview" });
     expect(a(row("needs_you", { stop: stop("cap") }))).toMatchObject({ label: "Raise cap", kind: "peek", tab: "config" });
     // The row cannot tell a cap the server raises from one it refuses; the peek's banner can.
-    expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Open", kind: "peek", tab: "overview" });
+    expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Raise budget", kind: "peek", tab: "config", budget: true });
     expect(a(row("needs_you", { stop: stop("mr_closed") }))).toMatchObject({ label: "Open", kind: "peek" });
     expect(a(row("needs_you", { stop: stop("stuck") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });
     expect(a(row("failed", { stop: stop("failed") }))).toMatchObject({ label: "Retry…", kind: "peek" });
@@ -69,15 +69,18 @@ describe("glyphOf and ticksOf", () => {
     expect(glyphOf(row("failed")).state).toBe("failed");
     expect(glyphOf(row("escalated")).state).toBe("esc");
     expect(glyphOf(row("cancelled"))).toMatchObject({ state: "ghost", icon: "ban" });
+    expect(glyphOf(row("done"))).toMatchObject({ state: "done", icon: "check" });
+    expect(glyphOf(row("archived"))).toMatchObject({ state: "done", icon: "check" });
     expect(glyphOf(row("paused", { current_node_id: null })).state).toBe("todo");
   });
 
-  it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended", () => {
+  it("fills ticks up to the current node, the current one hot when the item waits on a person, all once ended, its nodes between gates one dash", () => {
     const states = (i: WorkItem) => ticksOf(i).map((t) => t.state[0]).join("");
     expect(states(row("running"))).toBe("ddct");
     expect(states(row("needs_you", { stop: stop("cap") }))).toBe("ddht");
-    expect(states(row("done"))).toBe("dddd");
-    expect(states(row("archived"))).toBe("dddd");
+    expect(states(row("done"))).toBe("ddd");
+    expect(states(row("archived"))).toBe("ddd");
+    expect(ticksOf(row("done")).map((t) => t.gate)).toEqual([false, true, false]);
     expect(states(row("paused", { current_node_id: null }))).toBe("tttt");
     expect(ticksOf(row("running")).map((t) => t.gate)).toEqual([false, true, false, false]);
   });

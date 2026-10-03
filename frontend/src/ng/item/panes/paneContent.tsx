@@ -20,7 +20,7 @@ import { PathFooter } from "./PathFooter";
 import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
 import { chainName } from "../chainName";
-import { notStarted } from "../chainValues";
+import { materialized, notStarted, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
 
 export type PaneArgs = {
@@ -207,18 +207,30 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
-  const kind = esc || at?.model ? "agent" : undefined;
+  const kind = esc ? "agent" : taskKindAt(materialized(item), path) ?? (at?.model ? "agent" : undefined);
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
   const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task · ${look.running ? (look.meta ?? "running") : lookWord(look)}` };
   if (!at) {
-    // A task that has not run has only its Config, and only while the draft may override it (W11).
+    // A task that has not run keeps its tabs, each saying why it is empty (LV-5). Config is the
+    // draft's while it may override the task (W11). On the node the run stands on it can be skipped
+    // before it runs (`/skip` takes a task of the current node).
     const edit = !esc && !!a.canEdit?.(node.id);
+    const empty = (text: string) => <p className="item-muted">{text}</p>;
+    const bodies: Record<string, ReactNode> = {
+      thread: empty("No turns yet."),
+      overview: empty("Not run yet. It starts when the step before this one finishes."),
+      input: empty("No input yet. It is read when the task starts."),
+      output: empty("No output yet. It is written when the task finishes."),
+      log: empty("No log yet. It starts when the step before this one finishes."),
+      config: edit ? <DraftConfig path={path} /> : <><dl className="item-facts ip-facts"><div><dt>path</dt><dd className="is-mono">{path}</dd></div></dl><AppliedRows applied={a.applied} path={path} /></>,
+    };
+    const here = !esc && item.current_node_id === node.id;
     return {
       ...head,
-      tabs: edit ? OVERVIEW_CONFIG : undefined,
-      body: edit && a.tab === "config" ? <DraftConfig path={path} /> : <p className="item-muted">Not started. Its tabs fill in once it runs.</p>,
-      footer: undefined,
+      tabs,
+      body: bodies[tab],
+      footer: here ? <PathFooter item={item} path={path} what="task" state={item.display_status === "paused" ? "paused" : "running"} reload={a.reload} only="skip" /> : undefined,
     };
   }
   const current = item.current_node_id === node.id;

@@ -389,10 +389,27 @@ _CRON_FIELDS: tuple[tuple[str, int, int], ...] = (
 )
 
 
-class CronRangeError(PolicyError):
-    """A cron value outside its field (minute 61, day of week 8): the one
-    refusal a 1.4 `policy.yaml` trigger could already hold, since 1.4 checked
-    only that each value was digits. Such a trigger never fired there."""
+class LegacyCronError(PolicyError):
+    """A cron that 1.4 loaded, since it checked only that each value passed
+    `str.isdigit`, and that a schedule now refuses. A `policy.yaml` trigger
+    holding one is skipped with a warning (`_triggers`); `intake.yaml` refuses
+    it. `skipped` ends that warning."""
+
+    skipped = ""
+
+
+class CronRangeError(LegacyCronError):
+    """A cron value outside its field (minute 61, day of week 8). Such a
+    trigger never fired in 1.4."""
+
+    skipped = "as 1.4 never ran it"
+
+
+class CronDigitError(LegacyCronError):
+    """A cron number in digits other than 0-9 (`²`, `٣`), which `isdigit`
+    takes and `int` then crashes on or reads as another number."""
+
+    skipped = "as a cron number is the digits 0-9"
 
 
 #: What a cron number is: ASCII digits. `str.isdigit` also takes `²` and `٣`.
@@ -409,6 +426,8 @@ def _cron_values(name: str, part: str, label: str, lo: int, hi: int) -> frozense
     )
     out: set[int] = set()
     for token in part.split(","):
+        if token.isdigit() and not _DIGITS.fullmatch(token):
+            raise CronDigitError(f"{name}: field {part!r}: {token!r} is not the digits 0-9")
         base, slash, step_text = token.partition("/")
         if slash and not (_DIGITS.fullmatch(step_text) and int(step_text) > 0):
             raise PolicyError(f"{name}: field {part!r}: a step must be a positive integer")
@@ -483,15 +502,32 @@ def _triggers(name: str, raws: list[TriggerInput]) -> list[Trigger]:
     whose cron names a value outside its field (`0 24 * * *`) loaded in 1.4,
     which never ran it: it is skipped with a warning, not a refusal of the
     whole file, which would stop every intake door (R12 review P1-1).
-    `kraft admin doctor`'s `moved keys` row names it. Any other bad cron is
-    refused, as in 1.4."""
+    `kraft admin doctor`'s `moved keys` row names it. So is a number in
+    other digits (`²`), which 1.4 also took (`LegacyCronError`). Any other
+    bad cron is refused, as in 1.4."""
     out = []
     for i, raw in enumerate(raws):
         try:
             out.append(_trigger(f"{name}: triggers[{i}]", raw))
-        except CronRangeError as exc:
-            logger.warning("%s; that trigger is skipped, as 1.4 never ran it", exc)
+        except LegacyCronError as exc:
+            logger.warning("%s; that trigger is skipped, %s", exc, exc.skipped)
     return out
+
+
+def skipped_trigger(entry: object) -> str:
+    """Why `_triggers` skips this pre-2.0 `policy.yaml` trigger (its cron is a
+    `LegacyCronError`), or "" when it is read or refused. Said by the first
+    start's line and `kraft admin doctor`, of a trigger that stays."""
+    cron = entry.get("cron") if isinstance(entry, dict) else None
+    if not isinstance(cron, str):
+        return ""
+    try:
+        _cron_fields("cron", cron)
+    except LegacyCronError as exc:
+        return exc.skipped
+    except PolicyError:
+        return ""
+    return ""
 
 
 class CapOverride(BaseModel):

@@ -119,8 +119,9 @@ async def lifespan(app: FastAPI):
     # so Settings → Auto-intake comes up and can be used to fix the file.
     # `/health` and doctor name it (`invalid_intake`), as they name a bad policy.
     app.state.invalid_intake = None
-    #: Whether auto-intake and the schedules are off for it: only a start on a
-    #: bad file. A reload that refuses one keeps what was running.
+    #: Whether auto-intake and intake.yaml's schedules are off for it: only a
+    #: start on a bad file. A reload that refuses one keeps what was running.
+    #: A trigger left in policy.yaml fires either way (`triggers.schedules`).
     app.state.intake_off = False
     try:
         app.state.intake = config_mod.Intake.load(templates_dir / "intake.yaml").model_dump()

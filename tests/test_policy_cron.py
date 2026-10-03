@@ -56,7 +56,7 @@ def test_cron_due_reads_ranges_and_steps(cron, due, when):
         pytest.param("*/0 * * * *", "a step must be a positive integer", id="zero-step"),
         pytest.param("0 9 * * MON", "must be '*', an integer, a range", id="names"),
         pytest.param("every monday", "must have exactly 5 fields", id="words"),
-        pytest.param("\u00b2 * * * *", "must be '*', an integer", id="a-superscript-digit"),
+        pytest.param("\u00b2 * * * *", "'\u00b2' is not the digits 0-9", id="a-superscript-digit"),
         pytest.param("*/\u0663 * * * *", "a step must be a positive integer", id="an-arabic-digit"),
     ],
 )
@@ -80,14 +80,15 @@ def test_a_cron_the_scheduler_cannot_run_is_refused(cron, message):
 
 @pytest.mark.parametrize(
     "cron",
-    ["0 24 * * *", "60 * * * *", "0 9 * * 8", "0 9 0 * *"],
-    ids=["hour-24", "minute-60", "weekday-8", "day-0"],
+    ["0 24 * * *", "60 * * * *", "0 9 * * 8", "0 9 0 * *", "\u00b2 9 * * *", "0 \u0663 * * *"],
+    ids=["hour-24", "minute-60", "weekday-8", "day-0", "a-superscript-digit", "an-arabic-digit"],
 )
 def test_a_1_4_trigger_out_of_range_is_skipped_not_the_whole_policy(tmp_path, caplog, cron):
-    """1.4 checked only that a value was digits, so these loaded and never
-    fired. Refusing them now refused the whole `policy.yaml`, and with it
-    every intake door (R12 review P1-1): the trigger is skipped, warned of,
-    and the rest of the file and its other triggers load."""
+    """1.4 checked only that a value was digits (`str.isdigit`, which takes
+    `²` and `٣`), so these loaded. Refusing them now refused the whole
+    `policy.yaml`, and with it every intake door (R12 review P1-1): the
+    trigger is skipped, warned of, and the rest of the file and its other
+    triggers load. `intake.yaml` still refuses them (above)."""
     path = tmp_path / "policy.yaml"
     path.write_text(
         "default: {attempts: 1, wall_clock_s: 1}\ntriggers:\n"

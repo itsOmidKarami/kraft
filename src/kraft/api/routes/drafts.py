@@ -157,11 +157,11 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
         working, table = found.working(st, key, current, exists=exists), found.ops
     try:
         answers = ops.apply(working, body.ops, table)
+        written = working.finish()
     except ops.OpError as exc:
         return JSONResponse(
             status_code=422, content={"detail": str(exc), "op": exc.index, **exc.extra}
         )
-    written = working.finish()
     names = {*(old["files"] if old else ()), *working.dirty}
     # Only a file whose comments the write drops is `serialized`: the
     # results warn of it (`drafts.resolve`). A config area keeps them.

@@ -3,12 +3,18 @@
 .pol-page { max-width: 880px; box-sizing: border-box; margin: 0 auto; padding: 16px 24px 60px; display: flex; flex-direction: column; gap: 12px; }
 .pol-section { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; margin: -2px -7px; border: 0; border-radius: 5px; background: transparent; font-size: 12.5px; color: var(--text); cursor: pointer; }
 .pol-section:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); }
+.pol-head { display: flex; align-items: baseline; gap: 12px; margin: 4px 0 2px; }
+.pol-title { flex: none; margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.pol-head .pol-intro { flex: 1; }
+.pol-head .btn { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; }
 .pol-intro { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
 .pol-note { margin: 0; padding: 0 8px; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
 .pol-note.is-bad, .pol-help.is-bad { color: var(--bad); }
 .pol-h2 { margin: 6px 8px 2px; font-size: 10.5px; font-weight: 400; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 
 .pol-card { display: flex; flex-direction: column; gap: 2px; padding: 10px 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+/* Each scope sits inside the one it can't exceed. */
+.pol-card .pol-card { margin-top: 10px; background: var(--surface-2); }
 .pol-card.is-dashed { border-style: dashed; }
 .pol-card.is-bad { border-color: var(--bad); }
 .pol-body[data-flash="work_item"] .pol-card[data-scope="work_item"], .pol-body[data-flash="nodes"] .pol-card[data-scope="nodes"], .pol-body[data-flash="steps"] .pol-card[data-scope="steps"], .pol-body[data-flash="tasks"] .pol-card[data-scope="tasks"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bad); }
@@ -51,9 +57,9 @@
 .pol-pv-cap { font-size: 11px; line-height: 1.4; color: var(--text-sub); }
 .pol-pv-cap.is-bad { color: var(--bad); }
 
+/* Narrower, the label column shrinks; "set below policy" stays, as in the prototype at 900px (ST-1). */
 @media (max-width: 1023px) {
-  .pol-grid.has-below { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr) minmax(0, 1fr); }
-  .pol-grid.has-below > :nth-child(4), .pol-grid.has-below .pol-below { display: none; }
+  .pol-grid.has-below { grid-template-columns: minmax(70px, 100px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr); }
   .pol-one { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr); }
   .pol-one > .pol-help { grid-column: 1 / -1; }
 }

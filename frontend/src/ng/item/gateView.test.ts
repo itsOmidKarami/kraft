@@ -29,6 +29,17 @@ describe("gateView", () => {
     expect(v.doc).toBeUndefined();
   });
 
+  it("reads a gate's auto_review and message from the frozen chain, the API's chain listing no task on a gate (GR-4)", () => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", message: "Approve the plan.", auto_review: { id: "check", kind: "agent" } }] } });
+    const s = { id: "s", hook_point: "plan_approval.auto_review", node_id: "plan_approval", status: "running", attempt: 1, round: 0, created_at: "t", started_at: "t" } as WorkerSession;
+    const before = gateView(detail({ materialized_chain: frozen, current_node_id: "plan" }), V1[1], [], 0, { kind: "chain" }, on);
+    expect(before.reviewer).toMatchObject({ id: "auto_review", state: "todo", chip: "runs first when reached" });
+    expect(before.message).toBe("Approve the plan.");
+    const running = gateView(detail({ materialized_chain: frozen, current_node_id: "plan_approval", worker_sessions: [s] }), V1[1], [], 0, { kind: "chain" }, on);
+    expect(running.reviewer).toMatchObject({ id: "auto_review", state: "current" });
+    expect(running.reviewer?.chip).toBeUndefined();
+  });
+
   it("has no reviewer for a gate that declares none", () => {
     expect(gateView(detail(), V1[1], [], 0, { kind: "chain" }, on).reviewer).toBeUndefined();
   });

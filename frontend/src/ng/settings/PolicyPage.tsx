@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { Archive, Gauge, RefreshCw } from "lucide-react";
+import { Archive, Gauge, RefreshCw, Workflow } from "lucide-react";
 import { request } from "../http";
 import { Button } from "../ui/Button";
 import { Menu } from "../ui/Menu";
@@ -99,6 +99,8 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
   };
   const changes = useMemo(() => new Map(r.changes.map((c) => [c.path, c])), [r.changes]);
   const ctx: Ctx | null = p ? { draft, p, changes, problems: r.problems, active } : null;
+  // Preview reads the server's below lists: an older server sends none, and there is nothing to preview.
+  const previewable = !!p && "below" in (Object.values(p.limits.caps)[0] ? Object.values(Object.values(p.limits.caps)[0])[0] : {});
 
   return (
     <AreaFrame
@@ -107,7 +109,6 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
       pageKey="policy"
       title="Policy"
       tail={menu}
-      actions={section === "limits" && p && "below" in (Object.values(p.limits.caps)[0] ? Object.values(Object.values(p.limits.caps)[0])[0] : {}) ? <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}>Preview on a chain</Button> : undefined}
       onFix={onFix}
     >
       {({ size, review, reserve }) => (
@@ -120,7 +121,7 @@ function Editor({ draft, section }: { draft: ConfigDraft; section: Section }) {
                   {r.problems[0] && <p>{r.problems[0].message}</p>}
                   <p>Open YAML in the header to repair it.</p>
                 </div>
-              ) : section === "limits" ? <Limits ctx={ctx} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
+              ) : section === "limits" ? <Limits ctx={ctx} preview={previewable && <Button aria-pressed={preview} onClick={() => setPreview((v) => !v)}><Workflow size={13} aria-hidden /> Preview on a chain</Button>} /> : section === "loops" ? <Loops ctx={ctx} /> : <Housekeeping ctx={ctx} />}
             </div>
           </div>
           {!review && preview && section === "limits" && ctx && <PreviewPane draft={draft} chains={chains} size={size} onClose={() => setPreview(false)} />}

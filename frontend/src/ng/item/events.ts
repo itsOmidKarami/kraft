@@ -45,6 +45,43 @@ export function eventLine(e: KraftEvent): string | null {
   }
 }
 
+export type RecentLine = { e: KraftEvent; line: string };
+
+/** Recent's story, newest first (WI-2): a session's start and end fold into one line that
+ *  leads with what changed. A live session reads "code_review is running on verification";
+ *  one that ended well drops out, the node's next line tells it; one that failed says so at
+ *  its end; an escalation's turn that ends reads "escalation answered". A node's start drops
+ *  once a session on it starts, and its finish takes the place of everything that ran in it. */
+export function recent(events: KraftEvent[]): RecentLine[] {
+  const out: (RecentLine & { node?: string; session?: string })[] = [];
+  const started = new Map<string, { node: string; task: string }>();
+  const drop = (keep: (x: (typeof out)[number]) => boolean) => out.splice(0, out.length, ...out.filter(keep));
+  for (const e of events) {
+    const p = e.payload ?? {};
+    const node = s(e.node_id ?? p.node_id);
+    if (e.type === "worker_session_started") {
+      const task = p.hook_point ? taskName(s(p.hook_point)) : "a session";
+      started.set(s(p.session_id), { node, task });
+      drop((x) => !(x.node === node && x.e.type === "node_started"));
+      out.push({ e, node, session: s(p.session_id), line: `${task} is running on ${node}` });
+    } else if (e.type === "worker_session_exited") {
+      const at = started.get(s(p.session_id));
+      drop((x) => x.session !== s(p.session_id));
+      if (!at) continue;
+      const ok = s(p.status).startsWith("done");
+      if (at.task === "escalation") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: ok ? "escalation answered" : `escalation ${s(p.status).replaceAll("_", " ")}` });
+      else if (!ok && p.status !== "paused") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: `${at.task} ${s(p.status).replaceAll("_", " ")} on ${at.node}` });
+    } else {
+      const line = eventLine(e);
+      if (!line) continue;
+      const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
+      if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
+      out.push({ e, node, line });
+    }
+  }
+  return out.reverse().map(({ e, line }) => ({ e, line }));
+}
+
 /** "now", "6m", "1h 10m": the Recent column's age. */
 export function age(iso: string, now = Date.now()): string {
   const m = Math.floor((now - Date.parse(iso)) / 60_000);

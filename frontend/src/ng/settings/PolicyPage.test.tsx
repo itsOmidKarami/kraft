@@ -112,6 +112,16 @@ describe("Policy page: Limits", () => {
     expect(within(row).getByRole("button", { name: /maximum, 240 min/ })).toHaveClass("is-bad");
   });
 
+  it("nests each scope inside the one it can't exceed, under a Limits heading with Preview beside it (ST-1)", async () => {
+    mount();
+    const tasks = await screen.findByRole("region", { name: "tasks" });
+    const chain = ["tasks", "steps", "nodes", "work item", "instance"].map((name) => screen.getByRole("region", { name }));
+    chain.slice(1).forEach((outer, i) => expect(outer).toContainElement(chain[i]));
+    expect(tasks).toBeInTheDocument();
+    const head = screen.getByRole("heading", { name: "Limits" }).parentElement!;
+    expect(within(head).getByRole("button", { name: "Preview on a chain" })).toBeInTheDocument();
+  });
+
   it("draws no below column and no Preview button when the server sends no below lists", async () => {
     const bare = JSON.parse(JSON.stringify(RESOLVED));
     for (const l of Object.values(bare.limits.caps) as Record<string, { below?: unknown }>[]) for (const c of Object.values(l)) delete c.below;

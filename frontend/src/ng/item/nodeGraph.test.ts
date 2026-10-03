@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChainNode, WorkerSession } from "../../types";
 import { footerState, nodeGraph } from "./nodeGraph";
-import { detail } from "./testkit";
+import { detail, FROZEN } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const node: ChainNode = {
@@ -26,6 +26,11 @@ describe("nodeGraph", () => {
     expect(g.steps[1].tasks[0]).toMatchObject({ running: true, taskKind: "agent" });
     expect(g.loop).toEqual({ tone: "active", label: "fix loop · round 2" });
     expect(g.onFailure).toBe("repair_pass");
+  });
+
+  it("draws a task by its kind in the frozen chain, before it has run (WI-3)", () => {
+    const g = nodeGraph(detail({ materialized_chain: FROZEN }), node, NOW);
+    expect(g.steps.map((st) => st.tasks.map((t) => [t.id, t.taskKind]))).toEqual([[["lint", "subprocess"], ["typecheck", undefined]], [["code_review", "agent"]]]);
   });
 
   it("hangs the escalation on a side branch with its thread and turn, and a red loop when capped", () => {

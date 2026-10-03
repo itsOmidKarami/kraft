@@ -14,7 +14,12 @@ test("spec gate: read, reject and send back, then approve into the plan gate", a
   await page.goto(`/work-items/${id}`);
   await expect(waitingAt(page, "spec_approval")).toBeVisible({ timeout: scaledTimeout(100_000) });
 
-  await waitingAt(page, "spec_approval").getByRole("button", { name: "Open gate" }).click();
+  // The banner's Review changes opens the gate's review with its brief beside the diff.
+  await waitingAt(page, "spec_approval").getByRole("button", { name: "Review changes" }).click();
+  await expect(page).toHaveURL(new RegExp(`/work-items/${id}/review\\?gate=spec_approval&doc=1$`));
+  await expect(page.getByRole("dialog", { name: "Gate review: spec_approval" })).toContainText("fake spec body");
+
+  await page.goto(`/work-items/${id}?sel=spec_approval`);
   const gate = page.getByRole("complementary", { name: "spec_approval pane" });
   await gate.getByRole("button", { name: /^Read / }).click();
   await expect(page.getByRole("dialog")).toContainText("fake spec body");
@@ -37,7 +42,7 @@ test("spec gate: read, reject and send back, then approve into the plan gate", a
   await gate.getByRole("button", { name: "Approve" }).click();
   await expect(waitingAt(page, "plan_approval")).toBeVisible({ timeout: scaledTimeout(100_000) });
 
-  await waitingAt(page, "plan_approval").getByRole("button", { name: "Open gate" }).click();
+  await page.goto(`/work-items/${id}?sel=plan_approval`);
   await page.getByRole("complementary", { name: "plan_approval pane" }).getByRole("button", { name: /^Read / }).click();
   await expect(page.getByRole("dialog")).toContainText("fake plan body");
 });

@@ -140,7 +140,7 @@ export function useDiffFiles(id: string, version: string, gone = false): DiffFil
 export const totals = (files: DiffFile[]) => ({ add: files.reduce((a, f) => a + f.insertions, 0), del: files.reduce((a, f) => a + f.deletions, 0) });
 
 /** How many of the item's review threads are not resolved, read again with the item (as the gate pane counts them). */
-function useOpenThreads(id: string, version: string): number {
+export function useOpenThreads(id: string, version: string): number {
   const [open, setOpen] = useState(0);
   useEffect(() => {
     let live = true;

@@ -10,7 +10,7 @@ import type { Change, Op, Problem } from "../templates/draft/types";
 import { ValueCell } from "../templates/draft/ValueCell";
 import { Kv } from "../templates/panes/controls";
 import { subscribeLive } from "../live";
-import { checkText, hhmm } from "./intake/checks";
+import { checkText, hhmm, nextCheck } from "./intake/checks";
 import { describeCron } from "./intake/cron";
 import { type Check, type IntakeResolved, type Schedule, intakeOf, problemsOfSchedule } from "./intake/types";
 import { intervalFromText, PRIORITIES, showMinutes, toMinutes } from "./intake/units";
@@ -41,17 +41,25 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const [sel, setSel] = useState<Sel>("pickup");
   const [paneOpen, setPaneOpen] = useState(false);
   const [checks, setChecks] = useState<Check[] | null>(null);
+  // The clock "next check in N min" counts on, moved with each read of the checks.
+  const [now, setNow] = useState(() => Date.now());
   const [repos, setRepos] = useState<{ path: string; name?: string | null }[]>([]);
   const [chains, setChains] = useState<string[]>([]);
 
   // A live `intake_checked` frame is the check, prepended; the refetch below is the fallback for a missed frame.
   useEffect(() => subscribeLive("intake_checked", (payload) => {
     const c = payload as Check;
-    if (c && typeof c === "object" && "ready" in c) setChecks((prev) => [c, ...(prev ?? []).filter((x) => x.id !== c.id)].slice(0, 20));
+    if (!c || typeof c !== "object" || !("ready" in c)) return;
+    setNow(Date.now());
+    setChecks((prev) => [c, ...(prev ?? []).filter((x) => x.id !== c.id)].slice(0, 20));
   }), []);
   useEffect(() => {
     let live = true;
-    const load = () => void request<Check[]>("/intake/checks?limit=20").then((a) => { if (live && a.status === 200 && Array.isArray(a.body)) setChecks(a.body); });
+    const load = () => void request<Check[]>("/intake/checks?limit=20").then((a) => {
+      if (!live) return;
+      setNow(Date.now());
+      if (a.status === 200 && Array.isArray(a.body)) setChecks(a.body);
+    });
     load();
     const t = setInterval(load, CHECKS_EVERY_MS);
     window.addEventListener("focus", load);
@@ -71,6 +79,9 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   }), []);
 
   const schedules = data?.schedules ?? [];
+  // The live poller runs the published interval: with that or on/off changed in the draft, its next check isn't the draft's to say.
+  const unpublished = changes.has("intake.yaml|interval_s") || changes.has("intake.yaml|enabled");
+  const next = data?.enabled && !unpublished ? nextCheck(checks?.[0]?.at, data.interval_s, now) : null;
   const chosen = typeof sel === "number" ? schedules.find((s) => s.index === sel) : undefined;
   const onFix = (p: Problem) => {
     setPaneOpen(true);
@@ -106,7 +117,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               ) : (
                 <>
                   <button type="button" className={`ink-card${sel === "pickup" ? " is-sel" : ""}${data.enabled ? " is-on" : ""}`} aria-pressed={sel === "pickup"} onClick={() => { setSel("pickup"); setPaneOpen(true); }}>
-                    <span className="ink-status"><span className="ink-dot" aria-hidden /> {data.enabled ? "On" : "Off"}</span>
+                    <span className="ink-status"><span className="ink-dot" aria-hidden /> {data.enabled ? `On${next ? ` · ${next}` : ""}` : "Off"}</span>
                     <span className="ink-sentence">{pickup(data)}</span>
                   </button>
 

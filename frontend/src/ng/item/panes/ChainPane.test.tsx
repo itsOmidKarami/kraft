@@ -31,6 +31,20 @@ describe("ChainOverview", () => {
     expect(onSelect).toHaveBeenLastCalledWith("verification");
   });
 
+  it("shows the last five lines of Recent, the rest behind a link: in place, or the caller's", async () => {
+    const ev = (seq: number): KraftEvent => ({ seq, work_item_id: "w1", type: "node_completed", payload: {}, node_id: `n${seq}`, created_at: "2026-09-13T10:04:00Z" });
+    const events = [1, 2, 3, 4, 5, 6, 7].map(ev);
+    const { unmount } = render(<ChainOverview item={detail()} events={events} now={NOW} onSelect={() => {}} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
+    await userEvent.click(screen.getByRole("button", { name: "Show 2 earlier" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+    unmount();
+    const onMore = vi.fn();
+    render(<ChainOverview item={detail()} events={events} now={NOW} onSelect={() => {}} onMore={onMore} />);
+    await userEvent.click(screen.getByRole("button", { name: "All activity" }));
+    expect(onMore).toHaveBeenCalled();
+  });
+
   it("says a never-started item is not started, as the header does, and a paused mid-chain one is paused", () => {
     const { unmount } = render(<ChainOverview item={detail({ status: "paused", display_status: "paused", current_node_id: null })} events={[]} now={NOW} onSelect={() => {}} />);
     expect(screen.getByText("status").nextElementSibling).toHaveTextContent(/^not started$/);

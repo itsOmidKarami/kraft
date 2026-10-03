@@ -40,9 +40,10 @@ export function fitCam(world: { W: number; H: number }, view: Size, canvas: Canv
 /** 100%, the current node centred across and 30% down the view. */
 export const currentCam = (cx: number, cy: number, view: Size): Cam => ({ s: 1, tx: view.w / 2 - cx, ty: Math.round(view.h * 0.3) - cy });
 
-const LIVE = new Set(["running", "waiting", "needs_you", "escalated", "paused", "failed"]);
+const LIVE = new Set(["running", "waiting", "needs_you", "escalated", "paused"]);
 /** Decisions §7 "Opening view": an item with a node in progress opens on it at
- *  100%; one not started or finished opens fitted (R37). */
+ *  100%; one not started, finished or failed opens fitted (R37, WI-4: a failure
+ *  is read against the whole chain). */
 export const openingView = (status: string, hasCurrent: boolean): "current" | "fit" => (hasCurrent && LIVE.has(status) ? "current" : "fit");
 
 /** The least pan that brings a world box into view with `margin` px to spare

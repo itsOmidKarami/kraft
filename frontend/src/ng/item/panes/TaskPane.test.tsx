@@ -122,4 +122,16 @@ describe("task pane", () => {
     expect(within(pane("code_review")).queryByRole("tab", { name: "Thread" })).toBeNull();
     expect(within(pane("code_review")).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
+
+  it.each([
+    ["the node the run stands on: Skip task before it runs", "verification", "verification.review.code_review", "code_review", true],
+    ["a later node: nothing to skip yet", "verification", "merge_request.open.open_draft", "open_draft", false],
+  ])("keeps a task's tabs before it runs, each saying why it is empty, on %s", async (_, current, sel, name, skip) => {
+    const node = sel.split(".")[0];
+    mount(`/work-items/w1/nodes/${node}?sel=${sel}&tab=log`, { ...item, current_node_id: current, worker_sessions: [] });
+    expect(within(pane(name)).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "Input", "Output", "Log", "Config"]);
+    expect(within(pane(name)).getByText("No log yet. It starts when the step before this one finishes.")).toBeInTheDocument();
+    expect(within(pane(name)).queryByRole("button", { name: "Skip task" }) !== null).toBe(skip);
+    expect(within(pane(name)).queryByRole("button", { name: "Pause" })).toBeNull();
+  });
 });
