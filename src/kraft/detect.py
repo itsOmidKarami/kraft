@@ -1046,7 +1046,18 @@ _TEST_VERBS = frozenset({"test", "t"})
 #: Words that make a runner run something else: a shell string, a program, a
 #: config that names one (`go test -exec`, `cargo test --config`).
 _RUNS_SOMETHING_ELSE = frozenset(
-    {"exec", "dlx", "--call", "-c", "--shell-mode", "--config", "-exec", "--exec", "-toolexec", "--toolexec"}
+    {
+        "exec",
+        "dlx",
+        "--call",
+        "-c",
+        "--shell-mode",
+        "--config",
+        "-exec",
+        "--exec",
+        "-toolexec",
+        "--toolexec",
+    }
 )
 #: `uv run pytest`, `python -m pytest`, `npx jest`, `xvfb-run npm test`: what
 #: runs the runner, and the verb it takes first (None: the runner is next).
