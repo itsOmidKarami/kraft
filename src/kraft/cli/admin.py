@@ -196,7 +196,7 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
 
 
 def seed_home(templates_dir: Path) -> bool:
-    """Copy the packaged config into an empty home. True if it seeded.
+    """Copy the packaged config into a home that has none. True if it seeded.
 
     Only ever creates. An upgrade must not overwrite a policy the operator
     edited, and `access.yaml` is never bundled — it holds a password hash and a
@@ -206,10 +206,24 @@ def seed_home(templates_dir: Path) -> bool:
     anyone who points `KRAFT_TEMPLATES_DIR` at a checkout with a live
     notify.yaml and runs `just install` -- if either file ever slips into
     `BUNDLED / "templates"`, it must still not reach a seeded home.
+
+    A directory made before the first start, holding only what the docs say
+    to write there (a `sandbox.yaml`, a `detectors.yaml`), has no
+    `library.yaml`: each bundled file it lacks is added beside the ones it
+    has. A home with a `library.yaml` was seeded, and one with a legacy
+    registry is a pre-V1 home for `kraft admin update`; neither is touched.
     """
-    if finish_interrupted_update(templates_dir) or templates_dir.exists():
+    from kraft.templates.library import LIBRARY_FILE, is_pre_v1
+
+    if finish_interrupted_update(templates_dir):
+        return False
+    if templates_dir.exists() and (
+        (templates_dir / LIBRARY_FILE).exists() or is_pre_v1(templates_dir)
+    ):
         return False
     if not (BUNDLED / "templates").is_dir():
+        if templates_dir.exists():
+            return False  # a config directory pointed at by hand, in a source checkout
         raise SystemExit(
             f"kraft: no config in {templates_dir} and no bundled defaults to seed it "
             "with. This build shipped without them — reinstall with `just install`, "
@@ -217,8 +231,26 @@ def seed_home(templates_dir: Path) -> bool:
         )
     # Build beside the target and rename: an interrupted copy must not leave a
     # half-seeded home that every later start then treats as already seeded.
-    _stage_bundle(templates_dir).rename(templates_dir)
+    staging = _stage_bundle(templates_dir)
+    if not templates_dir.exists():
+        staging.rename(templates_dir)
+        return True
+    # Moved in one at a time, `library.yaml` last: it is what marks a home
+    # seeded, so a fill cut short is finished by the next start.
+    for entry in sorted(staging.iterdir(), key=lambda p: p.name == LIBRARY_FILE):
+        _move_missing(entry, templates_dir / entry.name)
+    shutil.rmtree(staging, ignore_errors=True)
     return True
+
+
+def _move_missing(source: Path, target: Path) -> None:
+    """Move `source` to `target` where `target` has nothing; into a directory
+    that exists, each of its entries the same way. Never replaces a file."""
+    if not target.exists() and not target.is_symlink():
+        source.rename(target)
+    elif source.is_dir() and target.is_dir():
+        for entry in source.iterdir():
+            _move_missing(entry, target / entry.name)
 
 
 def _stage_bundle(templates_dir: Path) -> Path:

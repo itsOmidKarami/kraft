@@ -97,10 +97,46 @@ def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):
     _bundle(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
     home.mkdir(parents=True)
+    (home / "library.yaml").write_text("tasks: {mine: {}}\n")
     (home / "policy.yaml").write_text("loops: {mine: 1}\n")
 
     assert cli.seed_home(home) is False
     assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
+    assert not (home / "chains").exists()  # a seeded home's deleted file stays deleted
+
+
+def test_a_templates_dir_made_before_the_first_start_gets_the_rest_seeded(monkeypatch, tmp_path):
+    """The sandbox and detectors pages say to write a file into templates/. Made
+    before the first start, that directory kept the whole bundle out, and the
+    server came up degraded, refusing work. Each file it lacks is seeded; none
+    it has is touched."""
+    _bundle(monkeypatch, tmp_path)
+    home = tmp_path / "home" / "templates"
+    (home / "chains").mkdir(parents=True)
+    (home / "sandbox.yaml").write_text("cli: podman\n")
+    (home / "policy.yaml").write_text("loops: {mine: 1}\n")
+    (home / "chains" / "mine.yaml").write_text("id: mine\n")
+
+    assert cli.seed_home(home) is True
+    assert (home / "sandbox.yaml").read_text() == "cli: podman\n"
+    assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
+    assert (home / "chains" / "mine.yaml").read_text() == "id: mine\n"
+    assert (home / "library.yaml").read_text() == "tasks: {}\n"
+    assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
+    assert (home / "library.yaml").stat().st_mode & 0o777 == 0o600
+    assert not (home / "notify.yaml").exists()
+    assert not home.with_name("templates.seeding").exists()
+    assert cli.seed_home(home) is False
+
+
+def test_a_pre_v1_home_is_left_for_the_major_update(monkeypatch, tmp_path):
+    _bundle(monkeypatch, tmp_path)
+    home = tmp_path / "home" / "templates"
+    home.mkdir(parents=True)
+    (home / "registry.yaml").write_text("hooks: {}\n")
+
+    assert cli.seed_home(home) is False
+    assert [p.name for p in home.iterdir()] == ["registry.yaml"]
 
 
 def test_seed_home_says_so_when_there_is_nothing_to_seed_with(monkeypatch, tmp_path):
@@ -162,6 +198,7 @@ def test_the_stamp_is_not_yaml_so_load_templates_never_sees_it(monkeypatch, tmp_
 def test_seeding_an_existing_home_still_does_nothing(tmp_path):
     home = tmp_path / "home" / "templates"
     home.mkdir(parents=True)
+    (home / "library.yaml").write_text("tasks: {}\n")
 
     assert cli.seed_home(home) is False
     assert not (home / ".seeded-version").exists()
@@ -177,9 +214,10 @@ def test_unknown_subcommand_exits_with_a_usable_message(monkeypatch, capsys):
 
 
 def _servable_home(monkeypatch, tmp_path, access_yaml: str) -> Path:
-    """A templates dir that already exists, so _serve() skips seeding."""
+    """A templates dir already seeded, so _serve() skips seeding."""
     home = tmp_path / "templates"
     home.mkdir()
+    (home / "library.yaml").write_text("tasks: {}\n")
     (home / "access.yaml").write_text(access_yaml)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
     # setenv, not delenv: `kraft serve --host` writes KRAFT_HOST into os.environ,
