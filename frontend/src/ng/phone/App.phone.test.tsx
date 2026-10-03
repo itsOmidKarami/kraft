@@ -86,7 +86,7 @@ describe("ng App at phone width (A.1)", () => {
 // phone screen, and a phone screen's lands on a desktop page when the window
 // widens past 767px. Neither side ever shows Not found (R3-04).
 describe("one address space across a resize", () => {
-  it.each([...ROUTES.map((r) => r.path), "/settings/intake", "/templates/repos/kraft", "/templates/library/implementation", "/settings/policy/loops"])("the desktop's %s opens a phone screen", (path) => {
+  it.each([...ROUTES.map((r) => r.path), "/settings/intake", "/settings/repos/kraft", "/templates/library/implementation", "/settings/policy/loops"])("the desktop's %s opens a phone screen", (path) => {
     width(true);
     stubFetch();
     window.history.pushState({}, "", path);
@@ -114,8 +114,8 @@ describe("one address space across a resize", () => {
 
   it.each([
     ["/more", "/"],
-    ["/templates/harnesses/claude", "/templates/harnesses?harness=claude"],
-    ["/templates/harnesses/profiles/deep", "/templates/harnesses?profile=deep"],
+    ["/settings/harnesses/claude", "/settings/harnesses?harness=claude"],
+    ["/settings/harnesses/profiles/deep", "/settings/harnesses?profile=deep"],
     ["/settings/notifications/webhook", "/settings/notifications"],
     ["/settings/auto-intake/schedules/0", "/settings/auto-intake"],
     ["/archived", "/archived"],
@@ -131,10 +131,10 @@ describe("one address space across a resize", () => {
   });
 
   it.each([
-    ["/templates/harnesses?harness=claude", "/templates/harnesses/claude"],
-    ["/templates/harnesses?profile=deep", "/templates/harnesses/profiles/deep"],
-    ["/templates/harnesses?harness=claude&lane=y", "/templates/harnesses/claude?lane=y"],
-    ["/templates/harnesses?yaml=1&profile=deep", "/templates/harnesses/profiles/deep?yaml=1"],
+    ["/settings/harnesses?harness=claude", "/settings/harnesses/claude"],
+    ["/settings/harnesses?profile=deep", "/settings/harnesses/profiles/deep"],
+    ["/settings/harnesses?harness=claude&lane=y", "/settings/harnesses/claude?lane=y"],
+    ["/settings/harnesses?yaml=1&profile=deep", "/settings/harnesses/profiles/deep?yaml=1"],
   ])("narrowing on %s opens the phone's %s", async (from, lands) => {
     const set = width(false);
     window.history.pushState({}, "", from);

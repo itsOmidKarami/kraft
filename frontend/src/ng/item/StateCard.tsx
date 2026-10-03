@@ -34,7 +34,7 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  const card = cardFor(item, { ...h, onRepos: () => navigate("/templates/repos"), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
+  const card = cardFor(item, { ...h, onRepos: () => navigate("/settings/repos"), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);
     const r = await p;

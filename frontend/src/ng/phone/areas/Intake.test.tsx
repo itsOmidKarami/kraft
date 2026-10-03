@@ -29,9 +29,9 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Auto-intake (N.2)", () => {
   it("says what the rule does in one status line, On and Off", async () => {
     main();
-    expect(await screen.findByText(/^On ·/)).toHaveTextContent("On · checking every 5 min, 5 at a time, every enabled repo, P2 or above.");
+    expect(await screen.findByText(/^On ·/)).toHaveTextContent("On · checking every 5 min, every enabled repo, P2 or above.");
     expect(statusLine({ ...INTAKE, enabled: false })).toMatch(/^Off · nothing is picked up automatically/);
-    expect(statusLine({ ...INTAKE, repos: ["/a", "/b"], interval_s: 90 })).toContain("every 1.5 min, 5 at a time, /a, /b");
+    expect(statusLine({ ...INTAKE, repos: ["/a", "/b"], interval_s: 90 })).toContain("every 1.5 min, /a, /b");
   });
 
   it("an Off rule shows Off and no checks", async () => {
@@ -81,7 +81,7 @@ describe("Auto-intake (N.2)", () => {
     }
   });
 
-  it("edits the pickup rule: the interval in minutes becomes seconds, a priority becomes the ceiling, at a time must be whole", async () => {
+  it("edits the pickup rule: the interval in minutes becomes seconds, a priority becomes the ceiling", async () => {
     const { calls } = main();
     await userEvent.click(await screen.findByRole("button", { name: /^check every/ }));
     const box = screen.getByLabelText("Check every", { selector: "input" });
@@ -96,9 +96,6 @@ describe("Auto-intake (N.2)", () => {
     await userEvent.click(screen.getByRole("radio", { name: "P3" }));
     await waitFor(() => expect(ops(calls)[1]).toEqual({ op: "set_intake", patch: { priority_ceiling: 3 } }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await userEvent.click(screen.getByRole("button", { name: /^at a time/ }));
-    await userEvent.type(screen.getByLabelText("At a time", { selector: "input" }), "{Control>}a{/Control}2.5{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("whole number above 0");
     expect(posts(calls)).toHaveLength(2);
   });
 
@@ -119,7 +116,7 @@ describe("Auto-intake (N.2)", () => {
   });
 
   it("marks a schedule with a problem", async () => {
-    main(ans(view({}, { problems: [problem("triggers.0", "no such chain", { schedule: 0, field: "chain" })] })));
+    main(ans(view({}, { problems: [problem("schedules.0", "no such chain", { schedule: 0, field: "chain" })] })));
     expect(await screen.findByRole("link", { name: /^Dependency check/ })).toHaveTextContent("problem");
   });
 
@@ -182,7 +179,7 @@ describe("a schedule (N.2)", () => {
   });
 
   it("shows the server's problem on the field it is about", async () => {
-    sched(0, ans(view({}, { problems: [problem("triggers.0", "chain nope does not exist", { schedule: 0, field: "chain" })] })));
+    sched(0, ans(view({}, { problems: [problem("schedules.0", "chain nope does not exist", { schedule: 0, field: "chain" })] })));
     expect(await screen.findByRole("button", { name: /^chain/ })).toHaveTextContent("chain nope does not exist");
   });
 

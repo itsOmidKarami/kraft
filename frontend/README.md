@@ -81,7 +81,7 @@ pure model code and its tests:
 | `item/` | a work item's page: header, state card, the chain and node panes, logs, documents |
 | `graph/` | the chain and node graph components, shared by `item/` and `templates/`, and the dev gallery |
 | `review/` | the review page: diff, file tree, threads, finishing a review |
-| `templates/`, `library/`, `harnesses/` | Chains, Repos, Library and Harnesses: the screens that edit `templates/` config through the drafts API |
+| `templates/`, `library/`, `harnesses/` | Chains and Library (Templates), Repos and Harnesses (Settings): the screens that edit `config/` through the drafts API |
 | `settings/` | Policy, Auto-intake, Notifications, Access, Appearance, About |
 | `analytics/` | the Analytics page |
 | `apply/` | the chip that offers a pending restart or reload once config is published |
@@ -205,7 +205,7 @@ area that needs one has a helper module beside its tests, named `testkit.tsx`,
 | `ng/library/fixture.ts`, `testSupport.tsx` | a library draft and the page mounted on it |
 | `ng/harnesses/testkit.tsx` | the harnesses draft's tasks, problems and a fake server |
 | `ng/phone/areas/testkit.tsx` | draft views and `mountAt()` for the phone's area screens |
-| `ng/settings/policy/fixture.ts`, `ng/settings/intake/fixture.ts`, `ng/templates/repos/fixture.ts`, `ng/templates/draft/fixture.default.ts`, `ng/item/draft/fixtures.ts` and `testkit.tsx` | per-screen fixtures |
+| `ng/settings/policy/fixture.ts`, `ng/settings/intake/fixture.ts`, `ng/settings/repos/fixture.ts`, `ng/templates/draft/fixture.default.ts`, `ng/item/draft/fixtures.ts` and `testkit.tsx` | per-screen fixtures |
 
 Reach for the nearest testkit first, and add a factory there the second time a
 setup recurs. `src/testFixtures.ts` is the older shared set (`item()`,

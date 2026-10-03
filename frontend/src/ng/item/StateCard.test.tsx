@@ -46,7 +46,7 @@ describe("StateCard", () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("infra") });
     await userEvent.click(within(screen.getByRole("region", { name: "Failed" })).getByRole("button", { name: "Open Repos" }));
-    expect(where).toBe("/templates/repos");
+    expect(where).toBe("/settings/repos");
   });
 
   // R10b-01: /retry claims only a stopped item, so a waiting one offers no Retry now

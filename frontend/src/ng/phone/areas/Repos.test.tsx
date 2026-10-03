@@ -12,7 +12,7 @@ const ops = (calls: ReturnType<typeof mountAt>["calls"]) => posts(calls).map((c)
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Repos list (M.2)", () => {
-  const list = (a = ans(), path = "/templates/repos") => mountAt(<ReposList />, path, "/templates/repos", a);
+  const list = (a = ans(), path = "/settings/repos") => mountAt(<ReposList />, path, "/settings/repos", a);
 
   it("lists the connected repos with their state, open count and chain, and the detected ones", async () => {
     list();
@@ -33,7 +33,7 @@ describe("Repos list (M.2)", () => {
   it("filters by name or path, and keeps the filter in the URL", async () => {
     list();
     await userEvent.type(await screen.findByRole("searchbox", { name: "Filter repos" }), "docs");
-    expect(where()).toBe("/templates/repos?q=docs");
+    expect(where()).toBe("/settings/repos?q=docs");
     expect(screen.queryByRole("link", { name: /^platform/ })).toBeNull();
     expect(screen.getByRole("link", { name: /^docs-site/ })).toBeInTheDocument();
   });
@@ -59,7 +59,7 @@ describe("Repos list (M.2)", () => {
 });
 
 describe("a repo (M.2)", () => {
-  const open = (name: string, a = ans()) => mountAt(<RepoView />, `/templates/repos/${name}`, "/templates/repos/:repo", a);
+  const open = (name: string, a = ans()) => mountAt(<RepoView />, `/settings/repos/${name}`, "/settings/repos/:repo", a);
 
   it("shows every field the desktop's Config tab edits, with where each value comes from", async () => {
     open("platform");
@@ -130,7 +130,7 @@ describe("a repo (M.2)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Disconnect repo" }));
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(ops(calls)).toEqual([{ op: "remove_repo", path: "/src/product_root" }]));
-    await waitFor(() => expect(where()).toBe("/templates/repos"));
+    await waitFor(() => expect(where()).toBe("/settings/repos"));
   });
 
   it("says there is no such repo", async () => {

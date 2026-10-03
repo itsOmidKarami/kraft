@@ -11,10 +11,10 @@ import "../areas/areas.css";
 const TEMPLATES: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/templates/chains", label: "Chains", icon: Workflow },
   { to: "/templates/library", label: "Library", icon: LibraryBig },
-  { to: "/templates/harnesses", label: "Harnesses", icon: Bot },
-  { to: "/templates/repos", label: "Repos", icon: GitBranch },
 ];
 const SETTINGS: { to: string; label: string; icon: LucideIcon }[] = [
+  { to: "/settings/repos", label: "Repos", icon: GitBranch },
+  { to: "/settings/harnesses", label: "Harnesses", icon: Bot },
   { to: "/settings/policy", label: "Policy", icon: SlidersHorizontal },
   { to: "/settings/auto-intake", label: "Auto-intake", icon: Download },
   { to: "/settings/notifications", label: "Notifications", icon: Bell },

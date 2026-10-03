@@ -38,7 +38,7 @@ const Gallery = DEV_PAGES ? lazy(() => import("./graph/Gallery").then((m) => ({ 
 const TokenSheet = DEV_PAGES ? lazy(() => import("./theme/TokenSheet").then((m) => ({ default: m.TokenSheet }))) : null;
 
 /** The routes whose page exists; every other row of ROUTES renders a placeholder. */
-const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/templates/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/templates/harnesses": <HarnessesPage /> };
+const BUILT: Record<string, ReactElement> = { "/": <BoardPage />, "/archived": <ArchivedPage />, "/analytics": <AnalyticsPage />, "/settings/appearance": <AppearancePage />, "/settings/access": <AccessPage />, "/settings/about": <AboutPage />, "/settings/notifications": <NotifyPage />, "/templates/chains": <ChainsIndex />, "/templates/library": <LibraryPage />, "/settings/repos": <ReposPage />, "/settings/policy": <PolicyPage />, "/settings/auto-intake": <IntakePage />, "/settings/harnesses": <HarnessesPage /> };
 
 export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) {
   const [locked, setLocked] = useState(initiallyLocked);
@@ -68,7 +68,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
           <Route path="/work-items/:id/review" element={<ReviewPage />} />
           <Route path="/templates/library/:ref" element={<LibraryPage />} />
           <Route path="/templates" element={<Navigate to="/templates/chains" replace />} />
-          <Route path="/templates/repos/:repo" element={<ReposPage />} />
+          <Route path="/settings/repos/:repo" element={<ReposPage />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/policy/:section" element={<PolicyPage />} />
           <Route path="/templates/chains/:chain" element={<ChainsPage />} />

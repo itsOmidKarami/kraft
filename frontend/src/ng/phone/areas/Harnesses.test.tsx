@@ -12,7 +12,7 @@ beforeEach(() => resetProviders());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Harnesses list (M.1)", () => {
-  const list = (a = ans()) => mountAt(<HarnessesList />, "/templates/harnesses", "/templates/harnesses", a);
+  const list = (a = ans()) => mountAt(<HarnessesList />, "/settings/harnesses", "/settings/harnesses", a);
 
   it("lists harnesses with their Access chip, profiles with their models, tasks with their harness, and the defaults", async () => {
     list();
@@ -73,7 +73,7 @@ describe("Harnesses list (M.1)", () => {
 });
 
 describe("a harness (M.1, R65)", () => {
-  const open = (id: string, a = ans()) => mountAt(<HarnessView />, `/templates/harnesses/${id}`, "/templates/harnesses/:id", a);
+  const open = (id: string, a = ans()) => mountAt(<HarnessView />, `/settings/harnesses/${id}`, "/settings/harnesses/:id", a);
 
   it("edits Access only, with set_access, and shows its own fields read-only", async () => {
     const { calls } = open("claude");
@@ -102,7 +102,7 @@ describe("a harness (M.1, R65)", () => {
 });
 
 describe("a profile (M.1)", () => {
-  const open = (name: string, a = ans()) => mountAt(<ProfileView />, `/templates/harnesses/profiles/${name}`, "/templates/harnesses/profiles/:name", a);
+  const open = (name: string, a = ans()) => mountAt(<ProfileView />, `/settings/harnesses/profiles/${name}`, "/settings/harnesses/profiles/:name", a);
 
   it("edits a provider entry's model and effort with the one set_profile patch", async () => {
     const { calls } = open("strong");

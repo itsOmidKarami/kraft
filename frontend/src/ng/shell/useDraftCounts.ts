@@ -8,10 +8,10 @@ export type AreaCount = { draft: boolean; problems: number };
 const ROW_OF: Record<string, string> = {
   chains: "/templates/chains",
   library: "/templates/library",
-  repos: "/templates/repos",
+  repos: "/settings/repos",
   policy: "/settings/policy",
   intake: "/settings/auto-intake",
-  harnesses: "/templates/harnesses",
+  harnesses: "/settings/harnesses",
 };
 
 /** Per sidebar row path, whether its area has an open draft and how many

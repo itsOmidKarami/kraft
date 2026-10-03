@@ -100,7 +100,7 @@ describe("Search (I)", () => {
     mount();
     await type("harness");
     await userEvent.click(await screen.findByRole("button", { name: "Harnesses" }), { advanceTimers: vi.advanceTimersByTime });
-    expect(where()).toBe("/templates/harnesses");
+    expect(where()).toBe("/settings/harnesses");
   });
 
   it("drops a slow answer for an older query", async () => {

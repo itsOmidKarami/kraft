@@ -26,7 +26,7 @@ describe("parentOf", () => {
     expect(parentOf("/templates/chains/default")).toBe("/templates/chains");
     expect(parentOf("/templates/chains/default/nodes/verification")).toBe("/templates/chains/default");
     expect(parentOf("/templates/library/implementation")).toBe("/templates/library");
-    expect(parentOf("/templates/harnesses/profiles/strong")).toBe("/templates/harnesses");
+    expect(parentOf("/settings/harnesses/profiles/strong")).toBe("/settings/harnesses");
     expect(parentOf("/settings/auto-intake/schedules/2")).toBe("/settings/auto-intake");
     expect(parentOf("/settings/auto-intake")).toBe("/more");
     expect(parentOf("/settings/policy/loops")).toBe("/more");
@@ -57,7 +57,7 @@ describe("tabOf", () => {
   it("shows the bar on the four roots and the areas, hides it elsewhere", () => {
     expect(tabOf("/")).toBe("board");
     expect(tabOf("/search")).toBe("search");
-    expect(tabOf("/templates/repos/kraft")).toBe("more");
+    expect(tabOf("/settings/repos/kraft")).toBe("more");
     expect(tabOf("/settings/access")).toBe("more");
     expect(tabOf("/archived")).toBe("more");
     for (const r of ["/work-items/a", "/work-items/a/nodes/n", "/work-items/a/review", "/work-items/new"]) expect(tabOf(r)).toBeNull();

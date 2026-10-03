@@ -69,7 +69,7 @@ export function DraftItemPage() {
       setRepos(live);
       setWorkspaces(r.workspaces ?? {});
       const first = live.find((x) => x.path === d.repo) ?? live[0];
-      if (first) setD((x) => ({ ...x, repo: first.path, chain: x.chain || first.default_chain_template }));
+      if (first) setD((x) => ({ ...x, repo: first.path, chain: x.chain || first.default_chain }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
     // Once, on arrival.
@@ -189,7 +189,7 @@ export function DraftItemPage() {
           label="Repo"
           triggerClass="composer-chip"
           trigger={<>{d.repo ? repoName(d.repo) : "repo"} <span aria-hidden className="board-caret">▾</span></>}
-          items={repos.map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain_template, onSelect: () => set({ repo: r.path, chain: r.default_chain_template, skip: [], members: [], spec: "", plan: "" }) }))}
+          items={repos.map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain, onSelect: () => set({ repo: r.path, chain: r.default_chain, skip: [], members: [], spec: "", plan: "" }) }))}
         />
         <span className="draft-gap" />
         <span>Start from existing</span>
@@ -224,7 +224,7 @@ export function DraftItemPage() {
             label="Chain"
             triggerClass="composer-chip composer-mono draft-chain-btn"
             trigger={<>{d.chain || "chain"} <span aria-hidden className="board-caret">▾</span></>}
-            items={chains.filter((c) => !c.error).map((c) => ({ label: c.id, checked: c.id === d.chain, hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repos.find((r) => r.path === d.repo)?.default_chain_template ? " · repo default" : ""}`, onSelect: () => { set({ chain: c.id, skip: [] }); setSel(null); } }))}
+            items={chains.filter((c) => !c.error).map((c) => ({ label: c.id, checked: c.id === d.chain, hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repos.find((r) => r.path === d.repo)?.default_chain ? " · repo default" : ""}`, onSelect: () => { set({ chain: c.id, skip: [] }); setSel(null); } }))}
           />
           <span>{runText}</span>
         </div>

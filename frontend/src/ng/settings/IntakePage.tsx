@@ -19,7 +19,7 @@ import "./intake/intake.css";
 const CHECKS_EVERY_MS = 30_000;
 type Sel = "pickup" | number;
 
-/** `/settings/auto-intake` (AreaIntake): the pickup rule and the schedules, one draft over `intake.yaml` and `policy.yaml`. */
+/** `/settings/auto-intake` (AreaIntake): the pickup rule and the schedules, one draft over `intake.yaml`. How many items run at once is Policy › Housekeeping's `max_concurrent`. */
 export function IntakePage() {
   const draft = useConfigDraft("intake", "intake");
   if (draft.status === "notFound" || (draft.status === "error" && !draft.view))
@@ -31,7 +31,7 @@ export function IntakePage() {
 /** What a pickup sentence says (AreaIntake's `pickupSentence`). */
 export function pickup(i: IntakeResolved): string {
   return i.enabled
-    ? `Every ${toMinutes(i.interval_s)} minutes, up to ${i.max_concurrent} at a time, starts ready beads at P${i.priority_ceiling} and below from ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}. Each runs to its first gate and waits for you there.`
+    ? `Every ${toMinutes(i.interval_s)} minutes, starts ready beads at P${i.priority_ceiling} and below from ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}. Each runs to its first gate and waits for you there.`
     : "Nothing is picked up automatically. Ready beads stay in the queue until someone files them.";
 }
 
@@ -65,7 +65,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   const changes = useMemo(() => new Map<string, Change>(r.changes.map((c) => [`${c.file ?? ""}|${c.path}`, c])), [r.changes]);
   const area = useMemo(() => ({
     crumb: "Auto-intake",
-    files: ["intake.yaml", "policy.yaml"],
+    files: ["intake.yaml"],
     toast: "Published auto-intake · applies now",
     affects: () => <Kv k="applies" v="without a restart: the poller is replaced and the new interval and schedules are live" />,
   }), []);
@@ -99,7 +99,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
             <div className="ink-page">
               {!data ? (
                 <div className="tpl-note" role="alert">
-                  <h1>intake.yaml or policy.yaml does not load</h1>
+                  <h1>intake.yaml does not load</h1>
                   {r.problems[0] && <p>{r.problems[0].message}</p>}
                   <p>Open YAML in the header to repair it.</p>
                 </div>
@@ -155,7 +155,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
               crumbs={[{ label: "Auto-intake", onClick: () => setSel("pickup") }]}
               icon={chosen ? "clock" : "download"}
               title={chosen ? chosen.title || "untitled" : "bd ready"}
-              sub={chosen ? "schedule · triggers: in policy.yaml" : "pickup rule · intake.yaml"}
+              sub={chosen ? "schedule · schedules: in intake.yaml" : "pickup rule · intake.yaml"}
               onCollapse={() => setPaneOpen(false)}
               onExpand={() => setPaneOpen(true)}
               footer={chosen ? <><span className="bp-gap" /><Button variant="danger" onClick={() => void removeSchedule(chosen.index)}>Remove schedule</Button></> : undefined}
@@ -201,9 +201,6 @@ function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: Intak
       <Row k="check every (min)" changed={changed("intake.yaml", "interval_s")}>
         <ValueCell label="check every, minutes" value={String(toMinutes(i.interval_s))} display={showMinutes(i.interval_s)} onCommit={(t) => { const v = intervalFromText(t); return "error" in v ? v.error : set({ interval_s: v.seconds }); }} />
       </Row>
-      <Row k="at a time" changed={changed("policy.yaml", "max_concurrent")} note="Also Policy › Housekeeping: the same key.">
-        <ValueCell label="at a time" value={String(i.max_concurrent)} display={String(i.max_concurrent)} onCommit={(t) => { const n = Number(t); return Number.isInteger(n) && n > 0 ? set({ max_concurrent: n }) : "Enter a whole number above 0."; }} />
-      </Row>
       <Row k="priority at or below" changed={changed("intake.yaml", "priority_ceiling")}>
         <Segmented label="priority at or below" value={String(i.priority_ceiling)} options={PRIORITIES} onChange={(v) => void set({ priority_ceiling: Number(v) })} />
       </Row>
@@ -216,7 +213,7 @@ function PickupRows({ draft, i, repos, changes }: { draft: ConfigDraft; i: Intak
 
 function ScheduleRows({ draft, s, repos, chains, changes, problems }: { draft: ConfigDraft; s: Schedule; repos: { path: string; name?: string | null }[]; chains: string[]; changes: Map<string, Change>; problems: Problem[] }) {
   const patch = (p: Record<string, unknown>) => send(draft, { op: "set_schedule", index: s.index, patch: p });
-  const changed = (field: string) => changes.has(`policy.yaml|triggers.${s.index}.${field}`);
+  const changed = (field: string) => changes.has(`intake.yaml|schedules.${s.index}.${field}`);
   const text = (field: keyof Schedule, label: string, k = label) => (
     <Row k={k} changed={changed(field)}>
       <ValueCell label={label} value={String(s[field] ?? "")} display={String(s[field] ?? "") || "not set"} muted={!s[field]} onCommit={(t) => (t ? patch({ [field]: t }) : field === "description" ? patch({ description: "" }) : "This cannot be empty.")} />

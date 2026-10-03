@@ -117,7 +117,7 @@ export function renderPage(query = "") {
   const out = render(
     <HeaderTailHost.Provider value={tail}>
       <HeaderActionsHost.Provider value={actions}>
-        <MemoryRouter initialEntries={[`/templates/harnesses${query}`]}>
+        <MemoryRouter initialEntries={[`/settings/harnesses${query}`]}>
           <HarnessesPage />
         </MemoryRouter>
       </HeaderActionsHost.Provider>

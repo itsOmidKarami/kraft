@@ -73,7 +73,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
       const byId = (id: string) => r.repos.find((x) => x.id === id);
       setRoots(new Set(Object.values(r.workspaces ?? {}).filter((w) => Object.keys(w.members).length).map((w) => byId(w.root)?.path ?? "")));
       const first = live.find((x) => x.path === repoFilter) ?? live[0];
-      if (first) setD((x) => (x.repo ? x : { ...x, repo: first.path, chain: first.default_chain_template }));
+      if (first) setD((x) => (x.repo ? x : { ...x, repo: first.path, chain: first.default_chain }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
   }, [repoFilter]);
@@ -145,7 +145,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           label="Repo"
           triggerClass="composer-chip"
           trigger={<>{repo ? repoName(repo.path) : "repo"} <span aria-hidden className="board-caret">▾</span></>}
-          items={(repos ?? []).map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain_template, onSelect: () => set({ repo: r.path, chain: r.default_chain_template, spec: "", plan: "" }) }))}
+          items={(repos ?? []).map((r) => ({ label: repoName(r.path), checked: r.path === d.repo, hint: r.default_chain, onSelect: () => set({ repo: r.path, chain: r.default_chain, spec: "", plan: "" }) }))}
         />
         <Menu
           label="Chain"
@@ -154,7 +154,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           items={chains.filter((c) => !c.error).map((c) => ({
             label: c.id,
             checked: c.id === d.chain,
-            hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain_template ? " · repo default" : ""}`,
+            hint: `${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " · repo default" : ""}`,
             onSelect: () => set({ chain: c.id }),
           }))}
         />
@@ -165,7 +165,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
         <Ticks className="composer-ticks" ticks={(full.length ? full : run?.nodes ?? []).map((n) => ({ gate: n.kind === "gate", state: off.has(n.id) ? "todo" : "run" }))} />
       </div>
       {preview && "error" in preview && <p className="composer-indent item-error" role="alert">{preview.error}</p>}
-      {repo && repoStops(repo) && <p className="composer-indent composer-note">{repoStops(repo)} Set it in <Link to="/templates/repos" className="item-link">Templates › Repos</Link> before you start it.</p>}
+      {repo && repoStops(repo) && <p className="composer-indent composer-note">{repoStops(repo)} Set it in <Link to="/settings/repos" className="item-link">Settings › Repos</Link> before you start it.</p>}
       <div className="composer-foot">
         {ask ? (
           <>
@@ -177,7 +177,7 @@ export function Composer({ repoFilter, onClose, onCreated }: { repoFilter: strin
           <>
             <span className="composer-note">
               {error ? <span className="item-error" role="alert">{error}</span>
-                : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/templates/repos" className="item-link">Templates › Repos</Link>.</>
+                : repos?.length === 0 ? <>No enabled repo to file to. Connect or enable one in <Link to="/settings/repos" className="item-link">Settings › Repos</Link>.</>
                 : "Created paused. Nothing spends tokens until you start it."}
             </span>
             <button type="button" className="board-select-all" title="Continue on the full page" onClick={() => more(false)}>More options ⤢</button>

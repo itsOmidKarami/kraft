@@ -14,9 +14,9 @@ import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { AreaScreen } from "./AreaScreen";
 import { Group, useEditor, type RowSpec } from "./kit";
 
-const url = (r: RepoView) => `/templates/repos/${encodeURIComponent(r.name || r.path)}`;
+const url = (r: RepoView) => `/settings/repos/${encodeURIComponent(r.name || r.path)}`;
 
-/** `/templates/repos`: Connected, Detected, and a filter (W17 brief M.2). Connecting by typing a path is the desktop's. */
+/** `/settings/repos`: Connected, Detected, and a filter (W17 brief M.2). Connecting by typing a path is the desktop's. */
 export function ReposList() {
   const draft = useConfigDraft("repos", "repos");
   const [params, setParams] = useSearchParams();
@@ -44,7 +44,7 @@ export function ReposList() {
           title="Connected"
           rows={shown.map((r): RowSpec => ({
             key: r.path, label: repoName(r), mono: true, to: url(r),
-            sub: `${r.path} · chain ${String(r.entry.default_chain_template ?? "default")}${r.entry.test_command === "" ? ` · ${NO_TESTS}` : r.entry.test_command ? ` · ${String(r.entry.test_command)}` : ""}`,
+            sub: `${r.path} · chain ${String(r.entry.default_chain ?? "default")}${r.entry.test_command === "" ? ` · ${NO_TESTS}` : r.entry.test_command ? ` · ${String(r.entry.test_command)}` : ""}`,
             chips: [{ label: r.entry.enabled === false ? "off" : "on", tone: r.entry.enabled === false ? undefined : "ok" }, ...(running[r.path] ? [{ label: `${running[r.path]} open` }] : []), ...(problemsOf(draft.view!.result, r.path).length ? [{ label: "problem", tone: "bad" as const }] : [])],
           }))}
         />
@@ -62,7 +62,7 @@ const sendTo = (draft: ConfigDraft, repo: RepoView, f: RepoField) => async (t: s
   return setRepo(draft, repo, patchFor(repo, f, p.value));
 };
 
-/** `/templates/repos/:repo`: every field the desktop's Config tab edits, each with where its value comes from, and Disconnect. */
+/** `/settings/repos/:repo`: every field the desktop's Config tab edits, each with where its value comes from, and Disconnect. */
 export function RepoView() {
   const { repo: param } = useParams();
   const draft = useConfigDraft("repos", "repos");
@@ -99,7 +99,7 @@ export function RepoView() {
     setError(null);
     const a = await draft.ops([{ op: "remove_repo", path: repo.path }], { quiet: true });
     if (a.status !== 200) return setError(detailOf(a.body));
-    sheet.goTo("/templates/repos");
+    sheet.goTo("/settings/repos");
     showToast(`${repoName(repo)} is disconnected in the draft. Publish to apply it.`);
   };
 

@@ -21,7 +21,7 @@ const repoLabel = (path: string, repos: NamedRepo[]) => repos.find((r) => r.path
 /** The pickup rule in one line (the prototype's status sentence). */
 export function statusLine(i: IntakeResolved): string {
   return i.enabled
-    ? `On · checking every ${showMinutes(i.interval_s)}, ${i.max_concurrent} at a time, ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}, P${i.priority_ceiling} or above.`
+    ? `On · checking every ${showMinutes(i.interval_s)}, ${i.repos.length ? i.repos.join(", ") : "every enabled repo"}, P${i.priority_ceiling} or above.`
     : "Off · nothing is picked up automatically. Ready beads stay in the queue until someone files them.";
 }
 
@@ -83,14 +83,13 @@ export function IntakeScreen() {
   return (
     <AreaScreen title="Auto-intake" sub="Picks up ready beads on a timer, and files scheduled items." draft={draft}>
       {draft.status === "error" && !draft.view && <p className="ph-error" role="alert">Auto-intake could not be read.</p>}
-      {r && !data && <p className="ph-error" role="alert">intake.yaml or policy.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. Open YAML to repair it.</p>}
+      {r && !data && <p className="ph-error" role="alert">intake.yaml does not load{r.problems[0] ? `: ${r.problems[0].message}` : ""}. Open YAML to repair it.</p>}
       {data && (
         <>
           <p className={`ph-intake-status${data.enabled ? " ph-is-on" : ""}`}>{statusLine(data)}</p>
           <Group title="Pickup" rows={[
             { label: "enabled", sw: data.enabled, changed: changed("intake.yaml", "enabled"), onSwitch: (on) => void set({ enabled: on }).then((e) => e && showToast(e)) },
             { label: "check every", value: showMinutes(data.interval_s), changed: changed("intake.yaml", "interval_s"), onEdit: () => edit({ kind: "text", title: "Check every", help: "In minutes. Not more often than every 30 seconds.", value: String(toMinutes(data.interval_s)), set: async (t) => { const v = intervalFromText(t); return "error" in v ? v.error : set({ interval_s: v.seconds }); } }) },
-            { label: "at a time", value: String(data.max_concurrent), sub: "Also Policy › Housekeeping: the same key.", changed: changed("policy.yaml", "max_concurrent"), onEdit: () => edit({ kind: "text", title: "At a time", help: "How many items auto-intake keeps running at once.", value: String(data.max_concurrent), set: async (t) => { const n = Number(t); return Number.isInteger(n) && n > 0 ? set({ max_concurrent: n }) : "Enter a whole number above 0."; } }) },
             { label: "priority at or below", value: `P${data.priority_ceiling}`, changed: changed("intake.yaml", "priority_ceiling"), onEdit: () => edit({ kind: "choice", title: "Priority at or below", value: String(data.priority_ceiling), options: PRIORITIES, set: (v) => set({ priority_ceiling: Number(v) }) }) },
             { label: "repos", value: data.repos.length ? data.repos.join(", ") : "every enabled repo", changed: changed("intake.yaml", "repos"), onEdit: () => edit({ kind: "text", title: "Repos", help: "Comma separated paths. Empty means every enabled repo.", value: data.repos.join(", "), placeholder: repos.map((x) => x.path).join(", ") || "every enabled repo", listed: { choices: repos.map((x) => ({ value: x.path })), multiple: true, noun: "repo" }, set: (t) => set({ repos: t.split(",").map((x) => x.trim()).filter(Boolean) }) }) },
           ]} />

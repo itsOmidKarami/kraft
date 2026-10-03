@@ -40,7 +40,7 @@ export function ChainsList() {
   const { chains, error } = useChains();
   const rows: RowSpec[] = (chains ?? []).map((c) => ({ key: c.id, label: c.id, mono: true, sub: c.error ? c.error : `${c.nodes.length} nodes · ${c.gates} ${c.gates === 1 ? "gate" : "gates"}`, to: `/templates/chains/${encodeURIComponent(c.id)}` }));
   return (
-    <AreaScreen title="Chains" sub="The templates that define how an item moves from spec to merge." status={{ label: "published" }} yaml={false}>
+    <AreaScreen title="Chains" sub="The chains an item runs: how it moves from spec to merge." status={{ label: "published" }} yaml={false}>
       {error && <p className="ph-error" role="alert">{error}</p>}
       {chains && rows.length === 0 && <p className="ph-empty">No chains.</p>}
       <Group rows={rows} foot={FOOT} />

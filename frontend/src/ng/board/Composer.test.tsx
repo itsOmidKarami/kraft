@@ -9,8 +9,8 @@ const N = (id: string, kind: "exec" | "gate" = "exec", covered_by: string | null
 const DEFAULT = [N("spec", "exec", "spec"), N("spec_approval", "gate", "spec"), N("implementation"), N("final_review", "gate")];
 const CHAINS: TemplateSummary[] = [{ id: "default", nodes: DEFAULT, gates: 2 }, { id: "docs_only", nodes: [N("implementation")], gates: 0 }];
 const REPOS = [
-  { path: "/code/kraft-plugins", default_chain_template: "default", enabled: true },
-  { path: "/code/kraft-docs", default_chain_template: "docs_only", enabled: true },
+  { path: "/code/kraft-plugins", default_chain: "default", enabled: true },
+  { path: "/code/kraft-docs", default_chain: "docs_only", enabled: true },
 ] as never;
 
 /** Where More options landed, and what it carried. */
@@ -87,18 +87,18 @@ describe("Composer", () => {
   });
 
   it("says before filing that an item on a repo with no setup command stops before its first task", async () => {
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/mono", default_chain_template: "default", enabled: true, test_command: "make test", test_scopes: null, setup_command: null }] as never });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/mono", default_chain: "default", enabled: true, test_command: "make test", test_scopes: null, setup_command: null }] as never });
     mount();
     await settle();
     expect(screen.getByText(/mono declares no setup command, so an item stops before its first task\./)).toBeInTheDocument();
   });
 
   it("with no enabled repo, says where to get one and creates nothing, rather than sending an empty repo", async () => {
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/notests", default_chain_template: "default", enabled: false }] as never });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/notests", default_chain: "default", enabled: false }] as never });
     const { calls } = mount();
     await settle();
     expect(screen.getByText(/No enabled repo to file to/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+    expect(screen.getByRole("link", { name: "Settings › Repos" })).toHaveAttribute("href", "/settings/repos");
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "x" } });
     expect(screen.getByRole("button", { name: "Create paused" })).toBeDisabled();
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Title" }), { key: "Enter", metaKey: true });

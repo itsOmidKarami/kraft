@@ -31,7 +31,7 @@ export const NO_TESTS = "no tests (passes verify)";
 const policy = (key: string, label: string, p: Pick<RepoField, "show" | "parse">): RepoField => ({ key: `policy.${key}`, label, ...p, placeholder: "not set" });
 
 export const FIELDS: RepoField[] = [
-  { key: "default_chain_template", label: "default chain", choice: "chain", ...text, fallback: "default" },
+  { key: "default_chain", label: "default chain", choice: "chain", ...text, fallback: "default" },
   { key: "test_command", label: "test command", ...command, none: "No tests", empty: NO_TESTS },
   { key: "test_scopes", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
   { key: "setup_command", label: "setup command", ...command, none: "No setup needed" },

@@ -19,7 +19,7 @@ const PLUGIN_COMMANDS = "claude plugin marketplace add itsOmidKarami/kraft\nclau
 /** Where the wizard got to once a repo is added, kept until its last step is
  *  done or skipped: with a repo connected the board no longer shows it on its
  *  own, and step 3 is the one that says Claude workers need Kraft registered.
- *  So a reload, or a visit to Templates › Repos from step 1, comes back to it. */
+ *  So a reload, or a visit to Settings › Repos from step 1, comes back to it. */
 const SAVED = "kraft.firstRun";
 type Saved = { step: number; reached: number; path: string; name: string; disabled: boolean; noSetup?: boolean; repoPath?: string; missing?: string[] };
 
@@ -89,7 +89,7 @@ function probeRows(p: RepoProbe): [string, string][] {
     ...also(p, "setup", "Also found for setup"),
     ...(p.stopped ?? []).map((s) => ["No tests", stopLine(s)] as [string, string]),
     ...(p.missing_setup?.length
-      ? [["No setup", "the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos"] as [string, string]]
+      ? [["No setup", "the first work item stops until a setup command is set, or No setup needed is ticked, in Settings › Repos"] as [string, string]]
       : []),
     ...(missingLine(p.missing_tools) ? [["Not installed", missingLine(p.missing_tools)!] as [string, string]] : []),
     ...(readFrom(p.read_from) ? [["Read from", readFrom(p.read_from)!] as [string, string]] : []),
@@ -127,7 +127,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   useEffect(() => {
     if (added) keep({ step, reached, path, name: added, disabled, noSetup, repoPath, missing });
   }, [added, step, reached, path, disabled, noSetup, repoPath, missing]);
-  // Fixed in Templates › Repos and back here: what it said is read again, not kept stale.
+  // Fixed in Settings › Repos and back here: what it said is read again, not kept stale.
   const reread0 = useRef(false);
   useEffect(() => {
     if (!repoPath || (!disabled && !noSetup)) return;
@@ -140,7 +140,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
         setNoSetup(entry.setup_command == null);
       }, () => {});
     };
-    // And once on arriving: the wizard's own Templates › Repos link and the
+    // And once on arriving: the wizard's own Settings › Repos link and the
     // sidebar are in-app routes, so fixing it there and coming back fires
     // neither event (R9a-06).
     if (!reread0.current) {
@@ -193,7 +193,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     if (!probe || adding || probe.read_from === null) return;
     setAdding(true);
     setError(null);
-    // As Templates › Repos' Connect does: a probe's lone root `["**"]` scope only repeats
+    // As Settings › Repos' Connect does: a probe's lone root `["**"]` scope only repeats
     // `test_command` and would shadow its later edits, and an empty list is not a valid
     // `test_scopes`, so only scopes with a nested path are sent.
     const nested = (probe.test_scopes ?? []).some((s) => s.paths.join() !== "**");
@@ -201,7 +201,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
       const repo = await api.addRepo({
         path: probe.path,
         name: probe.name,
-        default_chain_template: "default",
+        default_chain: "default",
         test_command: probe.test_command,
         ...(nested ? { test_scopes: probe.test_scopes } : {}),
         forge: probe.forge,
@@ -288,10 +288,10 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 )}
                 {added && <span className="fr-ok">Added {added}</span>}
               </div>
-              {added && disabled && <p>No test command: connected disabled. In <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>, set its test command and Enable it, then publish.</p>}
+              {added && disabled && <p>No test command: connected disabled. In <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>, set its test command and Enable it, then publish.</p>}
               {added && noSetup && (nested.length
-                ? <p>No setup command: {nested.join(", ")} {nested.length > 1 ? "have" : "has"} tests and nothing found prepares {nested.length > 1 ? "them" : "it"}. Its first work item stops before it starts until you set a setup command that does, in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>
-                : <p>No setup command found: its first work item stops before it starts until you set one, or tick No setup needed, in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link>.</p>)}
+                ? <p>No setup command: {nested.join(", ")} {nested.length > 1 ? "have" : "has"} tests and nothing found prepares {nested.length > 1 ? "them" : "it"}. Its first work item stops before it starts until you set a setup command that does, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>
+                : <p>No setup command found: its first work item stops before it starts until you set one, or tick No setup needed, in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>.</p>)}
             </>
           )}
           {step === 2 && (
@@ -313,7 +313,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             <>
               <h2>First work item</h2>
               <p>It is created paused, so nothing runs until you start it.</p>
-              {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command and Enable it in <Link to="/templates/repos" className="fr-link">Templates › Repos</Link> first.</p>}
+              {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command and Enable it in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link> first.</p>}
               <div className="fr-actions">
                 <Link className="btn btn-primary" to="/?new=1" onClick={finish}>+ New work item</Link>
                 <Button onClick={finish}>Go to the board</Button>
@@ -329,7 +329,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
         </div>
         <aside className="fr-aside">
           {step === 1 && <><h3>Kraft probes</h3><p>a local git checkout · .gitmodules, .beads/, the test and setup commands and the forge remote</p></>}
-          {step === 2 && <><h3>Defaults</h3><p>Every item uses the default chain and the policy below unless it names another. Everything Settings writes is YAML in $KRAFT_HOME/templates (~/.kraft/templates by default).</p></>}
+          {step === 2 && <><h3>Defaults</h3><p>Every item uses the default chain and the policy below unless it names another. Everything Templates and Settings write is YAML in $KRAFT_HOME/config (~/.kraft/config by default).</p></>}
           {step === 3 && <><h3>On create</h3><p>Filed from a title, or from an existing spec or plan. It waits for you to start it.</p></>}
         </aside>
       </section>

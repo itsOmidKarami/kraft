@@ -82,8 +82,8 @@ describe("crumbsFor", () => {
   });
 
   it("names Repos, Policy and Auto-intake under their group, whichever repo or section is open (the page adds that)", () => {
-    expect(crumbsFor("/templates/repos", none).map((c) => c.text)).toEqual(["Templates", "Repos"]);
-    expect(crumbsFor("/templates/repos/platform", none).map((c) => c.text)).toEqual(["Templates", "Repos"]);
+    expect(crumbsFor("/settings/repos", none).map((c) => c.text)).toEqual(["Settings", "Repos"]);
+    expect(crumbsFor("/settings/repos/platform", none).map((c) => c.text)).toEqual(["Settings", "Repos"]);
     expect(crumbsFor("/settings/policy/loops", none).map((c) => c.text)).toEqual(["Settings", "Policy"]);
     expect(crumbsFor("/settings/auto-intake", none).map((c) => c.text)).toEqual(["Settings", "Auto-intake"]);
   });

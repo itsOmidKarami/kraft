@@ -3,7 +3,7 @@
 
 export type Tab = "board" | "search" | "analytics" | "more";
 
-const AREA = /^\/(?:templates\/(?:chains|library|harnesses|repos)|settings\/(?:policy|auto-intake|notifications|access|appearance|about))/;
+const AREA = /^\/(?:templates\/(?:chains|library)|settings\/(?:repos|harnesses|policy|auto-intake|notifications|access|appearance|about))/;
 
 const split = (href: string) => {
   const [pathname, query = ""] = href.split("?");

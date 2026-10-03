@@ -162,7 +162,7 @@ describe("BoardPage", () => {
   });
 
   it("starts Group from Appearance › Board", async () => {
-    theme({ group_by: "template" });
+    theme({ group_by: "chain" });
     put(item("a1", "running"));
     board();
     expect(await screen.findByRole("region", { name: "default" })).toBeInTheDocument();

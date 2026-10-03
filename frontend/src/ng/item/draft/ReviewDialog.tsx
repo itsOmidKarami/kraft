@@ -101,7 +101,7 @@ function Review() {
           <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? "Apply and start" : "Apply"}</Button>
         </>
       )}>
-      <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain template and other items stay as they are.</p>
+      <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain itself and the other items stay as they are.</p>
       {blocked && (
         <ul className="idr-probs" aria-label="Problems">
           {d.issues.map((i) => (
