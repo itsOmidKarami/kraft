@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -652,6 +653,18 @@ def _check_one_line(title: str) -> None:
     blank-title refusal refuses rather than strips."""
     if not _LINE_BREAKS.isdisjoint(title):
         raise HTTPException(422, "the title is one line: put the rest in the description instead")
+    # A tab misaligned the same table; an escape or a bidi override in a title
+    # `kraft view list` prints raw can make a terminal show something else.
+    if any(unicodedata.category(ch) == "Cc" or ch in _BIDI_CONTROLS for ch in title):
+        raise HTTPException(
+            422, "the title is plain text: no tab, escape or other control character"
+        )
+
+
+#: The characters that reorder text as it is shown (Unicode's bidi controls).
+_BIDI_CONTROLS = frozenset(
+    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
 
 
 class TriggerBody(BaseModel):

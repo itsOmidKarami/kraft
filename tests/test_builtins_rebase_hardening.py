@@ -1,0 +1,111 @@
+"""`refresh_worktree_base` where its worktree turns hostile or its git hangs:
+a link a worker planted is never followed out of the worktree, and a rebase
+cut short is aborted with everything it started, or said to be left
+mid-rebase. The ordinary rebase cases: test_builtins_rebase.py."""
+
+import contextlib
+import os
+from pathlib import Path
+
+import pytest
+from support import worktree as wtree
+from support.harness import _git
+
+from kraft import builtins as kraft_builtins
+from kraft.config import git_read
+
+hung = wtree.hung
+
+
+def _link_the_parent_to(victim):
+    """A `pre-rebase` hook, which runs after the set-aside and before the
+    rebase, as a worker writing its worktree mid-rebase would: it swaps the
+    lockfile's emptied parent directory for a link to `victim`."""
+    return f'rm -rf sub && ln -s "{victim}" sub\n'
+
+
+@pytest.mark.parametrize("base_commits_one", [False, True], ids=["put-back", "base-wins"])
+@pytest.mark.parametrize("plant", ["set-aside-in-git-dir", "parent-in-worktree"], ids=lambda p: p)
+async def test_a_planted_link_never_moves_a_lockfile_outside_the_worktree(
+    tmp_path, database, run_dirs, repo, plant, base_commits_one
+):
+    """R11E-01: the set-aside lived in the worktree's git dir, which a
+    sandboxed worker can write, and the host-side move followed a link
+    planted there (or in place of a lockfile's parent directory), deleting
+    or overwriting a lockfile anywhere the server user can write. Nothing
+    outside the worktree is touched, whether the rebase then runs or git
+    refuses to check the base's copy out over the link."""
+    from kraft.adapters import forge
+
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    rel = "uv.lock" if plant == "set-aside-in-git-dir" else "sub/uv.lock"
+    if plant == "set-aside-in-git-dir":
+        (victim / "uv.lock").write_text("the host's own\n")
+        gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+        (gitdir / "kraft-set-aside").symlink_to(victim)
+    else:
+        hook = repo / ".git" / "hooks" / "pre-rebase"
+        hook.write_text(f'#!/bin/sh\ncd "{worktree}" && ' + _link_the_parent_to(victim))
+        hook.chmod(0o755)
+        (worktree / "sub").mkdir()
+    before = await forge.lockfile_digests(worktree)
+    (worktree / rel).write_text("the worker's choice\n")
+    await forge.record_setup_writes(worktree, before)
+    if base_commits_one:
+        wtree.commit(repo, rel, "committed on the base\n", "commit a lockfile")
+    else:
+        wtree.commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+
+    with contextlib.suppress(kraft_builtins.RebaseBlocked):
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    expected = ["uv.lock"] if plant == "set-aside-in-git-dir" else []
+    assert sorted(p.name for p in victim.iterdir()) == expected
+    if expected:
+        assert (victim / "uv.lock").read_text() == "the host's own\n"
+
+
+def _hanging_smudge_filter(repo, pids, seconds: float) -> None:
+    """The base adds `slow.txt` under a smudge filter that hangs, as an LFS
+    filter can: the rebase's checkout of the base hangs in it, holding the
+    worktree's `index.lock`."""
+    _git(repo, "config", "filter.slow.smudge", f"sh -c '{wtree.sleep_recorded(pids, seconds)}'")
+    (repo / ".gitattributes").write_text("slow.txt filter=slow\n")
+    wtree.commit(repo, "slow.txt", "slow\n", "a filtered file")
+
+
+@pytest.mark.parametrize("lock", ["stale", "held"])
+async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_started(
+    database, run_dirs, repo, hung, monkeypatch, lock
+):
+    """R11E-02: a smudge filter that hangs mid-rebase was left running past
+    the time cap, and the abort failed silently on the `index.lock` the killed
+    git left, so the item went on mid-rebase without its commits. The whole
+    process group is killed, a lock nothing holds any more is cleared, and
+    the abort runs. One that cannot run says so: the worktree is a person's."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    work = wtree.commit(worktree, "work.txt", "work\n", "worktree work")
+    _hanging_smudge_filter(repo, hung, seconds=60)
+    if lock == "held":
+        # As if another git in this worktree were still alive.
+        monkeypatch.setattr(kraft_builtins, "_clear_stale_index_lock", lambda _wt: False)
+
+    with pytest.raises(kraft_builtins.RebaseTimedOut) as raised:
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main", timeout=2.0)
+
+    [pid] = hung.read_text().split()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid), 0)
+    if lock == "stale":
+        assert "--abort" not in str(raised.value)
+        assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+        assert git_read(worktree, "rev-parse", "HEAD") == work
+    else:
+        assert "`git rebase --abort` failed" in str(raised.value)
+        assert str(raised.value).endswith("was left mid-rebase for a human")

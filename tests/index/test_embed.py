@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import os
 import pwd
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,40 @@ def test_no_input_never_loads_a_model():
     assert e.encode([]) == []
 
 
-def test_unavailable_when_the_extra_is_missing(monkeypatch):
+_RUNNING = f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+@pytest.mark.parametrize(
+    ("kind", "receipt", "hint"),
+    [
+        (
+            "uv",
+            'python = "3.12"\n',
+            '`uv tool install --force --python 3.12 "kraft-sdlc[vector]==2.0.0rc1"`',
+        ),
+        (
+            "uv",
+            "",
+            f'`uv tool install --force --python {_RUNNING} "kraft-sdlc[vector]==2.0.0rc1"`',
+        ),
+        ("pipx", None, '`pipx install --force --python /py/3 "kraft-sdlc[vector]==2.0.0rc1"`'),
+        ("pip", None, ' --upgrade "kraft-sdlc[vector]==2.0.0rc1"`'),
+        ("brew", None, "Homebrew's kraft formula does not ship the 'vector' extra"),
+        ("source", None, "`uv sync --extra vector` in the checkout"),
+    ],
+    ids=["uv-chosen-python", "uv-running-python", "pipx", "pip-venv", "homebrew", "source"],
+)
+def test_unavailable_when_the_extra_is_missing(tmp_path, monkeypatch, kind, receipt, hint):
+    """R11c-01: the hint named no version and no Python. On a release
+    candidate it installed the last final release, which refused to start on
+    the newer database, on whatever Python uv chose; on pip, pipx and
+    Homebrew it added a second Kraft. It reinstalls this version, on this
+    Python, the way this Kraft was installed."""
+    import importlib.metadata
+    import importlib.util
+
+    from kraft import update
+
     real_import = builtins.__import__
 
     def fake_import(name, *a, **kw):
@@ -26,9 +60,28 @@ def test_unavailable_when_the_extra_is_missing(monkeypatch):
         return real_import(name, *a, **kw)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(update, "installed", lambda: "2.0.0rc1")
+    if kind != "source":
+        prefix = tmp_path / "venv"
+        if kind == "brew":
+            prefix = tmp_path / "Cellar" / "kraft" / "2.0.0rc1" / "libexec"
+        prefix.mkdir(parents=True)
+        marker = {"uv": "uv-receipt.toml", "pipx": "pipx_metadata.json"}.get(kind)
+        if marker:
+            (prefix / marker).write_text(f"[tool]\n{receipt}" if kind == "uv" else "{}")
+        monkeypatch.setattr(update.sys, "prefix", str(prefix))
+        monkeypatch.setattr(update.sys, "_base_executable", "/py/3", raising=False)
+        monkeypatch.setattr(
+            importlib.metadata,
+            "distribution",
+            lambda name: type("D", (), {"read_text": lambda self, f: None})(),
+        )
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None)
+
     e = Embedder()
     assert e.available() is False
-    assert "vector" in (e.reason or "")
+    assert e.reason.startswith("the 'vector' extra is not installed — ")
+    assert hint in e.reason
 
 
 def test_encode_raises_when_unavailable(monkeypatch):

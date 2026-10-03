@@ -266,8 +266,36 @@ def test_a_stopped_item_says_where_to_read_why(monkeypatch, capsys):
             {"id": "w1", "node_id": "plan", "path": None, "attempt": None},
             "raised the cap on w1 to no cap; retried at plan",
         ),
+        (
+            ["item", "pause", "w1"],
+            "pause",
+            {"id": "w1", "paused_sessions": ["s1", "s2"]},
+            "paused w1, stopping 2 running sessions; kraft item resume w1 carries on",
+        ),
+        (
+            ["item", "pause", "w1"],
+            "pause",
+            {"id": "w1", "paused_sessions": []},
+            "paused w1; kraft item resume w1 carries on",
+        ),
+        (
+            ["item", "escalate", "w1", "--message", "help"],
+            "escalate",
+            {"id": "w1", "status": "escalating"},
+            "asked an agent about w1's stop; kraft view show w1 follows it",
+        ),
     ],
-    ids=["resume", "start", "retry", "retry-path", "raise-budget", "raise-budget-no-cap"],
+    ids=[
+        "resume",
+        "start",
+        "retry",
+        "retry-path",
+        "raise-budget",
+        "raise-budget-no-cap",
+        "pause",
+        "pause-nothing-running",
+        "escalate",
+    ],
 )
 def test_a_small_answer_reads_as_one_line_too(monkeypatch, capsys, argv, fn, answer, said):
     """resume, retry and raise-budget usually answer a handful of keys, not

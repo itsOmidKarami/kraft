@@ -620,7 +620,11 @@ def save_repos(path: str | Path, repos: list[dict], workspaces: dict | None = No
 
 
 def git_read(
-    cwd: Path, *args: str, expected_failure: bool = False, strip: bool = True
+    cwd: Path,
+    *args: str,
+    expected_failure: bool = False,
+    strip: bool = True,
+    errors: str = "replace",
 ) -> str | None:
     """One read-only git command, or None if git says no. Never raises.
 
@@ -639,12 +643,26 @@ def git_read(
     `strip=False` for the callers that read *content* rather than a scalar: a
     diff body ending in a blank context line loses that line to the strip, and
     git_read is a diff transport now as well as a `rev-parse` reader.
+
+    Output is decoded as UTF-8 with `errors`: `replace` by default, so a file
+    or a path that is not UTF-8 (a Latin-1 source file, a binary blob) reads
+    with `U+FFFD` in place of what cannot be decoded instead of raising --
+    a `UnicodeDecodeError` escaped this function and failed the whole diff
+    route. `surrogateescape` for a caller that writes or hashes the bytes
+    back out (`.encode("utf-8", "surrogateescape")` gives them back exactly).
     """
     # `core.fsmonitor` names a program git runs on a status-like read: from
     # a repository's own .git/config, that is the repository running code.
     cmd = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", *args]
     try:
-        out = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=10)
+        out = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            encoding="utf-8",
+            errors=errors,
+            timeout=10,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("git_read could not run %s in %s: %s", cmd, cwd, exc)
         return None
@@ -692,13 +710,25 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
     not a hardcoded `main`'s: the merge request lands on the base, so its
     rules are the ones the change must satisfy (Kraft-v9gbi).
     """
+    # Byte for byte: a pattern naming a path that is not UTF-8 still matches it.
     content = git_read(
-        repo, "show", f"origin/{base}:.gitignore", expected_failure=True, strip=False
+        repo,
+        "show",
+        f"origin/{base}:.gitignore",
+        expected_failure=True,
+        strip=False,
+        errors="surrogateescape",
     )
     if not content:
         yield []
         return
-    with tempfile.NamedTemporaryFile("w", prefix="kraft-base-gitignore-", suffix=".txt") as f:
+    with tempfile.NamedTemporaryFile(
+        "w",
+        prefix="kraft-base-gitignore-",
+        suffix=".txt",
+        encoding="utf-8",
+        errors="surrogateescape",
+    ) as f:
         f.write(content)
         f.flush()
         yield ["-c", f"core.excludesFile={f.name}"]
