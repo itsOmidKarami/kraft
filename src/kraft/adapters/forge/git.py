@@ -43,10 +43,13 @@ OPERATION_STATE = (
 )
 
 
-def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
+def assert_no_operation(
+    worktree: Path, *, allow: Collection[str] = (), branch: str | None = None
+) -> None:
     """Raise if `worktree`'s gitdir holds any of `OPERATION_STATE` but `allow`,
     found by `lexists` so a planted symlink counts. Nothing to check when git
-    cannot name the gitdir: no git that would act on it can run either."""
+    cannot name the gitdir: no git that would act on it can run either.
+    `branch`, the item's, is named in a rebase's way back."""
     gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
     if gitdir is None:
         return
@@ -54,11 +57,18 @@ def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
         planted = Path(gitdir, name)
         if name not in allow and os.path.lexists(planted):
             # Never "abort it": aborting a planted rebase is the attack. Nor
-            # "Kraft did not start it": Kraft's own timed-out abort can leave
-            # a `rebase-merge/` behind too.
+            # "Kraft did not start it": Kraft's own timed-out abort, or a
+            # server killed mid-rebase, can leave a `rebase-merge/` behind too,
+            # with HEAD detached at the base: the branch still has the work.
+            back = (
+                f"; if HEAD is left detached, `git checkout -f {branch}`, which still "
+                "holds the item's commits"
+                if branch is not None and name.startswith("rebase-")
+                else ""
+            )
             raise UnsafeWorktree(
                 f"{worktree} has a {name} in progress: inspect it, then delete {planted} "
-                "(do not run git rebase/merge --abort or --continue) and retry"
+                f"(do not run git rebase/merge --abort or --continue){back}, and retry"
             )
 
 

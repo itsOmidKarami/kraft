@@ -394,12 +394,21 @@ async def test_mr_rebase_raises_on_conflict(database, run_dirs, repo):
     assert wtree.base_ref(database) != git_read(repo, "rev-parse", "HEAD")
 
 
-async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(database, run_dirs, repo):
-    """Kraft-xngty: refused state is no failure a fix loop may work on."""
+@pytest.mark.parametrize("shape", ["base-moved", "up-to-date", "tracked-change"])
+async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(
+    database, run_dirs, repo, shape
+):
+    """Kraft-xngty: refused state is no failure a fix loop may work on.
+    R11E-02: whatever else the worktree looks like. A rebase cut short by its
+    time cap or a killed server leaves HEAD detached at the base, which read
+    as up to date, or as dirty, and the item went on without its commits."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     _commit(worktree, "work.txt", "work\n", "worktree work")
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    if shape != "up-to-date":
+        _commit(repo, "moved.txt", "moved on\n", "moved on")
+    if shape == "tracked-change":
+        (worktree / "work.txt").write_text("half-checked-out\n")
     (Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "rebase-merge").mkdir()
 
     status = await kraft_builtins.mr_rebase(
@@ -416,6 +425,10 @@ async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(database
     )
 
     assert status == "config_error"
+    log = database.read(
+        lambda c: c.execute("SELECT log_path FROM worker_sessions WHERE id='s1'").fetchone()
+    )["log_path"]
+    assert f"`git checkout -f {wtree.branch(database)}`" in Path(log).read_text()
 
 
 async def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(
@@ -631,6 +644,48 @@ async def test_a_hanging_rebase_abort_is_bounded_and_says_so(
             worktree, repo, wtree.branch(database), base="main", timeout=timeout
         )
     assert caps.monotonic() - started < 8
+
+
+def _hanging_smudge_filter(repo, pids, seconds: float) -> None:
+    """The base adds `slow.txt` under a smudge filter that hangs, as an LFS
+    filter can: the rebase's checkout of the base hangs in it, holding the
+    worktree's `index.lock`."""
+    _git(repo, "config", "filter.slow.smudge", f"sh -c '{_sleep_recorded(pids, seconds)}'")
+    (repo / ".gitattributes").write_text("slow.txt filter=slow\n")
+    _commit(repo, "slow.txt", "slow\n", "a filtered file")
+
+
+@pytest.mark.parametrize("lock", ["stale", "held"])
+async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_started(
+    database, run_dirs, repo, hung, monkeypatch, lock
+):
+    """R11E-02: a smudge filter that hangs mid-rebase was left running past
+    the time cap, and the abort failed silently on the `index.lock` the killed
+    git left, so the item went on mid-rebase without its commits. The whole
+    process group is killed, a lock nothing holds any more is cleared, and
+    the abort runs. One that cannot run says so: the worktree is a person's."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    work = _commit(worktree, "work.txt", "work\n", "worktree work")
+    _hanging_smudge_filter(repo, hung, seconds=60)
+    if lock == "held":
+        # As if another git in this worktree were still alive.
+        monkeypatch.setattr(kraft_builtins, "_clear_stale_index_lock", lambda _wt: False)
+
+    with pytest.raises(kraft_builtins.RebaseTimedOut) as raised:
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main", timeout=2.0)
+
+    [pid] = hung.read_text().split()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid), 0)
+    if lock == "stale":
+        assert "--abort" not in str(raised.value)
+        assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+        assert git_read(worktree, "rev-parse", "HEAD") == work
+    else:
+        assert "`git rebase --abort` failed" in str(raised.value)
+        assert str(raised.value).endswith("was left mid-rebase for a human")
 
 
 def _mr_rebase(database, run_dirs, repo, worktree, branch):
