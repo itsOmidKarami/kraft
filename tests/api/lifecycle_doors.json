@@ -53,7 +53,8 @@
       "status": "needs_human",
       "node": "implementation",
       "stop": "stuck",
-      "reason": "stuck: 1 finding(s) unchanged across cycle 1"
+      "reason": "stuck: 1 finding(s) unchanged across cycle 1",
+      "mr": true
     },
     "cap": {
       "status": "needs_human",
