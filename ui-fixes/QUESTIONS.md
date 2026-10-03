@@ -78,3 +78,27 @@ Verification after these commits:
 - `just lint`: ruff check and format clean (727 files).
 - `just check-tests`: ok.
 - Backend `tests/test_theme_contrast.py`, `tests/api/test_retry_open_log.py`, `tests/api/test_settings.py`: 117 passed.
+
+## PR 502 review fixes
+
+Applied as new commits on this branch (ID first):
+
+| # | Fix | Commit |
+|---|---|---|
+| 1 | **H1:** clicking the title to rename now resets the `settled` flag. The reset had never landed in the first H1 commit, so a second rename ended by a click away sent nothing. The new test renames once with Enter, then again ending with a click away, and checks that both saves are sent; it fails without the fix. | `d12ea00c5` H1 |
+| 2 | **D2:** in full screen the document is a centred 760px reading column (`.dv-drawer.is-full .dv-body > * { max-width: 760px; margin-inline: auto; }`), checked in the browser at 1600px. | `5d12c36f2` D2 |
+| 3 | **D3** (this PR): on macOS an editor counts as available when its app is installed, even if its command-line tool is not on `PATH`. It is then launched with `open -a "<App>" <path>`. Ids map to apps: code → Visual Studio Code, cursor → Cursor, zed → Zed, obsidian → Obsidian. `POST /documents/{id}/open` and open-worktree use the same launcher. Tests cover the PATH and the app paths, both listing (`GET /editors`) and launching; the app rows fail when the fallback is removed. The HTTP API doc is updated. | `45f4414a4` D3 |
+
+**Deviation in 3:** the app is detected by its bundle (`/Applications/<App>.app` or `~/Applications/<App>.app`), not with `open -Ra "<App>"`. `-R` means "reveal in Finder", and with `-a` and no file it would most likely reveal the app in a Finder window every time the editor list loads. The bundle check has no side effects but misses apps installed elsewhere, such as Setapp's folder. Say if `open -Ra` is wanted anyway.
+
+Also fixed:
+- **H4, a review finding** (`b4d072c5d`): a toast that times out under a still pointer gives no `mouseleave`, so the main button's hover menu could stay open until the pointer moved. The toast container is now watched while it holds the hover, and a toast leaving it starts the 160ms close. Tested and mutation-checked.
+- **Q2, CI's playwright job** (`1c89e991c`): `e2e/search.spec.ts` located document rows by the name `<title> <kind>`. Q2 moved the kind to a tag after the title block, so neither locator matched. The test now anchors on the title and checks the tag on its own. This is in `frontend/e2e`, outside `frontend/src/ng`, because it is the e2e test of the Q2 change.
+
+Verification after these commits:
+- `just test-ui`: 207 files, 2459 tests passed.
+- `tsc -b`: clean.
+- `just lint`: ruff check and format clean.
+- `just check-tests`: ok.
+- Playwright e2e, run locally as CI's `e2e-ci` does: 22 passed.
+- Backend `tests/api/test_retry_open_log.py`, `tests/api/test_settings.py`, `tests/api/test_deps.py`, `tests/test_theme_contrast.py`, `tests/test_config_schemas.py`: 248 passed.
