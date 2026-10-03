@@ -40,6 +40,13 @@ Each task names:
 - the implementation, written out in full;
 - the command that runs the test, and what it prints when it passes.
 
+Shape each failing test by what the tree already has. A task that fixes
+behaviour an existing test covers adds a parametrized case with a readable id to
+that test, not a new test function; a new function is for a new behaviour. Name
+the shared helper or fixture the test uses, found by looking in the repo's test
+support, rather than writing out a copy of one. The repo's own testing guidance
+(its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live.
+
 Write for an engineer who is a strong developer and knows nothing about this
 codebase. "Add appropriate error handling", "similar to task 3", "write tests
 for the above" are plan failures — the reader may be reading your tasks out of

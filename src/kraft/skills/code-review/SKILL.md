@@ -39,6 +39,11 @@ Look for, in rough order of what actually bites:
 - **Contract breaks.** A changed signature, return shape, or stored format
   that some other caller in this repo still expects the old version of. Grep
   for the callers; do not assume the author did.
+- **Test shape.** A fix to behaviour a test already covered should land as a
+  new case on that test, not a new test function, and a new helper should not
+  copy one the repo's shared test support already has. This is a convention, not
+  a style preference, but it is `minor`: it costs someone's attention, not a
+  wrong result.
 
 If your instructions name an intent tree, two more cases earn an `important`
 finding: the diff changes behaviour a requirement in the tree describes without

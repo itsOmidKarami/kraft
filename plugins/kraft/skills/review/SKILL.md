@@ -27,7 +27,10 @@ The document's kind sets the question. A spec: does it solve the problem in
 the brief? A plan: do its steps produce the spec's design, with test steps?
 A finished item: does what was built match what was approved, and does its
 size match the plan's? A checkpoint with no document: is the diff ready for the
-step that follows?
+step that follows? For a plan or finished item that adds tests, check their
+shape: a fix to behaviour a test already covered lands as a new case on that
+test, not a new test function, and no helper was copied that the repo's shared
+test support already has.
 
 ## 2. Recommend, with reasons
 
