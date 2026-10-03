@@ -188,6 +188,16 @@ def test_an_unignored_install_is_named_though_it_does_not_fail(tmp_path):
     assert ok and ".venv" not in said.replace(setup, ""), said
 
 
+def test_a_uv_lock_the_setup_wrote_is_named_as_a_lockfile_not_a_change(tmp_path):
+    """`uv sync` in a repo that commits no `uv.lock` writes one, which Kraft's
+    commits leave out: not a failure, and the advice is to commit one."""
+    repo = _repo(tmp_path)
+    ok, said = _verify(_entry(repo, setup_command="echo v1 > uv.lock", test_command="true"))
+    assert ok, said
+    assert "left uv.lock, a lockfile the repo does not commit" in said
+    assert "Commit one (uv lock)" in said
+
+
 def test_a_test_writes_no_bytecode_as_a_work_items_test_does_not(tmp_path):
     """Dispatch runs a test with PYTHONDONTWRITEBYTECODE=1; verify did not,
     and reported `__pycache__/` as files every work item would commit."""

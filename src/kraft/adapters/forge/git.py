@@ -148,19 +148,29 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
 
+#: Lockfiles a package manager writes by itself where a repo commits none:
+#: `uv sync` and `uv run` in a pyproject with no `uv.lock`, as an entry
+#: connected before the probe stopped proposing them for one still runs.
+WRITTEN_LOCKFILES = frozenset({"uv.lock"})
+
+
 def is_environment(path: Path) -> bool:
-    """Whether `path` is a directory a setup installs into: a virtualenv
-    (it holds `pyvenv.cfg`) or a `node_modules`."""
+    """Whether untracked `path` is what a setup installed rather than work: a
+    virtualenv (it holds `pyvenv.cfg`), a `node_modules`, or a lockfile the
+    package manager wrote (`WRITTEN_LOCKFILES`)."""
+    if path.name in WRITTEN_LOCKFILES:
+        return path.is_file()
     return path.name == "node_modules" or (path / "pyvenv.cfg").is_file()
 
 
-async def _environment_dirs(repo: Path, base: str) -> list[str]:
-    """Untracked directories that are an install, not work (`is_environment`):
-    a setup's `.venv/` in a repo that never ignored it is a thousand files,
-    and no merge request wants them. Only a directory git lists as untracked
-    whole: one the repo tracks is the repo's own, edits and all. Asked for
-    as `normal`, since `status.showUntrackedFiles=all` in a user's or the
-    repo's config would list its files one by one instead."""
+async def _environment_paths(repo: Path, base: str) -> list[str]:
+    """Untracked paths that are an install, not work (`is_environment`): a
+    setup's `.venv/` in a repo that never ignored it is a thousand files, and
+    a `uv.lock` uv wrote into a repo that commits none would be committed by
+    every work item. No merge request wants either. Only a path git lists as
+    untracked: one the repo tracks is the repo's own, edits and all. Asked
+    for as `normal`, since `status.showUntrackedFiles=all` in a user's or the
+    repo's config would list a directory's files one by one instead."""
     with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
             repo,
@@ -177,7 +187,7 @@ async def _environment_dirs(repo: Path, base: str) -> list[str]:
     return [
         entry[3:].rstrip("/")
         for entry in raw.split("\0")
-        if entry.startswith("?? ") and entry.endswith("/") and is_environment(repo / entry[3:])
+        if entry.startswith("?? ") and is_environment(repo / entry[3:])
     ]
 
 
@@ -203,14 +213,15 @@ async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     spec/plan/chain_review/review_brief once none of them are committed
     either) — without also assuming every path under a Kraft root is ours.
 
-    An untracked virtualenv or `node_modules` (`_environment_dirs`) is left
-    out too: what a setup installed is never work product, whether or not
+    An untracked virtualenv, `node_modules` or written lockfile
+    (`_environment_paths`) is left out too: what a setup installed is never
+    work product, whether or not
     the repo thought to ignore it.
     """
     return [
         ".",
         *(f":(exclude){p}" for p in await _kraft_written_paths(repo, base)),
-        *(f":(exclude,literal){p}" for p in await _environment_dirs(repo, base)),
+        *(f":(exclude,literal){p}" for p in await _environment_paths(repo, base)),
     ]
 
 
