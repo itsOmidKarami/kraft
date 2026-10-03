@@ -227,7 +227,7 @@ describe("ItemHeader", () => {
       await userEvent.click(screen.getByRole("menuitem", { name }));
     };
     await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
-    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Review changes", "Item settings", "Open worktree in editor", "Copy ID", "Copy link", "Escalate…", "Cancel…"]);
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Review changes", "Item settings", "Open worktree in editor", "Copy ID", "Copy link", "Cancel…"]);
     await userEvent.keyboard("{Escape}");
     await menu(/Item settings/);
     expect(onSettings).toHaveBeenCalled();
