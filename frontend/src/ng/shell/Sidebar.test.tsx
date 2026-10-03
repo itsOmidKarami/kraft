@@ -106,11 +106,11 @@ describe("ng Sidebar", () => {
     expect(pin).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("falls back to the width default, without an error, when storage throws", () => {
+  it("falls back to pinned, without an error, when storage throws", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("denied"); });
     vi.stubGlobal("innerWidth", 1024);
     expect(() => mount()).not.toThrow();
-    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "true");
     vi.unstubAllGlobals();
   });
 

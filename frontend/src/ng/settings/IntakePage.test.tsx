@@ -59,7 +59,7 @@ describe("Auto-intake page", () => {
   it("says what the rule does in a sentence, On and Off", async () => {
     mount();
     expect(await screen.findByText(/Every 5 minutes, starts ready beads at P2 and below from every enabled repo\. Each runs to its first gate and waits for you there\./)).toBeInTheDocument();
-    expect(screen.getByRole("button", { pressed: true })).toHaveTextContent("On");
+    expect(within(screen.getByRole("main")).getByRole("button", { pressed: true })).toHaveTextContent("On");
     document.body.innerHTML = "";
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({}, { ...INTAKE, enabled: false })));
     mount();
@@ -183,7 +183,7 @@ describe("Auto-intake page: the pane's first state", () => {
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
     expect(screen.getByRole("complementary", { name: "bd ready pane, collapsed" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { pressed: true }));
+    await userEvent.click(within(screen.getByRole("main")).getByRole("button", { pressed: true }));
     expect(screen.getByRole("complementary", { name: "bd ready pane" })).toBeInTheDocument();
   });
 });
