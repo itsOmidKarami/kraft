@@ -31,8 +31,9 @@ describe("headerState: every display status, from the server's fields only", () 
     ["needs_you", "mr_closed", "NEEDS YOU", "warn", "reopen", FULL],
     ["needs_you", "stuck", "NEEDS YOU", "warn", "retry", FULL],
     ["needs_you", "cap", "NEEDS YOU", "warn", "raise", FULL],
-    ["needs_you", "budget", "NEEDS YOU", "warn", "raise", FULL],
-    ["needs_you", "budget", "NEEDS YOU", "warn", "retry", FULL, "daily"],
+    // R12E-05: an escalation's agent would hit the same cap, so /escalate refuses a budget stop.
+    ["needs_you", "budget", "NEEDS YOU", "warn", "raise", NO_ESC],
+    ["needs_you", "budget", "NEEDS YOU", "warn", "retry", NO_ESC, "daily"],
     ["escalated", undefined, "ESCALATED", "warn", "retry", NO_ESC],
     ["failed", "failed", "FAILED", "bad", "retry", FULL],
     ["paused", undefined, "PAUSED", "muted", "resume", FULL],

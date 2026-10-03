@@ -53,7 +53,7 @@ export const NOT_RAISABLE = "The item can't raise this cap: the policy or the ch
 export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
 
 /** What `escalatable` reads: the detail's sessions and pending gate are optional, a board row has neither. */
-type EscalateFields = Pick<WorkItem, "display_status" | "current_node_id"> & Partial<Pick<WorkItem, "pending_gate">> & { worker_sessions?: { status: string; hook_point: string }[] };
+type EscalateFields = Pick<WorkItem, "display_status" | "current_node_id"> & Partial<Pick<WorkItem, "pending_gate" | "stop">> & { worker_sessions?: { status: string; hook_point: string }[] };
 
 const live = (s: { status: string }) => s.status === "running" || s.status === "pending";
 
@@ -88,10 +88,12 @@ export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick
  *  pending gate with a live session: an agent's review of the gate, or a
  *  human's escalation turn, which the server shows as needs-you because the
  *  gate wins (`board.display_status`), and either is "already running"
- *  (#504 review P2-1). */
+ *  (#504 review P2-1). Nor a spend cap's stop: the escalation's agent would
+ *  hit the same cap, so the server refuses it until the cap is raised (R12E-05). */
 export const escalatable = (item: EscalateFields) =>
   (item.display_status === "failed" || item.display_status === "needs_you" || (item.display_status === "paused" && !!item.current_node_id))
-  && !(item.pending_gate && item.worker_sessions?.some(live));
+  && !(item.pending_gate && item.worker_sessions?.some(live))
+  && !(item.display_status !== "paused" && item.stop?.kind === "budget");
 
 /** The way on from a `needs_you` stop, by its kind: the same table as the
  *  phone's bottom bar (`phone/item/model`'s `pairOf`), so the two layouts offer

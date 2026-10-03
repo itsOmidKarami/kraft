@@ -1930,12 +1930,13 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
         raise HTTPException(409, "work item has not started")
     if row["status"] == "needs_human" and (board._current_stop(st, wid) or {}).get("budget"):
         # The escalation's agent spends against the same cap, which refused
-        # its session with nothing on the item to say so (R12E-05).
+        # its session with nothing on the item to say so (R12E-05). Every
+        # budget stop, the daily cap's too (`tests/api/lifecycle_doors.json`).
         raise HTTPException(
             409,
             "a spend cap stopped this item, and an escalation's agent would hit it too: "
-            f"raise it first (`kraft item raise-budget {wid} --usd N` for its own cap; "
-            f"`kraft view show {wid}` names the cap), then escalate",
+            f"raise it first (`kraft item raise-budget {wid} --usd N` for the item's own "
+            f"cap; `kraft view show {wid}` names the cap), then escalate",
         )
     message = body.message.strip()
     if not message:

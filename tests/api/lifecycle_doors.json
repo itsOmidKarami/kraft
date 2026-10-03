@@ -201,8 +201,6 @@
         "conflict",
         "failed",
         "infra",
-        "budget_item_cap",
-        "budget_daily",
         "mr_closed"
       ]
     },
