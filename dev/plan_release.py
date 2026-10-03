@@ -211,7 +211,8 @@ def release_body(tag: str | None, notes: str) -> str:
         "This is a pre-release. Install it with "
         f'`uv tool install --force --python 3.13 "kraft-sdlc[vector]{source}"`, '
         "using the Python you installed Kraft with and leaving out `[vector]` if you don't use "
-        f"vector search, then run `kraft admin restart`. From {_UPDATE_KEEPS_EXTRAS} on, "
+        "vector search, then run `kraft admin restart` (or `kraft admin start` if Kraft "
+        f"isn't running). From {_UPDATE_KEEPS_EXTRAS} on, "
         f"`kraft admin update --channel {channel}` installs it too, keeping both. "
         + _vsix_line(version)
     )
