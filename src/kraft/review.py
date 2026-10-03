@@ -371,7 +371,9 @@ def quote_range(
             out.append(lines[i].kind + lines[i].text)
         return _clip_quote(out)
     rev = base if side == "old" else head
-    content = _config.git_read(worktree, "show", f"{rev}:{path}", strip=False)
+    # `cat-file blob` answers with the file or fails: `git show rev:<path>`
+    # printed the commit itself for `rev:*` on a newer git.
+    content = _config.git_read(worktree, "cat-file", "blob", f"{rev}:{path}", strip=False)
     if content is None:
         return None
     text = content.splitlines()
