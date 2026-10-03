@@ -21,7 +21,7 @@ export type ItemPolicy = (Record<string, unknown> & { paths?: Record<string, Rec
 /** A value as the chain (or what stands in for it) gives it, and where it comes from: the chip a row shows. */
 export type Given = { value: string; source: string };
 
-const ENDED = new Set(["done", "cancelled", "archived"]);
+export const ENDED = new Set(["done", "cancelled", "archived"]);
 
 /** Filed and never started: no node has run, and it has not ended. */
 export const notStarted = (item: Pick<ItemDetail, "current_node_id" | "display_status">) => !item.current_node_id && !ENDED.has(item.display_status ?? "");

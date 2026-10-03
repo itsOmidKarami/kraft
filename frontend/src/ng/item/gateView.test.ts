@@ -40,6 +40,13 @@ describe("gateView", () => {
     expect(running.reviewer?.chip).toBeUndefined();
   });
 
+  it("an ended item whose gate was skipped has no current node: the reviewer does not claim to run first when reached", () => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", auto_review: { id: "check", kind: "agent" } }] } });
+    const v = gateView(detail({ materialized_chain: frozen, display_status: "done", current_node_id: null }), V1[1], [], 0, { kind: "chain" }, on);
+    expect(v.reviewer).toMatchObject({ id: "auto_review", state: "todo" });
+    expect(v.reviewer?.chip).toBeUndefined();
+  });
+
   it("has no reviewer for a gate that declares none", () => {
     expect(gateView(detail(), V1[1], [], 0, { kind: "chain" }, on).reviewer).toBeUndefined();
   });
