@@ -5,15 +5,23 @@ import { detailOf, request } from "../http";
  *  system opener is there, and the default chosen in Settings › Appearance. */
 export type Editors = { available: string[]; system: boolean; default: string | null };
 
-const NAMES: Record<string, string> = { code: "VS Code", cursor: "Cursor", zed: "Zed", obsidian: "Obsidian" };
-/** An editor's name; null is the system's default app. */
-export const editorName = (id: string | null) => (id === null ? "System default" : NAMES[id] ?? id);
+/** The `editor` that asks `POST …/open` for the system's opener by name. `null`
+ *  asks for the default (theme.yaml `editor`, else KRAFT_EDITOR, else the
+ *  system's), so "System default" sent as null launched KRAFT_EDITOR while the
+ *  note said "Opened in System default" (#502 review). */
+export const SYSTEM_EDITOR = "system";
+
+const NAMES: Record<string, string> = { code: "VS Code", cursor: "Cursor", zed: "Zed", obsidian: "Obsidian", [SYSTEM_EDITOR]: "System default" };
+/** An editor's name; null (no editor chosen) and `system` are the system's default app. */
+export const editorName = (id: string | null) => (id === null ? NAMES[SYSTEM_EDITOR] : NAMES[id] ?? id);
 
 /** What Open in editor offers, the default first: every available editor, then
- *  the system opener. A default this machine lacks is skipped, not offered. */
-export function editorChoices(e: Editors): (string | null)[] {
-  const all: (string | null)[] = [...e.available, ...(e.system ? [null] : [])];
-  return all.includes(e.default) ? [e.default, ...all.filter((x) => x !== e.default)] : all;
+ *  the system opener. A default this machine lacks is skipped, not offered; no
+ *  default is the system opener's. */
+export function editorChoices(e: Editors): string[] {
+  const all = [...e.available, ...(e.system ? [SYSTEM_EDITOR] : [])];
+  const first = e.default ?? SYSTEM_EDITOR;
+  return all.includes(first) ? [first, ...all.filter((x) => x !== first)] : all;
 }
 
 /** The answer, or the server's reason it has none (a remote client is refused).

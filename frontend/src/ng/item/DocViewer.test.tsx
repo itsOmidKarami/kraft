@@ -18,6 +18,7 @@ function Harness({ source }: { source: DocSource }) {
 }
 
 describe("DocViewer", () => {
+  // "System default" goes by name: null asks for the default, which KRAFT_EDITOR can make an editor (#502 review).
   it("opens the default editor from the one button, and the others from its menu", async () => {
     const calls = stubFetch({ ...WRITES, "GET /documents/d1": [200, doc], "GET /editors": [200, EDITORS] });
     render(<Harness source={{ kind: "document", id: "d1" }} />);
@@ -33,8 +34,18 @@ describe("DocViewer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Other editors" }));
     expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["VS Code", "System default"]);
     await userEvent.click(screen.getByRole("menuitem", { name: "System default" }));
-    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([{ editor: "zed" }, { editor: null }]));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([{ editor: "zed" }, { editor: "system" }]));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("puts the system opener first when no default is chosen, and asks for it by name", async () => {
+    const calls = stubFetch({ ...WRITES, "GET /documents/d1": [200, doc], "GET /editors": [200, { ...EDITORS, default: null }] });
+    render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={() => {}} />);
+    const button = await screen.findByRole("button", { name: "Open in editor" });
+    await waitFor(() => expect(button).toHaveAttribute("title", "Open with the system's default app"));
+    await userEvent.click(button);
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([{ editor: "system" }]));
+    expect(await screen.findByText("Opened in System default.")).toBeInTheDocument();
   });
 
   it.each([
