@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_c1fa784957154a5e___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 19:31 +0000
+            created at 2026-10-03 20:07 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -556,17 +556,21 @@
     <p class="run run2"><span class="n"><a id="t474" href="#t474">474</a></span><span class="t">        <span class="nam">nargs</span><span class="op">=</span><span class="str">&quot;?&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t475" href="#t475">475</a></span><span class="t">        <span class="nam">const</span><span class="op">=</span><span class="str">&quot;&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t476" href="#t476">476</a></span><span class="t">        <span class="nam">metavar</span><span class="op">=</span><span class="str">&quot;EDITOR&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t477" href="#t477">477</a></span><span class="t">        <span class="nam">help</span><span class="op">=</span><span class="str">&quot;open in an editor on the server (code, cursor, zed, obsidian; default: system)&quot;</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t478" href="#t478">478</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t479" href="#t479">479</a></span><span class="t">    <span class="nam">doc</span><span class="op">.</span><span class="nam">add_argument</span><span class="op">(</span><span class="str">&quot;--no-pager&quot;</span><span class="op">,</span> <span class="nam">action</span><span class="op">=</span><span class="str">&quot;store_true&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t480" href="#t480">480</a></span><span class="t">    <span class="nam">doc</span><span class="op">.</span><span class="nam">set_defaults</span><span class="op">(</span><span class="nam">func</span><span class="op">=</span><span class="nam">_cmd_doc</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t481" href="#t481">481</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t482" href="#t482">482</a></span><span class="t">    <span class="nam">artifact</span> <span class="op">=</span> <span class="nam">subs</span><span class="op">.</span><span class="nam">add_parser</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t483" href="#t483">483</a></span><span class="t">        <span class="str">&quot;artifact&quot;</span><span class="op">,</span> <span class="nam">parents</span><span class="op">=</span><span class="op">[</span><span class="nam">common</span><span class="op">]</span><span class="op">,</span> <span class="nam">help</span><span class="op">=</span><span class="str">&quot;the document the pending gate is about&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run run2"><span class="n"><a id="t484" href="#t484">484</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t485" href="#t485">485</a></span><span class="t">    <span class="nam">artifact</span><span class="op">.</span><span class="nam">add_argument</span><span class="op">(</span><span class="str">&quot;id&quot;</span><span class="op">,</span> <span class="nam">nargs</span><span class="op">=</span><span class="str">&quot;?&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t486" href="#t486">486</a></span><span class="t">    <span class="nam">artifact</span><span class="op">.</span><span class="nam">add_argument</span><span class="op">(</span><span class="str">&quot;--no-pager&quot;</span><span class="op">,</span> <span class="nam">action</span><span class="op">=</span><span class="str">&quot;store_true&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t487" href="#t487">487</a></span><span class="t">    <span class="nam">artifact</span><span class="op">.</span><span class="nam">set_defaults</span><span class="op">(</span><span class="nam">func</span><span class="op">=</span><span class="nam">_cmd_artifact</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t477" href="#t477">477</a></span><span class="t">        <span class="nam">help</span><span class="op">=</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t478" href="#t478">478</a></span><span class="t">            <span class="str">&quot;open in an editor on the server (code, cursor, zed, obsidian, or system for &quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t479" href="#t479">479</a></span><span class="t">            <span class="str">&quot;the OS opener; default: the Default editor in Settings, else KRAFT_EDITOR, &quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t480" href="#t480">480</a></span><span class="t">            <span class="str">&quot;else system)&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t481" href="#t481">481</a></span><span class="t">        <span class="op">)</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t482" href="#t482">482</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t483" href="#t483">483</a></span><span class="t">    <span class="nam">doc</span><span class="op">.</span><span class="nam">add_argument</span><span class="op">(</span><span class="str">&quot;--no-pager&quot;</span><span class="op">,</span> <span class="nam">action</span><span class="op">=</span><span class="str">&quot;store_true&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t484" href="#t484">484</a></span><span class="t">    <span class="nam">doc</span><span class="op">.</span><span class="nam">set_defaults</span><span class="op">(</span><span class="nam">func</span><span class="op">=</span><span class="nam">_cmd_doc</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t485" href="#t485">485</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t486" href="#t486">486</a></span><span class="t">    <span class="nam">artifact</span> <span class="op">=</span> <span class="nam">subs</span><span class="op">.</span><span class="nam">add_parser</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t487" href="#t487">487</a></span><span class="t">        <span class="str">&quot;artifact&quot;</span><span class="op">,</span> <span class="nam">parents</span><span class="op">=</span><span class="op">[</span><span class="nam">common</span><span class="op">]</span><span class="op">,</span> <span class="nam">help</span><span class="op">=</span><span class="str">&quot;the document the pending gate is about&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t488" href="#t488">488</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t489" href="#t489">489</a></span><span class="t">    <span class="nam">artifact</span><span class="op">.</span><span class="nam">add_argument</span><span class="op">(</span><span class="str">&quot;id&quot;</span><span class="op">,</span> <span class="nam">nargs</span><span class="op">=</span><span class="str">&quot;?&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t490" href="#t490">490</a></span><span class="t">    <span class="nam">artifact</span><span class="op">.</span><span class="nam">add_argument</span><span class="op">(</span><span class="str">&quot;--no-pager&quot;</span><span class="op">,</span> <span class="nam">action</span><span class="op">=</span><span class="str">&quot;store_true&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t491" href="#t491">491</a></span><span class="t">    <span class="nam">artifact</span><span class="op">.</span><span class="nam">set_defaults</span><span class="op">(</span><span class="nam">func</span><span class="op">=</span><span class="nam">_cmd_artifact</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -576,7 +580,7 @@
             <a class="nav" href="z_c1fa784957154a5e___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 19:31 +0000
+            created at 2026-10-03 20:07 +0000
         </p>
     </div>
 </footer>
