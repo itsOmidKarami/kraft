@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../testkit";
@@ -21,6 +21,25 @@ describe("Log", () => {
     await userEvent.click(screen.getByRole("button", { name: "agent" }));
     expect(screen.queryByText(/reading cache\.py/)).toBeNull();
     expect(screen.getByText(/dispatch/)).toBeInTheDocument();
+  });
+
+  it("goes full screen over the viewport with the crumb, the task, the count and the controls, and Escape leaves it", async () => {
+    stubFetch(answer as never);
+    render(<Log sessionId="s1" running={false} title="implement" crumb="default › implementation" />);
+    await screen.findByText(/reading cache\.py/);
+    const open = screen.getByRole("button", { name: "full screen" });
+    await userEvent.click(open);
+    const screen_ = screen.getByRole("dialog", { name: "implement · log" });
+    expect(screen_).toHaveClass("ip-log-screen");
+    expect(screen_.querySelector(".ip-log-screen-head")).toHaveTextContent(/^default › implementation › implementlog · 2 linessysstdoutagenttool followcopy⤡ exit full screen$/);
+    expect(within(screen_).getByRole("button", { name: "agent" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen_).getByText(/reading cache\.py/)).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(open).toHaveFocus();
+    await userEvent.click(open);
+    await userEvent.click(screen.getByRole("button", { name: "⤡ exit full screen" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("reads again while the session runs, and not once it ended", async () => {

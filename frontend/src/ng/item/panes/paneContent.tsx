@@ -230,7 +230,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} />,
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
-    log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} />,
+    log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} />,
     config: <><TaskConfig path={path} s={at} /><AppliedRows applied={a.applied} path={path} /></>,
   };
   const live = sessions.some((s) => ["running", "pending"].includes(s.status));

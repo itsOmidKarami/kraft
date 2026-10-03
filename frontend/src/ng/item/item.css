@@ -164,11 +164,19 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-follow { font-size: 12px; }
 .ip-full { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .ip-log { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 11.5px/1.6 ui-monospace, Menlo, monospace; color: var(--text-sub); white-space: pre-wrap; overflow-wrap: anywhere; }
-.ip-log.is-big { max-height: 60vh; overflow: auto; }
+/* Full screen: the viewport, not a dialog box. The timestamp is its own column,
+   so a wrapped line does not run under it. */
+.ip-log-screen { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); }
+.ip-log-screen:focus-visible { outline: none; }
+.ip-log-screen-head { flex: none; margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.ip-log-crumb { min-width: 0; overflow-wrap: anywhere; }
+.ip-log-title { color: var(--text); font-weight: 500; }
+.ip-log.is-big { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 20px; border: 0; border-radius: 0; font-size: 13px; line-height: 1.7; }
+.ip-log.is-big .ip-log-line { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; }
+.ip-log.is-big .ip-log-t { margin-right: 0; }
 .ip-log:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .ip-log-t { display: inline-block; min-width: 44px; margin-right: 8px; color: var(--text-muted); }
 .ip-log-line.src-agent { color: var(--text); }
-.ip-log-full { width: min(900px, 80vw); }
 .ip-thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .ip-thread-head { margin: 0; font-size: 11.5px; color: var(--text-muted); }
 .ip-turn { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
