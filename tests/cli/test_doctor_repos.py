@@ -95,16 +95,15 @@ def test_doctor_fails_a_repo_entry_carrying_an_unrecognised_key(app, tmp_path):
     assert "legacy_widget" in row["detail"]
 
 
-@pytest.mark.parametrize("retired", ["default_model", "default_root_merge_policy"])
-def test_doctor_passes_a_repo_entry_carrying_a_retired_key(app, tmp_path, retired):
-    """Ruling 165: an older install's retired keys are dropped on read with a
-    warning of their own, so doctor's unrecognised-key check never sees them
-    and must not fail on them."""
+def test_doctor_passes_a_repo_entry_carrying_a_renamed_key(app, tmp_path):
+    """A 1.x `default_chain_template` is read as `default_chain` with a
+    warning of its own, so doctor's unrecognised-key check never sees it and
+    must not fail on it; the `moved keys` row is where it is named."""
     repo = make_repo(tmp_path, name="older")
     asyncio.run(client.ensure_repo(str(repo)))
     path = tmp_path / "templates" / "repos.yaml"
     data = yaml.safe_load(path.read_text())
-    data["repos"][0][retired] = "bump" if retired.endswith("policy") else "sonnet"
+    data["repos"][0]["default_chain_template"] = "default"
     path.write_text(yaml.safe_dump(data))
 
     checks = asyncio.run(doctor.run_checks())

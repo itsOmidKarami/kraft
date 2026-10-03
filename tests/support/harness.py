@@ -669,7 +669,7 @@ capabilities:
 
 
 def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "fake") -> Path:
-    """A `$KRAFT_HOME` whose `templates/harnesses/` overlays one harness that
+    """A `$KRAFT_HOME` whose `config/harnesses/` overlays one harness that
     launches `command`. Set `KRAFT_HOME` to the returned path and an agent task
     selecting `harness_id` runs the fake instead of a real CLI."""
     home = tmp_path / "kraft-home"
@@ -681,7 +681,7 @@ def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "
         )
     )
     # A task selects a *profile*, so the harness needs one of the same id.
-    write_harness_profiles(home / "templates", {harness_id: {"provider": harness_id}})
+    write_harness_profiles(home / "config", {harness_id: {"provider": harness_id}})
     return home
 
 

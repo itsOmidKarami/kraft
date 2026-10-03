@@ -678,7 +678,7 @@ def test_the_design_documents_repos_yaml_is_what_the_daemon_reads(tmp_path):
     assert api["policy"] == {"allowed_harnesses": ["codex", "claude"]}
     assert set(platform["areas"]) == {"python_api", "java_worker"}
     assert platform["areas"]["python_api"]["paths"] == ["services/api/**"]
-    assert repos["product_root"]["default_chain_template"] == "default"
+    assert repos["product_root"]["default_chain"] == "default"
 
     (workspace,) = config.load_workspaces(path).values()
     assert (workspace.id, workspace.root) == ("product", "product_root")
