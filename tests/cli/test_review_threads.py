@@ -180,6 +180,38 @@ def test_a_new_thread_prints_where_it_is_and_the_lines_it_quotes(app, monkeypatc
     ]
 
 
+@pytest.mark.parametrize(
+    ("verb", "fn", "line"),
+    [
+        ("resolve", "resolve_thread", "resolved thread t1 on calc.py:+9 to +11"),
+        ("reopen", "reopen_thread", "reopened thread t1 on calc.py:+9 to +11"),
+    ],
+    ids=["resolve", "reopen"],
+)
+def test_resolve_and_reopen_print_one_line_naming_the_thread(
+    app, monkeypatch, capsys, verb, fn, line
+):
+    """They printed the whole thread, its comments as one JSON line (R11a)."""
+
+    async def fake(*_a, **_kw):
+        return {
+            "id": "t1",
+            "file_path": "calc.py",
+            "side": "new",
+            "start_side": "new",
+            "start_line": 9,
+            "end_line": 11,
+            "state": "resolved" if verb == "resolve" else "open",
+            "comments": [{"id": "c1", "author": "you", "body": "x", "draft": False}],
+        }
+
+    monkeypatch.setattr(client, fn, fake)
+    cli.main(["item", verb, "t1"])
+    assert capsys.readouterr().out == f"{line}\n"
+    cli.main(["item", verb, "t1", "--json"])
+    assert json.loads(capsys.readouterr().out)["comments"][0]["id"] == "c1"
+
+
 def test_comment_needs_lines_for_a_suggestion(app, capsys):
     with pytest.raises(SystemExit) as caught:
         cli.main(["item", "comment", "--body", "x", "--suggest", "y"])

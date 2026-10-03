@@ -40,8 +40,9 @@ saying what they did, most of them with where the item stands now, such as
 `approved spec_approval on 4f2c…; the item is now running`. So does
 `kraft item review approve` or `request-changes` at a pending gate. With no
 gate pending, `review request-changes` and `review comment` print the review's
-fields as `key  value` lines, and so do `abandon` and the `set-*` verbs. The
-item itself is in `--json`, or in `kraft view show`.
+fields as `key  value` lines, and so do `abandon` and the `set-*` verbs.
+`kraft item comment`, `resolve` and `reopen` name the thread and where it
+sits. The item itself is in `--json`, or in `kraft view show`.
 
 `kraft view logs --json` and `kraft view events -f --json` print NDJSON, one
 object per line, because a stream has no end on which to close an array.
