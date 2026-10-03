@@ -55,6 +55,12 @@ a plain dict out. `main` only prints it, as text or `--json`;
 duplicated helper, the key shape a checker allowlist uses. `--root` points at
 another checkout.
 
+`--diff BASE HEAD` is the other mode: what one pull request does to the tree,
+as the markdown comment `.github/workflows/tests-nudge.yml` posts (the
+"--diff" section below says which three signs make it speak; otherwise it
+prints "nothing to nudge about"). It measures both revisions in throwaway
+`git worktree`s of `--root` and always exits 0.
+
 Run: `uv run python dev/test_shape_report.py [--json]`, or `just shape-report`.
 """
 
@@ -67,7 +73,12 @@ import hashlib
 import importlib.util
 import json
 import re
+import subprocess
+import sys
+import tempfile
 from collections import Counter, defaultdict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -416,8 +427,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--root", type=Path, default=ROOT, help="repo root to measure (default: this checkout)"
     )
+    parser.add_argument(
+        "--diff",
+        nargs=2,
+        metavar=("BASE", "HEAD"),
+        help="print what HEAD does to the tree relative to BASE, as a PR comment (always exits 0)",
+    )
     args = parser.parse_args(argv)
 
+    if args.diff:
+        return run_diff(*args.diff, root=args.root)
     shape = measure(args.root)
     if shape["parse_errors"]:
         print("\n".join(shape["parse_errors"]))
@@ -428,6 +447,303 @@ def main(argv: list[str] | None = None) -> int:
         print(format_helper_allowlist(shape))
     else:
         print(format_report(shape))
+    return 0
+
+
+# -- `--diff BASE HEAD`: what one pull request does to the tree ---------------
+#
+# `tests-nudge.yml` posts this as a PR comment, and only when a PR shows one of
+# three signs of the shape `docs/testing.md` ("One behaviour, one test") argues
+# against; the rest of the time it says nothing, because a nudge that fires on
+# every PR trains everyone to ignore it (the reason `docs-nudge.yml` gives too):
+#
+#   - three or more test functions added, none of them parametrized;
+#   - a module-level helper added whose fingerprint already exists in another
+#     file (a copy outside `tests/support`, where the shared ones live);
+#   - the added lines' verbatim-repeat share is above the tree's own.
+#
+# "Already present elsewhere" is judged against the BASE tree, never HEAD: in
+# HEAD a PR's own lines would count as each other's repeats.
+
+QUIET = "nothing to nudge about"
+NUDGE_MIN_FUNCTIONS = 3
+# A share of a handful of lines says nothing (one added `assert response.status_code == 200`
+# is "100% repeat"), so the share only counts from this many added non-trivial lines.
+NUDGE_MIN_ADDED_LINES = 20
+SUPPORT = "tests/support/"
+MAX_HELPER_ROWS = 3
+
+_HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_DEF = re.compile(r"\s*(?:async\s+)?def\s+(\w+)")
+
+
+def _git(root: Path, *args: str) -> str:
+    done = subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    )
+    return done.stdout
+
+
+@contextmanager
+def _checkout(root: Path, rev: str) -> Iterator[Path]:
+    """`rev` checked out detached in a temp dir, removed again however the body ends."""
+    with tempfile.TemporaryDirectory(prefix="kraft-shape-") as tmp:
+        tree = Path(tmp) / "tree"
+        _git(root, "worktree", "add", "--detach", str(tree), rev)
+        try:
+            yield tree
+        finally:
+            subprocess.run(
+                ["git", "-C", str(root), "worktree", "remove", "--force", str(tree)],
+                capture_output=True,
+            )
+            subprocess.run(["git", "-C", str(root), "worktree", "prune"], capture_output=True)
+
+
+def _scan(root: Path) -> tuple[Counter, dict[str, list[tuple[str, str]]]]:
+    """`(line_counts, helpers)` of `root/tests`, read the way `measure` reads it:
+    every non-trivial stripped line with its count, and the module-level
+    helpers as fingerprint -> [(relpath, name)]."""
+    ck = _checker(root)
+    line_counts: Counter = Counter()
+    helpers: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for path in ck._test_files():
+        if not path.is_relative_to(root / "tests"):
+            continue
+        tree, error = ck._parse(path)
+        if error is not None:
+            continue  # `measure` reports it
+        for raw in path.read_text().splitlines():
+            if not _trivial(raw.strip()):
+                line_counts[raw.strip()] += 1
+        relpath = path.relative_to(root).as_posix()
+        for node in tree.body:
+            if isinstance(node, _FUNCS) and not node.name.startswith("test_"):
+                helpers[helper_fingerprint(node, tree)].append((relpath, node.name))
+    return line_counts, helpers
+
+
+def _added_by_file(root: Path, base: str, head: str) -> dict[str, dict]:
+    """`git diff BASE HEAD -- tests/` for `.py` files: per new path, the added
+    lines `[(line number in HEAD, stripped text)]` and the names of the `def`s
+    that lines were removed from. Renames are followed, so a moved file adds
+    only what it changed."""
+    diff = _git(
+        root,
+        "-c",
+        "core.quotepath=off",
+        "diff",
+        "-M",
+        "--unified=0",
+        "--no-color",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        base,
+        head,
+        "--",
+        "tests/",
+    )
+    files: dict[str, dict] = {}
+    current: dict | None = None
+    old_left = new_left = new_line = 0
+    for line in diff.splitlines():
+        if old_left or new_left:  # inside a hunk: its header says how many lines it has
+            if line.startswith("-"):
+                old_left -= 1
+                match = _DEF.match(line[1:])
+                if match and current is not None:
+                    current["removed_defs"].add(match.group(1))
+            elif line.startswith("+"):
+                new_left -= 1
+                if current is not None:
+                    current["added"].append((new_line, line[1:].strip()))
+                new_line += 1
+            continue
+        if line.startswith("+++ "):
+            path = line[4:]
+            current = None
+            if path.startswith("b/") and path.endswith(".py"):
+                current = files.setdefault(path[2:], {"added": [], "removed_defs": set()})
+            continue
+        match = _HUNK.match(line)
+        if match:
+            old_left = int(match.group(1) if match.group(1) is not None else 1)
+            new_line = int(match.group(2))
+            new_left = int(match.group(3) if match.group(3) is not None else 1)
+    return files
+
+
+def _has_parametrize(decorators: list[ast.expr]) -> bool:
+    for dec in decorators:
+        func = dec.func if isinstance(dec, ast.Call) else dec
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name == "parametrize":
+            return True
+    return False
+
+
+def _tests_with_decorators(body: list[ast.stmt], outer: list[ast.expr]) -> Iterator[tuple]:
+    """`(test function node, decorators of it and of its enclosing classes)`."""
+    for node in body:
+        if isinstance(node, _FUNCS) and node.name.startswith("test_"):
+            yield node, [*outer, *node.decorator_list]
+        elif isinstance(node, ast.ClassDef):
+            yield from _tests_with_decorators(node.body, [*outer, *node.decorator_list])
+
+
+def _added_tests(head_tree: Path, changes: dict[str, dict]) -> tuple[int, int]:
+    """`(added test functions, how many of them carry a parametrize)`: a test
+    function whose `def` line the diff added, unless the same diff removed a
+    `def` of that name from the file (an edited signature, not a new test)."""
+    ck = _checker(head_tree)
+    added = parametrized = 0
+    for relpath, change in sorted(changes.items()):
+        path = head_tree / relpath
+        if not path.is_file() or not change["added"]:
+            continue
+        tree, error = ck._parse(path)
+        if error is not None:
+            continue
+        added_at = {number for number, _ in change["added"]}
+        for node, decorators in _tests_with_decorators(tree.body, []):
+            if node.lineno in added_at and node.name not in change["removed_defs"]:
+                added += 1
+                parametrized += _has_parametrize(decorators)
+    return added, parametrized
+
+
+def _shared_name(copies: list[tuple[str, str]]) -> str | None:
+    """`support.harness.commit_all` for a copy that lives under `tests/support`."""
+    for relpath, name in sorted(copies):
+        if relpath.startswith(SUPPORT):
+            module = relpath[len("tests/") : -len(".py")].replace("/", ".")
+            return f"{module}.{name}"
+    return None
+
+
+def _added_helpers(before: dict, after: dict) -> list[dict]:
+    """The helper groups a PR grew by a file that is not under `tests/support`:
+    HEAD has more files with that fingerprint than BASE, and at least two."""
+    rows = []
+    for fingerprint, copies in after.items():
+        files_now = {f for f, _ in copies}
+        files_before = {f for f, _ in before.get(fingerprint, [])}
+        new_files = {f for f in files_now - files_before if not f.startswith(SUPPORT)}
+        if not new_files or len(files_now) < 2 or len(files_now) <= len(files_before):
+            continue
+        added = [(f, n) for f, n in copies if f in new_files]
+        names = Counter(n for _, n in added)
+        rows.append(
+            {
+                "name": min(names, key=lambda n: (-names[n], n)),
+                "added": len(added),
+                "exist": len(copies),
+                "shared": _shared_name(copies),
+            }
+        )
+    rows.sort(key=lambda r: (-r["added"], r["name"]))
+    return rows
+
+
+def diff(base: str, head: str, root: Path = ROOT) -> dict:
+    """The delta HEAD makes to `root`'s test tree relative to BASE, as a plain
+    dict (`format_nudge` words it, `signs` says whether it is worth saying)."""
+    root = Path(root)
+    changes = _added_by_file(root, base, head)
+    with _checkout(root, base) as base_tree, _checkout(root, head) as head_tree:
+        before, after = measure(base_tree), measure(head_tree)
+        base_counts, base_helpers = _scan(base_tree)
+        _, head_helpers = _scan(head_tree)
+        added_functions, added_parametrized = _added_tests(head_tree, changes)
+    added_lines = [text for c in changes.values() for _, text in c["added"] if not _trivial(text)]
+    repeated = sum(1 for text in added_lines if base_counts[text] >= REPEAT_AT)
+    base_nontrivial = before["nontrivial_lines"]
+    return {
+        "test_functions": after["test_functions"] - before["test_functions"],
+        "collected_cases": after["collected_cases"] - before["collected_cases"],
+        "lines": after["lines"] - before["lines"],
+        "added_functions": added_functions,
+        "added_parametrized": added_parametrized,
+        "added_nontrivial_lines": len(added_lines),
+        "added_repeated_lines": repeated,
+        "base_repeat_pct": (
+            100 * before["verbatim_repeat_lines"] / base_nontrivial if base_nontrivial else 0.0
+        ),
+        "helpers": _added_helpers(base_helpers, head_helpers),
+        "parse_errors": [*before["parse_errors"], *after["parse_errors"]],
+    }
+
+
+def signs(delta: dict) -> list[str]:
+    """Which of the three signs `delta` shows, by name; empty means stay quiet."""
+    found = []
+    if delta["added_functions"] >= NUDGE_MIN_FUNCTIONS and delta["added_parametrized"] == 0:
+        found.append("functions")
+    if delta["helpers"]:
+        found.append("helper")
+    added = delta["added_nontrivial_lines"]
+    if (
+        added >= NUDGE_MIN_ADDED_LINES
+        and 100 * delta["added_repeated_lines"] / added > delta["base_repeat_pct"]
+    ):
+        found.append("repeats")
+    return found
+
+
+def format_nudge(delta: dict) -> str:
+    """The PR comment (without its marker; the workflow adds that)."""
+    added, parametrized = delta["added_functions"], delta["added_parametrized"]
+    net = f"{delta['test_functions']:+d}"
+    which = "of them" if added == delta["test_functions"] else f"of the {added} added"
+    rows = [
+        f"  {'test functions':<19}{net:<6}({parametrized} {which} parametrized)",
+        f"  {'collected cases':<19}{delta['collected_cases']:+d}",
+        f"  {'lines in tests/':<19}{delta['lines']:+d}",
+        f"  {'verbatim-repeat':<19}{delta['added_repeated_lines']:+d} lines already present "
+        f"{REPEAT_AT}+ times elsewhere in tests/",
+    ]
+    label = "helpers"
+    for row in delta["helpers"][:MAX_HELPER_ROWS]:
+        copies = "copy" if row["added"] == 1 else "copies"
+        shared = f"; `{row['shared']}` is the shared one" if row["shared"] else ""
+        rows.append(
+            f"  {label:<19}{row['added']:+d} {copies} of `{row['name']}` "
+            f"({row['exist']} exist{shared})"
+        )
+        label = ""
+    if len(delta["helpers"]) > MAX_HELPER_ROWS:
+        rows.append(f"  {'':<19}(and {len(delta['helpers']) - MAX_HELPER_ROWS} more)")
+    return "\n".join(
+        [
+            "This PR changes the test tree:",
+            "```",
+            *rows,
+            "```",
+            "If the new tests are rows of one behavior, fold them into a table",
+            '(docs/testing.md, "One behaviour, one test"). If they are new behaviors, ignore this.',
+        ]
+    )
+
+
+def run_diff(base: str, head: str, root: Path = ROOT) -> int:
+    """Print the nudge, or `QUIET`; exit 0 always. A revision that cannot be
+    measured is said on stderr and is quiet on stdout: this reminds, it never
+    fails a pull request."""
+    try:
+        delta = diff(base, head, root)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        detail = getattr(exc, "stderr", None) or exc
+        print(f"tests nudge skipped: {detail}".rstrip(), file=sys.stderr)
+        print(QUIET)
+        return 0
+    if delta["parse_errors"]:
+        print("tests nudge skipped:\n" + "\n".join(delta["parse_errors"]), file=sys.stderr)
+        print(QUIET)
+    elif signs(delta):
+        print(format_nudge(delta))
+    else:
+        print(QUIET)
     return 0
 
 
