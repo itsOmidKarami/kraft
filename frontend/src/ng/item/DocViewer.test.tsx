@@ -47,13 +47,13 @@ describe("DocViewer", () => {
     const onClose = vi.fn();
     const { unmount } = render(<DocViewer source={{ kind: "artifact", workItemId: "w1" }} onClose={onClose} />);
     await screen.findByText("Step one.");
-    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Close"]);
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["⤢ full screen", "Close"]);
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     unmount();
     render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={onClose} />);
     await screen.findByText("no size bound");
-    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([...EDITORS.map((e) => e.name), "Copy path", "Close"]);
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual([...EDITORS.map((e) => e.name), "Copy path", "⤢ full screen", "Close"]);
   });
 
   it("is a drawer whose header stacks the title, the path and who wrote it", async () => {
@@ -62,6 +62,20 @@ describe("DocViewer", () => {
     const drawer = await screen.findByRole("dialog", { name: "Review notes" });
     expect(drawer).toHaveClass("dv-drawer");
     expect([...drawer.querySelector(".dv-head-text")!.children].map((c) => c.textContent)).toEqual(["Review notes", doc.path, "written by review › code_review › attempt 2"]);
+  });
+
+  it("goes full screen and back, and opens as a drawer again after a close", async () => {
+    stubFetch({ "GET /documents/d1": [200, doc] });
+    render(<Harness source={{ kind: "document", id: "d1" }} />);
+    await userEvent.click(screen.getByRole("button", { name: "open doc" }));
+    await userEvent.click(await screen.findByRole("button", { name: "⤢ full screen" }));
+    expect(screen.getByRole("dialog")).toHaveClass("is-full");
+    await userEvent.click(screen.getByRole("button", { name: "⤡ exit full screen" }));
+    expect(screen.getByRole("dialog")).not.toHaveClass("is-full");
+    await userEvent.click(screen.getByRole("button", { name: "⤢ full screen" }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    await userEvent.click(screen.getByRole("button", { name: "open doc" }));
+    expect(await screen.findByRole("dialog")).not.toHaveClass("is-full");
   });
 
   it("closes on a press on the scrim, not on one inside the drawer", async () => {

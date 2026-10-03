@@ -39,6 +39,8 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
   const [doc, setDoc] = useState<Viewed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Not kept across openings: the viewer unmounts on close.
+  const [full, setFull] = useState(false);
   const ref = useModal<HTMLDivElement>(onClose);
   const titleId = useId();
   useEffect(() => {
@@ -55,7 +57,7 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
   const by = source.kind === "document" ? source.by : undefined;
   return createPortal(
     <div className="dv-scrim" {...backdropProps(onClose)}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="dv-drawer">
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={`dv-drawer${full ? " is-full" : ""}`}>
         <header className="dv-head">
           <div className="dv-head-text">
             <h2 id={titleId} className="dv-title">{doc?.title ?? "Document"}</h2>
@@ -69,6 +71,7 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
                 <Button onClick={() => navigator.clipboard?.writeText(doc.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
               </>
             )}
+            <button type="button" className="dv-full" onClick={() => setFull(!full)}>{full ? "⤡ exit full screen" : "⤢ full screen"}</button>
             <IconButton label="Close" onClick={onClose}><X size={16} aria-hidden /></IconButton>
           </div>
         </header>
