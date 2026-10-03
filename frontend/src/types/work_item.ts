@@ -309,6 +309,8 @@ export interface WorkItem {
   /** Whether `worktree_path` is on disk: false once it was reclaimed or
    *  deleted (and before the item first ran). Only on the detail endpoint. */
   worktree_exists?: boolean;
+  /** The branch the item's worktree lives on (detail only): `kraft/<slug>-<id>`, or `kraft/<id>` on an older row. */
+  branch?: string | null;
   /** The worktree's current HEAD (Kraft-lu2), so the gate can tell a
    *  measurement taken on this commit from one taken before it. Only on the
    *  detail endpoint. */

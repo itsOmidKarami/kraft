@@ -63,11 +63,18 @@ describe("StateCard", () => {
     expect(h.onEscalate).toHaveBeenCalled();
   });
 
-  it("an infra failure opens Repos in the new UI, not the shipped page", async () => {
+  it("an infra failure's Fix in Repos opens the item's repo in Settings › Repos (WI-4)", async () => {
     stubFetch();
     show({ display_status: "failed", stop: stop("infra") });
-    await userEvent.click(within(screen.getByRole("region", { name: "Failed" })).getByRole("button", { name: "Open Repos" }));
-    expect(where).toBe("/settings/repos");
+    await userEvent.click(within(screen.getByRole("region", { name: "Failed" })).getByRole("button", { name: "Fix in Repos" }));
+    expect(where).toBe("/settings/repos/%2Fcode%2Fkraft-plugins");
+  });
+
+  it("says what a failed run kept: its branch and the files changed on it (WI-4)", async () => {
+    stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }, { path: "b.py", insertions: 1, deletions: 0 }] }] });
+    show({ display_status: "failed", stop: stop("failed"), branch: "kraft/design-the-cache-w1", worktree_exists: true });
+    const card = screen.getByRole("region", { name: "Failed" });
+    await waitFor(() => expect(card).toHaveTextContent("work keptbranch kraft/design-the-cache-w1 · 2 files"));
   });
 
   // R10b-01: /retry claims only a stopped item, so a waiting one offers no Retry now
