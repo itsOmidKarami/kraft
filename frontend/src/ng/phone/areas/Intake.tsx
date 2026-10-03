@@ -128,7 +128,7 @@ export function ScheduleScreen() {
   const data = r ? intakeOf(r) : null;
   const s: Schedule | undefined = data?.schedules.find((x) => String(x.index) === param);
   const own = s && r ? problemsOfSchedule(r, s.index) : [];
-  const changed = (field: string) => !!s && !!r?.changes.some((c) => c.path === `triggers.${s.index}.${field}`);
+  const changed = (field: string) => !!s && !!r?.changes.some((c) => c.path === `schedules.${s.index}.${field}`);
   const patch = (p: Record<string, unknown>) => send(draft, { op: "set_schedule", index: s!.index, patch: p });
   const bad = (field: string) => own.find((p) => p.field === field)?.message;
 

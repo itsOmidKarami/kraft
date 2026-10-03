@@ -178,6 +178,13 @@ describe("a schedule (N.2)", () => {
     await waitFor(() => expect(ops(calls)).toEqual([{ op: "set_schedule", index: 0, patch: { description: "" } }]));
   });
 
+  // R12c-07: the marks read `triggers.N.field`; intake.yaml's draft reports `schedules.N.field`.
+  it("marks the field the draft changed, and only it", async () => {
+    sched(0, ans(view({}, { changes: [{ path: "schedules.0.cron", kind: "change", before: "0 9 * * 1", after: "0 7 * * 1", file: "intake.yaml" }] as never })));
+    expect(await screen.findByRole("button", { name: /^cron/ })).toHaveTextContent("(changed)");
+    expect(screen.getByRole("button", { name: /^chain/ })).not.toHaveTextContent("(changed)");
+  });
+
   it("shows the server's problem on the field it is about", async () => {
     sched(0, ans(view({}, { problems: [problem("schedules.0", "chain nope does not exist", { schedule: 0, field: "chain" })] })));
     expect(await screen.findByRole("button", { name: /^chain/ })).toHaveTextContent("chain nope does not exist");
