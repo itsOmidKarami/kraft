@@ -63,8 +63,10 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       {...common}
       crumbs={[{ label: "Board", onClick: onClose }, { label: repoName(item.repo), onClick: () => onRepo(item.repo) }]}
       icon="workflow"
-      title={item.bead_id || shortId(item.id)}
-      sub={`${fresh ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
+      // The item's title heads the peek and names its landmark; the id follows in the line under it (R7b-16).
+      title={item.title}
+      prose
+      sub={`${item.bead_id || shortId(item.id)} · ${fresh ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
       tabs={[{ value: "overview", label: "Overview" }, { value: "activity", label: "Activity" }, { value: "config", label: "Config" }]}
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}

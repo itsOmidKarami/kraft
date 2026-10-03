@@ -54,6 +54,13 @@ describe("Peek", () => {
     expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
   });
 
+  it("is headed and named by the item's title, its id in the line under it", async () => {
+    mount({ status: "needs_human", display_status: "failed", stop: stop("failed") });
+    const pane = await screen.findByRole("complementary", { name: "Design the cache pane" });
+    expect(pane.querySelector(".pane-title")).toHaveTextContent(/^Design the cache$/);
+    expect(within(pane).getByText(/^kraft-cb59 · Needs you · failed at/)).toBeInTheDocument();
+  });
+
   it.each([
     [{ status: "needs_human", display_status: "failed", stop: stop("failed", { reason: "The forge refused." }) }, /Failed/],
     [{ status: "needs_human", display_status: "needs_you", needs_context_question: "Keep the header?", stop: stop("question", { reason: "needs_context: Keep the header?" }) }, /Keep the header\?/],
