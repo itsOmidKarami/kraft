@@ -83,8 +83,9 @@ startup, before anything reads the theme:
   file's own `colour_amount`, else `full`. A file that already names its own
   `surface` just loses the `palette`.
 - The original bytes are saved as `theme.yaml.pre-2.0` first. An existing copy
-  is never overwritten, and a `theme.yaml.pre-1.5` that a 1.5.0 release
-  candidate saved counts as that copy: no second one is written beside it.
+  is never overwritten, and a `theme.yaml.pre-1.5` or `theme.yaml.pre-ux2`
+  that a 1.5.0 release candidate saved counts as that copy: no second one is
+  written beside it.
 - A missing file, a file with no `palette`, and one that does not parse or
   holds a value Kraft does not know are left alone. With no `theme.yaml` at
   all, the look is `ink` with `violet` at `full`.
