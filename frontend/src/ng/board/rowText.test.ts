@@ -53,6 +53,7 @@ describe("rowAction", () => {
     // The row cannot tell a cap the server raises from one it refuses; the peek's banner can.
     expect(a(row("needs_you", { stop: stop("budget") }))).toEqual({ label: "Open", kind: "peek", tab: "overview" });
     expect(a(row("needs_you", { stop: stop("mr_closed") }))).toMatchObject({ label: "Open", kind: "peek" });
+    expect(a(row("needs_you", { stop: stop("stuck") }))).toEqual({ label: "Retry…", kind: "peek", tab: "overview" });
     expect(a(row("failed", { stop: stop("failed") }))).toMatchObject({ label: "Retry…", kind: "peek" });
     expect(a(row("paused"))).toEqual({ label: "Resume", kind: "resume" });
     for (const s of ["running", "waiting", "escalated", "done", "cancelled"] as DisplayStatus[]) expect(a(row(s)), s).toBeNull();

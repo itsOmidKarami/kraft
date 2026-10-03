@@ -5,6 +5,7 @@ import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
 import { ItemHeader } from "../item/header/ItemHeader";
 import { placeUrl } from "../item/url";
+import { openBudgetEditor } from "../item/Workspace";
 import { useItem, type ItemDetail } from "../item/useItem";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
@@ -90,7 +91,14 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   return (
     <div className={`review-page${diff.plainCode ? " is-plain-code" : ""}`} onKeyDown={(e) => e.key === "Escape" && overlay && treeOpen && setTreeOpen(false)}>
       <h1 className="review-visually-hidden">Review changes: {item.title}</h1>
-      <ItemHeader item={item} reload={reload} onSettings={() => toItem({ sel: { kind: "chain" }, tab: "config" })} onRunLog={() => toItem({ sel: { kind: "chain" } })} />
+      <ItemHeader
+        item={item}
+        reload={reload}
+        onSettings={() => toItem({ sel: { kind: "chain" }, tab: "config" })}
+        onRaise={() => { if (item.stop?.kind === "budget") openBudgetEditor(); toItem({ sel: { kind: "chain" }, tab: "config" }); }}
+        onGate={(gate) => setPlace({ gate, doc: true })}
+        onRunLog={() => toItem({ sel: { kind: "chain" } })}
+      />
       <Toolbar
         item={item}
         place={place}

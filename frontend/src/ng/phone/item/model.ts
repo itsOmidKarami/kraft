@@ -98,7 +98,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null
             text: "Kraft stopped syncing the MR. The branch, the review and all findings are intact. Decide whether this work still goes ahead.", facts: [],
           };
         }
-        default: return { tone: "warn", title: "Needs you", where, text: stop.reason ?? undefined, facts: spent(item) };
+        default: return { tone: "warn", title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, facts: spent(item) };
       }
     }
     case "escalated": return { tone: "warn", title: "Escalation running", where: item.current_node_id ? `at ${item.current_node_id}` : undefined, text: "An agent is looking at this. It resumes the run, or comes back with a question for you.", facts: [] };
@@ -137,8 +137,9 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
   const stop = item.stop;
   const none = { secondary: null, primary: null };
   switch (item.display_status) {
-    case "running":
-    case "escalated": return { secondary: a("pause", "Pause"), primary: a("steer", "Steer") };
+    case "running": return { secondary: a("pause", "Pause"), primary: a("steer", "Steer") };
+    // An escalation turn runs: /pause, /steer and /escalate refuse it; a human's Retry outranks the turn (R11b-01).
+    case "escalated": return { secondary: null, primary: a("retry", "Retry") };
     case "paused": return item.current_node_id ? { secondary: a("steer", "Steer"), primary: a("resume", "Resume") } : { secondary: null, primary: a("start", "Start") };
     // Kraft retries a waiting item by itself; /retry would answer it 409 (R10b-01).
     case "waiting": return { secondary: a("pause", "Pause"), primary: null };
@@ -146,7 +147,8 @@ function pairTable(item: ItemDetail): { secondary: Act | null; primary: Act | nu
     case "needs_you":
       switch (stop?.kind) {
         case "gate": return { secondary: a("reject", "Reject…"), primary: a("review", "Review and decide") };
-        case "budget": return { secondary: a("steer", "Steer"), primary: budgetRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
+        // No Steer: a retry with one would only stop at the same cap again.
+        case "budget": return { secondary: null, primary: budgetRaise(item) ? a("raise", "Raise budget") : a("retry", "Retry") };
         case "cap": return { secondary: a("steer", "Steer"), primary: a("retry", "Retry") };
         case "question": return { secondary: a("escalate", "Escalate"), primary: a("answer", "Answer") };
         case "conflict": return { secondary: a("cancel", "Cancel…", true), primary: a("conflicts", "Review the conflicts") };

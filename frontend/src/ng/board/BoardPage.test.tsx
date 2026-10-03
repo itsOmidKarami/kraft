@@ -400,7 +400,8 @@ describe("BoardPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Open" }));
     expect(where()).toBe("/?sel=b1");
     expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
+    // The banner's Raise cap; the footer's main button says the same and does the same.
+    await userEvent.click((await screen.findAllByRole("button", { name: "Raise cap" }))[0]);
     expect(await screen.findByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
   });

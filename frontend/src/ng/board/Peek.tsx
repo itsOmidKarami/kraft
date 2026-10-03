@@ -71,7 +71,7 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}
       onFocus={open}
-      footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} />}
+      footer={<Footer item={item} reload={loaded.reload} offline={offline} onOpen={open} onRaise={raise} onAnswer={() => onTab("overview")} />}
     >
       {tab === "overview" && <Overview item={item} version={loaded.version} reload={loaded.reload} onRaise={raise} />}
       {tab === "activity" && <Activity id={item.id} version={loaded.version} />}
@@ -146,7 +146,7 @@ function Config({ item, reload, budget, onBudget }: { item: ItemDetail; reload: 
 }
 
 /** The item's main action (W5's headerState; Start for a never-started item), then Open item. */
-function Footer({ item, reload, offline, onOpen, onRaise }: { item: ItemDetail; reload: () => void; offline: boolean; onOpen: () => void; onRaise: () => void }) {
+function Footer({ item, reload, offline, onOpen, onRaise, onAnswer }: { item: ItemDetail; reload: () => void; offline: boolean; onOpen: () => void; onRaise: () => void; onAnswer: () => void }) {
   const hs = headerState(item);
   const btn = useRef<HTMLButtonElement>(null);
   const [pausing, setPausing] = useState(false);
@@ -163,6 +163,7 @@ function Footer({ item, reload, offline, onOpen, onRaise }: { item: ItemDetail; 
   };
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
   const navigate = useNavigate();
+  const openGate = useSelect(item.id);
   const startHere = async () => {
     setBusy(true);
     setError(null);
@@ -175,6 +176,14 @@ function Footer({ item, reload, offline, onOpen, onRaise }: { item: ItemDetail; 
   const main = () => {
     if (hs.main === "pause") return setPausing(true);
     if (hs.main === "raise") return onRaise();
+    if (hs.main === "gate") return openGate(item.pending_gate ?? item.stop?.node ?? null);
+    // The question card is on Overview, its answer box with it.
+    if (hs.main === "answer") {
+      onAnswer();
+      return requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('.pane textarea[aria-label="Your answer"]')?.focus());
+    }
+    if (hs.main === "conflicts") return navigate(`/work-items/${encodeURIComponent(item.id)}/review${item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""}`);
+    if (hs.main === "reopen") return void run(act.reopenMr(item.id));
     if (hs.main === "resume") return void run(act.resume(item.id));
     // Start never applies a draft: with one, the item page asks first (R9b-01's other door).
     if (hs.main === "start") return void startHere();

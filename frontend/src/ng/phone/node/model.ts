@@ -27,7 +27,9 @@ export function nodeBar(item: ItemDetail, node: ApiNode, graph: ChainNode): { se
   if (graph.state === "done") return retryable(item) ? { secondary: null, primary: a("retry-from", "Retry from here") } : none;
   if (graph.state !== "current" && graph.state !== "failed") return none;
   // A rate-limited node takes Pause only: /skip refuses it until it is paused (R10b-01's follow-up).
-  if (status === "running" || status === "escalated" || status === "waiting") return skippable(item) ? { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") } : { secondary: null, primary: a("pause", "Pause") };
+  // An escalation turn runs: /pause and /skip refuse it, and a human's Retry outranks the turn (R11b-01).
+  if (status === "escalated") return { secondary: null, primary: a("retry-node", "Retry node") };
+  if (status === "running" || status === "waiting") return skippable(item) ? { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") } : { secondary: null, primary: a("pause", "Pause") };
   if (status === "paused") return { secondary: a("skip", "Skip node"), primary: a("resume", "Resume") };
   return { secondary: a("skip", "Skip node"), primary: a("retry-node", "Retry node") };
 }

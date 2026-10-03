@@ -37,6 +37,11 @@ export const usePaneMemory = create<{ pane: { open: boolean; userCollapsed: bool
   setPane: (pane) => set({ pane }),
 }));
 
+/** Whether Config's budget editor is open: Raise cap, from the banner or the
+ *  header, opens it as the peek's does (R11a-05), from outside the workspace. */
+const useBudgetEditor = create<{ open: boolean; set: (open: boolean) => void }>((set) => ({ open: false, set: (open) => set({ open }) }));
+export const openBudgetEditor = () => useBudgetEditor.getState().set(true);
+
 /** Opens the pane for what someone asked to see (Open gate, a problem, a new
  *  node): an earlier collapse does not keep it shut. */
 export const openPane = () => usePaneMemory.getState().setPane({ open: true, userCollapsed: false });
@@ -61,7 +66,10 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const [artifact, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
-  const [editBudget, setEditBudget] = useState(false);
+  const editBudget = useBudgetEditor((s) => s.open);
+  const setEditBudget = useBudgetEditor((s) => s.set);
+  // Not carried to the next item: the page remounts per item.
+  useEffect(() => () => setEditBudget(false), [setEditBudget]);
   const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // Every second while an agent or a check runs, so "running 12s" counts; every

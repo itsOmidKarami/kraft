@@ -18,13 +18,15 @@ const ids = (i: ReturnType<typeof detail>) => {
 describe("pairOf (C.5): one pair, by status and stop kind", () => {
   it.each([
     ["running", mk("running"), [ "pause", "steer"]],
-    ["escalated", mk("escalated"), ["pause", "steer"]],
+    // R11b-01: /pause and /steer refuse a live escalation; a human's Retry outranks its turn.
+    ["escalated", mk("escalated"), [null, "retry"]],
     ["paused mid-chain", mk("paused"), ["steer", "resume"]],
     ["not started", mk("paused", null, { current_node_id: null }), [null, "start"]],
     ["gate", mk("needs_you", stop("gate", { node: "plan_approval" })), ["reject", "review"]],
-    ["budget, the item's own cap", mk("needs_you", own(), OWN_CAP), ["steer", "raise"]],
-    ["budget, an item-wide policy budget_usd", mk("needs_you", stop("budget", POLICY_USD)), ["steer", "raise"]],
-    ["budget, a cap the item cannot raise", mk("needs_you", stop("budget", { scope: "daily" }), OWN_CAP), ["steer", "retry"]],
+    // No Steer on a budget stop: a retry with one stops at the same cap again.
+    ["budget, the item's own cap", mk("needs_you", own(), OWN_CAP), [null, "raise"]],
+    ["budget, an item-wide policy budget_usd", mk("needs_you", stop("budget", POLICY_USD)), [null, "raise"]],
+    ["budget, a cap the item cannot raise", mk("needs_you", stop("budget", { scope: "daily" }), OWN_CAP), [null, "retry"]],
     ["cap", mk("needs_you", stop("cap")), ["steer", "retry"]],
     ["question", mk("needs_you", stop("question")), ["escalate", "answer"]],
     ["conflict", mk("needs_you", stop("conflict")), ["cancel", "conflicts"]],
@@ -46,7 +48,7 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
   });
 
   it("never offers Retry on a running item (Decisions §5)", () => {
-    for (const s of ["running", "escalated"] as const) expect(ids(mk(s))).not.toContain("retry");
+    expect(ids(mk("running"))).not.toContain("retry");
   });
   it("has at most two buttons in every state", () => {
     for (const s of ["running", "waiting", "needs_you", "escalated", "failed", "paused", "done", "cancelled", "archived"] as const) {
@@ -59,7 +61,8 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
 describe("kebabOf", () => {
   it("lists what the bar does not, cancel last and in the danger style", () => {
     const k = kebabOf(mk("running", null, { mr_ref: { number: 142, url: "https://x/142" } }));
-    expect(k.map((a) => a.id)).toEqual(["escalate", "settings", "open-mr", "duplicate", "complete", "cancel"]);
+    // No Escalate: /escalate refuses a running item.
+    expect(k.map((a) => a.id)).toEqual(["settings", "open-mr", "duplicate", "complete", "cancel"]);
     expect(k.at(-1)).toMatchObject({ id: "cancel", danger: true });
     expect(k.find((a) => a.id === "open-mr")?.label).toBe("Open MR !142");
   });

@@ -69,6 +69,8 @@ export function rowAction(i: Row): RowAction | null {
     // A row carries neither the stop's limit nor the item's spend, so it cannot tell the item's own cap from a daily
     // or token one the server will not raise: the peek's banner can (`budgetRaise`), and offers the raise or Retry.
     case "budget": return { label: "Open", kind: "peek", tab: "overview" };
+    // A stuck loop's way on is Retry, on the peek's card (R11a-01): the row said Open.
+    case "stuck": return { label: "Retry…", kind: "peek", tab: "overview" };
     default: return { label: "Open", kind: "peek", tab: "overview" };
   }
 }

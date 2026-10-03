@@ -10,7 +10,7 @@ import { acceptWrites, detail, inShell, stubFetch } from "../testkit";
 import { ItemHeader } from "./ItemHeader";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("POST /work-items/w1/open-worktree", "POST /work-items/w1/pause", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
+const WRITES = acceptWrites("POST /work-items/w1/open-worktree", "POST /work-items/w1/pause", "POST /work-items/w1/resume", "POST /work-items/w1/retry", "POST /work-items/w1/reopen-mr");
 
 /** The shell reads health and drafts itself; only the item's writes matter here. */
 const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !== "GET");
@@ -18,8 +18,9 @@ const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !==
 beforeEach(() => useStore.setState({ workItems: {} }));
 afterEach(() => vi.unstubAllGlobals());
 
-const show = (over: Parameters<typeof detail>[0] = {}, handlers: Partial<{ reload: () => void; onSettings: () => void; onRunLog: () => void }> = {}) =>
-  inShell(<ItemHeader item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRunLog={handlers.onRunLog ?? (() => {})} />);
+type Handlers = { reload: () => void; onSettings: () => void; onRunLog: () => void; onRaise: () => void; onGate: (gate: string) => void; onAnswer: () => void };
+const show = (over: Parameters<typeof detail>[0] = {}, handlers: Partial<Handlers> = {}) =>
+  inShell(<ItemHeader item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRunLog={handlers.onRunLog ?? (() => {})} onRaise={handlers.onRaise} onGate={handlers.onGate} onAnswer={handlers.onAnswer} />);
 
 describe("ItemHeader", () => {
   it("counts the others that need you, never this item, and hides at zero", () => {
@@ -181,13 +182,23 @@ describe("ItemHeader", () => {
     await waitFor(() => expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/pause", body: {} }]));
   });
 
-  it("opens Item settings for a capped item's Resume instead of resuming", async () => {
-    const calls = stubFetch();
-    const onSettings = vi.fn();
-    show({ display_status: "needs_you", stop: { kind: "cap", node: "verification", resume_at: null, reason: null } }, { onSettings });
-    await userEvent.click(screen.getByRole("button", { name: /Resume/ }));
-    expect(onSettings).toHaveBeenCalled();
-    expect(writes(calls)).toEqual([]);
+  // R11b-01: /pause answers every stopped item 409, so a needs-you stop's main button is its way on, never Pause.
+  it.each([
+    ["cap", /Raise cap/, { handler: "onRaise" as const }],
+    ["gate", /Open gate/, { handler: "onGate" as const, arg: "verification" }],
+    ["question", /Answer/, { handler: "onAnswer" as const }],
+    ["mr_closed", /Reopen MR/, { write: { method: "POST", path: "/work-items/w1/reopen-mr", body: {} } }],
+    ["stuck", /Retry/, { write: { method: "POST", path: "/work-items/w1/retry", body: { path: "verification" } } }],
+  ] as const)("a needs-you %s stop's main button is %s, and it acts", async (kind, name, want: { handler?: keyof Handlers; arg?: string; write?: object }) => {
+    const calls = stubFetch(WRITES);
+    const handlers = { onRaise: vi.fn(), onGate: vi.fn(), onAnswer: vi.fn() };
+    show({ display_status: "needs_you", status: "needs_human", stop: { kind, node: "verification", resume_at: null, reason: null } }, handlers);
+    expect(screen.queryByRole("button", { name: /Pause/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name }));
+    if (want.handler) {
+      expect(handlers[want.handler as keyof typeof handlers]).toHaveBeenCalledWith(...(want.arg ? [want.arg] : []));
+      expect(writes(calls)).toEqual([]);
+    } else await waitFor(() => expect(writes(calls)).toEqual([want.write]));
   });
 
   it("puts every ⋮ item on its route, the copied link on the shipped path, and Cancel… in ⋮ too", async () => {

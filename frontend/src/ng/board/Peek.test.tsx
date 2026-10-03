@@ -51,7 +51,7 @@ describe("Peek", () => {
     usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open gate" }));
+    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Open gate" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
     // The item page's pane, collapsed there before, opens on the gate.
     expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
@@ -73,20 +73,23 @@ describe("Peek", () => {
     expect((await screen.findAllByText(text)).length).toBeGreaterThan(0);
   });
 
-  it("opens Config with the budget editor from a budget stop's Raise cap", async () => {
+  // The banner's Raise cap and the footer's main button, which says the same (R11a-05).
+  it.each([".item-banner", ".pane-footer"])("opens Config with the budget editor from a budget stop's Raise cap in %s", async (where) => {
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
-    fireEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
+    await screen.findAllByRole("button", { name: "Raise cap" });
+    fireEvent.click(within(document.querySelector<HTMLElement>(where)!).getByRole("button", { name: "Raise cap" }));
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
   });
 
   it("moves focus into the budget editor's field, and Enter saves the typed cap (R10a-05)", async () => {
     const calls = mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
-    fireEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Raise cap" }))[0]);
     const field = await screen.findByRole("textbox", { name: "Budget in dollars" });
     expect(field).toHaveFocus();
-    await userEvent.clear(field);
-    await userEvent.type(field, "7{Enter}");
+    // The cap in force is selected, so typing replaces it rather than appending to it (R11a-03).
+    expect([(field as HTMLInputElement).selectionStart, (field as HTMLInputElement).selectionEnd]).toEqual([0, 1]);
+    await userEvent.keyboard("7{Enter}");
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toEqual([{ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: 7 } }]));
   });
 

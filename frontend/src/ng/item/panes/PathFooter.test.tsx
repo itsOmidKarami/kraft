@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acceptWrites, detail, stubFetch, type Call } from "../testkit";
@@ -65,6 +65,30 @@ describe("PathFooter", () => {
     render(<PathFooter item={detail({ steerable: false, display_status: "failed" })} path="m.o.open" what="task" state="stopped" reload={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(screen.queryByLabelText("Steer for the retry")).toBeNull();
+  });
+
+  // R11b-03: the button that opened a confirm is gone, so its focus fell to the page.
+  it.each([
+    ["Retry, steerable", "Retry", { display_status: "failed" }, "stopped", () => screen.getByLabelText("Steer for the retry")],
+    ["Retry, no agent to read a steer", "Retry", { display_status: "failed", steerable: false }, "stopped", () => within(screen.getByRole("group")).getByRole("button", { name: "Retry" })],
+    ["Skip", "Skip node", { display_status: "running" }, "running", () => screen.getByRole("button", { name: "Cancel" })],
+  ] as const)("%s: the confirm takes the focus, and Cancel and Escape hand it back to its opener", async (_name, opener, over, state, focused) => {
+    render(<PathFooter item={detail(over)} path="verification" what="node" state={state} reload={() => {}} />);
+    for (const close of ["{Escape}", "cancel"]) {
+      await userEvent.click(screen.getByRole("button", { name: opener }));
+      expect(focused()).toHaveFocus();
+      if (close === "cancel") await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      else await userEvent.keyboard(close);
+      expect(screen.queryByRole("group")).toBeNull();
+      expect(screen.getByRole("button", { name: opener })).toHaveFocus();
+    }
+  });
+
+  it("keeps a steer with text in it on Escape (R11b-02)", async () => {
+    render(<PathFooter item={detail({ display_status: "failed" })} path="verification" what="node" state="stopped" reload={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await userEvent.keyboard("Look at the tokenizer first{Escape}");
+    expect(screen.getByLabelText("Steer for the retry")).toHaveValue("Look at the tokenizer first");
   });
 
   it.each(["done", "cancelled", "archived"] as const)("offers no Retry or Skip on a %s item: its chain does not run again", (status) => {
