@@ -358,6 +358,46 @@ def test_open_document_launches_the_named_editor(
     assert launched == [[*argv, str(Path(doc["repo"]) / doc["path"])]]
 
 
+@pytest.mark.parametrize(
+    ("body", "theme", "env", "opens"),
+    [
+        ({"editor": None}, {"editor": "zed"}, "cursor", "zed"),
+        ({}, {}, "cursor", "cursor"),
+        ({"editor": None}, {}, None, "system"),
+        ({"editor": "system"}, {"editor": "zed"}, "cursor", "system"),
+        ({"editor": "code"}, {"editor": "zed"}, "cursor", "code"),
+    ],
+    ids=[
+        "null-is-the-settings-default",
+        "unsent-is-the-env-default",
+        "null-with-no-default-is-the-system-opener",
+        "system-is-the-opener-over-any-default",
+        "a-named-editor-wins",
+    ],
+)
+def test_open_document_resolves_which_editor_opens(
+    client, repo, monkeypatch, body, theme, env, opens
+):
+    """null is the default (Settings, else KRAFT_EDITOR); "system" is the opener
+    whatever the default, so the UI's "System default" can mean it."""
+    wid = _completed_item(client, repo)
+    doc_id = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0]["document_id"]
+    doc = _as_git_scan_doc(client, monkeypatch, doc_id)
+    launched = _spy_on_launches(monkeypatch)
+    monkeypatch.setattr("kraft.api.routes.search._os_open", lambda: ["xdg-open"])
+    if env:
+        monkeypatch.setenv("KRAFT_EDITOR", env)
+    else:
+        monkeypatch.delenv("KRAFT_EDITOR", raising=False)
+    if theme:
+        assert client.put("/api/theme", json=theme).status_code == 200
+    r = client.post(f"/api/documents/{doc_id}/open", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["editor"] == opens
+    exe = "/usr/bin/xdg-open" if opens == "system" else f"/usr/bin/{opens}"
+    assert launched == [[exe, str(Path(doc["repo"]) / doc["path"])]]
+
+
 @pytest.mark.parametrize("started", [True, False], ids=["worktree", "not-started"])
 def test_open_document_on_an_attachment_resolves_the_worktree_not_the_repo(
     client, tmp_path, monkeypatch, started

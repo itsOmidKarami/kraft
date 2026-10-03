@@ -540,5 +540,11 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
 
     open_p = subs.add_parser("open", parents=[common], help="open the worktree in an editor")
     open_p.add_argument("id", nargs="?")
-    open_p.add_argument("--editor", help="code, cursor, zed, obsidian (default: system)")
+    open_p.add_argument(
+        "--editor",
+        help=(
+            "code, cursor, zed, obsidian, or system for the OS opener (default: the "
+            "Default editor in Settings, else KRAFT_EDITOR, else system)"
+        ),
+    )
     open_p.set_defaults(func=_cmd_open)

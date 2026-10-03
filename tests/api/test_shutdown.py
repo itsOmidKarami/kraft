@@ -95,3 +95,35 @@ def test_sigterm_exits_with_a_websocket_client_connected(tmp_path):
             srv.proc.terminate()
             srv.proc.wait(timeout=10)
         assert srv.proc.returncode in (0, -signal.SIGTERM)
+
+
+def test_shutdown_ends_the_git_groups_left_once_the_walks_have_unwound(tmp_path, monkeypatch):
+    """R12E-04: a git runs in its own session, so nothing ended one still
+    running when the server stopped. Ended before the walks unwind, a walk's
+    `git rebase` would read as a conflict; after, only what no walk stopped
+    is left (a request's rebase)."""
+    import asyncio
+
+    from support.api import _client
+
+    from kraft import builtins as kraft_builtins
+
+    order: list[str] = []
+    monkeypatch.setattr(
+        kraft_builtins, "end_running_git_groups", lambda: order.append("git groups ended")
+    )
+
+    async def walk():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            order.append("walk unwound")
+
+    async def spawn(app):
+        app.state.tasks["w1"] = asyncio.ensure_future(walk())
+        await asyncio.sleep(0)  # into its wait, so the cancel reaches it
+
+    with _client(tmp_path, monkeypatch) as client:
+        client.portal.call(spawn, client.app)
+
+    assert order == ["walk unwound", "git groups ended"]

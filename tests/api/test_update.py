@@ -29,6 +29,8 @@ RELEASE_JSON = [
 def feed(tmp_path, monkeypatch):
     """The releases feed as a list the test swaps, counting each fetch."""
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    # The suite sets it everywhere (conftest); these tests are about the check.
+    monkeypatch.delenv("KRAFT_NO_UPDATE_CHECK", raising=False)
     state = {"payload": RELEASE_JSON, "fetches": 0}
 
     def fetch(_url, _timeout):
@@ -85,3 +87,31 @@ def test_the_channel_defaults_to_the_installed_ones_and_is_validated(client, fee
     assert client.get("/api/update?channel=alpha").json()["channel"] == "alpha"
     assert client.get("/api/update?channel=nightly").status_code == 400
     assert client.post("/api/update/check?channel=nightly").status_code == 400
+
+
+def test_no_update_check_makes_the_get_read_the_cache_only_and_leaves_the_posts_alone(
+    client, feed, monkeypatch
+):
+    """The sidebar reads GET on every page load; that is not an explicit check."""
+    monkeypatch.setenv("KRAFT_NO_UPDATE_CHECK", "1")
+    body = client.get("/api/update").json()
+    assert (body["latest"], body["behind"], body["checked_at"]) == (None, None, None)
+    assert feed["fetches"] == 0
+    assert not update._cache_path().exists()
+    # A person asking ("check now") is still answered ...
+    assert client.post("/api/update/check").json()["latest"] == "v0.4.0"
+    assert feed["fetches"] == 1
+    # ... and what it found is then what the quiet GET reports.
+    assert client.get("/api/update").json()["latest"] == "v0.4.0"
+    assert feed["fetches"] == 1
+
+
+def test_a_failed_check_is_not_retried_by_the_next_page_load(client, feed):
+    feed["payload"] = httpx.ConnectError("no route")
+    client.get("/api/update")
+    client.get("/api/update")
+    assert feed["fetches"] == 1
+    # "Check now" is not held to the window.
+    feed["payload"] = RELEASE_JSON
+    assert client.post("/api/update/check").json()["latest"] == "v0.4.0"
+    assert feed["fetches"] == 2
