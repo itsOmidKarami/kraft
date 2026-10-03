@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 
 import pytest
+from support.harness import write
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "dev" / "check_tests.py"
 
@@ -360,15 +361,9 @@ class TestEveryTestHasAnExpectation:
         assert ct.check_every_test_has_an_expectation(tree, relpath) == []
 
 
-def _parsed(root: Path, files: dict[str, str]) -> dict[str, ast.Module]:
-    """Write each `relpath: source` under `root` and parse it back, keyed by relpath."""
-    trees = {}
-    for relpath, source in files.items():
-        path = root / relpath
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source)
-        trees[relpath] = ast.parse(path.read_text())
-    return trees
+def _parsed(files: dict[str, str]) -> dict[str, ast.Module]:
+    """Each `relpath: source` parsed, keyed by relpath."""
+    return {relpath: ast.parse(source) for relpath, source in files.items()}
 
 
 # `_git` sits on line 4 of every file built from this.
@@ -379,6 +374,9 @@ _GIT = (
 )
 _MOVE_IT = "-- move it into tests/support/ and import it"
 _ZERO = {"groups": 0, "copies": 0}
+_NESTED = "def f(x):\n    def g(y):\n        return h(y, a=1, b=2)\n    return g(x)\n"
+_ROW = "\n\ndef _row(**f):\n    return {**DEFAULTS, **f}\n"
+_ENV = "\n\ndef _env():\n    return os.environ['HOME']\n"
 
 
 def _group_lines(ct, trees: dict, support: dict | None = None) -> list[str]:
@@ -398,45 +396,91 @@ class TestDuplicateHelpers:
     def _zero_ceiling(self, ct, monkeypatch):
         monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", dict(_ZERO))
 
-    def test_the_same_helper_body_in_several_files_is_one_group_naming_every_copy(
-        self, ct, tmp_path
-    ):
-        trees = _parsed(tmp_path, {f"tests/test_{x}.py": _GIT for x in "cab"})
+    def test_the_same_helper_body_in_several_files_is_one_group_naming_every_copy(self, ct):
+        trees = _parsed({f"tests/test_{x}.py": _GIT for x in "cab"})
         assert _group_lines(ct, trees) == [
             f"_git (3 copies): tests/test_a.py:4, tests/test_b.py:4, tests/test_c.py:4 {_MOVE_IT}"
         ]
 
-    def test_a_body_that_differs_only_in_keyword_order_is_the_same_body(self, ct, tmp_path):
-        reordered = _GIT.replace("check=True, text=True", "text=True, check=True")
-        trees = _parsed(tmp_path, {"tests/test_a.py": _GIT, "tests/test_b.py": reordered})
-        (line,) = _group_lines(ct, trees)
-        assert line.startswith("_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 ")
+    # Rule (e)'s "the same body", as `helper_fingerprint` decides it: two files
+    # each defining the last function of their source are one group or none.
+    @pytest.mark.parametrize(
+        ("first", "second", "same"),
+        [
+            pytest.param(
+                _GIT,
+                _GIT.replace("check=True, text=True", "text=True, check=True"),
+                True,
+                id="keyword-order",
+            ),
+            pytest.param(
+                _GIT,
+                _GIT.replace(
+                    "def _git(*args):\n",
+                    'def _git(*args: str) -> subprocess.CompletedProcess:\n    """Run git."""\n',
+                ),
+                True,
+                id="docstring-and-annotations",
+            ),
+            pytest.param(
+                _NESTED,
+                'def f(x: int) -> int:\n    """Doc."""\n'
+                "    def g(y: str):\n        return h(y, b=2, a=1)\n    return g(x)\n",
+                True,
+                id="annotations-and-keyword-order-in-a-nested-def",
+            ),
+            pytest.param(
+                "DEFAULTS = {'a': 1}\n" + _ROW,
+                "import os\nDEFAULTS = {'a': 1}\n" + _ROW,
+                True,
+                id="the-same-module-constant",
+            ),
+            pytest.param(
+                "DEFAULTS = {'a': 1}\n" + _ROW,
+                "DEFAULTS = {'a': 2}\n" + _ROW,
+                False,
+                id="another-module-constant",
+            ),
+            pytest.param(
+                "from defaults import DEFAULTS\n" + _ROW, _ROW, True, id="an-imported-name"
+            ),
+            pytest.param(
+                "import os\nos.environ['HOME'] = '/h'\n" + _ENV,
+                _ENV,
+                True,
+                id="a-name-only-assigned-into",
+            ),
+        ],
+    )
+    def test_the_same_body_is_one_helper(self, ct, first, second, same):
+        trees = _parsed({"tests/test_a.py": first, "tests/test_b.py": second})
+        assert len(ct.duplicate_helper_counts(trees, {})) == (1 if same else 0)
 
-    def test_a_body_that_differs_only_in_a_docstring_or_annotation_is_the_same_body(
-        self, ct, tmp_path
-    ):
-        dressed = _GIT.replace(
-            "def _git(*args):\n",
-            'def _git(*args: str) -> subprocess.CompletedProcess:\n    """Run git."""\n',
-        )
-        trees = _parsed(tmp_path, {"tests/test_a.py": _GIT, "tests/test_b.py": dressed})
-        (line,) = _group_lines(ct, trees)
-        assert line.startswith("_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 ")
-
-    def test_a_body_over_a_different_module_constant_is_a_different_helper(self, ct, tmp_path):
-        row = "def _row(**f):\n    return {**DEFAULTS, **f}\n"
-        trees = _parsed(
-            tmp_path,
-            {
-                "tests/test_a.py": "DEFAULTS = {'status': 'paused'}\n\n\n" + row,
-                "tests/test_b.py": "DEFAULTS = {'status': 'done'}\n\n\n" + row,
-            },
-        )
-        assert ct.check_duplicate_helpers(trees, {}) == []
-        trees |= _parsed(tmp_path, {"tests/test_c.py": "DEFAULTS = {'status': 'done'}\n\n\n" + row})
-        assert _group_lines(ct, trees) == [
-            f"_row (2 copies): tests/test_b.py:4, tests/test_c.py:4 {_MOVE_IT}"
-        ]
+    @pytest.mark.parametrize(
+        ("source", "appended"),
+        [
+            ("DEFAULTS = {'a': 1}\n" + _ROW, "\nDEFAULTS = {'a': 1}"),
+            ("DEFAULTS: dict = {'a': 1}\n" + _ROW, "\nDEFAULTS = {'a': 1}"),
+            ("OTHER, DEFAULTS = 0, {'a': 1}\n" + _ROW, "\nDEFAULTS = (0, {'a': 1})"),
+            ("OTHER = DEFAULTS = {'a': 1}\n" + _ROW, "\nDEFAULTS = {'a': 1}"),
+            ("DEFAULTS: dict\nDEFAULTS = {'a': 1}\n" + _ROW, "\nDEFAULTS = {'a': 1}"),
+            ("DEFAULTS = {}\nDEFAULTS = {'a': 1}\n" + _ROW, "\nDEFAULTS = {}\nDEFAULTS = {'a': 1}"),
+            ("B = 2\nA = 1\n" + _ROW.replace("DEFAULTS", "B, **A"), "\nA = 1\nB = 2"),
+        ],
+        ids=[
+            "plain",
+            "annotated",
+            "unpacked",
+            "chained",
+            "declared",
+            "rebound",
+            "sorted-by-name",
+        ],
+    )
+    def test_fingerprint_appends_each_module_constant_the_body_names(self, ct, source, appended):
+        module = ast.parse(source)
+        body = ast.unparse(module.body[-1].body)
+        assert ct.helper_fingerprint(module.body[-1], module) == body + appended
 
     _PUBLIC = "def commit_all(repo):\n    return run(repo, 'commit', '-am', 'files')\n"
     _PRIVATE = _PUBLIC.replace("commit_all", "_commit")
@@ -469,18 +513,15 @@ class TestDuplicateHelpers:
         ids=["public-support", "underscore-support", "public-name-in-a-test-file"],
     )
     def test_a_helper_matching_a_support_function_is_told_which_one_to_import(
-        self, ct, tmp_path, in_support, in_test_b, line
+        self, ct, in_support, in_test_b, line
     ):
-        trees = _parsed(
-            tmp_path, {"tests/api/test_a.py": self._PRIVATE, "tests/test_b.py": in_test_b}
-        )
-        support = _parsed(tmp_path, {"tests/support/harness.py": in_support} if in_support else {})
+        trees = _parsed({"tests/api/test_a.py": self._PRIVATE, "tests/test_b.py": in_test_b})
+        support = _parsed({"tests/support/harness.py": in_support} if in_support else {})
         assert _group_lines(ct, trees, support) == [line]
 
-    def test_a_genuinely_different_helper_with_the_same_name_is_not_flagged(self, ct, tmp_path):
+    def test_a_genuinely_different_helper_with_the_same_name_is_not_flagged(self, ct):
         other = _GIT.replace("check=True", "check=False")
         trees = _parsed(
-            tmp_path,
             {"tests/test_a.py": _GIT, "tests/test_b.py": _GIT, "tests/test_c.py": other},
         )
         (line,) = _group_lines(ct, trees)
@@ -490,10 +531,9 @@ class TestDuplicateHelpers:
     # `_commit` sits on line 8 of a file that is `_GIT` and then this.
     _COMMIT = "\n\ndef _commit(repo):\n    return run(repo, 'commit', '-am', 'files')\n"
 
-    def _two_groups(self, ct, tmp_path) -> dict:
+    def _two_groups(self, ct) -> dict:
         """`_git` in three files and `_commit` in two: 2 groups, 5 copies."""
         trees = _parsed(
-            tmp_path,
             {
                 "tests/test_a.py": _GIT + self._COMMIT,
                 "tests/test_b.py": _GIT + self._COMMIT,
@@ -504,10 +544,8 @@ class TestDuplicateHelpers:
         return trees
 
     @pytest.mark.parametrize(("over", "actual"), [("groups", 2), ("copies", 5)])
-    def test_copies_at_the_ceiling_pass_and_one_more_fails(
-        self, ct, tmp_path, monkeypatch, over, actual
-    ):
-        trees = self._two_groups(ct, tmp_path)
+    def test_copies_at_the_ceiling_pass_and_one_more_fails(self, ct, monkeypatch, over, actual):
+        trees = self._two_groups(ct)
         monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", {"groups": 2, "copies": 5})
         assert ct.check_duplicate_helpers(trees, {}) == []
         monkeypatch.setitem(ct.DUPLICATE_HELPER_CEILING, over, actual - 1)
@@ -519,10 +557,10 @@ class TestDuplicateHelpers:
         assert len(groups) == 2
         assert not any(line.startswith("duplicated helper ") for line in groups)
 
-    def test_a_breach_names_every_group_with_its_copies(self, ct, tmp_path, monkeypatch):
-        trees = self._two_groups(ct, tmp_path)
+    def test_a_breach_names_every_group_with_its_copies(self, ct, monkeypatch):
+        trees = self._two_groups(ct)
         support = _parsed(
-            tmp_path, {"tests/support/harness.py": self._COMMIT.replace("_commit", "commit_all")}
+            {"tests/support/harness.py": self._COMMIT.replace("_commit", "commit_all")}
         )
         # tests/support's public `commit_all` is a sixth copy, in the same two groups
         monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", {"groups": 2, "copies": 5})
@@ -549,18 +587,16 @@ class TestDuplicateHelpers:
             f"above the real {actual} -- tighten it to {actual} (margin is {margin})"
         ]
 
-    def test_a_test_function_is_never_a_helper(self, ct, tmp_path):
+    def test_a_test_function_is_never_a_helper(self, ct):
         test = "\n\ndef test_x():\n    assert _git('status')\n"
-        trees = _parsed(tmp_path, {"tests/test_a.py": _GIT + test, "tests/test_b.py": _GIT + test})
+        trees = _parsed({"tests/test_a.py": _GIT + test, "tests/test_b.py": _GIT + test})
         assert _group_lines(ct, trees) == [
             f"_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 {_MOVE_IT}"
         ]
 
-    def test_a_body_repeated_within_one_file_is_not_flagged(self, ct, tmp_path):
+    def test_a_body_repeated_within_one_file_is_not_flagged(self, ct):
         again = _GIT.split("\n\n\n", 1)[1].replace("def _git", "def _git_again")
-        trees = _parsed(
-            tmp_path, {"tests/test_a.py": _GIT + "\n\n" + again, "tests/test_b.py": "X = 1\n"}
-        )
+        trees = _parsed({"tests/test_a.py": _GIT + "\n\n" + again, "tests/test_b.py": "X = 1\n"})
         assert ct.duplicate_helper_counts(trees, {}) == {}
         assert ct.check_duplicate_helpers(trees, {}) == []
 
@@ -569,16 +605,10 @@ class TestDuplicateHelpers:
     ):
         public = "def commit_all(repo):\n    return run(repo, 'commit', '-am', 'files')\n"
         copy = public.replace("commit_all", "_commit") + "\n\ndef test_c():\n    assert _commit\n"
-        _parsed(
-            tmp_path,
-            {
-                "tests/support/harness.py": public,
-                "tests/test_a.py": copy,
-                f"{ct.PLUGIN_TESTS.as_posix()}/test_p.py": copy,
-            },
-        )
+        write(tmp_path, "tests/support/harness.py", public)
+        write(tmp_path, "tests/test_a.py", copy)
+        write(tmp_path, f"{ct.PLUGIN_TESTS.as_posix()}/test_p.py", copy)
         monkeypatch.setattr(ct, "ROOT", tmp_path)
-        monkeypatch.setattr(ct, "TESTS", tmp_path / "tests")
         monkeypatch.setattr(ct, "LINE_BUDGET_ALLOWLIST", {})
         monkeypatch.setattr(ct, "EXPECTATION_ALLOWLIST", set())
         monkeypatch.setattr(ct, "REAL_CLI_ALLOWLIST", {})
@@ -596,19 +626,16 @@ class TestDuplicateHelpers:
 
 
 class TestParseFailureIsAFailure:
-    def test_an_unparsable_file_is_reported_not_skipped(self, ct, tmp_path, monkeypatch):
-        monkeypatch.setattr(ct, "ROOT", tmp_path)
-        bad = tmp_path / "test_broken.py"
-        bad.write_text("def test_broken(:\n    pass\n")
-        tree, error = ct._parse(bad)
+    def test_an_unparsable_file_is_reported_not_skipped(self, ct, tmp_path):
+        bad = write(tmp_path, "tests/test_broken.py", "def test_broken(:\n    pass\n")
+        tree, error = ct._parse(bad, tmp_path)
         assert tree is None
         assert error is not None
         assert "could not parse" in error
 
     def test_main_exits_nonzero_when_any_file_fails_to_parse(self, ct, tmp_path, monkeypatch):
-        (tmp_path / "test_broken.py").write_text("def test_broken(:\n    pass\n")
+        write(tmp_path, "tests/test_broken.py", "def test_broken(:\n    pass\n")
         monkeypatch.setattr(ct, "ROOT", tmp_path)
-        monkeypatch.setattr(ct, "TESTS", tmp_path)
         assert ct.main() == 1
 
 
@@ -640,13 +667,12 @@ class TestUnreadableFileIsAFailure:
             path.chmod(0o644)
 
     @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
-    def test_parse_reports_it_as_a_violation_naming_the_file(self, ct, tmp_path, monkeypatch):
-        monkeypatch.setattr(ct, "ROOT", tmp_path)
+    def test_parse_reports_it_as_a_violation_naming_the_file(self, ct, tmp_path):
         path = tmp_path / "test_unreadable.py"
         path.write_text("def test_x():\n    assert True\n")
         path.chmod(0o000)
         try:
-            tree, error = ct._parse(path)
+            tree, error = ct._parse(path, tmp_path)
             assert tree is None
             assert error is not None
             assert "test_unreadable.py" in error
@@ -655,11 +681,9 @@ class TestUnreadableFileIsAFailure:
 
     @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
     def test_main_fails_rather_than_crashing_on_an_unreadable_file(self, ct, tmp_path, monkeypatch):
-        path = tmp_path / "test_unreadable.py"
-        path.write_text("def test_x():\n    assert True\n")
+        path = write(tmp_path, "tests/test_unreadable.py", "def test_x():\n    assert True\n")
         path.chmod(0o000)
         monkeypatch.setattr(ct, "ROOT", tmp_path)
-        monkeypatch.setattr(ct, "TESTS", tmp_path)
         try:
             assert ct.main() == 1
         finally:
@@ -676,7 +700,6 @@ class TestPluginTestsAreChecked:
         (plugin / "test_lite.py").write_text(body)
         (tmp_path / "tests").mkdir()
         monkeypatch.setattr(ct, "ROOT", tmp_path)
-        monkeypatch.setattr(ct, "TESTS", tmp_path / "tests")
         monkeypatch.setattr(ct, "REAL_CLI_ALLOWLIST", {})
         monkeypatch.setattr(ct, "EXPECTATION_ALLOWLIST", set())
         monkeypatch.setattr(ct, "LINE_BUDGET_ALLOWLIST", {})

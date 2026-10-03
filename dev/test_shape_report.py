@@ -13,9 +13,7 @@ numbers off a half-read tree are worse than none).
                             A non-literal second argument counts as 2 and is
                             tallied in `estimated_parametrize_sites`. Not seen:
                             fixture `params=`, `ON_FAKE_AND_REAL_BD`, `pytestmark`.
-    lines under tests/      physical lines of those `.py` files. (A plain
-                            `find tests -type f | xargs cat | wc -l` also counts
-                            the yaml/json fixtures and reads ~1% higher.)
+    lines under tests/      physical lines of those `.py` files
     verbatim-repeat lines   take every `.py` line under `tests/`, strip it, and
                             drop the trivial ones: a comment, an `import`
                             line, and anything shorter than MIN_LINE_LEN (25)
@@ -29,16 +27,14 @@ numbers off a half-read tree are worse than none).
                             Docstring bodies and decorators are kept.
     duplicated helpers      module-level `def`/`async def` not named `test_*` (a
                             class's methods are not), grouped by
-                            `helper_fingerprint`; a group defined in two or
-                            more files is a duplicated helper, reported under
-                            its most common name. "N names / M copies" is N
-                            groups and the M definitions in them. The fingerprint
-                            is strict (the body must be the same code once
-                            docstring, annotations and keyword order are gone,
-                            over the same module constant values), so it
-                            undercounts what a person sees as "the same
-                            `_git`"; `same-name helpers` is the looser count, a
-                            name defined in two or more files.
+                            `dev/check_tests.py`'s `helper_groups`; a group
+                            defined in two or more files is a duplicated helper,
+                            reported under its most common name. "N names / M
+                            copies" is N groups and the M definitions in them.
+                            The fingerprint is strict (rule (e)'s "the same
+                            body"), so it undercounts what a person sees as "the
+                            same `_git`"; `same-name helpers` is the looser
+                            count, a name defined in two or more files.
     densest modules         for each `src/kraft/**/*.py` of >= MIN_MODULE_LINES
                             code lines (not blank, not comment, not docstring),
                             the test functions in its mirrored test files,
@@ -47,19 +43,20 @@ numbers off a half-read tree are worse than none).
                             module `<a>_<b>` when that exists beside `<a>`, else
                             to `<a>`. Top TOP_MODULES.
 
-Stdlib only; `dev/check_tests.py` is loaded by path for its `_test_files` and
-`_parse`, so both tools read the same set of files the same way (and a parse
-failure is a failure here too). `measure(root)` is the seam: a repo root in,
-a plain dict out. `main` only prints it, as text or `--json`;
-`--print-helper-ceiling` emits the `DUPLICATE_HELPER_CEILING` line
-`dev/check_tests.py`'s rule (e) holds, computed by that checker's own
-grouping over both testpaths (the "duplicated helpers" numbers above count
-`tests/` only). `--root` points at another checkout.
+Stdlib only. `dev/check_tests.py` is loaded once, by path, and owns the
+reading and the grouping: its `_test_files` and `_parse` pick and parse the
+files (so a parse failure is a failure here too), and its `helper_groups` is
+what both its rule (e) and the numbers here group helpers by. `measure(root)`
+is the seam: a repo root in, a plain dict out. `main` only prints it, as text
+or `--json`; `--print-helper-ceiling` emits the `DUPLICATE_HELPER_CEILING`
+line `dev/check_tests.py`'s rule (e) holds, counted by that checker over both
+testpaths (the "duplicated helpers" numbers above count `tests/` only).
+`--root` points at another checkout.
 
 `--diff BASE HEAD` is the other mode: what one pull request does to the tree,
-as the markdown comment `.github/workflows/tests-nudge.yml` posts (the
-"--diff" section below says which three signs make it speak; otherwise it
-prints "nothing to nudge about"). It measures both revisions in throwaway
+as the markdown comment `.github/workflows/tests-nudge.yml` posts, printed
+only when `worth_saying` finds one of its three signs (otherwise stdout stays
+empty and the reason goes to stderr). It reads both revisions in throwaway
 `git worktree`s of `--root` and always exits 0.
 
 Run: `uv run python dev/test_shape_report.py [--json]`, or `just shape-report`.
@@ -69,8 +66,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import copy
-import hashlib
 import importlib.util
 import json
 import re
@@ -81,9 +76,9 @@ from collections import Counter, defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
-_CHECK_TESTS = Path(__file__).resolve().with_name("check_tests.py")
 
 REPEAT_AT = 5
 MIN_LINE_LEN = 25
@@ -95,88 +90,35 @@ _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _IMPORT = re.compile(r"(import |from \S+ import )")
 
 
-def _checker(root: Path):
-    """A private copy of `dev/check_tests.py` pointed at `root`, so its
-    `_test_files` and `_parse` work on another checkout (and on a tmp tree)."""
-    spec = importlib.util.spec_from_file_location("_dev_check_tests_for_shape", _CHECK_TESTS)
+def _load_check_tests():
+    path = Path(__file__).resolve().with_name("check_tests.py")
+    spec = importlib.util.spec_from_file_location("_dev_check_tests_for_shape", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.ROOT = root
-    mod.TESTS = root / "tests"
     return mod
 
 
-def _module_constants(module: ast.Module) -> dict[str, list[ast.expr]]:
-    """Every name `module` binds with a top-level `Assign`/`AnnAssign`, to the
-    value(s) it is bound to, in source order."""
-    values: dict[str, list[ast.expr]] = defaultdict(list)
-    for node in module.body:
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        for target in targets:
-            for name in ast.walk(target):
-                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
-                    values[name.id].append(value)
-    return dict(values)
-
-
-def helper_fingerprint(fn: ast.FunctionDef, module: ast.Module | None = None) -> str:
-    """The body of a module-level helper with everything that doesn't change
-    what it does stripped: docstring, annotations, return annotation, and
-    keyword-argument order in calls (the 17 `_git` copies differ only in
-    where `check=True` sits).
-
-    With `module` (the file `fn` is defined in), every name in the body
-    that `module` assigns at top level appends `NAME = <value>`, sorted by
-    name: nine `def _row(**f): return {**DEFAULTS, **f}` over nine different
-    `DEFAULTS` are nine helpers, not one. An imported or unknown name adds
-    nothing past the name already in the body."""
-    fn = copy.deepcopy(fn)
-    if fn.body and isinstance(fn.body[0], ast.Expr) and isinstance(fn.body[0].value, ast.Constant):
-        fn.body = fn.body[1:]
-    for node in ast.walk(fn):
-        if isinstance(node, ast.arg):
-            node.annotation = None
-        elif isinstance(node, ast.Call):
-            node.keywords.sort(key=lambda k: k.arg or "")
-    fn.returns = None
-    body = ast.unparse(fn.body)
-    if module is None:
-        return body
-    constants = _module_constants(module)
-    named = dict.fromkeys(
-        node.id
-        for stmt in fn.body
-        for node in ast.walk(stmt)
-        if isinstance(node, ast.Name) and node.id in constants
-    )
-    return "\n".join(
-        [body, *(f"{name} = {ast.unparse(v)}" for name in sorted(named) for v in constants[name])]
-    )
-
-
-def helper_key(name: str, fingerprint: str) -> str:
-    """`<name>#<first 8 hex of sha1(fingerprint)>`: a group's name, unique per body."""
-    return f"{name}#{hashlib.sha1(fingerprint.encode()).hexdigest()[:8]}"
+#: `dev/check_tests.py`, the one way this loads it: every root is passed in,
+#: never patched onto the module.
+check_tests = _load_check_tests()
 
 
 # -- test functions and collected cases -------------------------------------
 
 
-def _parametrize(decorators: list[ast.expr]) -> tuple[int, int]:
-    """`(cases, estimated_sites)` for one decorator list: the product of the
-    literal argvalues lengths; a non-literal one counts 2 and is an estimate."""
-    cases, estimated = 1, 0
+def _parametrize(decorators: list[ast.expr]) -> tuple[int, int, bool]:
+    """`(cases, estimated_sites, found)` for one decorator list: the product of
+    the literal argvalues lengths, how many of them were not literal (each
+    counts 2, an estimate), and whether any decorator is a `parametrize` at
+    all, a bare `@parametrize` with no cases to count included."""
+    cases, estimated, found = 1, 0, False
     for dec in decorators:
-        if not isinstance(dec, ast.Call):
-            continue
-        func = dec.func
+        func = dec.func if isinstance(dec, ast.Call) else dec
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
         if name != "parametrize":
+            continue
+        found = True
+        if not isinstance(dec, ast.Call):
             continue
         values = (
             dec.args[1]
@@ -190,21 +132,31 @@ def _parametrize(decorators: list[ast.expr]) -> tuple[int, int]:
         else:
             cases *= 2
             estimated += 1
-    return cases, estimated
+    return cases, estimated, found
 
 
-def _tally_tests(body: list[ast.stmt], outer: int, tally: Counter) -> None:
-    """Count `test_*` functions in `body` (recursing into classes only) into `tally`."""
+def _tests_with_decorators(body: list[ast.stmt], outer: list[ast.expr]) -> Iterator[tuple]:
+    """`(test function node, decorators of it and of its enclosing classes)`
+    for every `test_*` function in `body`, recursing into classes only."""
     for node in body:
         if isinstance(node, _FUNCS) and node.name.startswith("test_"):
-            cases, estimated = _parametrize(node.decorator_list)
-            tally["functions"] += 1
-            tally["cases"] += outer * cases
-            tally["estimated"] += estimated
+            yield node, [*outer, *node.decorator_list]
         elif isinstance(node, ast.ClassDef):
-            cases, estimated = _parametrize(node.decorator_list)
-            tally["estimated"] += estimated
-            _tally_tests(node.body, outer * cases, tally)
+            yield from _tests_with_decorators(node.body, [*outer, *node.decorator_list])
+
+
+def _tally_tests(body: list[ast.stmt]) -> Counter:
+    """`functions`, `cases` and `estimated` parametrize sites of the tests in
+    `body`. A class's decorator multiplies each of its tests' cases but is one
+    site, so sites are counted once per decorator node, not once per test."""
+    tally: Counter = Counter()
+    sites: dict[int, ast.expr] = {}
+    for _node, decorators in _tests_with_decorators(body, []):
+        tally["functions"] += 1
+        tally["cases"] += _parametrize(decorators)[0]
+        sites.update((id(d), d) for d in decorators)
+    tally["estimated"] = _parametrize(list(sites.values()))[1]
+    return tally
 
 
 # -- verbatim repeats -------------------------------------------------------
@@ -247,7 +199,7 @@ def _owner(test_stem: str, module_stems: set[str]) -> str | None:
     return max(matches, key=len) if matches else None
 
 
-def _densest(root: Path, tests_per_file: dict[str, int], errors: list[str], ck) -> list[dict]:
+def _densest(root: Path, tests_per_file: dict[str, int], errors: list[str]) -> list[dict]:
     src = root / "src" / "kraft"
     owned: dict[tuple[str, str], int] = defaultdict(int)  # (reldir, module stem) -> tests
     stems_by_dir: dict[str, set[str]] = {}
@@ -273,7 +225,7 @@ def _densest(root: Path, tests_per_file: dict[str, int], errors: list[str], ck) 
     for path in sorted(src.rglob("*.py")):
         if path.stem in ("__init__", "__main__"):
             continue
-        tree, error = ck._parse(path)
+        tree, error = check_tests._parse(path, root)
         if error is not None:
             errors.append(error)
             continue
@@ -298,90 +250,104 @@ def _densest(root: Path, tests_per_file: dict[str, int], errors: list[str], ck) 
 # -- the seam ----------------------------------------------------------------
 
 
-def measure(root: Path = ROOT) -> dict:
-    """The shape of `root/tests` (and `root/src/kraft`) as a plain dict."""
-    root = Path(root)
-    ck = _checker(root)
-    tests_dir = root / "tests"
-    errors: list[str] = []
-    tally: Counter = Counter()
+class _Read(NamedTuple):
+    """One pass over `root/tests`: what `measure` sums up and `diff` compares."""
+
+    #: relpath -> module, for every file that parsed
+    trees: dict[str, ast.Module]
+    #: `check_tests.helper_groups(trees)`: fingerprint -> group, one-file ones too
+    helpers: dict
+    #: physical lines, summed
+    lines: int
+    #: every non-trivial stripped line -> how many times it is seen
+    line_counts: Counter
+    #: `functions`, `cases`, `estimated`, summed
+    tally: Counter
+    tests_per_file: dict[str, int]
+    errors: list[str]
+
+
+def _read(root: Path) -> _Read:
+    """Every `.py` under `root/tests`, parsed and read once."""
+    trees: dict[str, ast.Module] = {}
     lines = 0
     line_counts: Counter = Counter()
+    tally: Counter = Counter()
     tests_per_file: dict[str, int] = {}
-    defs: dict[str, list[tuple[str, str]]] = defaultdict(list)  # fingerprint -> (relpath, name)
-
-    for path in ck._test_files():
-        if not path.is_relative_to(tests_dir):
+    errors: list[str] = []
+    for path in check_tests._test_files(root):
+        if not path.is_relative_to(root / check_tests.TESTS):
             continue  # the plugin's testpath is not `tests/`
         relpath = path.relative_to(root).as_posix()
-        tree, error = ck._parse(path)
+        tree, error = check_tests._parse(path, root)
         if error is not None:
             errors.append(error)
             continue
-        text = path.read_text()
-        file_lines = text.splitlines()
+        trees[relpath] = tree
+        file_lines = path.read_text().splitlines()
         lines += len(file_lines)
-        for raw in file_lines:
-            line = raw.strip()
-            if not _trivial(line):
-                line_counts[line] += 1
-        before = tally["functions"]
-        _tally_tests(tree.body, 1, tally)
-        tests_per_file[relpath] = tally["functions"] - before
-        for node in tree.body:
-            if isinstance(node, _FUNCS) and not node.name.startswith("test_"):
-                defs[helper_fingerprint(node, tree)].append((relpath, node.name))
+        line_counts.update(line for line in map(str.strip, file_lines) if not _trivial(line))
+        file_tally = _tally_tests(tree.body)
+        tally.update(file_tally)
+        tests_per_file[relpath] = file_tally["functions"]
+    helpers = check_tests.helper_groups(trees)
+    return _Read(trees, helpers, lines, line_counts, tally, tests_per_file, errors)
 
+
+def _repeated(line_counts: Counter) -> int:
+    """The verbatim-repeat lines: every sighting of a line seen REPEAT_AT+ times."""
+    return sum(n for n in line_counts.values() if n >= REPEAT_AT)
+
+
+def _repeat_pct(line_counts: Counter) -> float:
     nontrivial = sum(line_counts.values())
-    repeated = sum(n for n in line_counts.values() if n >= REPEAT_AT)
+    return 100 * _repeated(line_counts) / nontrivial if nontrivial else 0.0
 
-    groups = []
-    for fingerprint, found in defs.items():
-        files = sorted({f for f, _ in found})
-        if len(files) < 2:
-            continue
-        names = Counter(n for _, n in found)
-        name = min(names, key=lambda n: (-names[n], n))
-        groups.append(
-            {
-                "name": name,
-                "copies": len(found),
-                "files": files,
-                "key": helper_key(name, fingerprint),
-            }
-        )
-    groups.sort(key=lambda g: (-g["copies"], g["name"], g["key"]))
 
+def _duplicated_helpers(helpers: dict) -> list[dict]:
+    """The groups defined in two or more files, most copies first."""
+    groups = [
+        {"name": g.name, "copies": len(g.copies), "files": g.files, "key": g.key}
+        for g in helpers.values()
+        if len(g.files) >= 2
+    ]
+    return sorted(groups, key=lambda g: (-g["copies"], g["name"], g["key"]))
+
+
+def _same_name_helpers(helpers: dict) -> list[dict]:
+    """The names defined in two or more files, whatever their bodies."""
     by_name: dict[str, list[str]] = defaultdict(list)
-    for found in defs.values():
-        for relpath, name in found:
-            by_name[name].append(relpath)
-    same_name = sorted(
+    for group in helpers.values():
+        for helper in group.copies:
+            by_name[helper.name].append(helper.relpath)
+    return sorted(
         ({"name": n, "copies": len(f)} for n, f in by_name.items() if len(set(f)) >= 2),
         key=lambda g: (-g["copies"], g["name"]),
     )
 
+
+def _totals(groups: list[dict]) -> dict:
+    return {"names": len(groups), "copies": sum(g["copies"] for g in groups), "groups": groups}
+
+
+def measure(root: Path = ROOT) -> dict:
+    """The shape of `root/tests` (and `root/src/kraft`) as a plain dict."""
+    root = Path(root)
+    read = _read(root)
+    errors = list(read.errors)
     densest = (
-        _densest(root, tests_per_file, errors, ck) if (root / "src" / "kraft").is_dir() else []
+        _densest(root, read.tests_per_file, errors) if (root / "src" / "kraft").is_dir() else []
     )
     return {
-        "test_functions": tally["functions"],
-        "collected_cases": tally["cases"],
-        "estimated_parametrize_sites": tally["estimated"],
-        "lines": lines,
-        "nontrivial_lines": nontrivial,
-        "verbatim_repeat_lines": repeated,
-        "verbatim_repeat_pct": round(100 * repeated / nontrivial, 1) if nontrivial else 0.0,
-        "duplicated_helpers": {
-            "names": len(groups),
-            "copies": sum(g["copies"] for g in groups),
-            "groups": groups,
-        },
-        "same_name_helpers": {
-            "names": len(same_name),
-            "copies": sum(g["copies"] for g in same_name),
-            "groups": same_name,
-        },
+        "test_functions": read.tally["functions"],
+        "collected_cases": read.tally["cases"],
+        "estimated_parametrize_sites": read.tally["estimated"],
+        "lines": read.lines,
+        "nontrivial_lines": sum(read.line_counts.values()),
+        "verbatim_repeat_lines": _repeated(read.line_counts),
+        "verbatim_repeat_pct": round(_repeat_pct(read.line_counts), 1),
+        "duplicated_helpers": _totals(_duplicated_helpers(read.helpers)),
+        "same_name_helpers": _totals(_same_name_helpers(read.helpers)),
         "densest_modules": densest,
         "parse_errors": errors,
     }
@@ -417,9 +383,9 @@ def helper_ceiling(root: Path = ROOT) -> tuple[dict[str, int], list[str]]:
     `dev/check_tests.py` itself computes, over the files its `main()` walks
     (`plugins/kraft-lite/tests/` included), so a ceiling seeded from here is
     the one the check holds the tree to."""
-    ck = _checker(root)
-    trees, support, errors = ck.trees_and_support()
-    return ck.duplicate_helper_totals(ck.duplicate_helper_counts(trees, support)), errors
+    trees, support, errors = check_tests.trees_and_support(Path(root))
+    counts = check_tests.duplicate_helper_counts(trees, support)
+    return check_tests.duplicate_helper_totals(counts), errors
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -460,28 +426,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # -- `--diff BASE HEAD`: what one pull request does to the tree ---------------
-#
-# `tests-nudge.yml` posts this as a PR comment, and only when a PR shows one of
-# three signs of the shape `docs/testing.md` ("One behaviour, one test") argues
-# against; the rest of the time it says nothing, because a nudge that fires on
-# every PR trains everyone to ignore it (the reason `docs-nudge.yml` gives too):
-#
-#   - three or more test functions added, none of them parametrized;
-#   - a module-level helper added whose fingerprint already exists in another
-#     file (a copy outside `tests/support`, where the shared ones live);
-#   - the added lines' verbatim-repeat share is above the tree's own.
-#
-# "Already present elsewhere" is judged against the BASE tree, never HEAD: in
-# HEAD a PR's own lines would count as each other's repeats.
 
 QUIET = "nothing to nudge about"
 NUDGE_MIN_FUNCTIONS = 3
 # A share of a handful of lines says nothing (one added `assert response.status_code == 200`
 # is "100% repeat"), so the share only counts from this many added non-trivial lines.
 NUDGE_MIN_ADDED_LINES = 20
-SUPPORT = "tests/support/"
 MAX_HELPER_ROWS = 3
 
+#: A hunk header, old start,count then new start,count; a count of 1 is left
+#: out. `@@ -12,0 +13,4 @@` adds four lines after old line 12, as 13 to 16.
 _HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _DEF = re.compile(r"\s*(?:async\s+)?def\s+(\w+)")
 
@@ -509,34 +463,11 @@ def _checkout(root: Path, rev: str) -> Iterator[Path]:
             subprocess.run(["git", "-C", str(root), "worktree", "prune"], capture_output=True)
 
 
-def _scan(root: Path) -> tuple[Counter, dict[str, list[tuple[str, str]]]]:
-    """`(line_counts, helpers)` of `root/tests`, read the way `measure` reads it:
-    every non-trivial stripped line with its count, and the module-level
-    helpers as fingerprint -> [(relpath, name)]."""
-    ck = _checker(root)
-    line_counts: Counter = Counter()
-    helpers: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for path in ck._test_files():
-        if not path.is_relative_to(root / "tests"):
-            continue
-        tree, error = ck._parse(path)
-        if error is not None:
-            continue  # `measure` reports it
-        for raw in path.read_text().splitlines():
-            if not _trivial(raw.strip()):
-                line_counts[raw.strip()] += 1
-        relpath = path.relative_to(root).as_posix()
-        for node in tree.body:
-            if isinstance(node, _FUNCS) and not node.name.startswith("test_"):
-                helpers[helper_fingerprint(node, tree)].append((relpath, node.name))
-    return line_counts, helpers
-
-
 def _added_by_file(root: Path, base: str, head: str) -> dict[str, dict]:
     """`git diff BASE HEAD -- tests/` for `.py` files: per new path, the added
     lines `[(line number in HEAD, stripped text)]` and the names of the `def`s
-    that lines were removed from. Renames are followed, so a moved file adds
-    only what it changed."""
+    the diff removes (each removed line that is itself a `def` line). Renames
+    are followed, so a moved file adds only what it changed."""
     diff = _git(
         root,
         "-c",
@@ -583,72 +514,41 @@ def _added_by_file(root: Path, base: str, head: str) -> dict[str, dict]:
     return files
 
 
-def _has_parametrize(decorators: list[ast.expr]) -> bool:
-    for dec in decorators:
-        func = dec.func if isinstance(dec, ast.Call) else dec
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name == "parametrize":
-            return True
-    return False
-
-
-def _tests_with_decorators(body: list[ast.stmt], outer: list[ast.expr]) -> Iterator[tuple]:
-    """`(test function node, decorators of it and of its enclosing classes)`."""
-    for node in body:
-        if isinstance(node, _FUNCS) and node.name.startswith("test_"):
-            yield node, [*outer, *node.decorator_list]
-        elif isinstance(node, ast.ClassDef):
-            yield from _tests_with_decorators(node.body, [*outer, *node.decorator_list])
-
-
-def _added_tests(head_tree: Path, changes: dict[str, dict]) -> tuple[int, int]:
-    """`(added test functions, how many of them carry a parametrize)`: a test
-    function whose `def` line the diff added, unless the same diff removed a
-    `def` of that name from the file (an edited signature, not a new test)."""
-    ck = _checker(head_tree)
+def _added_tests(head: dict[str, ast.Module], changes: dict[str, dict]) -> tuple[int, int]:
+    """`(added test functions, how many of them carry a parametrize)` in the
+    HEAD trees `head`: a test function whose `def` line the diff added, unless
+    the same diff removed a `def` of that name from the file (an edited
+    signature, not a new test)."""
     added = parametrized = 0
     for relpath, change in sorted(changes.items()):
-        path = head_tree / relpath
-        if not path.is_file() or not change["added"]:
-            continue
-        tree, error = ck._parse(path)
-        if error is not None:
+        tree = head.get(relpath)
+        if tree is None or not change["added"]:
             continue
         added_at = {number for number, _ in change["added"]}
         for node, decorators in _tests_with_decorators(tree.body, []):
             if node.lineno in added_at and node.name not in change["removed_defs"]:
                 added += 1
-                parametrized += _has_parametrize(decorators)
+                parametrized += _parametrize(decorators)[2]
     return added, parametrized
-
-
-def _shared_name(copies: list[tuple[str, str]]) -> str | None:
-    """`support.harness.commit_all` for a copy that lives under `tests/support`."""
-    for relpath, name in sorted(copies):
-        if relpath.startswith(SUPPORT):
-            module = relpath[len("tests/") : -len(".py")].replace("/", ".")
-            return f"{module}.{name}"
-    return None
 
 
 def _added_helpers(before: dict, after: dict) -> list[dict]:
     """The helper groups a PR grew by a file that is not under `tests/support`:
     HEAD has more files with that fingerprint than BASE, and at least two."""
     rows = []
-    for fingerprint, copies in after.items():
-        files_now = {f for f, _ in copies}
-        files_before = {f for f, _ in before.get(fingerprint, [])}
-        new_files = {f for f in files_now - files_before if not f.startswith(SUPPORT)}
-        if not new_files or len(files_now) < 2 or len(files_now) <= len(files_before):
+    for fingerprint, group in after.items():
+        files_before = set(before[fingerprint].files) if fingerprint in before else set()
+        new_files = {h.relpath for h in group.copies if not h.in_support} - files_before
+        if not new_files or len(group.files) < 2 or len(group.files) <= len(files_before):
             continue
-        added = [(f, n) for f, n in copies if f in new_files]
-        names = Counter(n for _, n in added)
+        added = [h for h in group.copies if h.relpath in new_files]
+        original = group.original
         rows.append(
             {
-                "name": min(names, key=lambda n: (-names[n], n)),
+                "name": check_tests.most_common_name(h.name for h in added),
                 "added": len(added),
-                "exist": len(copies),
-                "shared": _shared_name(copies),
+                "exist": len(group.copies),
+                "shared": original.dotted if original else None,
             }
         )
     rows.sort(key=lambda r: (-r["added"], r["name"]))
@@ -657,47 +557,53 @@ def _added_helpers(before: dict, after: dict) -> list[dict]:
 
 def diff(base: str, head: str, root: Path = ROOT) -> dict:
     """The delta HEAD makes to `root`'s test tree relative to BASE, as a plain
-    dict (`format_nudge` words it, `signs` says whether it is worth saying)."""
+    dict (`format_nudge` words it, `worth_saying` says whether to). "Already
+    present elsewhere" is judged against the BASE tree, never HEAD: in HEAD a
+    PR's own lines would count as each other's repeats."""
     root = Path(root)
     changes = _added_by_file(root, base, head)
     with _checkout(root, base) as base_tree, _checkout(root, head) as head_tree:
-        before, after = measure(base_tree), measure(head_tree)
-        base_counts, base_helpers = _scan(base_tree)
-        _, head_helpers = _scan(head_tree)
-        added_functions, added_parametrized = _added_tests(head_tree, changes)
+        before, after = _read(base_tree), _read(head_tree)
+    added_functions, added_parametrized = _added_tests(after.trees, changes)
     added_lines = [text for c in changes.values() for _, text in c["added"] if not _trivial(text)]
-    repeated = sum(1 for text in added_lines if base_counts[text] >= REPEAT_AT)
-    base_nontrivial = before["nontrivial_lines"]
     return {
-        "test_functions": after["test_functions"] - before["test_functions"],
-        "collected_cases": after["collected_cases"] - before["collected_cases"],
-        "lines": after["lines"] - before["lines"],
+        "test_functions": after.tally["functions"] - before.tally["functions"],
+        "collected_cases": after.tally["cases"] - before.tally["cases"],
+        "lines": after.lines - before.lines,
         "added_functions": added_functions,
         "added_parametrized": added_parametrized,
         "added_nontrivial_lines": len(added_lines),
-        "added_repeated_lines": repeated,
-        "base_repeat_pct": (
-            100 * before["verbatim_repeat_lines"] / base_nontrivial if base_nontrivial else 0.0
+        "added_repeated_lines": sum(
+            1 for text in added_lines if before.line_counts[text] >= REPEAT_AT
         ),
-        "helpers": _added_helpers(base_helpers, head_helpers),
-        "parse_errors": [*before["parse_errors"], *after["parse_errors"]],
+        "base_repeat_pct": _repeat_pct(before.line_counts),
+        "helpers": _added_helpers(before.helpers, after.helpers),
+        "parse_errors": [*before.errors, *after.errors],
     }
 
 
-def signs(delta: dict) -> list[str]:
-    """Which of the three signs `delta` shows, by name; empty means stay quiet."""
-    found = []
-    if delta["added_functions"] >= NUDGE_MIN_FUNCTIONS and delta["added_parametrized"] == 0:
-        found.append("functions")
-    if delta["helpers"]:
-        found.append("helper")
+def worth_saying(delta: dict) -> bool:
+    """Whether `delta` shows one of the three signs of the shape
+    `docs/testing.md` ("One behaviour, one test") argues against. This is the
+    one statement of them; everything else that names them points here:
+
+      - NUDGE_MIN_FUNCTIONS or more test functions added, none parametrized;
+      - a module-level helper added whose body already exists in another file
+        (a copy outside `tests/support`, where the shared ones live);
+      - the added lines' verbatim-repeat share above the BASE tree's own,
+        counted from NUDGE_MIN_ADDED_LINES added non-trivial lines.
+
+    Otherwise the nudge says nothing: one that fires on every PR trains
+    everyone to ignore it (the reason `docs-nudge.yml` gives too)."""
     added = delta["added_nontrivial_lines"]
-    if (
-        added >= NUDGE_MIN_ADDED_LINES
-        and 100 * delta["added_repeated_lines"] / added > delta["base_repeat_pct"]
-    ):
-        found.append("repeats")
-    return found
+    return (
+        (delta["added_functions"] >= NUDGE_MIN_FUNCTIONS and delta["added_parametrized"] == 0)
+        or bool(delta["helpers"])
+        or (
+            added >= NUDGE_MIN_ADDED_LINES
+            and 100 * delta["added_repeated_lines"] / added > delta["base_repeat_pct"]
+        )
+    )
 
 
 def format_nudge(delta: dict) -> str:
@@ -736,23 +642,21 @@ def format_nudge(delta: dict) -> str:
 
 
 def run_diff(base: str, head: str, root: Path = ROOT) -> int:
-    """Print the nudge, or `QUIET`; exit 0 always. A revision that cannot be
-    measured is said on stderr and is quiet on stdout: this reminds, it never
-    fails a pull request."""
+    """Print the nudge when `worth_saying`, else nothing on stdout and the
+    reason on stderr; exit 0 always. A revision that cannot be measured is
+    one more reason on stderr: this reminds, it never fails a pull request."""
     try:
         delta = diff(base, head, root)
     except (subprocess.CalledProcessError, OSError) as exc:
         detail = getattr(exc, "stderr", None) or exc
         print(f"tests nudge skipped: {detail}".rstrip(), file=sys.stderr)
-        print(QUIET)
         return 0
     if delta["parse_errors"]:
         print("tests nudge skipped:\n" + "\n".join(delta["parse_errors"]), file=sys.stderr)
-        print(QUIET)
-    elif signs(delta):
+    elif worth_saying(delta):
         print(format_nudge(delta))
     else:
-        print(QUIET)
+        print(QUIET, file=sys.stderr)
     return 0
 
 

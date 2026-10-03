@@ -4,6 +4,7 @@ Kraft stores, so half of these tests are about where it must *not* appear."""
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import stat
@@ -48,6 +49,23 @@ def test_notify_yaml_loads_with_every_missing_key_defaulted(tmp_path, text, expe
     if text is not None:
         path.write_text(text)
     assert config.Notify.load(path).model_dump() == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        (MALFORMED.decode(), "^notify.yaml: not valid YAML$"),
+        ("url: https://hook.invalid/t0ken\nbase_url: 8080\n", "^notify.yaml: base_url: "),
+    ],
+    ids=["malformed-yaml", "malformed-base-url"],
+)
+def test_notify_load_refuses_a_file_it_cannot_use(tmp_path, text, error):
+    """A file that does not parse, or that parses into a value the model
+    refuses (`base_url: 8080`, a YAML int), fails at load, not at send time."""
+    path = tmp_path / "notify.yaml"
+    path.write_text(text)
+    with pytest.raises(config.ConfigError, match=error):
+        config.Notify.load(path)
 
 
 def test_saved_notify_yaml_is_0600_because_it_holds_a_token(tmp_path):
@@ -309,27 +327,20 @@ async def test_start_honours_a_passed_cursor_instead_of_a_fresh_max_seq(tmp_path
 
 
 @pytest.mark.parametrize(
-    ("text", "load_error"),
+    "text",
     [
-        ("enabled: false\nurl: https://hook.invalid/t0ken\n", None),
-        ("enabled: true\n", None),
-        (MALFORMED.decode(), "not valid YAML"),
-        ("enabled: true\nurl: https://hook.invalid/t0ken\nbase_url: 8080\n", "base_url"),
+        "enabled: false\nurl: https://hook.invalid/t0ken\n",
+        "enabled: true\n",
+        MALFORMED.decode(),
+        "enabled: true\nurl: https://hook.invalid/t0ken\nbase_url: 8080\n",
     ],
     ids=["disabled", "enabled-without-a-url", "malformed-yaml", "malformed-base-url"],
 )
-async def test_a_notify_yaml_that_cannot_send_sends_nothing_and_keeps_up(
-    tmp_path, database, text, load_error
-):
-    """Off, armed with nowhere to send, or unparsable: the notifier sends
-    nothing and records no failure, and its cursor still keeps up, so enabling
-    later does not burst a day of stale stops.
-
-    A file Kraft cannot parse must not guess at being enabled: `reload()`
-    falls back to the defaults rather than keep serving the config it had.
-    An operator typo like `base_url: 8080` (a YAML int) used to survive load
-    and fail at send time; the model now rejects it at load, the same "sends
-    nothing" failure mode."""
+async def test_a_notify_yaml_that_cannot_send_sends_nothing_and_keeps_up(tmp_path, database, text):
+    """Off, armed with nowhere to send, or a file `Notify.load` refuses: the
+    notifier sends nothing and records no failure, and its cursor still keeps
+    up, so enabling later does not burst a day of stale stops. A refused file
+    reads as the defaults, not as the config the notifier had before it."""
 
     await _seed_item(database)
     sends: list = []
@@ -337,9 +348,6 @@ async def test_a_notify_yaml_that_cannot_send_sends_nothing_and_keeps_up(
     # Written as an operator would, by hand: the model refuses to save these.
     path = tmp_path / "notify.yaml"
     path.write_text(text)
-    if load_error:
-        with pytest.raises(config.ConfigError, match=load_error):
-            config.Notify.load(path)
     n.reload()
     await n.start()
     await database.write(
@@ -609,55 +617,62 @@ def test_a_bad_notify_yaml_at_startup_disables_instead_of_crashing(
     assert "t0ken" not in caplog.text
 
 
+_GET = {"method": "GET"}
+_PUT = {"method": "PUT", "json": {"enabled": True}}
+
+
 @pytest.mark.parametrize(
-    ("content", "unreadable", "method", "detail"),
+    ("content", "call", "detail"),
     [
-        (MALFORMED, False, "get", "notify.yaml: not valid YAML"),
-        (INVALID_UTF8, False, "get", "notify.yaml: not valid YAML"),
+        (MALFORMED, _GET, "notify.yaml: not valid YAML"),
+        (INVALID_UTF8, _GET, "notify.yaml: not valid YAML"),
         (
             b"url: [https://hook.invalid/t0ken]\n",
-            False,
-            "get",
+            _GET,
             "notify.yaml: url: Input should be a valid string",
         ),
-        pytest.param(
-            b"url: https://hook.invalid/t0ken\n",
-            True,
-            "get",
-            "notify.yaml: cannot be read: Permission denied",
-            marks=pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions"),
-        ),
-        (MALFORMED, False, "put", "notify.yaml: not valid YAML"),
+        (MALFORMED, _PUT, "notify.yaml: not valid YAML"),
     ],
-    ids=["malformed-get", "utf8-get", "invalid-value-get", "denied-get", "malformed-put"],
+    ids=["malformed", "utf8", "invalid-value", "malformed-put"],
 )
-def test_a_bad_notify_file_is_reported_cleanly(client, caplog, content, unreadable, method, detail):
+def test_a_bad_notify_file_is_reported_cleanly(client, caplog, content, call, detail):
     """`read_yaml`'s `ConfigError` normally quotes the offending source line,
     and pydantic's error echoes the offending value -- for `notify.yaml` that
     line or value is the webhook URL. `config.Notify.load` sanitizes both
     before the route (and the global `ConfigError` handler) ever see them, for
     `GET` and for `PUT`, which loads the file before it touches the request
-    body. It must not blanket an unreadable file into "not valid YAML"
-    either: an operator who cannot read their own file needs to be told that,
-    not sent hunting for a typo that is not there. A `PUT` that cannot read the
-    file leaves it as it was."""
+    body, and leaves the file as it was."""
     path = Path(client.app.state.templates_dir) / "notify.yaml"
     path.write_bytes(content)
-    if unreadable:
-        os.chmod(path, 0o000)
-    try:
-        if method == "get":
-            res = client.get("/api/notify")
-        else:
-            res = client.put("/api/notify", json={"enabled": True})
-    finally:
-        os.chmod(path, 0o600)
+
+    res = client.request(url="/api/notify", **call)
 
     assert res.status_code == 422
     assert res.json() == {"detail": detail}
     assert "t0ken" not in res.text
     assert "t0ken" not in caplog.text
     assert path.read_bytes() == content
+
+
+def test_an_unreadable_notify_file_is_reported_as_unreadable(client, monkeypatch):
+    """Not blanketed into "not valid YAML": an operator who cannot read their
+    own file needs to be told that, not sent hunting for a typo that is not
+    there. The read fails the way it does for a non-root reader of a 0o000
+    file (root ignores the mode bits, so the test raises it itself)."""
+    path = Path(client.app.state.templates_dir) / "notify.yaml"
+    path.write_text("url: https://hook.invalid/t0ken\n")
+    read_text = Path.read_text
+
+    def denied(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(self))
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    res = client.get("/api/notify")
+
+    assert res.status_code == 422
+    assert res.json() == {"detail": "notify.yaml: cannot be read: Permission denied"}
 
 
 @pytest.mark.parametrize(

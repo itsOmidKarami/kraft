@@ -205,7 +205,7 @@ CI's order, on the full suite.
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
 | `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
 | `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
-| `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only when it adds three or more unparametrized tests, copies a helper, or repeats the tree more than the tree repeats itself; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
+| `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only on one of the three signs its `worth_saying` states; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
 | `codeql` | GitHub's static analysis | nothing to run |
 
 **Removed tests.** If your pull request deletes a test function, a frontend
