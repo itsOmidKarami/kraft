@@ -1,7 +1,7 @@
 import { EllipsisVertical } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { elapsedBetween, shortId } from "../../../format";
+import { DOLLARS_HINT, dollars, elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
@@ -262,8 +262,9 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
         error={error}
         busy={busy}
         onSubmit={async (v) => {
-          const n = Number(v);
-          if (!(n > 0)) return setError("Enter a dollar amount above 0.");
+          // As the desktop's editor reads it: "Infinity" took the cap off, "1,000" is a thousand or one (r12 review).
+          const n = dollars(v);
+          if (!(n > 0)) return setError(Number.isNaN(n) && v.trim() ? DOLLARS_HINT : "Enter a dollar amount above 0.");
           const r = await run(act.raiseBudget(item.id, n), "Budget raised. The item is running again.");
           if (r.ok) sheet.close();
           else setError(r.error);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { dollars, repoName, tokens, usd } from "../../../format";
+import { dollars, DOLLARS_HINT, repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -149,6 +149,7 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
         <Button type="submit" variant="primary" disabled={!(amount > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
       </form>
+      {value.trim() && Number.isNaN(amount) && <p className="item-muted">{DOLLARS_HINT}</p>}
       {error && <p className="item-error" role="alert">{error}</p>}
     </div>
   );

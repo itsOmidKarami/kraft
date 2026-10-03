@@ -106,12 +106,15 @@ describe("elapsedBetween + nodeRunSpan (W0.4)", () => {
 });
 
 // R12b-10: "1,000" saved a $1.00 cap; a lone decimal comma still reads as a point (#504 review).
+// Anything it cannot read for sure is NaN, so Save stays off (r12 review: "Infinity" removed the cap).
 describe("dollars", () => {
   it.each([
-    ["7", 7], ["0.03", 0.03], ["$12.5", 12.5],
+    ["7", 7], ["0.03", 0.03], ["$12.5", 12.5], [".5", 0.5],
     ["0,5", 0.5], ["0,03", 0.03], ["0,500", 0.5], ["1,5", 1.5],
-    ["1,000", 1000], ["12,345,678", 12345678], ["1,000.50", 1000.5], ["1.000,50", 1000.5],
-    ["1,00,0", NaN], ["1.000.000,5,0", NaN], ["1,000,00", NaN], ["abc", NaN],
+    ["12,345,678", 12345678], ["1.000.000", 1000000], ["1,000.50", 1000.5], ["1.000,50", 1000.5],
+    ["1,000", NaN], ["1.000", NaN], ["1.500", NaN], ["1,500", NaN],
+    ["1,", NaN], ["1,234,56", NaN], ["1,00,0", NaN], ["1.000.000,5,0", NaN], ["abc", NaN], ["", NaN],
+    ["Infinity", NaN], ["0x10", NaN], ["0b11", NaN], ["1e3", NaN], ["-5", NaN],
   ])("reads %j as %d", (typed, amount) => {
     expect(dollars(typed)).toBe(amount);
   });

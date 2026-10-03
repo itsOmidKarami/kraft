@@ -308,6 +308,13 @@ describe("Raise budget (C.6)", () => {
     await userEvent.type(input, "0{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("above 0");
     expect(posts(calls)).toEqual([]);
+    // r12 review: Number() took "Infinity", which removed the cap.
+    for (const typed of ["Infinity", "1,000"]) {
+      await userEvent.clear(input);
+      await userEvent.type(input, `${typed}{Enter}`);
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("like 1000 or 1.5"));
+      expect(posts(calls)).toEqual([]);
+    }
     await userEvent.clear(input);
     await userEvent.type(input, "25{Enter}");
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: 25 } }));
