@@ -107,7 +107,7 @@ describe("ng AppearancePage", () => {
 
     it("sends the whole diff object with only the changed key different", async () => {
       const put = setup({ diff: { layout: "unified", colours: "theme", show_whitespace: true, word_highlight: true, wrap_lines: false, one_file_at_a_time: true } });
-      fireEvent.click(await screen.findByRole("radio", { name: "Side by side" }));
+      fireEvent.click(await screen.findByRole("radio", { name: "Side-by-side" }));
       fireEvent.click(screen.getByRole("button", { name: "Diff colours: Colour-blind safe" }));
       fireEvent.click(screen.getByRole("switch", { name: "Wrap long lines" }));
       await waitFor(() => expect(put).toHaveBeenCalledTimes(3));

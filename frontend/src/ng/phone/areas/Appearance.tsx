@@ -97,7 +97,7 @@ export function AppearanceScreen() {
       <Group
         title="Review diff"
         rows={[
-          { label: "Layout", value: diff.layout === "split" ? "Side by side" : "Unified", onEdit: () => edit({ kind: "choice", title: "Layout", value: diff.layout, options: [{ value: "unified", label: "Unified" }, { value: "split", label: "Side by side" }], set: (v) => save({ diff: { ...diff, layout: v as DiffPrefs["layout"] } }) }) },
+          { label: "Layout", value: diff.layout === "split" ? "Side-by-side" : "Inline", onEdit: () => edit({ kind: "choice", title: "Layout", value: diff.layout, options: [{ value: "split", label: "Side-by-side" }, { value: "unified", label: "Inline" }], set: (v) => save({ diff: { ...diff, layout: v as DiffPrefs["layout"] } }) }) },
           { label: "Added and removed colours", value: label(DIFF_COLOURS, diff.colours), onEdit: () => edit({ kind: "choice", title: "Added and removed colours", value: diff.colours, options: DIFF_COLOURS, set: (v) => save({ diff: { ...diff, colours: v as DiffPrefs["colours"] } }) }) },
           ...TOGGLES.map((t): RowSpec => ({ key: t.key, label: t.label, sub: t.sub, sw: diff[t.key], onSwitch: (on) => setDiff({ [t.key]: on }) })),
         ]}

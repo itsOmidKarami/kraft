@@ -85,7 +85,7 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
         <div className="set-diff-cols">
           <div className="set-diff-controls">
             <h3 className="set-sub">Layout</h3>
-            <Segmented label="Layout" options={[{ value: "unified", label: "Unified" }, { value: "split", label: "Side by side" }]} value={diff.layout} onChange={(v) => setDiff({ layout: v })} />
+            <Segmented label="Layout" options={[{ value: "split", label: "Side-by-side" }, { value: "unified", label: "Inline" }]} value={diff.layout} onChange={(v) => setDiff({ layout: v })} />
             <h3 className="set-sub">Added and removed colours</h3>
             <div className="set-cards" role="group" aria-label="Added and removed colours">
               {DIFF_COLOURS.map((c) => (
