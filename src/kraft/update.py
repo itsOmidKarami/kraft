@@ -15,10 +15,12 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 
 from kraft.paths import default_run_dir
 
@@ -30,6 +32,12 @@ RELEASES_URL = "https://api.github.com/repos/itsOmidKarami/kraft/releases"
 #: One check a day. The thing being watched moves on the order of weeks, and the
 #: cost of being a day late is a notice that appears tomorrow instead of today.
 CACHE_TTL = 86_400
+
+#: How long a check that failed (no route, a bad feed, no usable release) is
+#: not repeated. Shorter than `CACHE_TTL`, since the cause is often a link that
+#: comes back, but long enough that an offline host does not pay `TIMEOUT` on
+#: every page load.
+RETRY_AFTER = 3_600
 
 #: Long enough for a slow link, short enough that a server start on a machine
 #: with no route out is not something anybody times.
@@ -146,51 +154,111 @@ def _parse(payload, channel: str = "stable") -> Release | None:
     return best[1] if best else None
 
 
-def _read_cache(now: float, channel: str) -> Release | None:
+def _load() -> dict | None:
+    """The cache file as an object, or None when it is missing, unreadable, or
+    valid JSON of another shape (`[]`, `null`, `1`): all of them a miss."""
     try:
         blob = json.loads(_cache_path().read_text())
+    except (OSError, ValueError):
+        return None
+    return blob if isinstance(blob, dict) else None
+
+
+def _read_cache(now: float, channel: str) -> Release | None:
+    blob = _load()
+    try:
+        if blob is None:
+            return None
         if blob.get("channel", "stable") != channel or now - float(blob["checked_at"]) >= CACHE_TTL:
             return None
         return Release(tag=blob["tag"], wheel_url=blob["wheel_url"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError):
         return None
 
 
-def _write_cache(release: Release, now: float, channel: str) -> None:
+def _recently_failed(now: float, channel: str) -> bool:
+    """True when a check on `channel` failed less than `RETRY_AFTER` ago."""
+    blob = _load()
+    try:
+        if blob is None or blob.get("channel", "stable") != channel:
+            return False
+        return 0 <= now - float(blob["failed_at"]) < RETRY_AFTER
+    except (ValueError, KeyError, TypeError):
+        return False
+
+
+def _store(blob: dict) -> None:
+    """Replace the cache file whole: a reader (another tab's request, `kraft
+    admin start`) sees the old file or the new one, never half of one, which
+    it would take for a miss and a failure write would then replace."""
     path = _cache_path()
+    tmp: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "tag": release.tag,
-                    "wheel_url": release.wheel_url,
-                    "channel": channel,
-                    "checked_at": now,
-                }
-            )
-        )
+        # A name of its own per write: the server checks from several threads
+        # at once, and two writers sharing one temp file would swap in half of it.
+        fd, name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+        tmp = Path(name)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(blob))
+        os.replace(tmp, path)
     except OSError:
         # A read-only or full run dir costs a re-check next time, nothing more.
-        pass
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def _write_failure(now: float, channel: str) -> None:
+    """Remember that a check just failed, keeping the last good one's fields.
+
+    `last_checked` reads `checked_at`, which stays the time of the last
+    success; the failure rides beside it as `failed_at`.
+    """
+    blob = _load()
+    if blob is None or blob.get("channel", "stable") != channel:
+        blob = {"channel": channel}
+    blob["failed_at"] = now
+    _store(blob)
+
+
+def _write_cache(release: Release, now: float, channel: str) -> None:
+    _store(
+        {
+            "tag": release.tag,
+            "wheel_url": release.wheel_url,
+            "channel": channel,
+            "checked_at": now,
+        }
+    )
 
 
 def last_checked(channel: str = "stable") -> float | None:
     """When a check on `channel` last succeeded, however long ago; None if never."""
+    blob = _load()
     try:
-        blob = json.loads(_cache_path().read_text())
-        return float(blob["checked_at"]) if blob.get("channel", "stable") == channel else None
-    except (OSError, ValueError, KeyError, TypeError):
+        return (
+            float(blob["checked_at"]) if blob and blob.get("channel", "stable") == channel else None
+        )
+    except (ValueError, KeyError, TypeError):
         return None
 
 
-def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
-    """The newest installable release in `channel`, or `None` if that cannot be established."""
+def latest(
+    *, force: bool = False, channel: str = "stable", cache_only: bool = False
+) -> Release | None:
+    """The newest installable release in `channel`, or `None` if that cannot be established.
+
+    A failed check is remembered for `RETRY_AFTER`, so it is not retried (and
+    its timeout not paid again) until then; `force` ignores that. `cache_only`
+    never fetches: a cold cache is `None`.
+    """
     now = time.time()
     if not force:
         cached = _read_cache(now, channel)
         if cached is not None:
             return cached
+        if cache_only or _recently_failed(now, channel):
+            return None
     try:
         # The most a page holds: GitHub's default 30 is one long pre-release
         # cycle, which would push the newest final off it.
@@ -200,8 +268,11 @@ def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
         # version check is never worth turning a working command into a
         # traceback. There is nothing this function could do with the
         # distinction that "no update known" does not already cover.
+        _write_failure(now, channel)
         return None
-    if release is not None:
+    if release is None:
+        _write_failure(now, channel)
+    else:
         _write_cache(release, now, channel)
     return release
 
@@ -279,7 +350,6 @@ def install_kind() -> str:
     made, and Homebrew's venv has its own path shape."""
     import json
     from importlib.metadata import PackageNotFoundError, distribution
-    from pathlib import Path
 
     if _is_homebrew_install():
         return "brew"
@@ -366,7 +436,6 @@ def add_extra_hint(extra: str) -> str:
 def _receipt() -> dict:
     """uv's record of how this tool was installed, or {} when it is not a uv tool."""
     import tomllib
-    from pathlib import Path
 
     try:
         return tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text()).get("tool") or {}

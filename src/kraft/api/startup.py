@@ -351,6 +351,9 @@ async def lifespan(app: FastAPI):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        # After the walks: a cancelled walk stops its own git and aborts what
+        # it left. Ended before that, a `git rebase` read as a conflict.
+        _builtins.end_running_git_groups()
         await app.state.egress_tls.close()
         await app.state.egress_channels.close_all()
         await proxy_serving.__aexit__(None, None, None)

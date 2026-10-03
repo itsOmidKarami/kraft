@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, Request
@@ -42,7 +43,13 @@ async def _update_state(channel: str | None, *, force: bool) -> dict:
         raise HTTPException(
             400, f"unknown channel {channel!r}: one of {', '.join(update.CHANNELS)}"
         )
-    release = await asyncio.to_thread(lambda: update.latest(force=force, channel=channel))
+    # KRAFT_NO_UPDATE_CHECK turns off the check Kraft makes on its own, and the
+    # sidebar's read on every page load is that. An explicit check (`force`)
+    # is somebody asking, so it still goes out.
+    cache_only = not force and bool(os.environ.get("KRAFT_NO_UPDATE_CHECK"))
+    release = await asyncio.to_thread(
+        lambda: update.latest(force=force, channel=channel, cache_only=cache_only)
+    )
     checked = update.last_checked(channel)
     return {
         "installed": update.installed(),

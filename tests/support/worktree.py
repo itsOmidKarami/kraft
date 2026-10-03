@@ -97,3 +97,26 @@ def hung(tmp_path):
 def sleep_recorded(pids, seconds: float) -> str:
     """A hook's last lines: the shell becomes the `sleep`, its pid in `pids`."""
     return f'echo $$ >> "{pids}"\nexec sleep {seconds}\n'
+
+
+def hanging_rebase_hook(repo, tmp_path, pids, phases: str, seconds: float) -> None:
+    """A `reference-transaction` hook that sleeps `seconds`, once per phase
+    named in `phases` ("rebase", "abort"), while a rebase is in progress.
+    Kraft-ujep9: `git rebase --abort` fires it (a `post-checkout` hook does
+    not, on current git), so a hook like this hangs the abort itself. Once per
+    phase, so a regression that drops the abort's timeout still ends."""
+    hook = repo / ".git" / "hooks" / "reference-transaction"
+    marker = tmp_path / "hook-hung"
+    hook.write_text(
+        "#!/bin/sh\n"
+        '[ -d "$(git rev-parse --git-dir)/rebase-merge" ] || exit 0\n'
+        'case "$(ps -ww -o args= -p $PPID)" in\n'
+        '  *"rebase --abort"*) phase=abort ;;\n'
+        "  *rebase*) phase=rebase ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n"
+        f'case " {phases} " in *" $phase "*) ;; *) exit 0 ;; esac\n'
+        f'[ -e "{marker}.$phase" ] && exit 0\n'
+        f'touch "{marker}.$phase"\n' + sleep_recorded(pids, seconds)
+    )
+    hook.chmod(0o755)
