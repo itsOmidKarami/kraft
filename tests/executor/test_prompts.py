@@ -3,7 +3,7 @@
 That `dispatch_node` puts them in the prompt, in order, is test_dispatch's."""
 
 import pytest
-from support.harness import commit_all, entry_of, git, v1_named_chain, write
+from support.harness import commit_all, entry_of, git, v1_named_chain, v1_task, write
 from support.store_fixtures import mk_item
 
 from kraft import store
@@ -12,15 +12,15 @@ from kraft.findings import Finding, JobRef
 from kraft.templates.models import AgentTask
 
 
-def _task(skill: str | None = None) -> AgentTask:
+def _agent_task_model(skill: str | None = None) -> AgentTask:
     """An agent task; `skill` set means it states its own method."""
     return AgentTask.model_validate(
-        {"id": "t", "kind": "agent", "harness": "claude", "prompt": "p", "skill": skill}
+        v1_task("t", kind="agent", harness="claude", prompt="p", skill=skill)
     )
 
 
-WORKER = _task()
-REVIEWER = _task("kraft:code-review")
+WORKER = _agent_task_model()
+REVIEWER = _agent_task_model("kraft:code-review")
 
 #: Where a worker can run `kraft` (host, a sandbox with `network:`) and where not.
 DOCKER = {"kind": "docker", "image": "x"}
@@ -164,7 +164,7 @@ _SCOPES = entry_of(
 
 
 def test_scope_note_lists_every_scope_command_for_the_implementer():
-    out = prompts.scope_note(_task(), _SCOPES)
+    out = prompts.scope_note(_agent_task_model(), _SCOPES)
     for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
         assert cmd in out
     assert "frontend/**" in out
@@ -174,18 +174,18 @@ def test_scope_note_is_empty_for_any_other_hook():
     """V1 keys this on the task stating a method of its own (a `skill:`), not
     on a hook name: every task with a skill is "any other hook" now."""
     for skill in ("kraft:mr-description", "kraft:code-review", "kraft:spec"):
-        assert prompts.scope_note(_task(skill), _SCOPES) == ""
+        assert prompts.scope_note(_agent_task_model(skill), _SCOPES) == ""
 
 
 def test_scope_note_is_empty_with_no_scopes_configured():
-    assert prompts.scope_note(_task(), entry_of({})) == ""
-    assert prompts.scope_note(_task(), None) == ""
+    assert prompts.scope_note(_agent_task_model(), entry_of({})) == ""
+    assert prompts.scope_note(_agent_task_model(), None) == ""
 
 
 def test_scope_note_handles_a_legacy_bare_test_command():
     # config.load_repos wraps a bare test_command into a ["**"] scope, but a
     # LaunchContext built by hand may not have been through that.
-    out = prompts.scope_note(_task(), entry_of({"test_command": "just test"}))
+    out = prompts.scope_note(_agent_task_model(), entry_of({"test_command": "just test"}))
     assert "just test" in out
 
 

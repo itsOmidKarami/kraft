@@ -1,4 +1,5 @@
-"""tests/support/harness.py's own git plumbing, not the fixtures it builds."""
+"""tests/support/harness.py's own git plumbing and V1 builders, not the
+fixtures it builds."""
 
 from __future__ import annotations
 
@@ -181,3 +182,122 @@ def test_the_beads_fake_and_real_bd_agree(bd, tmp_path):
         assert await beads.blocked_by([b], cwd=gone) == []
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("args", "fields", "want"),
+    [
+        ((), {}, {"id": "impl", "kind": "subprocess", "command": "true"}),
+        (
+            ("check",),
+            {"command": "make test", "skippable": False},
+            {"id": "check", "kind": "subprocess", "command": "make test", "skippable": False},
+        ),
+        (
+            ("judge",),
+            {"kind": "agent"},
+            {"id": "judge", "kind": "agent", "harness": "fake", "prompt": "Do it."},
+        ),
+        (
+            ("implement",),
+            {"kind": "agent", "harness": "claude", "model": "opus"},
+            {
+                "id": "implement",
+                "kind": "agent",
+                "harness": "claude",
+                "prompt": "Do it.",
+                "model": "opus",
+            },
+        ),
+        (("go",), {"kind": "forge"}, {"id": "go", "kind": "forge", "target": "mr.merge"}),
+        (
+            ("ci",),
+            {"kind": "forge", "target": "mr.ci"},
+            {"id": "ci", "kind": "forge", "target": "mr.ci"},
+        ),
+        (
+            ("sync",),
+            {"kind": "builtin", "handler": "kraft.sync"},
+            {"id": "sync", "kind": "builtin", "handler": "kraft.sync"},
+        ),
+    ],
+    ids=[
+        "defaults",
+        "override",
+        "agent-defaults",
+        "agent-override",
+        "forge-defaults",
+        "forge-override",
+        "builtin-has-no-defaults",
+    ],
+)
+def test_v1_task_builds_an_authored_task(args, fields, want):
+    assert harness.v1_task(*args, **fields) == want
+
+
+@pytest.mark.parametrize(
+    ("args", "fields", "want"),
+    [
+        (
+            (),
+            {},
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "impl", "kind": "subprocess", "command": "true"}],
+            },
+        ),
+        (
+            ("verify",),
+            {"tasks": [{"id": "a"}, {"id": "b"}]},
+            {"id": "verify", "kind": "exec", "tasks": [{"id": "a"}, {"id": "b"}]},
+        ),
+        (
+            (),
+            {"steps": [{"id": "run", "tasks": [{"id": "a"}]}]},
+            {"id": "build", "kind": "exec", "steps": [{"id": "run", "tasks": [{"id": "a"}]}]},
+        ),
+        (
+            ("ship",),
+            {"tasks": [], "policy": {"max_attempts": 2}, "fix_loop": {"tasks": [{"id": "f"}]}},
+            {
+                "id": "ship",
+                "kind": "exec",
+                "tasks": [],
+                "policy": {"max_attempts": 2},
+                "fix_loop": {"tasks": [{"id": "f"}]},
+            },
+        ),
+        (
+            ("review", "gate"),
+            {"artifact": "work_brief"},
+            {"id": "review", "kind": "gate", "artifact": "work_brief"},
+        ),
+    ],
+    ids=["defaults", "tasks-wired", "steps-no-default-task", "override", "gate-has-no-tasks"],
+)
+def test_v1_node_builds_an_authored_node(args, fields, want):
+    assert harness.v1_node(*args, **fields) == want
+
+
+def test_v1_builders_defaults_make_a_valid_chain():
+    """Each kind's defaults are what its model requires, so the builders' bare
+    calls validate as a V1 chain and a test spells out only what it is about."""
+    nodes = [
+        harness.v1_node(),
+        harness.v1_node(
+            "work",
+            tasks=[harness.v1_task("a", kind="agent"), harness.v1_task("m", kind="forge")],
+        ),
+        harness.v1_node("review", "gate"),
+    ]
+    chain = harness.v1_resolved(nodes)
+    assert [n.id for n in chain.chain.nodes] == ["build", "work", "review"]
+
+
+def test_v1_task_at_finds_a_materialized_task_by_path(tmp_path):
+    steps = [{"id": "run", "tasks": [harness.v1_task("a"), harness.v1_task("b")]}]
+    chain = harness.v1_chain([harness.v1_node(steps=steps)], repo=tmp_path)
+    assert harness.v1_task_at(chain, "build.run.b").task.id == "b"
+    with pytest.raises(StopIteration):
+        harness.v1_task_at(chain, "build.run.c")

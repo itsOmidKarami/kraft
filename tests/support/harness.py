@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from support.chain_builders import v1_node, v1_task  # re-exported: the v1_* family
 from support.fake_docker import fake_docker_bin  # noqa: F401 -- re-exported
 
 _SUPPORT = Path(__file__).parent
@@ -465,17 +466,12 @@ def v1_fix_loop_node(node_id: str, measure: dict, *, judge: bool = True) -> dict
     (legacy: `on.implementation.start`), and -- unless `judge=False` -- an
     agent judge on the same harness (legacy: `on.fix_loop.judge`). Its loop
     key is `f"{node_id}.fix_loop"` (`walk._loop_key`)."""
-    fix_loop: dict = {
-        "tasks": [{"id": "fix", "kind": "agent", "harness": "fake", "prompt": "Fix it."}]
-    }
+    fix_loop: dict = {"tasks": [v1_task("fix", kind="agent", prompt="Fix it.")]}
     if judge:
-        fix_loop["judge"] = {
-            "id": "judge",
-            "kind": "agent",
-            "harness": "fake",
-            "prompt": "Decide whether another repair attempt is justified.",
-        }
-    return {"id": node_id, "kind": "exec", "tasks": [measure], "fix_loop": fix_loop}
+        fix_loop["judge"] = v1_task(
+            "judge", kind="agent", prompt="Decide whether another repair attempt is justified."
+        )
+    return v1_node(node_id, tasks=[measure], fix_loop=fix_loop)
 
 
 def e2e_templates_dir(tmp_path: Path) -> Path:
@@ -526,6 +522,12 @@ def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, 
         target=target or WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
     )
+
+
+def v1_task_at(chain, path: str):
+    """The `ResolvedTask` at `path` (`node.step.task`) in a `MaterializedChain`;
+    `StopIteration` when there is none."""
+    return next(t for n in chain.chain.nodes for t in n.tasks() if t.path == path)
 
 
 def v1_item(database, chain, *, repo: Path | str, wid: str = "w1", title: str = "t", **kwargs):

@@ -7,6 +7,7 @@ import re
 
 import pytest
 from pydantic import ValidationError
+from support.harness import v1_task
 
 from kraft.executor import fallback
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
@@ -14,10 +15,9 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import AgentTask, Chain, ResolvedChain
 
 
-def _task(**kw) -> AgentTask:
-    return AgentTask.model_validate(
-        {"id": "t", "kind": "agent", "harness": "claude", "prompt": "do it", **kw}
-    )
+def _agent_task_model(**kw) -> AgentTask:
+    kw = {"harness": "claude", "prompt": "do it", **kw}
+    return AgentTask.model_validate(v1_task("t", kind="agent", **kw))
 
 
 @pytest.mark.parametrize(
@@ -27,12 +27,12 @@ def _task(**kw) -> AgentTask:
 )
 def test_a_malformed_entry_is_refused_at_load(entry):
     with pytest.raises(ValidationError):
-        _task(fallback=[entry])
+        _agent_task_model(fallback=[entry])
 
 
 def test_an_empty_entry_says_why():
     with pytest.raises(ValidationError, match="would relaunch the same thing"):
-        _task(fallback=[{}])
+        _agent_task_model(fallback=[{}])
 
 
 @pytest.mark.parametrize(
@@ -46,7 +46,7 @@ def test_an_empty_entry_says_why():
     ids=["harness", "model", "effort", "harness-and-model"],
 )
 def test_an_entry_keeps_what_it_omits_from_the_task(entry, expected):
-    task = _task(model="opus", effort="high", fallback=[entry])
+    task = _agent_task_model(model="opus", effort="high", fallback=[entry])
 
     primary, cand = fallback.candidates(task)
 
@@ -57,7 +57,7 @@ def test_an_entry_keeps_what_it_omits_from_the_task(entry, expected):
 
 @pytest.mark.parametrize("fallback_list", [None, []], ids=["unset", "empty"])
 def test_no_list_is_the_task_alone(fallback_list):
-    task = _task(fallback=fallback_list)
+    task = _agent_task_model(fallback=fallback_list)
     assert fallback.candidates(task) == [task]
 
 
@@ -142,15 +142,15 @@ def _route(t: AgentTask) -> tuple:
 def test_each_entry_shape_against_both_primary_routes(entry, on_profile, on_model):
     """The spec's table: an entry's route replaces a profile route whole, and
     merges per field into a field route."""
-    by_profile = _task(profile="deep", fallback=[entry])
-    by_model = _task(model="opus", effort="high", fallback=[entry])
+    by_profile = _agent_task_model(profile="deep", fallback=[entry])
+    by_model = _agent_task_model(model="opus", effort="high", fallback=[entry])
     assert _route(fallback.candidates(by_profile)[1]) == on_profile
     assert _route(fallback.candidates(by_model)[1]) == on_model
 
 
 def test_a_profile_task_takes_its_profiles_list_and_lists_do_not_chain():
     """deep's list names `strong`, whose own list (`haiku`) is not followed."""
-    cands = fallback.candidates(_task(profile="deep"), _table())
+    cands = fallback.candidates(_agent_task_model(profile="deep"), _table())
     assert [_route(c) for c in cands] == [
         ("claude", "deep", None, None),
         ("codex", "deep", None, None),
@@ -164,13 +164,13 @@ def test_a_profile_task_takes_its_profiles_list_and_lists_do_not_chain():
     ids=["replaces", "disables"],
 )
 def test_a_tasks_own_list_replaces_its_profiles(own, expected):
-    cands = fallback.candidates(_task(profile="deep", fallback=own), _table())
+    cands = fallback.candidates(_agent_task_model(profile="deep", fallback=own), _table())
     assert [_route(c) for c in cands[1:]] == expected
 
 
 def test_an_entry_with_a_profile_and_a_model_is_refused():
     with pytest.raises(ValidationError, match="one or the other"):
-        _task(fallback=[{"profile": "deep", "model": "opus"}])
+        _agent_task_model(fallback=[{"profile": "deep", "model": "opus"}])
 
 
 @pytest.mark.parametrize(

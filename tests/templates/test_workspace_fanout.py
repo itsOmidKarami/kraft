@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import commit_all, entry_of, make_repo, v1_chain
+from support.harness import commit_all, entry_of, make_repo, v1_chain, v1_task
 from support.workspace import repositories, workspace_item
 
 from kraft.executor import dispatch
@@ -39,10 +39,6 @@ def ran(monkeypatch):
     return calls
 
 
-def _task(id, **fields):
-    return {"id": id, "kind": "subprocess", "command": "true", **fields}
-
-
 LAUNCH = LaunchContext(repo_entry=NO_SETUP, repositories={"ws": NO_SETUP, "pkg": NO_SETUP})
 
 
@@ -57,7 +53,7 @@ async def test_a_task_opting_in_runs_once_per_selected_repository_and_others_onc
     once, in the assembled checkout (`workspace-tasks-have-an-assembled-
     checkout`)."""
     row, node, worktree = await workspace_item(
-        database, run_dirs, tmp_path, [_task("each", scope="each_repository"), _task("once")]
+        database, run_dirs, tmp_path, [v1_task("each", scope="each_repository"), v1_task("once")]
     )
     each, once = node.tasks()
 
@@ -85,7 +81,7 @@ async def test_a_fanned_out_task_fails_when_any_repository_fails(
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
     row, node, worktree = await workspace_item(
-        database, run_dirs, tmp_path, [_task("each", scope="each_repository")]
+        database, run_dirs, tmp_path, [v1_task("each", scope="each_repository")]
     )
     (each,) = node.tasks()
     assert (
@@ -106,7 +102,7 @@ async def test_each_repository_binds_its_own_task_and_the_checkout_binds_all(
         database,
         run_dirs,
         tmp_path,
-        [_task("each", scope="each_repository"), _task("once")],
+        [v1_task("each", scope="each_repository"), v1_task("once")],
         effective_policy=_policy(sandbox=_SANDBOX.model_dump()),
         repository_policies={"ws": _policy(), "pkg": _policy(sandbox=_SANDBOX.model_dump())},
     )
@@ -125,7 +121,7 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
     the root's. Its live sandbox wraps the whole item (Ruling 189), the
     root's run included."""
     row, node, worktree = await workspace_item(
-        database, run_dirs, tmp_path, [_task("each", scope="each_repository")]
+        database, run_dirs, tmp_path, [v1_task("each", scope="each_repository")]
     )
     connected = str(repositories(tmp_path, "pkg")["pkg"].path)
     live = {"kind": "docker", "image": "member:live"}

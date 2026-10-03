@@ -7,7 +7,7 @@ import shlex
 import subprocess
 
 import pytest
-from support.harness import commit_all, entry_of, git
+from support.harness import commit_all, entry_of, git, v1_node
 
 from kraft import executor, store
 from kraft import policy as _policy
@@ -26,21 +26,11 @@ def _sync():
 
 def _chain(**rebase_fields):
     """verify (with a fix loop) -> rebase (sync, then open) -> publish."""
-    rebase = {
-        "id": "rebase",
-        "kind": "exec",
-        "steps": [{"id": "sync", "tasks": [_sync()]}, {"id": "open", "tasks": [_sub("open")]}],
-        **rebase_fields,
-    }
+    steps = [{"id": "sync", "tasks": [_sync()]}, {"id": "open", "tasks": [_sub("open")]}]
     return [
-        {
-            "id": "verify",
-            "kind": "exec",
-            "tasks": [_sub("check")],
-            "fix_loop": {"tasks": [_sub("fix")]},
-        },
-        rebase,
-        {"id": "publish", "kind": "exec", "tasks": [_sub("publish")]},
+        v1_node("verify", tasks=[_sub("check")], fix_loop={"tasks": [_sub("fix")]}),
+        v1_node("rebase", steps=steps, **rebase_fields),
+        v1_node("publish", tasks=[_sub("publish")]),
     ]
 
 
@@ -390,7 +380,7 @@ def _gated(**rebase_fields):
     """`_chain` with an approvable `review` gate between `verify` and `rebase`,
     inside the span a restart from `verify` reruns."""
     verify, rebase, publish = _chain(**rebase_fields)
-    return [verify, {"id": "review", "kind": "gate"}, rebase, publish]
+    return [verify, v1_node("review", "gate"), rebase, publish]
 
 
 async def _approved_review(it):

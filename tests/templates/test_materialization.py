@@ -77,7 +77,9 @@ def agent_task(**kw) -> dict:
     return {"kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
-def write(root: Path, library: dict, chains: dict[str, dict]) -> TemplateLibrary:
+def write_library(root: Path, library: dict, chains: dict[str, dict]) -> TemplateLibrary:
+    """`library` and each of `chains` (by id) written under `root`, loaded back
+    as the `TemplateLibrary` they make."""
     (root / CHAINS_DIR).mkdir(parents=True, exist_ok=True)
     (root / LIBRARY_FILE).write_text(yaml.safe_dump(library))
     for id, chain in chains.items():
@@ -258,7 +260,7 @@ def test_the_design_documents_yaml_is_what_kraft_ships():
 
 
 def test_lint_reports_an_unknown_reference_with_its_source(tmp_path):
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"base": agent_task()}},
         {"broken": {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"extends": "typo"}]}]}},
@@ -273,7 +275,7 @@ def test_lint_reports_an_unknown_reference_with_its_source(tmp_path):
 
 
 def test_lint_reports_a_cycle_with_its_source(tmp_path):
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"a": {"extends": "b"}, "b": {"extends": "a"}}},
         {"looping": {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"extends": "a"}]}]}},
@@ -287,7 +289,7 @@ def test_lint_reports_a_cycle_with_its_source(tmp_path):
 
 
 def test_lint_reports_a_duplicate_sibling_identifier_with_its_source(tmp_path):
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"base": agent_task()}},
         {
@@ -313,7 +315,7 @@ def test_lint_reports_a_duplicate_sibling_identifier_with_its_source(tmp_path):
 def test_lint_reports_every_broken_chain_rather_than_the_first(tmp_path):
     """The point of a lint over a raising loader: an author fixing a library
     sees all of it, not one error per edit-and-rerun cycle."""
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"base": agent_task()}},
         {
@@ -329,7 +331,7 @@ def test_lint_reports_every_broken_chain_rather_than_the_first(tmp_path):
 
 
 def test_lint_writes_nothing_and_reloads_nothing(tmp_path):
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"base": agent_task()}},
         {"broken": {"nodes": [{"id": "n", "kind": "exec", "tasks": [{"extends": "typo"}]}]}},
@@ -537,7 +539,7 @@ def test_a_stored_snapshot_that_is_not_a_materialized_chain_is_an_error():
 def test_lint_reports_a_chain_policy_the_instance_ceiling_refuses(tmp_path):
     """Kraft-ib2af: a chain `policy:` past the instance maxima is an authoring
     error lint names, not a 500 the first intake finds."""
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"base": agent_task()}},
         {
@@ -565,7 +567,7 @@ def test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling(tmp
     to be wrong: a task that widens its own node's `allowed_tools` can never
     materialize, whatever the instance allows. The library component's own
     `policy:` reaches the task through `extends`."""
-    library = write(
+    library = write_library(
         tmp_path,
         {"tasks": {"base": agent_task(policy={"allowed_tools": ["git", "rm_rf"]})}},
         {

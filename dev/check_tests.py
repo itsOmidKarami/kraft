@@ -188,7 +188,7 @@ EXPECTATION_ALLOWLIST: set[str] = {
 #: and the message names every copy so the new one is easy to find. A ceiling
 #: that sits more than its margin above the real count is stale: tighten it.
 #: Re-seed with `just shape-report --print-helper-ceiling`; hand-edit only to tighten.
-DUPLICATE_HELPER_CEILING = {"groups": 74, "copies": 171}
+DUPLICATE_HELPER_CEILING = {"groups": 71, "copies": 165}
 DUPLICATE_HELPER_STALE_MARGIN = {"groups": 1, "copies": 2}
 
 

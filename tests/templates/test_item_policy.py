@@ -6,6 +6,7 @@ goes through, and it binds only the item it was set on."""
 from __future__ import annotations
 
 import pytest
+from support.harness import v1_node, v1_task, v1_task_at
 
 from kraft.policy import (
     SCOPE_CAP_FIELDS,
@@ -22,40 +23,21 @@ _WAIT = {"polling": {"initial_interval": "30s", "max_interval": "5m"}}
 
 
 def _chain(**maxima) -> MaterializedChain:
+    # The wait's timeout is its own total cap (Ruling 196).
+    ci = v1_task(
+        "ci", kind="forge", target="mr.ci", policy={"total_time_cap_minutes": 90}, wait=_WAIT
+    )
+    approval = v1_task(
+        "approval", kind="forge", target="mr.external_approval", policy={"allowed_tools": ["Read"]}
+    )
     nodes = [
-        {
-            "id": "verification",
-            "kind": "exec",
-            "steps": [
-                {"id": "check", "tasks": [{"id": "test", "kind": "subprocess", "command": "t"}]}
-            ],
-            "fix_loop": {
-                "tasks": [{"id": "fix", "kind": "subprocess", "command": "f"}],
-                "max_attempts": 2,
-            },
-        },
-        {
-            "id": "feedback",
-            "kind": "exec",
-            "policy": {"total_time_cap_minutes": 120},
-            "tasks": [
-                {
-                    "id": "ci",
-                    "kind": "forge",
-                    "target": "mr.ci",
-                    # The wait's timeout is its own total cap (Ruling 196).
-                    "policy": {"total_time_cap_minutes": 90},
-                    "wait": _WAIT,
-                },
-                {
-                    "id": "approval",
-                    "kind": "forge",
-                    "target": "mr.external_approval",
-                    "policy": {"allowed_tools": ["Read"]},
-                },
-            ],
-        },
-        {"id": "review", "kind": "gate"},
+        v1_node(
+            "verification",
+            steps=[{"id": "check", "tasks": [v1_task("test", command="t")]}],
+            fix_loop={"tasks": [v1_task("fix", command="f")], "max_attempts": 2},
+        ),
+        v1_node("feedback", tasks=[ci, approval], policy={"total_time_cap_minutes": 120}),
+        v1_node("review", "gate"),
     ]
     # A cap's maximum is per level (Ruling 211); the work item's bounds every
     # scope under it.
@@ -74,10 +56,6 @@ def _chain(**maxima) -> MaterializedChain:
     return ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
         target=WorkItemTarget.for_repository("target"), effective_policy=instance
     )
-
-
-def _task(chain: MaterializedChain, path: str):
-    return next(t for n in chain.chain.nodes for t in n.tasks() if t.path == path)
 
 
 def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stored():
@@ -99,7 +77,7 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
         }
     )
 
-    ci, approval = _task(item, "feedback.main.ci"), _task(item, "feedback.main.approval")
+    ci, approval = v1_task_at(item, "feedback.main.ci"), v1_task_at(item, "feedback.main.approval")
     assert ci.task.wait_bounds(item.policy_for(ci)).timeout.total_seconds() == 45 * 60
     assert approval.task.wait_bounds(item.policy_for(approval)).timeout.total_seconds() == 100 * 60
     verification = item.chain.nodes[0]
@@ -107,12 +85,15 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
         item.policy_for(verification).max_attempts,
         item.policy_for(verification).timeout_minutes,
     ) == (5, 90)
-    assert item.policy_for(_task(item, "verification.check.test")).allowed_tools == ("Read", "Bash")
+    assert item.policy_for(v1_task_at(item, "verification.check.test")).allowed_tools == (
+        "Read",
+        "Bash",
+    )
     assert item.to_json() == chain.to_json()
     # Without the layer, the chain's own value: the wait task's 90 minutes.
     assert (
-        _task(chain, "feedback.main.ci")
-        .task.wait_bounds(chain.policy_for(_task(chain, "feedback.main.ci")))
+        v1_task_at(chain, "feedback.main.ci")
+        .task.wait_bounds(chain.policy_for(v1_task_at(chain, "feedback.main.ci")))
         .timeout.total_seconds()
         == 90 * 60
     )
@@ -178,7 +159,7 @@ def test_an_items_safety_value_only_tightens_whatever_it_lands_on(override, path
     (`test_an_override_past_its_bounds_is_refused_naming_the_field`)."""
     chain = _chain(token_budget=1000).with_item_policy(override)
 
-    resolved = chain.policy_for(_task(chain, path))
+    resolved = chain.policy_for(v1_task_at(chain, path))
 
     field = "token_budget" if isinstance(expected, int) else "allowed_tools"
     assert getattr(resolved, field) == expected
@@ -248,7 +229,7 @@ def test_a_retry_may_narrow_a_task_below_the_items_allowlist():
         item, "verification.check.test", policy={"allowed_tools": ["Read"]}
     ).chain
 
-    assert fork.policy_for(_task(fork, "verification.check.test")).allowed_tools == ("Read",)
+    assert fork.policy_for(v1_task_at(fork, "verification.check.test")).allowed_tools == ("Read",)
 
 
 def test_a_retry_that_would_unlock_a_sandbox_the_item_set_below_it_is_refused():

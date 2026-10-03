@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
-from support.harness import commit_all, entry_of, git
+from support.harness import commit_all, entry_of, git, v1_task
 from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspace_item
 
 from kraft import events, store
@@ -20,10 +20,6 @@ from kraft.executor.context import LaunchContext
 from kraft.templates.models import DEFAULT_WAIT
 
 NO_SETUP = entry_of({"setup_command": ""})
-
-
-def _task(id, **fields):
-    return {"id": id, "kind": "subprocess", "command": "true", **fields}
 
 
 # ── publication order ──
@@ -95,7 +91,7 @@ async def _publishable(
     A member named in `untouched` is selected but gets no commit. `item`
     goes to `workspace_item`. Returns `(row, worktree, root_origin)`."""
     row, _, worktree = await workspace_item(
-        database, run_dirs, tmp_path, [_task("t")], pointer=pointer, **item
+        database, run_dirs, tmp_path, [v1_task("t")], pointer=pointer, **item
     )
     root = Path(row["repo"])
     members = ["pkg", "pkg2"] if item.get("second") else ["pkg"]

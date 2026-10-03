@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from support.harness import v1_walk, write_harness_profiles
+from support.harness import v1_node, v1_task, v1_walk, write_harness_profiles
 
 from kraft import db as _db
 from kraft import events, store
@@ -42,19 +42,11 @@ def _iso(ts: int) -> str:
     return datetime.fromtimestamp(ts, UTC).isoformat()
 
 
-def _task(**fields):
-    return {
-        "id": "implement",
-        "kind": "agent",
-        "harness": "claude",
-        "model": "opus",
-        "prompt": "Do it.",
-        **fields,
-    }
-
-
 def _chain(**fields):
-    return [{"id": "build", "kind": "exec", "tasks": [_task(**fields)]}]
+    """`build`, running one agent task, `implement`, on claude's `opus` unless
+    `fields` say otherwise."""
+    fields = {"harness": "claude", "model": "opus", **fields}
+    return [v1_node(tasks=[v1_task("implement", kind="agent", **fields)])]
 
 
 def _walk(tmp_path, repo, chain, **kwargs):
