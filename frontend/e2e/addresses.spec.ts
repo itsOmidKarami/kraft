@@ -10,8 +10,11 @@ test("old addresses land on their new pages", async ({ page }) => {
   await expect(page).toHaveURL(new RegExp(`/work-items/${id}\\?x=1$`));
   await expect(page.getByRole("heading", { level: 1, name: /^old addresses / })).toBeVisible();
 
+  // The chains index opens a chain as soon as the list loads (ChainsIndex), so
+  // the address settles on /templates/chains/default: matching only the bare
+  // index raced that redirect.
   await page.goto("/settings/chains");
-  await expect(page).toHaveURL(/\/templates\/chains$/);
+  await expect(page).toHaveURL(/\/templates\/chains\/default$/);
 
   await page.goto(`/work-items/${id}#node=implementation&tab=tasks`);
   await expect(page).toHaveURL(new RegExp(`/work-items/${id}/nodes/implementation$`));
