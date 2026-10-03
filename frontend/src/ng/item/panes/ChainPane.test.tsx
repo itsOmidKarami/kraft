@@ -41,19 +41,20 @@ describe("ChainOverview", () => {
 
   it("lists the spec and plan attached at intake, each opening its document when the page can open one", async () => {
     const onDoc = vi.fn();
-    const attachments = [{ kind: "spec" as const, path: "docs/specs/ws.md" }, { kind: "plan" as const, path: "docs/plans/ui.md" }];
-    const docs = [{ document_id: "d-plan", attachment_kind: "plan", path: "docs/plans/ui.md" }, { document_id: "d-spec", attachment_kind: "spec", path: "docs/specs/ws.md" }, { document_id: "d-x", attachment_kind: null, path: "x.md" }] as WorkItemDocument[];
+    // One name for both, as Kraft's own specs/<x>.md and plans/<x>.md have: the kind tells them apart (R11b-07).
+    const attachments = [{ kind: "spec" as const, path: "docs/specs/ws.md" }, { kind: "plan" as const, path: "docs/plans/ws.md" }];
+    const docs = [{ document_id: "d-plan", attachment_kind: "plan", path: "docs/plans/ws.md" }, { document_id: "d-spec", attachment_kind: "spec", path: "docs/specs/ws.md" }, { document_id: "d-x", attachment_kind: null, path: "x.md" }] as WorkItemDocument[];
     const { unmount } = render(<ChainOverview item={detail({ attachments })} events={[]} now={NOW} onSelect={() => {}} docs={docs} onDoc={onDoc} />);
-    expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ui.md");
-    await userEvent.click(screen.getByRole("button", { name: "ui.md" }));
+    expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ws.md");
+    await userEvent.click(screen.getByRole("button", { name: "Plan: ws.md" }));
     expect(onDoc).toHaveBeenCalledWith(docs[0]);
     unmount();
     // With no indexed document to open (the board's peek, or any item before it starts),
     // a name opens the copy Kraft kept at intake.
     const calls = stubFetch({ "GET /work-items/w1/attachments/spec": [200, { title: "Workspace spec", path: "docs/specs/ws.md", content: "# Workspace spec\n\nShare one **worktree**.", truncated: false }] });
     const peek = render(<ChainOverview item={detail({ attachments })} events={[]} now={NOW} onSelect={() => {}} />);
-    expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ui.md");
-    await userEvent.click(screen.getByRole("button", { name: "ws.md" }));
+    expect(screen.getByText("attached").closest("div")).toHaveTextContent("spec ws.mdplan ws.md");
+    await userEvent.click(screen.getByRole("button", { name: "Spec: ws.md" }));
     const viewer = await screen.findByRole("dialog", { name: "Workspace spec" });
     expect(await within(viewer).findByText("worktree")).toBeInTheDocument();
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /work-items/w1/attachments/spec"]);

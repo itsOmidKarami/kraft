@@ -53,12 +53,14 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
               {item.attachments.map((a) => {
                 const doc = docs?.find((d) => d.attachment_kind === a.kind);
                 const name = a.path.split("/").at(-1);
+                // The kind is in the name: a spec and its plan are often both <x>.md (R11b-07).
+                const label = `${a.kind.charAt(0).toUpperCase()}${a.kind.slice(1)}: ${name}`;
                 return (
                   <span key={a.kind} className="ip-attached">
                     {a.kind}{" "}
-                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button>
+                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} aria-label={label} onClick={() => onDoc(doc)}>{name}</button>
                       // Not indexed yet (before start nothing is): it reads from the copy Kraft kept at intake.
-                      : <button type="button" className="item-link is-mono" title={a.path} onClick={() => setAttached(a.kind)}>{name}</button>}
+                      : <button type="button" className="item-link is-mono" title={a.path} aria-label={label} onClick={() => setAttached(a.kind)}>{name}</button>}
                   </span>
                 );
               })}
