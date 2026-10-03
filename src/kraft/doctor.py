@@ -121,6 +121,10 @@ def _health_checks(payload: dict) -> list[dict]:
     ]
     if payload.get("invalid_policy"):
         reasons.append(f"invalid policy: {payload['invalid_policy']}")
+    if payload.get("invalid_intake"):
+        reasons.append(
+            f"invalid intake.yaml, auto-intake and schedules are off: {payload['invalid_intake']}"
+        )
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:

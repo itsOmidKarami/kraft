@@ -172,14 +172,16 @@ def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch):
             "status": "degraded",
             "invalid_templates": {"quick-task.yaml": "bad node"},
             "invalid_policy": "budget: not a number",
+            "invalid_intake": "intake.yaml: 'schedules'.0.cron: field '61': ...",
             "index": {"errors": ["scan failed"], "embeddings": {"available": True}},
             "reattach_summary": {"unknown": []},
         }
 
     monkeypatch.setattr(client, "health", degraded)
     details = [row["detail"] for row in asyncio.run(doctor.run_checks()) if row["name"] == "health"]
-    assert len(details) == 3
+    assert len(details) == 4
     assert any("quick-task.yaml" in d for d in details)
+    assert any(d.startswith("invalid intake.yaml") and "'61'" in d for d in details)
 
 
 def test_a_missing_vector_extra_is_advice_not_a_failure():

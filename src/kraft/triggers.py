@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from kraft import executor
 from kraft.api import deps as api_deps
 from kraft.executor.entry import one_line_title
-from kraft.policy import Trigger, cron_due
+from kraft.policy import PolicyError, Trigger, cron_due
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,15 @@ def schedules(st) -> list[tuple[str, Trigger]]:
     intake = getattr(st, "intake", None) or {}
     for index, entry in enumerate(intake.get("schedules") or []):
         out.append((f"intake.yaml schedule {index}", Trigger(**entry)))
+    have = {trig for _, trig in out}
     pol = getattr(st, "policy", None)
     for index, trig in enumerate(pol.triggers if pol is not None else ()):
+        # One left in policy.yaml beside its copy in intake.yaml (re-made on
+        # Settings › Auto-intake, which writes `description: ''` where the
+        # old entry had none) fires once, not twice. `Trigger` defaults the
+        # description, so equal entries compare equal however written.
+        if trig in have:
+            continue
         out.append((f"policy.yaml trigger {index}", trig))
     return out
 
@@ -62,7 +69,15 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
     stamp = now.strftime("%Y-%m-%dT%H:%M")
     filed: list[str] = []
     for index, trig in schedules(st):
-        if not cron_due(trig.cron, now):
+        try:
+            due = cron_due(trig.cron, now)
+        except PolicyError as exc:
+            # Every reader refuses such a cron now (`config.Schedule`), so
+            # this is a file loaded before that check: one bad entry skips
+            # itself, not every schedule after it.
+            logger.warning("%s: %s, skipped", index, exc)
+            continue
+        if not due:
             continue
         if st.trigger_last_fired.get(index) == stamp:
             continue

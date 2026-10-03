@@ -1254,19 +1254,30 @@ def _cmd_reindex(ns: argparse.Namespace) -> None:
 
 def _render_reload(result: dict) -> str:
     refused = result.get("refused_policy")
-    policy = "" if refused else " and policy.yaml"
-    lines = [f"reloaded {len(result.get('valid', []))} template(s){policy}"]
+    refused_intake = result.get("refused_intake")
+    files = [n for n, bad in (("policy.yaml", refused), ("intake.yaml", refused_intake)) if not bad]
+    also = f" and {' and '.join(files)}" if files else ""
+    lines = [f"reloaded {len(result.get('valid', []))} template(s){also}"]
     for name, reason in (result.get("invalid_templates") or {}).items():
         lines.append(f"  invalid: {name}: {reason}")
     if refused:
         lines.append(f"  refused: policy.yaml: {refused} (the running policy is kept)")
+    if refused_intake:
+        # `ConfigError` names the file itself.
+        lines.append(
+            f"  refused: {refused_intake} (the running auto-intake and schedules are kept)"
+        )
     return "\n".join(lines)
 
 
 def _cmd_reload(ns: argparse.Namespace) -> None:
     payload = asyncio.run(client.reload_templates())
     common.emit(payload, _render_reload, ns.json)
-    if payload.get("invalid_templates") or payload.get("refused_policy"):
+    if (
+        payload.get("invalid_templates")
+        or payload.get("refused_policy")
+        or payload.get("refused_intake")
+    ):
         # exit 1 so `kraft admin reload && ...` works; the reasons are already on stdout
         raise SystemExit(1)
 

@@ -37,9 +37,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from kraft.automated_review import AutomatedReview
-from kraft.policy import SandboxPolicy, TemplatePolicyOverride, ToolNames
+from kraft.policy import PolicyError, SandboxPolicy, TemplatePolicyOverride, ToolNames, _cron_fields
 from kraft.worker import steering as _steering
 
 if TYPE_CHECKING:
@@ -1202,6 +1203,19 @@ class Schedule(_Model):
     chain: str
     title: str
     description: str = ""
+
+    @field_validator("cron")
+    @classmethod
+    def _cron_runs(cls, cron: str) -> str:
+        """The scheduler's own check (`policy._cron_fields`), so a cron it
+        cannot run is refused where the file is read -- by a reload, a
+        Settings draft and the start-time move -- not every minute in the
+        tick, as 1.4 refused a `policy.yaml` trigger's."""
+        try:
+            _cron_fields("cron", cron)
+        except PolicyError as exc:
+            raise PydanticCustomError("cron", str(exc).removeprefix("cron: ")) from None
+        return cron
 
 
 class Intake(_Model):

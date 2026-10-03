@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import re
+
 from pydantic import ValidationError
 
-from kraft import apply
+from kraft import apply, policy
 from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft.api import deps
@@ -106,16 +108,37 @@ def _schedule_problems(st, index: int, entry: dict, chains: set) -> list[dict]:
     chain = entry.get("chain")
     if isinstance(chain, str) and chains and chain not in chains:
         out.append(_problem(index, "chain", f"chain {chain!r} is not in the library"))
+    cron = entry.get("cron")
+    if isinstance(cron, str):
+        try:
+            policy._cron_fields("cron", cron)
+        except policy.PolicyError as exc:
+            out.append(_problem(index, "cron", str(exc).removeprefix("cron: ")))
     return out
+
+
+#: A file-level problem `_schedule_problems` already names on its schedule.
+_SCHEDULE_CRON = re.compile(r"schedules\.\d+\.cron")
+
+
+def _only_crons(exc: ValidationError) -> bool:
+    """Whether every error is a schedule's cron, which `_schedule_problems`
+    names on that schedule, so the screen still renders the file."""
+    return all(e["loc"][:1] == ("schedules",) and e["loc"][2:] == ("cron",) for e in exc.errors())
 
 
 def resolve(st, key, raw, files, published) -> dict:
     out = config.resolve_files(st, files, published, FILES, keyed=True)
+    out["problems"] = [
+        p for p in out["problems"] if not _SCHEDULE_CRON.fullmatch(str(p.get("field")))
+    ]
     data = raw.get(INTAKE) if isinstance(raw.get(INTAKE), dict) else {}
     try:
         intake = config_mod.Intake.model_validate(data)
-    except ValidationError:
-        return {**out, "resolved": None}  # the problem above says why
+    except ValidationError as exc:
+        if not _only_crons(exc):
+            return {**out, "resolved": None}  # the problem above says why
+        intake = config_mod.Intake.model_validate({**data, "schedules": []})
 
     chains = set(getattr(getattr(st, "library", None), "chain_ids", ()) or ())
     raw_schedules = data.get("schedules")
@@ -141,6 +164,7 @@ async def after_publish(app, written) -> None:
     if INTAKE in written:
         st = app.state
         st.intake = config_mod.Intake.load(st.templates_dir / INTAKE).model_dump()
+        st.invalid_intake = None
         apply.record(st, INTAKE)
         await intake_mod.restart(app)
 

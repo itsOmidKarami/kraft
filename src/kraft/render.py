@@ -491,6 +491,8 @@ def health_block(payload: dict) -> str:
         pairs.append(("invalid template", f"{name}: {reason}"))
     if payload.get("invalid_policy"):
         pairs.append(("invalid policy", str(payload["invalid_policy"])))
+    if payload.get("invalid_intake"):
+        pairs.append(("invalid intake", str(payload["invalid_intake"])))
     for error in index.get("errors") or []:
         pairs.append(("index error", str(error)))
     reattach = payload.get("reattach_summary") or {}

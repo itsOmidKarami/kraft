@@ -117,11 +117,14 @@ async def lifespan(app: FastAPI):
     access = config_mod.Access.load(templates_dir / "access.yaml").model_dump()
     # A hand-edit typo must not refuse the boot: degrade to the default — off —
     # so Settings → Auto-intake comes up and can be used to fix the file.
+    # `/health` and doctor name it (`invalid_intake`), as they name a bad policy.
+    app.state.invalid_intake = None
     try:
         app.state.intake = config_mod.Intake.load(templates_dir / "intake.yaml").model_dump()
     except config_mod.ConfigError as exc:
         logger.warning("intake.yaml is unreadable, auto-intake stays off: %s", exc)
         app.state.intake = dict(config_mod.INTAKE_DEFAULT)
+        app.state.invalid_intake = str(exc)
 
     policy_obj = None
     invalid_policy: list[str] = []

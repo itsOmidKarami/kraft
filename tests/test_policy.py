@@ -258,9 +258,9 @@ def test_load_policy_parses_triggers(tmp_path):
         # cron has wrong field count
         "default: { attempts: 2, wall_clock_s: 20 }\n"
         'triggers:\n  - cron: "* * *"\n    repo: /r\n    chain: c\n    title: t\n',
-        # cron uses an unsupported range
+        # cron names a minute past 59
         "default: { attempts: 2, wall_clock_s: 20 }\n"
-        'triggers:\n  - cron: "1-5 * * * *"\n    repo: /r\n    chain: c\n    title: t\n',
+        'triggers:\n  - cron: "61 * * * *"\n    repo: /r\n    chain: c\n    title: t\n',
         # triggers not a list
         "default: { attempts: 2, wall_clock_s: 20 }\ntriggers: nope\n",
     ],

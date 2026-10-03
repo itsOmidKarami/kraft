@@ -378,37 +378,86 @@ class CronFields:
     weekday: str
 
 
-def _cron_fields(name: str, expr: str) -> CronFields:
-    """ponytail: `*` or a comma-separated list of ints per field, no ranges
-    or steps (`1-5`, `*/15`) -- add `croniter` as a dependency if a
-    policy.yaml ever needs one."""
+#: Each cron field's name and the values it may hold, in field order. Day of
+#: week takes 0-7, both 0 and 7 meaning Sunday, as cron's own does.
+_CRON_FIELDS: tuple[tuple[str, int, int], ...] = (
+    ("minute", 0, 59),
+    ("hour", 0, 23),
+    ("day of month", 1, 31),
+    ("month", 1, 12),
+    ("day of week", 0, 7),
+)
+
+
+def _cron_values(name: str, part: str, label: str, lo: int, hi: int) -> frozenset[int]:
+    """The values one cron field matches: `*`, an integer, a range `A-B`, a
+    step `*/N`, `A-B/N` or `A/N` (A to the field's top), or a comma-separated
+    list of those. Anything else, or a value outside `lo`-`hi`, is refused."""
+    shape = (
+        f"{name}: field {part!r} must be '*', an integer, a range (1-5), a step (*/15), "
+        "or a comma-separated list of those"
+    )
+    out: set[int] = set()
+    for token in part.split(","):
+        base, slash, step_text = token.partition("/")
+        if slash and not (step_text.isdigit() and int(step_text) > 0):
+            raise PolicyError(f"{name}: field {part!r}: a step must be a positive integer")
+        step = int(step_text) if slash else 1
+        start_text, dash, end_text = base.partition("-")
+        if base == "*":
+            start, end = lo, hi
+        elif dash and start_text.isdigit() and end_text.isdigit():
+            start, end = int(start_text), int(end_text)
+        elif base.isdigit():
+            start = int(base)
+            end = hi if slash else start
+        else:
+            raise PolicyError(shape)
+        for value in (start, end):
+            if not lo <= value <= hi:
+                raise PolicyError(f"{name}: field {part!r}: {label} {value} is outside {lo}-{hi}")
+        if start > end:
+            raise PolicyError(f"{name}: field {part!r}: the range {start}-{end} runs backwards")
+        out.update(range(start, end + 1, step))
+    return frozenset(out)
+
+
+def _cron_sets(name: str, expr: str) -> tuple[frozenset[int], ...]:
+    """Each field's matching values, in field order (`_CRON_FIELDS`). Day of
+    week's 7 is folded onto 0, Sunday."""
     parts = expr.split()
     if len(parts) != 5:
         raise PolicyError(f"{name}: cron expression must have exactly 5 fields: {expr!r}")
-    for part in parts:
-        for token in part.split(","):
-            if token != "*" and not token.isdigit():
-                raise PolicyError(
-                    f"{name}: field {part!r} must be '*' or a comma-separated list of "
-                    "integers; ranges and steps are not supported"
-                )
-    minute, hour, day, month, weekday = parts
+    sets = [
+        _cron_values(name, part, label, lo, hi)
+        for part, (label, lo, hi) in zip(parts, _CRON_FIELDS, strict=True)
+    ]
+    sets[4] = frozenset(0 if day == 7 else day for day in sets[4])
+    return tuple(sets)
+
+
+def _cron_fields(name: str, expr: str) -> CronFields:
+    """A 5-field cron expression, checked: each field is what `_cron_values`
+    reads, with every value in its field's range. Refused with a
+    `PolicyError` naming `name`, the way a policy.yaml trigger was in 1.4,
+    and every reader of a schedule (`config.Schedule`, the draft, the tick)
+    calls this one."""
+    _cron_sets(name, expr)
+    minute, hour, day, month, weekday = expr.split()
     return CronFields(minute, hour, day, month, weekday)
 
 
 def cron_due(expr: str, dt: datetime) -> bool:
-    """True when `dt` (minute resolution) matches a 5-field cron expression."""
-    fields = _cron_fields("cron", expr)
-
-    def matches(field: str, value: int) -> bool:
-        return field == "*" or value in {int(x) for x in field.split(",")}
-
+    """True when `dt` (minute resolution) matches a 5-field cron expression.
+    A day of month and a day of week must both match, as they always have
+    here (cron's own takes either when both are set)."""
+    minute, hour, day, month, weekday = _cron_sets("cron", expr)
     return (
-        matches(fields.minute, dt.minute)
-        and matches(fields.hour, dt.hour)
-        and matches(fields.day, dt.day)
-        and matches(fields.month, dt.month)
-        and matches(fields.weekday, dt.isoweekday() % 7)  # cron: 0 = Sunday
+        dt.minute in minute
+        and dt.hour in hour
+        and dt.day in day
+        and dt.month in month
+        and dt.isoweekday() % 7 in weekday  # cron: 0 = Sunday
     )
 
 

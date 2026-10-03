@@ -114,10 +114,14 @@ async def health(request: Request):
     invalid = deps.invalid_templates(st)
     summary = asdict(st.reattach_summary)
     summary["unknown"] = st.db.read(lambda c: reattach_mod.still_orphaned(c, summary["unknown"]))
+    # An `intake.yaml` that does not load leaves auto-intake off and every
+    # schedule unfired, which nothing else would say (R12E-03).
+    invalid_intake = getattr(st, "invalid_intake", None)
     return {
-        "status": "degraded" if (invalid or invalid_policy) else "ok",
+        "status": "degraded" if (invalid or invalid_policy or invalid_intake) else "ok",
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
+        "invalid_intake": invalid_intake,
         # `unknown` as it stands now, not as startup found it.
         "reattach_summary": summary,
         "index": st.indexer.health(),
