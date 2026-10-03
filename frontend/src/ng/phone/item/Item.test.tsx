@@ -373,7 +373,7 @@ describe("raising the cap that stopped the item (R73)", () => {
   const capped = (l?: unknown) => item("needs_you", { ...stop("cap", { reason: "Running time hit its 8h cap" }), ...(l ? { limit: l } : {}) } as WorkItemStop);
   const sent = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
   const openSheet = async () => {
-    await userEvent.click(await screen.findByRole("button", { name: /^Raise the running time cap/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     return screen.findByRole("dialog");
   };
   const type = async (v: string) => {
@@ -389,10 +389,11 @@ describe("raising the cap that stopped the item (R73)", () => {
     expect(screen.queryByRole("button", { name: /^Raise/ })).toBeNull();
   });
 
-  it("with stop.limit the card offers the raise beside Steer and Retry, and the sheet shows the value and the maximum", async () => {
+  it("with stop.limit the bar is Steer and Raise cap, and the sheet shows the value and the maximum", async () => {
     mount(capped(limit()));
+    expect(await screen.findByRole("button", { name: "Steer" })).toBeInTheDocument();
     const dialog = await openSheet();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(dialog).toHaveTextContent("Now 480 minutes of running time. The policy maximum is 1440.");
     expect(screen.getByLabelText("Raise the running time cap", { selector: "input" })).toHaveValue("480");
     expect(within(dialog).getByRole("button", { name: "Save & retry" })).toBeInTheDocument();
@@ -414,7 +415,7 @@ describe("raising the cap that stopped the item (R73)", () => {
 
   it("a node's own limit goes under policy.paths", async () => {
     const calls = mount(capped(limit({ path: "verification", key: "max_attempts", value: 3 })));
-    await userEvent.click(await screen.findByRole("button", { name: /^Raise the attempts cap/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     const box = screen.getByLabelText("Raise the attempts cap", { selector: "input" });
     await userEvent.clear(box);
     await userEvent.type(box, "5{Enter}");

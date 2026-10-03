@@ -48,7 +48,6 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const hs = headerState(item);
   const card = cardOf(item, events);
   const bar = pairOf(item);
-  const limit = stopLimitOf(item);
   const ended = status === "done" || status === "cancelled" || status === "archived";
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
@@ -66,7 +65,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const go = (id: ActId) => {
     switch (id) {
       case "pause": return sheet.open("pause");
-      case "raise": return sheet.open("raise");
+      case "raise": return sheet.open(item.stop?.kind === "cap" ? "raise-cap" : "raise");
       case "steer": case "reject": case "answer": case "escalate": case "cancel": case "complete": return navigate(itemUrl(item.id, `?compose=${id}`));
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
@@ -131,7 +130,6 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             <h2 className="ph-statecard-title">{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
-            {limit && item.stop?.kind === "cap" && <button type="button" className="ph-linkbtn" onClick={() => sheet.open("raise-cap")}>Raise the {limitWords(limit).noun}…</button>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
                 {card.facts.map(([k, v]) => <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
