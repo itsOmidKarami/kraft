@@ -43,6 +43,21 @@ describe("Inspector", () => {
     expect(onCollapse).toHaveBeenCalledTimes(1);
   });
 
+  // R11b-02: Escape in a Reject… note or a Retry steer collapsed the pane and the text went with it.
+  it.each([
+    ["a note with text in it", false, <textarea aria-label="field" defaultValue="The spec misses eviction." />],
+    ["a line with text in it", false, <input aria-label="field" defaultValue="0.03" />],
+    ["an empty note", true, <textarea aria-label="field" />],
+    ["a checkbox", true, <input type="checkbox" aria-label="field" />],
+  ])("Escape in %s: the pane collapses %s", async (_name, collapses, field) => {
+    const onCollapse = vi.fn();
+    render(<Inspector id="p" open size={docked} title="verification" crumbs={[]} onCollapse={onCollapse} onExpand={() => {}}>{field}</Inspector>);
+    screen.getByLabelText("field").focus();
+    await userEvent.keyboard("{Escape}");
+    expect(onCollapse).toHaveBeenCalledTimes(collapses ? 1 : 0);
+    if (!collapses) expect(screen.getByLabelText("field")).toHaveFocus();
+  });
+
   it("collapses to the rail and expands from it", async () => {
     const user = userEvent.setup();
     render(<Pane />);

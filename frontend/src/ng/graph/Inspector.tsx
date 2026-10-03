@@ -2,6 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { Maximize2, NodeIcon, PanelRightClose, PanelRightOpen, type TaskKind } from "../icons";
 import { Tabs } from "../ui/Tabs";
+import { holdsText } from "../keys";
 import type { useResizable } from "./useResizable";
 import "./graph.css";
 
@@ -78,6 +79,8 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
     if (e.key !== "Escape" || !e.currentTarget.contains(e.target as Node)) return;
     e.preventDefault();
     e.stopPropagation();
+    // Escape in a box with text in it leaves the pane as it is: collapsing it would throw the text away (R11b-02).
+    if (holdsText(e.target)) return;
     fromKeys.current = true;
     onCollapse();
   };
