@@ -22,6 +22,12 @@ Right after the spec, before touching a plan:
 - **Inline** - the spec came out spike- or bounded-classified. Go straight to
   the normal dev workflow (TDD, etc.) in this session. No plan doc needed:
   that's already bounded's own terminal state.
+  Two rules for the tests you write there: a fix adds a row, not a function
+  (find the test that already covers the behaviour and add a parametrized case
+  with a readable id; a new test function is for a new behaviour), and look in
+  the repo's shared test helpers and fixtures before writing one, since a
+  copied helper is a second place to keep current. The repo's own testing
+  guidance (its `CLAUDE.md`, `AGENTS.md` or CONTRIBUTING) says where they live.
 - **Handoff** - the spec came out architectural-classified, or the user already
   said the work is too big for this session, needs gates, or spans sessions.
   Use `kraft:handoff` to file it, attaching the spec. Kraft's own chain plans it -
