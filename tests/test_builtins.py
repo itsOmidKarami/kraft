@@ -575,9 +575,13 @@ async def test_the_worktree_and_the_forge_agree_on_the_branch(
     assert git_read(run_dirs.worktrees / wid, "rev-parse", "--abbrev-ref", "HEAD") == branch
     # what the forge adapter was handed
     assert captured["branch"] == branch
-    # and what abandon reclaims
+    # and what abandon reclaims, with what a server killed mid-rebase set aside
+    set_aside = kraft_builtins.set_aside_dir(run_dirs.worktrees / wid)
+    set_aside.mkdir(parents=True)
+    (set_aside / "uv.lock").write_text("left by a SIGKILL\n")
     removed = await lifecycle._remove_worktree(repo, run_dirs.worktrees / wid, branch, wid)
     assert removed["worktree_removed"]
+    assert not set_aside.exists()
     listed = subprocess.run(
         ["git", "branch", "--list", branch],
         cwd=repo,

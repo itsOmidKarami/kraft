@@ -4,6 +4,7 @@ the repository's default branch, which is what every item used before."""
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from support import worktree as wtree
@@ -187,31 +188,41 @@ async def test_the_base_branch_names_the_items_own_repository_or_its_default(
     assert await kraft_builtins.base_branch(database, "legacy", repo) == "main"
 
 
-def test_the_ignore_rules_come_from_the_items_base_branch(origin):
+@pytest.mark.parametrize("rule", [b"release-only/\n", b"caf\xe9-only/\n"], ids=["utf-8", "latin-1"])
+def test_the_ignore_rules_come_from_the_items_base_branch(origin, rule):
     """A rule the base branch gained after the worktree was cut still binds
     it -- the base's, not `main`'s, which an item on `release` never merges
-    into."""
+    into. Byte for byte (R11s-01): a rule naming a path that is not UTF-8
+    still names that path, not one with a replacement character."""
     repo, other = origin
     _git(other, "checkout", "-q", "release")
-    (other / ".gitignore").write_text("release-only/\n")
+    (other / ".gitignore").write_bytes(rule)
     _git(other, "add", "-A")
     _git(other, "commit", "-q", "-m", "ignore release-only")
     _git(other, "push", "-q", "origin", "release")
     _git(repo, "fetch", "-q", "origin")
 
     with base_ignore_args(repo, "release") as args:
-        rules = open(args[1].split("=", 1)[1]).read()
-    assert rules == "release-only/\n"
+        rules = Path(args[1].split("=", 1)[1]).read_bytes()
+    assert rules == rule
     with base_ignore_args(repo, "main") as args:
         assert args == []
 
 
+@pytest.mark.parametrize(
+    ("node", "rebased"),
+    [("spec", ["release"]), ("merge_request_feedback", [])],
+    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+)
 @pytest.mark.parametrize("door, stopped", [("retry", "needs_human"), ("resume", "paused")])
 def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
-    client, origin, monkeypatch, door, stopped
+    client, origin, monkeypatch, door, stopped, node, rebased
 ):
     """`/retry` and `/resume` rebase the worktree before the walk: onto the
-    item's base branch, like every other rebase."""
+    item's base branch, like every other rebase. Not when the item stands at
+    a node with `on_base_changed` (R11E-06): it rebases itself, and the
+    door's rebase took the move from it, so the span it restarts on a move
+    never ran on the new base."""
     from support.api import _force_node
 
     from kraft import executor
@@ -231,14 +242,28 @@ def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
         "/api/work-items",
         json={"title": "t", "repo": str(repo), "autostart": False, "base_branch": "release"},
     )
-    _force_node(r.json()["id"], "spec", stopped)
+    _force_node(r.json()["id"], node, stopped)
 
     assert client.post(f"/api/work-items/{r.json()['id']}/{door}", json={}).status_code == 200
-    assert bases == ["release"]
+    assert bases == rebased
 
 
+@pytest.mark.parametrize(
+    ("chain", "rebased"),
+    [
+        (_ONE_NODE, ["release"]),
+        (
+            [
+                {**_ONE_NODE[0], "id": "m"},
+                {**_ONE_NODE[0], "on_base_changed": {"restart_from": "m"}},
+            ],
+            [],
+        ),
+    ],
+    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+)
 async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
-    item_on, run_dirs, repo, monkeypatch
+    item_on, run_dirs, repo, monkeypatch, chain, rebased
 ):
     from kraft import events, store
     from kraft.executor import gates
@@ -256,7 +281,7 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     # the function.
     monkeypatch.setattr(sys.modules["kraft.executor.retry"], "retry", walk)
     target = WorkItemTarget.for_repository("target", base_branch="release")
-    it = await item_on(_ONE_NODE, "n", target=target)
+    it = await item_on(chain, "n", target=target)
     await it.database.write(
         lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True, kind="stuck")
     )
@@ -268,7 +293,7 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
 
     await gates.resume_after_escalation(it.database, run_dirs, work_item_id=it.id, cursor=cursor)
 
-    assert bases == ["release"]
+    assert bases == rebased
 
 
 async def test_an_escalations_self_retry_that_cannot_rebase_stops_infra(

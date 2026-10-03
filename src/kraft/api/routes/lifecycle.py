@@ -330,6 +330,8 @@ async def _remove_worktree(
     it, and the answer names the path as `repo_missing`. Its branch, if the
     repository was only moved, stays there.
     """
+    # Lockfiles a server killed mid-rebase left set aside, under the run dir.
+    await asyncio.to_thread(shutil.rmtree, builtins_mod.set_aside_dir(worktree), ignore_errors=True)
     if not repo.is_dir():
         logger.warning(
             "abandon %s: repository %s is gone; removing the worktree directory itself",
@@ -881,11 +883,18 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
-            new_base = await builtins_mod.refresh_worktree_base(
-                worktree,
-                Path(row["repo"]),
-                store.branch_for(row),
-                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+            # Left to a starting node that rebases itself, which then restarts
+            # its span on the move (`walk.rebases_itself`).
+            start = rewind["target"] if rewind is not None else row["current_node_id"]
+            new_base = (
+                None
+                if walk.rebases_itself(row, start)
+                else await builtins_mod.refresh_worktree_base(
+                    worktree,
+                    Path(row["repo"]),
+                    store.branch_for(row),
+                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+                )
             )
         except builtins_mod.RebaseConflict as exc:
             # Handed to the walk, which gives it to the node's `on_conflict`
@@ -1202,11 +1211,16 @@ async def _retry(wid: str, body: Retry, request: Request):
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
-            new_base = await builtins_mod.refresh_worktree_base(
-                worktree,
-                Path(row["repo"]),
-                store.branch_for(row),
-                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+            # Left to a node that rebases itself (`walk.rebases_itself`).
+            new_base = (
+                None
+                if walk.rebases_itself(row, node_id)
+                else await builtins_mod.refresh_worktree_base(
+                    worktree,
+                    Path(row["repo"]),
+                    store.branch_for(row),
+                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+                )
             )
         except builtins_mod.RebaseConflict as exc:
             # The retry still forks; the walk hands the conflict to the

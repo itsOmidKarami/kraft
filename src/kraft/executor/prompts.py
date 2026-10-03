@@ -160,7 +160,7 @@ _STEER_PROMPT = "A human has steered this run: {steer}\n\n"
 #: (Kraft-4bgg). Deliberately not `_STEER_PROMPT`: no human wrote this, and
 #: that template's wording would say one did.
 _REBASE_PROMPT = (
-    "This branch was rebased onto a newer {branch} before opening its MR. "
+    "This branch was rebased onto a newer {base} before opening its MR. "
     "Commits landed upstream while this work was in progress:\n\n{body}\n\n"
     "Check whether they affect this work; fix it if so.\n\n"
 )
@@ -172,7 +172,7 @@ _REBASE_PROMPT = (
 _REBASE_NOTE_MAX = 2000
 
 
-def rebase_drift_note(worktree, branch: str, old_base: str, new_base: str) -> str:
+def rebase_drift_note(worktree, base: str, old_base: str, new_base: str) -> str:
     """A short pointer at what changed upstream during a rebase bounce back
     to `verify` (Kraft-4bgg): commit subjects and touched files, not a full
     diff, so the next review agent knows what to go looking for instead of
@@ -183,7 +183,7 @@ def rebase_drift_note(worktree, branch: str, old_base: str, new_base: str) -> st
     body = f"Commits:\n{log}\n\nFiles touched:\n{stat}"
     if len(body) > _REBASE_NOTE_MAX:
         body = body[:_REBASE_NOTE_MAX] + "\n... (truncated)"
-    return _REBASE_PROMPT.format(branch=branch, body=body)
+    return _REBASE_PROMPT.format(base=base, body=body)
 
 
 #: What the rebase-conflict resolver (`walk.resolve_rebase_conflict`,
