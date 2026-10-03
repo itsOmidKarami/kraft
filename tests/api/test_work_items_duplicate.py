@@ -67,14 +67,15 @@ def test_a_chain_the_policy_now_refuses_is_a_422(client, repo, templates_dir):
 
 @pytest.mark.parametrize(
     ("stored", "title", "description"),
-    [("t", "t", "d"), ("t\nmore of it\n", "t", "more of it\n\nd")],
-    ids=["one-line", "stored-by-1.4-on-two-lines"],
+    [("t", "t", "d"), ("t\nmore of it\n", "t", "more of it\n\nd"), (" ", "d", "d")],
+    ids=["one-line", "stored-by-1.4-on-two-lines", "stored-by-1.4-blank"],
 )
 def test_duplicate_carries_the_listed_fields_and_nothing_else(
     client, tmp_path, stored, title, description
 ):
     """A title 1.4 stored with a line break is folded, as a cron trigger's is:
-    its first line is the title, and the rest leads the description (R11F-03)."""
+    its first line is the title, and the rest leads the description. A blank
+    one, which 1.4 filed too, takes the description's first line (R11F-03)."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     r = client.post(
         "/api/work-items",

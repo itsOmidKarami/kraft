@@ -138,15 +138,21 @@ def kv(pairs: list[tuple[str, str]]) -> str:
     )
 
 
+#: What a cell never prints: C0 and C1 controls but ESC (a painted cell's
+#: colour is one), DEL, and the bidi embeddings, overrides and isolates that
+#: would reorder the row. A title 1.4 stored can hold any of them.
+_CELL_CONTROLS = re.compile("[\x00-\x08\x0e-\x1a\x1f\x7f-\x84\x86-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
 def _cell(value: object) -> str:
     """None and "" are the same absence to a reader, and both read as "-".
 
     A cell is one line: a line break in it, such as in a title 1.4 stored
     with one, wrapped its row under the first column. Its first line that
-    has any text stands for it."""
+    has any text stands for it, without control characters."""
     if value in (None, ""):
         return "-"
-    text = str(value)
+    text = _CELL_CONTROLS.sub("", str(value).replace("\t", " "))
     lines = text.splitlines()
     if lines == [text]:
         return text

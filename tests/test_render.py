@@ -40,12 +40,19 @@ def test_table_renders_a_missing_key_as_a_dash():
 
 @pytest.mark.parametrize(
     ("title", "shown"),
-    [("two\nlines", "two"), ("\nsecond", "second"), ("cr\r\nlf", "cr"), ("\n", "-")],
-    ids=["two-lines", "leading-break", "crlf", "only-a-break"],
+    [
+        ("two\nlines", "two"),
+        ("\nsecond", "second"),
+        ("cr\r\nlf", "cr"),
+        ("\n", "-"),
+        ("bidi\u202eflip\x07", "bidiflip"),
+    ],
+    ids=["two-lines", "leading-break", "crlf", "only-a-break", "controls"],
 )
 def test_table_shows_a_cells_first_line_only(title, shown):
     """A title 1.4 stored with a line break wrapped `kraft view list`'s row
-    under its ID column (R11F-03)."""
+    under its ID column, and a control character in it reached the terminal
+    (R11F-03)."""
     rows = [{"title": title, "id": "Kraft-a"}]
     out = render.table(rows, [("TITLE", "title"), ("ID", "id")], width=80).splitlines()
     assert len(out) == 2

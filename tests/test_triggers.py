@@ -49,21 +49,30 @@ async def test_tick_ignores_a_not_yet_due_trigger(tmp_path, stub_app):
 
 
 @pytest.mark.parametrize(
-    ("title", "filed_title", "filed_description"),
+    ("title", "description", "filed_title", "filed_description"),
     [
-        ("Nightly sweep", "Nightly sweep", "d"),
-        ("Nightly sweep\n", "Nightly sweep", "d"),
-        ("Nightly sweep\nof every repo\n", "Nightly sweep", "of every repo\n\nd"),
+        ("Nightly sweep", "d", "Nightly sweep", "d"),
+        ("Nightly sweep\n", "d", "Nightly sweep", "d"),
+        ("Nightly sweep\nof every repo\n", "d", "Nightly sweep", "of every repo\n\nd"),
+        ("Nightly\tsweep\u202e\x07", "d", "Nightly sweep", "d"),
+        (
+            "\n",
+            "\nSweep the repos\nall of them",
+            "Sweep the repos",
+            "\nSweep the repos\nall of them",
+        ),
+        ("\n", " ", None, None),
     ],
-    ids=["one-line", "block-scalar", "two-lines"],
+    ids=["one-line", "block-scalar", "two-lines", "controls", "blank-takes-description", "blank"],
 )
 async def test_tick_files_a_paused_item_on_a_due_trigger(
-    tmp_path, stub_app, title, filed_title, filed_description
+    tmp_path, stub_app, title, description, filed_title, filed_description
 ):
     """A title is one line. A trigger's is folded rather than refused, as no
-    one is there to fix it, and `title: >` in YAML always ends in a line
-    break: the first line is the title, the rest leads the description
-    (R11F-03)."""
+    one is there to fix it, and `title: >` in YAML ends in a line break: the
+    first line is the title, the rest leads the description (R11F-03).
+    Control characters go, a blank title takes the description's first line,
+    and with no text in either the trigger is skipped."""
     repo = isolated_bd(tmp_path)
     pol = policy.Policy(
         loops={},
@@ -74,7 +83,7 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(
                 repo=str(repo),
                 chain="default",
                 title=title,
-                description="d",
+                description=description,
             )
         ],
     )
@@ -83,6 +92,9 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(
     _connect(tmp_path, repo)
     now = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
     filed = await triggers.tick(app, now=now)
+    if filed_title is None:
+        assert filed == []
+        return
     assert len(filed) == 1
     row = app.state.db.read(
         lambda c: c.execute(

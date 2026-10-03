@@ -26,21 +26,33 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
+#: What a title never carries, line breaks aside (`str.splitlines` takes
+#: those): C0 and C1 controls, DEL, and the bidi embeddings, overrides and
+#: isolates that reorder what the board shows. The marks (LRM, RLM, ALM) stay.
+_TITLE_CONTROLS = re.compile("[\x00-\x08\x0e-\x1b\x1f\x7f-\x84\x86-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
 def one_line_title(title: str, description: str | None) -> tuple[str, str | None]:
     """`title` folded to its first line, the rest put at the top of `description`.
 
     A title is one line: a line break broke `kraft view list`'s table. The
     doors a person types at refuse one (`api/routes/work_items._check_title`),
     but a `policy.yaml` cron trigger has no one to refuse, and a YAML block
-    scalar (`title: >`) always ends in a line break. Duplicate copies a title
-    1.4 stored as it was. Those are folded here instead, so the item still
-    files with nothing of its text lost.
+    scalar (`title: >`, unless `>-`) ends in a line break. Duplicate copies a title 1.4
+    stored as it was. Those are folded here instead, so the item still files
+    with nothing of its text lost. Control characters are dropped and a tab
+    becomes a space. A title with no text takes the description's first line
+    that has some; with none there either, it comes back empty, for the
+    caller to refuse.
     """
-    lines = title.splitlines()
-    if lines == [title]:
-        return title, description
-    first = next((i for i, line in enumerate(lines) if line.strip()), len(lines))
-    head = lines[first].strip() if first < len(lines) else ""
+    lines = [_TITLE_CONTROLS.sub("", line.replace("\t", " ")) for line in title.splitlines()]
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first is None:
+        fallback = next((ln for ln in (description or "").splitlines() if ln.strip()), "")
+        return (one_line_title(fallback, None)[0] if fallback else ""), description
+    if len(lines) == 1 and title.splitlines() == [title]:
+        return lines[0], description
+    head = lines[first].strip()
     rest = "\n".join(lines[first + 1 :]).strip()
     if not rest:
         return head, description
