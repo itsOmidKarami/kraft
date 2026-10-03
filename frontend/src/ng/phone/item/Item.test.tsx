@@ -242,6 +242,12 @@ describe("the other composers (C.7)", () => {
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/resume", body: { steer: "Allow it" } }));
   });
 
+  // R12b-13: each opened with the focus on <body>.
+  it.each(["steer", "reject", "answer", "escalate", "cancel", "complete"])("%s opens with the focus in its box", async (kind) => {
+    mount(kind === "reject" ? gateItem() : item("running"), `/work-items/w1?compose=${kind}`, { "GET /work-items/w1/cancel-preview": [404, { detail: "not here" }] });
+    expect(await screen.findByRole("textbox")).toHaveFocus();
+  });
+
   it("Escalate offers a new thread only when there is an earlier one", async () => {
     mount(item("running", null, { escalation_threads: [{ thread: 1, session_id: "e", turns: 1, started_at: "x", ended_at: null, status: "done" }] }), "/work-items/w1?compose=escalate");
     expect(await screen.findByRole("switch", { name: "Start a new thread" })).toHaveAttribute("aria-checked", "false");
