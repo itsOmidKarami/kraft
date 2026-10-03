@@ -49,6 +49,7 @@ def test_health_is_degraded_by(client, key, names):
     body = client.get("/api/health").json()
     assert body["status"] == "degraded"
     assert body[key]
+    assert body["intake_off"] is (key == "invalid_intake")  # started on it: off
     if names:
         assert names in body[key]
     assert "reattach_summary" in body

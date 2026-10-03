@@ -427,7 +427,9 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
         del new_policy["triggers"]
         moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
     if new_intake != intake_data:
-        write_text(intake_path, preserve.rewrite(intake_text, new_intake))
+        # A moved list keeps the indent it had in policy.yaml.
+        offset = preserve.list_offset(policy_text)
+        write_text(intake_path, preserve.rewrite(intake_text, new_intake, list_offset=offset))
     if new_policy != policy_data:
         write_text(policy_path, preserve.rewrite(policy_text, new_policy))
     return moved

@@ -34,13 +34,21 @@ def test_doctor_names_each_key_2_0_moved_and_still_reads(tmp_path, monkeypatch):
         assert old in check["detail"], check["detail"]
     assert "the next start moves them" in check["detail"]
 
-    # A key 1.4 ignored and 2.0's schedule refuses keeps them there: say so (R12c-02).
+    # A key 1.4 ignored and 2.0's schedule refuses keeps that one there, and a
+    # cron past its field is skipped too: say which move and why (R12c-02).
     (live / "policy.yaml").write_text(
         "default: {attempts: 1, wall_clock_s: 1}\ntriggers:\n"
         "  - {cron: '0 9 * * *', repo: /r, chain: default, title: t, enabled: false}\n"
+        "  - {cron: '0 9 * * 1', repo: /r, chain: default, title: moves}\n"
+        "  - {cron: '0 24 * * *', repo: /r, chain: default, title: never}\n"
     )
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "moved keys")
-    assert "they stay because intake.yaml's schedules refuse triggers.0.enabled" in check["detail"]
+    detail = check["detail"]
+    assert "the next start moves 1 of them" in detail
+    assert "triggers.0 stays because intake.yaml's schedules refuse triggers.0.enabled" in detail
+    assert (
+        "triggers.2 stays because" in detail and "hour 24 is outside 0-23 and is skipped" in detail
+    )
 
     (live / "intake.yaml").write_text("enabled: false\n")
     (live / "policy.yaml").write_text("default: {attempts: 1, wall_clock_s: 1}\n")

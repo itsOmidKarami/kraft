@@ -335,7 +335,7 @@ class Policy:
             budget=parsed.budget or NO_BUDGET,
             archive_after_days=parsed.archive.after_days if parsed.archive else None,
             rate_limit_retries=parsed.rate_limit_retries,
-            triggers=[_trigger(f"{name}: triggers[{i}]", t) for i, t in enumerate(parsed.triggers)],
+            triggers=_triggers(name, parsed.triggers),
             max_concurrent=parsed.max_concurrent,
             auto_escalate_stuck=parsed.auto_escalate_stuck,
             auto_escalate_stuck_cap=parsed.auto_escalate_stuck_cap,
@@ -389,6 +389,16 @@ _CRON_FIELDS: tuple[tuple[str, int, int], ...] = (
 )
 
 
+class CronRangeError(PolicyError):
+    """A cron value outside its field (minute 61, day of week 8): the one
+    refusal a 1.4 `policy.yaml` trigger could already hold, since 1.4 checked
+    only that each value was digits. Such a trigger never fired there."""
+
+
+#: What a cron number is: ASCII digits. `str.isdigit` also takes `²` and `٣`.
+_DIGITS = re.compile(r"[0-9]+")
+
+
 def _cron_values(name: str, part: str, label: str, lo: int, hi: int) -> frozenset[int]:
     """The values one cron field matches: `*`, an integer, a range `A-B`, a
     step `*/N`, `A-B/N` or `A/N` (A to the field's top), or a comma-separated
@@ -400,22 +410,24 @@ def _cron_values(name: str, part: str, label: str, lo: int, hi: int) -> frozense
     out: set[int] = set()
     for token in part.split(","):
         base, slash, step_text = token.partition("/")
-        if slash and not (step_text.isdigit() and int(step_text) > 0):
+        if slash and not (_DIGITS.fullmatch(step_text) and int(step_text) > 0):
             raise PolicyError(f"{name}: field {part!r}: a step must be a positive integer")
         step = int(step_text) if slash else 1
         start_text, dash, end_text = base.partition("-")
         if base == "*":
             start, end = lo, hi
-        elif dash and start_text.isdigit() and end_text.isdigit():
+        elif dash and _DIGITS.fullmatch(start_text) and _DIGITS.fullmatch(end_text):
             start, end = int(start_text), int(end_text)
-        elif base.isdigit():
+        elif _DIGITS.fullmatch(base):
             start = int(base)
             end = hi if slash else start
         else:
             raise PolicyError(shape)
         for value in (start, end):
             if not lo <= value <= hi:
-                raise PolicyError(f"{name}: field {part!r}: {label} {value} is outside {lo}-{hi}")
+                raise CronRangeError(
+                    f"{name}: field {part!r}: {label} {value} is outside {lo}-{hi}"
+                )
         if start > end:
             raise PolicyError(f"{name}: field {part!r}: the range {start}-{end} runs backwards")
         out.update(range(start, end + 1, step))
@@ -464,6 +476,22 @@ def cron_due(expr: str, dt: datetime) -> bool:
 def _trigger(name: str, raw: TriggerInput) -> Trigger:
     _cron_fields(f"{name}.cron", raw.cron)
     return Trigger(**raw.model_dump())
+
+
+def _triggers(name: str, raws: list[TriggerInput]) -> list[Trigger]:
+    """`policy.yaml`'s pre-2.0 `triggers:`, each checked as a schedule is. One
+    whose cron names a value outside its field (`0 24 * * *`) loaded in 1.4,
+    which never ran it: it is skipped with a warning, not a refusal of the
+    whole file, which would stop every intake door (R12 review P1-1).
+    `kraft admin doctor`'s `moved keys` row names it. Any other bad cron is
+    refused, as in 1.4."""
+    out = []
+    for i, raw in enumerate(raws):
+        try:
+            out.append(_trigger(f"{name}: triggers[{i}]", raw))
+        except CronRangeError as exc:
+            logger.warning("%s; that trigger is skipped, as 1.4 never ran it", exc)
+    return out
 
 
 class CapOverride(BaseModel):

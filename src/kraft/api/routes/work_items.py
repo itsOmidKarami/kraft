@@ -7,7 +7,7 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from kraft import config as config_mod
 from kraft import executor, store
@@ -34,7 +34,27 @@ class Attachment(BaseModel):
     path: str
 
 
-class NewWorkItem(BaseModel):
+def _one_chain(data: object) -> object:
+    """`chain` and its pre-2.0 name `chain_template` are one field: a body
+    naming two different chains is refused, not settled by which name wins."""
+    if (
+        isinstance(data, dict)
+        and data.get("chain") is not None
+        and data.get("chain_template") is not None
+        and data["chain"] != data["chain_template"]
+    ):
+        raise ValueError("`chain` and `chain_template` name different chains; send `chain` alone")
+    return data
+
+
+class _OneChain(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _one_chain(cls, data: object) -> object:
+        return _one_chain(data)
+
+
+class NewWorkItem(_OneChain):
     title: str
     #: the brief — prose, and what the spec node writes a design from. A title is
     #: only a label.
@@ -683,7 +703,7 @@ def _check_text(name: str, text: str | None) -> None:
 _BIDI_CONTROLS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
-class TriggerBody(BaseModel):
+class TriggerBody(_OneChain):
     repo: str
     title: str
     description: str = ""
@@ -733,7 +753,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     return await board.get_work_item(wid, request)
 
 
-class WorkItemPatch(BaseModel):
+class WorkItemPatch(_OneChain):
     #: Absent means untouched, in every field. This route is still not a
     #: general table editor -- a body carrying anything else is ignored, not
     #: applied -- but a screen that edits one field must not blank another,

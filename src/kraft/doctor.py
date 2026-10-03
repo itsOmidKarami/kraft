@@ -20,6 +20,7 @@ from pathlib import Path
 import yaml
 
 from kraft import auth, capabilities, client, config, detect, harness, pidfile, registration
+from kraft import policy as policy_mod
 from kraft.adapters import forge
 from kraft.executor import fallback
 from kraft.paths import (
@@ -124,6 +125,9 @@ def _health_checks(payload: dict) -> list[dict]:
     if payload.get("invalid_intake"):
         reasons.append(
             f"invalid intake.yaml, auto-intake and schedules are off: {payload['invalid_intake']}"
+            if payload.get("intake_off")
+            else f"invalid intake.yaml, not applied: the running auto-intake and schedules are "
+            f"kept; fix the file and reload: {payload['invalid_intake']}"
         )
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
@@ -294,10 +298,35 @@ def _why_it_stayed(key: str, data: dict) -> str:
     triggers = data.get("triggers")
     if key != "triggers" or not isinstance(triggers, list):
         return ""
-    why = config.schedule_refusal(triggers, "triggers")
-    if why is None:
+    refused = config.schedule_refusals(triggers, "triggers")
+    if not refused:
         return "; the next start moves them"
-    return f"; they stay because intake.yaml's schedules refuse {why}: fix that and restart"
+    moving = len(triggers) - len(refused)
+    out = f"; the next start moves {moving} of them" if moving else ""
+    for index, why in refused.items():
+        skipped = (
+            " and is skipped, as 1.4 never ran it" if _cron_out_of_range(triggers[index]) else ""
+        )
+        out += (
+            f"; triggers.{index} stays because intake.yaml's schedules refuse {why}{skipped}"
+            ": fix it and restart"
+        )
+    return out
+
+
+def _cron_out_of_range(entry: object) -> bool:
+    """A 1.4 trigger whose cron names a value past its field: loaded, never run
+    (`policy._triggers`)."""
+    cron = entry.get("cron") if isinstance(entry, dict) else None
+    if not isinstance(cron, str):
+        return False
+    try:
+        policy_mod._cron_fields("cron", cron)
+    except policy_mod.CronRangeError:
+        return True
+    except policy_mod.PolicyError:
+        return False
+    return False
 
 
 def _moved_keys_check(templates: Path) -> dict:

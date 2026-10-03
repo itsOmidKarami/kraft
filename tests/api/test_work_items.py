@@ -64,6 +64,12 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
     [
         ("work-items", {"title": "x", "repo": "/tmp", "chain_template": "nope"}, "no chain 'nope'"),
         ("work-items", {"title": "x", "repo": "/tmp", "chain": "nope"}, "no chain 'nope'"),
+        (
+            "work-items",
+            {"title": "x", "repo": "REPO", "chain": "default", "chain_template": "quick-task"},
+            None,
+        ),
+        ("triggers", {"title": "x", "repo": "REPO", "chain": "a", "chain_template": "b"}, None),
         ("work-items", {"title": "x"}, None),
         ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
@@ -88,6 +94,8 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
     ids=[
         "an-unknown-template",
         "an-unknown-chain",
+        "chain-and-chain-template-differ",
+        "trigger-chain-and-chain-template-differ",
         "no-repo",
         "a-nonexistent-repo",
         "trigger-an-unknown-template",
@@ -112,6 +120,8 @@ def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):
     assert r.status_code == 422
     if detail:
         assert detail in r.json()["detail"]
+    elif "chain" in body:
+        assert "name different chains" in r.json()["detail"][0]["msg"]
 
 
 @pytest.mark.parametrize(

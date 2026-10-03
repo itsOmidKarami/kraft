@@ -144,6 +144,7 @@ def test_reload_refuses_an_intake_yaml_that_does_not_load_and_says_so(client, te
     assert client.app.state.intake == running
     health = client.get("/api/health").json()
     assert (health["status"], health["invalid_intake"]) == ("degraded", r["refused_intake"])
+    assert health["intake_off"] is False  # the running schedules are kept
 
     path.write_text(good)
     assert client.post("/api/templates/reload").json()["refused_intake"] is None

@@ -23,6 +23,7 @@ OTHER = {**SCHEDULE, "title": "monthly"}
         "already-carried-by-settings",
         "a-trigger-intake-would-refuse",
         "one-refused-the-rest-move",
+        "a-1.4-cron-out-of-range-stays",
         "an-intake-that-does-not-load",
         "symlinked-files",
         "nothing-to-move",
@@ -49,6 +50,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
         triggers = [{**SCHEDULE, "enabled": False}]
     elif case == "one-refused-the-rest-move":
         triggers = [{**SCHEDULE, "enabled": False}, OTHER]
+    elif case == "a-1.4-cron-out-of-range-stays":
+        triggers = [{**SCHEDULE, "cron": "0 24 * * *"}, OTHER]
     elif case == "an-intake-that-does-not-load":
         intake["interval_s"] = "often"
     elif case == "nothing-to-move":
@@ -76,10 +79,11 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     elif case == "nothing-to-move":
         assert lines == []
         assert {n: (files / n).stat().st_ino for n in before} == before  # not replaced
-    elif case == "one-refused-the-rest-move":
+    elif case in ("one-refused-the-rest-move", "a-1.4-cron-out-of-range-stays"):
         assert after["policy.yaml"]["triggers"] == triggers[:1]
         assert after["intake.yaml"]["schedules"] == [OTHER]
-        assert "triggers.0.enabled" in lines[1] and "next start moves them" in lines[1]
+        why = "triggers.0.enabled" if case.startswith("one") else "hour 24 is outside 0-23"
+        assert why in lines[1] and "next start moves them" in lines[1]
     else:
         assert "triggers" not in after["policy.yaml"]
         schedules = [{"description": ""} if case.endswith("settings") else {}, {}]
@@ -107,7 +111,8 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
     (old / "intake.yaml").write_text("# pickup\nenabled: false\nmax_concurrent: 1  # one\n")
     (old / "policy.yaml").write_text(
         "# caps\ndefault: {attempts: 1, wall_clock_s: 1}\n"
-        "triggers:\n  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}  # weekly\n"
+        "triggers:\n  # the weekly one\n"
+        "  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}  # weekly\n"
         "# the end\n"
     )
 
@@ -126,8 +131,10 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
     assert (home / "policy.yaml").read_text().startswith("# caps\n")
     lines = (home / "intake.yaml").read_text().splitlines()
     assert any("title: t}" in line and line.endswith("# weekly") for line in lines)
+    # The line above it too, and the list's indent as policy.yaml had it.
+    assert lines[lines.index("  # the weekly one") + 1].startswith("  - {cron:")
     assert "# the end" not in (home / "intake.yaml").read_text()
-    assert "# weekly" not in (home / "policy.yaml").read_text()
+    assert "weekly" not in (home / "policy.yaml").read_text()
 
 
 @pytest.mark.parametrize(
@@ -219,3 +226,34 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
         assert "merge them by hand" in capsys.readouterr().err
     else:
         assert (old / "access.yaml").read_text() == "port: 9999\n"
+
+
+def test_the_first_start_binds_the_address_of_the_home_it_finishes_moving(monkeypatch, tmp_path):
+    """The bind is read before the home moves, to probe the port; a 0.x
+    update stopped between its renames leaves no home under either name until
+    the start finishes it, so the start reads `access.yaml` again after the
+    move and binds that address, not the default (R12c-01)."""
+    bundled = tmp_path / "_bundled" / "config"
+    bundled.mkdir(parents=True)
+    (bundled / "library.yaml").write_text("tasks: {}\n")
+    monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
+    home = tmp_path / "home"
+    for name in ("KRAFT_CONFIG_DIR", "KRAFT_TEMPLATES_DIR", "KRAFT_HOST", "KRAFT_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KRAFT_HOME", str(home))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
+    staged = home / "templates.seeding"
+    staged.mkdir(parents=True)
+    (staged / "library.yaml").write_text("tasks: {}\n")
+    (staged / "access.yaml").write_text("port: 8927\n")
+    (staged / cli.admin.UPDATE_STAGED).write_text("templates.pre-v1-x\n")
+    bound = []
+    monkeypatch.setattr(
+        cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: bound.append(self.config.port)
+    )
+
+    cli.admin._serve()
+
+    assert bound == [8927]
+    assert (paths.default_config_dir() / "access.yaml").read_text() == "port: 8927\n"

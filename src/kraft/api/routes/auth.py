@@ -122,6 +122,10 @@ async def health(request: Request):
         "invalid_templates": invalid,
         "invalid_policy": invalid_policy,
         "invalid_intake": invalid_intake,
+        # True when the server started on that file, so auto-intake and every
+        # schedule are off; False when a reload refused it and the running
+        # ones are kept.
+        "intake_off": bool(getattr(st, "intake_off", False)),
         # `unknown` as it stands now, not as startup found it.
         "reattach_summary": summary,
         "index": st.indexer.health(),

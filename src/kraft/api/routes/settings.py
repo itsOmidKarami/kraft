@@ -605,6 +605,7 @@ async def put_intake(body: IntakeBody, request: Request):
     intake.save(path)
     st.intake = data = intake.model_dump()
     st.invalid_intake = None
+    st.intake_off = False
     apply_mod.record(st, "intake.yaml")
     await intake_mod.restart(app_)
     apply_mod.notify(app_)

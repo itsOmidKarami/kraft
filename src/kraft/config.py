@@ -1218,18 +1218,24 @@ class Schedule(_Model):
         return cron
 
 
-def schedule_refusal(entries: list, where: str) -> str | None:
-    """Why `intake.yaml`'s `schedules:` would refuse the first of `entries`
-    it refuses, named `{where}.N.field: reason`; None when it takes them
-    all. What keeps a pre-2.0 `policy.yaml` trigger from moving."""
+def schedule_refusals(entries: list, where: str) -> dict[int, str]:
+    """Why `intake.yaml`'s `schedules:` would refuse each of `entries` it
+    refuses, by index, named `{where}.N.field: reason`. What keeps a pre-2.0
+    `policy.yaml` trigger from moving."""
+    out = {}
     for index, entry in enumerate(entries):
         try:
             Schedule.model_validate(entry)
         except ValidationError as exc:
             err = exc.errors()[0]
             field = ".".join(str(p) for p in err["loc"])
-            return f"{where}.{index}{'.' + field if field else ''}: {err['msg']}"
-    return None
+            out[index] = f"{where}.{index}{'.' + field if field else ''}: {err['msg']}"
+    return out
+
+
+def schedule_refusal(entries: list, where: str) -> str | None:
+    """The first of `schedule_refusals`, or None when it takes them all."""
+    return next(iter(schedule_refusals(entries, where).values()), None)
 
 
 class Intake(_Model):

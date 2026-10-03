@@ -29,6 +29,7 @@ repos:
   - path: /b
     setup_command: x
 
+# the cron list
 schedules:
   - {cron: '0 9 * * 1', title: weekly}
 
@@ -106,9 +107,27 @@ archive:
         ),
         pytest.param(
             lambda d: d["repos"].pop(0),
-            ["repos:\n  - path: /b\n    setup_command: x"],
+            ["repos:\n  # the scratch repo\n  - path: /b\n    setup_command: x"],
             ["/a"],
             id="an-entry-removed-keeps-the-rest-as-written",
+        ),
+        pytest.param(
+            lambda d: d["repos"].pop(),
+            ["    project: null\n\n# the cron list\nschedules:"],
+            ["/b", "# the scratch repo"],
+            id="the-last-entry-removed-keeps-the-next-keys-comment",
+        ),
+        pytest.param(
+            lambda d: d["repos"].append({"path": "/c"}),
+            ["  - path: /c\n\n# the cron list\nschedules:"],
+            [],
+            id="an-entry-appended-goes-before-the-next-keys-comment",
+        ),
+        pytest.param(
+            lambda d: d["repos"][1].__setitem__("env", {"on": "x"}),
+            ["'on': x"],
+            [],
+            id="a-new-key-on-stays-a-string",
         ),
         *[
             pytest.param(
@@ -185,3 +204,36 @@ def test_the_shipped_policy_keeps_its_documentation_through_an_edit(change):
     assert yaml.safe_load(out) == data
     comments = [line for line in text.splitlines() if line.startswith("#")]
     assert comments and [line for line in comments if line not in out] == []
+
+
+ENTRIES = """\
+repos:
+  # A: the api
+  - path: /a
+  # B: the web
+  - path: /b
+  # C: the cli
+  - path: /c
+# after the list
+other: 1
+"""
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [(0,), (1,), (2,), (0, 1), (0, 2), (1, 2)],
+    ids=["first", "middle", "last", "first-two", "first-and-last", "last-two"],
+)
+def test_a_removed_entrys_own_comment_goes_with_it_and_no_other(removed):
+    """ruamel keeps a comment line above an entry on the entry before it, so
+    removing one took the next entry's comment and left its own labelling
+    the next entry (R12 review P2-3)."""
+    data = yaml.safe_load(ENTRIES)
+    kept = [e for i, e in enumerate(data["repos"]) if i not in removed]
+    out = preserve.rewrite(ENTRIES, {**data, "repos": kept})
+    assert yaml.safe_load(out) == {**data, "repos": kept}
+    labels = [line.strip() for line in out.splitlines() if line.lstrip().startswith("#")]
+    names = {"/a": "# A: the api", "/b": "# B: the web", "/c": "# C: the cli"}
+    assert labels == [names[e["path"]] for e in kept] + ["# after the list"]
+    for entry in kept:
+        assert f"{names[entry['path']]}\n  - path: {entry['path']}" in out

@@ -28,7 +28,7 @@ from ruamel.yaml.tokens import CommentToken
 from kraft.drafts import authored
 
 
-def rewrite(text: str | None, data: Mapping) -> str:
+def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
     """`data` written over `text`. A key `text` has keeps its comments, its
     place and its layout (a flow-style block stays flow-style); a key `data`
     adds goes at the end of its mapping; one `data` drops or replaces keeps
@@ -36,7 +36,8 @@ def rewrite(text: str | None, data: Mapping) -> str:
     block list of mappings keeps each entry `data` still has (`_merge_seq`),
     with its comments; any other list is replaced whole. A value in `data`
     that is already a ruamel node (`carried`) is written as it is, with its
-    own comments."""
+    own comments. `list_offset` is the `- ` indent to use when `text` has no
+    block list to take it from (`list_offset`: another file's)."""
     if not text or not text.strip():
         return authored.dump(data)
     yaml = _yaml()
@@ -46,7 +47,7 @@ def rewrite(text: str | None, data: Mapping) -> str:
         return authored.dump(data)
     if not isinstance(doc, CommentedMap):
         return authored.dump(data)
-    if offset := _list_offset(text):
+    if offset := _list_offset(text) or list_offset:
         # `  - path: …` under its key, as the file has it, not `- path: …`.
         yaml.indent(mapping=2, sequence=offset + 2, offset=offset)
     _merge(doc, data)
@@ -69,6 +70,11 @@ def _yaml() -> YAML:
 
 _KEY_LINE = re.compile(r"(?P<indent> *)[^\s#-][^:#]*:\s*(#.*)?")
 _ITEM_LINE = re.compile(r"(?P<indent> *)- ")
+
+
+def list_offset(text: str | None) -> int:
+    """`_list_offset` of `text`, for `rewrite(list_offset=)`."""
+    return _list_offset(text or "")
 
 
 def _list_offset(text: str) -> int:
@@ -131,11 +137,19 @@ def carried(text: str | None, key: str) -> list:
         return []
     _take_block(doc, key)
     items = list(seq)
+    # The comment lines above an entry are stored on the entry before it (or,
+    # for the first, on the list): each is taken off there and goes with its
+    # own entry (`_place_leads`), not with the one before it.
+    first = seq.ca.comment[1] if seq.ca.comment and seq.ca.comment[1] else []
+    leads = ["".join(" " * t.column + t.value.lstrip(" ") for t in first)]
+    leads += [_take_block(seq, index - 1) for index in range(1, len(items))]
     for index, item in enumerate(items):
         # A flow entry's own comment (`- {cron: …}  # weekly`) is the list's,
         # by position: it goes with the entry.
         if isinstance(item, CommentedMap | CommentedSeq) and seq.ca.items.get(index):
             item._kraft_entry_comment = seq.ca.items[index]
+        if isinstance(item, CommentedMap | CommentedSeq) and leads[index].strip():
+            item._kraft_lead = leads[index]
     return items
 
 
@@ -157,14 +171,21 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
                 _merge(current, value, (doc, key))
                 continue
             if _mappings(current) and isinstance(value, list | tuple) and value:
+                # The comment block after the list (the next key's
+                # documentation) hangs off its last entry: take it off first,
+                # or removing that entry loses it and appending one lands it
+                # between entries.
+                block = _take_block(doc, key)
                 _merge_seq(current, value)
+                if block:
+                    _put_block(doc, key, block)
                 continue
             block = _take_block(doc, key)
             doc[key] = _node(value)
             if block:
                 _put_block(doc, key, block)
             continue
-        doc[key] = _node(value)
+        doc[_quoted(key) if isinstance(key, str) else key] = _node(value)
 
 
 # A comment block between two keys is stored by ruamel as the tail of
@@ -287,6 +308,7 @@ def _merge_seq(seq: CommentedSeq, values: list | tuple) -> None:
         if not _same(match, value):
             _merge(match, value)
         items.append(match)
+    _drop_removed_entries_comments(seq, {id(node) for node in unused})
     # The list's own comments are by position: each follows its entry.
     by_entry = {id(node): seq.ca.items[i] for i, node in enumerate(seq) if seq.ca.items.get(i)}
     seq.clear()
@@ -295,13 +317,51 @@ def _merge_seq(seq: CommentedSeq, values: list | tuple) -> None:
     _place_entry_comments(seq, by_entry)
 
 
+def _drop_removed_entries_comments(seq: CommentedSeq, removed: set[int]) -> None:
+    """A comment line above an entry is stored on the entry before it. So a
+    removed entry's own leading comment is dropped with it, and the one it
+    held for the entry after it moves to the kept entry now before that one,
+    or above the list when none is. The first entry's own is the list's
+    (`seq.ca.comment`, shared with the parent key)."""
+    lead = seq.ca.comment[1] if seq.ca.comment and seq.ca.comment[1] else []
+    kept_before = None
+    for index, node in enumerate(seq):
+        if id(node) not in removed:
+            kept_before = index
+            continue
+        if index > 0:
+            _take_block(seq, index - 1)  # this entry's own leading comment
+        block = _take_block(seq, index) if index + 1 < len(seq) else ""
+        if block and id(seq[index + 1]) in removed:
+            block = ""  # the next entry's own: it goes with that one
+        if kept_before is not None:
+            if block:
+                _put_block(seq, kept_before, block)
+        elif lead:
+            # Still at the top: the next entry's comment is the list's first.
+            lead[0].value = block.lstrip(" ") if block else ""
+            for token in lead[1:]:
+                token.value = ""
+        elif block:
+            lead = [CommentToken(block, CommentMark(0), None)]
+            seq.ca.comment = [None, lead]
+
+
 def _place_entry_comments(seq: CommentedSeq, by_entry: dict | None = None) -> None:
     """Each entry's own comment on `seq` at its new position: one it had
-    there (`by_entry`, by node id) or one it was `carried` with."""
+    there (`by_entry`, by node id) or one it was `carried` with, and the
+    comment lines a `carried` entry had above it."""
     for index, node in enumerate(seq):
         entry = (by_entry or {}).get(id(node)) or getattr(node, "_kraft_entry_comment", None)
         if entry:
             seq.ca.items[index] = entry
+    for index, node in enumerate(seq):
+        if not (lead := getattr(node, "_kraft_lead", None)):
+            continue
+        if index:
+            _put_block(seq, index - 1, lead)
+        elif not (seq.ca.comment and seq.ca.comment[1]):
+            seq.ca.comment = [None, [CommentToken(lead, CommentMark(0), None)]]
 
 
 def _quoted(value: str) -> str:
@@ -327,7 +387,8 @@ def _node(value: object) -> object:
     if isinstance(value, Mapping):
         node = CommentedMap()
         for k, v in value.items():
-            node[k] = _node(v)
+            # A key too: an env key `on` read back as `True` (R12 review P3).
+            node[_quoted(k) if isinstance(k, str) else k] = _node(v)
         if not node:
             # A block-style empty mapping dumps as a bare `{}` on the line
             # after its key, which is not YAML: `key: {}` is.

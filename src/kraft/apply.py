@@ -153,6 +153,7 @@ async def reload(app) -> str | None:
         st.invalid_intake = str(exc)
     else:
         st.invalid_intake = None
+        st.intake_off = False
         set_loaded(st, "intake.yaml", digest)
     await intake_mod.restart(app)
     notify(app)

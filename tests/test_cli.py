@@ -671,6 +671,10 @@ def test_config_dir_reads_a_home_not_yet_renamed_under_its_old_name(monkeypatch,
     assert paths.config_dir() == tmp_path / "templates"
     (tmp_path / "config" / "harnesses").mkdir(parents=True)
     assert paths.config_dir() == tmp_path / "templates"
+    # Naming the default itself is the default (R12c-04).
+    assert (
+        paths.config_dir({"KRAFT_CONFIG_DIR": str(tmp_path / "config")}) == tmp_path / "templates"
+    )
     (tmp_path / "config" / "library.yaml").write_text("")
     assert paths.config_dir() == tmp_path / "config"
 

@@ -165,6 +165,7 @@ async def after_publish(app, written) -> None:
         st = app.state
         st.intake = config_mod.Intake.load(st.templates_dir / INTAKE).model_dump()
         st.invalid_intake = None
+        st.intake_off = False
         apply.record(st, INTAKE)
         await intake_mod.restart(app)
 
