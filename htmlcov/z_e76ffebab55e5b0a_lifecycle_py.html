@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/api/routes/lifecycle.py: 94%</title>
+    <title>Coverage for src/kraft/api/routes/lifecycle.py: 95%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_15cffcd0.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>api<span class="sep">/</span>routes<span class="sep">/</span>lifecycle.py</b>:
-            <span class="pc_cov">94%</span>
+            <span class="pc_cov">95%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">816 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">769<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">47<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">773<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">43<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_repos_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 15:54 +0000
+            created at 2026-10-03 16:08 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -595,7 +595,7 @@
     <p class="run"><span class="n"><a id="t513" href="#t513">513</a></span><span class="t">    <span class="key">if</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;status&quot;</span><span class="op">]</span> <span class="key">not</span> <span class="key">in</span> <span class="op">(</span><span class="str">&quot;completed&quot;</span><span class="op">,</span> <span class="str">&quot;abandoned&quot;</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t514" href="#t514">514</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;only a completed or abandoned item can be archived&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t515" href="#t515">515</a></span><span class="t">    <span class="key">if</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;archived_at&quot;</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t516" href="#t516">516</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="str">&quot;id&quot;</span><span class="op">:</span> <span class="nam">wid</span><span class="op">,</span> <span class="str">&quot;archived_by&quot;</span><span class="op">:</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;archived_by&quot;</span><span class="op">]</span><span class="op">,</span> <span class="str">&quot;worktree_removed&quot;</span><span class="op">:</span> <span class="key">False</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t516" href="#t516">516</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="str">&quot;id&quot;</span><span class="op">:</span> <span class="nam">wid</span><span class="op">,</span> <span class="str">&quot;archived_by&quot;</span><span class="op">:</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;archived_by&quot;</span><span class="op">]</span><span class="op">,</span> <span class="str">&quot;worktree_removed&quot;</span><span class="op">:</span> <span class="key">False</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t517" href="#t517">517</a></span><span class="t">    <span class="nam">result</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">_archive_one</span><span class="op">(</span><span class="nam">request</span><span class="op">.</span><span class="nam">app</span><span class="op">,</span> <span class="nam">row</span><span class="op">,</span> <span class="str">&quot;you&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t518" href="#t518">518</a></span><span class="t">    <span class="key">return</span> <span class="op">{</span><span class="str">&quot;id&quot;</span><span class="op">:</span> <span class="nam">wid</span><span class="op">,</span> <span class="str">&quot;archived_by&quot;</span><span class="op">:</span> <span class="str">&quot;you&quot;</span><span class="op">,</span> <span class="op">**</span><span class="nam">result</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t519" href="#t519">519</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -792,7 +792,7 @@
     <p class="pln"><span class="n"><a id="t710" href="#t710">710</a></span><span class="t"><span class="str">    told its way on, since Resume, not Retry, is what picks it up (R10b-01).&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t711" href="#t711">711</a></span><span class="t">    <span class="key">if</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;status&quot;</span><span class="op">]</span> <span class="op">==</span> <span class="str">&quot;paused&quot;</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t712" href="#t712">712</a></span><span class="t">        <span class="key">return</span> <span class="str">&quot;work item is paused, not stopped: resume it instead, or skip what it would run&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t713" href="#t713">713</a></span><span class="t">    <span class="key">return</span> <span class="str">&quot;work item is not stopped&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t713" href="#t713">713</a></span><span class="t">    <span class="key">return</span> <span class="str">&quot;work item is not stopped&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t714" href="#t714">714</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t715" href="#t715">715</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t716" href="#t716">716</a></span><span class="t"><span class="key">def</span> <span class="nam">not_paused</span><span class="op">(</span><span class="nam">row</span><span class="op">,</span> <span class="nam">gate</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="key">None</span> <span class="op">=</span> <span class="key">None</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">str</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -812,7 +812,7 @@
     <p class="run run2"><span class="n"><a id="t730" href="#t730">730</a></span><span class="t">            <span class="str">&quot;work item is needs_human, not paused: it stopped, so retry it instead &quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t731" href="#t731">731</a></span><span class="t">            <span class="fst">f&quot;</span><span class="fst">(kraft item retry </span><span class="op">{</span><span class="nam">row</span><span class="op">[</span><span class="str">&#x27;id&#x27;</span><span class="op">]</span><span class="op">}</span><span class="fst">, which takes --steer too)</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t732" href="#t732">732</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t733" href="#t733">733</a></span><span class="t">    <span class="key">return</span> <span class="fst">f&quot;</span><span class="fst">work item is </span><span class="op">{</span><span class="nam">row</span><span class="op">[</span><span class="str">&#x27;status&#x27;</span><span class="op">]</span><span class="op">}</span><span class="fst">, not paused</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t733" href="#t733">733</a></span><span class="t">    <span class="key">return</span> <span class="fst">f&quot;</span><span class="fst">work item is </span><span class="op">{</span><span class="nam">row</span><span class="op">[</span><span class="str">&#x27;status&#x27;</span><span class="op">]</span><span class="op">}</span><span class="fst">, not paused</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t734" href="#t734">734</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t735" href="#t735">735</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t736" href="#t736">736</a></span><span class="t"><span class="key">def</span> <span class="nam">paused_steer_refusal</span><span class="op">(</span><span class="nam">db</span><span class="op">,</span> <span class="nam">row</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">str</span> <span class="op">|</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -1268,7 +1268,7 @@
     <p class="pln"><span class="n"><a id="t1186" href="#t1186">1186</a></span><span class="t">        <span class="com"># unwinding), and catching spawn&#x27;s own refusal only after those</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1187" href="#t1187">1187</a></span><span class="t">        <span class="com"># writes would strand the item claimed &#x27;active&#x27; with the cap already</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1188" href="#t1188">1188</a></span><span class="t">        <span class="com"># cleared and no walk behind it.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t1189" href="#t1189">1189</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;a walk is already running for this work item&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1189" href="#t1189">1189</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;a walk is already running for this work item&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1190" href="#t1190">1190</a></span><span class="t">    <span class="com"># Bracketed from *before* the claim to the hand-off (the claim-then-return</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1191" href="#t1191">1191</a></span><span class="t">    <span class="com"># class). A claim makes this item read `active`, which means &quot;a walk is</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1192" href="#t1192">1192</a></span><span class="t">    <span class="com"># behind this&quot;; any exit from here that neither spawns one nor leaves a</span>&nbsp;</span><span class="r"></span></p>
@@ -2132,7 +2132,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_repos_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 15:54 +0000
+            created at 2026-10-03 16:08 +0000
         </p>
     </div>
 </footer>
