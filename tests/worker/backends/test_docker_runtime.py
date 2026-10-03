@@ -65,7 +65,7 @@ def slow_podman(tmp_path, monkeypatch):
     """`slow_podman(*answers)`: a podman whose `info` answers each ask in
     turn, None for one that timed out; detected once now, with `UNSURE_TTL`
     far from over. Returns the detection, and the list of each ask's
-    timeout so far."""
+    timeout so far. `cli="docker"` makes it a docker instead."""
     templates = tmp_path / "templates"
     templates.mkdir()
     (templates / "sandbox.yaml").write_text("cli: podman\n")
@@ -77,15 +77,16 @@ def slow_podman(tmp_path, monkeypatch):
     monkeypatch.setattr(docker, "_UNSURE_UNTIL", docker._UNSURE_UNTIL)
     monkeypatch.setattr(docker, "_REASK", docker._REASK)
 
-    def go(*answers, during=lambda: None):
+    def go(*answers, during=lambda: None, cli="podman"):
+        (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
         left = iter(answers)
         timeouts = []
 
-        def ask(cli, timeout=10, engine=None):
+        def ask(cli_, timeout=10, engine=None):
             timeouts.append(timeout)
             if len(timeouts) > 1:
                 during()
-            return "podman", next(left), False
+            return cli, next(left), False
 
         monkeypatch.setattr(docker, "_ask", ask)
         unsure = docker.runtime()
@@ -149,6 +150,47 @@ def test_no_answer_never_replaces_an_answer(slow_podman):
     slow_podman(True, None)
     again = docker.runtime(refresh=True)
     assert again.identity_known and again.rootless is True
+
+
+@pytest.mark.parametrize(
+    ("answer", "root"), [(False, False), (None, None)], ids=["now-rootful", "still-no-answer"]
+)
+async def test_a_kept_rootless_docker_is_asked_again_before_the_next_launch(
+    slow_podman, answer, root
+):
+    """A daemon switched from rootless to rootful, then a refresh that timed
+    out, kept "rootless": rootless docker's `-u 0:0` is real root on a
+    rootful one. The next launch asks again, and never runs on the guess."""
+    _, timeouts = slow_podman(True, None, answer, cli="docker")
+    assert docker.runtime(refresh=True).rootless is True  # still good for a launch probed
+    reason = await docker.DockerBackend().probe(_SANDBOX, "sh", None)
+    assert len(timeouts) == 3
+    if root is None:
+        assert reason is not None and "could not tell whether docker runs rootless" in reason
+        with pytest.raises(docker.SandboxRefused, match="could not tell"):
+            docker.docker_argv(["true"], "/work", _SANDBOX, None)
+    else:
+        assert reason is None
+        argv = docker.docker_argv(["true"], "/work", _SANDBOX, None)
+        assert argv[argv.index("-u") + 1] == f"{os.getuid()}:{os.getgid()}"
+
+
+async def test_a_kept_rootless_podman_launches_without_asking_again(slow_podman):
+    """keep-id runs as the operator's uid, rootful or not: a busy runner's
+    timed-out refresh does not cost the next launch another ask."""
+    _, timeouts = slow_podman(True, None)
+    docker.runtime(refresh=True)
+    assert await docker.DockerBackend().probe(_SANDBOX, "sh", None) is None
+    assert "--userns=keep-id" in docker.docker_argv(["true"], "/work", _SANDBOX, None)
+    assert len(timeouts) == 2
+
+
+def test_a_kept_rootless_docker_is_asked_again_after_a_while(slow_podman, monkeypatch):
+    slow_podman(True, None, False, cli="docker")
+    assert docker.runtime(refresh=True).kept_root
+    monkeypatch.setattr(docker, "_UNSURE_UNTIL", 0.0)
+    again = docker.runtime()
+    assert (again.rootless, again.identity_kept) == (False, False)
 
 
 def test_a_runtime_that_did_not_answer_is_asked_again_after_a_while(slow_podman, monkeypatch):

@@ -632,7 +632,9 @@ def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(client, repo):
         },
     ).json()["id"]
     r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 50.0})
-    assert r.status_code == 409
+    # The detail, not just the code: a later branch answers 409 for an item
+    # with no spend-cap stop as well, under a different message.
+    assert r.status_code == 409 and r.json()["detail"] == "work item is not stopped", r.text
 
 
 def test_patch_budget_usd_sets_and_clears_the_cap(client, repo):

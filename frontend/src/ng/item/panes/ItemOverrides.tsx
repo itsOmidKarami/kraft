@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useProviders } from "../../harnesses/useProviders";
 import { useHarnessOptions } from "../../templates/panes/useHarnessOptions";
 import type { ChainNode, Policy } from "../../../types";
@@ -29,7 +29,8 @@ function useChoices(item: ItemDetail, node?: string) {
   };
 }
 
-/** Sends one field's PATCH and keeps the server's refusal on that field's row. */
+/** Sends one field's PATCH and keeps the server's refusal on that field's row.
+ *  Says whether the server took it. */
 function useSave(item: ItemDetail, reload: () => void) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const send = async (key: string, body: Record<string, unknown>) => {
@@ -37,19 +38,39 @@ function useSave(item: ItemDetail, reload: () => void) {
     const r = await act.patch(item.id, body);
     if (!r.ok) setErrors((e) => ({ ...e, [key]: r.error }));
     reload();
+    return r.ok;
   };
   return { errors, send };
 }
 
 /** The chain pane's model and effort for every agent task of an item that has
  *  not started (`agent_overrides`; `kraft item set-overrides`). Saved at once,
- *  one field per PATCH: the server merges fields, and `null` drops one. */
+ *  in one PATCH: the server replaces the whole override, so each save sends
+ *  every field, the one changed and the others as they stand. */
 export function ItemAgentRows({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const c = useChoices(item);
   const { errors, send } = useSave(item, reload);
+  // One save at a time, each built when it goes: two in flight at once could
+  // land in either order, and the older one would undo the newer.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const latest = useRef(item);
+  latest.current = item;
+  // What the server last took from this pane, until a read of the item
+  // brings it back: a save before then builds on it, not on a copy that
+  // never had it. A refused save leaves it as it was.
+  const took = useRef<{ over: ItemDetail["agent_overrides"]; stored: Agent } | null>(null);
   const own: Agent = item.agent_overrides ?? {};
   if (!c.tasks.length) return null;
-  const put = (key: keyof Agent, value: unknown) => void send(key, { agent_overrides: { [key]: value ?? null } });
+  const put = (key: keyof Agent, value: unknown) => {
+    // A save that threw (no server) must not hold back the ones after it.
+    queue.current = queue.current.catch(() => {}).then(async () => {
+      const now = latest.current.agent_overrides;
+      const last = took.current;
+      const { [key]: _old, ...rest } = last && last.over === now ? last.stored : (now ?? {});
+      const next: Agent = value == null ? rest : { ...rest, [key]: value };
+      if (await send(key, { agent_overrides: next })) took.current = { over: latest.current.agent_overrides, stored: next };
+    });
+  };
   return (
     <>
       <h3 className="ip-h">Every agent task</h3>

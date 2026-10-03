@@ -1,10 +1,12 @@
-"""The two stops `run_setup_command` ends a work item with, and what each
-tells the person to do about it."""
+"""The stops a work item meets preparing its worktree -- a repository with
+no commit to branch from, and the two `run_setup_command` ends it with --
+and what each tells the person to do about it."""
 
 from __future__ import annotations
 
 import pytest
-from support.harness import entry_of
+from support import worktree as wtree
+from support.harness import _git, entry_of
 
 from kraft import builtins as kraft_builtins
 
@@ -34,3 +36,16 @@ async def test_a_declared_empty_setup_command_needs_nothing(tmp_path):
         await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry_of({"setup_command": ""}))
         == ""
     )
+
+
+async def test_a_repo_with_no_commit_gets_no_worktree(tmp_path, database, run_dirs):
+    """git would make the item's branch an empty orphan, and the agent and
+    the tests would run without one of the repository's files."""
+    repo = tmp_path / "fresh"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "Makefile").write_text("test:\n\ttrue\n")
+    await wtree.make_item(database, repo)
+    with pytest.raises(RuntimeError, match="has no commit to branch from"):
+        await wtree.ensure(database, run_dirs, repo, repo_entry=entry_of({"setup_command": ""}))
+    assert not (run_dirs.worktrees / "w1").exists()

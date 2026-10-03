@@ -156,6 +156,36 @@ async def test_item_override_reaches_the_gate_review_dispatch(monkeypatch, datab
     assert seen["kwargs"]["effort"] == "low"
 
 
+async def test_an_item_model_stored_before_model_ids_were_checked_never_reaches_the_reviewer(
+    monkeypatch, database, run_dirs
+):
+    """1.4 stored any text as the item's model (`--model "sonnet 4"`). The
+    write doors now refuse it; a stored one is refused at launch, and the
+    gate names why no review ran instead of handing it to the agent."""
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+    await _seed(database, run_dirs, "w1")
+    await database.write(
+        lambda c: store.set_agent_overrides(c, "w1", json.dumps({"model": "sonnet 4"}))
+    )
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    verdict, why = await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert verdict == "undecided"
+    assert "stored model override is not a model id" in why and "'sonnet 4'" in why
+    assert "kraft item set-overrides w1 --clear" in why
+    assert seen == {}
+
+
 async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database, run_dirs):
     """Kraft-rki: a repo's `sandbox:` reaches the reviewer's `run_agent_task`,
     through `dispatch.item_sandbox` (Ruling 189), or it silently does nothing
@@ -319,7 +349,7 @@ def _stub_review(monkeypatch, verdict, note="because the migration is missing"):
     async def fake_review(db, run_dirs, **kw):
         return verdict, note
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
 
 
 def _stub_walk(monkeypatch, calls, status="completed"):
@@ -392,7 +422,7 @@ async def test_no_review_unless_both_knobs_are_on(
         reviewed.append(kw["gate"])
         return "approve", ""
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
 
     chain = _chain2(run_dirs, auto_review=auto_escalate)
     status = await _review_from_gate(database, run_dirs, chain, auto_gate=auto_gate)
@@ -410,7 +440,7 @@ async def test_a_human_decision_taken_during_the_review_wins(monkeypatch, databa
         await db.write(lambda c: store.approve_gate(c, work_item_id, "human_review_approval"))
         return "reject", "send it back"
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
     _stub_walk(monkeypatch, calls)
 
     status = await _review_from_gate(database, run_dirs, auto_gate=True)
@@ -510,7 +540,7 @@ async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dir
         reviewed.append(kw["gate"])
         return "approve", ""
 
-    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(gate_review, "review", fake_review)
     monkeypatch.setattr(
         "kraft.executor.stops.budget_breach",
         lambda db, wid, budget, **_tokens: _caps.WorkItemBreach(

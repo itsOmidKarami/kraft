@@ -145,11 +145,21 @@ install: bundle
 #
 # Kraft-1v6ow: with --testmon active, pytest's own "collected 0 items" exit
 # code (5, a failure) never reaches us -- testmon overrides it to 0 even when
-# nothing was collected at all, not merely deselected by testmon itself (that
-# case reads "collected N items / N deselected / 0 selected", never "collected
-# 0 items"). A path argument that matches nothing must not look like a run
-# that found nothing wrong, so we grep the one line pytest emits only for a
-# truly empty collection and fail on it ourselves, when args were given.
+# nothing was collected at all. A path argument that matches nothing must not
+# look like a run that found nothing wrong, so we grep for it and fail
+# ourselves, when args were given. The same goes for a run testmon emptied:
+# "collected N items / N deselected / 0 selected", or with -q only
+# "N deselected in 0.1s". Nothing ran, so nothing was shown to pass.
+#
+# Testmon follows Python execution only. A test whose real input is a data
+# file -- a harness YAML, fixtures/fake-claude.sh, a script under
+# tests/support run as a subprocess, templates/, a skill's .md, the sample
+# repo, docs/intent -- is deselected when that file changes. So when one of
+# them differs from the merge base with origin/main (committed on this branch,
+# staged, unstaged or untracked), named paths run with --no-testmon, saying
+# which files made it; a bare `just test` only warns, since its fallback would
+# be the whole suite. src/kraft/_bundled is gitignored and built from
+# templates/ and plugins/kraft/skills, which are watched instead.
 [positional-arguments]
 [doc("Backend tests affected by your changes (testmon); --no-testmon for all")]
 test *ARGS:
@@ -157,10 +167,29 @@ test *ARGS:
     set -uo pipefail
     log=$(mktemp -t kraft-test.XXXXXX)
     trap 'rm -f "$log"' EXIT
-    COVERAGE_CORE=ctrace uv run pytest --testmon "$@" 2>&1 | tee "$log"
+    mode=--testmon
+    case " $* " in *" --no-testmon "*) mode= ;; esac
+    if [ -n "$mode" ]; then
+        inputs=(src/kraft ':(glob,exclude)src/kraft/**/*.py' fixtures templates tests/support docs/intent plugins/kraft/skills)
+        base=$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
+        changed=$({ git diff --name-only "$base" -- "${inputs[@]}"; git ls-files --others --exclude-standard -- "${inputs[@]}"; } 2>/dev/null | sort -u)
+        if [ -n "$changed" ] && [ -n "$*" ]; then
+            echo "just test: testmon cannot see a change to these, so it could deselect the tests that read them -- running the given args with --no-testmon:" >&2
+            printf '%s\n' "$changed" | head -20 | sed 's/^/  /' >&2
+            mode=--no-testmon
+        elif [ -n "$changed" ]; then
+            echo "warning: testmon cannot see a change to these, so it may deselect tests that read them -- name the paths, or run 'just test --no-testmon', before trusting a green run:" >&2
+            printf '%s\n' "$changed" | head -20 | sed 's/^/  /' >&2
+        fi
+    fi
+    COVERAGE_CORE=ctrace uv run pytest ${mode:+"$mode"} "$@" 2>&1 | tee "$log"
     status=${PIPESTATUS[0]}
     if [ -n "$*" ] && grep -qE '^collected 0 items$' "$log"; then
         echo "error: just test collected 0 items for the given args -- treating as a failure (Kraft-1v6ow)" >&2
+        exit 1
+    fi
+    if [ -n "$*" ] && grep -qE '^collected [0-9]+ items / [0-9]+ deselected / 0 selected$|^(=+ )?[0-9]+ deselected(, [0-9]+ warnings?)? in [0-9.]+s' "$log"; then
+        echo "error: every test the given args name was deselected (by testmon, or by -k/-m), so none ran -- pass --no-testmon to run them" >&2
         exit 1
     fi
     exit "$status"
@@ -190,8 +219,8 @@ refresh-prices:
     uv run python dev/refresh_prices.py
 
 # Check the test suite against docs/testing.md's mechanical rules: e2e markers
-# name a CLI, no unit test reaches a real bd/claude/gh/glab, the per-file line
-# budget, every test has an expectation.
+# name a CLI, no unit test reaches a real bd, agent or forge CLI, the per-file line
+# budget, every test has an expectation. Both testpaths, kraft-lite's included.
 [doc("Check the test suite against docs/testing.md's mechanical rules")]
 check-tests:
     uv run python dev/check_tests.py

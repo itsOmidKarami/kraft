@@ -13,7 +13,7 @@ import { Brief, DiffLine, Title } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
 import { Workspace } from "./Workspace";
-import { useItem, type ItemDetail } from "./useItem";
+import { runVersion, useItem, type ItemDetail } from "./useItem";
 import "./item.css";
 
 /** `/work-items/:id[/nodes/:node]`: one item, its chain and the pane (W5). */
@@ -31,14 +31,14 @@ export function ItemPage() {
     return <Placeholder label="Work item not found" note={`There is no work item ${id}. It may have been removed.`} />;
   return (
     <ItemDraftProvider item={loaded.item} reload={loaded.reload}>
-      <Item item={loaded.item} reload={loaded.reload} />
+      <Item item={loaded.item} version={loaded.version} reload={loaded.reload} />
       <ReviewDialog />
       <LeaveGuard />
     </ItemDraftProvider>
   );
 }
 
-function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
+function Item({ item, version, reload }: { item: ItemDetail; version: string; reload: () => void }) {
   const navigate = useNavigate();
   const { node: nodeView } = useParams();
   const [cancelling, setCancelling] = useState(false);
@@ -61,14 +61,14 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
-        <DiffLine id={item.id} version={item.updated_at} />
+        <DiffLine id={item.id} version={runVersion(item)} />
       </div>
       <Banner item={item} onOpenGate={openGate} onRaise={settings} reload={reload} />
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />
       <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "task", node: item.stop.node, step: ESCALATION, task: ESCALATION } }))} />
-      <Workspace item={item} reload={reload} />
+      <Workspace item={item} version={version} reload={reload} />
     </div>
   );
 }

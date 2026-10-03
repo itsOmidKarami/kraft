@@ -284,7 +284,7 @@ async def test_closing_a_session_ends_the_tunnels_it_already_has(
         return await asyncio.open_connection("127.0.0.1", upstream.sockets[0].getsockname()[1])
 
     reg = channel.ChannelRegistry(
-        short_run, database, egress.EgressProxy(getaddrinfo=resolve, connect=connect)
+        short_run, database, egress.EgressProxy(getaddrinfo=resolve, connect=connect, environ={})
     )
     tls = channel.TLSListener(reg, short_run)
     sid = "0123456789abcdef0123"

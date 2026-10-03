@@ -66,6 +66,7 @@ from kraft.templates.models import (
 from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+from kraft.worker.env import TEST_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -537,12 +538,7 @@ async def _run_changed_test_scopes(
             cmd=cmd,
             cwd=worktree,
             repo_entry=repo_entry,
-            # The fix loop re-runs the test command after an agent edits source in
-            # the same worktree. A .pyc written on an earlier cycle has the same
-            # second-resolution mtime and (often) size as the fixed source, so
-            # CPython would import the stale bytecode and the re-measure would
-            # never see the fix. Never writing bytecode keeps every cycle honest.
-            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            env=TEST_ENV,
             sandbox=sandbox,
             checkout=checkout,
             time_cap=time_cap,
@@ -830,7 +826,7 @@ async def _dispatch_task(
             cmd=cmd,
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
-            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            env=TEST_ENV,
             sandbox=sandbox,
             checkout=checkout,
             time_cap=time_cap,
@@ -962,6 +958,11 @@ async def _dispatch_task(
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )
     node_override = store.node_overrides_of(work_item_row).get(node.id, {})
+    refusal = _overrides.stored_model_refusal(
+        work_item_row["id"], item_override, node_override, node.id
+    )
+    if refusal is not None:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {refusal}\n")
     instruction += _overrides.extra_prompt_note(node_override.get("extra_prompt"))
     keys = ("model", "escalate_model", "effort")
     merged_override = {**item_override, **{k: v for k, v in node_override.items() if k in keys}}

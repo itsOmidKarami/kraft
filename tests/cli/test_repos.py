@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -140,23 +141,30 @@ def test_connect_takes_the_commands_given_on_the_command_line(app, capsys, repo)
 
 
 def test_connect_no_tests_declares_a_repo_with_none(app, capsys, repo):
+    """Saved enabled, which connect says, and with nothing found to prepare
+    a repo with no tests needs no preparation either: `--no-tests` alone left
+    its setup undeclared, so its first item stopped before it started."""
     cli.main(["repo", "connect", str(repo), "--no-tests"])
-    assert 'test command: "" (no tests)' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'test command: "" (no tests)' in out
+    assert "saved enabled: its work items pass verification without running a test" in out
+    assert 'setup command: "" (nothing to prepare)' in out
     [entry] = asyncio.run(client.repos())
-    assert (entry["test_command"], entry["enabled"]) == ("", True)
+    assert (entry["test_command"], entry["setup_command"], entry["enabled"]) == ("", "", True)
 
 
 def test_connect_flags_on_a_connected_repo_change_nothing_and_say_so(app, capsys, repo):
-    cli.main(["repo", "connect", str(repo)])
+    cli.main(["repo", "connect", str(repo), "--test-command", "make test", "--setup-command", ""])
     cli.main(["repo", "connect", str(repo), "--test-command", "make check"])
     assert "its commands are unchanged" in capsys.readouterr().out
     [entry] = asyncio.run(client.repos())
-    assert entry["test_command"] is None
+    assert entry["test_command"] == "make test"
 
 
 def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     cli.main(["repo", "connect", str(repo)])
     out = capsys.readouterr().out
@@ -167,6 +175,7 @@ def test_connect_lists_the_commands_it_did_not_propose(app, capsys, repo):
 def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -182,6 +191,7 @@ def test_connect_in_a_terminal_asks_which_command_to_use(app, capsys, repo, monk
 def test_a_number_with_no_option_is_asked_again_not_saved(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -197,6 +207,7 @@ def test_a_yes_keeps_the_proposal_and_a_no_asks_again(app, capsys, repo, monkeyp
     """A yes or no answers the prompt; neither is saved as the command."""
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -213,6 +224,7 @@ def test_no_tests_at_the_prompt_is_confirmed_before_it_is_saved(app, capsys, rep
     a no at the confirmation asks again rather than saving it."""
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -306,6 +318,7 @@ def test_connect_names_origins_branch_whole(capsys):
 def test_connect_yes_takes_the_proposal_without_asking(app, capsys, repo, monkeypatch):
     (repo / "Makefile").write_text("test:\n\tgo test ./...\n")
     (repo / "go.mod").write_text("module x\n")
+    (repo / "x_test.go").write_text("")
     commit_all(repo)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
@@ -331,6 +344,18 @@ def test_connect_verify_exits_by_whether_the_commands_passed(
         exited = caught.code
     assert exited == code
     assert said in capsys.readouterr().out
+
+
+def test_connect_verify_json_says_why_it_failed(app, capsys, repo):
+    """`--verify --json` exited 1 with nothing on stdout or stderr saying why."""
+    argv = ["repo", "connect", str(repo), "--test-command", "false", "--setup-command", ""]
+    with pytest.raises(SystemExit) as caught:
+        cli.main([*argv, "--verify", "--json"])
+    assert caught.value.code == 1
+    verified = json.loads(capsys.readouterr().out)["verify"]
+    assert verified["passed"] is False
+    assert "  test [**]: false ..." in verified["output"]
+    assert verified["output"][-1].startswith("verify: failed")
 
 
 def test_reconnecting_survives_a_broken_detectors_file(app, capsys, repo, tmp_path):
@@ -528,7 +553,6 @@ def test_disconnect_from_inside_a_worktree_disconnects_the_repo(
     """The symmetric half of Kraft-97e: after Task 1 the stored path is the main
     checkout, so sending the raw cwd from a worktree would 404. `disconnect_repo`
     probes first, the way `ensure_repo` does for its 409 branch."""
-    import subprocess
 
     asyncio.run(client.ensure_repo(str(repo)))
     worktree = tmp_path / "wt"
@@ -556,7 +580,6 @@ def test_disconnect_removes_an_entry_registered_under_a_worktree_path(
     exists: `POST /repos` stores git's resolved toplevel, so the API cannot
     create this row any more.
     """
-    import subprocess
 
     asyncio.run(client.ensure_repo(str(repo)))
     worktree = tmp_path / "wt"

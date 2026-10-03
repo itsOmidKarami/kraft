@@ -1,11 +1,12 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { Combobox, notListed, unlisted, type Choice } from "./Combobox";
 import "./ui.css";
 
 /** A list of short names edited as pills (Decisions §11 Allowed tools): type and
  *  press Enter or comma to add; × or Backspace on an empty input removes one;
  *  Delete or Backspace on a focused pill's × removes it. `added` marks the pills
  *  that are new in the draft (green). The list is announced as it changes. */
-export function PillInput({ label, values, added = [], onChange, placeholder = "type and press Enter", empty }: {
+export function PillInput({ label, values, added = [], onChange, placeholder = "type and press Enter", empty, choices, noun = "value" }: {
   label: string;
   values: string[];
   added?: string[];
@@ -13,14 +14,21 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
   placeholder?: string;
   /** Said under an empty list. */
   empty?: string;
+  /** The closed set a pill comes from: listed as you type, and nothing else is added. */
+  choices?: Choice[];
+  /** What one value is, for the refusal ("grant"). */
+  noun?: string;
 }) {
   const [text, setText] = useState("");
   const [said, setSaid] = useState("");
+  const [refused, setRefused] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
 
   const add = (raw: string) => {
     const v = raw.trim().replace(/,$/, "").trim();
+    const stray = choices ? notListed(unlisted(v, choices), noun) : null;
+    if (stray) return setRefused(stray);
     setText("");
     if (!v || values.includes(v)) return;
     onChange([...values, v]);
@@ -58,19 +66,40 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
           </li>
         ))}
         <li className="pill-add">
-          <input
-            ref={input}
-            className="pill-input"
-            aria-label={`Add to ${label}`}
-            aria-describedby={empty && !values.length ? `${id}-empty` : undefined}
-            placeholder={values.length ? "add…" : placeholder}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKey}
-            onBlur={() => add(text)}
-          />
+          {choices ? (
+            <Combobox
+              ref={input}
+              className="pill-input"
+              aria-label={`Add to ${label}`}
+              aria-describedby={empty && !values.length ? `${id}-empty` : undefined}
+              placeholder={values.length ? "add…" : placeholder}
+              value={text}
+              choices={choices.filter((c) => !values.includes(c.value))}
+              closed
+              noun={noun}
+              listLabel={label}
+              invalid={!!refused}
+              onChange={(t) => { setText(t); setRefused(null); }}
+              onPick={add}
+              onKeyDown={onKey}
+              onBlur={() => add(text)}
+            />
+          ) : (
+            <input
+              ref={input}
+              className="pill-input"
+              aria-label={`Add to ${label}`}
+              aria-describedby={empty && !values.length ? `${id}-empty` : undefined}
+              placeholder={values.length ? "add…" : placeholder}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={onKey}
+              onBlur={() => add(text)}
+            />
+          )}
         </li>
       </ul>
+      {refused && <p className="pill-err" role="alert">{refused}</p>}
       {empty && !values.length && <p id={`${id}-empty`} className="pill-empty">{empty}</p>}
       <span className="pill-live" role="status" aria-live="polite">{said}</span>
     </div>

@@ -139,10 +139,29 @@ def test_a_server_the_installed_service_started_restarts_with_a_202(
 ):
     _installed(monkeypatch, tmp_path, platform)
     ran = []
-    client.app.state.restart_runner = ran.append
+    monkeypatch.setattr(client.app.state, "restart_runner", ran.append, raising=False)
     r = client.post("/api/apply/restart")
     assert r.status_code == 202
     assert ran == [client.app.state]
+
+
+@pytest.mark.parametrize(
+    ("failure", "says"),
+    [(OSError("no such file: kraft"), "no such file: kraft"), (SystemExit(2), "2")],
+    ids=["the-executable-cannot-start", "the-runner-exits"],
+)
+def test_a_restart_that_cannot_start_is_a_500_naming_why(
+    client, monkeypatch, tmp_path, failure, says
+):
+    _installed(monkeypatch, tmp_path, "linux")
+
+    def runner(st):
+        raise failure
+
+    monkeypatch.setattr(client.app.state, "restart_runner", runner, raising=False)
+    r = client.post("/api/apply/restart")
+    assert r.status_code == 500
+    assert r.json()["detail"] == f"could not start the restart: {says}"
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
@@ -153,7 +172,7 @@ def test_a_server_started_from_a_terminal_is_told_to_restart_it_there(
     monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
     monkeypatch.delenv("INVOCATION_ID", raising=False)
     ran = []
-    client.app.state.restart_runner = ran.append
+    monkeypatch.setattr(client.app.state, "restart_runner", ran.append, raising=False)
     r = client.post("/api/apply/restart")
     assert (r.status_code, r.json()["detail"]) == (409, "started from a terminal: restart it there")
     assert ran == []
@@ -162,7 +181,10 @@ def test_a_server_started_from_a_terminal_is_told_to_restart_it_there(
 def test_a_service_label_that_is_not_ours_is_not_managed(client, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("XPC_SERVICE_NAME", "com.someone.else")
+    ran = []
+    monkeypatch.setattr(client.app.state, "restart_runner", ran.append, raising=False)
     assert client.post("/api/apply/restart").status_code == 409
+    assert ran == []
 
 
 def test_the_restart_is_a_detached_kraft_admin_restart_logged_to_the_server_log(
@@ -177,9 +199,9 @@ def test_the_restart_is_a_detached_kraft_admin_restart_logged_to_the_server_log(
     assert seen["stdout"].name.endswith("server.log")
 
 
-def test_saving_access_never_restarts(client):
+def test_saving_access_never_restarts(client, monkeypatch):
     ran = []
-    client.app.state.restart_runner = ran.append
+    monkeypatch.setattr(client.app.state, "restart_runner", ran.append, raising=False)
     client.put("/api/access", json={"port": 9123})
     assert ran == []
 

@@ -135,12 +135,6 @@ def test_show_with_no_context_names_both_ways_to_fix_it(app, capsys):
     assert "no work item" in capsys.readouterr().err
 
 
-def test_search_renders_results(app, capsys):
-    cli.main(["view", "search", "anything", "--json"])
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["query"] == "anything"
-
-
 def test_an_operation_failure_is_a_kraft_message_on_stderr(app, capsys):
     with pytest.raises(SystemExit) as caught:
         cli.main(["view", "show", "no-such-item"])
@@ -201,18 +195,6 @@ def test_create_files_an_item_on_a_base_branch(
     created = json.loads(capsys.readouterr().out)
     shown = asyncio.run(client.transport._get(f"/work-items/{created['id']}"))
     assert json.loads(shown["materialized_chain"])["target"]["base_branch"] == outcome
-
-
-def test_item_create_passes_auto_gate(monkeypatch):
-    seen = {}
-
-    async def fake_create(title, repo, chain, description, attachments, auto_gate=False, **_rest):
-        seen["auto_gate"] = auto_gate
-        return {"id": "w1"}
-
-    monkeypatch.setattr("kraft.client.create_work_item", fake_create)
-    cli.main(["item", "create", "t", "--repo", "/r", "--auto-gate"])
-    assert seen["auto_gate"] is True
 
 
 def test_an_items_own_policy_is_set_at_create_and_replaced_by_set_policy(
@@ -467,9 +449,13 @@ def test_a_worker_cannot_set_its_own_policy_through_the_cli(
 
 
 def test_resume_starts_a_paused_item(app, capsys, make_item, repo):
+    """The verb's own contract: the id and `--steer` reach the route, and
+    `--json` prints its answer. What resume does to the item is the client
+    tier's (tests/client/test_act.py)."""
     wid = make_item(repo, "start me")
     cli.main(["item", "resume", wid, "--steer", "go left", "--json"])
-    assert capsys.readouterr().out.strip()  # the API's response, whatever shape it has
+    printed = json.loads(capsys.readouterr().out)
+    assert (printed["id"], printed["steer"]) == (wid, "go left")
 
 
 def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, repo):

@@ -28,6 +28,38 @@ def test_a_refusal_reads_kraft_once(exc, line):
     assert client.refusal(exc) == line
 
 
+@pytest.mark.parametrize(
+    "body, line",
+    [
+        ({"detail": "unknown work item"}, "unknown work item"),
+        (
+            {
+                "detail": [
+                    {
+                        "type": "literal_error",
+                        "loc": ["body", "label"],
+                        "msg": "Input should be 'nit'",
+                    },
+                    {"type": "missing", "loc": ["body", "body"], "msg": "Field required"},
+                    {
+                        "type": "int_parsing",
+                        "loc": ["query", "after"],
+                        "msg": "Input should be an int",
+                    },
+                ]
+            },
+            "label: Input should be 'nit'; body: Field required; after: Input should be an int",
+        ),
+        ("plain text", "plain text"),
+    ],
+    ids=["kraft-detail", "pydantic-list", "not-json-object"],
+)
+def test_an_answers_reason_is_one_line(body, line):
+    """FastAPI's 422 for a body that does not fit is a list of pydantic
+    errors; it reached the CLI and MCP as a Python repr."""
+    assert client.detail_of(body) == line
+
+
 def test_a_connect_the_server_has_not_answered_in_time_says_it_may_still_save(monkeypatch):
     """The client gave up at 30 s while the probe ran on for up to 120, then
     saved: a raw ReadTimeout, then "already connected"."""

@@ -233,7 +233,6 @@ async def test_dispatch_default_continues_the_latest_thread(monkeypatch, databas
 
     evts = database.read(lambda c: events_mod.read_after(c, 0, wid))
     turns = [e["payload"]["turn"] for e in evts if e["type"] == "escalation_message"]
-    turns = turns
     assert turns == [1, 2]
 
 
@@ -568,15 +567,28 @@ def test_an_escalation_carries_the_standing_judge_verdict(tmp_path, monkeypatch)
     assert "the retry path is never awaited" in prompt
 
 
-def test_a_judge_verdict_from_before_the_last_gate_is_not_carried(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "closing",
+    [
+        ("work_item_retried", {}),
+        ("gate_approved", {"gate": "spec_approval"}),
+        ("gate_rejected", {"gate": "spec_approval", "note": "no"}),
+    ],
+    ids=["retried", "gate-approved", "gate-rejected"],
+)
+def test_a_judge_verdict_from_before_the_last_gate_is_not_carried(tmp_path, monkeypatch, closing):
     """A verdict from an episode a gate or a retry has already closed describes
     a trend that is over."""
-    prompt = _dispatch_with(
-        monkeypatch,
-        tmp_path,
-        [_verdict("ancient history"), ("work_item_retried", {})],
-    )
+    prompt = _dispatch_with(monkeypatch, tmp_path, [_verdict("ancient history"), closing])
     assert "ancient history" not in prompt
+    assert "fix-loop judge" not in prompt
+
+
+def test_a_judge_verdict_with_no_reasoning_adds_no_judge_line(tmp_path, monkeypatch):
+    """A verdict the judge gave no reason for has nothing to hand on: no line
+    introducing an empty explanation."""
+    prompt = _dispatch_with(monkeypatch, tmp_path, [_verdict("   ")])
+    assert "fix-loop judge" not in prompt
 
 
 def test_another_nodes_judge_verdict_is_not_carried(tmp_path, monkeypatch):

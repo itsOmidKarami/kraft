@@ -5,7 +5,10 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkerSession } from "../../types";
 import { PausedCard, StateCard } from "./StateCard";
-import { detail, stubFetch, type Call } from "./testkit";
+import { acceptWrites, detail, stubFetch, type Call } from "./testkit";
+
+/** The writes these pages send; any other write is refused. */
+const WRITES = acceptWrites("POST /work-items/w1/keep-waiting", "POST /work-items/w1/reassign", "POST /work-items/w1/reopen-mr", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -23,7 +26,7 @@ const show = (over: Parameters<typeof detail>[0], h = handlers()) => ({ h, ...ro
 
 describe("StateCard", () => {
   it("failed: where, the reason, the facts sent, Retry from the task by its path", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const { h } = show({ display_status: "failed", stop: stop("failed", { facts: { error: "403 Forbidden", tried: "3 times over 6m" } }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 2.41 } });
     const card = screen.getByRole("region", { name: "Failed" });
     expect(card).toHaveTextContent("merge_request › open › open_draft · attempt 3");
@@ -47,7 +50,7 @@ describe("StateCard", () => {
   });
 
   it("waiting on the provider: Retry now, and the fallback only when policy allows it", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const s = stop("rate_limit", { node: "verification", task: "verification.review.code_review", facts: { harness: "claude-code", fallback: ["codex", "gemini"], fallback_allowed: ["codex"] } });
     show({ display_status: "waiting", stop: s, rate_limit: { count: 2, cap: 5 } });
     const card = screen.getByRole("region", { name: "Waiting on the provider" });
@@ -67,7 +70,7 @@ describe("StateCard", () => {
   });
 
   it("worker lost: rendered only with the B5 fields, and never for another kind (R2)", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const facts = { worker: "ci-runner-3", last_seen_at: "2026-09-13T10:08:00Z", reassign_at: "2026-09-13T10:13:00Z", workers_online: ["ci-runner-1"] };
     const { unmount } = show({ display_status: "waiting", stop: stop("worker_lost", { facts: { worker: "ci-runner-3" } }) });
     expect(screen.queryByRole("region")).toBeNull();
@@ -95,7 +98,7 @@ describe("StateCard", () => {
   });
 
   it("MR closed: who closed it, Reopen, a new MR from the node that opened it, and Cancel item…", async () => {
-    const calls = stubFetch({ "GET /work-items/w1/events": [200, [
+    const calls = stubFetch({ ...WRITES, "GET /work-items/w1/events": [200, [
       { seq: 1, work_item_id: "w1", type: "mr_opened", payload: { number: 142 }, node_id: "merge_request", created_at: "2026-09-13T09:00:00Z" },
       { seq: 2, work_item_id: "w1", type: "mr_closed", payload: { ref: 142, by: "mara" }, node_id: null, created_at: "2026-09-13T09:30:00Z" },
     ]] });
@@ -133,7 +136,7 @@ describe("PausedCard", () => {
   const paused = (hook: string) => ({ id: hook, hook_point: hook, status: "paused", node_id: "verification" }) as WorkerSession;
 
   it("resumes with the steer, or without one", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")] })} reload={reload} />);
     await userEvent.type(screen.getByLabelText("Steer"), "look at reindex first");
@@ -144,7 +147,7 @@ describe("PausedCard", () => {
   });
 
   it("resumes with the steer on ⌘↵, and not with an empty one", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review")] })} reload={() => {}} />);
     await userEvent.click(screen.getByLabelText("Steer"));
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
@@ -155,7 +158,7 @@ describe("PausedCard", () => {
   });
 
   it("offers plain Resume only when the item is not steerable, since the server refuses a steer then", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     const reload = vi.fn();
     render(<PausedCard item={detail({ display_status: "paused", steerable: false, worker_sessions: [paused("verification.review.code_review"), paused("verification.review.automated_review")] })} reload={reload} />);
     expect(screen.queryByLabelText("Steer")).toBeNull();
@@ -167,7 +170,7 @@ describe("PausedCard", () => {
   });
 
   it("sends the steer to one paused task when several are paused and one is picked", async () => {
-    const calls = stubFetch();
+    const calls = stubFetch(WRITES);
     render(<PausedCard item={detail({ display_status: "paused", worker_sessions: [paused("verification.review.code_review"), paused("verification.review.automated_review")] })} reload={() => {}} />);
     await userEvent.selectOptions(screen.getByRole("combobox"), "verification.review.automated_review");
     await userEvent.type(screen.getByLabelText("Steer"), "only you");

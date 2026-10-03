@@ -599,8 +599,7 @@ def set_agent_overrides(
     """Replace a work item's own model/effort override (Kraft-4k6l).
     `agent_overrides` is already-serialized JSON text; `None` clears it back
     to the template's own binding -- the same nullable-column convention
-    `set_description` uses. Replaces the whole stored object;
-    `merge_agent_overrides` is the field-level merge the PATCH route uses.
+    `set_description` uses. Replaces the whole stored object.
     """
     conn.execute(
         "UPDATE work_items SET agent_overrides = ?, updated_at = ? WHERE id = ?",
@@ -614,19 +613,12 @@ def set_agent_overrides(
     )
 
 
-def merge_agent_overrides(conn: sqlite3.Connection, work_item_id: str, patch: dict) -> dict:
-    """Merge `patch` into a work item's own model/effort override and return
-    the new whole object: a field set to a value is set, one set to `None` is
-    dropped, and a field not named is kept, all in this one write, so two
-    callers changing different fields never undo each other. `{}` clears
-    every field (`set_agent_overrides(..., None)`)."""
-    from kraft.store.chain import merge_fields
-
-    row = conn.execute(
-        "SELECT agent_overrides FROM work_items WHERE id = ?", (work_item_id,)
-    ).fetchone()
-    current = json.loads(row["agent_overrides"]) if row and row["agent_overrides"] else {}
-    new = merge_fields(current, patch) if patch else {}
+def replace_agent_overrides(conn: sqlite3.Connection, work_item_id: str, overrides: dict) -> dict:
+    """Replace a work item's own model/effort override with `overrides` and
+    return what is stored, as 1.4 did: a field not named is gone, and so is
+    one sent as `None`. `{}`, or nothing but `None`s, clears every field
+    (`set_agent_overrides(..., None)`)."""
+    new = {k: v for k, v in overrides.items() if v is not None}
     set_agent_overrides(conn, work_item_id, json.dumps(new) if new else None)
     return new
 

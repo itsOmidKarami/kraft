@@ -57,7 +57,14 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from kraft.config import ConfigError, bounded_yaml, first_error, git_read, read_yaml
+from kraft.config import (
+    GIT_READ_ENV,
+    ConfigError,
+    bounded_yaml,
+    first_error,
+    git_read,
+    read_yaml,
+)
 
 #: The packaged table. An operator's file of the same name under the
 #: templates directory layers on top of it, never replaces it wholesale, so a
@@ -134,6 +141,9 @@ class Command(BaseModel):
     run: str = Field(min_length=1)
     tasks: list[str] = []
     when: list[Condition] = []
+    #: The files it reads, named as its source; when not given, the first
+    #: of the detector's `files` there is.
+    reads: list[str] = []
 
 
 class Detector(BaseModel):
@@ -164,6 +174,11 @@ class Detector(BaseModel):
     #: {command}`): a runner's test task that calls `pytest` or `python`
     #: bare is run through it, since a worker's PATH has no virtualenv on it.
     wrap: str | None = Field(default=None, pattern=r"\{command\}")
+    #: The virtualenv its setup makes, relative to the directory (`.venv`):
+    #: a test command another detector proposes beside it (a Makefile's
+    #: `make test`, CI's `python -m unittest`) is run with it active, or it
+    #: would import from whatever Python a worker's PATH has.
+    venv: str | None = Field(default=None, pattern=r"^[\w.-]+(?:/[\w.-]+)*$")
     test: list[Command] = []
     setup: list[Command] = []
 
@@ -272,9 +287,13 @@ def source_ref(root: Path) -> str | None:
     return None
 
 
-#: A partial clone's missing blob is fetched on demand; a probe must not
-#: reach the network, let alone prompt for credentials.
-_GIT_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"}
+def no_commit(path: str | Path) -> str:
+    """Why a repository with no commit (`source_ref` None) is not connected:
+    a work item's branch would be an empty orphan."""
+    return (
+        f"{path} has no commit yet, and a work item's branch starts from one: "
+        "commit its files, then connect it"
+    )
 
 
 def _git(root: Path, *args: str) -> bytes:
@@ -287,7 +306,7 @@ def _git(root: Path, *args: str) -> bytes:
             capture_output=True,
             timeout=_LIST_TIMEOUT_S,
             check=False,
-            env={**os.environ, **_GIT_ENV},
+            env={**os.environ, **GIT_READ_ENV},
         )
     except subprocess.TimeoutExpired as exc:
         raise ConfigError(
@@ -327,7 +346,7 @@ class _Blobs:
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, **_GIT_ENV},
+                    env={**os.environ, **GIT_READ_ENV},
                 )
             stdin, stdout = self._proc.stdin, self._proc.stdout
             assert stdin is not None and stdout is not None
@@ -731,6 +750,9 @@ class Candidate:
     #: A CI line whose program is a bare tool rather than a runner, a
     #: toolchain's wrapper or a script of the repo's own.
     bare: bool = False
+    #: A CI line that hands a shell a script (`bash -c "…"`, or shell syntax
+    #: in quotes): shown, and never chosen.
+    script: bool = False
     #: The runner task it runs (`setup`), when it runs one.
     task: str | None = None
     chosen: bool = False
@@ -786,14 +808,15 @@ def _detect(index: _Index, d: str, table: Table) -> tuple[list[Candidate], list[
                         )
                     )
                 else:
+                    reads = [_join(d, r) for r in cmd.reads] or [_join(d, marker)]
                     found.append(
                         Candidate(
                             d,
                             role,
                             cmd.run,
                             det.tier,
-                            _join(d, marker),
-                            _join(d, marker),
+                            " + ".join(reads),
+                            reads[0],
                             det.id,
                             det.family,
                         )
@@ -992,6 +1015,36 @@ def _shell_syntax(command: str) -> bool:
     return bool(re.search(r"[|;&<>(){}\\]", bare))
 
 
+#: A shell that runs the script it is given after `-c`.
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+_SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
+#: The flag an interpreter takes a script after: `python -c`, `python -Ic`,
+#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`.
+_SCRIPT_FLAGS = re.compile(r"-[a-zA-Z]*[ceEp][a-zA-Z]*|--(?:eval|print|command)=?")
+
+
+def _a_script(command: str) -> bool:
+    """A line `_shell_syntax` passes only because its script is in quotes:
+    `bash -c "curl … | sh; pytest"`, `python -c "import os; …"`. Shown for a
+    person to read, never chosen. Quoted syntax anywhere else is an argument
+    a test runner reads, run as argv with no shell: `pytest -k "not (a or
+    b)"`, `go test -run 'Test(Foo|Bar)'`."""
+    words = command.split()
+    # A shell anywhere in the line, not only first: `env bash -lc "…"`,
+    # `xvfb-run bash -ec "…"` hand it the script all the same.
+    for i, word in enumerate(words):
+        if posixpath.basename(word) in _SHELLS and any(
+            _SHELL_FLAGS.fullmatch(w) for w in words[i + 1 :]
+        ):
+            return True
+    for quoted in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
+        before = command[: quoted.start()].split()
+        flag = before[-1] if before else ""
+        if _SCRIPT_FLAGS.fullmatch(flag) and re.search(r"[|;&<>(){}\\]", quoted[0]):
+            return True
+    return False
+
+
 def _strip_env(command: str) -> str:
     """`CI=true npm test` -> `npm test`: a test command runs without a shell,
     where a leading assignment is a program name."""
@@ -1063,7 +1116,10 @@ def _ci_candidates(index: _Index) -> list[Candidate]:
             bare = role == "test" and not (
                 head in _CI_WRAPPERS or head.startswith(("./", "bin/", "script"))
             )
-            found.append(Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare))
+            script = _a_script(command)
+            found.append(
+                Candidate(d, role, command, "ci", rel, rel, "ci", bare=bare, script=script)
+            )
     return found
 
 
@@ -1164,7 +1220,9 @@ def _ancestors(d: str) -> list[str]:
 def _first_by_tier(cands: list[Candidate], tiers: tuple[Tier, ...]) -> Candidate | None:
     """The first candidate by tier, and within a tier one CI also runs. A CI
     line running a bare tool (`pytest`, `jest`) comes last of all: CI
-    installed that tool on its own PATH, which a worktree's is not."""
+    installed that tool on its own PATH, which a worktree's is not. A CI
+    line that is a shell script is never one."""
+    cands = [c for c in cands if not c.script]
     for tier in tiers:
         pool = [c for c in cands if c.tier == tier and not c.bare]
         hit = next((c for c in pool if c.corroborated), pool[0] if pool else None)
@@ -1423,6 +1481,26 @@ def _in_env(index: _Index, by_dir: dict[str, list[Candidate]], matches: dict[str
             c.source += f", run through {env.detector.id} ({env.marker})"
 
 
+def _in_venv(test: Candidate, venv: str) -> None:
+    """`test` run with the virtualenv `venv` active: its `python` named
+    outright, or anything else run with the venv's `bin` first on PATH --
+    `make test` runs whatever `pytest` it finds there. Spelled with `$PWD`,
+    since a test command runs from its own directory, and through `sh -c`,
+    since a test command is split into argv with no shell to expand it."""
+    try:
+        words = shlex.split(test.command)
+    except ValueError:
+        return
+    if not words:
+        return
+    if words[0] in ("python", "python3"):
+        test.command = shlex.join([f"{venv}/bin/python", *words[1:]])
+    else:
+        active = f'VIRTUAL_ENV="$PWD/{venv}" PATH="$PWD/{venv}/bin:$PATH"'
+        test.command = f"sh -c {shlex.quote(f'{active} {shlex.join(words)}')}"
+    test.source += f", in the setup's {venv}"
+
+
 def _stop(
     by_dir: dict[str, list[Candidate]], matches: dict[str, list[_Match]], table: Table
 ) -> dict[str, Detector]:
@@ -1679,6 +1757,7 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
     def reach(a: str, f: str, of: dict[str, set[str] | None]) -> bool:
         return a in of and f in workspaces.get(a, ()) and (of[a] is None or f in of[a])
 
+    venvs = {det.id: det.venv for det in table.detectors}
     scopes: list[Scope] = []
     claimed: set[str] = set()
     #: The root runner's file, when its setup recipe is the root's setup: a
@@ -1711,6 +1790,9 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         named = recipe_text is not None and _names_dir(recipe_text, d)
         if named:
             setup = [c for c in setup if c.tier == "runner"]
+        venv = next((venvs[c.detector] for c in setup if venvs.get(c.detector)), None)
+        if venv and test is not None and test.tier in ("runner", "ci"):
+            _in_venv(test, venv)
         if test is None and d != "" and not workspaces.get(d):
             continue
         if test is None and d == "" and not setup:
@@ -1746,11 +1828,21 @@ def _propose(index: _Index, table: Table, test_command: str | None) -> Proposal:
         {"dir": s.dir, "test": s.test.command if s.test else None, "setup": s.setup_command}
         for s in scopes
     ]
+    setup_command = combine_setup(shaped)
+    if (
+        setup_command is None
+        and test_command == ""
+        and not nested
+        and not any(c.role == "setup" for cands in by_dir.values() for c in cands)
+    ):
+        # Said to have no tests, and nothing anywhere to prepare (a docs
+        # repo): nothing is what it needs, rather than a second flag to say so.
+        setup_command = ""
     return Proposal(
         test_command=test_scopes[0]["command"] if test_scopes else None,
         test_scopes=test_scopes,
         test_markers=[c.marker for s in tested for c in s.parts if c.marker],
-        setup_command=combine_setup(shaped),
+        setup_command=setup_command,
         missing_setup=[s.dir or "." for s in tested if s.setup_command is None],
         scopes=shaped,
         candidates=[asdict(c) for cands in by_dir.values() for c in cands],

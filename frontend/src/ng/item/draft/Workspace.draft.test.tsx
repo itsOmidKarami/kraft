@@ -21,7 +21,7 @@ const mount = (path: string, answer: [number, DraftView], over: Partial<ItemDeta
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         {["/work-items/:id", "/work-items/:id/nodes/:node"].map((p) => (
-          <Route key={p} path={p} element={<ItemDraftProvider item={item} reload={() => {}}><Workspace item={item} reload={() => {}} /></ItemDraftProvider>} />
+          <Route key={p} path={p} element={<ItemDraftProvider item={item} reload={() => {}}><Workspace item={item} version="1" reload={() => {}} /></ItemDraftProvider>} />
         ))}
       </Routes>
     </MemoryRouter>,

@@ -31,6 +31,28 @@ def test_install_script_is_valid_shell():
     assert result.returncode == 0, result.stderr
 
 
+def test_an_install_script_cut_short_runs_nothing(tmp_path):
+    """Piped into sh, a download that stops partway is still a script: every
+    line that arrived would run. Cut at any line, it must run none of them."""
+    import subprocess
+
+    stubs, log = tmp_path / "stubs", tmp_path / "ran"
+    stubs.mkdir()
+    for name in ("curl", "uv", "mktemp", "rm"):
+        (stubs / name).write_text(f'#!/bin/sh\necho "{name} $*" >> {log}\n')
+        (stubs / name).chmod(0o755)
+    lines = (ROOT / "install.sh").read_text().splitlines(keepends=True)
+    for cut in range(1, len(lines)):
+        subprocess.run(
+            ["sh"],
+            input="".join(lines[:cut]),
+            capture_output=True,
+            text=True,
+            env={"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        )
+        assert not log.exists(), f"cut after line {cut}, it ran: {log.read_text()}"
+
+
 def _run_installer(tmp_path: Path, *, bin_on_path: bool, old_uv: bool = False, index: int = 0):
     """install.sh against a stub `curl` and `uv`: the release feed names one
     wheel, and `uv tool install` puts a `kraft` into a bin directory that is

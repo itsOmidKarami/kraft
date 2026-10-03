@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useDocuments } from "../../item/useDocuments";
 import { useEvents } from "../../item/useEvents";
-import { useItem } from "../../item/useItem";
+import { runVersion, useItem } from "../../item/useItem";
 import { placeUrl, readPlace, type Place } from "../../item/url";
 import { Doc } from "../doc/Doc";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -15,9 +15,9 @@ export function NodeRoute() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const loaded = useItem(id);
-  const version = loaded.state === "ready" ? loaded.item.updated_at : "";
+  const version = loaded.state === "ready" ? loaded.version : "";
   const events = useEvents(id, version);
-  const docs = useDocuments(id, version);
+  const docs = useDocuments(id, loaded.state === "ready" ? runVersion(loaded.item) : "");
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -43,7 +43,7 @@ export function NodeRoute() {
       </>
     );
   if (!place.node) return <Navigate to={`/work-items/${encodeURIComponent(id)}`} replace />;
-  const props = { item: loaded.item, events, docs, place, node: place.node, now, reload: loaded.reload, setPlace };
+  const props = { item: loaded.item, version, events, docs, place, node: place.node, now, reload: loaded.reload, setPlace };
   if (place.sel.kind === "task") return <TaskScreen {...props} place={place as Place & { sel: { kind: "task"; node: string; step: string; task: string } }} />;
   return <NodeScreen {...props} />;
 }

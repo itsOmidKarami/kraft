@@ -457,6 +457,52 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
     assert _git(repo, "rev-parse", "HEAD") == before
 
 
+@pytest.mark.parametrize(
+    ("made", "marker"),
+    [(".venv", "pyvenv.cfg"), ("web/node_modules", "left-pad/index.js")],
+    ids=["virtualenv", "node_modules"],
+)
+def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, marker):
+    """A setup's `.venv/` or `node_modules/` in a repo that never ignored it
+    is an install, not work: swept, it put 1,023 virtualenv files into one
+    merge request. The agent's own file beside it still commits, and the
+    install does not stop the merge request either."""
+    repo = _repo_with_origin(tmp_path)
+    (repo / "web").mkdir()
+    (repo / "web" / "app.js").write_text("tracked\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a web dir")
+    (repo / made / marker).parent.mkdir(parents=True)
+    (repo / made / marker).write_text("installed\n")
+    (repo / "forgotten.py").write_text("never added\n")
+
+    committed = asyncio.run(
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
+    )
+
+    assert committed is True
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
+    asyncio.run(forge.assert_clean(repo, "main"))
+
+
+def test_an_unignored_install_stays_out_when_git_lists_every_untracked_file(tmp_path):
+    """With `status.showUntrackedFiles=all` git lists `.venv`'s files one by
+    one, never `.venv/` whole, so no entry read as an install and the sweep
+    committed the virtualenv again."""
+    repo = _repo_with_origin(tmp_path)
+    _git(repo, "config", "status.showUntrackedFiles", "all")
+    (repo / ".venv" / "lib").mkdir(parents=True)
+    (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (repo / ".venv" / "lib" / "site.py").write_text("installed\n")
+    (repo / "forgotten.py").write_text("never added\n")
+
+    asyncio.run(
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
+    )
+
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
+
+
 def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
     """`submodule.<path>.ignore = all` is a legitimate thing for a human to
     set on a six-submodule workspace -- it must not blind Kraft's own guard

@@ -87,8 +87,21 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 autostart=ns.autostart,
             )
         ),
-        common._render_action,
+        _render_created,
         ns.json,
+    )
+
+
+def _render_created(result: dict) -> str:
+    """The created item, and, when an --autostart was filed paused because
+    every slot was busy, why: what the board's composer says too."""
+    slots = result.get("slots")
+    shown = common._render_action({k: v for k, v in result.items() if k != "slots"})
+    if not slots:
+        return shown
+    return (
+        f"{shown}\nfiled paused: {slots['busy']} of {slots['limit']} slots are busy. "
+        f"Start it when one frees: kraft item resume {result['id']}"
     )
 
 

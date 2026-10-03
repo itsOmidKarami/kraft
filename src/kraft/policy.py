@@ -605,6 +605,13 @@ ToolNames = Annotated[list[StrictStr], AfterValidator(_tool_names)]
 #: classifier or sandbox would decide (Kraft-4in7z). Names, never command
 #: patterns: each harness matches a name to its own calls (`kraft.grants`).
 GRANTS: tuple[str, ...] = ("git-commit", "git-rebase", "git-push")
+#: One line per grant, for the editors that offer them (`kraft.grants` is
+#: what each one actually matches).
+GRANT_SUMMARIES: dict[str, str] = {
+    "git-commit": "A plain git commit",
+    "git-rebase": "A plain git rebase",
+    "git-push": "A plain git push to the item's own branch",
+}
 
 
 def _grant_names(names: list[str]) -> list[str]:

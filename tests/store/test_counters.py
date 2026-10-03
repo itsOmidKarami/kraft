@@ -160,3 +160,33 @@ async def test_a_retry_no_person_asked_for_clears_no_counter(database):
     assert [_counter(database, key)["count"] for key in keys] == [1] * 4
     ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
     assert ev["type"] == "work_item_retried"
+
+
+async def test_a_refund_gives_back_the_last_attempt(database, monkeypatch):
+    """An attempt that never became one (paused, rate limited) is given back;
+    a first attempt refunded leaves no row, so the next bump starts the clock
+    afresh. Another counter is not touched."""
+    monkeypatch.setattr(store.counters, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    await _bump(database, "verify.fix_loop")
+    await _bump(database, "verify.fix_loop")
+    await _bump(database, "ci_infra:verify")
+
+    await database.write(lambda c: store.refund_counter(c, "w1", "verify.fix_loop"))
+    assert _counter(database, "verify.fix_loop")["count"] == 1
+    await database.write(lambda c: store.refund_counter(c, "w1", "verify.fix_loop"))
+    assert _counter(database, "verify.fix_loop") is None
+
+    monkeypatch.setattr(store.counters, "_now", lambda: "2026-01-02T00:00:00+00:00")
+    count, started_at, _cap = await _bump(database, "verify.fix_loop")
+    assert (count, started_at) == (1, "2026-01-02T00:00:00+00:00")
+    assert _counter(database, "ci_infra:verify")["count"] == 1
+
+
+async def test_delete_counter_drops_that_key_only(database):
+    await _bump(database, "verify.escalation")
+    await _bump(database, "verify.fix_loop")
+
+    await database.write(lambda c: store.delete_counter(c, "w1", "verify.escalation"))
+
+    assert _counter(database, "verify.escalation") is None
+    assert _counter(database, "verify.fix_loop")["count"] == 1

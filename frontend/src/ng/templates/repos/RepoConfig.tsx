@@ -4,6 +4,9 @@ import { detailOf } from "../../http";
 import type { ConfigDraft } from "../draft/useConfigDraft";
 import type { Problem, Result } from "../draft/types";
 import { ValueCell } from "../draft/ValueCell";
+import { harnessChoices, steeringChoices } from "../choices";
+import { useHarnessOptions } from "../panes/useHarnessOptions";
+import { useLibrary } from "../useLibrary";
 import { FIELDS, FORGES, patchFor, sourceOf, valueOf, type RepoField } from "./fields";
 import { problemsOf, type RepoView } from "./types";
 
@@ -42,6 +45,9 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
   const shown = f.show(f.key === "steering" ? repo.resolved.steering : v);
   const set = v != null && !(Array.isArray(v) && v.length === 0);
   const source = sourceOf(repo, f);
+  const library = useLibrary();
+  const opts = useHarnessOptions();
+  const choices = f.choices === "steering" ? steeringChoices(library) : f.choices === "harnesses" ? harnessChoices(typeof opts === "string" ? null : opts.harnesses) : undefined;
   const [refused, setRefused] = useState<string | null>(null);
   /** A refusal of the `none` checkbox, which has no cell of its own to show one. */
   const [noneRefused, setNoneRefused] = useState<string | null>(null);
@@ -67,7 +73,7 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
             {[...new Set([String(v ?? "default"), ...chains])].map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         ) : (
-          <ValueCell label={f.label} value={f.show(v)} display={shown || f.fallback || "not set"} muted={!shown} bad={!!problem} changed={changed} placeholder={f.placeholder} onCommit={commit} />
+          <ValueCell label={f.label} value={f.show(v)} display={shown || f.fallback || "not set"} muted={!shown} bad={!!problem} changed={changed} placeholder={f.placeholder} choices={choices} closed multiple noun={f.choices === "steering" ? "steering profile" : "harness"} onCommit={commit} />
         )}
         {f.none && (
           <label className="rp-none">

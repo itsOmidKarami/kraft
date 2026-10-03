@@ -29,6 +29,8 @@ const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
 
 export interface PlaceProps {
   item: ItemDetail;
+  /** Moves on every read of the item (useItem): the thread is read again on it. */
+  version: string;
   events: KraftEvent[];
   docs: WorkItemDocument[];
   place: Place;

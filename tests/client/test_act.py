@@ -6,49 +6,42 @@ import asyncio
 import os
 from pathlib import Path
 
-import httpx
 import pytest
-from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
+from support.api import await_gate, run_with_app
+from support.harness import connected_repo, make_repo
 
-from client.test_read import run_with_app
 from kraft import client
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
+def test_resume_starts_a_paused_item(wired, tmp_path, monkeypatch):
+    """A created-paused item is the phase 2 output; resume is how it begins:
+    the item is claimed `active` and a walk starts carrying the steer. The walk
+    is recorded rather than run, so the status read back is the resume's own,
+    not wherever a walk got to."""
+    import kraft.executor
 
-@pytest.fixture
-def wired(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    import kraft.api as api
+    walks = []
 
-    monkeypatch.setattr(
-        client.transport,
-        "http",
-        lambda: httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
-        ),
-    )
-    return api
+    async def walk(_db, _run_dirs, **kwargs):
+        walks.append(kwargs)
 
-
-def test_resume_starts_a_paused_item(wired, tmp_path):
-    """A created-paused item is the phase 2 output; resume is how it begins."""
+    monkeypatch.setattr(kraft.executor, "run", walk)
     repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("drive me", repo=str(repo))
-        resumed = await client.resume(work_item_id=created["id"])
-        return created, resumed
+        resumed = await client.resume(" go left ", work_item_id=created["id"])
+        evts = await client.events(created["id"])
+        return created, resumed, evts, await client.get_work_item(created["id"])
 
-    created, resumed = run_with_app(wired, scenario)
-    assert resumed["id"] == created["id"]
+    created, resumed, evts, item = run_with_app(wired, scenario)
+    assert (resumed["id"], resumed["steer"]) == (created["id"], "go left")
+    assert item["status"] == "active"
+    # The log records the stripped steer, the way the board and `view events` read it.
+    assert [e["payload"] for e in evts if e["type"] == "work_item_resumed"] == [
+        {"steer": "go left"}
+    ]
+    assert [(w["work_item_id"], w["steer"]) for w in walks] == [(created["id"], "go left")]
 
 
 def test_pause_refuses_an_item_that_is_not_running(wired, tmp_path):
@@ -107,6 +100,39 @@ def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
 
     with pytest.raises(ValueError, match="no gate is pending"):
         run_with_app(wired, scenario)
+
+
+@pytest.mark.parametrize(
+    ("call", "decided"),
+    [
+        (lambda wid: client.approve_gate(work_item_id=wid), "gate_approved"),
+        (lambda wid: client.reject_gate("redo it", work_item_id=wid), "gate_rejected"),
+    ],
+    ids=["approve", "reject"],
+)
+def test_a_gate_decision_with_no_gate_named_decides_the_pending_one(wired, tmp_path, call, decided):
+    """`kraft item approve` with no `--gate`, the common case: the item says
+    which gate it waits on, and that is the one decided. The item walks to
+    its first gate for real; nothing names the gate but the item. `auto_gate`
+    is off so the decision is a person's whatever the chain's gate declares,
+    and the walk the decision starts is cancelled, not left for teardown."""
+    from kraft.api import deps
+
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("at a gate", repo=str(repo), auto_gate=False)
+        wid = created["id"]
+        await client.resume(work_item_id=wid)
+        gate = await await_gate(wid)
+        await call(wid)
+        evts = await client.events(wid)
+        await deps.cancel(wired.app, wid)
+        return gate, evts
+
+    gate, evts = run_with_app(wired, scenario)
+    assert gate == "spec_approval"
+    assert [e["payload"]["gate"] for e in evts if e["type"] == decided] == [gate]
 
 
 @pytest.mark.parametrize(

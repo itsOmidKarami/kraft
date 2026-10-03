@@ -94,4 +94,18 @@
 .pill-add { flex: 1 1 90px; min-width: 90px; }
 .pill-input { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, Menlo, monospace; }
 .pill-empty { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+.pill-err { margin: 0; font-size: 11px; line-height: 1.5; color: var(--bad); }
 .pill-live { position: absolute; width: 1px; height: 1px; overflow: clip; clip-path: inset(50%); white-space: nowrap; }
+
+/* A field with a list of its values (Combobox): the list floats under it, styled as a menu. */
+.cbx { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.cbx-list, .cbx-none { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 50; box-sizing: border-box; margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--side) 60%, transparent); }
+.cbx-list { display: flex; flex-direction: column; max-height: 240px; overflow: auto; padding: 4px; list-style: none; }
+.cbx-list[hidden] { display: none; }
+.cbx-opt { display: flex; align-items: flex-start; }
+.cbx-opt[aria-selected="true"] { background: var(--line); }
+.cbx-value { font: 12px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+.cbx-none { padding: 6px 10px; font-size: 11.5px; color: var(--text-muted); }
+.cbx > input[aria-invalid="true"] { border-color: var(--bad); }
+.cbx.is-above > .cbx-list, .cbx.is-above > .cbx-none { top: auto; bottom: calc(100% + 4px); }
+.cbx.is-inline > .cbx-list, .cbx.is-inline > .cbx-none { position: static; margin-top: 4px; box-shadow: none; }

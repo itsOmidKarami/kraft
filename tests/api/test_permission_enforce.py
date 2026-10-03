@@ -15,6 +15,7 @@ import pytest
 from support.permissions import PATH, ask, events_of, seed_session, templates
 
 from kraft import harness, permission_hooks
+from kraft.adapters import hook_install
 
 #: A push to `seed_session`'s item's own branch, from its title and id.
 _PUSH = {"command": "git push origin kraft/t-w1"}
@@ -187,3 +188,75 @@ def test_a_call_that_is_two_tools_needs_both(client, policy, behavior):
     seed_session(policy=policy)
     body = ask(client, "Write", input={}, mode="enforce", also=["Edit"]).json()
     assert body["behavior"] == behavior, body
+
+
+@pytest.mark.parametrize(
+    ("tool", "also", "input"),
+    [
+        ("Write", ["Edit"], {"path": ".cursor/hooks.json"}),
+        ("Write", ["Edit"], {"path": "/wt/.cursor/rules/../hooks.json"}),
+        ("Delete", [], {"path": "./.cursor"}),
+        ("Bash", [], {"command": "rm -f .cursor/hooks.json"}),
+        ("Bash", [], {"command": "echo '{}' > hooks.json"}),
+        ("Write", ["Edit"], {"path": ".Cursor/hooks.json"}),
+        ("Write", ["Edit"], {"path": ".cursor/HOOKS.json"}),
+        ("Write", ["Edit"], {"path": ".cursor/hoo\u212as.json"}),
+        ("Write", ["Edit"], {"path": ".cursor/hook\u017f.json"}),
+        ("Bash", [], {"command": "rm -f .CURSOR/x"}),
+        ("Bash", [], {"command": "rm -f .cur''sor/ho\\oks.json"}),
+    ],
+    ids=[
+        "write",
+        "write-through-dotdot",
+        "delete-the-directory",
+        "shell",
+        "shell-in-place",
+        "another-case",
+        "another-case-file",
+        "a-kelvin-sign",
+        "a-long-s",
+        "shell-another-case",
+        "shell-split-by-quotes",
+    ],
+)
+@pytest.mark.parametrize(
+    "policy", [{"grants": ["git-push"]}, {"allowed_tools": ["Bash", "Write", "Edit", "Delete"]}]
+)
+def test_a_cursor_worker_may_not_change_its_permission_hook(client, tool, also, input, policy):
+    """The hook entry sits in the worktree, where a worker allowed to write
+    or run a shell could drop it and work the rest of its session ungated."""
+    seed_session(policy=policy)
+    body = ask(
+        client, tool, input=input, mode="enforce", harness="cursor", cli_tool="x", also=also
+    ).json()
+    assert (body["behavior"], body["message"]) == ("deny", hook_install.HOOK_FILE_REASON)
+    [event] = events_of(client, "permission_decision")
+    assert event["decision"] == "deny"
+
+
+def test_a_cursor_worker_still_writes_and_reads_its_other_files(client):
+    seed_session(policy={"allowed_tools": ["Bash", "Write", "Edit", "Read"]})
+    calls = [
+        ("Write", ["Edit"], {"path": "src/hooks.json"}),
+        ("Read", [], {"path": ".cursor/hooks.json"}),
+        ("Bash", [], {"command": "ls"}),
+    ]
+    for tool, also, input in calls:
+        r = ask(client, tool, input=input, mode="enforce", harness="cursor", also=also)
+        assert r.json()["behavior"] == "allow", (tool, input)
+    # Another harness's worker has no Cursor hook to lose.
+    r = ask(client, "Bash", input={"command": "rm .cursor/hooks.json"}, mode="enforce")
+    assert r.json()["behavior"] == "allow"
+
+
+@pytest.mark.parametrize("path", ["cfg/hooks.json", "link"], ids=["through-a-dir", "a-file-link"])
+def test_a_cursor_worker_may_not_reach_its_hook_through_a_symlink(client, path):
+    """A repository can commit `cfg -> .cursor`, or a link to the file."""
+    worktree = client.app.state.run_dirs.worktrees / "w1"
+    (worktree / ".cursor").mkdir(parents=True)
+    (worktree / ".cursor" / "hooks.json").write_text("{}")
+    (worktree / "cfg").symlink_to(".cursor")
+    (worktree / "link").symlink_to(".cursor/hooks.json")
+    seed_session(policy={"allowed_tools": ["Write", "Edit"]})
+    r = ask(client, "Write", input={"path": path}, mode="enforce", harness="cursor", also=["Edit"])
+    assert r.json()["behavior"] == "deny"

@@ -3,6 +3,9 @@
 onto the base the merge request targets."""
 
 import asyncio
+import contextlib
+import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -501,17 +504,34 @@ async def test_mr_rebase_reports_done_when_it_moved_nothing(database, run_dirs, 
     assert status == "done"
 
 
-def _hanging_pre_rebase_hook(repo, seconds: float) -> None:
+@pytest.fixture
+def hung(tmp_path):
+    """Where a hanging hook below records the pid of its `sleep`. Each is
+    killed once the test is done: git gives up on the hook, but nothing ends
+    the hook itself, which would otherwise outlive the test."""
+    pids = tmp_path / "hook-pids"
+    yield pids
+    for pid in pids.read_text().split() if pids.exists() else ():
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(pid), signal.SIGKILL)
+
+
+def _sleep_recorded(pids, seconds: float) -> str:
+    """The hook's last lines: the shell becomes the `sleep`, its pid in `pids`."""
+    return f'echo $$ >> "{pids}"\nexec sleep {seconds}\n'
+
+
+def _hanging_pre_rebase_hook(repo, pids, seconds: float) -> None:
     """A real `pre-rebase` hook that sleeps -- `git rebase` runs it before it
     does anything else, so this hangs the rebase itself, the same shape a
     slow custom hook or a smudge/LFS filter would (Kraft-3llig)."""
     hook = repo / ".git" / "hooks" / "pre-rebase"
-    hook.write_text(f"#!/bin/sh\nsleep {seconds}\nexit 0\n")
+    hook.write_text("#!/bin/sh\n" + _sleep_recorded(pids, seconds))
     hook.chmod(0o755)
 
 
 async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
-    database, run_dirs, repo
+    database, run_dirs, repo, hung
 ):
     """Kraft-3llig review fix 1: a hanging pre-rebase hook must not hold the
     worker slot forever. `time_cap` bounds the `git rebase` subprocess
@@ -521,7 +541,7 @@ async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     _commit(repo, "moved.txt", "moved on\n", "moved on")
-    _hanging_pre_rebase_hook(repo, seconds=30)
+    _hanging_pre_rebase_hook(repo, hung, seconds=30)
     hit = caps.Hit(scope="", field="time_cap_minutes", minutes=0, remaining_s=1.0)
     time_cap = caps.Deadline(at=caps.monotonic() + 1.0, hit=hit)
 
@@ -557,7 +577,7 @@ async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
     assert not (worktree / ".git" / "rebase-apply").exists()
 
 
-def _hanging_rebase_hook(repo, tmp_path, phases: str, seconds: float) -> None:
+def _hanging_rebase_hook(repo, tmp_path, pids, phases: str, seconds: float) -> None:
     """A `reference-transaction` hook that sleeps `seconds`, once per phase
     named in `phases` ("rebase", "abort"), while a rebase is in progress.
     Kraft-ujep9: `git rebase --abort` fires it (a `post-checkout` hook does
@@ -575,8 +595,7 @@ def _hanging_rebase_hook(repo, tmp_path, phases: str, seconds: float) -> None:
         "esac\n"
         f'case " {phases} " in *" $phase "*) ;; *) exit 0 ;; esac\n'
         f'[ -e "{marker}.$phase" ] && exit 0\n'
-        f'touch "{marker}.$phase"\n'
-        f"sleep {seconds}\n"
+        f'touch "{marker}.$phase"\n' + _sleep_recorded(pids, seconds)
     )
     hook.chmod(0o755)
 
@@ -590,7 +609,7 @@ def _hanging_rebase_hook(repo, tmp_path, phases: str, seconds: float) -> None:
     ids=["conflict", "timed_out"],
 )
 async def test_a_hanging_rebase_abort_is_bounded_and_says_so(
-    tmp_path, monkeypatch, database, run_dirs, repo, phases, error, timeout
+    tmp_path, monkeypatch, database, run_dirs, repo, hung, phases, error, timeout
 ):
     """Kraft-ujep9: the abort after a conflict or a timed-out rebase runs under
     its own fixed timeout, and past it raises the caller's own error class,
@@ -603,7 +622,7 @@ async def test_a_hanging_rebase_abort_is_bounded_and_says_so(
         _commit(repo, "calc.py", "def add(a, b):\n    return a - b - 2\n", "conflicting edit")
     else:
         _commit(repo, "moved.txt", "moved on\n", "moved on")
-    _hanging_rebase_hook(repo, tmp_path, phases, seconds=10)
+    _hanging_rebase_hook(repo, tmp_path, hung, phases, seconds=10)
 
     started = caps.monotonic()
     with pytest.raises(error, match="--abort` also timed out after 1s.*left mid-rebase"):

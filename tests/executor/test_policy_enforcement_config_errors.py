@@ -40,7 +40,6 @@ def _never_launches(monkeypatch) -> list:
         return "done"
 
     monkeypatch.setattr(dispatch._subprocess, "run_task", launch)
-    monkeypatch.setattr(agent_mod._subprocess, "run_task", launch)
     monkeypatch.setattr(agent_mod, "run_agent_task", launch)
     return launched
 

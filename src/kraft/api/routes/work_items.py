@@ -249,6 +249,31 @@ def _dry_run_response(
     }
 
 
+def repo_warning(entry) -> str | None:
+    """What will stop an item filed on `entry`, said when it is filed rather
+    than found once it has run: no setup command declared stops it before
+    its first task, and no test command (nor test scopes) stops it at
+    verification, after its agent tasks have run. Warned, not refused: a
+    disabled repo still takes items filed by hand."""
+    stops = []
+    if entry.setup_command is None:
+        stops.append(
+            "declares no setup command, so this item stops before its first task, when "
+            'its worktree is made (set one, or "" for none)'
+        )
+    if entry.test_command is None and not entry.test_scopes:
+        stops.append(
+            "has no test command, so this item runs its agent tasks, then stops at "
+            'verification (set one, or "" for a repo with no tests)'
+        )
+    if not stops:
+        return None
+    return (
+        f"{entry.path} " + "; and it ".join(stops) + ". Set it in Templates › Repos, "
+        "or run `kraft repo connect` there again, before you start this item"
+    )
+
+
 @api_router.post("/work-items", status_code=201)
 async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = False):
     st = request.app.state
@@ -327,6 +352,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
         # 200, not this route's default 201: nothing was created.
         content = _dry_run_response(st, body, chain, materialized, attachment_kinds)
         return JSONResponse(status_code=200, content=content)
+    # Before intake: a lookup after it could answer 422 for an item filed.
+    repo_entry = deps.connected_or_422(st, body.repo)
     # Read before this item exists, so it cannot find itself. Warned, not
     # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
     # the usual reason to re-file, a revised spec, now has its own door.
@@ -392,6 +419,8 @@ async def create_work_item(body: NewWorkItem, request: Request, dry_run: bool = 
             + ". To revise its spec or plan, use `kraft item set-attachments` on it "
             "rather than filing again; abandon whichever of the two is not wanted"
         )
+    if cannot_run := repo_warning(repo_entry):
+        extra["repo_warning"] = cannot_run
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
@@ -667,10 +696,10 @@ class WorkItemPatch(BaseModel):
     #: started item.
     chain_template: str | None = None
     #: `None` (default) leaves the override alone. `{}` clears every field
-    #: back to the template's own binding; a non-empty object is merged into
-    #: the stored one field by field, a field sent as `null` dropped, in one
-    #: write, like `node_overrides`' fields. No `current_node_id` restriction,
-    #: unlike `chain_template`:
+    #: back to the template's own binding; a non-empty object *replaces* the
+    #: whole stored override, as in 1.4 -- a field it does not name, or sends
+    #: as `null`, is dropped. The item page sends every field in one PATCH.
+    #: No `current_node_id` restriction, unlike `chain_template`:
     #: a model/effort dial can change mid-chain, including on a paused item --
     #: that is the point, making a stuck item cheaper before its next retry.
     agent_overrides: dict | None = None
@@ -973,18 +1002,20 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         if body.chain_template is not None:
             store.set_chain_template(c, wid, body.chain_template, new_materialized)
         if body.agent_overrides is not None:
-            written["agent_overrides"] = (
-                store.merge_agent_overrides(c, wid, body.agent_overrides) or None
-            )
+            written["agent_overrides"] = store.replace_agent_overrides(c, wid, body.agent_overrides)
         if body.node_overrides is not None:
-            written["node_overrides"] = store.set_node_overrides(c, wid, body.node_overrides)
+            now = store.set_node_overrides(c, wid, body.node_overrides)
+            # Each node the request named, as stored: `{node: {}}` once it is
+            # cleared, as 1.4 echoed it, and never another node's entry.
+            written["node_overrides"] = {n: now.get(n, {}) for n in body.node_overrides}
         if "budget_usd" in fields_set:
             store.set_budget(c, wid, body.budget_usd)
         if body.policy is not None:
             store.set_policy_override(c, wid, item_policy)
 
-    # The overrides as stored after the merge, which the echo reports in
-    # place of what was sent: a field the request left out is still there.
+    # The overrides as stored after the write, which the echo reports in
+    # place of what was sent: `{}` once cleared, and for a node it named a
+    # field the request left out is still there.
     written: dict = {}
     filed = stored = entry.attachments_of(row)
     won = False
@@ -1013,6 +1044,6 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             entry.discard_attachments(st.run_dirs, wid, drop, keep)
     # `model_dump(exclude_none=True)` would drop an explicit `budget_usd:
     # null` along with every untouched field, so build the echo from
-    # `fields_set` (what the caller actually sent) instead. The overrides
-    # merge, so for them the echo is what is now stored, as the detail shows it.
+    # `fields_set` (what the caller actually sent) instead. For the overrides
+    # the echo is what is now stored, as the detail shows it.
     return {"id": wid, **{f: getattr(body, f) for f in fields_set}, **written}

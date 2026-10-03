@@ -15,6 +15,8 @@ export interface RepoField {
   source?: "steering" | "deny_tools" | "models";
   /** The value shown when the entry sets none. */
   fallback?: string;
+  /** A closed set its comma-separated entries come from, listed as you type. */
+  choices?: "steering" | "harnesses";
   /** A checkbox that sets the field to `""`, the command that does nothing. */
   none?: string;
   placeholder?: string;
@@ -28,7 +30,7 @@ export const FIELDS: RepoField[] = [
   { key: "test_scopes", label: "test scopes", ...scopes, placeholder: "paths => command; …" },
   { key: "setup_command", label: "setup command", ...command, none: "No setup needed" },
   { key: "intent_dir", label: "intent dir", ...text },
-  { key: "steering", label: "steering", ...list, source: "steering", placeholder: "profile, profile" },
+  { key: "steering", label: "steering", ...list, source: "steering", choices: "steering", placeholder: "profile, profile" },
   { key: "models", label: "models", ...models, source: "models", placeholder: "profile=model; …" },
   { key: "deny_tools", label: "deny tools", ...list, source: "deny_tools", placeholder: "tool, tool" },
   { key: "local_files", label: "local files", ...list, placeholder: "file, file" },
@@ -39,7 +41,7 @@ export const FIELDS: RepoField[] = [
   policy("token_budget", "tokens cap", whole("Tokens")),
   policy("budget_usd", "dollars cap", dollars),
   { ...policy("allowed_tools", "allowed tools", list), placeholder: "tool, tool" },
-  { ...policy("allowed_harnesses", "allowed harnesses", list), placeholder: "harness, harness" },
+  { ...policy("allowed_harnesses", "allowed harnesses", list), choices: "harnesses", placeholder: "harness, harness" },
 ];
 
 export const FORGES = ["gitlab", "github", "none"];

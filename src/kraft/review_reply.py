@@ -23,6 +23,7 @@ import logging
 import uuid
 
 from kraft import caps, events, executor, store
+from kraft import overrides as _overrides
 from kraft.adapters import agent as _agent
 from kraft.executor import read_only
 from kraft.templates.models import AgentTask
@@ -127,13 +128,19 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     if hit is not None and hit.remaining_s <= 0:
         return "no_agent"
     time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
+    item_override = json.loads(row["agent_overrides"]) if row["agent_overrides"] else None
+    # A model stored before the write doors checked model ids never reaches the
+    # command line: `run` records the refusal as `reply_agent_failed`.
+    refusal = _overrides.stored_model_refusal(work_item_id, item_override)
+    if refusal is not None:
+        raise ValueError(refusal)
     try:
         inv = _agent.resolve_agent_task(
             task.task,
             launch.repo_entry,
             launch.library_steering,
             skills_dir=launch.skills_dir,
-            item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
+            item_override=item_override,
             **executor.frozen_steering(row),
             item_repo=row["repo"],
             policy=executor.scope_policy(row, task),

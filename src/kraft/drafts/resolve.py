@@ -24,7 +24,7 @@ from kraft.api.routes import settings
 from kraft.drafts import authored
 from kraft.policy import Policy, PolicyError, TaskPolicyOverride, TemplatePolicyOverride
 from kraft.store import ENDED
-from kraft.templates import positions
+from kraft.templates import catalogue, positions
 from kraft.templates.library import (
     LIBRARY_FILE,
     ComponentSource,
@@ -94,6 +94,7 @@ def resolve(
         "policy_values": {
             k: getattr(policy, k) for k in ("auto_escalate_delay_s", "auto_review_attempts")
         },
+        "choices": catalogue.choices(),
         "warnings": [
             {"file": f, "message": "comments in this file will be dropped"}
             for f in serialized

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,16 @@ def test_add_repo_of_a_path_that_is_not_a_git_repo_is_a_problem(client, tmp_path
     assert any("not a git repository" in m for m in messages(body))
     body = resolved(client, {"op": "add_repo", "path": str(tmp_path / "missing")})
     assert any("not a directory" in m for m in messages(body))
+
+
+def test_add_repo_of_a_repo_with_no_commit_is_refused(client, tmp_path):
+    """As `POST /repos` refuses it: its items would run on an empty orphan branch."""
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=fresh, check=True)
+    r = ops(client, {"op": "add_repo", "path": str(fresh)})
+    assert r.status_code == 422
+    assert "has no commit yet" in r.text
 
 
 def test_a_default_chain_template_naming_no_chain_is_a_problem(client, connected):

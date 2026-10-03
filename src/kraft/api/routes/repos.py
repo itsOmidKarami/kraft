@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request
 from pydantic import AfterValidator, BaseModel
 
 from kraft import config as config_mod
+from kraft import detect
 from kraft.api import api_router, deps
 from kraft.store import open_counts_by_repo
 
@@ -56,6 +57,9 @@ class ProbeBody(BaseModel):
     #: False: only what needs no detector table (the path, name, forge),
     #: which is what resolving a path or checking "already connected" needs.
     detect: bool = True
+    #: The root's test command, as `POST /repos` takes it: the proposal is
+    #: what connecting with it would save.
+    test_command: str | None = None
 
 
 #: How long probing all of a connect's submodules may take, together.
@@ -270,7 +274,10 @@ async def probe_repo(body: ProbeBody, request: Request):
     async with st.probing:
         try:
             return await asyncio.to_thread(
-                config_mod.probe_repo, body.path, templates_dir=st.templates_dir
+                config_mod.probe_repo,
+                body.path,
+                templates_dir=st.templates_dir,
+                test_command=body.test_command,
             )
         except config_mod.ConfigError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -302,6 +309,11 @@ async def _add_repo(body: RepoBody, st) -> dict:
         facts = await asyncio.to_thread(config_mod.probe_repo, body.path, detect=False)
         if any(r["path"] == facts["path"] for r in _editable_repos(st)[0]):
             raise HTTPException(409, f"{facts['path']} is already connected")
+        if await asyncio.to_thread(detect.source_ref, Path(facts["path"])) is None:
+            # A work item's branch starts from a commit: on a repository with
+            # none, git makes it an empty orphan, without the files the
+            # proposal was read from (`builtins._add_worktree` refuses too).
+            raise HTTPException(422, detect.no_commit(facts["path"]))
         try:
             probed = await asyncio.to_thread(
                 config_mod.probe_repo,

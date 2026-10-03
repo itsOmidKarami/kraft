@@ -1,8 +1,9 @@
-"""`kraft view ...` parser rules; the verbs' behaviour is in `test_verbs.py`
-and `test_watching.py`."""
+"""`kraft view ...` parser rules and the search verb; the other verbs'
+behaviour is in `test_verbs.py` and `test_watching.py`."""
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -34,3 +35,33 @@ def test_search_prints_why_it_fell_back_to_text(note):
 
     assert "a.md" in out
     assert (f"note: {note}" in out) if note else ("note:" not in out)
+
+
+def test_search_renders_results(monkeypatch, capsys):
+    """One row per hit, with `--limit` passed through to the API."""
+    seen = []
+
+    async def fake_search(q, limit=20):
+        seen.append((q, limit))
+        hits = [
+            {"kind": "spec", "repo": "/r", "path": "specs/a.md", "score": 1.0},
+            {"kind": "session", "repo": "/s", "path": "sessions/b.md", "score": 0.5},
+        ]
+        return {"query": q, "results": hits}
+
+    monkeypatch.setattr("kraft.client.search", fake_search)
+    cli.main(["view", "search", "anything", "--limit", "3"])
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    assert rows == [
+        ["KIND", "REPO", "PATH"],
+        ["spec", "/r", "specs/a.md"],
+        ["session", "/s", "sessions/b.md"],
+    ]
+    cli.main(["view", "search", "anything"])
+    assert seen == [("anything", 3), ("anything", 20)]
+
+
+def test_search_json_is_the_api_payload(app, capsys):
+    cli.main(["view", "search", "anything", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["query"] == "anything"

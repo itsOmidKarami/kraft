@@ -117,23 +117,25 @@ async def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(
 
 
 async def test_no_app_fixture_still_avoids_the_operators_real_home(
-    tmp_path, tmp_path_factory, monkeypatch, database, run_dirs, repo
+    tmp_path, tmp_path_factory, monkeypatch, fake_beads, database, run_dirs, repo
 ):
     """Kraft-t5g: bd's fallback when it finds no `.beads/` walking up from cwd
     is a hardcoded `~/.beads`. A test with no `app` fixture and no explicit
-    `bd_cwd` must still land in a fake HOME, not the operator's real one."""
+    `bd_cwd` must still hand bd the repo as its cwd, under a fake HOME, so
+    neither the walk up nor the fallback can reach the operator's real home.
+
+    Unit tier: bd itself never runs, so what is pinned is where intake would
+    run it -- the cwd and the HOME it inherits at the moment it is called."""
     import os
-    import pwd
 
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
-    # The autouse fixture already swapped HOME to somewhere under pytest's
-    # base temp -- proof it ran, not a re-check of its own logic.
-    assert Path(os.environ["HOME"]).is_relative_to(tmp_path_factory.getbasetemp())
+    calls: list[tuple[str | None, str]] = []
 
-    # `pwd` reads the OS-level home directly, ignoring $HOME -- the one way to
-    # name the operator's real home while HOME itself is monkeypatched.
-    real_beads = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".beads"
-    before = real_beads.exists() and set(real_beads.iterdir())
+    async def spy(title, *, description=None, cwd=None):
+        calls.append((cwd, os.environ["HOME"]))
+        return await fake_beads.intake(title, description=description, cwd=cwd)
+
+    monkeypatch.setattr(beads, "intake", spy)
 
     await executor.intake(
         database,
@@ -143,8 +145,9 @@ async def test_no_app_fixture_still_avoids_the_operators_real_home(
         chain=_quick_task(tmp_path),
     )
 
-    after = real_beads.exists() and set(real_beads.iterdir())
-    assert before == after, "intake touched the operator's real ~/.beads"
+    [(cwd, home)] = calls
+    assert cwd == str(repo)
+    assert Path(home).is_relative_to(tmp_path_factory.getbasetemp())
 
 
 # -- Kraft-iaou3: a bead closes only when the item's change carries it --------

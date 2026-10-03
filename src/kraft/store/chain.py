@@ -496,6 +496,20 @@ def node_overrides_of(row) -> dict:
     return json.loads(raw) if raw else {}
 
 
+def work_item_payload(row) -> dict:
+    """A `work_items` row as every API answer that hands one back carries it:
+    the item's detail and the action and gate echoes alike. The columns are
+    as stored, except the three override columns, which hold JSON text and
+    are decoded, so a client reads the same object at every door:
+    `agent_overrides` and `policy_override` (`None` when unset) and
+    `node_overrides` (`{}` when unset)."""
+    payload = {k: row[k] for k in row.keys()}
+    payload["agent_overrides"] = json.loads(row["agent_overrides"] or "null")
+    payload["policy_override"] = json.loads(row["policy_override"] or "null")
+    payload["node_overrides"] = node_overrides_of(row)
+    return payload
+
+
 def effective_nodes(chain, node_overrides: dict) -> tuple:
     """A `MaterializedChain`'s ordered nodes with `node_overrides` folded on as
     a **typed** overlay: `tuple[ResolvedNode, ...]`.

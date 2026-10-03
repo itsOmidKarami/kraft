@@ -6,8 +6,16 @@ import { mountAt, posts } from "../areas/testkit";
 import { More } from "./More";
 
 const open = (answers: Record<string, [number, unknown]> = {}) => mountAt(<More />, "/more", "/more", answers);
-beforeEach(() => useApply.setState({ restart: [], reload: [], managed: false, loaded: false, phase: "idle", confirming: false, error: null }));
-afterEach(() => vi.unstubAllGlobals());
+// A case may swap a store action for a stub; each case gets the store, actions included, back as it found it.
+let saved: ReturnType<typeof useApply.getState>;
+beforeEach(() => {
+  saved = useApply.getState();
+  useApply.setState({ restart: [], reload: [], managed: false, loaded: false, phase: "idle", confirming: false, error: null });
+});
+afterEach(() => {
+  useApply.setState(saved, true);
+  vi.unstubAllGlobals();
+});
 
 describe("More (K.1)", () => {
   it("lists every area in the prototype's groups, About included", async () => {

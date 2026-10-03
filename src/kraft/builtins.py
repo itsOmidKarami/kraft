@@ -574,10 +574,23 @@ def _add_worktree(repo: Path, path: Path, branch: str, start: str | None) -> Non
     A sha for `start`, not `origin/<default>`: a remote-tracking start point
     would make git set it as the new branch's upstream. The prune first: a
     worktree directory deleted out from under git leaves a stale
-    administrative entry that makes `worktree add` refuse the same path."""
+    administrative entry that makes `worktree add` refuse the same path.
+    A repository with no commit is refused rather than given an orphan."""
     exists = git_read(
         repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", expected_failure=True
     )
+    if (
+        not exists
+        and not start
+        and not git_read(
+            repo, "rev-parse", "--verify", "--quiet", "HEAD^{commit}", expected_failure=True
+        )
+    ):
+        # git would make the branch an empty orphan, without one of the
+        # repository's files, and the work item would run in it.
+        raise RuntimeError(
+            f"{repo} has no commit to branch from: commit its files, then retry the work item"
+        )
     subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True)
     args = ["git", "worktree", "add", str(path)]
     args += [branch] if exists else ["-b", branch, *([start] if start else [])]

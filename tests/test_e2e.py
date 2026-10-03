@@ -6,7 +6,11 @@ import pytest
 from support.harness import connect_repo, e2e_templates_dir, isolated_bd, make_repo
 from support.server import running_server
 
-pytestmark = pytest.mark.e2e("claude", "bd")
+#: A real agent walking a real chain: `_poll` waits up to 180s, past
+#: pyproject's 120s per-test timeout, so the ceiling is raised to cover that
+#: wait and the server's startup -- a slow run fails with `_poll`'s message
+#: and the events it saw, not as a killed worker.
+pytestmark = [pytest.mark.e2e("claude", "bd"), pytest.mark.timeout(300)]
 
 
 def _poll(client, wid, want, timeout=180):

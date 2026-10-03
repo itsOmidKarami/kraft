@@ -18,7 +18,7 @@ export function useLog(sessionId: string | null, running: boolean) {
     const read = () =>
       request<{ lines: LogLine[] }>(`/worker-sessions/${encodeURIComponent(sessionId)}/log?format=jsonl`).then((r) => {
         if (!live) return;
-        if (r.status === 200) setLines(r.body.lines.filter((l) => !l.truncated));
+        if (r.status === 200) { setLines(r.body.lines.filter((l) => !l.truncated)); setError(null); }
         else setError(r.status === 404 ? "No log for this attempt yet." : "The log could not be read.");
       });
     void read();

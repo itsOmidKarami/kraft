@@ -5,6 +5,8 @@ import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import { languageOf, tokenizeSide } from "./tokenize";
 import { sendOnModEnter } from "../keys";
+import { isOneLine, startSideOf, type LineRange } from "./range";
+import type { Side } from "./rows";
 
 /** Fenced code in a comment, coloured by the review's own tokenizer. */
 export function codeBlock(text: string, lang: string | undefined): ReactNode {
@@ -22,9 +24,35 @@ const TAG: Record<ThreadLabel, string> = { must_fix: "MUST FIX", question: "QUES
 const CLAIM: Record<NonNullable<ReviewComment["claim"]>, string> = { fixed: "✓ claimed fixed", answered: "✓ answered", should_fix: "should fix" };
 const STATUS = (t: ReviewThread) => (t.draft ? "pending" : t.state);
 
-/** "Line 5", "Lines 5–7", "Old line 4": where a line comment sits, as its composer and its thread name it. */
-export const rangeName = (r: { side: "old" | "new"; start: number; end: number }) =>
-  `${r.side === "old" ? "Old line" : "Line"}${r.start === r.end ? ` ${r.start}` : `s ${r.start}–${r.end}`}`;
+/** A line as the diff marks it: `−4` on the old side, `+5` on the new. */
+export const lineRef = (side: Side, line: number) => `${side === "old" ? "−" : "+"}${line}`;
+
+/** "Line +5", "Lines +5 to +7", "Lines −2 to +2": where a line comment sits, as its composer and its thread name it. */
+export const rangeName = (r: LineRange) =>
+  isOneLine(r) ? `Line ${lineRef(r.side, r.start)}` : `Lines ${lineRef(startSideOf(r), r.start)} to ${lineRef(r.side, r.end)}`;
+
+/** A thread's range, or null on a file or the whole item. */
+export const threadRange = (t: ReviewThread): LineRange | null =>
+  t.start_line === null || !t.side
+    ? null
+    : { side: t.side, start: t.start_line, end: t.end_line ?? t.start_line, ...(t.start_side && t.start_side !== t.side && { startSide: t.start_side }) };
+
+/** The lines a range covers, as the diff draws them. */
+export function Quote({ lines }: { lines: string[] }) {
+  return (
+    <div className="rv-suggest rv-quote" role="group" aria-label="Lines commented on">
+      {lines.map((l, i) => {
+        const k = l[0];
+        return (
+          <div key={i} className={`rv-suggest-line${k === "-" ? " is-del" : k === "+" ? " is-add" : ""}`}>
+            <span aria-hidden="true">{k === "-" ? "−" : k === "+" ? "+" : k === "…" ? "…" : " "}</span>
+            {k === "…" ? "" : l.slice(1)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /** What a refused write said, or null when it landed. */
 type Act = () => Promise<string | null>;
@@ -45,8 +73,10 @@ function SuggestionBlock({ s, old }: { s: Suggestion; old: string[] }) {
 }
 
 /** One review thread in the diff (prototype 433–466). */
-export function Thread({ thread, oldLines, onChanged, onEdit }: {
+export function Thread({ thread, oldLines, quote, onChanged, onEdit }: {
   thread: ReviewThread;
+  /** A range's lines, quoted above its first comment; null for one line, a file or the item. */
+  quote?: string[] | null;
   /** The new-side text of lines `a..b`, for a suggestion's `−` rows. */
   oldLines: (a: number, b: number) => string[];
   onChanged: () => void;
@@ -73,14 +103,16 @@ export function Thread({ thread, oldLines, onChanged, onEdit }: {
   };
   const [first, ...rest] = thread.comments;
   const who = (c: ReviewComment) => (c.author === "you" ? "You" : c.author);
+  const range = threadRange(thread);
   return (
     <article className={`rv-thread${thread.state === "resolved" ? " is-resolved" : ""}`} aria-label={`Thread on ${thread.file_path ?? "the item"}`}>
       <div className="rv-thread-head">
         <span className="rv-who">{first ? who(first) : "You"}</span>
         {thread.label && <span className={`rv-tag is-${thread.label}`}>{TAG[thread.label]}</span>}
         <span className="rv-status">{STATUS(thread)}</span>
-        {thread.start_line !== null && thread.side && <span className="rv-status">· {rangeName({ side: thread.side, start: thread.start_line, end: thread.end_line ?? thread.start_line })}</span>}
+        {range && <span className="rv-status">· {rangeName(range)}</span>}
       </div>
+      {quote && quote.length > 0 && <Quote lines={quote} />}
       {first && <Body text={first.body} />}
       {first?.suggestion && <SuggestionBlock s={first.suggestion} old={oldLines(first.suggestion.start_line, first.suggestion.end_line)} />}
       {thread.draft && (

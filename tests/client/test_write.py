@@ -3,39 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
+from support.api import run_with_app
+from support.harness import connected_repo, make_repo
 
-from client.test_read import run_with_app
 from kraft import client
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
-
-
-@pytest.fixture
-def wired(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    monkeypatch.delenv("KRAFT_WORK_ITEM_ID", raising=False)
-    import kraft.api as api
-
-    monkeypatch.setattr(
-        client.transport,
-        "http",
-        lambda: httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1"
-        ),
-    )
-    return api
 
 
 def test_create_work_item_never_starts_it(wired, tmp_path):
@@ -151,9 +126,8 @@ def test_a_relative_path_reaches_the_server_absolute(call, tmp_path, monkeypatch
 
 
 def test_set_agent_overrides_replaces_the_whole_override_as_in_1_4(wired, tmp_path):
-    """The PATCH route merges field by field for the item page; the CLI's
-    `set-overrides` and the MCP tool still replace, by sending `null` for every
-    field they don't name. The echo is what is stored."""
+    """`set-overrides` and the MCP tool replace the whole override: a field
+    they don't name is gone. The echo is what is stored."""
     repo = connected_repo(tmp_path)
 
     async def scenario():
@@ -163,3 +137,20 @@ def test_set_agent_overrides_replaces_the_whole_override_as_in_1_4(wired, tmp_pa
 
     # The PATCH echoes the override as stored (`update_work_item`).
     assert run_with_app(wired, scenario)["agent_overrides"] == {"model": "gpt-big"}
+
+
+def test_set_agent_overrides_sends_only_the_fields_named(tmp_path, monkeypatch):
+    """A field not named is left out, never sent as `null`: a 1.4 server,
+    still running between `kraft admin update` and the restart, refuses a
+    `null` field with a 422 (`agent_overrides 'effort' must be one of ...`),
+    where it takes the named fields alone and replaces the override."""
+    monkeypatch.chdir(tmp_path)
+    sent = []
+
+    async def send(method, path, **kwargs):
+        sent.append((method, path, kwargs.get("json")))
+        return httpx.Response(200, json={"id": "w1"})
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    asyncio.run(client.set_agent_overrides(model="gpt-big", work_item_id="w1"))
+    assert sent == [("PATCH", "/work-items/w1", {"agent_overrides": {"model": "gpt-big"}})]

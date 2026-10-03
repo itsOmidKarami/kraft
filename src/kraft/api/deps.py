@@ -222,6 +222,13 @@ def _work_item_row(st, wid):
     return row
 
 
+def work_item_answer(st, wid) -> dict:
+    """The item as an action or gate route hands it back: its row as it is
+    now, in the detail's shape for the override columns
+    (`store.work_item_payload`)."""
+    return store.work_item_payload(_work_item_row(st, wid))
+
+
 def worktree_missing(row) -> HTTPException:
     """The 404 for an item whose worktree directory is not on disk. An item
     that never ran (no `current_node_id`) has not made one yet; one that did
