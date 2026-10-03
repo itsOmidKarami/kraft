@@ -296,7 +296,10 @@ def _not_by_uv(kind: str, release: Release) -> str:
     import importlib.util
 
     wanted = requirement(release)
-    python = os.path.realpath(sys.executable)
+    # The interpreter pipx's venv was made from, as named, never resolved: a
+    # resolved path names one patch release, which an upgrade of that Python
+    # then leaves behind and a cleanup deletes.
+    python = getattr(sys, "_base_executable", None) or sys.executable
     # A venv uv made has no pip of its own.
     pip = (
         f"{sys.executable} -m pip install --upgrade"
@@ -351,8 +354,12 @@ def installed_extras() -> list[str]:
 
 def _python() -> str:
     """The interpreter an update installs on: the one the user chose, if uv
-    recorded it, else the one running now. Never the tool venv's own
-    `bin/python`, which the reinstall replaces."""
+    recorded it, else the running one's minor version ("3.13"). Never the
+    tool venv's own `bin/python`, which the reinstall replaces, and never
+    the running interpreter's resolved path: that names one patch release
+    (`cpython-3.13.12-…`), so the tool stayed on it after `uv python
+    upgrade`, and stopped running once that patch was uninstalled. A plain
+    `uv tool install`, install.sh and every 1.4 update record no Python."""
     chosen = _receipt().get("python")
     if isinstance(chosen, str) and chosen:
         # A version ("3.12") as is. A path's directory, not the path: the
@@ -360,7 +367,7 @@ def _python() -> str:
         where = os.path.realpath(os.path.dirname(chosen)) + os.sep
         if os.sep not in chosen or not where.startswith(os.path.realpath(sys.prefix) + os.sep):
             return chosen
-    return os.path.realpath(sys.executable)
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def requirement(release: Release) -> str:
@@ -387,8 +394,11 @@ def perform(release: Release, *, run=None) -> int:
 
     Otherwise, `uv tool install --force` of `kraft-sdlc[extras]==X` from the
     package index, on the same Python: the extras and the interpreter the
-    user installed with survive the update, and uv's record of the tool is
-    one `uv tool upgrade` can read. The release workflow creates the GitHub
+    user installed with survive the update, and uv's record of the tool
+    names the index, which stays valid. The record pins that version
+    (`==`), as installing a release by number does, so `uv tool upgrade`
+    leaves it where it is; `kraft admin update` is what moves it. The
+    release workflow creates the GitHub
     release before it publishes to PyPI, so in that window the index has no
     such version, and the release's wheel is installed by its URL instead.
     uv records that URL, which stays valid, where the temporary file this

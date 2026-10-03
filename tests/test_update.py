@@ -231,8 +231,10 @@ def test_perform_installs_the_release_from_the_index_keeping_extras_and_python(u
 def test_perform_keeps_vector_when_uv_recorded_only_a_temporary_wheel(uv_tool, monkeypatch, python):
     """What every earlier `kraft admin update` left: a receipt with no extras
     and no Python. `vector` is read off its import, and the Python is the
-    interpreter running now, never the tool venv's own link to it, which
-    the reinstall replaces."""
+    running one's minor version: never the tool venv's own link to it, which
+    the reinstall replaces, and never its resolved path, which names one
+    patch release that `uv python upgrade` leaves behind and an uninstall of
+    that patch breaks `kraft` on."""
     import importlib.util
 
     running = update.os.path.realpath(update.sys.executable)
@@ -247,7 +249,8 @@ def test_perform_keeps_vector_when_uv_recorded_only_a_temporary_wheel(uv_tool, m
 
     (command,) = run.commands
     assert command[-1] == "kraft-sdlc[vector]==0.4.0"
-    assert command[command.index("--python") + 1] == running
+    minor = f"{update.sys.version_info.major}.{update.sys.version_info.minor}"
+    assert command[command.index("--python") + 1] == minor
 
 
 def test_perform_falls_back_to_the_wheel_url_while_the_index_lacks_the_release(uv_tool, capsys):
@@ -381,7 +384,8 @@ def test_perform_refuses_a_stale_pre_rename_kraft_tool(monkeypatch, uv_tool, lis
 @pytest.mark.parametrize(
     ("marker", "says", "command"),
     [
-        ("pipx_metadata.json", "installed with pipx", "pipx install --force --python "),
+        # The base interpreter as named, not resolved to one patch release.
+        ("pipx_metadata.json", "installed with pipx", "pipx install --force --python /py/3 "),
         (None, "installed with pip, into", ' --upgrade "kraft-sdlc==0.4.0"'),
     ],
     ids=["pipx", "pip-venv"],
@@ -396,6 +400,7 @@ def test_perform_refuses_an_install_uv_did_not_make(tmp_path, monkeypatch, marke
     if marker:
         (prefix / marker).write_text("{}")
     monkeypatch.setattr(update.sys, "prefix", str(prefix))
+    monkeypatch.setattr(update.sys, "_base_executable", "/py/3", raising=False)
     monkeypatch.setattr(
         "importlib.metadata.distribution",
         lambda name: type("D", (), {"read_text": lambda self, f: None})(),

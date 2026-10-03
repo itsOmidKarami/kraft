@@ -69,8 +69,9 @@ main() {
     esac
 
     # From PyPI by version, as `kraft admin update` does: uv records the request,
-    # so a later `uv tool upgrade` can read it back. A wheel in a temporary
-    # directory left a record naming a file that was gone. The GitHub release is
+    # which stays valid, where a wheel in a temporary directory left a record
+    # naming a file that was gone. The record pins the version, so update with
+    # `kraft admin update`, not `uv tool upgrade`. The GitHub release is
     # created a few minutes before PyPI has it, so in that window, or for a wheel
     # whose name says no version, install the wheel by its URL instead.
     if [ -z "$version" ] || ! uv tool install --force "kraft-sdlc==$version"; then
