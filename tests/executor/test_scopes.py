@@ -538,3 +538,17 @@ async def test_every_red_scope_is_named_and_listed(item_on):
     one = {"command": "false", "scope": "a/**", "exit_code": 1, "session_id": first}
     two = {"command": _EXIT_3, "scope": "b/**", "exit_code": 3, "session_id": second}
     assert payload["facts"] == {**one, "failed_scopes": [one, two]}
+
+
+async def test_a_red_scope_is_named_from_the_latest_run_only(item_on):
+    """The newest run (its round and head) by each command's later row: a
+    scope red in an earlier round, or red and then green again at the same
+    head, is not what stopped the item now."""
+    it = await item_on(_verify(), repo="/r")
+    await _exited(it, [("s-old", "failed", "old", None)], round=0)
+    rerun = [("s-flaky", "failed", "flaky", None), ("s-red", "failed", "red", None)]
+    await _exited(it, [*rerun, ("s-flaky-2", "done", "flaky", None)], round=1)
+
+    found = dispatch.failed_test_scopes(it.database, it.id, "verify", "verify.main.t", None)
+
+    assert found == [{"command": "red", "session_id": "s-red"}]
