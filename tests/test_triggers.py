@@ -55,6 +55,8 @@ async def test_tick_ignores_a_not_yet_due_trigger(tmp_path, stub_app):
         ("Nightly sweep\n", "d", "Nightly sweep", "d"),
         ("Nightly sweep\nof every repo\n", "d", "Nightly sweep", "of every repo\n\nd"),
         ("Nightly\tsweep\u202e\x07", "d", "Nightly sweep", "d"),
+        ("Nightly\x9b sweep\u2066", "d", "Nightly sweep", "d"),
+        ("Nightly sweep\x85of every repo", "d", "Nightly sweep", "of every repo\n\nd"),
         (
             "\n",
             "\nSweep the repos\nall of them",
@@ -63,7 +65,16 @@ async def test_tick_ignores_a_not_yet_due_trigger(tmp_path, stub_app):
         ),
         ("\n", " ", None, None),
     ],
-    ids=["one-line", "block-scalar", "two-lines", "controls", "blank-takes-description", "blank"],
+    ids=[
+        "one-line",
+        "block-scalar",
+        "two-lines",
+        "controls",
+        "c1-and-isolate",
+        "nel",
+        "blank-takes-description",
+        "blank",
+    ],
 )
 async def test_tick_files_a_paused_item_on_a_due_trigger(
     tmp_path, stub_app, title, description, filed_title, filed_description

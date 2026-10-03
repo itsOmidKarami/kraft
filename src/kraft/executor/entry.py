@@ -12,6 +12,7 @@ from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.render import plain_text
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import ResolvedChain
 
@@ -24,12 +25,6 @@ logger = logging.getLogger(__name__)
 #: `template.id`, so a chain built straight from a `Template` still records
 #: which one without every internal caller having to say so.
 _UNSET = object()
-
-
-#: What a title never carries, line breaks aside (`str.splitlines` takes
-#: those): C0 and C1 controls, DEL, and the bidi embeddings, overrides and
-#: isolates that reorder what the board shows. The marks (LRM, RLM, ALM) stay.
-_TITLE_CONTROLS = re.compile("[\x00-\x08\x0e-\x1b\x1f\x7f-\x84\x86-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
 def one_line_title(title: str, description: str | None) -> tuple[str, str | None]:
@@ -45,7 +40,7 @@ def one_line_title(title: str, description: str | None) -> tuple[str, str | None
     that has some; with none there either, it comes back empty, for the
     caller to refuse.
     """
-    lines = [_TITLE_CONTROLS.sub("", line.replace("\t", " ")) for line in title.splitlines()]
+    lines = [plain_text(line) for line in title.splitlines()]
     first = next((i for i, line in enumerate(lines) if line.strip()), None)
     if first is None:
         fallback = next((ln for ln in (description or "").splitlines() if ln.strip()), "")

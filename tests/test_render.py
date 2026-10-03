@@ -46,8 +46,22 @@ def test_table_renders_a_missing_key_as_a_dash():
         ("cr\r\nlf", "cr"),
         ("\n", "-"),
         ("bidi\u202eflip\x07", "bidiflip"),
+        ("c1\x9b31mred", "c131mred"),
+        ("iso\u2066late\u2069", "isolate"),
+        ("nel\x85next", "nel"),
+        ("mark\u200fkept", "mark\u200fkept"),
     ],
-    ids=["two-lines", "leading-break", "crlf", "only-a-break", "controls"],
+    ids=[
+        "two-lines",
+        "leading-break",
+        "crlf",
+        "only-a-break",
+        "controls",
+        "c1",
+        "isolate",
+        "nel",
+        "rlm",
+    ],
 )
 def test_table_shows_a_cells_first_line_only(title, shown):
     """A title 1.4 stored with a line break wrapped `kraft view list`'s row
