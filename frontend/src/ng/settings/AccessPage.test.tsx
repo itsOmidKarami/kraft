@@ -104,11 +104,21 @@ describe("ng AccessPage", () => {
     const put = setup({ port: 9000 }, { port: 8765 });
     expect(await screen.findByText("port changes from 8765 to 9000")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Undo" }));
-    await waitFor(() => expect(put).toHaveBeenCalledWith({ bind: "0.0.0.0", port: 8765 }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ port: 8765 }));
     const askRestart = vi.fn();
     useApply.setState({ askRestart });
     await userEvent.click(screen.getByRole("button", { name: "Restart Kraft" }));
     expect(askRestart).toHaveBeenCalled();
+  });
+
+  it("Undo puts back only what waits on a restart, never a KRAFT_PORT the server runs on", async () => {
+    // Local network saved, running on 127.0.0.1 at KRAFT_PORT 8760: the server lists no port item, the env wins.
+    useApply.setState({ restart: [{ id: "access.bind", file: "access.yaml", text: "bind changes from 127.0.0.1 to 0.0.0.0" }], managed: true });
+    const put = setup({ bind: "0.0.0.0", port: 8765 }, { bind: "127.0.0.1", port: 8760 });
+    await screen.findByText("bind changes from 127.0.0.1 to 0.0.0.0");
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0][0]).toEqual({ bind: "127.0.0.1" });
   });
 
   it.each([
