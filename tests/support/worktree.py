@@ -1,11 +1,17 @@
 """Worktree helpers shared by tests/test_builtins*.py: one work item, its
 worktree, and the two columns those tests read back."""
 
+import contextlib
+import os
+import signal
 from pathlib import Path
+
+import pytest
 
 from kraft import builtins as kraft_builtins
 from kraft import store
-from support.harness import entry_of
+from kraft.config import git_read
+from support.harness import commit_all, entry_of
 
 #: A repo that deliberately needs no preparation. Most of these tests are about
 #: git and attachments, not environments.
@@ -64,3 +70,30 @@ def ensure(database, run_dirs, repo, *, repo_entry=NO_SETUP, **kw):
     return kraft_builtins.ensure_worktree(
         database, run_dirs, repo=str(repo), work_item_id="w1", repo_entry=repo_entry, **kw
     )
+
+
+def commit(cwd, name, text, message):
+    """Write `name` under `cwd` (its directories too) and commit everything;
+    returns the new HEAD."""
+    (cwd / name).parent.mkdir(parents=True, exist_ok=True)
+    (cwd / name).write_text(text)
+    commit_all(cwd, message)
+    return git_read(cwd, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def hung(tmp_path):
+    """Where a hanging hook or filter records the pid of its `sleep`
+    (`sleep_recorded`). Each is killed once the test is done: git gives up
+    on the hook, but nothing ends the hook itself, which would otherwise
+    outlive the test. A module takes it as `hung = wtree.hung`."""
+    pids = tmp_path / "hook-pids"
+    yield pids
+    for pid in pids.read_text().split() if pids.exists() else ():
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(pid), signal.SIGKILL)
+
+
+def sleep_recorded(pids, seconds: float) -> str:
+    """A hook's last lines: the shell becomes the `sleep`, its pid in `pids`."""
+    return f'echo $$ >> "{pids}"\nexec sleep {seconds}\n'
