@@ -111,6 +111,14 @@ describe("ng AccessPage", () => {
     expect(askRestart).toHaveBeenCalled();
   });
 
+  it("moves focus to the Reach choice Undo set back, not to the page (R10b-04)", async () => {
+    useApply.setState({ restart: [{ id: "access.bind", file: "access.yaml", text: "bind changes from 127.0.0.1 to 0.0.0.0" }], managed: true });
+    setup({ bind: "0.0.0.0", port: 8765 }, { bind: "127.0.0.1", port: 8765 });
+    await screen.findByText("bind changes from 127.0.0.1 to 0.0.0.0");
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(within(screen.getByRole("radiogroup", { name: "Reach" })).getByRole("radio", { checked: true })).toHaveFocus());
+  });
+
   it("Undo puts back only what waits on a restart, never a KRAFT_PORT the server runs on", async () => {
     // Local network saved, running on 127.0.0.1 at KRAFT_PORT 8760: the server lists no port item, the env wins.
     useApply.setState({ restart: [{ id: "access.bind", file: "access.yaml", text: "bind changes from 127.0.0.1 to 0.0.0.0" }], managed: true });

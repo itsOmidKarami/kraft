@@ -45,6 +45,7 @@ export function AccessPage() {
   const askRestart = useApply((s) => s.askRestart);
   const refreshApply = useApply((s) => s.refresh);
   const field = useRef<HTMLInputElement>(null);
+  const reach = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(() => api.getAuthSessions().then((r) => setSessions(r.sessions), () => setSessions([])), []);
   useEffect(() => {
@@ -141,6 +142,9 @@ export function AccessPage() {
     const pending = (k: "bind" | "port") => items.some((i) => i.id === `access.${k}`);
     const body = { ...(pending("bind") && health.bind != null && { bind: health.bind }), ...(pending("port") && health.port != null && { port: health.port }) };
     if (Object.keys(body).length) await put("bind", body);
+    // The Restart to apply card goes with what it listed, Undo with it: focus the Reach
+    // choice Undo set back, not the page (R10b-04).
+    requestAnimationFrame(() => reach.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
   };
   const revoke = async (s: AuthSession) => {
     setRevoking(null);
@@ -197,7 +201,7 @@ export function AccessPage() {
 
         <section aria-labelledby="set-reach">
           <h2 id="set-reach" className="adr-sr">Reach</h2>
-          <div className="set-modes is-cards" role="radiogroup" aria-label="Reach">
+          <div ref={reach} className="set-modes is-cards" role="radiogroup" aria-label="Reach">
             {[
               { bind: LOOPBACK, icon: <Laptop size={15} />, title: "This machine only", note: "No password. Only loopback names are accepted." },
               { bind: "0.0.0.0", icon: <Wifi size={15} />, title: "Local network", note: "Password required. For the phone view." },

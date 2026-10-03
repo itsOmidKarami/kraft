@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ChainNode, KraftEvent } from "../../../types";
 import { FileText } from "../../icons";
@@ -77,15 +77,23 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
     reload();
   };
   const reject = () => run(act.reject(item.id, gate.id, note.trim()));
+  // Cancel hands focus back to Reject…, which comes back as the note goes.
+  const rejectButton = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!rejecting && refocus.current) rejectButton.current?.focus();
+    refocus.current = false;
+  }, [rejecting]);
   if (rejecting)
     return (
       <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`}>
         <p className="ip-confirm-q">Reject <code>{gate.id}</code>{to && <> · goes back to <code>{to}</code></>}</p>
-        <textarea aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />
+        {/* Focus moves into the note: the Reject… button that had it is gone (R7b-10, R10b-04). */}
+        <textarea autoFocus aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />
         {error && <p className="item-error" role="alert">{error}</p>}
         <div className="item-actions">
           <Button variant="danger" disabled={busy || !note.trim()} onClick={reject}>Reject</Button>
-          <Button onClick={() => setRejecting(false)}>Cancel</Button>
+          <Button onClick={() => { refocus.current = true; setRejecting(false); }}>Cancel</Button>
         </div>
       </div>
     );
@@ -95,7 +103,7 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
       {/* The review page (W8): the gate review overlay first when the gate has a document (it opens only at the pending gate). */}
       <Button onClick={() => navigate(`/work-items/${encodeURIComponent(item.id)}/review?gate=${encodeURIComponent(gate.id)}${item.gate_artifact ? "&doc=1" : ""}`)}>Review changes</Button>
       <Button variant="primary" disabled={busy} onClick={() => run(act.approve(item.id, gate.id))}>Approve</Button>
-      <Button disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
+      <Button ref={rejectButton} disabled={busy} onClick={() => setRejecting(true)}>Reject…</Button>
       {error && <span className="item-error" role="alert">{error}</span>}
     </div>
   );

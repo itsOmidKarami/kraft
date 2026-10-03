@@ -11,7 +11,7 @@ describe("lines and count", () => {
     expect(lines(ops).map((l) => l.text)).toEqual([
       "~ verify.main.run   model → opus",
       "~ verify.main.run   effort → high",
-      "~ verify.main.run   policy.time_cap_minutes → 30",
+      "~ verify.main.run   running cap → 30m",
       "+ scan   after build · from the library (security)",
       "» skip ship.main.run",
       "- ship",

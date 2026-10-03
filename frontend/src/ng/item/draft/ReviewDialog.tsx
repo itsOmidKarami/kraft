@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { usd } from "../../../format";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
@@ -36,6 +36,11 @@ function Review() {
   const budget = view.checks.budget;
   const close = () => d.setReviewing(false);
   const start = d.starting;
+  const primary = useRef<HTMLButtonElement>(null);
+  // Opened from an address (the peek's Start sends `?start=1`) nothing had focus, and
+  // Review & apply goes once its draft is empty: either way focus goes to the header's
+  // main button, not to the page (R10b-04).
+  const returnTo = () => document.querySelector<HTMLElement>(".item-main-action");
 
   const run = async () => {
     setBusy(true);
@@ -55,7 +60,9 @@ function Review() {
     await d.draft.edit((ops) => ops.filter((_, i) => !gone.has(i)));
     setBusy(false);
     setMoved(0);
-    if (gone.size === d.ops.length) close();
+    if (gone.size === d.ops.length) return close();
+    // The link that was pressed is gone with what it removed: focus the way on (R10b-04).
+    requestAnimationFrame(() => primary.current?.focus());
   };
   const discard = async () => {
     setBusy(true);
@@ -68,7 +75,7 @@ function Review() {
   };
 
   return (
-    <Dialog title={start ? `Start with ${n} unapplied ${plural(n, "change", "changes")}?` : `Apply ${n} ${plural(n, "change", "changes")} to this item?`} onClose={close} className="idr-review"
+    <Dialog title={start ? `Start with ${n} unapplied ${plural(n, "change", "changes")}?` : `Apply ${n} ${plural(n, "change", "changes")} to this item?`} onClose={close} className="idr-review" returnTo={returnTo}
       footer={asking ? (
         <>
           <span className="idr-ask">Discard this draft? It cannot be brought back.</span>
@@ -78,9 +85,10 @@ function Review() {
       ) : (
         <>
           <Button className="idr-danger idr-left" onClick={() => setAsking(true)}>Discard draft</Button>
-          <Button onClick={close}>Back to editing</Button>
+          {/* Focus opens on the primary, or on Back to editing while it is blocked; never on Discard draft (R10b-05). */}
+          <Button data-autofocus={blocked ? true : undefined} onClick={close}>Back to editing</Button>
           {start && <Button disabled={busy} onClick={startWithout}>Start without them</Button>}
-          <Button variant="primary" disabled={blocked || busy} onClick={run}>{start ? "Apply and start" : "Apply"}</Button>
+          <Button ref={primary} data-autofocus={blocked ? undefined : true} variant="primary" disabled={blocked || busy} onClick={run}>{start ? "Apply and start" : "Apply"}</Button>
         </>
       )}>
       <p className="idr-sub">{start ? "These changes are only in the item's draft. Start does not apply them: apply them now, or start without them and they stay in the draft. " : ""}Only this item changes. The chain template and other items stay as they are.</p>

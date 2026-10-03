@@ -150,8 +150,8 @@ describe("ChainConfig", () => {
     stubFetch({ ...HARNESS, "GET /work-items/w1/draft": answer([ov("implementation", undefined, { budget_usd: 2 }), ov("plan.write.plan", { model: "x" }, undefined, true)]) });
     const it = fresh();
     render(<ItemDraftProvider item={it} reload={() => {}}><ChainConfig item={it} policy={null} reload={() => {}} editBudget={false} onEditBudget={() => {}} /></ItemDraftProvider>);
-    expect(await screen.findByText("implementation policy.budget_usd → 2")).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["implementation policy.budget_usd → 2 · in the draft, not applied yet"]);
+    expect(await screen.findByText("implementation budget ($) → 2")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["implementation budget ($) → 2 · in the draft, not applied yet"]);
     expect(screen.queryByText(/Nothing changed/)).toBeNull();
   });
 

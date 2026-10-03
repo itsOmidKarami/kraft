@@ -76,6 +76,25 @@ describe("ReviewDialog", () => {
     await waitFor(() => expect(within(d).getByRole("button", { name: "Apply" })).toBeEnabled());
   });
 
+  it("opens on Back to editing while Apply is blocked, never on Discard draft (R10b-05)", async () => {
+    open({ [DRAFT]: answer([ov("plan.write.plan", { model: "x" }, undefined, true)]) });
+    expect(within(await dialog()).getByRole("button", { name: "Back to editing" })).toHaveFocus();
+  });
+
+  it("moves focus to Apply once Remove it from the draft is gone with what it removed (R10b-04)", async () => {
+    const answers: Record<string, [number, unknown]> = { [DRAFT]: answer([ov("plan.write.plan", { model: "x" }, undefined, true), add("scan", "verification")], [], withScan) };
+    answers["PUT /work-items/w1/draft"] = answer([add("scan", "verification")], [], withScan);
+    open(answers);
+    const d = await dialog();
+    await userEvent.click(within(d).getByRole("button", { name: "Remove it from the draft" }));
+    await waitFor(() => expect(within(d).getByRole("button", { name: "Apply" })).toHaveFocus());
+  });
+
+  it("names a policy field by its Config label, not its YAML key (R10a-04)", async () => {
+    open({ [DRAFT]: answer([ov("implementation", undefined, { total_time_cap_minutes: 45 })]) });
+    expect(within(await dialog()).getByLabelText("Changes").textContent).toContain("~ implementation   total cap → 45m");
+  });
+
   it("closes once removing the passed edits leaves nothing", async () => {
     open({ [DRAFT]: answer([ov("plan.write.plan", { model: "x" }, undefined, true)]), "PUT /work-items/w1/draft": answer([]) });
     await userEvent.click(within(await dialog()).getByRole("button", { name: "Remove it from the draft" }));

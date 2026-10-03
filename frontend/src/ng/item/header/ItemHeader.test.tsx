@@ -108,6 +108,45 @@ describe("ItemHeader", () => {
       await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
     });
 
+    // R10b-04 / R10b-05: focus opens on the safe default and never falls to the page.
+    it("opens with focus on Apply and start, not on Discard draft", async () => {
+      stubFetch(DRAFT);
+      mount();
+      await screen.findByText("DRAFT · 1 CHANGE");
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
+      expect(within(d).getByRole("button", { name: "Apply and start" })).toHaveFocus();
+    });
+
+    it("keeps focus on the header's main button while Start without them runs, which it does not disable", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      stubFetch(DRAFT);
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith("/resume")) await held;
+        return base(input as string, init);
+      });
+      mount();
+      await screen.findByText("DRAFT · 1 CHANGE");
+      const startButton = screen.getByRole("button", { name: /^Start$/ });
+      await userEvent.click(startButton);
+      await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
+      await waitFor(() => expect(startButton).toHaveAttribute("aria-disabled", "true"));
+      expect(startButton).not.toBeDisabled();
+      expect(startButton).toHaveFocus();
+      release();
+    });
+
+    it("hands focus to the header's main button on Escape when it was opened from ?start=1, with nothing focused", async () => {
+      stubFetch(DRAFT);
+      mount(vi.fn(), "/work-items/w1?start=1");
+      await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(screen.getByRole("button", { name: /^Start$/ })).toHaveFocus();
+    });
+
     it("Back to editing starts nothing", async () => {
       const calls = stubFetch(DRAFT);
       mount();

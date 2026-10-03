@@ -10,7 +10,7 @@ const FOCUSABLE =
  * of the modal into the page behind it, which for a keyboard or screen-reader
  * user means the dialog is not really modal at all.
  */
-export function useModal<T extends HTMLElement>(onClose: () => void) {
+export function useModal<T extends HTMLElement>(onClose: () => void, returnTo?: () => HTMLElement | null | undefined) {
   const ref = useRef<T>(null);
 
   useEffect(() => {
@@ -49,8 +49,13 @@ export function useModal<T extends HTMLElement>(onClose: () => void) {
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      previouslyFocused?.focus?.();
+      // What opened it is gone, or nothing had focus (a dialog opened from an
+      // address, such as Start's `?start=1`): the dialog's own fallback (R10b-04).
+      const back = previouslyFocused && previouslyFocused !== document.body && previouslyFocused.isConnected ? previouslyFocused : returnTo?.() ?? previouslyFocused;
+      back?.focus?.();
     };
+    // `returnTo` is read once, as the dialog closes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
 
   return ref;
