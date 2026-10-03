@@ -35,8 +35,9 @@
 .item-badge.is-ok { background: color-mix(in oklab, var(--ok) 9%, transparent); color: var(--ok); }
 .item-badge.is-muted { background: var(--surface-2); color: var(--text-sub); }
 .item-main-group { display: flex; align-items: center; gap: 2px; }
-.item-main { display: flex; align-items: stretch; width: 118px; height: 28px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-.item-main-action { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
+/* At least 118px, and as wide as its label: a fixed width wrapped "Raise cap", "Review conflicts" and "Reopen MR" into a 28px box (R12b-07). */
+.item-main { display: flex; align-items: stretch; min-width: 118px; height: 28px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.item-main-action { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; white-space: nowrap; border: 0; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
 .item-main-toggle { flex: none; width: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
 .item-main-action:not(:disabled):is(:hover, :focus-visible), .item-main-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); color: var(--text); }
 .item-main-action:focus-visible, .item-main-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

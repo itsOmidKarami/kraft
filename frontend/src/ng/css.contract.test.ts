@@ -35,6 +35,15 @@ describe("ng CSS", () => {
     expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-mid"));
   });
 
+  // R12b-07: a fixed 118px wrapped the two-word labels and clipped them.
+  it("lets the item header's main button grow with its label, on one line", () => {
+    const css = readFileSync(join(here, "item/item.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = (sel: string) => new RegExp(`(?:^|\\n)${sel}\\s*{([^}]*)}`).exec(css)?.[1] ?? "";
+    expect(rule("\\.item-main")).not.toMatch(/(?:^|[;\s])width:/);
+    expect(rule("\\.item-main")).toMatch(/min-width:\s*118px/);
+    expect(rule("\\.item-main-action")).toMatch(/white-space:\s*nowrap/);
+  });
+
   // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
   // shipped css.contract.test.ts, which the cutover deletes.
   it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {
