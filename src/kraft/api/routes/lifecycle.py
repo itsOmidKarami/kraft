@@ -330,6 +330,8 @@ async def _remove_worktree(
     it, and the answer names the path as `repo_missing`. Its branch, if the
     repository was only moved, stays there.
     """
+    # Lockfiles a server killed mid-rebase left set aside, under the run dir.
+    await asyncio.to_thread(shutil.rmtree, builtins_mod.set_aside_dir(worktree), ignore_errors=True)
     if not repo.is_dir():
         logger.warning(
             "abandon %s: repository %s is gone; removing the worktree directory itself",

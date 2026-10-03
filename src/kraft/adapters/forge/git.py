@@ -214,8 +214,14 @@ async def untracked_lockfiles(repo: Path) -> set[str]:
 
 
 def _digest(path: Path) -> str | None:
+    """The sha256 of the lockfile at `path`. A link is hashed as the name it
+    points at, never followed: the record sits where the worker can read
+    it, and a followed link would put a digest of any host file in it."""
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        if path.is_symlink():
+            return hashlib.sha256(b"symlink:" + os.fsencode(os.readlink(path))).hexdigest()
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
     except OSError:
         return None
 

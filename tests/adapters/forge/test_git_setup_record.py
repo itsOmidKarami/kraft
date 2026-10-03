@@ -169,3 +169,24 @@ def test_a_cargo_lock_the_setup_wrote_is_left_out(tmp_path):
     (repo / "work.py").write_text("x = 1\n")
 
     assert _sweep(repo) == ["work.py"]
+
+
+def test_a_linked_lockfile_is_recorded_by_its_link_never_its_target(tmp_path):
+    """R11E-01: the record sits where a worker can read it. A `uv.lock` that
+    is a link to a host file was hashed through the link, so the record held
+    a digest of that file. The link itself is recorded: a change to the
+    target never touches the record, and its digest is not the target's."""
+    import hashlib
+
+    repo = make_repo(tmp_path)
+    secret = tmp_path / "host-secret"
+    secret.write_text("the host's\n")
+    before = asyncio.run(forge.lockfile_digests(repo))
+    (repo / "uv.lock").symlink_to(secret)
+    asyncio.run(forge.record_setup_writes(repo, before))
+    recorded = json.loads(_record(repo).read_text())["uv.lock"]
+
+    secret.write_text("changed on the host\n")
+
+    assert recorded != hashlib.sha256(b"the host's\n").hexdigest()
+    assert asyncio.run(forge.setup_lockfiles(repo)) == {"uv.lock"}

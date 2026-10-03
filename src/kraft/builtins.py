@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ from kraft.worker import inject as _inject
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
+from kraft.worker.worktree_read import open_dir_no_symlinks
 
 logger = logging.getLogger(__name__)
 
@@ -1305,31 +1307,87 @@ def _refuse_unstarted_rebase(worktree: Path, done: subprocess.CompletedProcess) 
     )
 
 
-#: In the worktree's own git dir: where `_set_aside_setup_lockfiles` keeps
-#: the setup's lockfiles while a rebase runs.
-SET_ASIDE = "kraft-set-aside"
+#: Under Kraft's own run dir: where `_set_aside_setup_lockfiles` keeps the
+#: setup's lockfiles while a rebase runs, one directory per worktree.
+SET_ASIDE = "set-aside"
+
+
+def set_aside_dir(worktree: Path) -> Path:
+    """Where `worktree`'s set-aside lockfiles wait out a rebase: under Kraft's
+    run dir, never the worktree's git dir. A sandboxed worker can write its
+    git dir, and a link it planted there was followed by the host-side move,
+    so the setup's lockfile went into, and came back out of, any directory
+    the server user can write. Named after the worktree and a digest of its
+    path, so a member's checkout never shares its root's."""
+    run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+    key = hashlib.sha256(os.fsencode(worktree.resolve())).hexdigest()[:16]
+    return run_base / SET_ASIDE / f"{worktree.name}-{key}"
+
+
+def _move_no_symlinks(src_root: Path, dst_root: Path, rel: str) -> None:
+    """Rename `src_root/rel` to `dst_root/rel`, making `dst_root/rel`'s
+    parents as needed. Every directory on both sides is opened without
+    following a link (`open_dir_no_symlinks`), and the rename itself never
+    follows one, so a worker that swaps a component for a link while this
+    runs gets an `OSError`, not a write outside its worktree."""
+    parts = Path(rel).parts
+    src = open_dir_no_symlinks(src_root, parts[:-1])
+    try:
+        dst = open_dir_no_symlinks(dst_root, parts[:-1], create=True)
+        try:
+            os.replace(parts[-1], parts[-1], src_dir_fd=src, dst_dir_fd=dst)
+        finally:
+            os.close(dst)
+    finally:
+        os.close(src)
+
+
+def _exists_no_symlinks(root: Path, rel: str) -> bool:
+    """Whether `root/rel` exists, as a link or anything else, reached without
+    following a link on the way. A parent that is a link counts as there:
+    nothing is written through it."""
+    parts = Path(rel).parts
+    try:
+        fd = open_dir_no_symlinks(root, parts[:-1])
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        os.lstat(parts[-1], dir_fd=fd)
+    except FileNotFoundError:
+        return False
+    finally:
+        os.close(fd)
+    return True
 
 
 async def _set_aside_setup_lockfiles(worktree: Path) -> list[str]:
     """Move the untouched lockfiles this worktree's setup wrote
-    (`forge.git.setup_lockfiles`) into the git dir, out of the rebase's way:
-    a base that has since committed its own `uv.lock`, as Kraft advises,
+    (`forge.git.setup_lockfiles`) into `set_aside_dir`, out of the rebase's
+    way: a base that has since committed its own `uv.lock`, as Kraft advises,
     could not be checked out over the setup's untracked one. Returns what
-    was moved, for `_put_back_setup_lockfiles`."""
-    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
-    if gitdir is None:
-        return []
-    store_dir = Path(gitdir) / SET_ASIDE
+    was moved, for `_put_back_setup_lockfiles`. A path that cannot be moved
+    without following a link stays where it is, for the rebase to judge."""
+    store_dir = set_aside_dir(worktree)
     # What a server killed mid-rebase left: the setup's next run rewrites it.
+    # Kraft's own directory, and `rmtree` unlinks a link inside it rather
+    # than following it.
     shutil.rmtree(store_dir, ignore_errors=True)
     # Only a lockfile known to be as the setup left it: one with no digest (a
     # record from before them) may hold the agent's edit, and moving it out
     # of the way of a base's copy would lose that.
     lockfiles = await git.setup_lockfiles(worktree, unknown=False)
+    if not lockfiles:
+        return []
+    store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     moved = []
     for rel in sorted(lockfiles):
-        (store_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-        os.replace(worktree / rel, store_dir / rel)
+        try:
+            _move_no_symlinks(worktree, store_dir, rel)
+        except OSError as exc:
+            logger.warning("not setting %s aside in %s: %s", rel, worktree, exc)
+            continue
         moved.append(rel)
     return moved
 
@@ -1337,17 +1395,18 @@ async def _set_aside_setup_lockfiles(worktree: Path) -> list[str]:
 def _put_back_setup_lockfiles(worktree: Path, moved: list[str]) -> None:
     """Undo `_set_aside_setup_lockfiles`. A path the rebase brought a tracked
     copy to keeps the base's: the setup's is dropped, and its next run (every
-    walk entry runs it) works from the committed one."""
+    walk entry runs it) works from the committed one. So is one whose way
+    back into the worktree passes through a link: the setup writes it again."""
     if not moved:
         return
-    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
-    if gitdir is None:
-        return
-    store_dir = Path(gitdir) / SET_ASIDE
+    store_dir = set_aside_dir(worktree)
     for rel in moved:
-        if not os.path.lexists(worktree / rel):
-            (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
-            os.replace(store_dir / rel, worktree / rel)
+        if _exists_no_symlinks(worktree, rel):
+            continue
+        try:
+            _move_no_symlinks(store_dir, worktree, rel)
+        except OSError as exc:
+            logger.warning("not putting %s back in %s: %s", rel, worktree, exc)
     shutil.rmtree(store_dir, ignore_errors=True)
 
 

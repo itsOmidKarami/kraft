@@ -20,6 +20,7 @@ from kraft.config import git_read
 
 def _commit(cwd, name, text, message):
     """Write `name` under `cwd` and commit everything; returns the new HEAD."""
+    (cwd / name).parent.mkdir(parents=True, exist_ok=True)
     (cwd / name).write_text(text)
     _git(cwd, "add", "-A")
     _git(cwd, "commit", "-m", message)
@@ -748,7 +749,7 @@ async def test_a_set_aside_a_killed_server_left_is_cleared(database, run_dirs, r
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
-    stale = Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "kraft-set-aside"
+    stale = kraft_builtins.set_aside_dir(worktree)
     (stale / "sub").mkdir(parents=True)
     (stale / "sub" / "uv.lock").write_text("left by a SIGKILL\n")
     _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
@@ -756,6 +757,58 @@ async def test_a_set_aside_a_killed_server_left_is_cleared(database, run_dirs, r
     await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
     assert not stale.exists()
+
+
+def _link_the_parent_to(victim):
+    """A `pre-rebase` hook, which runs after the set-aside and before the
+    rebase, as a worker writing its worktree mid-rebase would: it swaps the
+    lockfile's emptied parent directory for a link to `victim`."""
+    return f'rm -rf sub && ln -s "{victim}" sub\n'
+
+
+@pytest.mark.parametrize("base_commits_one", [False, True], ids=["put-back", "base-wins"])
+@pytest.mark.parametrize("plant", ["set-aside-in-git-dir", "parent-in-worktree"], ids=lambda p: p)
+async def test_a_planted_link_never_moves_a_lockfile_outside_the_worktree(
+    tmp_path, database, run_dirs, repo, plant, base_commits_one
+):
+    """R11E-01: the set-aside lived in the worktree's git dir, which a
+    sandboxed worker can write, and the host-side move followed a link
+    planted there (or in place of a lockfile's parent directory), deleting
+    or overwriting a lockfile anywhere the server user can write. Nothing
+    outside the worktree is touched, whether the rebase then runs or git
+    refuses to check the base's copy out over the link."""
+    from kraft.adapters import forge
+
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    rel = "uv.lock" if plant == "set-aside-in-git-dir" else "sub/uv.lock"
+    if plant == "set-aside-in-git-dir":
+        (victim / "uv.lock").write_text("the host's own\n")
+        gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+        (gitdir / "kraft-set-aside").symlink_to(victim)
+    else:
+        hook = repo / ".git" / "hooks" / "pre-rebase"
+        hook.write_text(f'#!/bin/sh\ncd "{worktree}" && ' + _link_the_parent_to(victim))
+        hook.chmod(0o755)
+        (worktree / "sub").mkdir()
+    before = await forge.lockfile_digests(worktree)
+    (worktree / rel).write_text("the worker's choice\n")
+    await forge.record_setup_writes(worktree, before)
+    if base_commits_one:
+        _commit(repo, rel, "committed on the base\n", "commit a lockfile")
+    else:
+        _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+
+    with contextlib.suppress(kraft_builtins.RebaseBlocked):
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    expected = ["uv.lock"] if plant == "set-aside-in-git-dir" else []
+    assert sorted(p.name for p in victim.iterdir()) == expected
+    if expected:
+        assert (victim / "uv.lock").read_text() == "the host's own\n"
 
 
 async def test_a_failing_put_back_never_hides_the_rebases_own_error(
