@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/config.py: 97%</title>
+    <title>Coverage for src/kraft/config.py: 98%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_15cffcd0.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>config.py</b>:
-            <span class="pc_cov">97%</span>
+            <span class="pc_cov">98%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -54,8 +54,8 @@
             </div>
         </aside>
         <h2>
-            <span class="text">593 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">578<span class="text"> run</span></button>
+            <span class="text">602 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">587<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">15<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">2<span class="text"> excluded</span></button>
         </h2>
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_config_schemas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 11:55 +0000
+            created at 2026-10-03 12:33 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -1375,32 +1375,55 @@
     <p class="run"><span class="n"><a id="t1293" href="#t1293">1293</a></span><span class="t">        <span class="key">return</span> <span class="nam">out</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1294" href="#t1294">1294</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t1295" href="#t1295">1295</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1296" href="#t1296">1296</a></span><span class="t"><span class="key">def</span> <span class="nam">migrate_theme</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="nam">Path</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">bool</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1297" href="#t1297">1297</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The 1.5 upgrade: write the look `palette` stands for as the file&#x27;s own</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1298" href="#t1298">1298</a></span><span class="t"><span class="str">    `surface`, `accent` and `colour_amount`, then drop `palette`. All three are</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1299" href="#t1299">1299</a></span><span class="t"><span class="str">    written: a file with its own surface defaults to no accent at subtle, so</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1300" href="#t1300">1300</a></span><span class="t"><span class="str">    `surface` alone would change the look. `effective()` answers the same</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1301" href="#t1301">1301</a></span><span class="t"><span class="str">    before and after, which is the point: the user sees no change.</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1302" href="#t1302">1302</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1303" href="#t1303">1303</a></span><span class="t"><span class="str">    The original bytes go to `theme.yaml.pre-1.5` first, never overwriting an</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1304" href="#t1304">1304</a></span><span class="t"><span class="str">    earlier copy. A missing, unreadable or invalid file, or one without</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t1305" href="#t1305">1305</a></span><span class="t"><span class="str">    `palette`, is left alone. True when the file was rewritten.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1306" href="#t1306">1306</a></span><span class="t">    <span class="nam">path</span> <span class="op">=</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1307" href="#t1307">1307</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1308" href="#t1308">1308</a></span><span class="t">        <span class="nam">data</span> <span class="op">=</span> <span class="nam">read_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1309" href="#t1309">1309</a></span><span class="t">        <span class="nam">look</span> <span class="op">=</span> <span class="nam">Theme</span><span class="op">.</span><span class="nam">model_validate</span><span class="op">(</span><span class="nam">data</span><span class="op">)</span><span class="op">.</span><span class="nam">effective</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1310" href="#t1310">1310</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">ConfigError</span><span class="op">,</span> <span class="nam">ValidationError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1311" href="#t1311">1311</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1312" href="#t1312">1312</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;palette&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1313" href="#t1313">1313</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1314" href="#t1314">1314</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;surface&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1315" href="#t1315">1315</a></span><span class="t">        <span class="nam">data</span><span class="op">.</span><span class="nam">update</span><span class="op">(</span><span class="op">{</span><span class="nam">key</span><span class="op">:</span> <span class="nam">look</span><span class="op">[</span><span class="nam">key</span><span class="op">]</span> <span class="key">for</span> <span class="nam">key</span> <span class="key">in</span> <span class="nam">THEME_V2_KEYS</span><span class="op">}</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1316" href="#t1316">1316</a></span><span class="t">    <span class="key">del</span> <span class="nam">data</span><span class="op">[</span><span class="str">&quot;palette&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1317" href="#t1317">1317</a></span><span class="t">    <span class="nam">backup</span> <span class="op">=</span> <span class="nam">path</span><span class="op">.</span><span class="nam">with_name</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">name</span> <span class="op">+</span> <span class="str">&quot;.pre-1.5&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1318" href="#t1318">1318</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">backup</span><span class="op">.</span><span class="nam">exists</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1319" href="#t1319">1319</a></span><span class="t">        <span class="nam">backup</span><span class="op">.</span><span class="nam">write_bytes</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">read_bytes</span><span class="op">(</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1320" href="#t1320">1320</a></span><span class="t">    <span class="nam">write_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">data</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t1321" href="#t1321">1321</a></span><span class="t">    <span class="key">return</span> <span class="key">True</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1296" href="#t1296">1296</a></span><span class="t"><span class="com">#: What the 2.0 upgrade saves the original `theme.yaml` as, beside it.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1297" href="#t1297">1297</a></span><span class="t"><span class="nam">THEME_BACKUP</span> <span class="op">=</span> <span class="str">&quot;.pre-2.0&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1298" href="#t1298">1298</a></span><span class="t"><span class="com">#: What the 1.5.0 release candidates, which became 2.0, saved it as: rc5 to</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1299" href="#t1299">1299</a></span><span class="t"><span class="com">#: rc9 `.pre-ux2`, later ones `.pre-1.5`. One of these that exists is the</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1300" href="#t1300">1300</a></span><span class="t"><span class="com">#: backup: it holds the file from before the first conversion, so a later one</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1301" href="#t1301">1301</a></span><span class="t"><span class="com">#: never writes a second copy or replaces it. Oldest first, which is the one</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1302" href="#t1302">1302</a></span><span class="t"><span class="com">#: that holds the original when a home has both.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1303" href="#t1303">1303</a></span><span class="t"><span class="nam">EARLIER_THEME_BACKUPS</span> <span class="op">=</span> <span class="op">(</span><span class="str">&quot;.pre-ux2&quot;</span><span class="op">,</span> <span class="str">&quot;.pre-1.5&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1304" href="#t1304">1304</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1305" href="#t1305">1305</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1306" href="#t1306">1306</a></span><span class="t"><span class="key">def</span> <span class="nam">theme_backup</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="nam">Path</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">Path</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1307" href="#t1307">1307</a></span><span class="t">    <span class="str">&quot;&quot;&quot;Where `migrate_theme` keeps (or kept) the original of `path`: the</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1308" href="#t1308">1308</a></span><span class="t"><span class="str">    earlier pre-release&#x27;s copy when one exists, else `&lt;name&gt;.pre-2.0`.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1309" href="#t1309">1309</a></span><span class="t">    <span class="nam">path</span> <span class="op">=</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1310" href="#t1310">1310</a></span><span class="t">    <span class="key">for</span> <span class="nam">suffix</span> <span class="key">in</span> <span class="nam">EARLIER_THEME_BACKUPS</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1311" href="#t1311">1311</a></span><span class="t">        <span class="nam">earlier</span> <span class="op">=</span> <span class="nam">path</span><span class="op">.</span><span class="nam">with_name</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">name</span> <span class="op">+</span> <span class="nam">suffix</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1312" href="#t1312">1312</a></span><span class="t">        <span class="key">if</span> <span class="nam">earlier</span><span class="op">.</span><span class="nam">exists</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1313" href="#t1313">1313</a></span><span class="t">            <span class="key">return</span> <span class="nam">earlier</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1314" href="#t1314">1314</a></span><span class="t">    <span class="key">return</span> <span class="nam">path</span><span class="op">.</span><span class="nam">with_name</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">name</span> <span class="op">+</span> <span class="nam">THEME_BACKUP</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1315" href="#t1315">1315</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1316" href="#t1316">1316</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1317" href="#t1317">1317</a></span><span class="t"><span class="key">def</span> <span class="nam">migrate_theme</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="nam">Path</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">bool</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1318" href="#t1318">1318</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The 2.0 upgrade: write the look `palette` stands for as the file&#x27;s own</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1319" href="#t1319">1319</a></span><span class="t"><span class="str">    `surface`, `accent` and `colour_amount`, then drop `palette`. All three are</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1320" href="#t1320">1320</a></span><span class="t"><span class="str">    written: a file with its own surface defaults to no accent at subtle, so</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1321" href="#t1321">1321</a></span><span class="t"><span class="str">    `surface` alone would change the look. `effective()` answers the same</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1322" href="#t1322">1322</a></span><span class="t"><span class="str">    before and after, which is the point: the user sees no change.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1323" href="#t1323">1323</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1324" href="#t1324">1324</a></span><span class="t"><span class="str">    The original bytes go to `theme.yaml.pre-2.0` first (`theme_backup`),</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1325" href="#t1325">1325</a></span><span class="t"><span class="str">    never overwriting an earlier copy, and none is written beside a</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1326" href="#t1326">1326</a></span><span class="t"><span class="str">    `theme.yaml.pre-ux2` or `theme.yaml.pre-1.5` a 1.5.0 release candidate</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1327" href="#t1327">1327</a></span><span class="t"><span class="str">    left. A missing, unreadable or invalid file, or one without `palette`, is</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t1328" href="#t1328">1328</a></span><span class="t"><span class="str">    left alone. True when the file was rewritten.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1329" href="#t1329">1329</a></span><span class="t">    <span class="nam">path</span> <span class="op">=</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1330" href="#t1330">1330</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1331" href="#t1331">1331</a></span><span class="t">        <span class="nam">data</span> <span class="op">=</span> <span class="nam">read_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1332" href="#t1332">1332</a></span><span class="t">        <span class="nam">look</span> <span class="op">=</span> <span class="nam">Theme</span><span class="op">.</span><span class="nam">model_validate</span><span class="op">(</span><span class="nam">data</span><span class="op">)</span><span class="op">.</span><span class="nam">effective</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1333" href="#t1333">1333</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">ConfigError</span><span class="op">,</span> <span class="nam">ValidationError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1334" href="#t1334">1334</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1335" href="#t1335">1335</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;palette&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1336" href="#t1336">1336</a></span><span class="t">        <span class="key">return</span> <span class="key">False</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1337" href="#t1337">1337</a></span><span class="t">    <span class="key">if</span> <span class="str">&quot;surface&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">data</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1338" href="#t1338">1338</a></span><span class="t">        <span class="nam">data</span><span class="op">.</span><span class="nam">update</span><span class="op">(</span><span class="op">{</span><span class="nam">key</span><span class="op">:</span> <span class="nam">look</span><span class="op">[</span><span class="nam">key</span><span class="op">]</span> <span class="key">for</span> <span class="nam">key</span> <span class="key">in</span> <span class="nam">THEME_V2_KEYS</span><span class="op">}</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1339" href="#t1339">1339</a></span><span class="t">    <span class="key">del</span> <span class="nam">data</span><span class="op">[</span><span class="str">&quot;palette&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1340" href="#t1340">1340</a></span><span class="t">    <span class="nam">backup</span> <span class="op">=</span> <span class="nam">theme_backup</span><span class="op">(</span><span class="nam">path</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1341" href="#t1341">1341</a></span><span class="t">    <span class="key">if</span> <span class="key">not</span> <span class="nam">backup</span><span class="op">.</span><span class="nam">exists</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1342" href="#t1342">1342</a></span><span class="t">        <span class="nam">backup</span><span class="op">.</span><span class="nam">write_bytes</span><span class="op">(</span><span class="nam">path</span><span class="op">.</span><span class="nam">read_bytes</span><span class="op">(</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1343" href="#t1343">1343</a></span><span class="t">    <span class="nam">write_yaml</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">data</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t1344" href="#t1344">1344</a></span><span class="t">    <span class="key">return</span> <span class="key">True</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -1410,7 +1433,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_config_schemas_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-03 11:55 +0000
+            created at 2026-10-03 12:33 +0000
         </p>
     </div>
 </footer>
