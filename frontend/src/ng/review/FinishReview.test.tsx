@@ -168,7 +168,7 @@ describe("BottomBar", () => {
 
   it("once published: resolved count, why Approve is off, and Request changes opens Finish there", async () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
-    const onFinish = bar([th({ draft: false, label: "must_fix", state: "claimed" }), th({ id: "t2", draft: false, state: "resolved" })]);
+    const onFinish = bar([th({ draft: false, label: "must_fix", state: "claimed", comments: [c({ draft: false })] }), th({ id: "t2", draft: false, state: "resolved", comments: [c({ draft: false })] })]);
     expect(screen.getByText("1 of 2 resolved")).toBeInTheDocument();
     expect(screen.getByText("Approve unlocks when must-fix threads are resolved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
@@ -176,10 +176,23 @@ describe("BottomBar", () => {
     expect(onFinish).toHaveBeenCalledWith("request_changes");
   });
 
+  it("in a later round: counts the new drafts, offers Finish review, and Approve asks before it sends them", async () => {
+    const send = vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
+    const onFinish = bar([th({ draft: false, state: "resolved", comments: [c({ draft: false, review_id: "r" })] }), th({ id: "t2", comments: [c({ id: "c2", thread_id: "t2", body: "Round two" })] })]);
+    expect(screen.getByText("1 of 2 resolved")).toBeInTheDocument();
+    expect(screen.getByText("1 pending · Ready to approve")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Finish review" }));
+    expect(onFinish).toHaveBeenLastCalledWith();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(onFinish).toHaveBeenLastCalledWith("approve");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("approves from the bar when it can", async () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: {} });
-    bar([th({ draft: false, state: "resolved" })]);
+    bar([th({ draft: false, state: "resolved", comments: [c({ draft: false })] })]);
     expect(screen.getByText("Ready to approve")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Finish review" })).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
     await waitFor(() => expect(where).toBe("/work-items/w1"));
     expect(body()).toEqual({ outcome: "approve" });
