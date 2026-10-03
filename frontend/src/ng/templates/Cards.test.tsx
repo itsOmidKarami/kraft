@@ -77,6 +77,7 @@ describe("rename", () => {
     await user.type(id, "specification{Enter}");
     await waitFor(() => expect(post).toHaveBeenCalledWith("chains", "default", [{ op: "rename", path: "spec", id: "specification" }], undefined));
     await toasted(/Renamed spec → specification · 2 references updated/);
+    await waitFor(() => expect(document.activeElement).toHaveClass("pane-title-btn"));
   });
 
   it("Esc keeps the id and the pane open; a blur renames, as a Config row saves", async () => {
@@ -87,7 +88,8 @@ describe("rename", () => {
     await user.click(within(pane()).getByRole("button", { name: "spec" }));
     await user.type(within(pane()).getByRole("textbox", { name: "Rename node" }), "x{Escape}");
     expect(within(pane()).queryByRole("textbox", { name: "Rename node" })).toBeNull();
-    expect(within(pane()).getByRole("button", { name: "spec" })).toBeInTheDocument();
+    // The focus goes back to the title the field replaced, not to the page.
+    await waitFor(() => expect(within(pane()).getByRole("button", { name: "spec" })).toHaveFocus());
     expect(post).not.toHaveBeenCalled();
     await user.click(within(pane()).getByRole("button", { name: "spec" }));
     await user.type(within(pane()).getByRole("textbox", { name: "Rename node" }), "x");
