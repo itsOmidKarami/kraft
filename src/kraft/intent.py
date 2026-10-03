@@ -214,12 +214,117 @@ def render(report: Report) -> str:
     return "\n".join(lines)
 
 
+PIN_PREFIX = "enforced-by:"
+
+
+def _case_of(pin: str, old: str) -> str | None:
+    """The `[case]` suffix when `pin` is `old` parametrized, else None."""
+    if pin.startswith(old + "[") and pin.endswith("]"):
+        return pin[len(old) :]
+    return None
+
+
+def _has_case(node_id: str) -> bool:
+    return node_id.endswith("]") and "[" in node_id.rpartition("::")[2]
+
+
+def _retarget(pin: str, old: str, new: str) -> str | None:
+    """Where `pin` points after `old` becomes `new`, or None if it is not `old`'s.
+
+    `old[case]` keeps its case (`new[case]`) when `new` names none of its own:
+    renaming a parametrized test moves every pinned case in one command.
+    """
+    if pin == old:
+        return new
+    case = _case_of(pin, old)
+    if case is None:
+        return None
+    return new if _has_case(new) else new + case
+
+
+def plan_repoint(files: list[Path], old: str, new: str) -> tuple[dict[Path, str], set[str]]:
+    """Each file that has a pin on `old`, with its rewritten text, and every id
+    the rewrite points a pin at. Reads only; `main` writes once the targets are
+    known to collect. Only the `enforced-by:` lines `parse_file` reads as pins
+    (inside a requirement) are considered, and only the matching entries on
+    them change: the rest of the line, and every other line, stays as written.
+    """
+    rewritten: dict[Path, str] = {}
+    targets: set[str] = set()
+
+    for path in files:
+        lines = path.read_text().splitlines(keepends=True)
+        in_req = False
+        changed = False
+        for number, raw in enumerate(lines):
+            if REQ_HEADING.match(raw):
+                in_req = True
+                continue
+            if raw.startswith("## "):
+                in_req = False
+                continue
+            stripped = raw.strip()
+            if not in_req or not stripped.startswith(PIN_PREFIX):
+                continue
+            pins = [p.strip() for p in stripped.removeprefix(PIN_PREFIX).split(",") if p.strip()]
+            moved = [_retarget(p, old, new) for p in pins]
+            if not any(moved):
+                continue
+            targets.update(m for m in moved if m)
+            indent = raw[: len(raw) - len(raw.lstrip())]
+            ending = raw[len(raw.rstrip("\r\n")) :]
+            joined = ", ".join(m or p for m, p in zip(moved, pins, strict=True))
+            lines[number] = f"{indent}{PIN_PREFIX} {joined}{ending}"
+            changed = True
+        if changed:
+            rewritten[path] = "".join(lines)
+
+    return rewritten, targets
+
+
+def repoint(files: list[Path], old: str, new: str) -> int:
+    """`--repoint OLD NEW`: move every pin on OLD (or OLD[case]) to NEW, the one
+    command a renamed or parametrized test needs instead of a hand edit across
+    the tree. Refuses, rewriting nothing, when OLD matches no pin -- a typo
+    would otherwise "succeed" by changing nothing and leave the real pin to
+    surface as BROKEN later -- or when a target is not a test pytest collects,
+    which would trade one broken pin for another."""
+    rewritten, targets = plan_repoint(files, old, new)
+    if not rewritten:
+        print(f"intent: no enforced-by pin is {old} or {old}[...]; nothing rewritten.")
+        return 1
+
+    missing = sorted(targets - collect_node_ids(Path.cwd()))
+    if missing:
+        print(f"intent: refusing to repoint {old} -> {new}; nothing rewritten.")
+        for target in missing:
+            print(f"NOT COLLECTED  {target}")
+        return 1
+
+    for path, text in rewritten.items():
+        path.write_text(text)
+        print(path)
+    print(f"intent: repointed {old} -> {new} in {len(rewritten)} file(s).")
+    return 0
+
+
+def _tree_files(tree: Path) -> list[Path]:
+    # The README states the format, and its examples are not requirements.
+    return sorted(p for p in tree.glob("*.md") if p.name != "README.md") if tree.is_dir() else []
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    tree = Path(args[0]) if args else DEFAULT_TREE
 
-    # The README states the format, and its examples are not requirements.
-    files = sorted(p for p in tree.glob("*.md") if p.name != "README.md") if tree.is_dir() else []
+    if args and args[0] == "--repoint":
+        if len(args) not in (3, 4):
+            print("usage: python -m kraft.intent --repoint OLD NEW [TREE]")
+            return 2
+        tree = Path(args[3]) if len(args) == 4 else DEFAULT_TREE
+        return repoint(_tree_files(tree), args[1], args[2])
+
+    tree = Path(args[0]) if args else DEFAULT_TREE
+    files = _tree_files(tree)
     if not files:
         print(f"intent: no intent tree at {tree}, nothing to check.")
         return 0
