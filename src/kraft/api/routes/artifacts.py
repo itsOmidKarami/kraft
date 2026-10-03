@@ -311,6 +311,9 @@ async def get_work_item_attachment(wid: str, kind: str, request: Request):
     containment walk as a gate's artifact."""
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
+    if kind not in ("spec", "plan"):
+        # A kind no item can have is the caller's mistake, not a missing file.
+        raise HTTPException(422, f"no attachment kind {kind!r}: use spec or plan")
     a = next((a for a in entry.attachments_of(row) if a.get("kind") == kind), None)
     if a is None:
         raise HTTPException(404, f"this work item has no {kind} attached")

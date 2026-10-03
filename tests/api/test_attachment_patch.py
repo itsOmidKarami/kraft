@@ -300,6 +300,11 @@ def test_an_attachment_reads_from_the_snapshot_and_follows_a_revision(client, re
         "truncated": False,
     }
     assert client.get(f"/api/work-items/{wid}/attachments/spec").status_code == 404
+    bogus = client.get(f"/api/work-items/{wid}/attachments/bogus")
+    assert (bogus.status_code, bogus.json()["detail"]) == (
+        422,
+        "no attachment kind 'bogus': use spec or plan",
+    )
 
     revised = _doc(repo, "plans/p2.md", "# Plan two\n")
     r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"plan": revised}})
