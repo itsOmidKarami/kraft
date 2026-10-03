@@ -70,6 +70,14 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
   const [error, setError] = useState<string | null>(null);
   const ended = ENDED.has(item.display_status ?? "");
   const gone = item.worktree_exists === false;
+  // The elapsed clock ticks as the pane's does: every second while an agent or a check runs, else every 30 s (R11b-11).
+  const ticking = !ended && item.worker_sessions.some((s) => s.status === "running" || s.status === "pending");
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), ticking ? 1_000 : 30_000);
+    return () => clearInterval(t);
+  }, [ticking]);
 
   const run = async (p: Promise<{ ok: boolean; error?: string }>) => {
     setBusy(true);
@@ -165,7 +173,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         </Link>
       )}
       <span className="item-elapsed" title={`Created ${new Date(item.created_at).toLocaleString()}`}>
-        <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt)}
+        <Clock size={11} aria-hidden /> {elapsedBetween(item.created_at, endedAt, now)}
       </span>
       <span className={`item-badge is-${hs.tone}`}>{hs.badge}</span>
       <div className="item-main-group">

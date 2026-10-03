@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
@@ -43,6 +43,21 @@ describe("ItemHeader", () => {
     } });
     show({ display_status: "needs_you" });
     expect(screen.getByRole("link", { name: /3 others need you/ })).toBeInTheDocument();
+  });
+
+  // R11b-11: the header's clock stood still while the pane's counted each second.
+  it("ticks its elapsed clock every second while something runs", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      vi.setSystemTime(Date.parse("2026-09-13T08:00:12Z"));
+      const running = { id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1 } as never;
+      show({ worker_sessions: [running] });
+      expect(document.querySelector(".item-elapsed")).toHaveTextContent("12s");
+      await act(async () => void vi.advanceTimersByTime(4_000));
+      expect(document.querySelector(".item-elapsed")).toHaveTextContent("16s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the server's badge and retries a failed item from the stopped task's path", async () => {
