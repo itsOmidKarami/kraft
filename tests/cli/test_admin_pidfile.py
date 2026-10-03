@@ -38,11 +38,15 @@ def test_a_pidfile_naming_another_program_is_cleared_not_signalled(
     monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
     monkeypatch.setattr(cli.admin, "_confirm_running_agents", lambda *a, **k: None)
 
-    cli.main(["admin", verb, "-y"] if verb == "restart" else ["admin", verb])
+    if verb == "restart":
+        with pytest.raises(SystemExit):
+            cli.main(["admin", verb, "-y"])
+    else:
+        cli.main(["admin", verb])
 
     out = capsys.readouterr()
     assert decoy.poll() is None, "signalled a process that is not Kraft"
-    assert "no server running" in out.out
+    assert "no server running" in out.out + out.err
     assert f"removed a stale pidfile: pid {decoy.pid} is sleep, not Kraft" in out.err
     assert not RunDirs(tmp_path / "run").pid.exists()
 

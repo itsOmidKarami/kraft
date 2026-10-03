@@ -467,11 +467,14 @@ def test_serve_records_detached_mode_when_asked(tmp_path, monkeypatch):
     assert seen["mode"] == "detached"
 
 
-def test_restart_with_no_server_is_not_an_error(tmp_path, monkeypatch, capsys):
+def test_restart_with_no_server_says_nothing_was_restarted_and_fails(tmp_path, monkeypatch, capsys):
+    """It exited 0 having started nothing, so `restart && ...` went on with no server."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setattr(cli.admin, "_service_installed", lambda: False)
-    cli.main(["admin", "restart"])
-    assert "no server running" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["admin", "restart"])
+    assert exc.value.code == 1
+    assert "no server running, so nothing was restarted" in capsys.readouterr().err
 
 
 def test_start_detached_waits_for_health_not_just_the_pidfile(tmp_path, monkeypatch, capsys):
