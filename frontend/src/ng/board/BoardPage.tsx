@@ -229,7 +229,7 @@ export function BoardPage() {
   if (fresh && !query.new)
     return (
       <>
-        <HeaderActions><button type="button" className="btn btn-primary" onClick={() => setQuery({ new: true })}>+ New work item</button></HeaderActions>
+        <HeaderActions><button type="button" className="btn btn-primary" disabled={offline} onClick={() => setQuery({ new: true })}>+ New work item</button></HeaderActions>
         {restart}
         <FirstRun onDone={() => setFresh(false)} />
       </>

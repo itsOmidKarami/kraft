@@ -88,6 +88,14 @@ describe("BoardPage", () => {
     expect(screen.getByRole("region", { name: "New work item" })).toBeInTheDocument();
   });
 
+  it("turns first-run's + New work item off while the server can't be reached, as the board's is", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    vi.spyOn(api, "listWorkItems").mockRejectedValue(new Error("could not reach the Kraft server — it may have stopped."));
+    board();
+    expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ New work item" })).toBeDisabled());
+  });
+
   it("brings back a first-run left part-way while its repo is connected, and starts over once no repo is", async () => {
     localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/r", name: "r", disabled: false }));
     vi.spyOn(api, "getTemplates").mockResolvedValue([]);
