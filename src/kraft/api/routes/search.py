@@ -135,8 +135,26 @@ def _os_open() -> list[str] | None:
     return None
 
 
+#: The `editor` that asks for the system's opener by name, the way `null` asks
+#: for the default. It is what an answer's `editor` already says for one.
+SYSTEM_EDITOR = "system"
+
+
+def _default_editor(request: Request) -> str | None:
+    """The editor chosen when none is named: `editor` in theme.yaml (Settings ›
+    Appearance), else `KRAFT_EDITOR`, else None, which is the system's opener."""
+    try:
+        chosen = config_mod.Theme.load(request.app.state.templates_dir / "theme.yaml").editor
+    except config_mod.ConfigError:
+        chosen = None
+    return chosen or os.environ.get("KRAFT_EDITOR") or None
+
+
 def _launch_editor(request: Request, editor: str | None, path: Path) -> dict:
     """Open `path` in an editor, or say plainly that this server cannot.
+
+    `editor` null is "whatever is the default" (`_default_editor`); `"system"`
+    is the system's opener whatever the default is, for a caller that chose it.
 
     Loopback callers only. This starts a process and opens a window on the
     machine hosting the API, and Kraft has one shared password and no notion of
@@ -150,7 +168,10 @@ def _launch_editor(request: Request, editor: str | None, path: Path) -> dict:
     """
     if not perimeter._client_is_local(request):
         raise HTTPException(403, "this server only opens editors for a client on its own machine")
-    name = editor or os.environ.get("KRAFT_EDITOR") or ""
+    if editor == SYSTEM_EDITOR:
+        name = ""
+    else:
+        name = editor or _default_editor(request) or ""
     argv = _EDITORS.get(name) if name else None
     if name and argv is None:
         raise HTTPException(400, f"unknown editor {name!r}")
@@ -179,15 +200,11 @@ async def list_editors(request: Request):
     answer would describe a machine they cannot open anything on."""
     if not perimeter._client_is_local(request):
         raise HTTPException(403, "this server only opens editors for a client on its own machine")
-    try:
-        chosen = config_mod.Theme.load(request.app.state.templates_dir / "theme.yaml").editor
-    except config_mod.ConfigError:
-        chosen = None
     system = _os_open()
     return {
         "available": [name for name in _EDITORS if _editor_argv(name)],
         "system": bool(system and shutil.which(system[0])),
-        "default": chosen or os.environ.get("KRAFT_EDITOR") or None,
+        "default": _default_editor(request),
     }
 
 

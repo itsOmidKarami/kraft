@@ -474,7 +474,11 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
         nargs="?",
         const="",
         metavar="EDITOR",
-        help="open in an editor on the server (code, cursor, zed, obsidian; default: system)",
+        help=(
+            "open in an editor on the server (code, cursor, zed, obsidian, or system for "
+            "the OS opener; default: the Default editor in Settings, else KRAFT_EDITOR, "
+            "else system)"
+        ),
     )
     doc.add_argument("--no-pager", action="store_true")
     doc.set_defaults(func=_cmd_doc)
