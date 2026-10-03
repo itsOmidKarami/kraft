@@ -38,6 +38,35 @@ describe("ReviewPage", () => {
   });
 });
 
+describe("Escape on the review page", () => {
+  it("goes back to the item, as the gate review's × does, and leaves a text field's Escape to it (GR-1)", async () => {
+    vi.spyOn(http, "request").mockImplementation(async (p) => (String(p).includes("/compare") ? { status: 404, body: { detail: "nothing to compare" } } : { status: 200, body: [] }));
+    let path = "";
+    const Path = () => {
+      path = useLocation().pathname + useLocation().search;
+      return null;
+    };
+    render(
+      <MemoryRouter initialEntries={["/work-items/w1/review"]}>
+        <Routes>
+          <Route path="/work-items/:id/review" element={<ReviewPage />} />
+          <Route path="*" element={null} />
+        </Routes>
+        <Path />
+      </MemoryRouter>,
+    );
+    await screen.findByText("nothing to compare");
+    const box = document.createElement("input");
+    document.body.append(box);
+    box.focus();
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(path).toBe("/work-items/w1/review");
+    box.remove();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(path).toBe("/work-items/w1");
+  });
+});
+
 describe("an ended item's review", () => {
   it.each(["done", "cancelled", "archived"])("is read only when the item is %s: no comment on a file, no Finish review (Kraft-9d8b2.51)", async (display_status) => {
     vi.mocked(api.getWorkItem).mockResolvedValue({ ...ITEM, display_status, pending_gate: null } as never);
