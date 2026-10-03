@@ -22,6 +22,7 @@ import { Alias, ALIASES, ShippedHash } from "../shell/aliases";
 import { NotFound } from "./nav/NotFound";
 import { TabBar } from "./nav/TabBar";
 import { Toaster } from "./nav/Toaster";
+import { Tooltip } from "../ui/Tooltip";
 import { useTrail } from "./nav/trail";
 import "./nav/nav.css";
 
@@ -83,6 +84,7 @@ export function PhoneApp() {
         </Route>
       </Routes>
       <Toaster />
+      <Tooltip />
     </BrowserRouter>
   );
 }

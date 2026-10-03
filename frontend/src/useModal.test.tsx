@@ -27,7 +27,7 @@ describe("useModal", () => {
       const ref = useModal<HTMLDivElement>(() => {});
       return (
         <div role="dialog" aria-label="intake" ref={ref}>
-          <button aria-label="close">✕</button>
+          <button aria-label="close" data-tip="close">✕</button>
           <input aria-label="title" data-autofocus />
         </div>
       );

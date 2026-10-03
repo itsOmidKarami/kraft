@@ -4,6 +4,7 @@ import type { WorkerSession, WorkItemDocument } from "../../../types";
 import { FileText } from "../../icons";
 import { lookWord, sessionLook } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
+import { tip } from "../../ui/Tooltip";
 
 /** ‹ attempt n of m › above every tab: which session the tabs show (Decisions §6 Attempts).
  *  On the escalation each session is a turn of its thread, so it reads ‹ turn n of m ›
@@ -26,9 +27,9 @@ export function AttemptSwitcher({ sessions, at, onAt, now, turns }: { sessions: 
   return (
     <div className="ip-attempts">
       <span className="ip-attempt-box">
-        <button ref={earlier} type="button" className="ip-attempt-btn" aria-label={turns ? "Earlier turn" : "Earlier attempt"} disabled={i <= 0} onClick={() => step(i - 1)}>‹</button>
+        <button ref={earlier} type="button" className="ip-attempt-btn" {...tip(turns ? "Earlier turn" : "Earlier attempt")} disabled={i <= 0} onClick={() => step(i - 1)}>‹</button>
         <span>{turns ? turnWords(sessions, at) : `attempt ${at.attempt} of ${sessions.at(-1)!.attempt}${at.round ? ` · round ${at.round + 1}` : ""}`}</span>
-        <button ref={later} type="button" className="ip-attempt-btn" aria-label={turns ? "Later turn" : "Later attempt"} disabled={i >= sessions.length - 1} onClick={() => step(i + 1)}>›</button>
+        <button ref={later} type="button" className="ip-attempt-btn" {...tip(turns ? "Later turn" : "Later attempt")} disabled={i >= sessions.length - 1} onClick={() => step(i + 1)}>›</button>
       </span>
       <span className={`ip-attempt-state${look.running ? " is-live" : look.state === "failed" ? " is-bad" : ""}`}>{lookWord(look)}</span>
     </div>

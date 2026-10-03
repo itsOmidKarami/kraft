@@ -23,6 +23,7 @@ import { PauseSheet } from "./PauseSheet";
 import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act, type ActId } from "./model";
 import { useDo } from "./useDo";
 import "./item.css";
+import { tip } from "../../ui/Tooltip";
 
 const TAG_TONE = { running: "info", waiting: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "warn", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
@@ -109,7 +110,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
     <>
       <ScreenHeader
         id={item.bead_id || shortId(item.id)}
-        trailing={<button type="button" className="ph-icon-btn" aria-label="More actions" onClick={() => sheet.open("kebab")}><EllipsisVertical size={18} aria-hidden="true" /></button>}
+        trailing={<button type="button" className="ph-icon-btn" {...tip("More actions")} onClick={() => sheet.open("kebab")}><EllipsisVertical size={18} aria-hidden="true" /></button>}
       />
       <div className="ph-content">
         <div className="ph-item-top">

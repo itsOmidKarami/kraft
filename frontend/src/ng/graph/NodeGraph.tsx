@@ -6,6 +6,7 @@ import { useCamera } from "./useCamera";
 import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
+import { tip } from "../ui/Tooltip";
 
 /** A step, or a task in it. The escalation task's step is `escalation`. */
 export type NodeSel = { step: string; task?: string };
@@ -84,7 +85,7 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
   const last = lay.cols[lay.cols.length - 1];
 
   const seam = (key: string, x: number, y: number, title: string, fire: (el: HTMLElement) => void) => (
-    <button key={key} type="button" className="seam is-node" aria-label={title} title={title} style={{ left: x - 10, top: y - 10 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span></button>
+    <button key={key} type="button" className="seam is-node" {...tip(title)} style={{ left: x - 10, top: y - 10 }} onClick={(e) => fire(e.currentTarget)}><span aria-hidden="true">+</span></button>
   );
   const taskButton = (s: NodeSel, t: GraphItem, x: number, y: number, kind: string, extra = "") => {
     const key = taskKey(s.step, t.id), sel = isSel(s);
@@ -140,7 +141,8 @@ export function NodeGraph({ name, steps, selected, side, loop, onFailure, seamAf
               ref={roving.ref(key)}
               type="button"
               tabIndex={roving.tabIndex(key)}
-              aria-label={`${st.label ?? st.id}, step`}
+              // A lone step draws no label (a blank one): its id names it, and the tooltip says it.
+              {...(st.label?.trim() === "" ? tip(`${st.id}, step`) : { "aria-label": `${st.label ?? st.id}, step` })}
               aria-pressed={sel}
               className={`step-label${sel ? " is-sel" : ""}${st.mark ? ` mark-${st.mark}` : ""}`}
               style={{ left: cx - G.COL / 2, top: labelY, width: G.COL }}

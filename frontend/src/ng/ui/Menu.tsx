@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "./Popover";
 import "./ui.css";
+import { tip } from "./Tooltip";
 
 export interface MenuItem {
   label: string;
@@ -46,7 +47,7 @@ export function Menu({ label, trigger, items, triggerClass, note, heading }: { l
 
   return (
     <>
-      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : { "aria-label": label, title: label })} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={button} type="button" className={triggerClass ?? "icon-btn"} {...(triggerClass ? {} : tip(label))} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
       <Popover anchor={button} open={open} onClose={close} role="menu" label={label}>

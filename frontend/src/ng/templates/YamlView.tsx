@@ -6,6 +6,7 @@ import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Scope } from "./draft/types";
 import { scopeFile } from "./draft/view";
 import { problemText } from "./problems";
+import { tip } from "../ui/Tooltip";
 
 const LINE = 18;
 
@@ -118,7 +119,7 @@ export function YamlView({ draft, scope, published, file: named }: { draft: Conf
           <div className="yv-issues-head">
             <span className="yv-issues-title">{err ? "Syntax error" : `${probs.length} problem${probs.length === 1 ? "" : "s"}`}</span>
             <span className="bp-gap" />
-            <button type="button" className="icon-btn" aria-expanded={issuesOpen} aria-label={issuesOpen ? "Collapse the problems" : "Expand the problems"} onClick={() => setIssuesOpen((o) => !o)}>
+            <button type="button" className="icon-btn" aria-expanded={issuesOpen} {...tip(issuesOpen ? "Collapse the problems" : "Expand the problems")} onClick={() => setIssuesOpen((o) => !o)}>
               {issuesOpen ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
             </button>
           </div>

@@ -7,6 +7,7 @@ import { Popover } from "../ui/Popover";
 import { fromOptions, nodeRows, targetLabel, toOptions, type TargetOption } from "./model";
 import type { DiffPrefs } from "./prefs";
 import type { ReviewPlace } from "./url";
+import { tip } from "../ui/Tooltip";
 
 type Item = Pick<WorkItem, "attempts" | "last_review_sha" | "chain_definition">;
 
@@ -37,8 +38,8 @@ export function Toolbar(p: {
       </span>
       <NodesFilter files={p.files} chainOrder={p.item.chain_definition.nodes.map((n) => n.id)} nodes={p.place.nodes} onChange={(nodes) => p.setPlace({ nodes })} />
       <span className="rv-spacer" />
-      <IconButton label="Collapse all" onClick={p.onCollapseAll}><ChevronsDownUp size={16} aria-hidden /></IconButton>
-      <IconButton label="Expand all" onClick={p.onExpandAll}><ChevronsUpDown size={16} aria-hidden /></IconButton>
+      <IconButton label="Collapse all files" onClick={p.onCollapseAll}><ChevronsDownUp size={16} aria-hidden /></IconButton>
+      <IconButton label="Expand all files" onClick={p.onExpandAll}><ChevronsUpDown size={16} aria-hidden /></IconButton>
       <DiffSettings prefs={p.prefs} set={p.setPrefs} />
     </div>
   );
@@ -73,7 +74,7 @@ function Pop({ label, trigger, triggerClass, children }: { label: string; trigge
   };
   return (
     <>
-      <button ref={anchor} type="button" className={triggerClass} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={anchor} type="button" className={triggerClass} {...tip(label)} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {trigger}
       </button>
       <Popover anchor={anchor} open={open} onClose={close} role="menu" label={label}>

@@ -16,6 +16,7 @@ import { budgetRaise, neverStarted, spentLine } from "../status";
 import { notStarted } from "../chainValues";
 import { ItemAgentRows } from "./ItemOverrides";
 import { limitPolicy } from "../limitPolicy";
+import { tip } from "../../ui/Tooltip";
 
 const statusLine = (item: ItemDetail) => {
   const st = item.display_status ?? "running";
@@ -97,7 +98,7 @@ function Meter({ label, used, of, ratio, max, onEdit, editRef }: { label: string
       <div className="meter-row">
         <span className="meter-label">{label}</span>
         <span className="meter-value"><strong>{used}</strong>{of ? <> of {of}</> : " · no cap"}</span>
-        {onEdit && <button ref={editRef} type="button" className="icon-btn meter-edit" aria-label={`Edit ${label.toLowerCase()}`} onClick={onEdit}>✎</button>}
+        {onEdit && <button ref={editRef} type="button" className="icon-btn meter-edit" {...tip(`Edit ${label.toLowerCase()}`)} onClick={onEdit}>✎</button>}
       </div>
       {ratio != null && (
         <div className="meter-bar-row">

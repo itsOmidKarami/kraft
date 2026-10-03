@@ -116,3 +116,5 @@
 .cbx > input[aria-invalid="true"] { border-color: var(--bad); }
 .cbx.is-above > .cbx-list, .cbx.is-above > .cbx-none { top: auto; bottom: calc(100% + 4px); }
 .cbx.is-inline > .cbx-list, .cbx.is-inline > .cbx-none { position: static; margin-top: 4px; box-shadow: none; }
+
+.tip { position: fixed; z-index: 80; max-width: 240px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 11.5px; line-height: 1.4; pointer-events: none; box-shadow: 0 4px 12px color-mix(in oklab, var(--side) 50%, transparent); }

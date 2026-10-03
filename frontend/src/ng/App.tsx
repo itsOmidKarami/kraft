@@ -27,6 +27,7 @@ import { ReposPage } from "./templates/ReposPage";
 import { IntakePage } from "./settings/IntakePage";
 import { PolicyPage } from "./settings/PolicyPage";
 import { Toaster } from "./ui/Toast";
+import { Tooltip } from "./ui/Tooltip";
 
 /** `/_gallery` and `/_tokens`, the component and token sheets, are for building
  *  the UI: the dev server has them, and so does a build the screenshot sweep
@@ -81,6 +82,7 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
         </Route>
       </Routes>
       <Toaster />
+      <Tooltip />
     </BrowserRouter>
   );
 }

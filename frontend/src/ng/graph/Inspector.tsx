@@ -5,6 +5,7 @@ import { Tabs } from "../ui/Tabs";
 import { holdsText, isEscape } from "../keys";
 import type { useResizable } from "./useResizable";
 import "./graph.css";
+import { tip } from "../ui/Tooltip";
 
 type Props = {
   /** The pane's id, for its tabs and their panel. */
@@ -65,7 +66,7 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
   if (!open)
     return (
       <aside className="pane-rail" aria-label={`${title} pane, collapsed`}>
-        <button ref={railBtn} type="button" className="rail-btn" aria-label="Expand pane" title="Expand pane" onClick={onExpand}><PanelRightOpen size={14} /></button>
+        <button ref={railBtn} type="button" className="rail-btn" {...tip("Expand pane")} onClick={onExpand}><PanelRightOpen size={14} /></button>
         <button type="button" className="rail-name" aria-label={`Expand ${title}`} onClick={onExpand}>
           <span className="rail-icon">{glyph}{prob && <span className="rail-prob" aria-label="has a problem" />}</span>
           <span className="rail-title">{title}</span>
@@ -96,12 +97,12 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
             </span>
           ))}
         </nav>
-        <button type="button" className="pane-icon-btn" aria-label="Collapse pane" title="Collapse pane (Esc)" onClick={() => { fromKeys.current = true; onCollapse(); }}><PanelRightClose size={14} /></button>
+        <button type="button" className="pane-icon-btn" {...tip("Collapse pane", "Collapse pane (Esc)")} onClick={() => { fromKeys.current = true; onCollapse(); }}><PanelRightClose size={14} /></button>
       </div>
       <div className="pane-head">
         <div className="pane-title-row">
           {onIcon ? (
-            <button type="button" className="pane-glyph is-picker" aria-label={`Icon${icon ? `: ${icon}` : ""}, change`} title="Change the icon" onClick={(e) => onIcon(e.currentTarget)}>
+            <button type="button" className="pane-glyph is-picker" {...tip(`Icon${icon ? `: ${icon}` : ""}, change`, "Change the icon")} onClick={(e) => onIcon(e.currentTarget)}>
               {glyph}<ChevronDown size={10} aria-hidden />
             </button>
           ) : <span className="pane-glyph">{glyph}</span>}

@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { Combobox, notListed, unlisted, type Choice } from "./Combobox";
 import "./ui.css";
+import { tip } from "./Tooltip";
 
 /** A list of short names edited as pills (Decisions §11 Allowed tools): type and
  *  press Enter or comma to add; × or Backspace on an empty input removes one;
@@ -62,7 +63,7 @@ export function PillInput({ label, values, added = [], onChange, placeholder = "
             }}
           >
             <span>{v}</span>
-            <button type="button" className="pill-x" aria-label={`Remove ${v}`} onClick={() => remove(v)}>×</button>
+            <button type="button" className="pill-x" {...tip(`Remove ${v}`)} onClick={() => remove(v)}>×</button>
           </li>
         ))}
         <li className="pill-add">

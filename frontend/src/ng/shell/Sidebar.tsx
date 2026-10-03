@@ -12,6 +12,7 @@ import { useGroupCount } from "../board/counts";
 import { request } from "../http";
 import type { UpdateState } from "../settings/AboutPage";
 import { restartPending, useHealth } from "./health";
+import { tip } from "../ui/Tooltip";
 
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
@@ -105,18 +106,17 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
             type="button"
             className="ng-side-pin"
             aria-pressed={mode === "pinned"}
-            title={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
-            // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11).
-            aria-label="Pin sidebar"
+            // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11). The tooltip says what a press does.
+            {...tip("Pin sidebar", mode === "pinned" ? "Collapse sidebar" : "Pin sidebar")}
             onClick={toggle}
           >
             {mode === "pinned" ? <PanelLeftClose size={16} aria-hidden /> : <PanelLeftOpen size={16} aria-hidden />}
           </button>
         </div>
         <nav className="ng-side-nav" aria-label="Pages">
-          <button type="button" className="ng-side-row" aria-label="Search" aria-keyshortcuts="Meta+K Control+K" onClick={() => onSearch?.()}>
+          <button type="button" className="ng-side-row" aria-keyshortcuts="Meta+K Control+K" onClick={() => onSearch?.()}>
             <SearchIcon size={16} aria-hidden />
-            <span className="ng-side-label" aria-hidden>Search</span>
+            <span className="ng-side-label">Search</span>
             <span className="ng-side-kbd ng-side-label" aria-hidden><Kbd>{mod("K")}</Kbd></span>
           </button>
           {routesIn("top").map(row)}

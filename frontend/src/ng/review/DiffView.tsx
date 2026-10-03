@@ -10,6 +10,7 @@ import { inRange, lineIndex, rangeBetween, toward, type LineIndex, type LineRang
 import { anchorsOf, buildRows, spans, type Anchor, type Cell, type Row, type Side } from "./rows";
 import { rangeName } from "./Thread";
 import { languageOf } from "./tokenize";
+import { tip } from "../ui/Tooltip";
 
 /** A picked range of one file's lines. `anchor` is where the pick started,
  *  `head` where it ends now; Shift moves only the head. Both are on `side`,
@@ -251,7 +252,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   return (
     <section className="rv-file" data-file={file.path} aria-label={file.path}>
       <header className="rv-file-head">
-        <button type="button" className="rv-fold" aria-expanded={!collapsed} aria-label={collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`} onClick={() => p.onCollapse(file.path, !collapsed)}>
+        <button type="button" className="rv-fold" aria-expanded={!collapsed} {...tip(collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`)} onClick={() => p.onCollapse(file.path, !collapsed)}>
           {collapsed ? "▸" : "▾"}
         </button>
         <span className="rv-file-path rv-mono" title={file.path} data-allow-ellipsis="">{file.path}</span>
@@ -351,7 +352,7 @@ function PlusButton({ a, pick, range, inPick, g }: { a: Anchor; pick: Pick | nul
   const name = rangeName(range && inPick ? range : { side: a.side, start: a.line, end: a.line });
   const what = `Comment on ${name[0].toLowerCase()}${name.slice(1)}`;
   return (
-    <button type="button" tabIndex={head ? 0 : -1} className={`rv-plus${head ? " is-head" : ""}`} aria-label={what} title={what} onMouseDown={g.startDrag(a, true)} onClick={g.onPlus(a)}>
+    <button type="button" tabIndex={head ? 0 : -1} className={`rv-plus${head ? " is-head" : ""}`} {...tip(what)} onMouseDown={g.startDrag(a, true)} onClick={g.onPlus(a)}>
       <Plus size={12} aria-hidden />
     </button>
   );
