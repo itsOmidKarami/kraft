@@ -927,15 +927,20 @@ def _cmd_restart(ns: argparse.Namespace) -> None:
     this only stops it and says so -- restarting it is that terminal's job.
     """
     _confirm_running_agents(ns, "restarting", ask=True)
+    _refuse_restart_with_no_server()
+    _restart(ns)
+
+
+def _refuse_restart_with_no_server() -> None:
+    """`kraft admin restart` with nothing to restart. Not a quiet success: a
+    script running `restart` wants a server after it. `update --restart`
+    does not ask this; with no server, it has nothing to restart."""
     if not _service_installed() and _read_pid(_pid_path()) is None:
-        # Not a quiet success: a script running `restart` wants a server after
-        # it, and `update --restart` (which skips this) has nothing to restart.
         print(
             "kraft: no server running, so nothing was restarted - start it: kraft admin start",
             file=sys.stderr,
         )
         raise SystemExit(1)
-    _restart(ns)
 
 
 def _restart(ns: argparse.Namespace) -> None:
