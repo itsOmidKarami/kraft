@@ -203,25 +203,32 @@ def test_a_highlight_lifts_one_real_entry_out_of_new():
 
 
 _PRE = "This is a pre-release. Install it with"
+_KEEP = (
+    "using the Python you installed Kraft with and leaving out `[vector]` if you don't use "
+    "vector search, then run `kraft admin restart`. From 1.5.0rc14 on, "
+)
+_WHEEL = "https://github.com/itsOmidKarami/kraft/releases/download"
 
 
 @pytest.mark.parametrize(
     ("tag", "line"),
     [
         (
-            "v1.5.0rc2",
-            f"{_PRE} `kraft admin update --channel rc`, "
-            'or `uv tool install --force "kraft-sdlc==1.5.0rc2"`.',
+            "v2.0.0rc1",
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector]==2.0.0rc1"`, '
+            f"{_KEEP}`kraft admin update --channel rc` installs it too, keeping both.",
         ),
         (
-            "v1.5.0b1",
-            f"{_PRE} `kraft admin update --channel beta`, "
-            "or `uv tool install --force` the wheel attached below.",
+            "v2.0.0b1",
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
+            f'{_WHEEL}/v2.0.0b1/kraft_sdlc-2.0.0b1-py3-none-any.whl"`, '
+            f"{_KEEP}`kraft admin update --channel beta` installs it too, keeping both.",
         ),
         (
-            "v1.5.0a3",
-            f"{_PRE} `kraft admin update --channel alpha`, "
-            "or `uv tool install --force` the wheel attached below.",
+            "v2.0.0a3",
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
+            f'{_WHEEL}/v2.0.0a3/kraft_sdlc-2.0.0a3-py3-none-any.whl"`, '
+            f"{_KEEP}`kraft admin update --channel alpha` installs it too, keeping both.",
         ),
     ],
 )
@@ -229,6 +236,28 @@ def test_a_pre_release_says_how_to_install_it_above_its_notes(tag, line):
     """Only an rc is on PyPI; a beta or alpha points at its release's own wheel."""
     notes = "### Highlights\n\n- the headline (#1)\n\n### Fixes\n\n- a fix (#2)\n"
     assert plan_release.release_body(tag, notes) == f"{line}\n\n{notes}"
+
+
+@pytest.mark.parametrize("mark", ["rc", "b", "a"])
+def test_a_pre_release_leads_with_the_install_that_keeps_vector_and_the_python(mark):
+    """1.4's `kraft admin update` installs a new release without `[vector]` and
+    on uv's default Python, which the upgrade notes warn about, so it may not
+    be the first way the notes offer. The `uv` command that keeps both is, and
+    `kraft admin update` follows, for the installs whose update keeps them."""
+    body = plan_release.release_body(f"v2.0.0{mark}1", "- x (#1)\n")
+    uv, update = body.index("`uv tool install"), body.index("`kraft admin update")
+    assert uv < update
+    assert '"kraft-sdlc[vector]' in body[uv:update] and "--python 3.13" in body[uv:update]
+    assert "From 1.5.0rc14 on, `kraft admin update" in body
+
+
+def test_the_wheel_a_pre_release_names_is_the_package_kraft_publishes():
+    """The URL is built, not read off the release, so it must spell the wheel
+    as `uv build` names `kraft-sdlc`'s: normalized, pure Python."""
+    from kraft.update import PACKAGE
+
+    body = plan_release.release_body("v2.0.0b1", "")
+    assert f"/{PACKAGE.replace('-', '_')}-2.0.0b1-py3-none-any.whl" in body
 
 
 def test_every_pre_release_channel_is_one_update_accepts():

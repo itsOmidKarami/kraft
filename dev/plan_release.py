@@ -173,15 +173,31 @@ def release_notes(prs: list[dict]) -> str:
     return "\n\n".join(parts) + "\n" if parts else ""
 
 
+#: Where a release's wheel is attached: `kraft_sdlc-<version>-py3-none-any.whl`,
+#: what `uv build --wheel` names the pure-Python `kraft-sdlc` package.
+_WHEEL = (
+    "https://github.com/itsOmidKarami/kraft/releases/download/{tag}"
+    "/kraft_sdlc-{version}-py3-none-any.whl"
+)
+
+#: The first release whose `kraft admin update` keeps the `[vector]` extra and
+#: the Python Kraft was installed with. Any earlier one, 1.4 included, drops
+#: both, so the notes lead with the `uv` command that keeps them.
+_UPDATE_KEEPS_EXTRAS = "1.5.0rc14"
+
+
 def release_body(tag: str | None, notes: str) -> str:
     """The GitHub Release's text: `notes`, opened by how to install `tag` if it is a pre-release.
 
     Nothing finds a pre-release unless it asks for one, so its notes say how.
-    The channel is the pre-release's kind, which `kraft admin update --channel`
-    takes by the same name. Only an rc reaches PyPI, so an rc gets the
-    `uv tool install` form from there; a beta or alpha, which neither PyPI nor
-    Homebrew carries, points at the wheel attached to its own release. A stable
-    release's text is `notes`, byte for byte.
+    The `uv tool install` command comes first, with `[vector]` and a Python:
+    it works from any install, where `kraft admin update` before
+    `_UPDATE_KEEPS_EXTRAS` installs without the extra, on uv's default Python.
+    Only an rc reaches PyPI, so an rc's command names its version there; a beta
+    or alpha, which neither PyPI nor Homebrew carries, names the wheel attached
+    to its own release. Then `kraft admin update --channel <kind>`, which takes
+    the pre-release's kind by the same name, for an install new enough to keep
+    both. A stable release's text is `notes`, byte for byte.
     The changelogs take the plain notes, not this.
     """
     match = _PRE_TAG.fullmatch(tag or "")
@@ -189,11 +205,14 @@ def release_body(tag: str | None, notes: str) -> str:
         return notes
     version, mark = match.groups()
     channel = next(kind for kind, m in PRE_MARKS.items() if m == mark)
-    line = f"This is a pre-release. Install it with `kraft admin update --channel {channel}`"
-    if channel == "rc":
-        line += f', or `uv tool install --force "kraft-sdlc=={version}"`'
-    else:
-        line += ", or `uv tool install --force` the wheel attached below"
+    source = f"=={version}" if channel == "rc" else f" @ {_WHEEL.format(tag=tag, version=version)}"
+    line = (
+        "This is a pre-release. Install it with "
+        f'`uv tool install --force --python 3.13 "kraft-sdlc[vector]{source}"`, '
+        "using the Python you installed Kraft with and leaving out `[vector]` if you don't use "
+        f"vector search, then run `kraft admin restart`. From {_UPDATE_KEEPS_EXTRAS} on, "
+        f"`kraft admin update --channel {channel}` installs it too, keeping both"
+    )
     return f"{line}.\n\n{notes}" if notes else f"{line}.\n"
 
 
