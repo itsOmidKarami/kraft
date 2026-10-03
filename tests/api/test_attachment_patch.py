@@ -191,7 +191,7 @@ def test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with(
     assert Path(filed[0]["source"]).read_text() == "# filed\n"
 
 
-def _node(item, node_id) -> dict:
+def _materialized_node(item, node_id) -> dict:
     nodes = json.loads(item["materialized_chain"])["chain"]["nodes"]
     return next(n for n in nodes if n["id"] == node_id)
 
@@ -201,7 +201,7 @@ def test_an_attachment_patch_keeps_the_chain_frozen_at_intake(client, repo, temp
     A template edited and reloaded after intake must not reach an item whose
     PATCH only touched its attachments."""
     wid = _file(client, repo)
-    before = _node(_item(client, wid), "local_review")
+    before = _materialized_node(_item(client, wid), "local_review")
     default = templates_dir / "chains" / "default.yaml"
     default.write_text(default.read_text().replace(before["message"], "EDITED AFTER INTAKE."))
     assert client.post("/api/templates/reload").status_code == 200
@@ -211,7 +211,7 @@ def test_an_attachment_patch_keeps_the_chain_frozen_at_intake(client, repo, temp
 
     assert r.status_code == 200, r.text
     after = _item(client, wid)
-    assert _node(after, "local_review") == before
+    assert _materialized_node(after, "local_review") == before
     assert "spec_approval" not in _nodes(after)
 
 

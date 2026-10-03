@@ -17,7 +17,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_node
 
 from kraft import analytics, caps, executor, store
 from kraft import policy as _policy
@@ -55,21 +55,8 @@ def _chain(
     def own(policy):
         return {"policy": policy} if policy else {}
 
-    nodes = [
-        {
-            "id": "build",
-            "kind": "exec",
-            **own(node),
-            "steps": [
-                {
-                    "id": "run",
-                    "tasks": [_sub("impl", command, **own(task), **(impl or {}))],
-                    **own(step),
-                }
-            ],
-            **node_fields,
-        }
-    ]
+    run = {"id": "run", "tasks": [_sub("impl", command, **own(task), **(impl or {}))], **own(step)}
+    nodes = [v1_node(steps=[run], **own(node), **node_fields)]
     return ResolvedChain.from_chain(
         Chain.model_validate({"id": "c", **own(chain), "nodes": nodes})
     ).materialize(

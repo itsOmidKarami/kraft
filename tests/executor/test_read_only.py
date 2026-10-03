@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.harness import entry_of, git, write
+from support.harness import entry_of, git, v1_node, write
 from support.workspace import workspace_item
 
 from kraft import store
@@ -47,10 +47,6 @@ def _sub(task_id: str) -> dict:
     return {"id": task_id, "kind": "subprocess", "command": "true"}
 
 
-def _node(steps: list[dict], **fields) -> dict:
-    return {"id": "build", "kind": "exec", "steps": steps, **fields}
-
-
 async def _walk(it) -> str:
     node = it.chain.chain.nodes[0]
     return await walk.walk_node(
@@ -76,7 +72,7 @@ async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it
         "tasks": [_agent()],
         "on_failure": {"tasks": [_sub("fix")]},
     }
-    it = await item_on([_node([step])])
+    it = await item_on([v1_node(steps=[step])])
     git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
     launched = _launches(monkeypatch, lambda cwd: write(cwd, "calc.py", "edited\n"))
 
@@ -97,7 +93,7 @@ async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it
 async def test_an_untracked_file_is_a_change_and_an_ignored_one_is_not(
     item_on, monkeypatch, name, stops
 ):
-    it = await item_on([_node([{"id": "check", "read_only": True, "tasks": [_sub("t")]}])])
+    it = await item_on([v1_node(steps=[{"id": "check", "read_only": True, "tasks": [_sub("t")]}])])
     (it.repo / ".gitignore").write_text("*.log\n")
     git(it.repo, "add", ".gitignore")
     git(it.repo, "commit", "-qm", "ignore logs")
@@ -119,7 +115,7 @@ async def test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_ins
     """`t` fails, its on_failure repair writes (by design, unchecked), and the
     retried `t` writes again: only the retry's file is the violation."""
     task = {**_sub("t"), "on_failure": {"tasks": [_sub("fix")]}}
-    it = await item_on([_node([{"id": "check", "read_only": True, "tasks": [task]}])])
+    it = await item_on([v1_node(steps=[{"id": "check", "read_only": True, "tasks": [task]}])])
     statuses = iter(["failed", "done", "done"])
     writes = {"build.check.t.on_failure.main.fix": "fixed.txt"}
     launched: list[str] = []
@@ -140,7 +136,7 @@ async def test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_ins
 
 
 async def test_a_step_that_is_not_read_only_is_not_checked(item_on, monkeypatch):
-    it = await item_on([_node([{"id": "check", "tasks": [_sub("t")]}])])
+    it = await item_on([v1_node(steps=[{"id": "check", "tasks": [_sub("t")]}])])
     _launches(monkeypatch, lambda cwd: write(cwd, "new.txt", "x\n"))
 
     assert await _walk(it) == "ok"
@@ -150,7 +146,7 @@ async def test_a_step_that_is_not_read_only_is_not_checked(item_on, monkeypatch)
 async def test_a_read_only_node_is_checked_around_all_of_its_steps(item_on, monkeypatch):
     """The write happens in the second step; the violation is the node's."""
     steps = [{"id": "one", "tasks": [_sub("a")]}, {"id": "two", "tasks": [_sub("b")]}]
-    it = await item_on([_node(steps, read_only=True)])
+    it = await item_on([v1_node(steps=steps, read_only=True)])
 
     def during(cwd: Path) -> None:
         if launched[-1] == "build.two.b":
@@ -166,7 +162,7 @@ async def test_a_read_only_node_is_checked_around_all_of_its_steps(item_on, monk
 async def test_a_read_only_step_over_workspace_members_names_the_member_file(
     database, run_dirs, tmp_path, monkeypatch
 ):
-    nodes = [_node([{"id": "check", "read_only": True, "tasks": [_sub("t")]}])]
+    nodes = [v1_node(steps=[{"id": "check", "read_only": True, "tasks": [_sub("t")]}])]
     row, node, worktree = await workspace_item(database, run_dirs, tmp_path, [], nodes=nodes)
     _launches(monkeypatch, lambda cwd: (cwd / "repos" / "pkg" / "new.txt").write_text("x\n"))
 
@@ -192,7 +188,7 @@ async def test_a_sandboxed_read_only_step_that_plants_a_repository_is_not_read_b
     the worktree it sits in (Kraft-nx4id)."""
     sandbox = {"policy": {"sandbox": {"kind": "docker", "image": "kraft/policy:1"}}}
     step = {"id": "check", "read_only": True, "tasks": [_sub("t")]}
-    it = await item_on([_node([step], **sandbox)])
+    it = await item_on([v1_node(steps=[step], **sandbox)])
     head = git(it.repo, "rev-parse", "HEAD")
     await it.database.write(lambda c: store.set_base_ref(c, it.id, head))
 
@@ -223,7 +219,7 @@ def test_a_node_with_a_fix_loop_cannot_be_read_only():
     loop = {"tasks": [_sub("fix")]}
     with pytest.raises(ValidationError, match="a node with a fix_loop cannot be read_only"):
         tm.ExecNode.model_validate(
-            _node([{"id": "s", "tasks": [_sub("t")]}], read_only=True, fix_loop=loop)
+            v1_node(steps=[{"id": "s", "tasks": [_sub("t")]}], read_only=True, fix_loop=loop)
         )
 
 
@@ -231,7 +227,9 @@ def test_a_node_with_a_fix_loop_cannot_be_read_only():
 def test_a_recovery_or_fix_loop_step_cannot_be_read_only(handler):
     shape = {"steps": [{"id": "repair", "read_only": True, "tasks": [_sub("fix")]}]}
     with pytest.raises(ValidationError, match="cannot be read_only: it writes by design"):
-        tm.ExecNode.model_validate(_node([{"id": "s", "tasks": [_sub("t")]}], **{handler: shape}))
+        tm.ExecNode.model_validate(
+            v1_node(steps=[{"id": "s", "tasks": [_sub("t")]}], **{handler: shape})
+        )
 
 
 def test_git_failing_the_same_way_twice_still_counts_as_a_change(tmp_path):

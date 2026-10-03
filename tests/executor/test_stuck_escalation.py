@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_node
 
 from kraft import events, executor, rate_limit_retry, store
 from kraft import policy as _policy
@@ -27,18 +27,14 @@ def _sub(task_id):
 def _node(**fields):
     """prep -> check, one node-level repair, a one-attempt fix loop, and an
     escalation task."""
-    return {
-        "id": "build",
-        "kind": "exec",
-        "steps": [
-            {"id": "prep", "tasks": [_sub("prep")]},
-            {"id": "check", "tasks": [_sub("check")]},
-        ],
-        "on_failure": {"tasks": [_sub("repair")]},
-        "fix_loop": {"tasks": [_sub("fix")], "max_attempts": 1},
-        "escalation": _sub("esc"),
-        **fields,
-    }
+    steps = [{"id": "prep", "tasks": [_sub("prep")]}, {"id": "check", "tasks": [_sub("check")]}]
+    node = v1_node(
+        steps=steps,
+        on_failure={"tasks": [_sub("repair")]},
+        fix_loop={"tasks": [_sub("fix")], "max_attempts": 1},
+        escalation=_sub("esc"),
+    )
+    return {**node, **fields}
 
 
 def _policy_(cap=3):

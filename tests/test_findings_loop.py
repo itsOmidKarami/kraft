@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from support.chain_run import loop_policy, run_chain
-from support.harness import isolated_bd, make_repo, seed_v1_library, v1_resolved
+from support.harness import isolated_bd, make_repo, v1_resolved, v1_seeded_chain
 
 from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
@@ -47,14 +47,6 @@ def _loop_node(node_id, measure: dict) -> dict:
         "tasks": [measure],
         "fix_loop": {"tasks": [_agent("fix")], "judge": _agent("judge")},
     }
-
-
-def _chain(templates_parent: Path, node: dict):
-    """One fix-loop node as a chain, with the `fake` harness its agent tasks
-    name overlaid onto this test's `KRAFT_HOME`. No `env_setup` node: V1
-    prepares the worktree before the first node."""
-    seed_v1_library(templates_parent / "templates", agent_command=_FAKE)
-    return v1_resolved([node])
 
 
 def _policy(tmp_path, *, attempts=3, severities=None) -> policy.Policy:
@@ -95,7 +87,11 @@ def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
     return run_chain(
         call_dir,
-        _chain(call_dir, _loop_node("review", measure or _reviewer())),
+        v1_seeded_chain(
+            call_dir / "templates",
+            [_loop_node("review", measure or _reviewer())],
+            agent_command=_FAKE,
+        ),
         policy=_policy(call_dir, attempts=attempts, severities=severities),
         title="review me",
     )
@@ -572,7 +568,9 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
     tracker = isolated_bd(call_dir)
     repo = make_repo(call_dir)
-    chain = _chain(call_dir, _loop_node("review", _reviewer()))
+    chain = v1_seeded_chain(
+        call_dir / "templates", [_loop_node("review", _reviewer())], agent_command=_FAKE
+    )
 
     async def scenario():
         rd = RunDirs(call_dir / "run").ensure()
@@ -651,7 +649,7 @@ def _run_template(tmp_path, monkeypatch, node, *, attempts=3):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     return run_chain(
         tmp_path,
-        _chain(tmp_path, node),
+        v1_seeded_chain(tmp_path / "templates", [node], agent_command=_FAKE),
         policy=_policy(tmp_path, attempts=attempts),
         title="blind failure",
     )

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from support.harness import v1_node, v1_task
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates import revision
@@ -126,25 +127,17 @@ def _run(id: str, **kw) -> dict:
 def _chain(**maxima):
     """plan -> revision_approval (the revision's gate) -> build -> brief ->
     review (gate) -> feedback -> final (chain_finalized) -> land."""
+    build = v1_task("run", kind="agent", prompt="build it")
     nodes = [
         _run("plan"),
-        {"id": GATE, "kind": "gate", "artifact": "chain_revision"},
-        {
-            "id": "build",
-            "kind": "exec",
-            "policy": {"time_cap_minutes": 60},
-            "tasks": [{"id": "run", "kind": "agent", "harness": "fake", "prompt": "build it"}],
-        },
+        v1_node(GATE, "gate", artifact="chain_revision"),
+        v1_node("build", tasks=[build], policy={"time_cap_minutes": 60}),
         _run("brief"),
-        {"id": "review", "kind": "gate", "artifact": "work_brief", "reject_to": "build"},
+        v1_node("review", "gate", artifact="work_brief", reject_to="build"),
         _run("feedback", on_base_changed={"restart_from": "feedback"}),
         _run("pinned", skippable=False),
-        {"id": "final", "kind": "gate", "chain_finalized": True, "artifact": "review_brief"},
-        {
-            "id": "land",
-            "kind": "exec",
-            "tasks": [{"id": "merge", "kind": "forge", "target": "mr.merge"}],
-        },
+        v1_node("final", "gate", chain_finalized=True, artifact="review_brief"),
+        v1_node("land", tasks=[v1_task("merge", kind="forge")]),
     ]
     instance = InstancePolicy.from_input(InstancePolicyInput.model_validate({"maxima": maxima}))
     return ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(

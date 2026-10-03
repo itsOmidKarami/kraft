@@ -5,7 +5,7 @@ and a reviewer's continuity: its last round's findings and its own last
 session."""
 
 import pytest
-from support.harness import entry_of, v1_named_chain
+from support.harness import entry_of, v1_named_chain, v1_node, v1_task
 
 from kraft import executor
 from kraft.templates.models import AgentInput
@@ -14,8 +14,9 @@ NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _node(**agent_fields):
-    agent = {"id": "judge", "kind": "agent", "harness": "fake", "prompt": "Judge it."}
-    return [{"id": "review", "kind": "exec", "tasks": [{**agent, **agent_fields}]}]
+    """A chain of one node, `review`, whose one task is the agent `judge`."""
+    judge = v1_task("judge", kind="agent", prompt="Judge it.", **agent_fields)
+    return [v1_node("review", tasks=[judge])]
 
 
 @pytest.mark.parametrize("declared", [True, False], ids=["declared", "undeclared"])

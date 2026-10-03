@@ -7,7 +7,7 @@ import json
 import shlex
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_node
 
 from kraft import executor
 from kraft import policy as _policy
@@ -34,15 +34,11 @@ def _walk(it, **kwargs):
     )
 
 
-def _node(steps, **fields):
-    return {"id": "build", "kind": "exec", "steps": steps, **fields}
-
-
 async def test_a_task_recovery_retries_only_the_failed_task(item_on, script):
     """`task-recovery-retries-only-the-task`: its passing co-task is not rerun."""
     script.plan = {"a": ["failed", "done"]}
     it = await item_on(
-        [_node([{"id": "check", "tasks": [_sub("a", on_failure=_fix()), _sub("b")]}])]
+        [v1_node(steps=[{"id": "check", "tasks": [_sub("a", on_failure=_fix()), _sub("b")]}])]
     )
 
     assert await _walk(it) == "completed"
@@ -62,8 +58,8 @@ async def test_a_step_recovery_reruns_every_task_in_the_step_and_no_earlier_step
     script.plan = {"a": ["failed", "done"]}
     it = await item_on(
         [
-            _node(
-                [
+            v1_node(
+                steps=[
                     {"id": "prep", "tasks": [_sub("prep")]},
                     {"id": "check", "tasks": [_sub("a"), _sub("b")], "on_failure": _fix()},
                 ]
@@ -83,8 +79,11 @@ async def test_a_node_recovery_reruns_the_node_from_its_first_step(item_on, scri
     script.plan = {"a": ["failed", "done"]}
     it = await item_on(
         [
-            _node(
-                [{"id": "prep", "tasks": [_sub("prep")]}, {"id": "check", "tasks": [_sub("a")]}],
+            v1_node(
+                steps=[
+                    {"id": "prep", "tasks": [_sub("prep")]},
+                    {"id": "check", "tasks": [_sub("a")]},
+                ],
                 on_failure=_fix(),
             )
         ]
@@ -113,7 +112,7 @@ async def test_the_nearest_handler_wins_and_only_it_runs(item_on, script, declar
     if "step" in declared:
         step["on_failure"] = _fix("step_fix")
     fields = {"on_failure": _fix("node_fix")} if "node" in declared else {}
-    it = await item_on([_node([step], **fields)])
+    it = await item_on([v1_node(steps=[step], **fields)])
 
     assert await _walk(it) == "needs_human"
     handlers = [c for c in script.calls if c.endswith("_fix")]
@@ -129,8 +128,8 @@ async def test_a_concurrent_step_settles_before_recovery_begins(item_on, script)
     script.delay = {"slow": 0.2}
     it = await item_on(
         [
-            _node(
-                [
+            v1_node(
+                steps=[
                     {"id": "check", "tasks": [_sub("fast"), _sub("slow")], "on_failure": _fix()},
                     {"id": "later", "tasks": [_sub("later")]},
                 ]
@@ -149,8 +148,8 @@ async def test_sibling_task_recoveries_run_one_at_a_time_after_the_step_settles(
     script.delay = {"fix_a": 0.1, "fix_b": 0.1}
     it = await item_on(
         [
-            _node(
-                [
+            v1_node(
+                steps=[
                     {
                         "id": "check",
                         "tasks": [
@@ -178,7 +177,7 @@ async def test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops(
     script.plan = {"a": ["failed"], "repair": ["done"]}
     fields = {"fix_loop": {"tasks": [_sub("repair")], "max_attempts": 1}} if with_fix_loop else {}
     it = await item_on(
-        [_node([{"id": "check", "tasks": [_sub("a", on_failure=_fix())]}], **fields)]
+        [v1_node(steps=[{"id": "check", "tasks": [_sub("a", on_failure=_fix())]}], **fields)]
     )
     policy = _policy.Policy(loops={}, default=_policy.Cap(3, 3600))
 
@@ -200,7 +199,12 @@ async def test_a_stop_or_a_question_spends_no_recovery(item_on, script, stop):
     addressed to a human."""
     script.plan = {"a": [stop]}
     it = await item_on(
-        [_node([{"id": "check", "tasks": [_sub("a", on_failure=_fix())]}], on_failure=_fix("n"))]
+        [
+            v1_node(
+                steps=[{"id": "check", "tasks": [_sub("a", on_failure=_fix())]}],
+                on_failure=_fix("n"),
+            )
+        ]
     )
 
     await _walk(it)
@@ -209,7 +213,7 @@ async def test_a_stop_or_a_question_spends_no_recovery(item_on, script, stop):
 
 async def test_a_task_recovery_is_told_the_failure_it_repairs(item_on, script):
     script.plan = {"a": ["failed", "done"]}
-    it = await item_on([_node([{"id": "check", "tasks": [_sub("a", on_failure=_fix())]}])])
+    it = await item_on([v1_node(steps=[{"id": "check", "tasks": [_sub("a", on_failure=_fix())]}])])
 
     await _walk(it)
     [steer] = script.steers["fix"]
@@ -237,7 +241,7 @@ def _stopped_step(scope: str) -> list:
     step = {"id": "check", "tasks": [_sub("a"), b]}
     if scope == "step":
         step["on_failure"] = _fix()
-    return [_node([step], **({"on_failure": _fix()} if scope == "node" else {}))]
+    return [v1_node(steps=[step], **({"on_failure": _fix()} if scope == "node" else {}))]
 
 
 @pytest.mark.parametrize("scope", ["task", "step", "node"])
@@ -283,7 +287,7 @@ async def test_a_step_handler_reruns_a_task_its_own_handler_already_recovered(it
         "tasks": [_sub("a", on_failure=_fix("task_fix")), _sub("b")],
         "on_failure": _fix("step_fix"),
     }
-    it = await item_on([_node([step])])
+    it = await item_on([v1_node(steps=[step])])
 
     assert await _walk(it) == "completed"
     assert sorted(script.calls[:2]) == ["a", "b"]
@@ -314,7 +318,7 @@ async def test_a_measuring_tasks_question_stops_before_node_recovery(
     script.effects = {"a": asks}
     fields = {"fix_loop": {"tasks": [_sub("repair")]}} if with_fix_loop else {}
     it = await item_on(
-        [_node([{"id": "check", "tasks": [_sub("a")]}], on_failure=_fix("n"), **fields)]
+        [v1_node(steps=[{"id": "check", "tasks": [_sub("a")]}], on_failure=_fix("n"), **fields)]
     )
 
     assert await _walk(it, policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600))) == (
@@ -344,7 +348,9 @@ async def test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring
     doubt = "Nothing to repair: the work is already on main; skip, do not retry."
     task = _sub("a", on_failure=_fix()) if scope == "task" else _sub("a")
     step = {"id": "check", "tasks": [task], **({"on_failure": _fix()} if scope == "step" else {})}
-    it = await item_on([_node([step], **({"on_failure": _fix()} if scope == "node" else {}))])
+    it = await item_on(
+        [v1_node(steps=[step], **({"on_failure": _fix()} if scope == "node" else {}))]
+    )
 
     async def concerned(_row):
         result = {"status": "done_with_concerns", "concerns": doubt}

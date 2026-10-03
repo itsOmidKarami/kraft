@@ -12,14 +12,9 @@ from support.harness import entry_of
 
 from kraft.adapters import forge
 from kraft.executor.context import LaunchContext
+from kraft.templates.models import Chain
 
 NO_SETUP = entry_of({"setup_command": ""})
-
-
-def _chain(*nodes):
-    from kraft.templates.models import Chain
-
-    return Chain.model_validate({"id": "c", "nodes": list(nodes)})
 
 
 def _forge(id, target):
@@ -84,10 +79,11 @@ def test_nothing_readies_or_merges_before_the_final_gate(target, where):
     a node ahead of the gate -- is refused when it is loaded, not discovered
     once it has published (Kraft-nwonj)."""
     node = _placed(where, {"id": "t", "kind": "forge", "target": target})
+    draft = _forge("draft", "mr.open_draft")
     with pytest.raises(ValueError, match=f"{target}.*before.*'final'"):
-        _chain(_forge("draft", "mr.open_draft"), node, _FINAL)
+        Chain.model_validate({"id": "c", "nodes": [draft, node, _FINAL]})
     # After the gate, the same node is the ordinary publication.
-    assert _chain(_forge("draft", "mr.open_draft"), _FINAL, node)
+    assert Chain.model_validate({"id": "c", "nodes": [draft, _FINAL, node]})
 
 
 def test_the_seeded_default_chain_publishes_in_the_required_order():

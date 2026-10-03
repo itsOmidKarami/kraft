@@ -10,7 +10,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_task_at
 
 from kraft import caps, escalate, events, executor, gate_review, store
 from kraft.adapters import agent as agent_mod
@@ -31,10 +31,6 @@ def _materialize(nodes, **policy_yaml):
         target=WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate(policy_yaml)),
     )
-
-
-def _task(chain, path):
-    return next(t for n in chain.chain.nodes for t in n.tasks() if t.path == path)
 
 
 async def _ran(it, sid, path, minutes, *, node=None, status="done"):
@@ -87,7 +83,7 @@ async def test_each_levels_default_binds_every_scope_of_its_kind_that_set_none(i
     it = await item_on(chain)
 
     def left(path):
-        hit = it.database.read(lambda c: caps.at_launch(c, it.row(), _task(chain, path)))
+        hit = it.database.read(lambda c: caps.at_launch(c, it.row(), v1_task_at(chain, path)))
         return hit.scope, hit.remaining_s
 
     assert left("slow.main.a") == ("slow", 240 * 60)
@@ -108,7 +104,7 @@ async def test_raising_the_items_own_cap_unsticks_a_capped_item(item_on):
     )
     it = await item_on(chain, "build", policy_override={"time_cap_minutes": 5})
     await _ran(it, "s-old", "build.main.a", 6)
-    task = _task(chain, "build.main.a")
+    task = v1_task_at(chain, "build.main.a")
     assert it.database.read(lambda c: caps.at_launch(c, it.row(), task)).remaining_s <= 0
 
     raised = it.chain.with_item_policy({"time_cap_minutes": 60}).item_policy
@@ -216,7 +212,9 @@ async def test_an_automatic_escalation_turn_counts_toward_its_nodes_running_time
         )
     )
 
-    hit = it.database.read(lambda c: caps.at_launch(c, it.row(), _task(it.chain, "build.main.a")))
+    hit = it.database.read(
+        lambda c: caps.at_launch(c, it.row(), v1_task_at(it.chain, "build.main.a"))
+    )
 
     assert hit.scope == "build"
     assert round(hit.remaining_s / 60) == left

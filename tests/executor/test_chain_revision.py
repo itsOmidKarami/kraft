@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_node, v1_task
 
 from kraft import executor, store
 from kraft.api.routes import gates as gates_route
@@ -45,12 +45,8 @@ def _chain(tmp_path: Path, change: dict) -> list[dict]:
         f"cp {source} .engineering/chain_revisions/w1.md'"
     )
     return [
-        {
-            "id": "revise",
-            "kind": "exec",
-            "tasks": [{"id": "write", "kind": "subprocess", "command": write}],
-        },
-        {"id": GATE, "kind": "gate", "artifact": "chain_revision", "reject_to": "revise"},
+        v1_node("revise", tasks=[v1_task("write", command=write)]),
+        v1_node(GATE, "gate", artifact="chain_revision", reject_to="revise"),
         _run("build"),
         _run("brief"),
     ]

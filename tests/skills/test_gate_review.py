@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, v1_chain, v1_item, write_harness_profiles
+from support.harness import entry_of, v1_chain, v1_item, v1_node, v1_task, write_harness_profiles
 
 from kraft import caps as _caps
 from kraft import events, executor, gate_review, store
@@ -38,23 +38,10 @@ def _reviewer(**extra):
 
 def _chain(rd):
     """spec (exec) -> spec_approval (gate, artifact: spec, reviewed)."""
-    return v1_chain(
-        [
-            {
-                "id": "spec",
-                "kind": "exec",
-                "tasks": [{"id": "author", "kind": "subprocess", "command": "true"}],
-            },
-            {
-                "id": "spec_approval",
-                "kind": "gate",
-                "artifact": "spec",
-                "reject_to": "spec",
-                "auto_review": _reviewer(),
-            },
-        ],
-        repo=rd.base,
+    gate = v1_node(
+        "spec_approval", "gate", artifact="spec", reject_to="spec", auto_review=_reviewer()
     )
+    return v1_chain([v1_node("spec", tasks=[v1_task("author")]), gate], repo=rd.base)
 
 
 def _gate(rd):
@@ -287,20 +274,10 @@ async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_
 def _chain2(rd, *, auto_review=True):
     """implementation (exec) -> human_review_approval (gate, reject_to
     implementation, reviewed unless `auto_review=False`)."""
-    gate = {"id": "human_review_approval", "kind": "gate", "reject_to": "implementation"}
+    gate = v1_node("human_review_approval", "gate", reject_to="implementation")
     if auto_review:
         gate["auto_review"] = _reviewer()
-    return v1_chain(
-        [
-            {
-                "id": "implementation",
-                "kind": "exec",
-                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
-            },
-            gate,
-        ],
-        repo=rd.base,
-    )
+    return v1_chain([v1_node("implementation", tasks=[v1_task("build")]), gate], repo=rd.base)
 
 
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600))

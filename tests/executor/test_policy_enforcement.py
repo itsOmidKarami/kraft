@@ -15,7 +15,7 @@ import dataclasses
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_node
 
 from kraft import escalate, events, gate_review, store
 from kraft import policy as _policy
@@ -35,7 +35,8 @@ def _agent(task_id="implement", **fields):
 
 
 def _node(*tasks, **fields):
-    return [{"id": "implementation", "kind": "exec", "tasks": list(tasks), **fields}]
+    """A chain of one node, `implementation`, running `tasks`."""
+    return [v1_node("implementation", tasks=tasks, **fields)]
 
 
 async def _dispatch(it, launch=NO_SETUP):

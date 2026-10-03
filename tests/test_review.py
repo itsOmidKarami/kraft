@@ -38,7 +38,8 @@ def test_numstat_rename_forms_resolve_to_the_new_path():
     assert review.new_path("plain.py") == "plain.py"
 
 
-def _node(node_id, tasks):
+def _stub_node(node_id, tasks):
+    """A stand-in for a resolved node: its id and one step running `tasks`."""
     return types.SimpleNamespace(
         id=node_id, node=None, steps=[types.SimpleNamespace(tasks=[_t(t) for t in tasks])]
     )
@@ -52,11 +53,11 @@ def _t(task):
 #: subprocess task plus a skilled agent task (not "working" -- `_working`
 #: only counts an unskilled agent task); check_ci: a subprocess task alone.
 NODES = [
-    _node(
+    _stub_node(
         "implementation",
         [AgentTask(id="implement", kind=TaskKind.AGENT, harness="claude", prompt="do it")],
     ),
-    _node(
+    _stub_node(
         "verify",
         [
             SubprocessTask(id="run_tests", kind=TaskKind.SUBPROCESS, command="pytest"),
@@ -69,7 +70,9 @@ NODES = [
             ),
         ],
     ),
-    _node("check_ci", [SubprocessTask(id="wait_ci", kind=TaskKind.SUBPROCESS, command="ci wait")]),
+    _stub_node(
+        "check_ci", [SubprocessTask(id="wait_ci", kind=TaskKind.SUBPROCESS, command="ci wait")]
+    ),
 ]
 
 

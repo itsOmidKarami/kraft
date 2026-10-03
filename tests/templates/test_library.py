@@ -20,7 +20,11 @@ def design() -> TemplateLibrary:
     return TemplateLibrary.from_yaml_dir(DESIGN_TEMPLATES)
 
 
-def write(root: Path, library: dict, chain: dict, chain_id: str = "default") -> TemplateLibrary:
+def write_library(
+    root: Path, library: dict, chain: dict, chain_id: str = "default"
+) -> TemplateLibrary:
+    """`library` as `root/library.yaml` and `chain` as `root/chains/<chain_id>.yaml`,
+    loaded back as the `TemplateLibrary` they make."""
     (root / "chains").mkdir(parents=True, exist_ok=True)
     (root / "library.yaml").write_text(yaml.safe_dump(library))
     (root / "chains" / f"{chain_id}.yaml").write_text(yaml.safe_dump(chain))
@@ -48,7 +52,7 @@ def test_each_chain_file_is_one_selectable_chain(tmp_path):
         "id": "default",
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
     }
-    loaded = write(tmp_path, library, chain)
+    loaded = write_library(tmp_path, library, chain)
     (tmp_path / "chains" / "quick-change.yaml").write_text(
         yaml.safe_dump({**chain, "id": "quick-change"})
     )
@@ -62,7 +66,7 @@ def test_two_chain_files_claiming_one_id_is_an_error_naming_both(tmp_path):
         "id": "default",
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
     }
-    write(tmp_path, library, chain)
+    write_library(tmp_path, library, chain)
     (tmp_path / "chains" / "also-default.yaml").write_text(yaml.safe_dump(chain))
     with pytest.raises(TemplateLibraryError) as exc:
         TemplateLibrary.from_yaml_dir(tmp_path)
@@ -78,7 +82,7 @@ def test_chain_level_extends_is_rejected_explicitly(tmp_path):
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
     }
     with pytest.raises(TemplateLibraryError, match="chain-level 'extends' is not supported"):
-        write(tmp_path, library, chain, chain_id="variant").resolve_chain("variant")
+        write_library(tmp_path, library, chain, chain_id="variant").resolve_chain("variant")
 
 
 def test_an_unknown_chain_is_rejected(design):
@@ -216,7 +220,7 @@ def test_extends_replaces_arrays_wholesale_and_scalars_including_null(tmp_path):
             }
         ],
     }
-    task = only_task(write(tmp_path, library, chain))
+    task = only_task(write_library(tmp_path, library, chain))
     assert task.steering == ["b"]  # array replaced wholesale, not merged
     assert task.model == "gpt-5.6-terra"  # untouched inherited scalar
     assert task.effort is None  # an explicit null replaces
@@ -245,7 +249,7 @@ def test_extends_merges_maps_recursively(tmp_path):
             }
         ],
     }
-    task = only_task(write(tmp_path, library, chain))
+    task = only_task(write_library(tmp_path, library, chain))
     assert task.policy.total_time_cap_minutes == 10
     assert task.wait.polling.initial_interval.total_seconds() == 30
     assert task.wait.polling.max_interval.total_seconds() == 300
@@ -262,7 +266,9 @@ def test_extends_expands_a_reusable_step(tmp_path):
             {"id": "n", "kind": "exec", "steps": [{"id": "checks", "extends": "verification"}]}
         ],
     }
-    assert write(tmp_path, library, chain).resolve_chain("default").task_paths == ("n.checks.run",)
+    assert write_library(tmp_path, library, chain).resolve_chain("default").task_paths == (
+        "n.checks.run",
+    )
 
 
 def test_extends_cannot_change_the_parent_kind(tmp_path):
@@ -278,7 +284,7 @@ def test_extends_cannot_change_the_parent_kind(tmp_path):
         ],
     }
     with pytest.raises(TemplateLibraryError, match="cannot change kind 'agent' to 'subprocess'"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 def test_extends_cannot_change_a_kind_inherited_further_up_the_chain(tmp_path):
@@ -294,7 +300,7 @@ def test_extends_cannot_change_a_kind_inherited_further_up_the_chain(tmp_path):
         ],
     }
     with pytest.raises(TemplateLibraryError, match="cannot change kind 'agent' to 'subprocess'"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 def test_a_gates_auto_review_expands_its_extends(tmp_path):
@@ -307,7 +313,7 @@ def test_a_gates_auto_review_expands_its_extends(tmp_path):
             {"id": "g", "kind": "gate", "auto_review": {"id": "reviewer", "extends": "base"}}
         ],
     }
-    resolved = write(tmp_path, library, chain).resolve_chain("default")
+    resolved = write_library(tmp_path, library, chain).resolve_chain("default")
     review = resolved.nodes[0].auto_review
     assert (review.path, review.task.id, review.task.effort) == (
         "g.auto_review",
@@ -323,7 +329,7 @@ def test_extends_rejects_more_than_one_parent(tmp_path):
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": ["a", "b"]}]}],
     }
     with pytest.raises(TemplateLibraryError, match="exactly one parent"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 def test_extends_rejects_a_cycle(tmp_path):
@@ -338,14 +344,14 @@ def test_extends_rejects_a_cycle(tmp_path):
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "a"}]}],
     }
     with pytest.raises(TemplateLibraryError, match="cycle"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 def test_extends_rejects_a_cross_namespace_parent(tmp_path):
     library = {"tasks": {"implementer": agent_task()}}
     chain = {"id": "default", "nodes": [{"id": "n", "extends": "implementer"}]}
     with pytest.raises(TemplateLibraryError, match="which is a task, not a node"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 def test_extends_rejects_an_unknown_parent(tmp_path):
@@ -355,7 +361,7 @@ def test_extends_rejects_an_unknown_parent(tmp_path):
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "ghost"}]}],
     }
     with pytest.raises(TemplateLibraryError, match="no task named 'ghost'"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 # ── errors name the input to correct
@@ -369,7 +375,7 @@ def test_an_inheritance_error_names_the_file_and_the_component(tmp_path):
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "ghost"}]}],
     }
     with pytest.raises(TemplateLibraryError) as exc:
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
     message = str(exc.value)
     assert "chains/default.yaml" in message
     assert "n.main.t" in message
@@ -382,7 +388,7 @@ def test_a_schema_error_names_the_library_file_the_component_came_from(tmp_path)
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "broken"}]}],
     }
     with pytest.raises(TemplateLibraryError) as exc:
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
     message = str(exc.value)
     assert "library.yaml" in message
     assert "broken" in message
@@ -404,7 +410,7 @@ def test_a_duplicate_identifier_error_names_the_container_and_the_id(tmp_path):
         ],
     }
     with pytest.raises(TemplateLibraryError) as exc:
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
     assert "duplicate step id 's'" in str(exc.value)
     assert "chains/default.yaml" in str(exc.value)
 
@@ -419,7 +425,7 @@ def test_an_unknown_steering_reference_is_rejected(tmp_path):
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
     }
     with pytest.raises(TemplateLibraryError, match="selects no steering profile 'nowhere'"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 @pytest.mark.parametrize("name", ["kraft:no-such-method", "no-such-method"])
@@ -432,7 +438,7 @@ def test_a_skill_that_resolves_to_nothing_is_a_lint_error(tmp_path, name):
         "id": "default",
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
     }
-    lib = write(tmp_path, library, chain)
+    lib = write_library(tmp_path, library, chain)
     with pytest.raises(TemplateLibraryError, match=f"n.main.t.*{name}"):
         lib.resolve_chain("default")
     assert [i.chain for i in lib.lint()] == ["default"]
@@ -449,7 +455,7 @@ def test_a_skill_the_operator_overlay_provides_resolves(tmp_path):
         "id": "default",
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
     }
-    write(tmp_path / "templates", library, chain)
+    write_library(tmp_path / "templates", library, chain)
     lib = TemplateLibrary.from_yaml_dir(tmp_path / "templates", skills_dir=skills)
     assert lib.lint() == []
 
@@ -513,7 +519,7 @@ def test_lint_refuses_a_node_mixing_tasks_with_and_without_produces(tmp_path):
             }
         ],
     }
-    library_obj = write(tmp_path, library, chain)
+    library_obj = write_library(tmp_path, library, chain)
     with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
         library_obj.resolve_chain("default")
     # `lint()` is the reporting door onto the same check, and it names the file
@@ -533,7 +539,7 @@ def test_lint_allows_a_node_whose_every_task_produces_the_same_kind(tmp_path):
             }
         ],
     }
-    assert write(tmp_path, library, chain).lint() == []
+    assert write_library(tmp_path, library, chain).lint() == []
 
 
 def test_the_design_chain_has_no_node_mixing_produces(design):
@@ -560,7 +566,7 @@ def test_lint_refuses_a_node_whose_tasks_produce_two_different_kinds(tmp_path):
         ],
     }
     with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
-        write(tmp_path, library, chain).resolve_chain("default")
+        write_library(tmp_path, library, chain).resolve_chain("default")
 
 
 # ── issue locations (VS Code extension spec, "Config files") ──

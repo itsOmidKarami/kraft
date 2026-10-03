@@ -8,7 +8,7 @@ import shlex
 import sys
 
 import pytest
-from support.harness import entry_of
+from support.harness import entry_of, v1_node
 
 from kraft import executor, store
 from kraft import policy as _policy
@@ -33,14 +33,8 @@ def _fails_until(marker, passes_on: int):
 
 
 def _node(check, fix_steps, attempts=3):
-    return [
-        {
-            "id": "build",
-            "kind": "exec",
-            "tasks": [check],
-            "fix_loop": {"steps": fix_steps, "max_attempts": attempts},
-        }
-    ]
+    """A chain of one node, `build`: `check`, then a fix loop of `fix_steps`."""
+    return [v1_node(tasks=[check], fix_loop={"steps": fix_steps, "max_attempts": attempts})]
 
 
 def _policy_():

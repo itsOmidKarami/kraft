@@ -5,6 +5,7 @@ route is its caller; these pin what it accepts and how it refuses."""
 from __future__ import annotations
 
 import pytest
+from support.harness import v1_node, v1_task
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
@@ -17,24 +18,15 @@ def _agent(id: str, **kw) -> dict:
 
 
 def _chain(**maxima) -> MaterializedChain:
+    implement = _agent("implement", policy={"allowed_tools": ["Read", "Edit"]})
     nodes = [
-        {
-            "id": "build",
-            "kind": "exec",
-            "policy": {"allowed_tools": ["Read", "Edit", "Bash"], "deny_tools": ["WebFetch"]},
-            "steps": [
-                {
-                    "id": "work",
-                    "tasks": [
-                        _agent("implement", policy={"allowed_tools": ["Read", "Edit"]}),
-                        {"id": "check", "kind": "subprocess", "command": "true"},
-                    ],
-                }
-            ],
-            "fix_loop": {"tasks": [_agent("fix")], "max_attempts": 2},
-        },
-        {"id": "short", "kind": "exec", "tasks": [_agent("only")]},
-        {"id": "review", "kind": "gate", "auto_review": _agent("reviewer")},
+        v1_node(
+            policy={"allowed_tools": ["Read", "Edit", "Bash"], "deny_tools": ["WebFetch"]},
+            steps=[{"id": "work", "tasks": [implement, v1_task("check")]}],
+            fix_loop={"tasks": [_agent("fix")], "max_attempts": 2},
+        ),
+        v1_node("short", tasks=[_agent("only")]),
+        v1_node("review", "gate", auto_review=_agent("reviewer")),
     ]
     instance = InstancePolicy.from_input(InstancePolicyInput.model_validate({"maxima": maxima}))
     return ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(

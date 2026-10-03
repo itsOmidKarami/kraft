@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pydantic
 import pytest
+from support.harness import v1_node
 
 from kraft import events, store, usage
 from kraft import policy as _policy
@@ -32,21 +33,8 @@ def _chain(level: str | None = None, cap: dict | None = None):
     def own(at):
         return {"policy": cap} if level == at else {}
 
-    nodes = [
-        {
-            "id": "build",
-            "kind": "exec",
-            **own("node"),
-            "steps": [
-                {
-                    "id": "run",
-                    **own("step"),
-                    "tasks": [_agent("impl", **own("task")), _agent("other")],
-                }
-            ],
-        },
-        {"id": "ship", "kind": "exec", "tasks": [_agent("go")]},
-    ]
+    run = {"id": "run", **own("step"), "tasks": [_agent("impl", **own("task")), _agent("other")]}
+    nodes = [v1_node(steps=[run], **own("node")), v1_node("ship", tasks=[_agent("go")])]
     return ResolvedChain.from_chain(
         Chain.model_validate({"id": "c", **own("chain"), "nodes": nodes})
     ).materialize(

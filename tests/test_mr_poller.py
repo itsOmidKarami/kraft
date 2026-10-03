@@ -4,7 +4,7 @@ without merging, for an item parked at an MR node, and stops it for a human."""
 from __future__ import annotations
 
 import pytest
-from support.harness import v1_chain
+from support.harness import v1_chain, v1_node, v1_task
 
 from kraft import events, mr_poller, store
 
@@ -13,21 +13,8 @@ def _chain(repo, *, mr_node_id: str = "merge"):
     """A two-node chain: a plain exec node (`verify`) and one MR node whose
     one task is `kind: forge`, `target: mr.merge` -- `_is_mr_node` must find
     it by that task, not by this node's id."""
-    return v1_chain(
-        [
-            {
-                "id": "verify",
-                "kind": "exec",
-                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
-            },
-            {
-                "id": mr_node_id,
-                "kind": "exec",
-                "tasks": [{"id": "go", "kind": "forge", "target": "mr.merge"}],
-            },
-        ],
-        repo=repo,
-    )
+    mr = v1_node(mr_node_id, tasks=[v1_task("go", kind="forge", target="mr.merge")])
+    return v1_chain([v1_node("verify", tasks=[v1_task("run")]), mr], repo=repo)
 
 
 def _patch_forge(monkeypatch, fake):

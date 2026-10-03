@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from pydantic import ValidationError
-from support.harness import entry_of, v1_chain, v1_walk, write_harness_profiles
+from support.harness import entry_of, v1_chain, v1_task, v1_walk, write_harness_profiles
 from support.launches import agent_launches
 
 from kraft import doctor
@@ -47,8 +47,8 @@ def _table(profiles, harnesses=HARNESSES) -> HarnessProfileTable:
     )
 
 
-def _task(**fields) -> AgentTask:
-    return AgentTask.model_validate({"id": "t", "kind": "agent", "prompt": "p", **fields})
+def _agent_task_model(**fields) -> AgentTask:
+    return AgentTask.model_validate(v1_task("t", kind="agent", **{"prompt": "p", **fields}))
 
 
 def _live(tmp_path, monkeypatch, tasks: dict, *, profiles=PROFILES, harnesses=HARNESSES) -> Path:
@@ -141,9 +141,9 @@ def test_one_named_provider_accepting_the_effort_is_enough():
 def test_a_task_selecting_a_profile_and_a_model_is_refused():
     for both in ({"model": "opus"}, {"effort": "high"}):
         with pytest.raises(ValidationError, match="profile"):
-            _task(harness="claude", profile="deep", **both)
-    assert _task(harness="claude", profile="deep").profile == "deep"
-    assert _task(harness="claude", model="opus", effort="high").profile is None
+            _agent_task_model(harness="claude", profile="deep", **both)
+    assert _agent_task_model(harness="claude", profile="deep").profile == "deep"
+    assert _agent_task_model(harness="claude", model="opus", effort="high").profile is None
 
 
 def test_a_library_task_selecting_both_routes_is_refused_naming_it(tmp_path, monkeypatch):
@@ -454,7 +454,7 @@ def test_a_profile_fills_the_tasks_own_rung(tmp_path, monkeypatch):
         "claude": {"provider": "claude", "defaults": {"model": "sonnet", "effort": "medium"}}
     }
     _live(tmp_path, monkeypatch, {}, harnesses=harnesses)
-    task = _task(harness="claude", profile="deep")
+    task = _agent_task_model(harness="claude", profile="deep")
     repo = entry_of({"models": {"claude": "haiku"}})
 
     # Beats the repo's model for the harness and the harness defaults.

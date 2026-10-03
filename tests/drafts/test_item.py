@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from support.harness import v1_node, v1_task
 
 from kraft.drafts import item
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -27,29 +28,13 @@ LIBRARY = TemplateLibrary.from_mappings(
 
 def _chain():
     """plan -> build (work: implement, check) -> lint -> review (gate) -> land."""
-    run = [{"id": "run", "kind": "subprocess", "command": "true"}]
+    implement = v1_task("implement", kind="agent", harness="codex", prompt="do")
     nodes = [
-        {"id": "plan", "kind": "exec", "tasks": run},
-        {
-            "id": "build",
-            "kind": "exec",
-            "steps": [
-                {
-                    "id": "work",
-                    "tasks": [
-                        {"id": "implement", "kind": "agent", "harness": "codex", "prompt": "do"},
-                        {"id": "check", "kind": "subprocess", "command": "true"},
-                    ],
-                }
-            ],
-        },
-        {"id": "lint", "kind": "exec", "tasks": run},
-        {"id": "review", "kind": "gate", "artifact": "work_brief"},
-        {
-            "id": "land",
-            "kind": "exec",
-            "tasks": [{"id": "m", "kind": "forge", "target": "mr.merge"}],
-        },
+        v1_node("plan", tasks=[v1_task("run")]),
+        v1_node(steps=[{"id": "work", "tasks": [implement, v1_task("check")]}]),
+        v1_node("lint", tasks=[v1_task("run")]),
+        v1_node("review", "gate", artifact="work_brief"),
+        v1_node("land", tasks=[v1_task("m", kind="forge")]),
     ]
     maxima = {"allowed_harnesses": ["codex"], "max_attempts": 3}
     instance = InstancePolicy.from_input(InstancePolicyInput.model_validate({"maxima": maxima}))
