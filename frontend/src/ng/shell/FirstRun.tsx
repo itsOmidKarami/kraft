@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, FilePlus, GitBranch, Workflow } from "lucide-react";
 import { Link } from "react-router-dom";
 import * as api from "../../api";
 import type { Policy, RepoProbe, TemplateSummary } from "../../types/settings";
@@ -13,6 +13,11 @@ import "./first-run.css";
 export const PROBE_STEP_MS = 450;
 
 const STEPS = ["Connect a repo", "Chain and policy", "First work item"] as const;
+/** The diagram's icon and line under each step's name (BD-2). */
+const STEP_ICON = [GitBranch, Workflow, FilePlus] as const;
+const STEP_SUB = ["a git checkout", "default", "created paused"] as const;
+/** What Kraft reads from a checkout, listed before it has one to read. */
+const PROBES = [".gitmodules", ".beads/", "test command", "forge remote"] as const;
 /** What `docsite/content/1.get-started/1.install.md` gives for Claude Code: the
  *  plugin, which registers the MCP server every Claude worker needs. */
 const PLUGIN_COMMANDS = "claude plugin marketplace add itsOmidKarami/kraft\nclaude plugin install kraft@kraft";
@@ -61,7 +66,8 @@ function useLoad<T>(fetcher: () => Promise<T>): Load<T> {
 }
 
 function StepCircle({ n, state, onClick }: { n: number; state: "done" | "current" | "todo"; onClick?: () => void }) {
-  const inner = state === "done" ? <Check size={12} aria-hidden /> : n;
+  const Icon = STEP_ICON[n - 1];
+  const inner = state === "done" ? <Check size={14} aria-hidden /> : <Icon size={14} aria-hidden />;
   const label = `Step ${n}: ${STEPS[n - 1]}`;
   if (!onClick) return <span className={`fr-circle fr-${state}`} aria-label={label} role="img">{inner}</span>;
   return (
@@ -225,13 +231,13 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
   const nested = missing.filter((d) => d !== ".").map((d) => `${d}/`);
   const chains = useLoad(api.getTemplates);
   const policy = useLoad(api.getPolicy);
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(PLUGIN_COMMANDS);
-      setCopied(true);
+      await navigator.clipboard.writeText(text);
+      setCopied(text);
     } catch {
-      setCopied(false);
+      setCopied(null);
     }
   };
 
@@ -244,38 +250,44 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     <StepCircle key={n} n={n} state={n === step ? "current" : n < step || (n === 1 && added) ? "done" : "todo"} onClick={n <= reached ? () => setStep(n) : undefined} />
   );
 
+  const Icon = STEP_ICON[step - 1];
   return (
     <div className="ng-firstrun">
-      <h1>Nothing on the board yet</h1>
-      <p className="fr-lead">
-        Kraft is running{address && <> at <code>{address}</code></>} with the default chain and policy. Connect a repo and file the first work item; it is created paused, so nothing runs until you start it.
-      </p>
-      <ol className="fr-steps" aria-label="Setup steps">
-        {STEPS.map((label, i) => (
-          <li key={label} className={i + 1 === step ? "fr-step-on" : undefined}>
-            {circle(i + 1)}
-            <span>{label}</span>
-          </li>
-        ))}
-      </ol>
+      <div className="fr-hero">
+        <h1>Nothing on the board yet</h1>
+        <p className="fr-lead">
+          Kraft is running{address && <> at <code>{address}</code></>} with the default chain and policy. Connect a repo and file the first work item; it is created paused, so nothing runs until you start it.
+        </p>
+        <ol className="fr-steps" aria-label="Setup steps">
+          {STEPS.map((label, i) => (
+            <li key={label} className={i + 1 === step ? "fr-step-on" : undefined}>
+              {circle(i + 1)}
+              <span className="fr-step-name">{label}</span>
+              <span className="fr-step-sub">{STEP_SUB[i]}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="fr-agent">
+          Or drive it from an agent session <code>kraft admin init</code>
+          <Button onClick={() => copy("kraft admin init")}><Copy size={12} aria-hidden />{copied === "kraft admin init" ? "Copied" : "Copy"}</Button>
+        </p>
+        <p className="fr-note"><code>kraft admin init</code> registers the MCP server and the /kraft:* skills. Everything Settings writes is plain YAML: diff it, revert it, git init it.</p>
+      </div>
 
       <section className="fr-card" aria-label={STEPS[step - 1]}>
         <div className="fr-main">
+          <p className="fr-crumb">Set up <span aria-hidden>›</span> Step {step} of {STEPS.length}</p>
+          <div className="fr-head">
+            <span className="fr-head-icon" aria-hidden><Icon size={14} /></span>
+            <div><h2>{STEPS[step - 1]}</h2><span className="fr-step-sub">{STEP_SUB[step - 1]}</span></div>
+          </div>
           {step === 1 && (
             <>
-              <h2>Connect a repo</h2>
               <Field label="Path to a local git checkout" error={error}>
                 <input ref={pathField} value={path} spellCheck={false} placeholder={onMac() ? "/Users/you/code/project" : "/home/you/code/project"} disabled={!!added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
                   onKeyDown={(e) => e.key === "Enter" && (probe && !noCommit ? probed && !added && doAdd() : doProbe())} />
               </Field>
-              {probe && (
-                <ul className="fr-probes" aria-label="Probe results">
-                  {rows.map(([k, v], i) => (
-                    <li key={k}><span>{k}</span><span className={i < shown ? undefined : "fr-pending"}>{i < shown ? v : "checking…"}</span></li>
-                  ))}
-                </ul>
-              )}
               <div className="fr-actions">
                 {added ? (
                   <Button variant="primary" onClick={() => go(2)}>Continue</Button>
@@ -288,6 +300,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
                 ) : (
                   <Button variant="primary" disabled={!path.trim() || probing} onClick={doProbe}>{probing ? "Probing…" : "+ Add repo"}</Button>
                 )}
+                {!added && <Button onClick={() => go(2)}>Skip to chain →</Button>}
                 {added && <span className="fr-ok">Added {added}</span>}
               </div>
               {added && disabled && <p>No test command: connected disabled. In <Link to="/settings/repos" className="fr-link">Settings › Repos</Link>, set its test command and Enable it, then publish.</p>}
@@ -298,7 +311,6 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
           )}
           {step === 2 && (
             <>
-              <h2>Chain and policy</h2>
               <dl className="fr-facts">
                 <dt>Chain</dt>
                 <dd>{chains.state === "loading" ? "reading…" : chains.state === "error" ? "Could not read the chains." : chainLine(chains.value)}</dd>
@@ -313,7 +325,6 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
           )}
           {step === 3 && (
             <>
-              <h2>First work item</h2>
               <p>It is created paused, so nothing runs until you start it.</p>
               {disabled && added && <p>{added} is disabled, so New work item cannot file to it yet. Set its test command and Enable it in <Link to="/settings/repos" className="fr-link">Settings › Repos</Link> first.</p>}
               <div className="fr-actions">
@@ -323,14 +334,29 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
               <h3>Before you start it: register Kraft with Claude Code</h3>
               <p>Claude workers need Kraft's MCP server, or Kraft refuses to launch them. Install the Kraft plugin, which also adds the /kraft:* skills:</p>
               <pre className="fr-cmd">{PLUGIN_COMMANDS}</pre>
-              <Button onClick={copy}><Copy size={14} aria-hidden />{copied ? "Copied" : "Copy commands"}</Button>
+              <Button onClick={() => copy(PLUGIN_COMMANDS)}><Copy size={14} aria-hidden />{copied === PLUGIN_COMMANDS ? "Copied" : "Copy commands"}</Button>
               <p>Then open a Claude Code session in your repo and run <code>/kraft:onboard</code>. The repo is connected already: it checks the setup and test commands against the repo's own docs and CI, offers to rehearse them with <code>kraft repo connect --verify</code>, and confirms <code>kraft admin doctor</code> passes.</p>
               <p>Or, without the plugin, run <code>kraft admin init</code>. Not both.</p>
             </>
           )}
         </div>
         <aside className="fr-aside">
-          {step === 1 && <><h3>Kraft probes</h3><p>a local git checkout · .gitmodules, .beads/, the test and setup commands and the forge remote</p></>}
+          {step === 1 && (
+            <>
+              <h3>Kraft probes</h3>
+              {probe ? (
+                <ul className="fr-probes" aria-label="Probe results">
+                  {rows.map(([k, v], i) => (
+                    <li key={k}><span>{k}</span><span className={i < shown ? undefined : "fr-pending"}>{i < shown ? v : "checking…"}</span></li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="fr-probes is-todo" aria-label="What Kraft probes">
+                  {PROBES.map((k) => <li key={k}><span><span className="fr-probe-dot" aria-hidden />{k}</span><span className="fr-pending">after you add</span></li>)}
+                </ul>
+              )}
+            </>
+          )}
           {step === 2 && <><h3>Defaults</h3><p>Every item uses the default chain and the policy below unless it names another. Everything Templates and Settings write is YAML in $KRAFT_HOME/config (~/.kraft/config by default).</p></>}
           {step === 3 && <><h3>On create</h3><p>Filed from a title, or from an existing spec or plan. It waits for you to start it.</p></>}
         </aside>

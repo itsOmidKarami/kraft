@@ -224,7 +224,15 @@ export function BoardPage() {
     </div>
   );
   // FirstRun's last step opens the composer, which lives on the board.
-  if (fresh && !query.new) return <>{restart}<FirstRun onDone={() => setFresh(false)} /></>;
+  // "+ New work item" stays in the header over first-run (BD-2): one filed from it ends the setup.
+  if (fresh && !query.new)
+    return (
+      <>
+        <HeaderActions><button type="button" className="btn btn-primary" onClick={() => setQuery({ new: true })}>+ New work item</button></HeaderActions>
+        {restart}
+        <FirstRun onDone={() => setFresh(false)} />
+      </>
+    );
 
   const count = (f: (i: WorkItem) => boolean) => String(items.filter(f).length);
   const repos = [...new Set(items.map((i) => i.repo))].sort((a, b) => repoName(a).localeCompare(repoName(b)));

@@ -78,10 +78,14 @@ describe("BoardPage, against a server older than its interface (R10c-01)", () =>
 });
 
 describe("BoardPage", () => {
-  it("shows first-run only when no repo is connected", async () => {
+  it("shows first-run only when no repo is connected, with + New work item still in the header (BD-2)", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    vi.spyOn(api, "getTemplates").mockResolvedValue([]);
     board();
     expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "+ New work item" }));
+    expect(where()).toBe("/?new=1");
+    expect(screen.getByRole("region", { name: "New work item" })).toBeInTheDocument();
   });
 
   it("brings back a first-run left part-way while its repo is connected, and starts over once no repo is", async () => {

@@ -68,6 +68,26 @@ describe("FirstRun", () => {
     expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveAttribute("placeholder", placeholder);
   });
 
+  it("offers the agent-session route with its command to copy, and lists what Kraft probes before a path is given (BD-2)", async () => {
+    const user = setup();
+    mount();
+    expect(screen.getByText(/Or drive it from an agent session/)).toHaveTextContent("kraft admin init");
+    await user.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await navigator.clipboard.readText()).toBe("kraft admin init");
+    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    const probes = screen.getByRole("list", { name: "What Kraft probes" });
+    expect([...probes.querySelectorAll("li")].map((li) => li.textContent)).toEqual([".gitmodulesafter you add", ".beads/after you add", "test commandafter you add", "forge remoteafter you add"]);
+  });
+
+  it("skips to the chain step without a repo", async () => {
+    const user = setup();
+    mount();
+    expect(screen.getByText(/^Set up/)).toHaveTextContent("Set up › Step 1 of 3");
+    await user.click(screen.getByRole("button", { name: "Skip to chain →" }));
+    expect(screen.getByRole("heading", { name: "Chain and policy" })).toBeInTheDocument();
+    expect(screen.getByText(/^Set up/)).toHaveTextContent("Set up › Step 2 of 3");
+  });
+
   it("names the address the server is on", async () => {
     mount();
     expect(await screen.findByText("127.0.0.1:4317")).toBeInTheDocument();
