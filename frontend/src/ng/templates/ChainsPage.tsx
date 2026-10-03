@@ -322,7 +322,8 @@ function Editor({ chain, node, draft }: { chain: string; node?: string; draft: C
             <Pencil size={14} aria-hidden />
           </IconButton>
         )}
-        <Button variant="primary" aria-pressed={review} onClick={review ? endReview : startReview}>Review &amp; publish</Button>
+        {/* With no draft there is nothing to publish: the server would answer 404 (R8b-04), as Repos, Policy and Harnesses already know. */}
+        <Button variant="primary" aria-pressed={review} disabled={!review && !view.draft} title={!review && !view.draft ? "Nothing to publish: no draft" : undefined} onClick={review ? endReview : startReview}>Review &amp; publish</Button>
       </HeaderActions>
       <div className={`tpl-area${s.level === "node" ? " has-strip" : ""}${s.level === "node" && selNode && kindOf(r, selNode) === "exec" ? " has-bottom" : ""}`}>
         {s.level === "chain" ? (

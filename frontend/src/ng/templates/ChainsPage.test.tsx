@@ -150,6 +150,13 @@ describe("Chains page: the chain canvas", () => {
     ta.remove();
   });
 
+  it("offers no Review & publish on a published chain with no draft: there is nothing to publish", async () => {
+    mount();
+    await canvas();
+    expect(screen.getByText("published")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review & publish" })).toBeDisabled();
+  });
+
   it("reviews on the chain canvas: unchanged nodes fade, changed ones say what, removed ones are ghosts where they stood", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(view({
       changes: [{ path: "implementation.main.implement", kind: "change", summary: "model" }, { path: "plan", kind: "remove", summary: "removed" }],

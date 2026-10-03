@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Inspector } from "../graph/Inspector";
 import type { useResizable } from "../graph/useResizable";
+import { detailOf } from "../http";
 import { Button } from "../ui/Button";
 import { showToast } from "../ui/Toast";
 import { folded, lineDiff } from "./draft/lineDiff";
@@ -101,6 +102,8 @@ export function ReviewPane({ draft, scope, published, libraryPublished, area, op
       if (gone) onGone?.(deleted ? null : renamedTo);
       else onDone();
     } else if (a.status === 422) setRefused((a.body as { problems?: Problem[] }).problems ?? null);
+    // A 409 shows its diff here; any other refusal says why, never nothing.
+    else if (a.status !== 409) showToast(`Couldn't publish: ${detailOf(a.body)}`);
   };
   const discard = async () => {
     setAsking(false);
