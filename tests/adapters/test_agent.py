@@ -751,7 +751,7 @@ def _v1_agent_task(**fields):
 def _claude_profile():
     """A profile `claude` on the provider of that name, for a task selecting it."""
     write_harness_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates", {"claude": {"provider": "claude"}}
+        Path(os.environ["KRAFT_HOME"]) / "config", {"claude": {"provider": "claude"}}
     )
 
 
@@ -782,7 +782,7 @@ def test_a_task_overrides_its_harness_profiles_defaults():
     profile = {"provider": "claude", "executable": "/opt/claude-wrapper"}
     defaults = {"model": "sonnet", "effort": "medium", "permission_mode": "plan"}
     write_harness_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates", {"review": {**profile, "defaults": defaults}}
+        Path(os.environ["KRAFT_HOME"]) / "config", {"review": {**profile, "defaults": defaults}}
     )
     task = _v1_agent_task(id="t", harness="review", prompt="p", effort="high")
 

@@ -57,7 +57,7 @@ def test_reload_prints_the_count(app, capsys):
 
 
 def test_reload_reports_invalid_templates_and_exits_1(app, capsys):
-    templates_dir = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    templates_dir = Path(os.environ["KRAFT_CONFIG_DIR"])
     (templates_dir / "library.yaml").write_text("tasks: [unclosed\n")
     with pytest.raises(SystemExit) as caught:
         cli.main(["admin", "reload"])
@@ -66,7 +66,7 @@ def test_reload_reports_invalid_templates_and_exits_1(app, capsys):
 
 
 def test_reload_reports_a_refused_policy_and_exits_1(app, capsys):
-    templates_dir = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    templates_dir = Path(os.environ["KRAFT_CONFIG_DIR"])
     (templates_dir / "policy.yaml").write_text("default: [unclosed\n")
     with pytest.raises(SystemExit) as caught:
         cli.main(["admin", "reload"])
@@ -94,7 +94,7 @@ def test_admin_templates_lint_of_a_clean_library_exits_0(app, capsys):
 
 
 def test_admin_templates_lint_prints_each_error_and_exits_1(app, capsys):
-    chains = Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "chains"
+    chains = Path(os.environ["KRAFT_CONFIG_DIR"]) / "chains"
     (chains / "garbled.yaml").write_text("nodes: [unclosed\n")
     with pytest.raises(SystemExit) as caught:
         cli.main(["admin", "templates", "lint"])
@@ -111,7 +111,7 @@ def test_admin_templates_lint_dir_reads_the_shipped_library_with_no_server(monke
         raise AssertionError("--dir must not call the server")
 
     monkeypatch.setattr(client, "lint_templates", broken)
-    shipped = Path(__file__).resolve().parents[2] / "templates"
+    shipped = Path(__file__).resolve().parents[2] / "config"
     cli.main(["admin", "templates", "lint", "--dir", str(shipped)])
     assert "no errors" in capsys.readouterr().out
 
@@ -155,7 +155,7 @@ def test_admin_templates_show_resolved_prints_the_expanded_chain(app, capsys):
 def test_admin_templates_show_prints_the_saved_template(app, capsys):
     """Without `--resolved`: the chain file as its author wrote it."""
     cli.main(["admin", "templates", "show", "default"])
-    saved = (Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "chains" / "default.yaml").read_text()
+    saved = (Path(os.environ["KRAFT_CONFIG_DIR"]) / "chains" / "default.yaml").read_text()
     assert capsys.readouterr().out == saved
 
 
@@ -221,7 +221,7 @@ def test_reindex_unknown_repo_is_a_kraft_message(app, capsys):
 def test_serve_writes_and_clears_the_pidfile(tmp_path, monkeypatch):
     """`kraft admin stop` needs a pid, and a stopped server must leave none."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     seen = {}
 
     def fake_run(self, *args, **kwargs):
@@ -233,11 +233,15 @@ def test_serve_writes_and_clears_the_pidfile(tmp_path, monkeypatch):
     assert not RunDirs(tmp_path / "run").pid.exists()
 
 
-def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("home", ["pointed-by-hand", "1.x-at-the-default"])
+def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys, home):
     """Two servers on one KRAFT_HOME share databases and worktrees with no port
-    conflict to reveal it."""
+    conflict to reveal it; a 1.x home a live 1.4 reads stays under its old name."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    old = fake_templates_dir(tmp_path, "true")  # found at the default by its old name
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(old) if home == "pointed-by-hand" else "")
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", "")
     pid_path = RunDirs(tmp_path / "run").pid
     held = hold_pidfile(pid_path)
     monkeypatch.setattr(
@@ -249,13 +253,14 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys)
         cli.admin._serve()
     assert "already running" in capsys.readouterr().err
     assert pid_path.exists()
+    assert (old / "library.yaml").is_file() and not (tmp_path / "config").exists()
     held.release()
 
 
 def test_a_stale_pidfile_does_not_block_serve(tmp_path, monkeypatch):
     """A pidfile that outlived a SIGKILLed server is stale, not a conflict."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     pid_path = RunDirs(tmp_path / "run").pid
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text("999999")
@@ -420,7 +425,7 @@ def test_serve_exports_its_identity_for_workers(tmp_path, monkeypatch):
     whatever it finds on a port against the daemon it actually is, rather than
     assume it is stale and kill it (Kraft-f8u3)."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.setenv("KRAFT_PORT", "9321")
     # setenv, not delenv(raising=False): monkeypatch only records an undo for a
     # key that existed before the call, so delenv on an already-absent var
@@ -438,7 +443,7 @@ def test_serve_exports_its_identity_for_workers(tmp_path, monkeypatch):
 
 def test_serve_records_attached_mode_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.delenv("KRAFT_DETACHED", raising=False)
     seen = {}
     mode_path = RunDirs(tmp_path / "run").mode
@@ -454,7 +459,7 @@ def test_serve_records_attached_mode_by_default(tmp_path, monkeypatch):
 
 def test_serve_records_detached_mode_when_asked(tmp_path, monkeypatch):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.setenv("KRAFT_DETACHED", "1")
     seen = {}
     mode_path = RunDirs(tmp_path / "run").mode
@@ -480,7 +485,7 @@ def test_restart_with_no_server_says_nothing_was_restarted_and_fails(tmp_path, m
 def test_start_detached_waits_for_health_not_just_the_pidfile(tmp_path, monkeypatch, capsys):
     """Kraft-9efnk.22 / #260: the pidfile lands before uvicorn binds."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     run_dirs = RunDirs(tmp_path / "run").ensure()
     FakeProc = type("FakeProc", (), {"poll": lambda self: None})
 
@@ -604,14 +609,14 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
     start` for real, sends a real SIGTERM, and times the real exit.
 
     `_isolated_kraft_home` (autouse) already gives it KRAFT_HOME and a free
-    KRAFT_PORT; this only adds KRAFT_RUN_DIR/KRAFT_TEMPLATES_DIR on top."""
+    KRAFT_PORT; this only adds KRAFT_RUN_DIR/KRAFT_CONFIG_DIR on top."""
     run_dir = tmp_path / "run"
     templates = fake_templates_dir(tmp_path, "true")
     port = int(os.environ["KRAFT_PORT"])
     spawned_at = time.monotonic()
     proc = subprocess.Popen(
         [sys.executable, "-m", "kraft", "admin", "start"],
-        env=child_env({"KRAFT_RUN_DIR": str(run_dir), "KRAFT_TEMPLATES_DIR": str(templates)}),
+        env=child_env({"KRAFT_RUN_DIR": str(run_dir), "KRAFT_CONFIG_DIR": str(templates)}),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -648,7 +653,7 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
 )
 def test_serve_refuses_when_the_address_already_answers(tmp_path, monkeypatch, squatter_host):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
         squatter.bind((squatter_host, 0))
         squatter.listen(1)
@@ -668,7 +673,7 @@ def test_serve_probes_127_0_0_1_when_its_own_bind_is_a_wildcard(tmp_path, monkey
     # A wildcard bind is refused outright without a password (_bind, unrelated
     # to this test) -- set one so the address check is what actually runs.
     (templates_dir / "access.yaml").write_text("password_hash: x\n")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
         squatter.bind(("127.0.0.1", 0))
         squatter.listen(1)
@@ -682,7 +687,7 @@ def test_serve_probes_127_0_0_1_when_its_own_bind_is_a_wildcard(tmp_path, monkey
 def test_serve_proceeds_when_the_address_is_free(tmp_path, monkeypatch):
     """A free ephemeral port (nothing bound it) must not be refused."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
@@ -701,7 +706,7 @@ def test_serve_proceeds_when_the_address_is_free(tmp_path, monkeypatch):
 
 def test_shutdown_logs_the_signal(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")  # keep this test's own stderr intact
 
     def fake_run(self, *a, **k):
@@ -714,7 +719,7 @@ def test_shutdown_logs_the_signal(tmp_path, monkeypatch, capsys):
 
 def test_shutdown_logs_an_unhandled_exception(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
 
     def fake_run(self, *a, **k):
@@ -739,7 +744,7 @@ def test_a_foreground_start_writes_server_log_too(tmp_path, monkeypatch, capfd):
     it corrupts capture for every test that runs after this one in-process.
     """
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.delenv("KRAFT_LOG_REDIRECTED", raising=False)
 
     def fake_run(self, *a, **k):
@@ -754,7 +759,7 @@ def test_a_foreground_start_writes_server_log_too(tmp_path, monkeypatch, capfd):
 
 def test_large_log_is_rotated_before_a_start(tmp_path, monkeypatch, capfd):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     monkeypatch.delenv("KRAFT_LOG_REDIRECTED", raising=False)
     log_path = RunDirs(tmp_path / "run").logs / "server.log"
     log_path.parent.mkdir(parents=True)
@@ -784,7 +789,7 @@ def test_client_refuses_a_mismatched_run_dir(app, monkeypatch):
 def test_reload_exits_1_on_a_chain_that_does_not_resolve(app, capsys):
     """Kraft-n1zp9: the library parses, one chain does not resolve -- reload
     used to print "reloaded 2 template(s)" and exit 0."""
-    templates_dir = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    templates_dir = Path(os.environ["KRAFT_CONFIG_DIR"])
     (templates_dir / "chains" / "broken.yaml").write_text(
         "id: broken\nnodes:\n  - {id: n, extends: no_such_node}\n"
     )

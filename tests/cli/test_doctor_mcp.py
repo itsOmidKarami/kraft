@@ -73,7 +73,7 @@ def test_mcp_check_still_only_warns_when_one_repo_registers_it_and_another_does_
 def _templates() -> Path:
     import os
 
-    return Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    return Path(os.environ["KRAFT_CONFIG_DIR"])
 
 
 @pytest.mark.parametrize("connected", [True, False], ids=["a-repo-connected", "no-repo"])

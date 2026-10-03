@@ -25,7 +25,14 @@ import yaml
 
 from kraft import client, config, permission_hooks, pidfile, render
 from kraft.cli import common, templates
-from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.paths import (
+    BUNDLED,
+    RunDirs,
+    config_dir,
+    default_config_dir,
+    default_run_dir,
+    pre_2_config_dir,
+)
 from kraft.policy import CarriedPolicy
 
 #: launchd label / systemd unit name. One daemon, one name -- not
@@ -41,6 +48,8 @@ _SYSTEMD_UNIT = "kraft.service"
 _INSTANCE_ENV_VARS = (
     "KRAFT_HOME",
     "KRAFT_RUN_DIR",
+    "KRAFT_CONFIG_DIR",
+    # Its 1.x name, carried so a shell still pointing with it supervises the same instance.
     "KRAFT_TEMPLATES_DIR",
     "KRAFT_SKILLS_DIR",
     "KRAFT_HOST",
@@ -195,42 +204,234 @@ def _cmd_uninstall_service(ns: argparse.Namespace) -> None:
         raise SystemExit(f"kraft admin uninstall-service: unsupported platform {sys.platform}")
 
 
+def adopt_pre_2_home(in_use: Path) -> bool:
+    """The 2.0 rename: a home whose config still sits in 1.x's `templates/`
+    becomes `config/`, once, before anything reads it. True if it moved
+    anything.
+
+    `in_use` is the directory this process reads (`paths.config_dir()`). Only
+    a home at the default location is adopted, so `in_use` must be
+    `$KRAFT_HOME/config` or `$KRAFT_HOME/templates` itself: 1.4's
+    `install-service` wrote `KRAFT_TEMPLATES_DIR` into the unit with exactly
+    that default, and the rename must follow it, not seed an empty `config/`
+    beside it. A directory pointed at anywhere else is the operator's to name.
+    `templates/` must be a 1.x home (a `library.yaml`) or a 0.x one (a
+    `registry.yaml`, which `kraft admin update` then replaces where it now is).
+
+    One rename, then `templates` is left as a relative link to `config`: a 1.4
+    process still running (an MCP server under an agent, 1.4's own
+    `update --restart` waiting on the port) keeps finding its `access.yaml`,
+    and a rollback to 1.4 finds the home where it looks. A `config/` already
+    made before this start (the harness guide's `mkdir -p
+    ~/.kraft/config/harnesses`) holding no `library.yaml` gets each entry it
+    lacks moved in instead; an entry both hold is left in `templates/`, and
+    `kraft admin doctor` names both directories. A rename the filesystem
+    refuses is reported and the home read where it is (`paths.config_dir`).
+    The keys 2.0 moved between files are `carry_moved_keys`'s, run by the
+    same start."""
+    if os.environ.get("KRAFT_CONFIG_DIR"):
+        # A 2.0 name, set on purpose: the directory it names is the
+        # operator's, never renamed, merged into or refused, wherever it is.
+        return False
+    home = default_config_dir()
+    old = home.with_name("templates")
+    # A 0.x update interrupted between its two renames left the home staged
+    # under the old name: finish it there first, or it is stranded.
+    finish_interrupted_update(old)
+    if old.is_symlink() or not old.is_dir():
+        return False
+    if os.path.realpath(in_use) not in (os.path.realpath(home), os.path.realpath(old)):
+        return False
+    if pre_2_config_dir() != old:
+        return False
+    reads_old = os.path.realpath(in_use) == os.path.realpath(old)
+    if home.exists() or home.is_symlink():
+        if not home.is_dir() or home.is_symlink() or (home / "library.yaml").exists():
+            return False
+        if reads_old:
+            # A merge could leave a clash behind in `templates/`, which this
+            # process would then read without its library and seed over.
+            raise SystemExit(
+                f"kraft: {old} (named by KRAFT_TEMPLATES_DIR) and {home} both exist. "
+                f"Merge what {old} holds into {home} and remove {old}, then unset "
+                f"KRAFT_TEMPLATES_DIR or point it at {home}; or remove {home} if it holds "
+                "nothing you need. Then start Kraft again."
+            )
+    try:
+        if home.exists():
+            moved = _merge_into(old, home)
+        else:
+            old.rename(home)
+            moved = [f"moved {old} to {home}"]
+    except OSError as e:
+        print(
+            f"kraft: could not move {old} to {home} ({e}); reading it where it is. "
+            "Move it by hand with the server stopped.",
+            file=sys.stderr,
+        )
+        return False
+    if not old.exists():
+        try:
+            old.symlink_to(home.name, target_is_directory=True)
+        except OSError as e:
+            print(
+                f"kraft: moved {old} to {home}, but could not leave a link at {old} ({e}); "
+                "a 1.4 process still running reads its old path",
+                file=sys.stderr,
+            )
+    for line in moved:
+        print(f"kraft: {line}: the config directory is config/ since 2.0", file=sys.stderr)
+    if old.is_dir() and not old.is_symlink():
+        left = ", ".join(sorted(p.name for p in old.iterdir()))
+        print(
+            f"kraft: {old} still holds {left}, which {home} also has; "
+            "merge them by hand (kraft admin doctor names both)",
+            file=sys.stderr,
+        )
+    return True
+
+
+def _merge_into(old: Path, home: Path) -> list[str]:
+    """Move each entry of `old` that `home` lacks (or holds only as an empty
+    directory) into `home`; `old` is removed once nothing is left in it."""
+    moved = []
+    for entry in sorted(old.iterdir()):
+        target = home / entry.name
+        if target.is_dir() and not target.is_symlink() and not any(target.iterdir()):
+            target.rmdir()
+        if target.exists() or target.is_symlink():
+            continue
+        entry.rename(target)
+        moved.append(f"moved {entry} to {target}")
+    if not any(old.iterdir()):
+        old.rmdir()
+    return moved
+
+
+def carry_moved_keys(config_dir: Path) -> list[str]:
+    """Move what 2.0 reads from another file: `intake.yaml`'s `max_concurrent`
+    into `policy.yaml` (unless it already sets one), and `policy.yaml`'s
+    `triggers:` onto `intake.yaml`'s `schedules:`. Run by every start, in
+    whichever directory is in use; a home with nothing left to move is not
+    written. Returns a line per move.
+
+    Each file is rewritten over its own text (`drafts.preserve`), so its
+    comments stay, and through a symlink to wherever the file really is. The
+    triggers move only if `intake.yaml` then still loads (`config.Intake`):
+    1.4 ignored a key 2.0's schedule refuses (an `enabled: false`), and an
+    `intake.yaml` that fails to load turns auto-intake off with every
+    schedule in it. Left where they are, they are still read and fire. Only
+    the entries `schedules:` lacks are added, and `intake.yaml` is written
+    first: a start interrupted between the two writes moves nothing twice.
+    A file that does not parse is left alone, and its reader says why."""
+    import pydantic
+    import yaml
+
+    from kraft.config import Intake, write_text
+    from kraft.drafts import preserve
+
+    def load(name: str) -> tuple[Path, str, dict] | None:
+        path = Path(os.path.realpath(config_dir / name))
+        try:
+            text = path.read_text() if path.is_file() else ""
+            data = yaml.safe_load(text) if text.strip() else {}
+        except (OSError, ValueError, yaml.YAMLError):
+            return None
+        return (path, text, data) if isinstance(data, dict) else None
+
+    moved: list[str] = []
+    intake, policy = load("intake.yaml"), load("policy.yaml")
+    if intake is None or policy is None:
+        return moved
+    (intake_path, intake_text, intake_data), (policy_path, policy_text, policy_data) = (
+        intake,
+        policy,
+    )
+    new_intake, new_policy = dict(intake_data), dict(policy_data)
+    if "max_concurrent" in new_intake:
+        value = new_intake.pop("max_concurrent")
+        if "max_concurrent" not in new_policy and isinstance(value, int):
+            new_policy["max_concurrent"] = value
+            moved.append(
+                f"intake.yaml: max_concurrent {value} moved to policy.yaml, which reads it"
+            )
+        else:
+            moved.append("intake.yaml: dropped max_concurrent; policy.yaml's is the one read")
+    triggers = new_policy.get("triggers")
+    if isinstance(triggers, list) and triggers:
+        have = new_intake.get("schedules")
+        have = have if isinstance(have, list) else []
+        add = [t for t in triggers if t not in have]
+        candidate = {**new_intake, "schedules": [*have, *add]}
+        try:
+            Intake.model_validate(candidate)
+        except pydantic.ValidationError as e:
+            why = e.errors()[0]
+            where = ".".join(str(p) for p in why["loc"])
+            moved.append(
+                f"policy.yaml: triggers left where they are, still read: intake.yaml's "
+                f"schedules would refuse them ({where}: {why['msg']})"
+            )
+        else:
+            new_intake = candidate
+            del new_policy["triggers"]
+            dupes = len(triggers) - len(add)
+            moved.append(
+                f"policy.yaml: {len(add)} trigger(s) moved to intake.yaml's schedules"
+                + (f" ({dupes} already there)" if dupes else "")
+            )
+    elif isinstance(triggers, list):
+        del new_policy["triggers"]
+        moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
+    if new_intake != intake_data:
+        write_text(intake_path, preserve.rewrite(intake_text, new_intake))
+    if new_policy != policy_data:
+        write_text(policy_path, preserve.rewrite(policy_text, new_policy))
+    return moved
+
+
 def seed_home(templates_dir: Path) -> bool:
     """Copy the packaged config into a home that has none. True if it seeded.
+
+    A 1.x home is adopted first (`adopt_pre_2_home`), so its `templates/` is
+    never re-seeded beside a fresh `config/`.
 
     Only ever creates. An upgrade must not overwrite a policy the operator
     edited, and `access.yaml` is never bundled — it holds a password hash and a
     bind address that belong to one machine. `notify.yaml` is never bundled
     either, for the same reason: it usually holds a webhook URL with a bearer
     token embedded, and that belongs to one machine too. Reachable today by
-    anyone who points `KRAFT_TEMPLATES_DIR` at a checkout with a live
+    anyone who points `KRAFT_CONFIG_DIR` at a checkout with a live
     notify.yaml and runs `just install` -- if either file ever slips into
-    `BUNDLED / "templates"`, it must still not reach a seeded home.
+    `BUNDLED / "config"`, it must still not reach a seeded home.
 
     A directory made before the first start, holding only what the docs say
     to write there (a `sandbox.yaml`, a `detectors.yaml`), has no
     `library.yaml`: each bundled file it lacks is added beside the ones it
     has, and the whole directory is then the operator's alone, as a seeded
     one is. A home with a `library.yaml` was seeded, and one with a legacy
-    registry is a pre-V1 home for `kraft admin update`; neither is touched.
+    registry is a pre-V1 home for `kraft admin update` (adopted under its 2.0
+    name first, so that command finds it); neither is touched.
     Nor is a directory holding none of Kraft's config names: a mistyped
-    `KRAFT_TEMPLATES_DIR` must not fill some other directory with it.
+    `KRAFT_CONFIG_DIR` must not fill some other directory with it.
     """
     from kraft.templates.library import LIBRARY_FILE, is_pre_v1
 
+    if adopt_pre_2_home(templates_dir):
+        return False
     if finish_interrupted_update(templates_dir):
         return False
     if templates_dir.exists() and (
         (templates_dir / LIBRARY_FILE).exists() or is_pre_v1(templates_dir)
     ):
         return False
-    if not (BUNDLED / "templates").is_dir():
+    if not (BUNDLED / "config").is_dir():
         if templates_dir.exists():
             return False  # a config directory pointed at by hand, in a source checkout
         raise SystemExit(
             f"kraft: no config in {templates_dir} and no bundled defaults to seed it "
             "with. This build shipped without them — reinstall with `just install`, "
-            "or point KRAFT_TEMPLATES_DIR at a config directory."
+            "or point KRAFT_CONFIG_DIR at a config directory."
         )
     if templates_dir.exists() and not _holds_config(templates_dir):
         return False
@@ -253,7 +454,7 @@ def _holds_config(directory: Path) -> bool:
     """Empty (dotfiles aside), or holding at least one name Kraft's config
     uses: a templates directory someone started, not an unrelated one."""
     names = {p.name for p in directory.iterdir() if not p.name.startswith(".")}
-    known = {p.name for p in (BUNDLED / "templates").iterdir()}
+    known = {p.name for p in (BUNDLED / "config").iterdir()}
     return not names or bool(names & (known | set(MACHINE_CONFIG) | CONFIG_EXTRAS))
 
 
@@ -293,7 +494,7 @@ def _stage_bundle(templates_dir: Path) -> Path:
     for the caller to rename into place. Returns the staging directory."""
     staging = templates_dir.with_name(templates_dir.name + ".seeding")
     shutil.rmtree(staging, ignore_errors=True)
-    shutil.copytree(BUNDLED / "templates", staging)
+    shutil.copytree(BUNDLED / "config", staging)
     (staging / "access.yaml").unlink(missing_ok=True)
     (staging / "notify.yaml").unlink(missing_ok=True)
     # What this home was seeded from, for `capabilities.added_since` (Kraft-hxt6x).
@@ -311,8 +512,7 @@ def _stage_bundle(templates_dir: Path) -> Path:
 
 #: What a home holds that belongs to this machine rather than to the template
 #: schema: the password hash and bind, the webhook, the theme, the connected
-#: repositories, auto-intake, the pre-1.0 steering files (folded into the library
-#: at the next start) and harness
+#: repositories, auto-intake and harness
 #: overrides. A major update carries each across unchanged; everything else --
 #: the registry, the chains, `policy.yaml` -- is replaced, and kept in the backup.
 MACHINE_CONFIG = (
@@ -321,7 +521,6 @@ MACHINE_CONFIG = (
     "theme.yaml",
     "repos.yaml",
     "intake.yaml",
-    "steering",
     "harnesses",
 )
 
@@ -346,7 +545,7 @@ def replace_pre_v1_config(templates_dir: Path, backup: Path) -> CarriedPolicy | 
     old -> backup, staged -> home. Between them the home is missing, and
     `finish_interrupted_update` -- run by the next start and the next update --
     completes the swap from the marked staging instead of seeding over it."""
-    if not (BUNDLED / "templates").is_dir():
+    if not (BUNDLED / "config").is_dir():
         raise SystemExit(
             "kraft admin update: this build shipped no bundled configuration to install; "
             "reinstall with `just install`. Nothing was changed."
@@ -610,8 +809,32 @@ class _SignalLoggingServer(uvicorn.Server):
         super().handle_exit(sig, frame)
 
 
+def prepare_home() -> Path:
+    """The config directory this server runs against, after the one-time 2.0
+    moves and the seed, in this order: the rename of a 1.x home at its
+    default location (`adopt_pre_2_home`), the packaged defaults into a home
+    that has none (`seed_home`), and the two keys 2.0 reads from another file
+    (`carry_moved_keys`), in whichever directory is in use, so a home an
+    operator points at by hand gets them too.
+
+    Called only once this process knows no server is running. A 1.4 server
+    still up re-reads `repos.yaml` per request, so a rename under it would
+    lose its repos and fail its running items, and the 2.0 start would then
+    exit "already running" anyway. Until that check every reader finds a 1.x
+    home under its old name (`paths.config_dir`), which is where `_bind` and
+    the address probe read it."""
+    adopt_pre_2_home(config_dir())
+    templates_dir = config_dir()
+    if seed_home(templates_dir):
+        print(f"kraft: seeded default config in {templates_dir}")
+    _warn_if_pre_v1(templates_dir)
+    for line in carry_moved_keys(templates_dir):
+        print(f"kraft: {line}", file=sys.stderr)
+    return templates_dir
+
+
 def _serve() -> None:
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates_dir = config_dir()
     pid_path = _pid_path()
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = RunDirs(pid_path.parent).logs / "server.log"
@@ -625,9 +848,6 @@ def _serve() -> None:
         # ties fd 1/2 to this same file before spawning.
         _rotate_if_large(log_path)
         _redirect_output_to_log(log_path)
-    if seed_home(templates_dir):
-        print(f"kraft: seeded default config in {templates_dir}")
-    _warn_if_pre_v1(templates_dir)
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
@@ -641,6 +861,9 @@ def _serve() -> None:
         running = running or pidfile.read(pid_path).pid
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
+    # The lock is held: the home is this server's to rename, seed and move
+    # keys in.
+    prepare_home()
 
     def _exit_on_signal(sig, frame):
         # uvicorn re-raises the SIGTERM it drained on, with this handler put
@@ -744,15 +967,16 @@ def _start_detached() -> None:
     same pidfile `_serve` always has, so `admin stop`/`health`/`doctor` never
     need to know a server was started this way.
     """
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    if seed_home(templates_dir):
-        print(f"kraft: seeded default config in {templates_dir}")
     run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
     pid_path = run_dirs.pid
     running = _read_pid(pid_path)
     if running is not None:
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
+    # Not prepared here: two detached starts racing past this read would both
+    # rename and seed. The child's `_serve` prepares the home once it holds
+    # the lock (`prepare_home`); until then the home is read where it is.
+    templates_dir = config_dir()
     # Resolved (and validated — refuses a password-less LAN bind) here too, so
     # a bad access.yaml fails this shell instead of showing up only as a child
     # that exited before ever writing a pidfile.
@@ -1142,7 +1366,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
 
     # The configuration first: a pre-V1 home is what a legacy install's first V1
     # binary finds, and that binary is the one running this.
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates_dir = config_dir()
     finish_interrupted_update(templates_dir)
     if is_pre_v1(templates_dir):
         _accept_major_update(templates_dir, ns.yes)

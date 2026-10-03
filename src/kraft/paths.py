@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,8 +27,49 @@ def default_run_dir() -> Path:
     return kraft_home() / "run"
 
 
-def default_templates_dir() -> Path:
-    return kraft_home() / "templates"
+def default_config_dir() -> Path:
+    """Where an install keeps its configuration: the policy, the connected
+    repositories, the harness profiles, access, and the templates (the library
+    and the chains) an item is filed from. `config/` since 2.0; a home still
+    holding the 1.x `templates/` is renamed once at start, leaving `templates`
+    as a link to it (`cli.admin.adopt_pre_2_home`)."""
+    return kraft_home() / "config"
+
+
+#: The 1.x name of `default_config_dir()`. Read when the current one is unset,
+#: so a shell, a service unit or a Kit built for 1.x keeps pointing at the same
+#: directory; written nowhere.
+LEGACY_CONFIG_DIR_VAR = "KRAFT_TEMPLATES_DIR"
+
+
+def config_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """The config directory this process runs against: `KRAFT_CONFIG_DIR`, else
+    the 1.x `KRAFT_TEMPLATES_DIR`, else `default_config_dir()`. Read at call
+    time, never at import, so a test or a reload that sets the variable after
+    import still takes effect."""
+    env = os.environ if environ is None else environ
+    named = env.get("KRAFT_CONFIG_DIR") or env.get(LEGACY_CONFIG_DIR_VAR)
+    if named:
+        return Path(named)
+    default = default_config_dir()
+    legacy = pre_2_config_dir()
+    if not default.exists() and legacy is not None and legacy != default:
+        # Until the first 2.0 start renames it (`cli.admin.adopt_pre_2_home`),
+        # a 1.x home's files are where they were: `kraft admin doctor` or
+        # `kraft view list` run before that restart must read them, not
+        # report an empty home beside them.
+        return legacy
+    return default
+
+
+def pre_2_config_dir() -> Path | None:
+    """`$KRAFT_HOME/templates`, when it holds a 1.x home (a `library.yaml`)
+    or a 0.x one (a `registry.yaml`): what `default_config_dir()` was called
+    before 2.0. None when there is no such directory."""
+    old = kraft_home() / "templates"
+    if (old / "library.yaml").is_file() or (old / "registry.yaml").is_file():
+        return old
+    return None
 
 
 def default_skills_dir() -> Path:
@@ -49,8 +91,17 @@ def default_harnesses_dir() -> Path:
     `cli.seed_home` -- a seeded copy would freeze at whichever version the
     operator first installed, which is the drift measured live on 2026-09-13
     (Kraft-717xy).
+
+    1.x kept it at `$KRAFT_HOME/templates/harnesses` whatever
+    `KRAFT_TEMPLATES_DIR` named, so a home whose config lived elsewhere has
+    it there, in a `templates/` the 2.0 rename never adopts: read until a
+    `config/harnesses` exists.
     """
-    return kraft_home() / "templates" / "harnesses"
+    current = default_config_dir() / "harnesses"
+    legacy = kraft_home() / "templates" / "harnesses"
+    if not current.is_dir() and legacy.is_dir():
+        return legacy
+    return current
 
 
 #: Built SPA and default config, copied in by `just install`. Absent in a plain

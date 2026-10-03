@@ -370,3 +370,18 @@ def test_a_theme_with_no_palette_or_surface_keeps_the_nocturne_look():
     for theme in (config.Theme(), config.Theme.model_validate({"mode": "light"})):
         eff = theme.effective()
         assert (eff["surface"], eff["accent"], eff["colour_amount"]) == ("ink", "violet", "full")
+
+
+def test_intake_drops_a_max_concurrent_it_no_longer_reads_and_says_so(tmp_path, caplog):
+    """`max_concurrent` is `policy.yaml`'s since before 2.0; a file still
+    naming it loads, the key is not honoured, and the warning names the move."""
+    import logging
+
+    from kraft import config
+
+    path = tmp_path / "intake.yaml"
+    path.write_text("enabled: true\nmax_concurrent: 9\n")
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        loaded = config.Intake.load(path)
+    assert loaded == config.Intake(enabled=True)
+    assert "max_concurrent is read from policy.yaml" in caplog.text

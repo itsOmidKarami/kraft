@@ -1,6 +1,6 @@
 # How Claude Code spells the options Kraft names neutrally. A fact about a
 # CLI. An operator who needs to change one drops a file of this name into
-# $KRAFT_HOME/templates/harnesses/ and thereby owns it -- see harness.py.
+# $KRAFT_HOME/config/harnesses/ and thereby owns it -- see harness.py.
 id: claude
 kind: cli
 command: [claude]

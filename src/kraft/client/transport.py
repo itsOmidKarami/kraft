@@ -18,7 +18,7 @@ from urllib.parse import quote
 import httpx
 
 from kraft import auth, config
-from kraft.paths import default_run_dir, default_templates_dir
+from kraft.paths import config_dir, default_run_dir
 
 
 def base_url() -> str:
@@ -29,7 +29,7 @@ def base_url() -> str:
     client. A wildcard bind is rewritten to loopback — `0.0.0.0` is an address to
     listen on, never one to connect to.
     """
-    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates_dir = config_dir()
     access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
     port = int(os.environ.get("KRAFT_PORT") or access.port)

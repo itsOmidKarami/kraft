@@ -16,7 +16,7 @@ const send = async (draft: ConfigDraft, op: Op) => {
 const problemRows = (ps: HProblem[]): RowSpec[] => ps.map((p, i) => ({ key: `p${i}`, label: problemText(p), sub: [p.chain, p.path].filter(Boolean).join(" · ") || undefined, chips: [{ label: "problem", tone: "bad" as const }] }));
 const changedAt = (draft: ConfigDraft, needle: string) => !!draft.view?.result.changes.some((c) => c.path.includes(needle));
 
-/** `/templates/harnesses`. The desktop keeps its selection in the query (`?harness=` / `?profile=`); that address opens the phone's own page for it, with the rest of the query, so a resize keeps the place. */
+/** `/settings/harnesses`. The desktop keeps its selection in the query (`?harness=` / `?profile=`); that address opens the phone's own page for it, with the rest of the query, so a resize keeps the place. */
 export function HarnessesList() {
   const [params] = useSearchParams();
   const harness = params.get("harness");
@@ -25,8 +25,8 @@ export function HarnessesList() {
   rest.delete("harness");
   rest.delete("profile");
   const query = rest.size ? `?${rest}` : "";
-  if (harness) return <Navigate to={`/templates/harnesses/${encodeURIComponent(harness)}${query}`} replace />;
-  if (profile) return <Navigate to={`/templates/harnesses/profiles/${encodeURIComponent(profile)}${query}`} replace />;
+  if (harness) return <Navigate to={`/settings/harnesses/${encodeURIComponent(harness)}${query}`} replace />;
+  if (profile) return <Navigate to={`/settings/harnesses/profiles/${encodeURIComponent(profile)}${query}`} replace />;
   return <HarnessesIndex />;
 }
 
@@ -43,8 +43,8 @@ function HarnessesIndex() {
       {problems.length > 0 && <Group title="Problems" rows={problemRows(problems)} />}
       {r && (
         <>
-          <Group title="Harnesses" rows={r.harnesses.map((h): RowSpec => ({ key: h.id, label: h.id, mono: true, sub: `${h.provider ?? "?"}${h.executable_found ? "" : " · not found on this machine"}`, to: `/templates/harnesses/${encodeURIComponent(h.id)}`, chips: [{ label: ACCESS_WORD[h.state], tone: h.state === "never" ? "warn" : undefined }, ...(problemsOfHarness(r, problems, h.id).length ? [{ label: "problem", tone: "bad" as const }] : [])] }))} />
-          <Group title="Profiles" rows={Object.entries(r.profiles).map(([name, p]): RowSpec => ({ key: name, label: name, mono: true, sub: Object.entries(p.providers).map(([prov, e]) => `${prov} ${e.model ?? "—"}`).join(" · "), to: `/templates/harnesses/profiles/${encodeURIComponent(name)}`, chips: problemsOfProfile(r, problems, name).length ? [{ label: "problem", tone: "bad" as const }] : undefined }))} />
+          <Group title="Harnesses" rows={r.harnesses.map((h): RowSpec => ({ key: h.id, label: h.id, mono: true, sub: `${h.provider ?? "?"}${h.executable_found ? "" : " · not found on this machine"}`, to: `/settings/harnesses/${encodeURIComponent(h.id)}`, chips: [{ label: ACCESS_WORD[h.state], tone: h.state === "never" ? "warn" : undefined }, ...(problemsOfHarness(r, problems, h.id).length ? [{ label: "problem", tone: "bad" as const }] : [])] }))} />
+          <Group title="Profiles" rows={Object.entries(r.profiles).map(([name, p]): RowSpec => ({ key: name, label: name, mono: true, sub: Object.entries(p.providers).map(([prov, e]) => `${prov} ${e.model ?? "—"}`).join(" · "), to: `/settings/harnesses/profiles/${encodeURIComponent(name)}`, chips: problemsOfProfile(r, problems, name).length ? [{ label: "problem", tone: "bad" as const }] : undefined }))} />
           <Group title="Tasks" note="Each agent task and the harness it runs on. Change it in the chain." rows={tasks.map((t, i): RowSpec => ({ key: `${t.chain}:${t.path}:${i}`, label: t.path, mono: true, sub: t.chain, value: `${t.harness}${t.profile ? ` · ${t.profile}` : ""}` }))} />
           <Group
             title="Defaults"
@@ -63,7 +63,7 @@ function HarnessesIndex() {
 
 const list = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
 
-/** `/templates/harnesses/:id`: its Access (editable), and what it is. */
+/** `/settings/harnesses/:id`: its Access (editable), and what it is. */
 export function HarnessView() {
   const { id = "" } = useParams();
   const draft = useConfigDraft("harnesses", "harnesses");
@@ -95,7 +95,7 @@ export function HarnessView() {
   );
 }
 
-/** `/templates/harnesses/profiles/:name`: model and effort per provider. */
+/** `/settings/harnesses/profiles/:name`: model and effort per provider. */
 export function ProfileView() {
   const { name = "" } = useParams();
   const draft = useConfigDraft("harnesses", "harnesses");

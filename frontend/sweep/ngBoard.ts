@@ -90,7 +90,7 @@ export const NG_CHAINS = [
   { id: "docs_only", nodes: v1(["spec", "spec_approval", "implementation", "work_brief", "merge_request"]), gates: 1 },
 ].map((c) => ({ ...c, gates: c.nodes.filter((n) => n.kind === "gate").length }));
 export const NG_REPOS = ["kraft-plugins", "kraft-core", "kraft-api", "kraft-vscode", "kraft-docs", "kraft-lite", "vendor-schemas"].map((name, i) => ({
-  ...repo(R(name), i), id: name, enabled: true, default_chain_template: name === "kraft-docs" ? "docs_only" : "default",
+  ...repo(R(name), i), id: name, enabled: true, default_chain: name === "kraft-docs" ? "docs_only" : "default",
 }));
 /** kraft-plugins roots a workspace with two members: the draft page's cross-repo picker (G.5). */
 export const NG_WORKSPACES = {

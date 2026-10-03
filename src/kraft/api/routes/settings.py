@@ -191,7 +191,7 @@ async def get_resolved_template(tid: str, request: Request):
     materialized (`resolved-template-api-shows-saved-chain`)."""
     library = deps.library_or_503(request.app.state)
     if tid not in library.chain_ids:
-        raise HTTPException(404, f"unknown chain template {tid!r}")
+        raise HTTPException(404, f"unknown chain {tid!r}")
     try:
         return _resolved_view(library.resolve_chain(tid))
     except TemplateLibraryError as exc:
@@ -207,7 +207,7 @@ async def steering_preview(chain: str, task: str, repo: str, request: Request):
     st = request.app.state
     library = deps.library_or_503(st)
     if chain not in library.chain_ids:
-        raise HTTPException(404, f"unknown chain template {chain!r}")
+        raise HTTPException(404, f"unknown chain {chain!r}")
     try:
         resolved = library.resolve_chain(chain)
     except TemplateLibraryError as exc:
@@ -349,7 +349,7 @@ async def get_template(tid: str, request: Request):
     the Chains screen edits, and the mapping it parses to."""
     library = deps.library_or_503(request.app.state)
     if tid not in library.chain_ids:
-        raise HTTPException(404, f"unknown chain template {tid!r}")
+        raise HTTPException(404, f"unknown chain {tid!r}")
     path = library.chain_file(tid)
     try:
         text = path.read_text()
@@ -370,7 +370,7 @@ async def put_template(tid: str, body: ChainText, request: Request):
     comments and layout survive. A new id becomes `chains/<id>.yaml`."""
     st = request.app.state
     if not _CHAIN_ID.fullmatch(tid):
-        raise HTTPException(400, f"invalid chain template id {tid!r}")
+        raise HTTPException(400, f"invalid chain id {tid!r}")
     library = deps.library_or_503(st)
     path = (
         library.chain_file(tid)
@@ -583,7 +583,11 @@ async def put_intake(body: IntakeBody, request: Request):
     would otherwise keep the old interval until the next reboot."""
     app_ = request.app
     st = app_.state
-    data = body.model_dump()
+    data = body.model_dump(exclude_none=True)
+    if body.schedules is None:
+        # The schedules live in this file since 2.0; a body that says nothing
+        # about them (every 1.x client) must not write them away.
+        data["schedules"] = list(st.intake.get("schedules") or [])
     config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
     st.intake = data
     apply_mod.record(st, "intake.yaml")

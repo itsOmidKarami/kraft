@@ -27,7 +27,7 @@ def test_base_url_prefers_loopback_over_a_wildcard_bind(monkeypatch, tmp_path):
     access = tmp_path / "templates"
     access.mkdir()
     (access / "access.yaml").write_text("bind: 0.0.0.0\nport: 9999\n")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(access))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(access))
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     # 0.0.0.0 is an address to listen on, never one to connect to
@@ -39,7 +39,7 @@ def test_base_url_brackets_an_ipv6_bind(monkeypatch, tmp_path):
     access = tmp_path / "templates"
     access.mkdir()
     (access / "access.yaml").write_text("bind: '::1'\nport: 9999\n")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(access))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(access))
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     assert client.base_url() == "http://[::1]:9999"

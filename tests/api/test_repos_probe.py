@@ -234,7 +234,7 @@ def test_submodules_share_one_time_budget(tmp_path, monkeypatch):
 )
 @pytest.mark.parametrize("route", ["/api/repos/probe", "/api/repos"], ids=["probe", "add"])
 def test_add_repo_writes_the_probed_setup_command(tmp_path, client, route, lockfile, expected):
-    """The first-run and Templates › Repos probe proposes what connecting
+    """The first-run and Settings › Repos probe proposes what connecting
     writes: `uv sync` only beside a `uv.lock`, since it writes one otherwise."""
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")

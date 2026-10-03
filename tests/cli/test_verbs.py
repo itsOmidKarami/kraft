@@ -147,7 +147,7 @@ def test_an_operation_failure_is_a_kraft_message_on_stderr(app, capsys):
 def test_create_uses_the_cwd_repo_and_its_default_chain_and_lands_paused(
     app, monkeypatch, capsys, repo
 ):
-    connect_repo(repo, default_chain_template="quick-task")
+    connect_repo(repo, default_chain="quick-task")
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "filed from a terminal", "--json"])
     created = json.loads(capsys.readouterr().out)

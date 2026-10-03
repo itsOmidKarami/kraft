@@ -25,8 +25,8 @@ test("old addresses land on their new pages", async ({ page }) => {
 // page, and neither width ever shows Not found (R3-04).
 const WIDENED: [from: string, lands: string][] = [
   ["/more", "/"],
-  ["/templates/harnesses/claude", "/templates/harnesses?harness=claude"],
-  ["/templates/harnesses/profiles/deep", "/templates/harnesses?profile=deep"],
+  ["/settings/harnesses/claude", "/settings/harnesses?harness=claude"],
+  ["/settings/harnesses/profiles/deep", "/settings/harnesses?profile=deep"],
   ["/settings/notifications/webhook", "/settings/notifications"],
   ["/settings/auto-intake/schedules/0", "/settings/auto-intake"],
   ["/archived", "/archived"],

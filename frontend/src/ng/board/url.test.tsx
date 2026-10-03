@@ -11,8 +11,8 @@ describe("board query", () => {
     expect(readBoardQuery(new URLSearchParams("group=bogus&sort=bogus"))).toMatchObject({ group: "status", sort: "attention", new: false });
   });
 
-  it("starts Group from the theme's board.group_by when the query has none, template reading as chain", () => {
-    expect(readBoardQuery(new URLSearchParams(""), "template").group).toBe("chain");
+  it("starts Group from the theme's board.group_by when the query has none", () => {
+    expect(readBoardQuery(new URLSearchParams(""), "chain").group).toBe("chain");
     expect(readBoardQuery(new URLSearchParams(""), "repo").group).toBe("repo");
     expect(readBoardQuery(new URLSearchParams("group=status"), "repo").group).toBe("status");
   });

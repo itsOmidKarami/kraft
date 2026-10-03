@@ -4,11 +4,10 @@ Kraft-ps1ao). Re-exported by `kraft.adapters.agent`, whose names these are."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from kraft import harness as _harness
-from kraft.paths import default_templates_dir
+from kraft.paths import config_dir
 from kraft.templates.environment import (
     HarnessProfile,
     HarnessProfileTable,
@@ -34,9 +33,9 @@ _PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
 
 def harness_table(harnesses: _harness.HarnessSet) -> tuple[HarnessProfileTable, Path]:
     """The live `harnesses.yaml` and its path, or `HarnessUnavailable`. Read
-    from the app's templates directory (`KRAFT_TEMPLATES_DIR`, else
-    `$KRAFT_HOME/templates`) on every call, so an edit reaches the next launch."""
-    path = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "harnesses.yaml"
+    from the app's templates directory (`KRAFT_CONFIG_DIR`, else
+    `$KRAFT_HOME/config`) on every call, so an edit reaches the next launch."""
+    path = config_dir() / "harnesses.yaml"
     try:
         return HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid), path
     except TemplateEnvironmentError as exc:

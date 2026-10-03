@@ -106,7 +106,7 @@ def build() -> MCPServer:
     async def create_work_item(
         title: str,
         repo: str | None = None,
-        chain_template: str | None = None,
+        chain: str | None = None,
         description: str | None = None,
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
@@ -116,12 +116,13 @@ def build() -> MCPServer:
         skip_nodes: list[str] | None = None,
         budget_usd: float | None = None,
         node_overrides: dict | None = None,
+        chain_template: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
         Kraft rather than doing it in this session. `repo` defaults to the repo
-        of the work item this session is standing in. `chain_template` defaults
-        to the repo's `default_chain_template`, else `default`.
+        of the work item this session is standing in. `chain` defaults to the
+        repo's `default_chain`, else `default`.
 
         `description` is the brief — what the work actually is, in prose. The
         title is only a label; the spec node writes its design from the
@@ -152,11 +153,12 @@ def build() -> MCPServer:
         its spend in dollars (unset, the policy's cap applies -- this door can
         set a cap but not lift one); `node_overrides` is `{node_id: {field:
         value}}`, the fields `set_node_overrides` takes. Leave all three out
-        unless a human asked for them."""
+        unless a human asked for them. `chain_template` is `chain`'s 1.x
+        name, still read; pass `chain`."""
         return await client.create_work_item(
             title,
             repo=repo,
-            chain_template=chain_template,
+            chain=chain or chain_template,
             description=description,
             attachments=attachments,
             auto_gate=auto_gate,
@@ -323,12 +325,11 @@ def build() -> MCPServer:
         return await client.mr_labels(labels, work_item_id)
 
     @server.tool()
-    async def set_chain_template(template: str, work_item_id: str | None = None) -> dict:
-        """Switch a not-yet-started Kraft work item onto a different chain
-        template. Only works before the chain has started (no current node
-        set yet) -- 404s on an unknown template name, 409s once the item is
-        running."""
-        return await client.set_chain_template(template, work_item_id)
+    async def set_chain(chain: str, work_item_id: str | None = None) -> dict:
+        """Switch a not-yet-started Kraft work item onto a different chain.
+        Only works before the chain has started (no current node set yet) --
+        404s on an unknown chain id, 409s once the item is running."""
+        return await client.set_chain(chain, work_item_id)
 
     @server.tool()
     async def set_attachments(
@@ -377,7 +378,7 @@ def build() -> MCPServer:
         its auto-escalate settings, the `model`/`effort` its agent tasks launch
         with (above the item-wide `set_agent_overrides`), and an `extra_prompt`
         appended to each of their instructions -- without touching the Policy
-        screen's system defaults or the chain template everyone else uses. A
+        screen's system defaults or the chain everyone else uses. A
         model/effort the node's harness refuses is refused here. `clear` resets this node back to
         the template's own binding; naming a field sets it and keeps the
         node's other fields. 409s once the node has started."""
@@ -398,7 +399,7 @@ def build() -> MCPServer:
         policy: dict | None = None, clear: bool = False, work_item_id: str | None = None
     ) -> dict:
         """Set or clear a Kraft work item's own policy override, for that item
-        only -- never its chain template or any other item. `policy` holds
+        only -- never its chain or any other item. `policy` holds
         item-wide fields (`max_attempts`, `timeout_minutes`,
         `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
         profile an escalation turn runs on, or "item" for the one the item's

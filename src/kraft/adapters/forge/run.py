@@ -128,7 +128,7 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
     if cli is None:
         raise ForgeError(
             "backend: auto, but no forge is recorded for this repo — set "
-            "`forge: gitlab` or `forge: github` on it in Templates › Repos "
+            "`forge: gitlab` or `forge: github` on it in Settings › Repos "
             "(or repos.yaml); `forge: fake` is a dev-only in-process forge "
             "that opens nothing"
         )

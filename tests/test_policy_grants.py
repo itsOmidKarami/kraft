@@ -34,7 +34,7 @@ def test_a_workspace_meet_intersects_grants():
 
 def test_a_launch_carries_its_tasks_grants(tmp_path, monkeypatch):
     write_harness_profiles(tmp_path, {"claude": {"provider": "claude"}})
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path))
     task = AgentTask.model_validate(
         {"id": "t", "kind": "agent", "prompt": "p", "harness": "claude"}
     )

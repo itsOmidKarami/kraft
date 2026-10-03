@@ -299,7 +299,7 @@ def _materialized():
     from kraft.templates.environment import WorkItemTarget
     from kraft.templates.library import TemplateLibrary
 
-    root = Path(__file__).resolve().parents[2] / "templates"
+    root = Path(__file__).resolve().parents[2] / "config"
     return (
         TemplateLibrary.from_yaml_dir(root)
         .resolve_chain("default")

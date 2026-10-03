@@ -18,7 +18,7 @@ async def test_an_undeclared_setup_command_names_both_ways_out(tmp_path, entry):
     message = str(stopped.value)
     assert "no setup_command declared for" in message
     assert 'use "" for a repo that deliberately needs no preparation' in message
-    assert "tick No setup needed under Templates › Repos" in message
+    assert "tick No setup needed under Settings › Repos" in message
 
 
 async def test_a_failed_setup_command_names_the_command_and_its_output(tmp_path):

@@ -120,7 +120,7 @@ def test_an_inconclusive_runtime_refuses_a_limit_and_is_asked_again(
     asked on every call (Kraft-zfu0a), then asked again; doctor asks at once."""
     templates = tmp_path / "templates"
     templates.mkdir()
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     monkeypatch.setattr(docker, "_ask", lambda cli: ("docker", False, False))
     answers = iter([None, docker.LIMITS])
     monkeypatch.setattr(docker, "_ask_limits", lambda cli, engine: next(answers))

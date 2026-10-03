@@ -254,7 +254,7 @@ def test_resolve_chain_or_422_prefixes_the_resolvers_own_message(tmp_path):
     """Three intake doors (`POST /work-items`, `POST /triggers`, the
     auto-intake poller) share this function so they answer an unknown chain
     id the same way. `resolve_chain`'s own `TemplateLibraryError` already
-    names the id -- `chain template {id!r}: ` is what `resolve_chain_or_422`
+    names the id -- `chain {id!r}: ` is what `resolve_chain_or_422`
     itself adds on top, and that prefix is what says the failure is *this*
     door's `chain_template` field rather than something buried further in the
     library."""
@@ -269,7 +269,7 @@ def test_resolve_chain_or_422_prefixes_the_resolvers_own_message(tmp_path):
         deps.resolve_chain_or_422(st, "nope")
 
     assert excinfo.value.status_code == 422
-    assert excinfo.value.detail.startswith("chain template 'nope': ")
+    assert excinfo.value.detail.startswith("chain 'nope': ")
     assert "no chain 'nope'" in excinfo.value.detail
 
 

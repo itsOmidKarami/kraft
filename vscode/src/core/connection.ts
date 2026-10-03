@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface Locations {
@@ -7,11 +7,22 @@ export interface Locations {
   runDir: string;
 }
 
-export function locations(env: NodeJS.ProcessEnv, homedir: string): Locations {
+// Kraft's own `paths.config_dir()`: the variable, else `config/`, else a 1.x
+// `templates/` the first 2.0 start has not renamed yet.
+export function configDir(env: NodeJS.ProcessEnv, home: string, exists: (p: string) => boolean = existsSync): string {
+  const named = env.KRAFT_CONFIG_DIR || env.KRAFT_TEMPLATES_DIR;
+  if (named) return named;
+  const current = join(home, "config");
+  const legacy = join(home, "templates");
+  if (!exists(current) && (exists(join(legacy, "library.yaml")) || exists(join(legacy, "registry.yaml")))) return legacy;
+  return current;
+}
+
+export function locations(env: NodeJS.ProcessEnv, homedir: string, exists: (p: string) => boolean = existsSync): Locations {
   const home = env.KRAFT_HOME || join(homedir, ".kraft");
   return {
     home,
-    templatesDir: env.KRAFT_TEMPLATES_DIR || join(home, "templates"),
+    templatesDir: configDir(env, home, exists),
     runDir: env.KRAFT_RUN_DIR || join(home, "run"),
   };
 }

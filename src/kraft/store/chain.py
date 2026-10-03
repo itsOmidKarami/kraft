@@ -71,8 +71,8 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
 def set_chain_template(
     conn: sqlite3.Connection, work_item_id, template_id: str, materialized_chain: str
 ) -> None:
-    """Switch a not-yet-started item onto a different chain template
-    (Kraft-gwn6): the caller has already 404'd an unknown template and 409'd a
+    """Switch a not-yet-started item onto a different chain
+    (Kraft-gwn6): the caller has already 404'd an unknown chain and 409'd a
     started item, and already re-run `ResolvedChain.materialize` the same way
     `executor.intake` would have -- attachments included, so a switch cannot
     undo the trim the item was filed with -- so this is just the write. Its own

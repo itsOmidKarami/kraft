@@ -34,7 +34,7 @@ export function NewItem() {
     api.getRepos().then((r) => {
       const live = r.repos.filter((x) => x.enabled !== false);
       setRepos(live);
-      setD((x) => (x.repo || !live[0] ? x : { ...x, repo: live[0].path, chain: live[0].default_chain_template }));
+      setD((x) => (x.repo || !live[0] ? x : { ...x, repo: live[0].path, chain: live[0].default_chain }));
     }).catch(() => {});
     api.getTemplates().then(setChains).catch(() => {});
   }, []);
@@ -94,14 +94,14 @@ export function NewItem() {
         <textarea className="ph-input ph-input-area" aria-label="Brief" placeholder="A line of brief. Every node reads it." value={d.brief} onChange={(e) => set({ brief: e.target.value })} />
         <label className="ph-field">
           <span>Repo</span>
-          <select className="ph-input ph-select" value={d.repo} onChange={(e) => set({ repo: e.target.value, chain: repos.find((r) => r.path === e.target.value)?.default_chain_template ?? d.chain, spec: "", plan: "" })}>
+          <select className="ph-input ph-select" value={d.repo} onChange={(e) => set({ repo: e.target.value, chain: repos.find((r) => r.path === e.target.value)?.default_chain ?? d.chain, spec: "", plan: "" })}>
             {repos.map((r) => <option key={r.path} value={r.path}>{repoName(r.path)}</option>)}
           </select>
         </label>
         <label className="ph-field">
           <span>Chain</span>
           <select className="ph-input ph-select" value={d.chain} onChange={(e) => set({ chain: e.target.value })}>
-            {chains.filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{`${c.id} · ${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain_template ? " (repo default)" : ""}`}</option>)}
+            {chains.filter((c) => !c.error).map((c) => <option key={c.id} value={c.id}>{`${c.id} · ${c.nodes.length} nodes · ${c.gates} gates${c.id === repo?.default_chain ? " (repo default)" : ""}`}</option>)}
           </select>
         </label>
         <div className="ph-attaches">{chip("spec")}{chip("plan")}</div>

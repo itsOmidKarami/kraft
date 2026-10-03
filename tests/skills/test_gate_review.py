@@ -25,7 +25,7 @@ from kraft.paths import RunDirs
 def _claude_profile():
     """`_reviewer` selects profile `claude`, on the provider of that name."""
     write_harness_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates", {"claude": {"provider": "claude"}}
+        Path(os.environ["KRAFT_HOME"]) / "config", {"claude": {"provider": "claude"}}
     )
 
 
@@ -241,7 +241,7 @@ async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_
     from kraft.adapters import agent
 
     write_harness_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates",
+        Path(os.environ["KRAFT_HOME"]) / "config",
         {"claude": {"provider": "claude", "enabled": False}},
     )
     seen = {}

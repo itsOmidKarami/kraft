@@ -31,11 +31,11 @@ describe("ng App", () => {
 
   it("signs in, runs the boot probe once, then shows the shell where the person was", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/health") ? { status: "ok" } : { ok: true }), { status: 200 })));
-    window.history.pushState({}, "", "/templates/harnesses");
+    window.history.pushState({}, "", "/settings/harnesses");
     render(<App initiallyLocked />);
     await userEvent.type(screen.getByLabelText(/^Password/), "pw{Enter}");
     expect(await screen.findByRole("link", { name: /Harnesses/ })).toHaveAttribute("aria-current", "page");
-    expect(window.location.pathname).toBe("/templates/harnesses");
+    expect(window.location.pathname).toBe("/settings/harnesses");
     expect(session.resumeSession).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });

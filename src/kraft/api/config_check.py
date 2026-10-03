@@ -327,13 +327,11 @@ class IntakeBody(BaseModel):
     # The poller floors this at 30s anyway; rejecting it is better than
     # accepting a number the running instance will not honour.
     interval_s: int = Field(ge=30)
-    # Moved to `policy.yaml` (`Policy.max_concurrent`); kept optional here for
-    # one release so an old client or a hand-edited file round-trips without
-    # a 422. No longer read back as authoritative anywhere.
-    max_concurrent: int | None = Field(default=None, ge=1)
     # P0 is the *highest* priority, so the ceiling is "P<n> and below".
     priority_ceiling: int = Field(ge=0, le=4)
     repos: list[str] = []
+    #: Left out, the file's own are kept: a 1.x client never sent any.
+    schedules: list[dict] | None = None
 
 
 def _check_intake(path, data, ctx):

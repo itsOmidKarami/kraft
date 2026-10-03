@@ -39,15 +39,15 @@ dev_env := "KRAFT_HOME=" + justfile_directory() + "/.dev" + \
 # The fake agent ahead of the real `claude`, so a dev instance never spends tokens.
 fake_agent := "PATH=" + justfile_directory() + "/fixtures/bin:$PATH"
 
-# A dev home starts as a copy of the tracked templates/, plus the throwaway repo
+# A dev home starts as a copy of the tracked config/, plus the throwaway repo
 # beads and the seeded work items live in. Copied, not pointed at: the Settings
 # screens write to this directory, and dev edits must not land in the repo's real
 # config. access.yaml never comes along — it is this machine's bind address and
 # password hash, and a dev instance must stay on unauthenticated loopback.
 _dev-home:
     @mkdir -p .dev
-    @[ -d .dev/templates ] || cp -R templates .dev/templates
-    @rm -f .dev/templates/access.yaml
+    @[ -d .dev/config ] || {{ '{' }} [ -d .dev/templates ] && mv .dev/templates .dev/config; {{ '}' }} || cp -R config .dev/config
+    @rm -f .dev/config/access.yaml
     @{{dev_env}} uv run python dev/seed.py --repo-only
 
 # Run backend only, against the dev home (127.0.0.1:8766, or KRAFT_DEV_PORT)
@@ -110,7 +110,7 @@ bundle:
     rm -rf src/kraft/_bundled
     mkdir -p src/kraft/_bundled
     cp -R frontend/dist src/kraft/_bundled/web
-    cp -R templates src/kraft/_bundled/templates
+    cp -R config src/kraft/_bundled/config
     # The agent skills live in plugins/kraft/ so they can be published beside
     # kraft-lite in one marketplace. An installed Kraft has no plugins/ beside
     # it, so they ride into the wheel here with the SPA.
@@ -119,11 +119,11 @@ bundle:
     # password hash, the other a webhook URL that usually embeds a bearer
     # token. `cp -R` does not know either is secret -- `.gitignore` only keeps
     # them out of the commit, not out of the wheel or the homes it seeds.
-    rm -f src/kraft/_bundled/templates/access.yaml
-    rm -f src/kraft/_bundled/templates/notify.yaml
+    rm -f src/kraft/_bundled/config/access.yaml
+    rm -f src/kraft/_bundled/config/notify.yaml
 
 # Install `kraft` as a real command (then just run `kraft` from anywhere).
-# State lands in ~/.kraft, seeded from templates/ on first run.
+# State lands in ~/.kraft, seeded from config/ on first run.
 [doc("Install `kraft` as a real command; state in ~/.kraft")]
 install: bundle
     uv tool install --from . kraft-sdlc --force
@@ -153,13 +153,13 @@ install: bundle
 #
 # Testmon follows Python execution only. A test whose real input is a data
 # file -- a harness YAML, fixtures/fake-claude.sh, a script under
-# tests/support run as a subprocess, templates/, a skill's .md, the sample
+# tests/support run as a subprocess, config/, a skill's .md, the sample
 # repo, docs/intent -- is deselected when that file changes. So when one of
 # them differs from the merge base with origin/main (committed on this branch,
 # staged, unstaged or untracked), named paths run with --no-testmon, saying
 # which files made it; a bare `just test` only warns, since its fallback would
 # be the whole suite. src/kraft/_bundled is gitignored and built from
-# templates/ and plugins/kraft/skills, which are watched instead.
+# config/ and plugins/kraft/skills, which are watched instead.
 [positional-arguments]
 [doc("Backend tests affected by your changes (testmon); --no-testmon for all")]
 test *ARGS:
@@ -170,7 +170,7 @@ test *ARGS:
     mode=--testmon
     case " $* " in *" --no-testmon "*) mode= ;; esac
     if [ -n "$mode" ]; then
-        inputs=(src/kraft ':(glob,exclude)src/kraft/**/*.py' fixtures templates tests/support docs/intent plugins/kraft/skills)
+        inputs=(src/kraft ':(glob,exclude)src/kraft/**/*.py' fixtures config tests/support docs/intent plugins/kraft/skills)
         base=$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
         changed=$({ git diff --name-only "$base" -- "${inputs[@]}"; git ls-files --others --exclude-standard -- "${inputs[@]}"; } 2>/dev/null | sort -u)
         if [ -n "$changed" ] && [ -n "$*" ]; then
@@ -254,7 +254,7 @@ test-ui:
 # once against the real CLI. Spends a few cents. Tests run with a temp HOME, so
 # a `claude login` is invisible to them: export ANTHROPIC_API_KEY or
 # CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) first. The pre-commit hook
-# runs this when a commit touches templates/ or the bundled harnesses.
+# runs this when a commit touches config/ or the bundled harnesses.
 [doc("Launch every shipped (harness, model, effort) on the real CLI; spends a few cents")]
 smoke-models:
     @[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "smoke-models: export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) -- tests use a temp HOME, so claude login is not seen" >&2; exit 1; }

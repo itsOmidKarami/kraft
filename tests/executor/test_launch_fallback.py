@@ -75,7 +75,7 @@ def _fallbacks(evts):
 def _profiles(fake_agent, profiles: dict) -> None:
     """Merge harness profiles into both places a launch may read them from."""
     write_harness_profiles(fake_agent.templates, profiles)
-    write_harness_profiles(Path(os.environ["KRAFT_HOME"]) / "templates", profiles)
+    write_harness_profiles(Path(os.environ["KRAFT_HOME"]) / "config", profiles)
 
 
 # -- a rate-limited launch moves on, in the same dispatch ----------------------

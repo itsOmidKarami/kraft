@@ -573,7 +573,7 @@ def test_notifier_stops_before_the_database_closes(tmp_path, monkeypatch):
     monkeypatch.setattr(kdb.Database, "close", tracked_db_close)
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "claude")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "claude")))
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 

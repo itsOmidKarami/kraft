@@ -21,8 +21,8 @@ export interface BoardQuery {
 const GROUPS: GroupBy[] = ["status", "repo", "chain"];
 const SORTS: SortBy[] = ["attention", "updated", "created", "title"];
 
-/** `theme.board.group_by` names the chain grouping `template`. */
-export const groupFromTheme = (g: BoardGroupBy | undefined): GroupBy => (g === "template" ? "chain" : g === "repo" ? "repo" : "status");
+/** `theme.board.group_by`, which the server already reads `template` (its pre-2.0 name) as `chain`. */
+export const groupFromTheme = (g: BoardGroupBy | undefined): GroupBy => (g === "chain" ? "chain" : g === "repo" ? "repo" : "status");
 
 export function readBoardQuery(p: URLSearchParams, themeGroup?: BoardGroupBy): BoardQuery {
   const group = p.get("group") as GroupBy;

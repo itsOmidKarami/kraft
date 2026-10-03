@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -24,9 +25,10 @@ from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
     RunDirs,
+    config_dir,
+    default_config_dir,
     default_run_dir,
     default_skills_dir,
-    default_templates_dir,
 )
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
@@ -176,27 +178,42 @@ def _restart_check(payload: dict) -> dict:
     return _check("restart", True, f"{who} runs the installed version ({here})")
 
 
+def _config_row(templates: Path) -> dict:
+    """The directory in use, and a warning when a 1.x `templates/` still sits
+    beside `config/` as a directory of its own (not the link the 2.0 rename
+    leaves): one of the two is not read, and whatever it holds is invisible."""
+    home = default_config_dir()
+    old = home.with_name("templates")
+    if old.is_dir() and not old.is_symlink() and home.is_dir() and any(old.iterdir()):
+        return _check(
+            "config",
+            True,
+            f"{templates}; {old} and {home} both exist and only one is read: "
+            f"merge what {old} holds into {home} and remove it",
+            warn=True,
+        )
+    return _check("config", True, str(templates))
+
+
 def _config_checks() -> list[dict]:
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     if not templates.is_dir():
         # Every row still reports, as a skip: every check this function can emit
         # emits on every path, so a caller reading the run by name never has to
         # ask whether a row is missing because it passed, because it was skipped,
         # or because an earlier branch returned before reaching it.
         return [
-            _check(
-                "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
-            ),
+            _check("config", False, f"{templates} does not exist — start `kraft` once to seed it"),
             _chain_templates_check(),
-            _check("chains", True, "skipped: no templates dir", skipped=True),
+            _check("chains", True, "skipped: no config dir", skipped=True),
             # Nothing seeded yet, so nothing to upgrade: the first start seeds
             # every capability and stamps the version.
-            _check("capabilities", True, "skipped: no templates dir", skipped=True),
-            _check("detectors.yaml", True, "skipped: no templates dir", skipped=True),
+            _check("capabilities", True, "skipped: no config dir", skipped=True),
+            _check("detectors.yaml", True, "skipped: no config dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
-    checks = [_check("templates", True, str(templates))]
+    checks = [_config_row(templates)]
     try:
         access = config.Access.load(templates / "access.yaml")
         # Loaded as written, so this is the only place a bad one shows.
@@ -227,12 +244,61 @@ def _config_checks() -> list[dict]:
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_detectors_check(templates))
+    checks.append(_moved_keys_check(templates))
     checks.append(_chain_templates_check())
     checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
     checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
     return checks
+
+
+def _repo_entries(data: object) -> list:
+    return [r for r in (data.get("repos") or []) if isinstance(r, dict)] if data else []
+
+
+#: What 2.0 moved or renamed in the config files, each still read under its
+#: old name: file, the old key, where it lives now, and whether the parsed
+#: file still has it.
+MOVED_KEYS: tuple[tuple[str, str, str, Callable[[dict], bool]], ...] = (
+    (
+        "intake.yaml",
+        "max_concurrent",
+        "policy.yaml's `max_concurrent`",
+        lambda d: "max_concurrent" in d,
+    ),
+    ("policy.yaml", "triggers", "intake.yaml's `schedules`", lambda d: "triggers" in d),
+    (
+        "repos.yaml",
+        "default_chain_template",
+        "`default_chain` on the entry",
+        lambda d: any("default_chain_template" in r for r in _repo_entries(d)),
+    ),
+    (
+        "theme.yaml",
+        "board.group_by: template",
+        "`chain`",
+        lambda d: isinstance(d.get("board"), dict) and d["board"].get("group_by") == "template",
+    ),
+)
+
+
+def _moved_keys_check(templates: Path) -> dict:
+    """A key 2.0 moved, still written under its old name: read, so nothing
+    stops, and named here so the file gets tidied rather than carrying a
+    key no reader honours (intake.yaml's `max_concurrent`) or one the
+    Settings screens no longer show (policy.yaml's `triggers`)."""
+    found: list[str] = []
+    for name, key, now, has in MOVED_KEYS:
+        try:
+            data = config.read_yaml(templates / name, {})
+        except config.ConfigError:
+            continue  # its own row says so
+        if isinstance(data, dict) and has(data):
+            found.append(f"{name}: {key} is {now} since 2.0")
+    if not found:
+        return _check("moved keys", True, "none: every key is where 2.0 reads it")
+    return _check("moved keys", True, "; ".join(found), warn=True)
 
 
 def _detectors_check(templates: Path) -> dict:
@@ -305,7 +371,7 @@ def _chain_templates_check() -> dict:
     Always `ok`: which nodes a repo's chain actually runs is an operator's own
     edit, not a fault.
     """
-    shipped_dir = BUNDLED / "templates"
+    shipped_dir = BUNDLED / "config"
     if not (shipped_dir / CHAINS_DIR).is_dir():
         return _check("chain_templates", True, "skipped: not an installed Kraft", skipped=True)
     shipped = _chain_template_files(shipped_dir)
@@ -313,10 +379,10 @@ def _chain_templates_check() -> dict:
         return _check(
             "chain_templates", True, "skipped: no chain templates in this version", skipped=True
         )
-    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live_dir = config_dir()
     if not live_dir.is_dir():
         # A home never started: nothing is missing from a copy not made yet.
-        return _check("chain_templates", True, "skipped: no templates dir", skipped=True)
+        return _check("chain_templates", True, "skipped: no config dir", skipped=True)
     live = _chain_template_files(live_dir)
     parts = []
     for name, shipped_ids in shipped.items():
@@ -362,7 +428,7 @@ def _capabilities_check() -> dict:
     the live library carries per-task `model`/`effort` choices the shipped
     defaults do not, so overwriting destroys operator intent.
     """
-    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live_dir = config_dir()
     stamp_path = live_dir / ".seeded-version"
     try:
         stamp = stamp_path.read_text().strip() or None
@@ -402,13 +468,13 @@ def _agent_checks() -> list[dict]:
     """One PATH check per harness profile the live library's chains select,
     plus one failure row per harness file or profile table that failed to load.
 
-    Read from disk, the same `KRAFT_TEMPLATES_DIR` precedence dispatch reads
+    Read from disk, the same `KRAFT_CONFIG_DIR` precedence dispatch reads
     `harnesses.yaml` by (`agent.harness_profile`). A chain that does not resolve
     selects nothing here: `/health` already names the library error, and a
     second copy of it helps nobody. A shipped profile nothing selects is not a
     missing dependency and gets no row.
     """
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     harnesses = harness.load(None)
     checks: list[dict] = []
     try:
@@ -691,7 +757,7 @@ def _launches_direct_asker(entries: list[config.RepoEntry]) -> bool:
     own row fails, and this one must not pass on a guess."""
     if entries and all(e.effective_sandbox is not None for e in entries):
         return False
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     harnesses = harness.load(None)
     direct = _direct_askers(harnesses)
     try:
@@ -780,7 +846,7 @@ def _runs_forge_tasks() -> bool:
     A library that cannot be read means no forge checks: `/health` already
     reports that failure, and a second copy of it per repo helps nobody.
     """
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     return any(
         isinstance(t.task, ForgeTask)
         for chain in _resolved_chains(live)
@@ -1032,7 +1098,7 @@ def _tests_check(repo: config.RepoEntry, probed: detect.Proposal | None) -> dict
     advice = (
         f"connect proposes `{found}` now: run `kraft repo connect {repo.path}` again to save it"
         if found
-        else 'set one under Templates › Repos, or `""` if it has no tests'
+        else 'set one under Settings › Repos, or `""` if it has no tests'
     )
     return _check(
         name, True, f"no test command, so its work items stop at verify; {advice}", warn=True
@@ -1054,7 +1120,7 @@ async def _repo_checks() -> list[dict]:
     # instructions, the same shape `api.deps.library_steering` hands
     # `steering.select`. `None` when the library itself does not load --
     # `_chains_check` already reports that failure.
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    live = config_dir()
     profiles = _library_steering(live)
     # Retyped from the wire: the checks below read the entry the loader
     # models, not a dict whose keys each one must spell right. The loader's
@@ -1097,7 +1163,7 @@ async def _repo_checks() -> list[dict]:
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
                     f' (use "" if this repo deliberately needs no preparation){again}, or tick '
-                    "No setup needed under Templates › Repos",
+                    "No setup needed under Settings › Repos",
                 )
             )
         if (tests := _tests_check(repo, probed)) is not None:
@@ -1105,14 +1171,17 @@ async def _repo_checks() -> list[dict]:
         unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
         if unrecognised:
             # Loaded, with a warning nobody may be reading: a key that binds
-            # nothing is exactly what a typo looks like (Kraft-4hn34).
-            checks.append(
-                _check(
-                    f"keys {_label(repo)}",
-                    False,
-                    f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
-                )
+            # nothing is exactly what a typo looks like (Kraft-4hn34). A key an
+            # older Kraft wrote is not a typo: a warning naming what replaced
+            # it, not a failure an upgraded `doctor && ...` trips on.
+            retired = [k for k in unrecognised if k in config.RETIRED_REPO_KEYS]
+            unknown = [k for k in unrecognised if k not in config.RETIRED_REPO_KEYS]
+            detail = "; ".join(
+                [f"repos.yaml keys nothing reads: {', '.join(unknown)} -- remove them"]
+                * bool(unknown)
+                + [f"{k} is no longer read: {config.RETIRED_REPO_KEYS[k]}" for k in retired]
             )
+            checks.append(_check(f"keys {_label(repo)}", not unknown, detail, warn=not unknown))
         if (policy := repo.effective_sandbox) is not None and policy.kind == "kit":
             # The rows below read the docker policy it lowers to.
             policy, found = await _kit_checks(repo, policy)

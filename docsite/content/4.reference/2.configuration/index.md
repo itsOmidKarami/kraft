@@ -5,19 +5,24 @@ navigation:
 description: Where Kraft's configuration files live and which file controls what.
 ---
 
-Kraft's configuration is a set of YAML files under `$KRAFT_HOME/templates/` (default `~/.kraft/templates/`); this page maps each file to its reference page.
+Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (default `~/.kraft/config/`); this page maps each file to its reference page.
 
 Kraft seeds the directory from the packaged defaults on first run and never
 overwrites it afterwards, so an upgrade cannot clobber an edited policy. The
-Templates and Settings screens in the UI edit these same files, and editing them by hand is
+UI edits these same files: the two templates, `library.yaml` and `chains/`,
+under **Templates**, and the rest under **Settings**. Editing them by hand is
 equally supported.
+
+Before 2.0 the directory was `templates/`. The first start of 2.0 renames it;
+`KRAFT_TEMPLATES_DIR` still points at it when `KRAFT_CONFIG_DIR` is unset.
+See [Upgrading from 1.4](/get-started/install#upgrading-from-14).
 
 - `kraft admin doctor` reports anything that does not parse.
 - `kraft admin reload` picks up an on-disk edit without a restart.
 - `kraft admin templates lint` checks the whole library and every chain at
   once, and writes nothing.
 
-`KRAFT_HOME` and `KRAFT_TEMPLATES_DIR` move this directory. See
+`KRAFT_HOME` and `KRAFT_CONFIG_DIR` move this directory. See
 [Environment variables](/reference/configuration/environment-variables) for
 those and every other variable Kraft reads.
 
@@ -35,12 +40,12 @@ template format. Kraft refuses a home that still holds them until you run
 
 | File | What it configures | Page |
 |---|---|---|
+| `library.yaml` and `chains/*.yaml` | The templates: reusable components and the chains built from them, copied onto each work item at intake. | [Library and chains](/reference/configuration/library-and-chains) |
 | `repos.yaml` | Connected repos: setup command, env, steering, workspaces. | [Repos](/reference/configuration/repos) |
-| `policy.yaml` | Caps, budget, archiving, defaults and maxima, triggers. | [Policy](/reference/configuration/policy) |
-| `library.yaml` and `chains/*.yaml` | Reusable components and the chain templates built from them. | [Library and chains](/reference/configuration/library-and-chains) |
 | `harnesses.yaml` | Harness profiles and agent profiles. | [Harnesses file](/reference/configuration/harnesses-file) |
+| `policy.yaml` | Caps, budget, concurrency, archiving, defaults and maxima. | [Policy](/reference/configuration/policy) |
+| `intake.yaml` | Autonomous pickup of issues, and schedules. | [Intake](/reference/configuration/intake) |
 | `access.yaml` | Bind address, password, remote access. | [Access](/reference/configuration/access) |
-| `intake.yaml` | Autonomous pickup of issues. | [Intake](/reference/configuration/intake) |
 | `sandbox.yaml` | Which container CLI runs sandboxed tasks, SELinux, and an extra CA. | [Sandbox host](/reference/configuration/sandbox) |
 | `notify.yaml`, `theme.yaml` | Notification webhook and UI appearance. | [Settings-only files](#settings-only-files) |
 
@@ -68,7 +73,7 @@ and a key the file leaves out takes its default.
 | `density` | `compact` or `comfortable`: how tightly rows and text are spaced. | `compact` |
 | `code_scheme` | `light`: `auto`, `none` or `solarized-light`; `dark`: `auto`, `none`, `solarized-dark`, `monokai` or `dracula`. The syntax colours in review diffs, chosen separately for light and dark. | `auto` for both |
 | `diff` | The review page's diff: `layout` (`unified` or `split`), `colours` (`theme`, `safe` or `plain`), and the switches `show_whitespace` (`true`), `word_highlight` (`true`), `wrap_lines` (`false`) and `one_file_at_a_time` (`true`). | as shown |
-| `board` | `group_by` (`status`, `repo` or `template`), `show_done` (the Done group's size, at least `1`; `5`) and `open_in` (`peek` or `full`: whether opening an item shows the side panel or the item page; `peek`). | as shown |
+| `board` | `group_by` (`status`, `repo` or `chain`; a file's pre-2.0 `template` reads as `chain`), `show_done` (the Done group's size, at least `1`; `5`) and `open_in` (`peek` or `full`: whether opening an item shows the side panel or the item page; `peek`). | as shown |
 
 ### `palette` is legacy
 

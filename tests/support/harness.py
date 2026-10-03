@@ -137,14 +137,14 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
 def connect_repo(repo: Path | str, templates_dir: Path | None = None, **fields) -> Path:
     """Connect `repo` to the instance under test: both intake doors file only
     against a connected repo (Kraft-ta8nv). Appended to its `repos.yaml`
-    (`templates_dir`, else `$KRAFT_TEMPLATES_DIR`, which every in-process app
+    (`templates_dir`, else `$KRAFT_CONFIG_DIR`, which every in-process app
     fixture sets) with the path
     resolved, as `POST /repos` stores git's `--show-toplevel`. Intake reads the
     file per request, so this works before or after the app starts.
 
     `setup_command: ""` unless `fields` say otherwise: what dispatch did with
     no entry at all, so connecting changes nothing but intake's answer."""
-    repos_yaml = Path(templates_dir or os.environ["KRAFT_TEMPLATES_DIR"]) / "repos.yaml"
+    repos_yaml = Path(templates_dir or os.environ["KRAFT_CONFIG_DIR"]) / "repos.yaml"
     data = (yaml.safe_load(repos_yaml.read_text()) if repos_yaml.exists() else None) or {}
     data.setdefault("repos", []).append(
         {"path": str(Path(repo).resolve()), "setup_command": "", **fields}
@@ -246,16 +246,16 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
     return repo
 
 
-def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
+def fake_templates_dir(tmp_path: Path, agent_command: str, name: str = "templates") -> Path:
     """A throwaway templates dir holding the shipped V1 layout -- `library.yaml`,
     `chains/`, `harnesses.yaml` and `policy.yaml` -- with every agent profile
     launching `agent_command` (`seed_v1_library`). The product seed ships no
     legacy `steering/*.md` directory to migrate (Kraft-c82sp: the never-signal
     rule is now the opt-in `never-signal-processes-you-didnt-start` library
     profile, unselected by default), so there is none to copy in."""
-    d = tmp_path / "templates"
+    d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
-    shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
+    shutil.copy(_REPO_ROOT / "config" / "policy.yaml", d / "policy.yaml")
     seed_v1_library(d, agent_command=agent_command)
     return d
 
@@ -268,8 +268,8 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     drift from the chain an operator actually gets.
     """
     templates_dir.mkdir(parents=True, exist_ok=True)
-    library = (_REPO_ROOT / "templates" / "library.yaml").read_text()
-    shipped_profiles = yaml.safe_load((_REPO_ROOT / "templates" / "harnesses.yaml").read_text())
+    library = (_REPO_ROOT / "config" / "library.yaml").read_text()
+    shipped_profiles = yaml.safe_load((_REPO_ROOT / "config" / "harnesses.yaml").read_text())
     agent_profiles = shipped_profiles.get("profiles") or {}
     if agent_command is None:
         write_harness_profiles(templates_dir, shipped_profiles["harnesses"])
@@ -309,15 +309,15 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
                 task.clear()
                 task.update({"kind": "subprocess", "command": "true"})
         library = yaml.safe_dump(parsed, sort_keys=False)
-        # `$KRAFT_HOME/templates/harnesses`, which is what
+        # `$KRAFT_HOME/config/harnesses`, which is what
         # `paths.default_harnesses_dir()` reads -- *not* `templates_dir`, which
-        # is `KRAFT_TEMPLATES_DIR` and a different directory under pytest
+        # is `KRAFT_CONFIG_DIR` and a different directory under pytest
         # (`conftest._isolated_kraft_home` pins `KRAFT_HOME` to its own path).
         # Writing it beside the library instead meant every V1 walk driven
         # through `support.api._client` stopped at "harness 'fake' is not
         # available", which reads as a chain defect and is a fixture one.
         home = os.environ.get("KRAFT_HOME")
-        harnesses = (Path(home) / "templates" if home else templates_dir) / "harnesses"
+        harnesses = (Path(home) / "config" if home else templates_dir) / "harnesses"
         harnesses.mkdir(parents=True, exist_ok=True)
         # `fake` is the *bundled* `claude` declaration under another id with its
         # `command:` swapped -- the fake agents stand in for `claude`, and speak
@@ -345,26 +345,30 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # `run_agent_task` raises on a capability a harness has not declared.
         (harnesses / "claude.yaml").write_text(bundled.replace("command: [claude]", command))
         # Beside the library, and where dispatch reads it when no
-        # `KRAFT_TEMPLATES_DIR` is set (`agent.harness_profile`) -- the same
+        # `KRAFT_CONFIG_DIR` is set (`agent.harness_profile`) -- the same
         # two-directory split as the harness files above.
         write_harness_profiles(templates_dir, profiles)
         # An agent profile's model is keyed by provider, and every profile
         # above is now on `fake`: give each tier claude's model there too, so
         # a shipped task launches the model it would in production.
-        on_fake = {
-            pid: {**body, "model": {**body["model"], "fake": body["model"]["claude"]}}
-            for pid, body in agent_profiles.items()
-        }
+        on_fake = {pid: _profile_on_fake(body) for pid, body in agent_profiles.items()}
         write_agent_profiles(templates_dir, on_fake)
         if home:
-            write_harness_profiles(Path(home) / "templates", profiles)
-            write_agent_profiles(Path(home) / "templates", on_fake)
+            write_harness_profiles(Path(home) / "config", profiles)
+            write_agent_profiles(Path(home) / "config", on_fake)
     (templates_dir / "library.yaml").write_text(library)
     chains = templates_dir / "chains"
     chains.mkdir(exist_ok=True)
-    for chain in sorted((_REPO_ROOT / "templates" / "chains").glob("*.yaml")):
+    for chain in sorted((_REPO_ROOT / "config" / "chains").glob("*.yaml")):
         shutil.copy(chain, chains / chain.name)
     return templates_dir
+
+
+def _profile_on_fake(body: dict) -> dict:
+    """`body` with claude's route copied onto the `fake` provider, in whichever
+    of the two profile shapes the file uses (`providers:`, or the older `model:`)."""
+    key = "providers" if "providers" in body else "model"
+    return {**body, key: {**body[key], "fake": body[key]["claude"]}}
 
 
 def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:
@@ -699,11 +703,11 @@ capabilities:
 
 
 def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "fake") -> Path:
-    """A `$KRAFT_HOME` whose `templates/harnesses/` overlays one harness that
+    """A `$KRAFT_HOME` whose `config/harnesses/` overlays one harness that
     launches `command`. Set `KRAFT_HOME` to the returned path and an agent task
     selecting `harness_id` runs the fake instead of a real CLI."""
     home = tmp_path / "kraft-home"
-    directory = home / "templates" / "harnesses"
+    directory = home / "config" / "harnesses"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{harness_id}.yaml").write_text(
         _FAKE_HARNESS.format(command=json.dumps([str(c) for c in command])).replace(
@@ -711,7 +715,7 @@ def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "
         )
     )
     # A task selects a *profile*, so the harness needs one of the same id.
-    write_harness_profiles(home / "templates", {harness_id: {"provider": harness_id}})
+    write_harness_profiles(home / "config", {harness_id: {"provider": harness_id}})
     return home
 
 

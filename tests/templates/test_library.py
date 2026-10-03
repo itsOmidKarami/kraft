@@ -466,7 +466,7 @@ def test_every_seeded_skill_reaches_the_agent_as_its_bundled_method():
     reached an agent. Every seeded skill must read as its shipped method."""
     from kraft import skill
 
-    seed = Path(__file__).resolve().parents[2] / "templates"
+    seed = Path(__file__).resolve().parents[2] / "config"
     lib = TemplateLibrary.from_yaml_dir(seed)
     seen = set()
     for cid in lib.chain_ids:

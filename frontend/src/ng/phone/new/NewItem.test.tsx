@@ -8,7 +8,7 @@ import { Toaster } from "../nav/Toaster";
 import { createBody } from "./body";
 import { NewItem } from "./NewItem";
 
-const REPOS = { repos: [{ path: "/code/kraft-plugins", enabled: true, default_chain_template: "default" }, { path: "/code/docs-site", enabled: true, default_chain_template: "docs_only" }] };
+const REPOS = { repos: [{ path: "/code/kraft-plugins", enabled: true, default_chain: "default" }, { path: "/code/docs-site", enabled: true, default_chain: "docs_only" }] };
 const CHAINS = [{ id: "default", nodes: new Array(15).fill({}), gates: 5 }, { id: "docs_only", nodes: new Array(5).fill({}), gates: 1 }];
 
 function Where() {

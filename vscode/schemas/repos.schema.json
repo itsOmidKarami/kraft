@@ -92,7 +92,7 @@
     },
     "RepoEntry": {
       "additionalProperties": true,
-      "description": "One `repos.yaml` entry. Strict, so `managed: \"true\"` is rejected as the\nhand-rolled loader rejected it; unknown keys ride along (`extra=\"allow\"`)\nbecause entries carry keys this loader never read (`name`, `enabled`,\n`default_chain_template`, ...) and a re-save must not drop them.",
+      "description": "One `repos.yaml` entry. Strict, so `managed: \"true\"` is rejected as the\nhand-rolled loader rejected it; unknown keys ride along (`extra=\"allow\"`)\nbecause entries carry keys this loader never read (`name`, `enabled`,\n`default_chain`, ...) and a re-save must not drop them.",
       "properties": {
         "areas": {
           "additionalProperties": {
@@ -119,7 +119,7 @@
           "title": "Ci Checks",
           "type": "boolean"
         },
-        "default_chain_template": {
+        "default_chain": {
           "anyOf": [
             {
               "type": "string"
@@ -129,7 +129,7 @@
             }
           ],
           "default": null,
-          "title": "Default Chain Template"
+          "title": "Default Chain"
         },
         "deny_tools": {
           "default": [],

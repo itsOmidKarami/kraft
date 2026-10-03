@@ -18,7 +18,7 @@ def test_a_dead_server_is_a_sentence_not_a_traceback(monkeypatch, tmp_path):
     templates = tmp_path / "templates"
     templates.mkdir()
     (templates / "access.yaml").write_text("bind: 127.0.0.1\nport: 8765\n")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     monkeypatch.delenv("KRAFT_PORT", raising=False)
 

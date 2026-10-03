@@ -13,7 +13,6 @@ export interface Schedule {
 export interface IntakeResolved {
   enabled: boolean;
   interval_s: number;
-  max_concurrent: number;
   priority_ceiling: number;
   repos: string[];
   schedules: Schedule[];

@@ -52,7 +52,7 @@ def test_a_pidfile_naming_another_program_is_cleared_not_signalled(
 
 
 def test_start_is_not_refused_by_a_pidfile_naming_another_program(decoy, tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     started = []
     monkeypatch.setattr(
         cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: started.append(True)

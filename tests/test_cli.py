@@ -21,7 +21,7 @@ def test_kraft_home_follows_env(monkeypatch, tmp_path):
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "elsewhere"))
     assert paths.kraft_home() == tmp_path / "elsewhere"
     assert paths.default_run_dir() == tmp_path / "elsewhere" / "run"
-    assert paths.default_templates_dir() == tmp_path / "elsewhere" / "templates"
+    assert paths.default_config_dir() == tmp_path / "elsewhere" / "config"
 
 
 def test_kraft_home_defaults_under_the_user(monkeypatch):
@@ -30,13 +30,13 @@ def test_kraft_home_defaults_under_the_user(monkeypatch):
 
 
 def _bundle(monkeypatch, tmp_path) -> Path:
-    bundled = tmp_path / "_bundled" / "templates"
+    bundled = tmp_path / "_bundled" / "config"
     bundled.mkdir(parents=True)
     (bundled / "policy.yaml").write_text("loops: {}\n")
     (bundled / "access.yaml").write_text("bind: 0.0.0.0\n")
     # A local checkout should never have a live notify.yaml here, but nothing
     # stops `just install`'s `cp -R templates ...` from copying one if one
-    # exists (e.g. KRAFT_TEMPLATES_DIR pointed at a checkout mid-dev). Put one
+    # exists (e.g. KRAFT_CONFIG_DIR pointed at a checkout mid-dev). Put one
     # in the bundle so seed_home is proven to strip it, not just to never have
     # been given one.
     (bundled / "notify.yaml").write_text("url: https://hook.invalid/t0ken\n")
@@ -134,7 +134,7 @@ def test_a_templates_dir_made_before_the_first_start_gets_the_rest_seeded(monkey
 
 
 def test_a_directory_holding_no_kraft_config_is_not_seeded(monkeypatch, tmp_path):
-    """A mistyped KRAFT_TEMPLATES_DIR naming somebody's project: left alone."""
+    """A mistyped KRAFT_CONFIG_DIR naming somebody's project: left alone."""
     _bundle(monkeypatch, tmp_path)
     elsewhere = tmp_path / "project"
     elsewhere.mkdir()
@@ -234,7 +234,7 @@ def _servable_home(monkeypatch, tmp_path, access_yaml: str) -> Path:
     home.mkdir()
     (home / "library.yaml").write_text("tasks: {}\n")
     (home / "access.yaml").write_text(access_yaml)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home))
     # setenv, not delenv: `kraft serve --host` writes KRAFT_HOST into os.environ,
     # and monkeypatch records no undo for a delenv of a variable that was absent —
     # so a delenv here would let that write leak into every later test.
@@ -453,8 +453,15 @@ def test_the_detached_child_imports_kraft_not_the_shell_cwd(monkeypatch, tmp_pat
     assert (done.returncode, "usage: kraft admin start" in done.stdout) == (0, True), done.stderr
 
 
-def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, capsys):
-    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+@pytest.mark.parametrize("home", ["pointed-by-hand", "1.x-at-the-default"])
+def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, capsys, home):
+    """And leaves a 1.x home under its old name: the 2.0 rename comes after
+    the check, never under a live 1.4 server (`prepare_home`)."""
+    old = _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    if home == "1.x-at-the-default":
+        monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", "")
+        monkeypatch.setenv("KRAFT_TEMPLATES_DIR", "")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     held = hold_pidfile(paths.RunDirs(run_dir).pid)
@@ -462,6 +469,7 @@ def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, caps
     with pytest.raises(SystemExit):
         cli.main(["admin", "start", "--detach"])
     assert "already running" in capsys.readouterr().err
+    assert (old / "library.yaml").is_file() and not (tmp_path / "config").exists()
     held.release()
 
 
@@ -631,3 +639,60 @@ def test_a_broken_pipe_that_is_not_stdout_still_fails_loudly(tmp_path):
     assert out == b"started\n"
     assert proc.returncode == 1
     assert b"BrokenPipeError" in err
+
+
+def test_config_dir_reads_the_new_variable_then_the_1x_one(monkeypatch, tmp_path):
+    """`KRAFT_CONFIG_DIR` names the directory; the 1.x `KRAFT_TEMPLATES_DIR`
+    still does when the new one is unset, so a shell or a unit written for
+    1.x keeps pointing at the same files."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.delenv("KRAFT_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("KRAFT_TEMPLATES_DIR", raising=False)
+    assert paths.config_dir() == tmp_path / "config"
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "old"))
+    assert paths.config_dir() == tmp_path / "old"
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "new"))
+    assert paths.config_dir() == tmp_path / "new"
+    assert paths.config_dir({"KRAFT_TEMPLATES_DIR": "/elsewhere"}) == Path("/elsewhere")
+
+
+@pytest.mark.parametrize("marker", ["library.yaml", "registry.yaml"], ids=["1.x", "0.x"])
+def test_config_dir_reads_a_home_not_yet_renamed_under_its_old_name(monkeypatch, tmp_path, marker):
+    """Between the package upgrade and the first 2.0 start, `kraft admin
+    doctor` or `kraft view list` must find the 1.x home where it still is,
+    not report an empty `config/` beside it."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.delenv("KRAFT_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("KRAFT_TEMPLATES_DIR", raising=False)
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / marker).write_text("")
+    assert paths.config_dir() == tmp_path / "templates"
+    (tmp_path / "config").mkdir()
+    assert paths.config_dir() == tmp_path / "config"
+
+
+@pytest.mark.parametrize("marker", ["library.yaml", "registry.yaml"], ids=["1.x", "0.x"])
+def test_seed_home_adopts_a_pre_2_templates_directory_instead_of_seeding(
+    monkeypatch, tmp_path, marker
+):
+    """The 2.0 rename: a home whose config still sits in `templates/` is
+    renamed to `config/` once, so an upgrade keeps every edited file and never
+    seeds a fresh copy beside the operator's. A 0.x home (a registry, no
+    library) is adopted too, so `kraft admin update` finds it where every
+    reader now looks and offers the replacement."""
+    _bundle(monkeypatch, tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    old = tmp_path / "home" / "templates"
+    old.mkdir(parents=True)
+    (old / marker).write_text("tasks: {}\n")
+    (old / "policy.yaml").write_text("default: {attempts: 1, wall_clock_s: 1}\n")
+    home = paths.default_config_dir()
+
+    assert cli.seed_home(home) is False
+
+    assert old.is_symlink() and old.resolve() == home.resolve()
+    assert (home / marker).is_file()
+    assert (home / "policy.yaml").read_text() == "default: {attempts: 1, wall_clock_s: 1}\n"
+    assert not (home / "access.yaml").exists()  # adopted, not seeded over
+    # Once: the next start finds `config/` and leaves it alone.
+    assert cli.admin.adopt_pre_2_home(home) is False

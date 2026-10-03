@@ -19,7 +19,7 @@ from kraft.policy import DEFAULT_LOOP_SEVERITIES
 SKILL = (
     Path(__file__).resolve().parents[2] / "src" / "kraft" / "skills" / "code-review" / "SKILL.md"
 )
-LIBRARY = Path(__file__).resolve().parents[2] / "templates" / "library.yaml"
+LIBRARY = Path(__file__).resolve().parents[2] / "config" / "library.yaml"
 
 
 @pytest.fixture(scope="module")

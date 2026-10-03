@@ -52,6 +52,13 @@ def test_put_theme_defaults_density_and_board_when_omitted(client):
     assert resp.json()["board"] == {"group_by": "status", "show_done": 5, "open_in": "peek"}
 
 
+def test_a_board_grouped_by_template_reads_as_chain(client, templates_dir):
+    """`template` named the chain grouping before 2.0; the file is read as it
+    was, and the answer says `chain`."""
+    (templates_dir / "theme.yaml").write_text("board: {group_by: template}\n")
+    assert client.get("/api/theme").json()["board"]["group_by"] == "chain"
+
+
 def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir):
     # A palette written after startup (an old tab, a hand edit) is still read
     # until the next start converts it.
@@ -301,7 +308,6 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
         json={
             "enabled": True,
             "interval_s": 60,
-            "max_concurrent": 2,
             "priority_ceiling": 3,
             "repos": ["/repo-a"],
         },
@@ -309,7 +315,7 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
     assert saved.status_code == 200
     assert app.state.intake["interval_s"] == 60
     assert app.state.intake_task is not None
-    assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["max_concurrent"] == 2
+    assert "max_concurrent" not in yaml.safe_load((templates_dir / "intake.yaml").read_text())
     assert client.get("/api/intake").json()["repos"] == ["/repo-a"]
 
     # and turning it back off stops the poller rather than leaving a live timer
@@ -318,7 +324,6 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
         json={
             "enabled": False,
             "interval_s": 60,
-            "max_concurrent": 2,
             "priority_ceiling": 3,
             "repos": [],
         },
@@ -330,22 +335,37 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
     "over",
     [
         {"interval_s": 5},  # below the floor the poller would clamp to anyway
-        {"max_concurrent": 0},
         {"priority_ceiling": 5},
         {"priority_ceiling": -1},
     ],
-    ids=["interval-below-the-floor", "zero-max-concurrent", "ceiling-above-p4", "negative-ceiling"],
+    ids=["interval-below-the-floor", "ceiling-above-p4", "negative-ceiling"],
 )
 def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
     body = {
         "enabled": True,
         "interval_s": 60,
-        "max_concurrent": 1,
         "priority_ceiling": 2,
         "repos": [],
         **over,
     }
     assert client.put("/api/intake", json=body).status_code == 422
+
+
+def test_put_intake_keeps_the_schedules_a_body_leaves_out(client, templates_dir):
+    """The schedules live in intake.yaml since 2.0; a 1.x-shaped body says
+    nothing about them and must not write them away. A body that names them
+    replaces them."""
+    schedule = {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "t"}
+    (templates_dir / "intake.yaml").write_text(
+        yaml.safe_dump({"enabled": False, "schedules": [schedule]})
+    )
+    client.app.state.intake = config.Intake.load(templates_dir / "intake.yaml").model_dump()
+    body = {"enabled": False, "interval_s": 300, "priority_ceiling": 2, "repos": []}
+    assert client.put("/api/intake", json=body).status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "intake.yaml").read_text())
+    assert [s["title"] for s in on_disk["schedules"]] == ["t"]
+    assert client.put("/api/intake", json={**body, "schedules": []}).status_code == 200
+    assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["schedules"] == []
 
 
 def test_put_intake_no_longer_requires_max_concurrent(client):

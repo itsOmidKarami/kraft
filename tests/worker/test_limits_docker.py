@@ -5,13 +5,12 @@ kill is read back off the runtime and recorded
 
 import os
 import subprocess
-from pathlib import Path
 
 import pytest
 
 from kraft import events, store
 from kraft.adapters import subprocess as sp
-from kraft.paths import default_templates_dir
+from kraft.paths import config_dir
 from kraft.worker.backends import docker
 
 IMAGE = "docker.io/library/alpine:3"
@@ -42,7 +41,7 @@ def runtime(request, monkeypatch) -> docker.Runtime:
         pulled = subprocess.run([cli, "pull", "-q", IMAGE], capture_output=True, text=True)
         if pulled.returncode != 0:
             _unavailable(cli, f"e2e: {cli} could not pull {IMAGE}: {pulled.stderr.strip()}")
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
     detected = docker.detect_runtime()

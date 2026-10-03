@@ -27,7 +27,7 @@ from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask
 
 ROOT = Path(__file__).resolve().parents[1]
-SHIPPED = ROOT / "templates"
+SHIPPED = ROOT / "config"
 #: The rc templates as every install seeded before this change has them: the
 #: library on `model:`/`effort:`, and a `harnesses.yaml` with no `profiles:`.
 RC = ROOT / "tests" / "fixtures" / "templates_rc"
@@ -63,14 +63,14 @@ def _live(tmp_path, monkeypatch, tasks: dict, *, profiles=PROFILES, harnesses=HA
     (live / "chains" / "c.yaml").write_text(yaml.safe_dump({"id": "c", "nodes": nodes}))
     body = {"harnesses": harnesses} | ({"profiles": profiles} if profiles is not None else {})
     (live / "harnesses.yaml").write_text(yaml.safe_dump(body))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
     return live
 
 
 def _launches(templates: Path, monkeypatch) -> list[tuple]:
     """(chain, task path, harness, model, effort, permission_mode) for every
     agent task of every chain in `templates`, resolved the way a launch does."""
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     return [
         (cid, path, inv.harness, inv.model, inv.effort, inv.permission_mode)
         for cid, path, inv in agent_launches(templates)
@@ -570,7 +570,7 @@ def test_a_fresh_seed_gets_the_library_and_its_profiles_together(tmp_path, monke
     from kraft.cli import admin
 
     bundle = tmp_path / "bundle"
-    shutil.copytree(SHIPPED, bundle / "templates")
+    shutil.copytree(SHIPPED, bundle / "config")
     monkeypatch.setattr(admin, "BUNDLED", bundle)
     home = tmp_path / "home" / "templates"
     assert admin.seed_home(home)
@@ -585,7 +585,7 @@ def test_the_shipped_library_on_an_rc_harnesses_file_is_named_not_substituted(
     home = tmp_path / "templates"
     shutil.copytree(SHIPPED, home)
     shutil.copy(RC / "harnesses.yaml", home / "harnesses.yaml")
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home))
     # Only the profile rows: whether `claude` is on this machine's PATH is not the point.
     failed = [r for r in doctor._agent_checks() if not r["ok"] and r["name"].startswith("profile")]
     assert [r["name"] for r in failed] == ["profile: strong"]

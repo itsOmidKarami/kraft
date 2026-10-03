@@ -490,7 +490,7 @@ async def dispatch(
     # `harness:`, **not** `command: "claude"`. Same shape Task 4b removed from
     # `gate_review.py`, and removed here for the same reason: a hardcoded
     # `command` bypasses the harness declaration entirely, so an operator who
-    # overlays `~/.kraft/templates/harnesses/claude.yaml` is ignored and a test
+    # overlays `~/.kraft/config/harnesses/claude.yaml` is ignored and a test
     # fixture cannot substitute a fake. `run_agent_task` falls through to the
     # harness's own declared command when `command` is empty
     # (`adapters/agent.py`'s `command=command or None`), which is what every

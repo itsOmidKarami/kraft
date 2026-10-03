@@ -38,8 +38,8 @@ from kraft.templates.models import (
 ROOT = Path(__file__).resolve().parents[2]
 
 #: What `just bundle` copies into the wheel and `cli.seed_home` copies into a
-#: fresh `$KRAFT_HOME/templates`.
-SEEDED = ROOT / "templates"
+#: fresh `$KRAFT_HOME/config`.
+SEEDED = ROOT / "config"
 
 DESIGN_DOC = ROOT / "docs" / "templates-v1-design.md"
 
@@ -680,7 +680,7 @@ def test_the_design_documents_repos_yaml_is_what_the_daemon_reads(tmp_path):
     assert api["policy"] == {"allowed_harnesses": ["codex", "claude"]}
     assert set(platform["areas"]) == {"python_api", "java_worker"}
     assert platform["areas"]["python_api"]["paths"] == ["services/api/**"]
-    assert repos["product_root"]["default_chain_template"] == "default"
+    assert repos["product_root"]["default_chain"] == "default"
 
     (workspace,) = config.load_workspaces(path).values()
     assert (workspace.id, workspace.root) == ("product", "product_root")

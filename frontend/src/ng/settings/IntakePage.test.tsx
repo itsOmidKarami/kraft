@@ -58,7 +58,7 @@ const edit = async (name: RegExp | string, text: string) => {
 describe("Auto-intake page", () => {
   it("says what the rule does in a sentence, On and Off", async () => {
     mount();
-    expect(await screen.findByText(/Every 5 minutes, up to 5 at a time, starts ready beads at P2 and below from every enabled repo\. Each runs to its first gate and waits for you there\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Every 5 minutes, starts ready beads at P2 and below from every enabled repo\. Each runs to its first gate and waits for you there\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { pressed: true })).toHaveTextContent("On");
     document.body.innerHTML = "";
     vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({}, { ...INTAKE, enabled: false })));
@@ -111,8 +111,6 @@ describe("Auto-intake page", () => {
     await expand();
     await edit(/^check every, minutes, 5 min/, "2");
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_intake", patch: { interval_s: 120 } }));
-    await edit(/^at a time, 5/, "7");
-    await waitFor(() => expect(sent()).toContainEqual({ op: "set_intake", patch: { max_concurrent: 7 } }));
     await userEvent.click(within(screen.getByRole("radiogroup", { name: "priority at or below" })).getByRole("radio", { name: "P4" }));
     expect(sent()).toContainEqual({ op: "set_intake", patch: { priority_ceiling: 4 } });
     await userEvent.click(within(screen.getByRole("radiogroup", { name: "enabled" })).getByRole("radio", { name: "no" }));
@@ -137,10 +135,10 @@ describe("Auto-intake page", () => {
     expect(await screen.findByRole("complementary", { name: "Scheduled item pane" })).toBeInTheDocument();
   });
 
-  it("edits a schedule by its index, in policy.yaml's triggers, and removes it then selects the pickup card", async () => {
+  it("edits a schedule by its index, in intake.yaml's schedules, and removes it then selects the pickup card", async () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: /Dependency check/ }));
-    expect(screen.getByText("schedule · triggers: in policy.yaml")).toBeInTheDocument();
+    expect(screen.getByText("schedule · schedules: in intake.yaml")).toBeInTheDocument();
     await edit(/^cron, 0 9 \* \* 1-5/, "0 8 * * *");
     await waitFor(() => expect(sent()).toContainEqual({ op: "set_schedule", index: 0, patch: { cron: "0 8 * * *" } }));
     await userEvent.selectOptions(screen.getByLabelText("repo"), "/src/product");
@@ -153,7 +151,7 @@ describe("Auto-intake page", () => {
   });
 
   it("shows a schedule's problem on its row and on the field it is about", async () => {
-    vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ problems: [{ path: "triggers[0].repo", field: "repo", message: "/src/platform is not a connected repo", file: "policy.yaml", line: 1, col: 1, schedule: 0 }] }, INTAKE, true)));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ problems: [{ path: "schedules[0].repo", field: "repo", message: "/src/platform is not a connected repo", file: "intake.yaml", line: 1, col: 1, schedule: 0 }] }, INTAKE, true)));
     mount();
     const row = await screen.findByRole("button", { name: /Dependency check/ });
     expect(within(row).getByRole("img", { name: "has a problem" })).toBeInTheDocument();
@@ -171,7 +169,7 @@ describe("Auto-intake page", () => {
   });
 
   it("marks a changed row against the file it is in", async () => {
-    vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ changes: [{ path: "interval_s", kind: "change", summary: "300 → 120", file: "intake.yaml" }, { path: "max_concurrent", kind: "change", summary: "3 → 5", file: "policy.yaml" }] }, INTAKE, true)));
+    vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({ changes: [{ path: "interval_s", kind: "change", summary: "300 → 120", file: "intake.yaml" }, { path: "priority_ceiling", kind: "change", summary: "2 → 3", file: "intake.yaml" }] }, INTAKE, true)));
     mount();
     await screen.findByRole("region", { name: "Recent checks" });
     await expand();

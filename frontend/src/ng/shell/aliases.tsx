@@ -4,14 +4,19 @@ import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom"
 /** The shipped UI's addresses that moved, and where each lands (spec §11.2),
  *  so a bookmark made before the cutover still opens its page. The query
  *  string is kept. `/settings` and the pages whose path did not change are
- *  routes of their own. */
+ *  routes of their own. Repos and Harnesses are Settings, as they were in
+ *  1.4; the `/templates/...` addresses the 2.0 candidates gave them land
+ *  there too. */
 export const ALIASES: [from: string, to: string][] = [
   ["/search", "/"],
   ["/settings/intake", "/settings/auto-intake"],
-  ["/settings/repos/*", "/templates/repos"],
+  ["/templates/repos/:repo", "/settings/repos/:repo"],
+  ["/templates/repos/*", "/settings/repos"],
   ["/settings/chains/*", "/templates/chains"],
   ["/settings/library/*", "/templates/library"],
-  ["/settings/harnesses/*", "/templates/harnesses"],
+  ["/templates/harnesses/profiles/:name", "/settings/harnesses?profile=:name"],
+  ["/templates/harnesses/:id", "/settings/harnesses?harness=:id"],
+  ["/templates/harnesses/*", "/settings/harnesses"],
   ["/settings/templates/*", "/templates/chains"],
   ["/settings/plugins/*", "/templates/chains"],
   ["/settings/steering/*", "/templates/library"],
@@ -24,8 +29,8 @@ export const ALIASES: [from: string, to: string][] = [
  *  in the target is filled from the address. */
 export const PHONE_ONLY: [from: string, to: string][] = [
   ["/more", "/"],
-  ["/templates/harnesses/profiles/:name", "/templates/harnesses?profile=:name"],
-  ["/templates/harnesses/:id", "/templates/harnesses?harness=:id"],
+  ["/settings/harnesses/profiles/:name", "/settings/harnesses?profile=:name"],
+  ["/settings/harnesses/:id", "/settings/harnesses?harness=:id"],
   ["/settings/auto-intake/schedules/:index", "/settings/auto-intake"],
   ["/settings/notifications/:channel", "/settings/notifications"],
 ];

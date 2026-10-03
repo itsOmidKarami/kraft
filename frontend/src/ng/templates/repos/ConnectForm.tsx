@@ -31,7 +31,7 @@ export function fieldsFrom(p: Probe): Record<string, unknown> {
   const scopes = nested ? p.test_scopes : null;
   return {
     name: p.name,
-    default_chain_template: "default",
+    default_chain: "default",
     test_command: p.test_command,
     ...(scopes ? { test_scopes: scopes } : {}),
     setup_command: p.setup_command ?? null,
@@ -142,7 +142,7 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
           ))}
           <Kv k="setup" v={setupLine(probe)} mono muted={!probe.setup_command} />
           {(probe.stopped ?? []).map((s) => <Kv key={s.dir} k="no tests" v={stopLine(s)} muted />)}
-          {probe.missing_setup?.length ? <Kv k="no setup" v="the first work item stops until a setup command is set, or No setup needed is ticked, in Templates › Repos" muted /> : null}
+          {probe.missing_setup?.length ? <Kv k="no setup" v="the first work item stops until a setup command is set, or No setup needed is ticked, in Settings › Repos" muted /> : null}
           {missingLine(probe.missing_tools) && <Kv k="not installed" v={missingLine(probe.missing_tools)!} />}
           {readFrom(probe.read_from) && <Kv k="read from" v={readFrom(probe.read_from)!} muted />}
           {alsoTest && <p className="rp-connect-note">Also found for tests: {alsoTest}</p>}

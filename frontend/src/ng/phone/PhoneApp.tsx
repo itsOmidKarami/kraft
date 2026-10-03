@@ -60,11 +60,11 @@ export function PhoneApp() {
           <Route path="/templates/chains/:chain/nodes/:node" element={<ChainNodeView />} />
           <Route path="/templates/library" element={<LibraryList />} />
           <Route path="/templates/library/:ref" element={<LibraryComponentView />} />
-          <Route path="/templates/harnesses" element={<HarnessesList />} />
-          <Route path="/templates/harnesses/profiles/:name" element={<ProfileView />} />
-          <Route path="/templates/harnesses/:id" element={<HarnessView />} />
-          <Route path="/templates/repos" element={<ReposList />} />
-          <Route path="/templates/repos/:repo" element={<RepoView />} />
+          <Route path="/settings/harnesses" element={<HarnessesList />} />
+          <Route path="/settings/harnesses/profiles/:name" element={<ProfileView />} />
+          <Route path="/settings/harnesses/:id" element={<HarnessView />} />
+          <Route path="/settings/repos" element={<ReposList />} />
+          <Route path="/settings/repos/:repo" element={<RepoView />} />
           <Route path="/templates/*" element={<NotFound />} />
           <Route path="/settings" element={<Navigate to="/settings/policy/limits" replace />} />
           <Route path="/settings/policy" element={<Navigate to="/settings/policy/limits" replace />} />

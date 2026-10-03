@@ -11,7 +11,7 @@ description: Every field in repos.yaml, and how kraft repo connect fills it in.
 repos:
   - path: /home/you/code/my-service
     name: my-service
-    default_chain_template: default
+    default_chain: default
     forge: github
     test_command: null
     intent_dir: null
@@ -35,17 +35,17 @@ repos:
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `id` | — | The repository id a workspace names this entry by (`[a-z][a-z0-9_-]*`, unique). Only a workspace's root and members need one; connecting a repo with submodules writes it for them. |
 | `enabled` | `true` | Set `false` to keep auto-intake off this repo without disconnecting it. It governs auto-intake only: you can still file and run items on a disabled repo (from the CLI or an agent; the web composer lists only enabled repos), and running items keep going. `kraft repo connect` saves a repo it found no test command for with `enabled: false`; an item on it stops at `verify` until it has a `test_command` or `test_scopes`. An absent key counts as enabled. Kraft refuses an edit that would leave an enabled repo with neither a `test_command` (`""` counts) nor `test_scopes`. |
-| `managed` | `true` | Keeps a human-connected repo out of Templates › Repos' "Detected · not connected" section; auto-connected submodules are written with `managed: false`. |
-| `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly, however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake. Unset, it is `default`. |
+| `managed` | `true` | Keeps a human-connected repo out of Settings › Repos' "Detected · not connected" section; auto-connected submodules are written with `managed: false`. |
+| `default_chain` | — | Which chain a work item on this repo runs when none is named explicitly, however it is filed: `kraft item create`, the MCP tool, the board, the API, `POST /api/triggers` or auto-intake. Unset, it is `default`. `default_chain_template` before 2.0: still read, and saved under the new name. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `kraft repo connect` sets it from the host of the repo's remote: `github.com`, `gitlab.com`, or a self-hosted host that names one (`gitlab.example.com`). |
-| `project` | `null` | The GitLab project path, when `forge: gitlab`. A legacy `gitlab_project` key still reads. |
+| `project` | `null` | The GitLab project path, when `forge: gitlab`. |
 | `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` or agent `profile:` and the work item's override. Keyed by profile because one model name means nothing to another provider. The retired `default_model` key is dropped with a warning. |
-| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. It runs from the worktree root without a shell. `""` declares a repo with no tests (docs, infrastructure): verification passes and its session says so. It is the **No tests** checkbox in Templates › Repos. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. Verification ignores it while `test_scopes` is set: the scopes are what runs. For a repo with more than one project, connect saves the first scope's command here, beside the scopes, so it does not cover every path. |
+| `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. It runs from the worktree root without a shell. `""` declares a repo with no tests (docs, infrastructure): verification passes and its session says so. It is the **No tests** checkbox in Settings › Repos. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. Verification ignores it while `test_scopes` is set: the scopes are what runs. For a repo with more than one project, connect saves the first scope's command here, beside the scopes, so it does not cover every path. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Every command runs from the repository root, without a shell, so one for a project in a subdirectory names that directory itself: `sh -c 'cd frontend && npm test'` (what connect proposes) or `npm --prefix frontend test`, not `npm test`. Not synthesized from `test_command` — the two stay independently editable. |
 | `intent_dir` | `null` | Where the repo's intent tree lives, relative to its root. When set, every agent in the repo is told to follow it. Its check runs as one of the repo's `test_scopes`. |
-| `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing", which is the **No setup needed** checkbox in Templates › Repos; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
-| `env` | `{}` | Literal environment variables every worker for this repo gets. A worker's environment is an allowlist, not the daemon's: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`, `TZ`, `TMPDIR`, `SSH_AUTH_SOCK`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case), the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`), eight `KRAFT_*` variables that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`, `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`, `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`), the ones Kraft sets for the session itself ([Passed to workers](/reference/configuration/environment-variables#passed-to-workers)) and the agent's credential variable. Any other `KRAFT_*` variable the daemon has stays behind: set it in `env`, or name it in `env_passthrough`. These values are layered on top of it. A sandboxed worker gets none of that allowlist, only what [Sandboxed workers](#sandboxed-workers) lists, which covers the daemon's proxy and an extra CA. |
+| `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing", which is the **No setup needed** checkbox in Settings › Repos; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
+| `env` | `{}` | Literal environment variables every worker for this repo gets. A worker's environment is an allowlist, not the daemon's: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`, `TZ`, `TMPDIR`, `SSH_AUTH_SOCK`, the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case), the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`), nine `KRAFT_*` variables that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`, `KRAFT_CONFIG_DIR`, its 1.x name `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`, `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`), the ones Kraft sets for the session itself ([Passed to workers](/reference/configuration/environment-variables#passed-to-workers)) and the agent's credential variable. Any other `KRAFT_*` variable the daemon has stays behind: set it in `env`, or name it in `env_passthrough`. These values are layered on top of it. A sandboxed worker gets none of that allowlist, only what [Sandboxed workers](#sandboxed-workers) lists, which covers the daemon's proxy and an extra CA. |
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the worker allowlist under `env` doesn't cover. A sandbox gets each by name, so its value never appears on the `docker` command line. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. Only a file the worktree's `.gitignore` covers is copied; an entry that is not, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`). |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (see the `policy` row): frozen into each work item when it is filed, and a later addition still applies to running items. |
@@ -286,7 +286,7 @@ own, and the root scope, running that command, covers it.
 
 Connect says when it found no command. With no `test_command` it saves the
 repo disabled. Set `setup_command` yourself, or `""` (the **No setup needed**
-checkbox in Templates › Repos) if the repo needs no preparation. Set `test_command`, then `enabled: true`.
+checkbox in Settings › Repos) if the repo needs no preparation. Set `test_command`, then `enabled: true`.
 Or fix the cause, such as committing the missing lockfile, and run
 `kraft repo connect` again: on a connected repo it fills in only what the entry
 left undecided, and enables a repo that was disabled for want of a test command.
@@ -307,11 +307,9 @@ the task's, in the agent's system prompt under a `## Project standards`
 heading, 8 KB at most together.
 
 A name the library doesn't define is refused when the repository is saved
-(Templates › Repos) and when an item is filed, and a
+(Settings › Repos) and when an item is filed, and a
 library save that removes a profile a repository still names is refused too.
 You write profiles in Templates › Library, which edits `library.yaml`.
-
-A `templates/steering/*.md` directory from an older release is folded into `library.yaml` as steering profiles of the same name on first start. The old directory is kept as `templates/steering.pre-1.0/`.
 
 This is not a place for target-repo files: Kraft never reads `CLAUDE.md`,
 `AGENTS.md`, or anything else from inside the repo being worked on as a

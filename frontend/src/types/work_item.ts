@@ -194,7 +194,7 @@ export interface CancelPreview {
 }
 
 /** `POST /work-items/{id}/duplicate` (B3): a fresh, paused item from this
- *  one's own title, description, repo, chain template, workspace selection
+ *  one's own title, description, repo, chain, workspace selection
  *  and attachments. Additive: not read by the shipped UI yet. */
 export interface DuplicateResponse {
   id: string;

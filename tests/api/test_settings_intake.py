@@ -25,7 +25,6 @@ def test_two_overlapping_intake_saves_leave_exactly_one_live_poller(client):
     body = {
         "enabled": True,
         "interval_s": 60,
-        "max_concurrent": 1,
         "priority_ceiling": 2,
         "repos": [],
     }
@@ -76,8 +75,8 @@ def test_get_intake_reads_the_file_not_the_cached_state(client, templates_dir):
     has to show what is on disk. Returning `app.state` hides an edit made since
     boot, and the next save silently overwrites it."""
     (templates_dir / "intake.yaml").write_text(
-        "enabled: false\ninterval_s: 900\nmax_concurrent: 4\npriority_ceiling: 1\nrepos: []\n"
+        "enabled: false\ninterval_s: 900\npriority_ceiling: 1\nrepos: []\n"
     )
     body = client.get("/api/intake").json()
     assert body["interval_s"] == 900
-    assert body["max_concurrent"] == 4
+    assert body["priority_ceiling"] == 1

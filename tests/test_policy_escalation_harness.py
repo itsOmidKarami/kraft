@@ -54,7 +54,7 @@ def test_repositories_that_name_different_escalation_harnesses_do_not_meet():
 def test_policy_yaml_takes_a_known_profile_or_item(tmp_path, monkeypatch, value):
     templates = tmp_path / "templates"
     write_harness_profiles(templates, {"cx": {"provider": "codex"}})
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     path = templates / "policy.yaml"
     path.write_text(
         f"default: {{attempts: 3, wall_clock_s: 60}}\ndefaults: {{escalation_harness: {value}}}\n"
@@ -69,7 +69,7 @@ def test_policy_yaml_refuses_an_unknown_escalation_harness_naming_the_known(tmp_
     """Refused when the file is read, not when the first item gets stuck."""
     templates = tmp_path / "templates"
     write_harness_profiles(templates, {"cx": {"provider": "codex"}})
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     path = templates / "policy.yaml"
     path.write_text(
         "default: {attempts: 3, wall_clock_s: 60}\ndefaults: {escalation_harness: gemini}\n"

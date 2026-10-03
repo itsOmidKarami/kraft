@@ -35,7 +35,7 @@ from kraft.paths import default_harnesses_dir
 from kraft.policy import DEFAULT_SENTINEL, SandboxCredential, host_pattern
 
 #: Harnesses that ship with Kraft. Read from the package, never from
-#: `$KRAFT_HOME/templates/`, because `cli.seed_home` copies templates once and
+#: `$KRAFT_HOME/config/`, because `cli.seed_home` copies templates once and
 #: never again -- a seeded harness would freeze at install time.
 BUNDLED = Path(__file__).parent / "harnesses"
 

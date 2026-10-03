@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { configFile, isLibraryFile, schemaFor } from "../../src/core/scope";
 
-const T = "/home/u/.kraft/templates";
+const T = "/home/u/.kraft/config";
 
 describe("configFile", () => {
   it.each([

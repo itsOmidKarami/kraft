@@ -84,7 +84,7 @@ function Row({ draft, repo, f, chains, problem, changed }: { draft: ConfigDraft;
       </span>
       <span className="rp-src">
         <span className={`rp-chip${changed ? " is-changed" : source === "this repo" ? " is-own" : ""}`}>{changed ? "changed" : source}</span>
-        {set && source === "this repo" && f.key !== "default_chain_template" && (
+        {set && source === "this repo" && f.key !== "default_chain" && (
           <button type="button" className="rp-reset" aria-label={`Reset ${f.label}`} onClick={() => void send(null)}>Reset</button>
         )}
       </span>

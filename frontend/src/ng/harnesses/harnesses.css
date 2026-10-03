@@ -1,4 +1,4 @@
-/* Templates › Harnesses (W14). Colours only from W1 tokens; classes are hn-*. */
+/* Settings › Harnesses (W14). Colours only from W1 tokens; classes are hn-*. */
 .hn-page { position: absolute; inset: 0; display: flex; overflow: hidden; }
 .hn-note { padding: 28px 24px; font-size: 13px; color: var(--text-sub); }
 .hn-crumb-sep { flex: none; color: var(--text-muted); }

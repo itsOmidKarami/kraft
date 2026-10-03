@@ -33,7 +33,7 @@ _LAUNCH = executor.LaunchContext(repo_entry=None, skills_dir=None)
 def escalation_profile(tmp_path, monkeypatch):
     templates = tmp_path / "escalation-templates"
     write_harness_profiles(templates, {"claude": {"provider": "claude"}})
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
 
 
 @pytest.fixture

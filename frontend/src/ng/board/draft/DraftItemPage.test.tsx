@@ -49,7 +49,7 @@ const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   sessionStorage.clear();
-  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/kraft-plugins", default_chain_template: "default", enabled: true }] as never });
+  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/kraft-plugins", default_chain: "default", enabled: true }] as never });
   vi.spyOn(api, "getTemplates").mockResolvedValue(CHAINS);
   vi.spyOn(api, "getTemplate").mockResolvedValue({ id: "default", file: "default.yaml", text: "nodes:\n  - id: spec\n", chain: {} });
   vi.spyOn(api, "getHealth").mockResolvedValue({ status: "ok" } as never);

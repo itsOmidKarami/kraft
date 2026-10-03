@@ -16,7 +16,7 @@ import { useProviders } from "./useProviders";
 import { useRun } from "./ops";
 import "./harnesses.css";
 
-/** Templates › Harnesses (Decisions §11): one draft over harnesses.yaml and policy.yaml.
+/** Settings › Harnesses (Decisions §11): one draft over harnesses.yaml and policy.yaml.
  *  The selection is in the query (`?harness=` / `?profile=`, `&lane=`), so no id shadows a route. */
 export function HarnessesPage() {
   const draft = useConfigDraft("harnesses", "harnesses");

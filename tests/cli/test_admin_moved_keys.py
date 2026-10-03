@@ -1,0 +1,197 @@
+"""The first 2.0 start's moves (`cli.admin.prepare_home`): a 1.x home adopted
+under its new name (`adopt_pre_2_home`), and the two keys 2.0 reads from
+another file carried on every start (`carry_moved_keys`), moving nothing it
+would break."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from kraft import cli, paths
+
+SCHEDULE = {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "weekly"}
+OTHER = {**SCHEDULE, "title": "monthly"}
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "already-carried",
+        "a-trigger-intake-would-refuse",
+        "an-intake-that-does-not-load",
+        "symlinked-files",
+        "nothing-to-move",
+    ],
+)
+def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case):
+    """A schedule already carried is not added twice (a start interrupted
+    between the two writes, or a home with both keys). A trigger 1.4 fired
+    but 2.0's schedule refuses (an `enabled: false`), or an `intake.yaml`
+    that would not load, leaves the triggers where they are, still read: an
+    `intake.yaml` that fails turns every schedule in it off. A symlinked file
+    is written where it points. A home with nothing to move is not written."""
+    home = tmp_path / "config"
+    home.mkdir()
+    intake = {"enabled": False}
+    triggers = [SCHEDULE, OTHER]
+    if case == "already-carried":
+        intake["schedules"] = [SCHEDULE]
+    elif case == "a-trigger-intake-would-refuse":
+        triggers = [{**SCHEDULE, "enabled": False}]
+    elif case == "an-intake-that-does-not-load":
+        intake["interval_s"] = "often"
+    elif case == "nothing-to-move":
+        intake["schedules"], triggers = [SCHEDULE], None
+    policy = {"default": {"attempts": 1, "wall_clock_s": 1}}
+    if triggers is not None:
+        policy["triggers"] = triggers
+    files = home
+    if case == "symlinked-files":
+        files = tmp_path / "dotfiles"
+        files.mkdir()
+        for name in ("intake.yaml", "policy.yaml"):
+            (home / name).symlink_to(files / name)
+    (files / "intake.yaml").write_text("# mine\n" + yaml.safe_dump(intake))
+    (files / "policy.yaml").write_text("# caps\n" + yaml.safe_dump(policy))
+    before = {n: (files / n).stat().st_ino for n in ("intake.yaml", "policy.yaml")}
+
+    lines = cli.admin.carry_moved_keys(home)
+
+    after = {n: yaml.safe_load((files / n).read_text()) for n in ("intake.yaml", "policy.yaml")}
+    if case in ("a-trigger-intake-would-refuse", "an-intake-that-does-not-load"):
+        assert after["policy.yaml"]["triggers"] == triggers
+        assert "schedules" not in after["intake.yaml"]
+        assert lines and "left where they are" in lines[0]
+    elif case == "nothing-to-move":
+        assert lines == []
+        assert {n: (files / n).stat().st_ino for n in before} == before  # not replaced
+    else:
+        assert "triggers" not in after["policy.yaml"]
+        assert after["intake.yaml"]["schedules"] == [SCHEDULE, OTHER]
+        assert (files / "intake.yaml").read_text().startswith("# mine\n")
+    if case == "symlinked-files":
+        assert (home / "intake.yaml").is_symlink() and (home / "policy.yaml").is_symlink()
+
+
+@pytest.mark.parametrize("where", ["renamed", "pointed-by-hand"])
+def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_path, where):
+    """A 1.x `intake.yaml` `max_concurrent` and `policy.yaml` `triggers:` move
+    to the file 2.0 reads them from, once, at the first start, each file
+    keeping its comments: in the home the start renames, and just the same in
+    one an operator points `KRAFT_CONFIG_DIR` at, which is never renamed."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    old = tmp_path / ("elsewhere" if where == "pointed-by-hand" else "home/templates")
+    if where == "pointed-by-hand":
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(old))
+    old.mkdir(parents=True)
+    (old / "library.yaml").write_text("tasks: {}\n")
+    (old / "intake.yaml").write_text("# pickup\nenabled: false\nmax_concurrent: 1  # one\n")
+    (old / "policy.yaml").write_text(
+        "# caps\ndefault: {attempts: 1, wall_clock_s: 1}\n"
+        "triggers:\n  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}\n"
+    )
+
+    home = cli.admin.prepare_home()
+
+    assert home == (old if where == "pointed-by-hand" else paths.default_config_dir())
+    assert old.is_symlink() == (where == "renamed")
+    intake = yaml.safe_load((home / "intake.yaml").read_text())
+    policy = yaml.safe_load((home / "policy.yaml").read_text())
+    assert "max_concurrent" not in intake and policy["max_concurrent"] == 1
+    assert "triggers" not in policy
+    assert intake["schedules"] == [
+        {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "t"}
+    ]
+    assert (home / "intake.yaml").read_text().startswith("# pickup\n")
+    assert (home / "policy.yaml").read_text().startswith("# caps\n")
+
+
+@pytest.mark.parametrize(
+    "case, in_use, templates_is",
+    [
+        ("default", "config", "link"),
+        ("templates-variable-at-the-default", "templates", "link"),
+        ("config-made-by-hand", "config", "link"),
+        ("config-made-by-hand-with-a-clash", "config", "dir"),
+        ("0x-update-interrupted", "config", "link"),
+        ("rename-refused", "templates", "dir"),
+        ("pointed-by-hand", "elsewhere", "dir"),
+        ("a-2-0-home-beside-it", "config", "dir"),
+        ("templates-variable-with-a-config-made-by-hand", "refused", "dir"),
+        ("config-variable-at-templates-beside-config", "templates", "dir"),
+    ],
+)
+def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
+    monkeypatch, tmp_path, capsys, case, in_use, templates_is
+):
+    """The rename follows the directory the start reads, 1.4's service-unit
+    `KRAFT_TEMPLATES_DIR` at the default included, and never seeds over the
+    operator's repos. `templates` is left as a link, so a 1.4 process still
+    running finds its `access.yaml`. A `config/` made by hand first gets what
+    it lacks; a clash stays put for the operator. A directory pointed at
+    elsewhere, or a 2.0 home already there, is not touched; a refused rename
+    is read where it is. A `config/` beside a `templates/` the variable names
+    stops the start: a merge could strand a clash where it reads. A
+    `KRAFT_CONFIG_DIR` is a 2.0 operator's own choice, never moved or refused,
+    even naming `templates/` beside a `config/` (the e2e server's layout)."""
+    bundled = tmp_path / "_bundled" / "config"
+    bundled.mkdir(parents=True)
+    (bundled / "library.yaml").write_text("tasks: {}\n")
+    monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
+    h = tmp_path / "home"
+    monkeypatch.setenv("KRAFT_HOME", str(h))
+    elsewhere = tmp_path / "elsewhere"
+    named_2 = {
+        "pointed-by-hand": elsewhere,
+        "config-variable-at-templates-beside-config": h / "templates",
+    }
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(named_2.get(case, "")))
+    named = str(h / "templates") if case.startswith("templates-variable") else ""
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", named)
+    old = h / "templates"
+    (old / "harnesses").mkdir(parents=True)
+    (old / "harnesses" / "mine.yaml").write_text("x: 1\n")
+    for name, text in {
+        "library.yaml": "tasks: {}\n",
+        "repos.yaml": "repos: [mine]\n",
+        "access.yaml": "port: 9999\n",
+    }.items():
+        (old / name).write_text(text)
+    if "config-made-by-hand" in case or case.endswith("beside-config"):
+        (h / "config" / "harnesses").mkdir(parents=True)
+        if case.endswith("clash"):
+            (h / "config" / "harnesses" / "theirs.yaml").write_text("y: 2\n")
+    elif case == "a-2-0-home-beside-it":
+        (h / "config").mkdir()
+        (h / "config" / "library.yaml").write_text("tasks: {}\n")
+    elif case == "0x-update-interrupted":
+        old.rename(h / "templates.seeding")
+        (h / "templates.seeding" / cli.admin.UPDATE_STAGED).write_text("templates.pre-v1-x\n")
+    elif case == "rename-refused":
+        monkeypatch.setattr(Path, "rename", lambda *a: (_ for _ in ()).throw(OSError(16, "busy")))
+
+    if in_use == "refused":
+        # The variable reads `templates/`: a merge could strand a clash there
+        # and seed over it, so the start names both and stops.
+        with pytest.raises(SystemExit, match="both exist"):
+            cli.admin.prepare_home()
+        assert sorted(p.name for p in old.iterdir()) == sorted(
+            ["access.yaml", "harnesses", "library.yaml", "repos.yaml"]
+        )
+        return
+    got = cli.admin.prepare_home()
+
+    assert got == {"config": h / "config", "templates": old, "elsewhere": elsewhere}[in_use]
+    assert old.is_symlink() == (templates_is == "link")
+    if case not in ("pointed-by-hand", "a-2-0-home-beside-it"):
+        # Never seeded over: the operator's repos are where every reader looks.
+        assert yaml.safe_load((got / "repos.yaml").read_text()) == {"repos": ["mine"]}
+    if case.endswith("clash"):
+        assert sorted(p.name for p in (h / "config" / "harnesses").iterdir()) == ["theirs.yaml"]
+        assert (old / "harnesses" / "mine.yaml").is_file()
+        assert "merge them by hand" in capsys.readouterr().err
+    else:
+        assert (old / "access.yaml").read_text() == "port: 9999\n"

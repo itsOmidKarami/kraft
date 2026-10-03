@@ -114,14 +114,18 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
     repo = make_repo(tmp_path)
     created = client.post(
         "/api/repos",
-        json={"path": str(repo), "default_chain_template": "default", "enabled": False},
+        json={"path": str(repo), "default_chain": "default", "enabled": False},
     )
     assert created.status_code == 201
     path = created.json()["path"]
 
     on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
     assert on_disk["repos"][0]["path"] == path
-    assert client.get("/api/repos").json()["repos"][0]["default_chain_template"] == "default"
+    assert client.get("/api/repos").json()["repos"][0]["default_chain"] == "default"
+    # The pre-2.0 name is still read on the wire, and answered under the new one.
+    patched = client.patch(f"/api/repos?path={path}", json={"default_chain_template": "quick-task"})
+    assert patched.status_code == 200, patched.text
+    assert client.get("/api/repos").json()["repos"][0]["default_chain"] == "quick-task"
 
     # connecting the same repo twice is a conflict, not a duplicate row
     assert client.post("/api/repos", json={"path": str(repo)}).status_code == 409
@@ -179,7 +183,7 @@ def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, temp
     r = client.post("/api/repos", json={"path": str(repo), "steering": ["does-not-exist"]})
     assert r.status_code == 422, r.text
     # Naming the name, and where steering profiles live.
-    assert "'does-not-exist' is not a steering profile in templates/library.yaml" in r.text
+    assert "'does-not-exist' is not a steering profile in config/library.yaml" in r.text
     # a rejected write never got persisted
     assert not repos_yaml.exists()
     assert client.get("/api/repos").json()["repos"] == []
@@ -546,7 +550,7 @@ def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
 
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     import kraft.api as api
 
@@ -774,7 +778,7 @@ def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, 
     templates_dir = fake_templates_dir(tmp_path, "claude")
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
     import kraft.api as api

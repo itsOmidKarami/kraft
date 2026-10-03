@@ -189,7 +189,7 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
     """
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     run_dir = tmp_path / "kraft-home" / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
@@ -231,7 +231,7 @@ def test_install_and_uninstall_service_use_real_systemd_user(tmp_path, monkeypat
     # `enable --now` unable to find the unit this test just wrote.
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "kraft-home"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
     run_dir = tmp_path / "kraft-home" / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
@@ -284,7 +284,7 @@ def test_install_service_enable_works_inside_the_managers_own_search_path(tmp_pa
     def install(run_dir: pathlib.Path) -> None:
         monkeypatch.setenv("KRAFT_HOME", str(run_dir.parent))
         monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
-        monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
         probe = socket.socket()
         probe.bind(("127.0.0.1", 0))

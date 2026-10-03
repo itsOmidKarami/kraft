@@ -15,7 +15,7 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch) -> str:
     itself, built with `cli` and made this machine's runtime through
     `sandbox.yaml`, rootless or not as it really is. Skips where the runtime
     cannot build it, unless KRAFT_E2E_REQUIRE names it."""
-    from kraft.paths import default_templates_dir
+    from kraft.paths import config_dir
     from kraft.worker.backends import docker
 
     context = tmp_path / "image"
@@ -49,7 +49,7 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch) -> str:
                 '[engine]\nactive_service = "e2e"\n[engine.service_destinations.e2e]\n'
                 f'uri = "{host}"\nidentity = "{key}"\n'
             )
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
     monkeypatch.setattr(docker, "_RUNTIME", docker.detect_runtime())

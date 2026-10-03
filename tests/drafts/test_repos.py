@@ -133,12 +133,12 @@ def test_add_repo_of_a_repo_with_no_commit_is_refused(client, tmp_path):
     assert "has no commit yet" in r.text
 
 
-def test_a_default_chain_template_naming_no_chain_is_a_problem(client, connected):
+def test_a_default_chain_naming_no_chain_is_a_problem(client, connected):
     body = resolved(
         client,
-        {"op": "set_repo", "path": connected, "patch": {"default_chain_template": "nope"}},
+        {"op": "set_repo", "path": connected, "patch": {"default_chain": "nope"}},
     )
-    (problem,) = [p for p in body["problems"] if p["field"] == "default_chain_template"]
+    (problem,) = [p for p in body["problems"] if p["field"] == "default_chain"]
     assert "'nope'" in problem["message"]
 
 

@@ -207,9 +207,23 @@ class TestScope(BaseModel):
 
 
 #: Keys an older `repos.yaml` entry may still carry, and where each went.
-_RETIRED_KEYS = {
-    "default_model": "set a model per harness profile under 'models:'",
-    "default_root_merge_policy": "a workspace's 'root_pointer_default' replaces it",
+#: `repos.yaml` keys 2.0 renamed, old name to new: read under the old name,
+#: with a warning naming the new one, and written back under the new name at
+#: the next save.
+_RENAMED_KEYS = {"default_chain_template": "default_chain"}
+#: `(path, old key)` already warned about: the file is re-read on every
+#: request, and one line per process is what an operator needs.
+_RENAME_WARNED: set[tuple[object, str]] = set()
+
+#: Keys an older `repos.yaml` entry may still carry that nothing reads since
+#: 2.0, and what replaced each: the loader's warning and `kraft admin
+#: doctor`'s `keys` row say it instead of "remove it".
+RETIRED_REPO_KEYS = {
+    "default_model": "set a model per harness profile under 'models:', then remove it",
+    "default_root_merge_policy": "a workspace's 'root_pointer_default' replaces it; remove it",
+    "submodules": "connect each submodule as a repos.yaml entry of its own "
+    "(`kraft repo connect` in its directory), then remove it",
+    "allow_cross_repo": "nothing replaces it; remove it",
 }
 
 #: A harness profile id, the key of `RepoEntry.models`: the same rule as
@@ -221,7 +235,7 @@ class RepoEntry(BaseModel):
     """One `repos.yaml` entry. Strict, so `managed: "true"` is rejected as the
     hand-rolled loader rejected it; unknown keys ride along (`extra="allow"`)
     because entries carry keys this loader never read (`name`, `enabled`,
-    `default_chain_template`, ...) and a re-save must not drop them."""
+    `default_chain`, ...) and a re-save must not drop them."""
 
     model_config = ConfigDict(strict=True, extra="allow")
 
@@ -232,9 +246,9 @@ class RepoEntry(BaseModel):
     id: Annotated[str, Field(pattern=_PROFILE_ID)] | None = None
     #: A display name; None falls back to `path` wherever this entry is shown.
     name: str | None = None
-    #: Which node-8 chain a new item against this repo resolves, when the item
-    #: doesn't say. None falls back to `"default"`.
-    default_chain_template: str | None = None
+    #: Which chain a new item against this repo runs, when the item doesn't
+    #: say. None falls back to `"default"`. `default_chain_template` before 2.0.
+    default_chain: str | None = None
     forge: str | None = None
     project: str | None = None
     # True, not False: every entry that predates this field was connected by a
@@ -302,34 +316,39 @@ class RepoEntry(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _normalize_forge(cls, data: Any) -> Any:
-        """Read a pre-forge entry: `templates/` is seeded once and never
-        overwritten, so the `gitlab_project` -> `forge`/`project` rename lives
-        in the reader rather than in a migration that rewrites a user's file."""
+    def _read_renamed_keys(cls, data: Any) -> Any:
+        """Read a key under its pre-2.0 name: `config/` is seeded once and
+        never overwritten, so a rename lives in the reader rather than in a
+        migration that rewrites a user's file. The next save writes the new
+        name; a file naming both keeps the new one. A pre-forge
+        `gitlab_project` is read as `forge: gitlab` and `project:`."""
         if not isinstance(data, dict):
             return data
         data = dict(data)
-        # Ruling 165: retired, so dropped here rather than carried along as an
-        # unknown extra that every re-save would write back. `default_model`
-        # has no one-to-one successor (it was one model for every provider);
-        # `default_root_merge_policy` was never read at run time -- a
-        # workspace's `root_pointer_default` is where that decision lives now.
-        for retired in _RETIRED_KEYS:
-            if retired in data:
-                logger.warning(
-                    "repos.yaml: %s: %r is no longer read and is dropped (%s)",
-                    data.get("path"),
-                    retired,
-                    _RETIRED_KEYS[retired],
-                )
-                del data[retired]
         legacy = data.pop("gitlab_project", None)
         # Both `forge` and `project` must be absent: a hand-edited
         # half-migrated entry carrying an explicit `project` beside the legacy
-        # key keeps its own.
+        # key keeps its own. The next save writes the new shape.
         if data.get("forge") is None and data.get("project") is None and legacy:
             data["forge"] = "gitlab"
             data["project"] = legacy
+        for old, new in _RENAMED_KEYS.items():
+            if old in data:
+                value = data.pop(old)
+                kept = data.get(new) is None
+                if kept:
+                    data[new] = value
+                if (data.get("path"), old) not in _RENAME_WARNED:
+                    _RENAME_WARNED.add((data.get("path"), old))
+                    logger.warning(
+                        "repos.yaml: %s: %r is %r since 2.0; %s",
+                        data.get("path"),
+                        old,
+                        new,
+                        "read as it, and written under the new name at the next save"
+                        if kept
+                        else "the entry names both, so the new one is read",
+                    )
         return data
 
     @field_validator("areas")
@@ -410,9 +429,13 @@ class RepoEntry(BaseModel):
                 raise ValueError(
                     f"repos.yaml: {self.path}: unknown key {key!r}: did you mean {meant!r}?"
                 )
-            if not quiet:
+            if not quiet and (self.path, key) not in _RENAME_WARNED:
+                _RENAME_WARNED.add((self.path, key))
                 logger.warning(
-                    "repos.yaml: %s: unrecognised key %r binds nothing; remove it", self.path, key
+                    "repos.yaml: %s: %r binds nothing; %s",
+                    self.path,
+                    key,
+                    RETIRED_REPO_KEYS.get(key, "remove it"),
                 )
         return self
 
@@ -442,7 +465,7 @@ class RepoEntry(BaseModel):
             block["sandbox"] = self.sandbox
         return TemplatePolicyOverride.model_validate(block) if block else None
 
-    #: `enabled`, `name` and `default_chain_template` carry a typed default
+    #: `enabled`, `name` and `default_chain` carry a typed default
     #: so every reader can use the attribute, but an entry that never set one
     #: must not have it reappear at its default the next time this entry is
     #: written out (a save, or `GET /repos`) -- an absent `enabled` means
@@ -450,7 +473,7 @@ class RepoEntry(BaseModel):
     _DEFAULTED_ON_ABSENCE: ClassVar[tuple[str, ...]] = (
         "enabled",
         "name",
-        "default_chain_template",
+        "default_chain",
     )
 
     def model_dump_repo(self, **kwargs: Any) -> dict:
@@ -487,52 +510,6 @@ def _near_miss(key: str) -> str | None:
     return field if distance <= 2 else None
 
 
-def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
-    """Legacy `submodules[]` edges become ordinary child repo entries (§5).
-
-    A pure transform, deliberately: doing it on read keeps a write out of a
-    read path, and the migrated shape persists the next time any route calls
-    `save_repos`. Idempotent -- once the field is gone there is nothing left
-    to migrate.
-
-    Only an edge a human actually configured survives. An all-default edge
-    records no decision, so it is dropped and auto-connect re-creates it as
-    `managed: false`.
-    """
-    seen = {r["path"] for r in repos if isinstance(r.get("path"), str)}
-    out: list[dict] = []
-    for r in repos:
-        edges = r.pop("submodules", None) or []
-        r.pop("allow_cross_repo", None)
-        out.append(r)
-        if not isinstance(edges, list):
-            continue
-        for e in edges:
-            if not isinstance(e, dict) or not isinstance(e.get("path"), str) or not e["path"]:
-                continue
-            if not (e.get("enabled") or e.get("test_command") or e.get("chain_override")):
-                continue
-            child = str(Path(r["path"]) / e["path"])
-            # A hand-connected child already holds the operator's real intent;
-            # the edge beside it is the stale copy, so it loses.
-            if child in seen:
-                continue
-            seen.add(child)
-            out.append(
-                {
-                    "path": child,
-                    "name": Path(child).name,
-                    "enabled": bool(e.get("enabled")),
-                    # the edge carried a human decision -- that is the touch
-                    "managed": True,
-                    "test_command": e.get("test_command"),
-                    "setup_command": e.get("setup_command"),
-                    "default_chain_template": e.get("chain_override") or "default",
-                }
-            )
-    return out
-
-
 def load_repos(path: str | Path, *, steering: Mapping[str, str] | None = None) -> list[RepoEntry]:
     """Parse `repos.yaml` into its entries, or raise `ConfigError`.
 
@@ -559,7 +536,7 @@ def load_repos(path: str | Path, *, steering: Mapping[str, str] | None = None) -
         raise ConfigError("repos.yaml: 'repos' must be a list of mappings")
     ctx = {"steering": steering} if steering is not None else None
     out: list[RepoEntry] = []
-    for r in _migrate_submodule_edges(repos):
+    for r in repos:
         try:
             out.append(RepoEntry.model_validate(r, context=ctx))
         except ValidationError as exc:
@@ -1216,6 +1193,17 @@ class Notify(_Model):
 # ── auto-intake ──────────────────────────────────────────────────────────────
 
 
+class Schedule(_Model):
+    """One `schedules:` entry of `intake.yaml`: a cron that files a work item,
+    paused, as `kraft item create` would (`triggers.tick`)."""
+
+    cron: str
+    repo: str
+    chain: str
+    title: str
+    description: str = ""
+
+
 class Intake(_Model):
     FILE = "intake.yaml"
 
@@ -1223,12 +1211,28 @@ class Intake(_Model):
     interval_s: int = 300
     repos: list[str] = []
     priority_ceiling: int = 2
-    # Moved to `policy.yaml` (`Policy.max_concurrent`); `PUT /intake` still
-    # writes it so an old client or a hand-edited file round-trips.
-    max_concurrent: int | None = None
+    #: Cron-fired intake. `policy.yaml`'s `triggers:` before 2.0, which is
+    #: still read (`policy.PolicyInput.triggers`) and named by `kraft admin doctor`.
+    schedules: list[Schedule] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_moved_keys(cls, data: Any) -> Any:
+        """`max_concurrent` moved to `policy.yaml` before 2.0, where every slot
+        count is read. A file still naming it loads, the key is not honoured,
+        and the warning names the move; `kraft admin doctor` does too."""
+        if isinstance(data, dict) and "max_concurrent" in data:
+            data = {k: v for k, v in data.items() if k != "max_concurrent"}
+            logger.warning(
+                "intake.yaml: max_concurrent is read from policy.yaml, not here; "
+                "move it there and delete this key"
+            )
+        return data
 
 
-INTAKE_DEFAULT: dict = Intake().model_dump(exclude={"max_concurrent"})
+#: What a save fills an `intake.yaml` with for every key it did not have; the
+#: schedules are written only when there are some.
+INTAKE_DEFAULT: dict = Intake().model_dump(exclude={"schedules"})
 
 
 # ── theme ────────────────────────────────────────────────────────────────────
@@ -1237,7 +1241,16 @@ PALETTE_IDS = frozenset({"nocturne", "rose", "forest", "amber", "slate"})
 
 
 class BoardPrefs(_Model):
-    group_by: Literal["status", "repo", "template"] = "status"
+    group_by: Literal["status", "repo", "chain"] = "status"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _chain_was_template(cls, data: Any) -> Any:
+        """`template` named the chain grouping before 2.0; read as `chain`."""
+        if isinstance(data, dict) and data.get("group_by") == "template":
+            data = {**data, "group_by": "chain"}
+        return data
+
     show_done: int = Field(default=5, ge=1)
     open_in: Literal["peek", "full"] = "peek"
 

@@ -1,6 +1,6 @@
 """What this version of Kraft can do that an older seeded config cannot.
 
-`$KRAFT_HOME/templates/` is seeded once and never overwritten
+`$KRAFT_HOME/config/` is seeded once and never overwritten
 (`cli/admin.py`'s `seed_home`), so every capability shipped after an operator's
 install is invisible to them. Measured on a real install 2026-09-18: two
 capabilities shipped inside a week were not running, and the P1 bug one of them

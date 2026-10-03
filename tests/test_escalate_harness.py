@@ -37,7 +37,7 @@ def profiles(tmp_path, monkeypatch):
             "cx-backup": {"provider": "codex"},
         },
     )
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
 
 
 @pytest.fixture

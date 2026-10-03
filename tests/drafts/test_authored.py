@@ -26,7 +26,7 @@ from kraft.templates.models import (
     SubprocessTask,
 )
 
-TEMPLATES = Path(__file__).resolve().parents[2] / "templates"
+TEMPLATES = Path(__file__).resolve().parents[2] / "config"
 SHIPPED = [*sorted((TEMPLATES / "chains").glob("*.yaml")), TEMPLATES / LIBRARY_FILE]
 CHAINS = SHIPPED[:-1]
 

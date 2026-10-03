@@ -141,7 +141,7 @@ repos:
   - id: product_root
     path: /work/product
     enabled: true
-    default_chain_template: default
+    default_chain: default
     forge: github
     project: acme/product
 

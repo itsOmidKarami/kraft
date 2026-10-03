@@ -291,7 +291,7 @@ def _impact(st, key: str) -> dict:
     )
     return {
         "running": running,
-        "repos": [r.path for r in _repos(st) if (r.default_chain_template or "default") == key],
+        "repos": [r.path for r in _repos(st) if (r.default_chain or "default") == key],
     }
 
 

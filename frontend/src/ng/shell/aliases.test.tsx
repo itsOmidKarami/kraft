@@ -22,10 +22,10 @@ const SHIPPED: [from: string, lands: string][] = [
   ["/search", "/"],
   ["/work-items/abc", "/work-items/abc"],
   ["/settings", "/settings/policy/limits"],
-  ["/settings/repos", "/templates/repos"],
+  ["/templates/repos", "/settings/repos"],
   ["/settings/chains", "/templates/chains"],
   ["/settings/library", "/templates/library"],
-  ["/settings/harnesses", "/templates/harnesses"],
+  ["/templates/harnesses", "/settings/harnesses"],
   ["/settings/policy", "/settings/policy/limits"],
   ["/settings/intake", "/settings/auto-intake"],
   ["/settings/notify", "/settings/notifications"],
@@ -43,6 +43,19 @@ describe("shipped addresses", () => {
     render(<App />);
     await waitFor(() => expect(window.location.pathname.replace(/\/$/, "")).toBe(lands.replace(/\/$/, "")));
     expect(screen.queryByRole("heading", { name: "Not found" })).toBeNull();
+  });
+
+  // The 2.0 release candidates' addresses for a repo and a harness, under
+  // Templates, land on the same thing under Settings.
+  it.each([
+    ["/templates/repos/kraft", "/settings/repos/kraft", ""],
+    ["/templates/harnesses/profiles/fast", "/settings/harnesses", "?profile=fast"],
+    ["/templates/harnesses/claude", "/settings/harnesses", "?harness=claude"],
+  ])("%s lands on %s%s", async (from, path, search) => {
+    window.history.pushState({}, "", from);
+    render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe(path));
+    expect(window.location.search).toBe(search);
   });
 
   it("keeps the query string and adds no history entry", async () => {
@@ -71,9 +84,9 @@ describe("shipped addresses", () => {
 const PHONE: [from: string, lands: string][] = [
   ["/more", "/"],
   ["/more?x=1", "/?x=1"],
-  ["/templates/harnesses/claude", "/templates/harnesses?harness=claude"],
-  ["/templates/harnesses/profiles/deep", "/templates/harnesses?profile=deep"],
-  ["/templates/harnesses/profiles/deep?yaml=1", "/templates/harnesses?profile=deep&yaml=1"],
+  ["/settings/harnesses/claude", "/settings/harnesses?harness=claude"],
+  ["/settings/harnesses/profiles/deep", "/settings/harnesses?profile=deep"],
+  ["/settings/harnesses/profiles/deep?yaml=1", "/settings/harnesses?profile=deep&yaml=1"],
   ["/settings/notifications/webhook", "/settings/notifications"],
   ["/settings/auto-intake/schedules/0", "/settings/auto-intake"],
 ];
@@ -97,9 +110,9 @@ describe("phone addresses at desktop width", () => {
 
 describe("aliasTarget", () => {
   it.each([
-    ["/templates/harnesses?harness=:id", { id: "claude" }, "", "/templates/harnesses?harness=claude"],
-    ["/templates/harnesses?harness=:id", { id: "a b/c" }, "", "/templates/harnesses?harness=a%20b%2Fc"],
-    ["/templates/harnesses?harness=:id", { id: "x" }, "?lane=y", "/templates/harnesses?harness=x&lane=y"],
+    ["/settings/harnesses?harness=:id", { id: "claude" }, "", "/settings/harnesses?harness=claude"],
+    ["/settings/harnesses?harness=:id", { id: "a b/c" }, "", "/settings/harnesses?harness=a%20b%2Fc"],
+    ["/settings/harnesses?harness=:id", { id: "x" }, "?lane=y", "/settings/harnesses?harness=x&lane=y"],
     ["/settings/notifications", { channel: "webhook" }, "?x=1", "/settings/notifications?x=1"],
     ["/", {}, "?", "/"],
   ])("%s with %o and %s → %s", (to, params, search, out) => {

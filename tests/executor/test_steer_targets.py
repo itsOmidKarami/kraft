@@ -5,15 +5,13 @@ when it can (docs/templates-v1-design.md "Operator controls and run forks")."""
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 import pytest
 from support.harness import write_harness_profiles
 
 from kraft import executor, store
 from kraft.executor import dispatch
-from kraft.paths import default_templates_dir
+from kraft.paths import config_dir
 
 #: Two agent tasks and a subprocess task running side by side in one step.
 CHAIN = """
@@ -172,7 +170,7 @@ async def test_a_paused_codex_task_resumes_the_thread_its_own_log_names(item_on,
     never sees, so the task would restart instead of resuming."""
     # The live table a launch reads; the seeded `codex` profile is on `fake`.
     write_harness_profiles(
-        Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()),
+        config_dir(),
         {"real-codex": {"provider": "codex"}},
     )
     it = await item_on(

@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from kraft.config import ConfigError
-from kraft.paths import RunDirs, default_run_dir, default_templates_dir, kraft_home
+from kraft.paths import RunDirs, config_dir, default_run_dir, kraft_home
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
 from kraft.worker import refstore as _refstore
@@ -443,7 +443,7 @@ def _sandbox_yaml():
     not parse."""
     from kraft import config
 
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    templates = config_dir()
     return config.SandboxHost.load(templates / config.SandboxHost.FILE)
 
 

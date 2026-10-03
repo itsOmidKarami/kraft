@@ -18,14 +18,14 @@ function Where() {
 }
 const ok = <T,>(body: T, status = 200) => Promise.resolve({ status, body });
 
-const mount = (path = "/templates/repos/platform") =>
+const mount = (path = "/settings/repos/platform") =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Where />
       <Routes>
         <Route element={<Shell />}>
-          <Route path="/templates/repos" element={<ReposPage />} />
-          <Route path="/templates/repos/:repo" element={<ReposPage />} />
+          <Route path="/settings/repos" element={<ReposPage />} />
+          <Route path="/settings/repos/:repo" element={<ReposPage />} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -82,12 +82,12 @@ describe("Repos page: the table", () => {
   });
 
   it("opens the repo in the URL and moves the selection with a click", async () => {
-    mount("/templates/repos/platform");
+    mount("/settings/repos/platform");
     await screen.findByRole("listbox", { name: "Repos" });
     expect(row("platform")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("complementary", { name: "platform pane" })).toBeInTheDocument();
     await userEvent.click(row("docs-site"));
-    expect(where).toBe("/templates/repos/docs-site");
+    expect(where).toBe("/settings/repos/docs-site");
   });
 });
 
@@ -384,15 +384,15 @@ describe("Repos page: disconnecting and enabling", () => {
   });
 
   it("disconnects an idle repo with remove_repo and moves to a neighbour", async () => {
-    mount("/templates/repos/docs-site");
+    mount("/settings/repos/docs-site");
     await screen.findByRole("listbox", { name: "Repos" });
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(d.postOps).toHaveBeenCalledWith("repos", "repos", [{ op: "remove_repo", path: "/src/docs-site" }], undefined));
-    await waitFor(() => expect(where).not.toBe("/templates/repos/docs-site"));
+    await waitFor(() => expect(where).not.toBe("/settings/repos/docs-site"));
   });
 
   it("enables and disables with set_repo", async () => {
-    mount("/templates/repos/docs-site");
+    mount("/settings/repos/docs-site");
     await screen.findByRole("listbox", { name: "Repos" });
     await userEvent.click(screen.getByRole("button", { name: "Enable" }));
     expect(d.postOps).toHaveBeenCalledWith("repos", "repos", [{ op: "set_repo", path: "/src/docs-site", patch: { enabled: true } }], undefined);
@@ -402,12 +402,12 @@ describe("Repos page: disconnecting and enabling", () => {
 describe("Repos page: problems", () => {
   it("marks a repo with a problem, shows it on its field row, and Fix → in review selects it", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(reposView({ changes: [{ path: "/src/docs-site", kind: "change", summary: "", fields: [] }], problems: [problemAt("/src/docs-site", "test_command", "docs-site: not a command")] }, true)));
-    mount("/templates/repos/platform");
+    mount("/settings/repos/platform");
     await screen.findByRole("listbox", { name: "Repos" });
     expect(within(row("docs-site")).getByRole("img", { name: "has a problem" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
     await userEvent.click(await screen.findByRole("button", { name: "Fix →" }));
-    expect(where).toBe("/templates/repos/docs-site");
+    expect(where).toBe("/settings/repos/docs-site");
     const rows = await screen.findAllByText("docs-site: not a command");
     expect(rows.some((e) => e.closest(".rp-row-cfg"))).toBe(true);
   });
@@ -438,12 +438,12 @@ describe("Repos fixture", () => {
 
 describe("Repos page: the pane's first state", () => {
   it("loads on the list with the pane on its rail, and a link to one repo opens it", async () => {
-    mount("/templates/repos");
+    mount("/settings/repos");
     await screen.findByRole("listbox", { name: "Repos" });
     expect(screen.getByRole("complementary", { name: /pane, collapsed$/ })).toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: /sections$/ })).toBeNull();
     document.body.innerHTML = "";
-    mount("/templates/repos/platform");
+    mount("/settings/repos/platform");
     expect(await screen.findByRole("tablist", { name: /sections$/ })).toBeInTheDocument();
   });
 });

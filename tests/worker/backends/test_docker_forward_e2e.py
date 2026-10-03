@@ -138,7 +138,7 @@ def runtime_with_ca(request, tmp_path, monkeypatch, tls_server):
             pytest.skip(why)
     templates = tmp_path / "templates"
     templates.mkdir(exist_ok=True)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\nca_bundle: {tls_server[1]}\n")
     monkeypatch.setattr(docker, "_RUNTIME", docker.detect_runtime())

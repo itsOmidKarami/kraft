@@ -19,7 +19,7 @@ from support.launches import distinct_launches
 from kraft import harness as _harness
 from kraft.adapters import agent
 
-SHIPPED = Path(__file__).resolve().parents[1] / "templates"
+SHIPPED = Path(__file__).resolve().parents[1] / "config"
 #: The bundled harnesses only: collection runs outside `_isolated_kraft_home`,
 #: and an operator's `$KRAFT_HOME` overlay is not what ships.
 BUNDLED = _harness.load(SHIPPED / "no-overlay")
@@ -27,7 +27,7 @@ BUNDLED = _harness.load(SHIPPED / "no-overlay")
 
 def _shipped() -> dict:
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("KRAFT_TEMPLATES_DIR", str(SHIPPED))
+        mp.setenv("KRAFT_CONFIG_DIR", str(SHIPPED))
         return distinct_launches(SHIPPED, BUNDLED)
 
 
@@ -46,7 +46,7 @@ def _live(tmp_path, monkeypatch, tasks: dict) -> Path:
     (live / "harnesses.yaml").write_text(
         yaml.safe_dump({"harnesses": harnesses, "profiles": profiles})
     )
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
     return live
 
 
@@ -81,7 +81,7 @@ def test_a_wrong_model_in_a_shipped_task_reaches_the_smoke(tmp_path, monkeypatch
     del implementer["profile"]
     implementer |= {"model": "gpt-5.6-terra", "effort": "high"}
     (home / "library.yaml").write_text(yaml.safe_dump(library))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(home))
     combos = distinct_launches(home)
     wrong = ("claude", "claude", "gpt-5.6-terra", "high")
     assert combos[wrong] == "default:implementation.main.implement"

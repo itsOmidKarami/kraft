@@ -60,7 +60,7 @@ kraft item skip [ID] [--note "..."]         # advance past the current node or g
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
 kraft item abandon [ID] --yes               # drop an item, deleting its worktree and branch
-kraft item set-chain [ID] --template T      # a not-yet-started item's chain
+kraft item set-chain [ID] --chain C      # a not-yet-started item's chain
 kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
 kraft item set-policy [ID] --policy KEY=VALUE [--clear]
 kraft item mr-label LABEL...                # label this item's merge request
@@ -105,9 +105,10 @@ their worktrees, `admin` is this machine's server. Typing an old flat verb
 (`kraft list`) prints where it moved.
 
 Installed Kraft keeps state in `$KRAFT_HOME` (default `~/.kraft`): `run/` for the
-databases, logs and worktrees, `templates/` for the YAML the Templates and
-Settings screens edit, seeded from the packaged defaults on first run and never
-overwritten after.
+databases, logs and worktrees, `config/` for the YAML the Templates and
+Settings screens edit (`templates/` before 2.0), seeded from the packaged
+defaults in the repo's `config/` on first run and never overwritten after. Only
+`library.yaml` and `chains/` are templates; the rest is configuration.
 
 ## Architecture Overview
 
@@ -224,8 +225,8 @@ beads stores its issues in), or close beads. Kraft does those itself.
 
 A worker's environment is built from an allowlist, not inherited from whatever
 shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy
-vars, the eight `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`,
-`KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`,
+vars, the nine `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`,
+`KRAFT_CONFIG_DIR` and its 1.x name `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`,
 `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`) plus the ones Kraft sets per session, and
 the agent's credential var. Any other `KRAFT_*` var, and anything else a
 repo needs, is declared in its `repos.yaml` entry — `env:` for literal values,

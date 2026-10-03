@@ -107,8 +107,8 @@ const port = await new Promise((ok) => {
 });
 const env = { ...process.env, KRAFT_HOME: home, KRAFT_BD_CWD: join(home, "repo"), KRAFT_PORT: String(port), PATH: `${join(ROOT, "fixtures", "bin")}:${process.env.PATH}` };
 const api = `http://127.0.0.1:${port}/api`;
-cpSync(join(ROOT, "templates"), join(home, "templates"), { recursive: true });
-rmSync(join(home, "templates", "access.yaml"), { force: true });
+cpSync(join(ROOT, "config"), join(home, "config"), { recursive: true });
+rmSync(join(home, "config", "access.yaml"), { force: true });
 sh("uv", ["run", "python", "dev/seed.py", "--repo-only"], ROOT, env);
 const daemon = spawn("uv", ["run", "python", "-m", "kraft"], { cwd: ROOT, env, stdio: "inherit" });
 let app;
@@ -225,7 +225,7 @@ async function drive(app) {
   await palette("View: Close All Editors");
   await palette("File: Open File...");
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
-  await page.keyboard.type(join(home, "templates", "policy.yaml"));
+  await page.keyboard.type(join(home, "config", "policy.yaml"));
   await page.keyboard.press("Enter");
   await pause(2500);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+F" : "Control+F");

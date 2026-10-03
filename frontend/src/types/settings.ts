@@ -13,7 +13,7 @@ export interface Repo {
    *  root and members carry one. */
   id?: string | null;
   name: string;
-  default_chain_template: string;
+  default_chain: string;
   test_command: string | null;
   test_scopes: TestScope[] | null;
   /** How a fresh worktree is prepared; `""` for nothing to run, null for none declared. */
@@ -214,7 +214,7 @@ export interface HarnessProvider {
   kind: string;
   command: string[];
   path: string;
-  /** From `$KRAFT_HOME/templates/harnesses/` rather than the package. */
+  /** From `$KRAFT_HOME/config/harnesses/` rather than the package. */
   override: boolean;
   capabilities: Record<string, HarnessCapability>;
 }
@@ -290,7 +290,7 @@ export type PaletteId = "nocturne" | "rose" | "forest" | "amber" | "slate";
 export type ThemeMode = "light" | "dark" | "system";
 
 /** `GET/PUT /theme`. Instance-wide, like every other Settings-backed value. */
-export type BoardGroupBy = "status" | "repo" | "template";
+export type BoardGroupBy = "status" | "repo" | "chain";
 export type BoardOpenIn = "peek" | "full";
 
 export interface Theme {

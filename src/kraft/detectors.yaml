@@ -1,7 +1,7 @@
 # How `kraft repo connect` proposes a repository's setup and test commands.
 #
 # Packaged with Kraft and read on every probe. To teach Kraft your own
-# conventions, write $KRAFT_HOME/templates/detectors.yaml in this same shape:
+# conventions, write $KRAFT_HOME/config/detectors.yaml in this same shape:
 # its new detectors are tried before these, one with the same `id` replaces
 # the packaged one where it stands, `disable: [id, ...]` drops packaged ones,
 # and its `ignore_dirs` add to the list below. Nothing here runs anything: a proposal is written into

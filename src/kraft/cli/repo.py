@@ -13,7 +13,7 @@ _REPO_COLUMNS = [
     ("", "here"),
     ("NAME", "name"),
     ("STATE", "state"),
-    ("CHAIN", "default_chain_template"),
+    ("CHAIN", "default_chain"),
     ("PATH", "path"),
 ]
 
@@ -270,7 +270,7 @@ def _say_setup(result: dict) -> None:
         _print(
             f"setup command: {why}; pass --setup-command or set `setup_command` in its "
             'repos.yaml entry, `""` if it needs no preparation, or tick No setup needed '
-            "under Templates › Repos"
+            "under Settings › Repos"
         )
 
 
@@ -357,13 +357,12 @@ def _connect_again(
     ):
         out(
             "  its commands are unchanged: edit its repos.yaml entry "
-            "(Templates › Repos) to change them"
+            "(Settings › Repos) to change them"
         )
     if not needs_tests and not needs_setup:
         if stored.get("enabled") is False:
             out(
-                "  it is disabled: enable it under Templates › Repos "
-                "(`enabled: true` in repos.yaml)"
+                "  it is disabled: enable it under Settings › Repos (`enabled: true` in repos.yaml)"
             )
         return stored
     try:

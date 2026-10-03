@@ -40,7 +40,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
     assert _by_name(rows, "server")["ok"]
     for name in (
         "health",
-        "templates",
+        "config",
         "access.yaml",
         "detectors.yaml",
         "pidfile",
@@ -61,7 +61,7 @@ def test_doctor_names_an_allowed_host_that_never_matches(templates_dir, monkeypa
     """It fails a network bind, where a device using that name is refused.
     A loopback bind never reads the list, so a wildcard 1.4 accepted only
     warns there: `doctor && ...` must not go red on an upgrade."""
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     (templates_dir / "access.yaml").write_text(
         f"bind: {bind}\nallowed_hosts: [kraft.local, '*.ts.net']\n"
@@ -87,7 +87,7 @@ def test_doctor_warns_of_a_network_bind_with_no_allowed_hosts(
     """Off loopback with an empty list, every browser on another device gets
     a 403: say so before a 1.4 user, whose plain-http browser was never
     checked, upgrades into it."""
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates_dir))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(templates_dir))
     monkeypatch.delenv("KRAFT_HOST", raising=False)
     (templates_dir / "access.yaml").write_text(access)
     row = _by_name(doctor._config_checks(), "access.yaml")
@@ -125,7 +125,7 @@ def test_doctor_reports_a_missing_bd_without_failing(app, tmp_path, monkeypatch)
 
 def test_a_dead_server_is_one_failure_and_the_rest_are_skipped(monkeypatch, tmp_path):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
 
     async def dead():
         raise ValueError("no Kraft server at http://127.0.0.1:1 — start one with `kraft serve`")
@@ -138,7 +138,7 @@ def test_a_dead_server_is_one_failure_and_the_rest_are_skipped(monkeypatch, tmp_
     # problems. (`agent cli` is deliberately not asserted either way: whether
     # `claude` is installed is a fact about the machine, not about doctor.)
     assert "server" in failed
-    assert {"templates", "mcp token"} <= failed
+    assert {"config", "mcp token"} <= failed
     assert all(_by_name(rows, name)["skipped"] for name in ("health", "repos", "worktrees"))
     assert not failed & {"health", "repos", "worktrees"}
 
@@ -250,30 +250,30 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
 
 
 def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeypatch):
-    """CI has no `$KRAFT_HOME/templates`, and `_config_checks` returns early
+    """CI has no `$KRAFT_HOME/config`, and `_config_checks` returns early
     there. Every row it can emit must still emit, or a caller reading the run by
     name gets StopIteration instead of an answer — which is how this reached a
     red pipeline while passing on a developer machine that had the directory.
     """
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "nope"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "nope"))
     # An installed Kraft's bundle: never started, its chains are not "missing".
-    (_chains(tmp_path / "bundled" / "templates") / "default.yaml").write_text("nodes: [{id: a}]\n")
+    (_chains(tmp_path / "bundled" / "config") / "default.yaml").write_text("nodes: [{id: a}]\n")
     monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "bundled")
 
     rows = asyncio.run(doctor.run_checks())
-    assert _by_name(rows, "templates")["ok"] is False
+    assert _by_name(rows, "config")["ok"] is False
     chains = _by_name(rows, "chain_templates")
-    assert chains == {**chains, "ok": True, "skipped": True, "detail": "skipped: no templates dir"}
+    assert chains == {**chains, "ok": True, "skipped": True, "detail": "skipped: no config dir"}
     assert _by_name(rows, "chains")["skipped"] is True
     # Not the upgrade guide: a home never seeded has nothing to upgrade.
-    assert _by_name(rows, "capabilities")["detail"] == "skipped: no templates dir"
+    assert _by_name(rows, "capabilities")["detail"] == "skipped: no config dir"
 
 
 def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):
     """A newcomer's first `doctor`: a line up front saying no server has run
     here, and the harnesses row pointing at `kraft` like the others, not a raw
     ENOENT."""
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path / "templates"))
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
 
@@ -291,13 +291,13 @@ def _chains(root: Path) -> Path:
 
 def test_chain_templates_check_names_a_node_missing_from_the_live_copy(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled"
-    (_chains(bundled / "templates") / "default.yaml").write_text(
+    (_chains(bundled / "config") / "default.yaml").write_text(
         "id: default\nnodes:\n  - {id: spec, extends: spec}\n  - {id: review, extends: review}\n"
     )
     live = tmp_path / "templates"
     (_chains(live) / "default.yaml").write_text("id: default\nnodes:\n  - {id: spec}\n")
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
 
     check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
     assert check["ok"] is True  # an operator's own chain, not a failure
@@ -307,13 +307,13 @@ def test_chain_templates_check_names_a_node_missing_from_the_live_copy(tmp_path,
 
 def test_chain_templates_check_names_a_template_missing_entirely(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled"
-    (_chains(bundled / "templates") / "quick-task.yaml").write_text(
+    (_chains(bundled / "config") / "quick-task.yaml").write_text(
         "id: quick-task\nnodes:\n  - {id: implementation}\n"
     )
     live = tmp_path / "templates"
     _chains(live)  # live has no quick-task.yaml at all
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
 
     check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
     assert check["ok"] is True
@@ -324,12 +324,12 @@ def test_chain_templates_check_reads_only_chains(tmp_path, monkeypatch):
     """A top-level file -- `library.yaml`, whose `nodes:` is a mapping, or a
     legacy chain left beside it -- is not a chain the V1 loader reads."""
     bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "legacy.yaml").write_text("id: legacy\nnodes:\n  - {id: x}\n")
+    (bundled / "config").mkdir(parents=True)
+    (bundled / "config" / "legacy.yaml").write_text("id: legacy\nnodes:\n  - {id: x}\n")
     live = tmp_path / "templates"
     live.mkdir()
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
 
     check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
     assert check["ok"] is True
@@ -338,11 +338,11 @@ def test_chain_templates_check_reads_only_chains(tmp_path, monkeypatch):
 
 def test_chain_templates_check_ignores_files_with_no_nodes_list(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled"
-    (_chains(bundled / "templates") / "notes.yaml").write_text("enabled: false\n")
+    (_chains(bundled / "config") / "notes.yaml").write_text("enabled: false\n")
     live = tmp_path / "templates"
     live.mkdir()
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
 
     check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
     assert check["ok"] is True
@@ -519,7 +519,7 @@ def _live(tmp_path, monkeypatch, profiles: dict[str, str], selected: list[str]) 
     (live / "chains" / "c.yaml").write_text(yaml.safe_dump({"id": "c", "nodes": nodes}))
     harnesses = {pid: {"provider": provider} for pid, provider in profiles.items()}
     (live / "harnesses.yaml").write_text(yaml.safe_dump({"harnesses": harnesses}))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(live))
     return live
 
 
@@ -636,7 +636,7 @@ _MANIFEST = (capabilities.Capability(version="1.0.0", name="thing", what="does i
 
 def test_capabilities_row_names_what_the_install_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(capabilities, "MANIFEST", _MANIFEST)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path))
     (tmp_path / ".seeded-version").write_text("0.1.0\n")
     row = doctor._capabilities_check()
     assert row["ok"] is True, "not upgrading is a choice, not a failure"
@@ -646,7 +646,7 @@ def test_capabilities_row_names_what_the_install_is_missing(tmp_path, monkeypatc
 
 def test_capabilities_row_is_quiet_when_the_stamp_is_current(tmp_path, monkeypatch):
     monkeypatch.setattr(capabilities, "MANIFEST", _MANIFEST)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path))
     (tmp_path / ".seeded-version").write_text("1.0.0\n")
     row = doctor._capabilities_check()
     assert row["ok"] is True
@@ -656,14 +656,14 @@ def test_capabilities_row_is_quiet_when_the_stamp_is_current(tmp_path, monkeypat
 def test_capabilities_row_leaves_out_one_the_live_templates_already_hold(tmp_path, monkeypatch):
     held = dataclasses.replace(_MANIFEST[0], present=("harnesses.yaml", "profiles"))
     monkeypatch.setattr(capabilities, "MANIFEST", (held,))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path))
     (tmp_path / "harnesses.yaml").write_text("profiles: {}\n")
     assert "up to date" in doctor._capabilities_check()["detail"]
 
 
 def test_an_unstamped_home_is_told_everything_rather_than_erroring(tmp_path, monkeypatch):
     monkeypatch.setattr(capabilities, "MANIFEST", _MANIFEST)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(tmp_path))
     row = doctor._capabilities_check()
     assert row["ok"] is True
     assert "thing" in row["detail"]

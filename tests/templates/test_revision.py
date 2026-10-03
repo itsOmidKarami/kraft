@@ -388,7 +388,7 @@ def test_the_revising_task_is_shown_only_the_nodes_it_may_change():
 
 # ── the shipped chains ──
 
-SHIPPED = Path(__file__).resolve().parents[2] / "templates"
+SHIPPED = Path(__file__).resolve().parents[2] / "config"
 
 
 def test_the_default_chain_revises_itself_right_after_the_plan_is_approved():

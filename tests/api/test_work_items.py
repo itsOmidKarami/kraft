@@ -709,7 +709,7 @@ def test_no_chain_template_takes_the_repo_default_and_files_paused(
     POST /work-items' `autostart` defaults off (Kraft-9efnk.17), and POST
     /triggers has no such field at all."""
     if repo_default:
-        connect_repo(repo, default_chain_template=repo_default)
+        connect_repo(repo, default_chain=repo_default)
 
     def filed(**chain):
         r = client.post(f"/api/{route}", json={"title": "t", "repo": str(repo), **chain})

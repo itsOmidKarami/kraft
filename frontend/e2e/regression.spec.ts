@@ -23,7 +23,7 @@ test("repos: connect a repo and publish it", async ({ page }) => {
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"]);
 
-  await page.goto("/templates/repos");
+  await page.goto("/settings/repos");
   await page.getByRole("button", { name: "Connect repo" }).click();
   const dialog = page.getByRole("dialog", { name: "Connect a repo" });
   await dialog.getByRole("textbox", { name: "Path to a git repository" }).fill(repo);
@@ -57,7 +57,7 @@ test("library: a component lists the chains that use it, and links to them", asy
 });
 
 test("harnesses: a harness lists the tasks it runs, and links to them", async ({ page }) => {
-  await page.goto("/templates/harnesses");
+  await page.goto("/settings/harnesses");
   await page.getByRole("region", { name: "claude" }).getByRole("link", { name: /^default › implementation\.main\.implement\. Open in Chains$/ }).click();
   await expect(page).toHaveURL(/\/templates\/chains\/default\/nodes\/implementation$/);
 });

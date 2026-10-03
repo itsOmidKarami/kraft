@@ -43,10 +43,10 @@ def schedule(repo, **over):
     }
 
 
-def test_set_intake_writes_intake_yaml_whole_and_max_concurrent_to_policy(client):
+def test_set_intake_writes_intake_yaml_whole(client):
     body = resolved(
         client,
-        {"op": "set_intake", "patch": {"enabled": True, "interval_s": 90, "max_concurrent": 2}},
+        {"op": "set_intake", "patch": {"enabled": True, "interval_s": 90}},
     )
     assert written(client, "intake.yaml") == {
         "enabled": True,
@@ -54,18 +54,19 @@ def test_set_intake_writes_intake_yaml_whole_and_max_concurrent_to_policy(client
         "repos": [],
         "priority_ceiling": 2,
     }
-    assert written(client, "policy.yaml")["max_concurrent"] == 2
     r = body["resolved"]
-    assert (r["enabled"], r["interval_s"], r["max_concurrent"], r["priority_ceiling"]) == (
-        True,
-        90,
-        2,
-        2,
-    )
+    assert (r["enabled"], r["interval_s"], r["priority_ceiling"]) == (True, 90, 2)
 
 
-def test_set_intake_refuses_a_field_that_is_not_an_intake_setting(client):
-    assert ops(client, {"op": "set_intake", "patch": {"cron": "x"}}).status_code == 422
+@pytest.mark.parametrize(
+    "patch",
+    [{"cron": "x"}, {"max_concurrent": 4}],
+    ids=["a-schedule-field", "policy-yamls-max-concurrent"],
+)
+def test_set_intake_refuses_a_field_that_is_not_an_intake_setting(client, patch):
+    """`max_concurrent` is `policy.yaml`'s, edited on Settings › Policy: this
+    area writes one file."""
+    assert ops(client, {"op": "set_intake", "patch": patch}).status_code == 422
 
 
 def test_a_bound_outside_the_range_is_a_problem_not_a_refused_op(client):
@@ -74,12 +75,12 @@ def test_a_bound_outside_the_range_is_a_problem_not_a_refused_op(client):
     assert client.post(f"{URL}/publish").status_code == 422
 
 
-def test_schedule_ops_rewrite_triggers_in_place(client, connected):
+def test_schedule_ops_rewrite_schedules_in_place(client, connected):
     resolved(client, schedule(connected), schedule(connected, title="Second"))
     resolved(client, {"op": "set_schedule", "index": 0, "patch": {"cron": "0 8 * * 1"}})
     body = resolved(client, {"op": "remove_schedule", "index": 1})
-    triggers = written(client, "policy.yaml")["triggers"]
-    assert triggers == [
+    schedules = written(client, "intake.yaml")["schedules"]
+    assert schedules == [
         {
             "cron": "0 8 * * 1",
             "repo": connected,
@@ -97,7 +98,7 @@ def test_a_schedule_naming_no_connected_repo_or_no_chain_is_a_problem(client, co
     body = resolved(client, schedule("/not/connected", chain="no-such-chain"))
     by_field = {p["field"]: p for p in body["problems"] if "schedule" in p}
     assert set(by_field) == {"repo", "chain"}
-    assert by_field["chain"]["path"] == "triggers[0].chain"
+    assert by_field["chain"]["path"] == "schedules[0].chain"
     assert client.post(f"{URL}/publish").status_code == 422
 
     body = resolved(client, {"op": "set_schedule", "index": 0, "patch": {"repo": connected}})
@@ -123,7 +124,7 @@ def test_publish_applies_the_interval_and_schedules_with_one_poller_restart(
     assert client.post(f"{URL}/publish").status_code == 200
     assert restarts == [90]
     assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["interval_s"] == 90
-    assert [t.title for t in client.app.state.policy.triggers] == ["Weekly sweep"]
+    assert [s["title"] for s in client.app.state.intake["schedules"]] == ["Weekly sweep"]
 
 
 # ── changes at key level (W15 A.2) ──
@@ -132,19 +133,13 @@ def test_publish_applies_the_interval_and_schedules_with_one_poller_restart(
 def test_an_intake_draft_lists_each_changed_key_and_a_schedule_by_its_index(client, connected):
     body = resolved(
         client,
-        {"op": "set_intake", "patch": {"interval_s": 90, "max_concurrent": 2}},
+        {"op": "set_intake", "patch": {"interval_s": 90}},
         schedule(connected),
     )
     by_path = {(c["file"], c["path"]): c for c in body["changes"]}
     assert ("intake.yaml", "interval_s") in by_path
     assert by_path[("intake.yaml", "interval_s")]["summary"].endswith("→ 90")
-    assert by_path[("policy.yaml", "max_concurrent")]["summary"].endswith("→ 2")
-    assert by_path[("policy.yaml", "triggers.0.cron")]["kind"] == "add"
-    assert by_path[("policy.yaml", "triggers.0.title")]["summary"] == "not set → Weekly sweep"
+    assert by_path[("intake.yaml", "schedules.0.cron")]["kind"] == "add"
+    assert by_path[("intake.yaml", "schedules.0.title")]["summary"] == "not set → Weekly sweep"
     # No file-level row alongside.
-    assert {c["path"] for c in body["changes"]}.isdisjoint({"intake.yaml", "policy.yaml"})
-
-
-def test_max_concurrent_is_one_key_whichever_draft_writes_it(client):
-    resolved(client, {"op": "set_intake", "patch": {"max_concurrent": 4}})
-    assert written(client, "policy.yaml")["max_concurrent"] == 4
+    assert {c["path"] for c in body["changes"]}.isdisjoint({"intake.yaml"})

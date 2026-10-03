@@ -63,7 +63,7 @@ The two local hooks need `just` on `PATH`:
 - `config-schemas-current` runs `just schemas` when `src/kraft/` or
   `vscode/schemas/` changes, and fails the commit if that rewrote a schema.
   Stage the regenerated files and commit again.
-- `shipped-models-smoke` runs `just smoke-models` when `templates/` or
+- `shipped-models-smoke` runs `just smoke-models` when `config/` or
   `src/kraft/harnesses/` changes. It launches the real `claude` CLI and spends
   a few cents, so it needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
   Without one it prints `SKIPPED` and lets the commit through.
@@ -116,7 +116,7 @@ new ones.
 ```text
 src/kraft/        the orchestrator: api/, executor/, store/, adapters/, worker/, cli/, index/, ...
 frontend/         the React SPA (vite), see frontend/README.md; e2e/ is Playwright, sweep/ is a screenshot harness
-templates/        the default library, chains, harness profiles and policy: an install's seed
+config/           the packaged configuration: the default library, chains, harness profiles and policy, an install's seed
 tests/            backend tests, mirroring src/kraft/ (CLAUDE.md says why that matters)
 dev/              the dev-instance seeder, CI check scripts, release and codegen helpers
 fixtures/         the fake agent and the PATH shim `just dev` uses

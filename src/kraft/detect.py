@@ -24,7 +24,7 @@ Three kinds of evidence, in the order a repository is most likely to mean them:
 A `.devcontainer`'s create commands are a last resort for setup ("devenv").
 
 The table of detectors is data: `detectors.yaml` beside this module, and an
-operator's `$KRAFT_HOME/templates/detectors.yaml` on top of it (`load`). The
+operator's `$KRAFT_HOME/config/detectors.yaml` on top of it (`load`). The
 readers that list a runner's tasks are code (`_TASK_READERS`), so a detector
 names one of them rather than bringing its own parser.
 

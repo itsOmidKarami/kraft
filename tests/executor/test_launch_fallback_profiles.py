@@ -19,7 +19,7 @@ PROFILES = {
 
 
 def _setup(fake_agent, monkeypatch, *, limit=("opus",), profiles=PROFILES, harnesses=None):
-    for where in (fake_agent.templates, Path(os.environ["KRAFT_HOME"]) / "templates"):
+    for where in (fake_agent.templates, Path(os.environ["KRAFT_HOME"]) / "config"):
         if harnesses:
             write_harness_profiles(where, harnesses)
         write_agent_profiles(where, profiles)

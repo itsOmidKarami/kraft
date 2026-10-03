@@ -371,7 +371,6 @@ def policy_text(templates_dir, old="rate_limit_retries: 5", new="rate_limit_retr
         ("repos", "repos.yaml"),
         ("policy", "policy.yaml"),
         ("intake", "intake.yaml"),
-        ("intake", "policy.yaml"),
     ],
 )
 def test_each_config_area_keeps_a_draft_of_its_files(client, templates_dir, area, file):

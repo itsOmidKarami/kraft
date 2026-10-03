@@ -20,7 +20,7 @@ def agent_launches(
     """(chain, task path, invocation) for every agent task of every chain in
     `templates` -- each fallback candidate too -- through
     `agent.resolve_agent_task`. The profile table is read from
-    `KRAFT_TEMPLATES_DIR`, as at a launch: point it at `templates` first."""
+    `KRAFT_CONFIG_DIR`, as at a launch: point it at `templates` first."""
     harnesses = harnesses if harnesses is not None else _harness.load(None)
     table = agent.harness_table(harnesses)[0]
     library = TemplateLibrary.from_yaml_dir(templates)

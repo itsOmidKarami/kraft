@@ -15,7 +15,6 @@ CI's Linux runner runs them:
 """
 
 import json
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -24,7 +23,7 @@ import pytest
 from support import registry
 from support.harness import entry_of
 
-from kraft.paths import default_templates_dir
+from kraft.paths import config_dir
 from kraft.policy import DEFAULT_SENTINEL
 from kraft.worker import kit
 
@@ -98,7 +97,7 @@ def kit_ref(probed, monkeypatch):  # noqa: F811
         monkeypatch.setenv("CONTAINERS_REGISTRIES_CONF", str(conf))
         monkeypatch.setenv("SSL_CERT_FILE", str(served.cert))
         monkeypatch.setenv("KRAFT_E2E_KIT_KEY", REAL)
-        templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+        templates = config_dir()
         sandbox_yaml = templates / "sandbox.yaml"
         sandbox_yaml.write_text(
             f"{sandbox_yaml.read_text()}credentials: {{e2e: KRAFT_E2E_KIT_KEY}}\n"

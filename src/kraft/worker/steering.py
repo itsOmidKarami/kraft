@@ -13,19 +13,12 @@ Kraft never reads a steering text from inside a target repository.
 from __future__ import annotations
 
 import logging
-import re
-import time
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import ClassVar
 
-import yaml
 from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
-
-#: Where 0.x and the 1.0 release candidates kept repository steering files.
-LEGACY_DIR = "steering"
 
 
 class SteeringError(ValueError):
@@ -73,7 +66,7 @@ def select(names: Sequence[str], profiles: Mapping[str, str], *, where: str) -> 
     if missing:
         raise SteeringError(
             f"{where}: steering {missing[0]!r} is not a steering profile in "
-            "templates/library.yaml; define it under `steering:` there "
+            "config/library.yaml; define it under `steering:` there "
             "(Templates › Library), or remove the name"
         )
     selected = {n: profiles[n] for n in names}
@@ -95,7 +88,7 @@ def for_repository(
     filed with, keyed by repository path, and the answer whatever `repos.yaml`
     or the library say now. `None` is a snapshot stored before that was
     frozen, whose steering came from files read at each launch; those files
-    are library profiles now (`migrate_files`), so it reads the entry's names
+    are library profiles, so it reads the entry's names
     against the live library, `live`, and raises naming a name it lacks.
 
     A repos.yaml `path:` can be hand-edited while an item is in flight
@@ -118,93 +111,3 @@ def for_repository(
         return ()
     where = f"repos.yaml: {entry.path} (an item filed before repository steering was frozen)"
     return tuple(select(entry.steering, live or {}, where=where).values())
-
-
-def _indented(entries: Mapping[str, dict]) -> str:
-    dumped = yaml.safe_dump(dict(entries), sort_keys=False, allow_unicode=True, width=10**6)
-    return "".join(f"  {line}" if line.strip() else line for line in dumped.splitlines(True))
-
-
-def migrate_files(templates_dir: Path) -> list[str]:
-    """Fold `templates/steering/*.md` into `library.yaml`'s `steering:` and
-    move the directory aside. Returns the names it added.
-
-    Runs at every start, and does nothing once the directory is gone. Each
-    file whose name the library does not define yet becomes
-    `steering: {<name>: {instructions: <file text>}}`, so a `repos.yaml`
-    naming it keeps resolving to the same text. A name the library already
-    defines keeps the library's text; an empty or unreadable file is skipped.
-    Both are logged, and nothing is deleted: the whole directory moves to
-    `steering.pre-1.0/` beside it.
-
-    The new entries are inserted as text, so the file's comments survive. If
-    that text does not parse back to exactly the old library plus the new
-    entries (an unusual layout), the merged mapping is written instead, with
-    the original kept as `library.yaml.pre-1.0`.
-    """
-    src = templates_dir / LEGACY_DIR
-    if not src.is_dir():
-        return []
-    library_path = templates_dir / "library.yaml"
-    try:
-        text = library_path.read_text() if library_path.is_file() else ""
-        data = yaml.safe_load(text) or {}
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        data, text = exc, ""
-    if not isinstance(data, dict) or not isinstance(data.get("steering") or {}, dict):
-        # The library is not loadable either, so nothing would resolve; keep
-        # the files where they are and try again at the next start.
-        logger.error("steering migration: %s is not a mapping, left %s in place", library_path, src)
-        return []
-    existing = data.get("steering") or {}
-    added: dict[str, dict] = {}
-    for path in sorted(src.glob("*.md")):
-        try:
-            body = path.read_text()
-        except (OSError, ValueError) as exc:
-            logger.warning("steering migration: skipped unreadable %s: %s", path, exc)
-            continue
-        if path.stem in existing:
-            logger.warning(
-                "steering migration: library.yaml already defines steering %r; kept it, "
-                "and %s is only in the moved-aside copy",
-                path.stem,
-                path.name,
-            )
-        elif body.strip():
-            added[path.stem] = {"instructions": body}
-        else:
-            logger.warning("steering migration: skipped empty %s", path)
-    if added:
-        merged = {**data, "steering": {**existing, **added}}
-        if "steering" in data:
-            head = re.search(r"^steering:[ \t]*(#.*)?$", text, re.M)
-            new_text = (
-                text[: head.end()] + "\n" + _indented(added).rstrip("\n") + text[head.end() :]
-                if head
-                else ""
-            )
-        else:
-            kept = text.rstrip("\n")
-            new_text = (kept + "\n\n" if kept else "") + "steering:\n" + _indented(added)
-        try:
-            ok = yaml.safe_load(new_text) == merged
-        except yaml.YAMLError:
-            ok = False
-        if not ok:
-            if library_path.is_file():
-                library_path.replace(library_path.with_name("library.yaml.pre-1.0"))
-            new_text = yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
-        from kraft.config import write_text  # here: kraft.config imports this module
-
-        write_text(library_path, new_text)
-    aside = src.with_name(f"{LEGACY_DIR}.pre-1.0")
-    if aside.exists():
-        aside = src.with_name(f"{LEGACY_DIR}.pre-1.0-{int(time.time())}")
-    src.rename(aside)
-    logger.warning(
-        "steering files moved into library.yaml as steering profiles %s; the files are kept in %s",
-        sorted(added),
-        aside,
-    )
-    return list(added)

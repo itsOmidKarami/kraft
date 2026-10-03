@@ -34,7 +34,7 @@ describe("Auto-intake", () => {
   });
 
   it("narrows the resolved answer and is null while a file does not load", () => {
-    const ok = { enabled: true, interval_s: 300, max_concurrent: 3, priority_ceiling: 2, repos: [], schedules: [] };
+    const ok = { enabled: true, interval_s: 300, priority_ceiling: 2, repos: [], schedules: [] };
     expect(intakeOf({ resolved: ok } as never)).toEqual(ok);
     expect(intakeOf({ resolved: null } as never)).toBeNull();
   });

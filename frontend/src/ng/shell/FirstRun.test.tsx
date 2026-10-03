@@ -143,7 +143,7 @@ describe("FirstRun", () => {
     await waitFor(() => expect(api.addRepo).toHaveBeenCalledTimes(1));
     expect(calls).toEqual(["probe", "add"]);
     expect(api.addRepo).toHaveBeenCalledWith({
-      path: "/code/acme", name: "acme", default_chain_template: "default", test_command: "uv run pytest -q",
+      path: "/code/acme", name: "acme", default_chain: "default", test_command: "uv run pytest -q",
       forge: "gitlab", project: "acme/acme",
     });
     expect(await screen.findByText("Added acme")).toBeInTheDocument();
@@ -205,7 +205,7 @@ describe("FirstRun", () => {
   });
 
   it("reads the repo again on arriving back by an in-app link, with no focus event", async () => {
-    // Where the wizard got to before its Templates › Repos link: no setup command then.
+    // Where the wizard got to before its Settings › Repos link: no setup command then.
     localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 1, reached: 1, path: "/code/acme", name: "acme", disabled: false, noSetup: true, repoPath: "/code/acme", missing: [] }));
     const repos = vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [{ path: "/code/acme", enabled: true, setup_command: "" }] } as never);
     mount();
@@ -236,11 +236,11 @@ describe("FirstRun", () => {
     expect(vi.mocked(api.addRepo).mock.calls[0][0]).not.toHaveProperty("test_scopes");
     // R8b-02: setting the command is not enough while the repo is disabled.
     expect(screen.getByText(/set its test command and Enable it, then publish/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+    expect(screen.getByRole("link", { name: "Settings › Repos" })).toHaveAttribute("href", "/settings/repos");
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(await screen.findByRole("button", { name: "Continue" }));
     expect(screen.getByText(/acme is disabled, so New work item cannot file to it yet/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+    expect(screen.getByRole("link", { name: "Settings › Repos" })).toHaveAttribute("href", "/settings/repos");
   });
 
   it("says nothing about a disabled repo when the server enabled it", async () => {
@@ -302,7 +302,7 @@ describe("FirstRun", () => {
     await probeAndAdd(user);
     await user.click(stepButton(1)!);
     expect(screen.getByText(/No setup command found: its first work item stops before it starts until you set one, or tick No setup needed/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Templates › Repos" })).toHaveAttribute("href", "/templates/repos");
+    expect(screen.getByRole("link", { name: "Settings › Repos" })).toHaveAttribute("href", "/settings/repos");
   });
 
   it("says nothing about setup when the server saved a setup command", async () => {
@@ -319,7 +319,7 @@ describe("FirstRun", () => {
     const user = setup();
     mount();
     await probeAndAdd(user);
-    expect(screen.getByText(/YAML in \$KRAFT_HOME\/templates/)).toBeInTheDocument();
+    expect(screen.getByText(/YAML in \$KRAFT_HOME\/config/)).toBeInTheDocument();
   });
 
   it("step 3 opens the board's composer and says Claude workers need the plugin, or admin init", async () => {
@@ -349,7 +349,7 @@ describe("FirstRun", () => {
     expect(savedFirstRun()).toBeNull();
     await probeAndAdd(user);
     first.unmount();
-    // A reload, or a visit to Templates › Repos from step 1, mounts it again.
+    // A reload, or a visit to Settings › Repos from step 1, mounts it again.
     const second = mount();
     expect(screen.getByRole("heading", { name: "Chain and policy" })).toBeInTheDocument();
     await user.click(stepButton(1)!);

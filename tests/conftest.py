@@ -417,7 +417,7 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 
     `kraft_home()` falls back to `~/.kraft` (paths.py:16). Only KRAFT_RUN_DIR and
-    KRAFT_TEMPLATES_DIR were ever overridden, so `default_skills_dir()` — and any
+    KRAFT_CONFIG_DIR were ever overridden, so `default_skills_dir()` — and any
     check that reads its env var lazily — resolved against the real home, which
     exists on a developer machine and not in a CI container. Autouse rather than
     part of `app`, so a test cannot reach the home by not opting in.
@@ -527,7 +527,7 @@ def item_on(request, database, run_dirs):
 
 @pytest.fixture
 def templates_dir(tmp_path) -> Path:
-    """`KRAFT_TEMPLATES_DIR` for the `client` fixture: `fake_templates_dir` with
+    """`KRAFT_CONFIG_DIR` for the `client` fixture: `fake_templates_dir` with
     every agent on `fixtures/fake-claude.sh`. A file that needs another shape
     (an edited library or chain) overrides this fixture and `client` picks its
     version up."""
@@ -614,7 +614,7 @@ def app(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
     monkeypatch.setenv(
         "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
     )

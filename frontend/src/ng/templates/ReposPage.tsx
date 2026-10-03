@@ -17,7 +17,7 @@ import { problemsOf, repoName, reposOf, runningOf, type RepoView } from "./repos
 import { useRepoFragment } from "./repos/useRepoFragment";
 import "./repos/repos.css";
 
-export const reposUrl = (repo?: string) => `/templates/repos${repo ? `/${encodeURIComponent(repo)}` : ""}`;
+export const reposUrl = (repo?: string) => `/settings/repos${repo ? `/${encodeURIComponent(repo)}` : ""}`;
 
 /** The Repos area (Decisions §12's sibling, AreaRepos): `repos.yaml` as a table and a
  *  pane, edited through the `repos` draft and published with Review & publish. */
@@ -144,7 +144,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                         ref={rove.ref(x.path)}
                         role="option"
                         aria-selected={sel?.path === x.path}
-                        aria-label={`${repoName(x)}, chain ${String(x.entry.default_chain_template ?? "default")}, ${state}${bad ? ", has a problem" : ""}`}
+                        aria-label={`${repoName(x)}, chain ${String(x.entry.default_chain ?? "default")}, ${state}${bad ? ", has a problem" : ""}`}
                         tabIndex={rove.tabIndex(x.path)}
                         className={`rp-row${sel?.path === x.path ? " is-sel" : ""}${x.entry.enabled === false ? " is-off" : ""}`}
                         onClick={() => select(x)}
@@ -155,7 +155,7 @@ function Editor({ draft }: { draft: ConfigDraft }) {
                           <span className="rp-name-text" data-allow-ellipsis title={x.path}>{repoName(x)}</span>
                           {bad && <span className="rp-dot" role="img" aria-label="has a problem" />}
                         </span>
-                        <span className="rp-cell">{String(x.entry.default_chain_template ?? "default")}</span>
+                        <span className="rp-cell">{String(x.entry.default_chain ?? "default")}</span>
                         <span className="rp-cell rp-cut" data-allow-ellipsis title={steer || undefined}>{steer || "—"}</span>
                         <span className="rp-cell rp-cut" data-allow-ellipsis title={testsTitle(x.entry)}>{testsCell(x.entry)}</span>
                         <span className={`rp-cell rp-state${x.entry.enabled === false ? "" : " is-on"}`}>{state}</span>
@@ -258,7 +258,7 @@ function RepoPane({ draft, repo, running, chains, tab, onTab, open, size, onOpen
       {tab === "overview" && (
         <>
           <Kv k="path" v={repo.path} mono />
-          <Kv k="default chain" v={String(repo.entry.default_chain_template ?? "default")} mono />
+          <Kv k="default chain" v={String(repo.entry.default_chain ?? "default")} mono />
           <Kv k="open items" v={String(running)} />
           <Kv k="state" v={enabled ? "enabled" : "disabled"} />
           <Kv k="steering" v={repo.resolved.steering.join(", ") || "—"} mono muted={!repo.resolved.steering.length} />
