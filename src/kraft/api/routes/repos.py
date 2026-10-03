@@ -5,6 +5,7 @@ import logging
 import re
 import tempfile
 import time
+from functools import lru_cache
 from itertools import count
 from pathlib import Path
 from typing import Annotated
@@ -266,10 +267,17 @@ async def list_repos(request: Request):
     }
 
 
+@lru_cache(maxsize=4)
+def _checkout_of(cwd: str) -> str | None:
+    """The git checkout `cwd` is in. Cached by directory: about ten places in
+    the UI read GET /repos, and the answer only changes if the server moves."""
+    return config_mod.git_read(Path(cwd), "rev-parse", "--show-toplevel", expected_failure=True)
+
+
 def _suggested(connected: list[str]) -> str | None:
     """The git checkout this server was started in, when it is not connected
     yet: the path first-run offers to connect. None outside a checkout."""
-    top = config_mod.git_read(Path.cwd(), "rev-parse", "--show-toplevel", expected_failure=True)
+    top = _checkout_of(str(Path.cwd()))
     if top is None or any(Path(p).resolve() == Path(top).resolve() for p in connected):
         return None
     return top
