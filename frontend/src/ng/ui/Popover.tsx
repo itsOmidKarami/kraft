@@ -21,8 +21,9 @@ export const firstFocusable = (root: HTMLElement | null): HTMLElement | null =>
  *  - Tab and Shift+Tab cycle inside a dialog (a confirm card, a small form), as
  *    in a dialog: closing it on Tab would lose what was typed, and leaving it
  *    open would send focus to the top of the page;
- *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere. */
-export function Popover({ anchor, open, onClose, children, role, label, focusIn = true }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean }) {
+ *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere;
+ *  - `dirty` (a card holding typed, unsaved text): neither Escape nor an outside press closes it. */
+export function Popover({ anchor, open, onClose, children, role, label, focusIn = true, dirty = false }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean; dirty?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -59,11 +60,13 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (!ref.current?.contains(t) && !anchor.current?.contains(t)) onClose();
+      if (!ref.current?.contains(t) && !anchor.current?.contains(t) && !dirty) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
+      // An input method's own Escape, or a card holding typed text, keeps it open (R12b-05).
+      if (e.isComposing || dirty) return;
       closeBack();
     };
     document.addEventListener("mousedown", onDown);
@@ -72,7 +75,7 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, anchor]);
+  }, [open, onClose, anchor, dirty]);
 
   // Close, and hand focus back to what had it when this opened, unless `onClose` already moved it.
   function closeBack() {

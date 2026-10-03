@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,8 +20,9 @@ const open = (answers: Parameters<typeof stubFetch>[0]) => {
   const calls = stubFetch({ ...WRITES, ...answers });
   const anchor = createRef<HTMLDivElement>();
   const onDone = vi.fn();
-  render(<><div ref={anchor} /><CancelCard id="w1" anchor={anchor} onClose={() => {}} onDone={onDone} /></>);
-  return { calls, onDone };
+  const onClose = vi.fn();
+  render(<><div ref={anchor} /><CancelCard id="w1" anchor={anchor} onClose={onClose} onDone={onDone} /></>);
+  return { calls, onDone, onClose };
 };
 
 describe("CancelCard", () => {
@@ -34,6 +35,19 @@ describe("CancelCard", () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     const writes = calls.filter((c) => c.method === "POST");
     expect(writes).toEqual([{ method: "POST", path: "/work-items/w1/cancel", body: { reason: "superseded", close_mr: close } }]);
+  });
+
+  // R12b-05: Escape closed the card and dropped the reason; an empty card still closes on it.
+  it("keeps a typed reason on Escape, and closes on one while empty", async () => {
+    const { onClose } = open({ "GET /work-items/w1/cancel-preview": [200, preview(null)] });
+    const reason = screen.getByLabelText("Reason");
+    await userEvent.type(reason, "Not needed any more");
+    fireEvent.keyDown(reason, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(reason).toHaveValue("Not needed any more");
+    await userEvent.clear(reason);
+    fireEvent.keyDown(reason, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("cancels on ⌘↵ from the reason once it has one", async () => {

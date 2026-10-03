@@ -8,7 +8,7 @@ import "./ui.css";
 /** `className` lets a page size its own dialog with a class it owns (R59: only ui/ styles `.dialog`). */
 /** `returnTo`: where focus goes on close when what opened the dialog is gone, or nothing had focus. */
 export function Dialog({ title, onClose, children, footer, dirty, className, returnTo }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; dirty?: boolean; className?: string; returnTo?: () => HTMLElement | null | undefined }) {
-  const ref = useModal<HTMLDivElement>(onClose, returnTo);
+  const ref = useModal<HTMLDivElement>(onClose, returnTo, dirty);
   const id = useId();
   return createPortal(
     <div className="dialog-backdrop" {...backdropProps(onClose, dirty)}>
