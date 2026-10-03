@@ -63,16 +63,9 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
     if (box) return box.focus();
     threadOf();
   };
-  const runLog = () => {
-    const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
-    const last = [...item.worker_sessions].reverse().find((s) => s.node_id === node?.id && s.hook_point.split(".").length === 3);
-    if (!node || !last) return settings();
-    const [, step, task] = last.hook_point.split(".");
-    navigate(placeUrl(item.id, { node: node.id, sel: { kind: "task", node: node.id, step, task }, tab: "log" }));
-  };
   return (
     <div className="item-page">
-      <ItemHeader item={item} reload={reload} onSettings={settings} onRaise={raise} onGate={openGate} onAnswer={answer} onRunLog={runLog} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} />
+      <ItemHeader item={item} reload={reload} onSettings={settings} onRaise={raise} onGate={openGate} onAnswer={answer} cancelOpen={cancelling} onCancelOpen={setCancelling} escalateOpen={escalating} onEscalateOpen={setEscalating} />
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}

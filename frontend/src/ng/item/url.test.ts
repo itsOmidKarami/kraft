@@ -22,6 +22,11 @@ describe("item URL", () => {
     expect(readPlace(undefined, q("doc=d1"), nodes).doc).toBe("d1");
     expect(readPlace(undefined, q(""), nodes).doc).toBeUndefined();
     expect(placeUrl("w1", { sel: { kind: "chain" }, doc: "d1" })).toBe("/work-items/w1?doc=d1");
+    // The search that opened it rides along, and means nothing without a document.
+    expect(readPlace(undefined, q("doc=d1&q=cache+bound"), nodes)).toMatchObject({ doc: "d1", q: "cache bound" });
+    expect(readPlace(undefined, q("q=cache"), nodes).q).toBeUndefined();
+    expect(placeUrl("w1", { sel: { kind: "chain" }, doc: "d1", q: "cache bound" })).toBe("/work-items/w1?doc=d1&q=cache+bound");
+    expect(placeUrl("w1", { sel: { kind: "chain" }, q: "cache" })).toBe("/work-items/w1");
   });
 
   it("knows a node's escalation task, which no step lists", () => {

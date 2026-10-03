@@ -97,12 +97,11 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         reload={reload}
         onSettings={() => toItem({ sel: { kind: "chain" }, tab: "config" })}
         onRaise={() => {
-          if (item.stop?.limit) return void (openLimitEditor(item.id), toItem({}));
+          if (item.stop?.limit) return void (openLimitEditor(item.id), toItem({ sel: { kind: "chain" } }));
           if (item.stop?.kind === "budget") openBudgetEditor(item.id);
           toItem({ sel: { kind: "chain" }, tab: "config" });
         }}
         onGate={(gate) => setPlace({ gate, doc: true })}
-        onRunLog={() => toItem({ sel: { kind: "chain" } })}
       />
       <Toolbar
         item={item}

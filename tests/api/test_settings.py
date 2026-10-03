@@ -40,6 +40,7 @@ def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
         "mode": "light",
         "density": "comfortable",
         "board": {"group_by": "repo", "show_done": 10, "open_in": "full"},
+        "editor": "zed",
     }
     assert client.put("/api/theme", json=body).status_code == 200
     assert client.get("/api/theme").json().items() >= body.items()
@@ -83,8 +84,15 @@ def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir)
         {"surface": "nocturne"},
         {"mode": "twilight"},
         {"board": {"group_by": "priority", "show_done": 5, "open_in": "peek"}},
+        {"editor": "vi"},
     ],
-    ids=["an-unknown-palette", "an-unknown-surface", "an-unknown-mode", "an-unknown-group-by"],
+    ids=[
+        "an-unknown-palette",
+        "an-unknown-surface",
+        "an-unknown-mode",
+        "an-unknown-group-by",
+        "an-unknown-editor",
+    ],
 )
 def test_put_theme_rejects_an_unknown_value(client, templates_dir, body):
     assert client.put("/api/theme", json=body).status_code == 422

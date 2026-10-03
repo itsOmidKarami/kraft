@@ -271,6 +271,8 @@ def render(blocks: dict, accents: dict, code: dict) -> str:
         " * Do not edit: change the generator and run `uv run python dev/gen_theme.py`. */",
         '[data-mode="dark"] { color-scheme: dark; }',
         '[data-mode="light"] { color-scheme: light; }',
+        # A drawer's scrim: black at 40% under every surface and mode.
+        ":root { --scrim: rgb(0 0 0 / 40%); }",
     ]
     for (s, m, a), t in blocks.items():
         body = " ".join(f"--{k}: {v};" for k, v in t.items())

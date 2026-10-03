@@ -1282,6 +1282,11 @@ class DiffPrefs(_Model):
     one_file_at_a_time: bool = True
 
 
+#: The editors `POST /documents/{id}/open` can launch, each by an executable of
+#: the same name. The UI's default editor is one of these, or unset for the system's.
+EDITORS = ("code", "cursor", "zed", "obsidian")
+
+
 class Theme(_Model):
     FILE = "theme.yaml"
 
@@ -1298,6 +1303,8 @@ class Theme(_Model):
     colour_amount: Literal["mono", "subtle", "full"] | None = None
     code_scheme: CodeScheme = CodeScheme()
     diff: DiffPrefs = DiffPrefs()
+    # The document viewer's Open in editor; unset is the system's default app.
+    editor: Literal[EDITORS] | None = None
 
     @field_validator("palette")
     @classmethod

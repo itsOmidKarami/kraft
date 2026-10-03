@@ -15,7 +15,8 @@ async function openSearch(page: import("@playwright/test").Page) {
 test("Ctrl-K finds an indexed document, and a hit opens it", async ({ page }) => {
   const overlay = await openSearch(page);
   await overlay.getByRole("combobox", { name: "Search" }).fill("reconnect backoff");
-  const hit = overlay.getByRole("option", { name: /^WS transport design specs/ });
+  const hit = overlay.getByRole("option", { name: /^WS transport design/ });
+  await expect(hit.locator(".ng-search-tag")).toHaveText("specs");
   await expect(hit).toContainText("reconnect backoff schedule caps");
 
   // A document no work item links to opens in the document dialog.
@@ -28,8 +29,9 @@ test("Ctrl-K finds an indexed document, and a hit opens it", async ({ page }) =>
 test("the kind filter narrows documents", async ({ page }) => {
   const overlay = await openSearch(page);
   await overlay.getByRole("combobox", { name: "Search" }).fill("board");
-  const plan = overlay.getByRole("option", { name: /^UI plan plans/ });
+  const plan = overlay.getByRole("option", { name: /^UI plan/ });
   await expect(plan).toBeVisible();
+  await expect(plan.locator(".ng-search-tag")).toHaveText("plans");
 
   // The guarantee is that nothing outside the kind comes back, not that
   // nothing does: hybrid search can surface a near spec for this query.

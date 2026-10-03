@@ -30,7 +30,7 @@ describe("ng Popover", () => {
   });
 
   // R12b-05: the Cancel card's typed reason went with an Escape or a stray press.
-  it.each([
+  it.each<[string, { dirty?: boolean }, { isComposing?: boolean }]>([
     ["while dirty", { dirty: true }, {}],
     ["on the Escape that ends an IME composition", {}, { isComposing: true }],
   ])("stays open %s", (_, props, key) => {

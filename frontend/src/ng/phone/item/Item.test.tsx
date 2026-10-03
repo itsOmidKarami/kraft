@@ -82,7 +82,7 @@ describe("the item screen (C)", () => {
 
   // R12b-11: an archived item's worktree is gone, and the compare's 404 went to the console on every load.
   it("asks for no diff once the worktree is gone", async () => {
-    const calls = mount(item("archived", null, { status: "archived", worktree_exists: false }), "/work-items/w1");
+    const calls = mount(item("archived", null, { status: "completed", worktree_exists: false }), "/work-items/w1");
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
     expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
   });

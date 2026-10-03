@@ -56,7 +56,7 @@ describe("ItemPage", () => {
 
   // R12b-11: an archived item's page asked for its diff, and the 404 went to the console on every load.
   it("asks for no diff once the item's worktree is gone", async () => {
-    const calls = stubFetch({ "GET /work-items/w1": [200, detail({ status: "archived", display_status: "archived", worktree_exists: false })] });
+    const calls = stubFetch({ "GET /work-items/w1": [200, detail({ status: "completed", display_status: "archived", worktree_exists: false })] });
     mount();
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
     await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1")).toBe(true));

@@ -104,12 +104,27 @@ async def get_document(doc_id: str, request: Request):
 
 
 #: Editor id -> the argv that opens a file with it. The UI offers exactly these.
-_EDITORS = {
-    "code": ["code"],
-    "cursor": ["cursor"],
-    "zed": ["zed"],
-    "obsidian": ["obsidian"],
-}
+_EDITORS = {name: [name] for name in config_mod.EDITORS}
+
+
+#: macOS: an editor's app, for when it is installed without its command-line
+#: tool on PATH. Found by its bundle, not `open -Ra`, which reveals it in Finder.
+_MAC_APPS = {"code": "Visual Studio Code", "cursor": "Cursor", "zed": "Zed", "obsidian": "Obsidian"}
+_MAC_APP_DIRS = (Path("/Applications"), Path.home() / "Applications")
+
+
+def _editor_argv(name: str) -> list[str] | None:
+    """How to launch editor `name` here, the file's path to follow: its
+    command-line tool on PATH, else on macOS `open -a <App>` when the app is
+    installed; None when neither is."""
+    exe = shutil.which(_EDITORS[name][0])
+    if exe:
+        return [exe]
+    app = _MAC_APPS.get(name) if sys.platform == "darwin" else None
+    if not app or not any((d / f"{app}.app").is_dir() for d in _MAC_APP_DIRS):
+        return None
+    opener = shutil.which("open")
+    return [opener, "-a", app] if opener else None
 
 
 def _os_open() -> list[str] | None:
@@ -140,15 +155,40 @@ def _launch_editor(request: Request, editor: str | None, path: Path) -> dict:
     if name and argv is None:
         raise HTTPException(400, f"unknown editor {name!r}")
     if argv is None:
-        argv = _os_open()
-    exe = shutil.which(argv[0]) if argv else None
-    if exe is None:
+        system = _os_open()
+        exe = shutil.which(system[0]) if system else None
+        launch = [exe] if exe else None
+    else:
+        launch = _editor_argv(name)
+    if launch is None:
         raise HTTPException(501, f"no editor available on the server for {name or 'default'}")
     try:
-        subprocess.Popen([exe, str(path)], start_new_session=True)
+        subprocess.Popen([*launch, str(path)], start_new_session=True)
     except OSError as exc:
         raise HTTPException(501, f"could not launch {name or 'the default editor'}: {exc}") from exc
     return {"path": str(path), "editor": name or "system"}
+
+
+@api_router.get("/editors")
+async def list_editors(request: Request):
+    """The editors this machine can launch, for the viewer's Open in editor:
+    only those whose executable is on PATH (or, on macOS, whose app is
+    installed), whether the system opener is,
+    and the default chosen in Settings (theme.yaml `editor`, else
+    `KRAFT_EDITOR`). Loopback only, as opening one is: for anyone else the
+    answer would describe a machine they cannot open anything on."""
+    if not perimeter._client_is_local(request):
+        raise HTTPException(403, "this server only opens editors for a client on its own machine")
+    try:
+        chosen = config_mod.Theme.load(request.app.state.templates_dir / "theme.yaml").editor
+    except config_mod.ConfigError:
+        chosen = None
+    system = _os_open()
+    return {
+        "available": [name for name in _EDITORS if _editor_argv(name)],
+        "system": bool(system and shutil.which(system[0])),
+        "default": chosen or os.environ.get("KRAFT_EDITOR") or None,
+    }
 
 
 @api_router.post("/documents/{doc_id}/open")

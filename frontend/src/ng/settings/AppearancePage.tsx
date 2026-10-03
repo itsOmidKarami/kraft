@@ -40,6 +40,7 @@ function themeYaml(theme: Theme): string {
     `density: ${theme.density}`,
     "board:",
     `  open_in: ${theme.board.open_in}`,
+    ...(theme.editor ? [`editor: ${theme.editor}`] : []),
   ].join("\n");
 }
 

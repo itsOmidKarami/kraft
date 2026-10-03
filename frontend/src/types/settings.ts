@@ -318,6 +318,8 @@ export interface Theme {
     wrap_lines: boolean;
     one_file_at_a_time: boolean;
   };
+  /** The document viewer's Open in editor (`GET /editors`); unset is the system's default app. */
+  editor?: string | null;
 }
 
 export type Surface = "graphite" | "slate" | "ink" | "sand" | "moss";

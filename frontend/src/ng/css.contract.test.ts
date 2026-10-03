@@ -35,13 +35,31 @@ describe("ng CSS", () => {
     expect(shrink("\\.ng-crumb-repo")).toBeGreaterThan(shrink("\\.ng-crumb-mid"));
   });
 
-  // R12b-07: a fixed 118px wrapped the two-word labels and clipped them.
+  it("takes an unpinned sidebar to no width, and keeps its overlay 180ms after the pointer leaves", () => {
+    const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
+    expect(css).toMatch(/:root\[data-sidebar="rail"\]\s*{\s*--ng-side-w:\s*0px;/);
+    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*\b180ms\b/);
+  });
+
+  it("lays the document drawer over the theme's scrim, black at 40%", () => {
+    expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain(":root { --scrim: rgb(0 0 0 / 40%); }");
+    expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
+  });
+
+  it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
+    const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
+    const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);
+    expect(z("\\.dialog-backdrop")).toBeLessThan(z("\\.popover"));
+    expect(z("\\.popover")).toBeLessThan(z("\\.toasts"));
+  });
+
+  // R12b-07 (fixed by #502's header): a fixed 118px wrapped "Raise cap", "Review conflicts" and "Reopen MR" and clipped them.
   it("lets the item header's main button grow with its label, on one line", () => {
     const css = readFileSync(join(here, "item/item.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
     const rule = (sel: string) => new RegExp(`(?:^|\\n)${sel}\\s*{([^}]*)}`).exec(css)?.[1] ?? "";
     expect(rule("\\.item-main")).not.toMatch(/(?:^|[;\s])width:/);
     expect(rule("\\.item-main")).toMatch(/min-width:\s*118px/);
-    expect(rule("\\.item-main-action")).toMatch(/white-space:\s*nowrap/);
+    expect(rule("\\.item-main-label")).toMatch(/white-space:\s*nowrap/);
   });
 
   // The one breakpoint ladder (shipped W2.1, spec §3). Here so it outlives the
