@@ -1,6 +1,6 @@
 ### Breaking changes
 
-- **This release is 2.0.0, not 1.5.0.** It changes some 1.4 behaviour that Kraft's stability policy covers, such as `--json` fields and exit codes, and moves the database to a schema 1.4 can't open, so it is a major release. Every change, and how to upgrade without ending a running agent, is under **Upgrading from 1.4** in the Highlights above and in [Upgrading from 1.4](https://itsomidkarami.github.io/kraft/get-started/install#upgrading-from-14). The 1.5.0 release candidates were 2.0's pre-releases: `kraft admin update` on one moves to 2.0's. (#489)
+- This release is 2.0.0, not 1.5.0: see **Upgrading from 1.4** under Highlights. (#489)
 
 ### New
 

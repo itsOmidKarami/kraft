@@ -197,7 +197,8 @@ def release_body(tag: str | None, notes: str) -> str:
     or alpha, which neither PyPI nor Homebrew carries, names the wheel attached
     to its own release. Then `kraft admin update --channel <kind>`, which takes
     the pre-release's kind by the same name, for an install new enough to keep
-    both. A stable release's text is `notes`, byte for byte.
+    both, and where to get the VS Code extension to match (`_vsix_line`). A
+    stable release's text is `notes`, byte for byte.
     The changelogs take the plain notes, not this.
     """
     match = _PRE_TAG.fullmatch(tag or "")
@@ -211,9 +212,27 @@ def release_body(tag: str | None, notes: str) -> str:
         f'`uv tool install --force --python 3.13 "kraft-sdlc[vector]{source}"`, '
         "using the Python you installed Kraft with and leaving out `[vector]` if you don't use "
         f"vector search, then run `kraft admin restart`. From {_UPDATE_KEEPS_EXTRAS} on, "
-        f"`kraft admin update --channel {channel}` installs it too, keeping both"
+        f"`kraft admin update --channel {channel}` installs it too, keeping both. "
+        + _vsix_line(version)
     )
-    return f"{line}.\n\n{notes}" if notes else f"{line}.\n"
+    return f"{line}\n\n{notes}" if notes else f"{line}\n"
+
+
+def _vsix_line(version: str) -> str:
+    """How to get the VS Code extension that matches pre-release `version`.
+
+    The Marketplace and Open VSX take only a stable release, so the extension
+    there is the last one until `X.Y.Z` ships. The `.vsix` attached to the
+    pre-release (release.yml names it `kraft-<version>.vsix`) is the one that
+    matches. The extension needs the server's own major, so against the first
+    pre-release of a new major the Marketplace one is read-only, not just older.
+    """
+    base = re.match(r"\d+\.\d+\.\d+", version).group()
+    vsix = f"kraft-{version}.vsix"
+    stays = f"The VS Code extension on the Marketplace stays at the last release until {base} ships"
+    if base.endswith(".0.0"):
+        stays += " and is read-only against this one"
+    return f"{stays}: install the `{vsix}` attached below with `code --install-extension {vsix}`."
 
 
 def write_changelog(version: str, notes: str, path: Path = CHANGELOG) -> None:

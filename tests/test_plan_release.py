@@ -208,6 +208,7 @@ _KEEP = (
     "vector search, then run `kraft admin restart`. From 1.5.0rc14 on, "
 )
 _WHEEL = "https://github.com/itsOmidKarami/kraft/releases/download"
+_VSIX = "The VS Code extension on the Marketplace stays at the last release"
 
 
 @pytest.mark.parametrize(
@@ -216,19 +217,25 @@ _WHEEL = "https://github.com/itsOmidKarami/kraft/releases/download"
         (
             "v1.5.0rc2",
             f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector]==1.5.0rc2"`, '
-            f"{_KEEP}`kraft admin update --channel rc` installs it too, keeping both.",
+            f"{_KEEP}`kraft admin update --channel rc` installs it too, keeping both. "
+            f"{_VSIX} until 1.5.0 ships: install the `kraft-1.5.0rc2.vsix` attached below with "
+            "`code --install-extension kraft-1.5.0rc2.vsix`.",
         ),
         (
             "v1.5.0b1",
             f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
             f'{_WHEEL}/v1.5.0b1/kraft_sdlc-1.5.0b1-py3-none-any.whl"`, '
-            f"{_KEEP}`kraft admin update --channel beta` installs it too, keeping both.",
+            f"{_KEEP}`kraft admin update --channel beta` installs it too, keeping both. "
+            f"{_VSIX} until 1.5.0 ships: install the `kraft-1.5.0b1.vsix` attached below with "
+            "`code --install-extension kraft-1.5.0b1.vsix`.",
         ),
         (
             "v1.5.0a3",
             f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
             f'{_WHEEL}/v1.5.0a3/kraft_sdlc-1.5.0a3-py3-none-any.whl"`, '
-            f"{_KEEP}`kraft admin update --channel alpha` installs it too, keeping both.",
+            f"{_KEEP}`kraft admin update --channel alpha` installs it too, keeping both. "
+            f"{_VSIX} until 1.5.0 ships: install the `kraft-1.5.0a3.vsix` attached below with "
+            "`code --install-extension kraft-1.5.0a3.vsix`.",
         ),
     ],
 )
@@ -249,6 +256,24 @@ def test_a_pre_release_leads_with_the_install_that_keeps_vector_and_the_python(m
     assert uv < update
     assert '"kraft-sdlc[vector]' in body[uv:update] and "--python 3.13" in body[uv:update]
     assert "From 1.5.0rc14 on, `kraft admin update" in body
+
+
+def test_a_new_majors_pre_release_says_the_marketplace_extension_is_read_only():
+    """The extension needs the server's own major, so against 2.0.0rc1 the
+    Marketplace's 1.x one only reads; against a minor's pre-release it works,
+    and only the newer `.vsix` is offered."""
+    major = plan_release.release_body("v2.0.0rc1", "")
+    assert (
+        f"{_VSIX} until 2.0.0 ships and is read-only against this one: install the "
+        "`kraft-2.0.0rc1.vsix` attached below with `code --install-extension kraft-2.0.0rc1.vsix`."
+    ) in major
+    assert "read-only" not in plan_release.release_body("v2.1.0rc1", "")
+
+
+def test_the_vsix_a_pre_release_names_is_the_one_release_yml_attaches():
+    text = (_DEV.parent / ".github" / "workflows" / "release.yml").read_text()
+    assert '--out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"' in text
+    assert "`kraft-2.0.0rc1.vsix`" in plan_release.release_body("v2.0.0rc1", "")
 
 
 def test_the_wheel_a_pre_release_names_is_the_package_kraft_publishes():
