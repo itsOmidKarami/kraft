@@ -9,6 +9,7 @@ import { placeUrl } from "../item/url";
 import { openBudgetEditor } from "../item/Workspace";
 import { openLimitEditor } from "../item/RaiseLimit";
 import { useItem, type ItemDetail } from "../item/useItem";
+import { materialized, producerOf } from "../item/chainValues";
 import { useOverlay } from "../graph/useResizable";
 import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
@@ -201,6 +202,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           threads={threadList}
           isViewed={viewed.isViewed}
           doc={artifact}
+          by={producerOf(materialized(item), place.gate)}
           approve={() => submit("approve", "")}
           onReviewChanges={(file) => setPlace({ doc: false, ...(file && { file }) })}
           onRequestChanges={() => {

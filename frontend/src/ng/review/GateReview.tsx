@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CompareFile, ReviewThread, WorkItem, WorkItemArtifact } from "../../types";
+import { docBody } from "../../format";
 import { useModal } from "../../useModal";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -14,11 +15,13 @@ import type { Fetched } from "./useReview";
  *  document beside the list of what changed, with the gate's decision. A
  *  full-page layer over the review page, with its own header; Escape closes it
  *  to the page. */
-export function GateReview({ item, gate, doc, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
+export function GateReview({ item, gate, doc, by, files, threads, isViewed, approve, onReviewChanges, onRequestChanges, onClose }: {
   item: Pick<WorkItem, "id" | "pending_gate">;
   gate: string;
   /** GET /artifact, read by the page (its digest also rides on the page's Approve). */
   doc: Fetched<WorkItemArtifact> | null;
+  /** The task that wrote the document, by path, when the chain says. */
+  by?: string | null;
   files: CompareFile[];
   threads: ReviewThread[];
   isViewed: (path: string) => boolean;
@@ -58,8 +61,10 @@ export function GateReview({ item, gate, doc, files, threads, isViewed, approve,
               <div className="rv-gate-doc-head">
                 <span className="rv-gate-doc-title">{doc.data.title}</span>
                 <span className="rv-mono rv-muted">{doc.data.path}</span>
+                {by && <span className="rv-muted">written by <span className="rv-mono">{by}</span></span>}
               </div>
-              <Markdown text={doc.data.content} code={codeBlock} />
+              {/* Its own H1 repeats the title above, as the document viewer drops it. */}
+              <Markdown text={docBody(doc.data.content, doc.data.title)} code={codeBlock} />
               {doc.data.truncated && <p className="rv-muted">The document stops at {Math.round(doc.data.artifact_max_bytes / 1024)} KB. The rest is in the worktree.</p>}
             </>
           )}

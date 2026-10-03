@@ -29,6 +29,14 @@ describe("GateReview", () => {
     expect(screen.queryByRole("button", { name: /^Viewed / })).toBeNull();
   });
 
+  it("shows the document's title once and who wrote it (GR-6)", async () => {
+    const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
+    render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: { ...DOC, content: "# Review brief\n\n## Summary\n\nAdds it." } }} by="work_item_summary.main.author" files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    expect(await screen.findAllByText("Review brief")).toHaveLength(1);
+    expect(screen.queryByRole("heading", { level: 1, name: "Review brief" })).toBeNull();
+    expect(screen.getByText(/^written by/)).toHaveTextContent("written by work_item_summary.main.author");
+  });
+
   it("approves through the page's review submit", async () => {
     const p = overlay();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
