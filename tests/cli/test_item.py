@@ -40,6 +40,14 @@ def test_set_node_override_help_says_it_merges(capsys):
     assert "Each call changes only the flags you give" in text and "--clear resets the node" in text
 
 
+def test_create_help_says_an_attachment_is_a_file_inside_the_repo(capsys):
+    """R10a-02: a spec kept in ~/notes was refused, and nothing said where it
+    had to be."""
+    text = _help(capsys, "item", "create")
+    assert "--spec PATH attach a spec that already exists, a file inside the repo" in text
+    assert "--plan PATH attach a plan that already exists, a file inside the repo" in text
+
+
 def test_create_gives_its_title_a_help_line(capsys):
     assert "title the item's title: one line, as the board shows it" in _help(
         capsys, "item", "create"

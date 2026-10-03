@@ -402,8 +402,19 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     # Two flags rather than a repeatable `--attach kind=path`: there are exactly
     # two kinds, the server refuses a duplicate kind, and these document
     # themselves in --help.
-    create.add_argument("--spec", help="attach a spec that already exists; skips the spec node")
-    create.add_argument("--plan", help="attach a plan that already exists; skips the plan node")
+    # Inside the repo: the copy is committed on the item's branch (R10a-02).
+    create.add_argument(
+        "--spec",
+        metavar="PATH",
+        help="attach a spec that already exists, a file inside the repo (e.g. under "
+        ".engineering/specs/); skips the spec node",
+    )
+    create.add_argument(
+        "--plan",
+        metavar="PATH",
+        help="attach a plan that already exists, a file inside the repo (e.g. under "
+        ".engineering/plans/); skips the plan node",
+    )
     create.add_argument(
         "--auto-gate",
         action=argparse.BooleanOptionalAction,
@@ -618,8 +629,16 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="replace or drop a not-yet-started item's spec/plan, instead of re-filing it",
     )
     set_attachments.add_argument("id", nargs="?")
-    set_attachments.add_argument("--spec", help="the revised spec, re-copied into Kraft")
-    set_attachments.add_argument("--plan", help="the revised plan, re-copied into Kraft")
+    set_attachments.add_argument(
+        "--spec",
+        metavar="PATH",
+        help="the revised spec, a file inside the repo, re-copied into Kraft",
+    )
+    set_attachments.add_argument(
+        "--plan",
+        metavar="PATH",
+        help="the revised plan, a file inside the repo, re-copied into Kraft",
+    )
     set_attachments.add_argument(
         "--drop",
         action="append",
