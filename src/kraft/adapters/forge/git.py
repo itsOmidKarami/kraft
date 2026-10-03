@@ -235,10 +235,43 @@ def _digest(path: Path) -> str | None:
         return None
 
 
+#: Directories a setup installs into, recorded by path (with a trailing `/`)
+#: when the setup made them: bun leaves no marker inside its `node_modules`,
+#: so `is_environment` cannot tell its install from an agent's fixture.
+INSTALL_DIRS = frozenset({"node_modules"})
+
+
+async def untracked_installs(repo: Path) -> set[str]:
+    """The untracked `INSTALL_DIRS` in `repo`, as git lists them (`dir/`)."""
+    try:
+        raw = await run_git(
+            repo,
+            [
+                "git",
+                "status",
+                "--porcelain",
+                "-z",
+                "--untracked-files=normal",
+                sandbox.SUBMODULES_UNENTERED,
+            ],
+        )
+    except ForgeError:
+        return set()
+    return {
+        entry[3:]
+        for entry in raw.split("\0")
+        if entry.startswith("?? ") and entry.endswith("/") and Path(entry[3:]).name in INSTALL_DIRS
+    }
+
+
 async def lockfile_digests(repo: Path) -> dict[str, str | None]:
-    """`untracked_lockfiles`, each with the sha256 of its content now: what
-    `_prepare` reads before a setup runs, for `record_setup_writes`."""
-    return {p: _digest(repo / p) for p in await untracked_lockfiles(repo)}
+    """`untracked_lockfiles`, each with the sha256 of its content now, and
+    `untracked_installs`, each with None: what `_prepare` reads before a
+    setup runs, for `record_setup_writes`."""
+    return {
+        **{p: _digest(repo / p) for p in await untracked_lockfiles(repo)},
+        **dict.fromkeys(await untracked_installs(repo)),
+    }
 
 
 async def _setup_wrote_path(repo: Path) -> Path:
@@ -247,18 +280,9 @@ async def _setup_wrote_path(repo: Path) -> Path:
     )
 
 
-async def setup_wrote(repo: Path) -> dict[str, str | None]:
-    """What `record_setup_writes` recorded for this worktree: each lockfile's
-    path, with the sha256 the setup left it at (None in a record written
-    before digests were kept, which counts as unchanged).
-
-    Read through the filter it was written with: only a `WRITTEN_LOCKFILES`
-    name. The file sits in a git dir a worker can write, so any other path
-    in it was never the setup's and is ignored, not left out of a commit.
-
-    A record that cannot be read or decoded counts as empty, and says so in
-    the log: never a failed task. The setup's lockfile then reads as the
-    agent's, and the sweep commits it, which a person can see and undo."""
+async def _setup_record(repo: Path) -> dict[str, str | None]:
+    """The record as written, every path in it; `setup_wrote` and
+    `setup_installs` read it through their filters."""
     try:
         path = await _setup_wrote_path(repo)
         raw = path.read_bytes()
@@ -277,10 +301,35 @@ async def setup_wrote(repo: Path) -> dict[str, str | None]:
     if not isinstance(data, dict):
         logger.warning("ignoring a setup record that is not an object: %s", path)
         return {}
+    return {p: d if isinstance(d, str) else None for p, d in data.items()}
+
+
+async def setup_wrote(repo: Path) -> dict[str, str | None]:
+    """What `record_setup_writes` recorded for this worktree: each lockfile's
+    path, with the sha256 the setup left it at (None in a record written
+    before digests were kept, which counts as unchanged).
+
+    Read through the filter it was written with: only a `WRITTEN_LOCKFILES`
+    name. The file sits in a git dir a worker can write, so any other path
+    in it was never the setup's and is ignored, not left out of a commit.
+
+    A record that cannot be read or decoded counts as empty, and says so in
+    the log: never a failed task. The setup's lockfile then reads as the
+    agent's, and the sweep commits it, which a person can see and undo."""
     return {
-        p: d if isinstance(d, str) else None
-        for p, d in data.items()
-        if Path(p).name in WRITTEN_LOCKFILES
+        p: d
+        for p, d in (await _setup_record(repo)).items()
+        if Path(p).name in WRITTEN_LOCKFILES and not p.endswith("/")
+    }
+
+
+async def setup_installs(repo: Path) -> set[str]:
+    """The `INSTALL_DIRS` the setup made, as recorded (`dir/`). Only that
+    name: any other directory in the record was never the setup's. A forged
+    one only leaves the worker's own files out of its commit, and the sweep
+    names it (`sweep_left_out`)."""
+    return {
+        p for p in await _setup_record(repo) if p.endswith("/") and Path(p).name in INSTALL_DIRS
     }
 
 
@@ -290,9 +339,11 @@ async def record_setup_writes(repo: Path, before: Mapping[str, str | None]) -> N
     setup's when it was not there before, or was recorded as the setup's and
     nobody has changed it since. One that was there before this setup and
     not recorded, or that changed after the last setup recorded it, is the
-    agent's. Written whole or not at all (a temporary file, then a rename)."""
+    agent's. An `INSTALL_DIRS` directory is the setup's the same way: made
+    by this setup, or recorded by the last one. Written whole or not at all
+    (a temporary file, then a rename)."""
     after = await lockfile_digests(repo)
-    prior = await setup_wrote(repo)
+    prior = await _setup_record(repo)
     wrote = {
         p: d
         for p, d in after.items()
@@ -335,6 +386,7 @@ async def environment_paths(repo: Path, base: str) -> list[str]:
     `status.showUntrackedFiles=all` in a user's or the repo's config would
     list a directory's files one by one instead."""
     wrote = await setup_lockfiles(repo)
+    installs = await setup_installs(repo)
     with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
             repo,
@@ -352,7 +404,10 @@ async def environment_paths(repo: Path, base: str) -> list[str]:
         entry[3:].rstrip("/")
         for entry in raw.split("\0")
         if entry.startswith("?? ")
-        and ((entry.endswith("/") and is_environment(repo / entry[3:])) or entry[3:] in wrote)
+        and (
+            (entry.endswith("/") and (is_environment(repo / entry[3:]) or entry[3:] in installs))
+            or entry[3:] in wrote
+        )
     ]
 
 
