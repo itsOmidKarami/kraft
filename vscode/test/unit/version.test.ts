@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compatible, mismatch } from "../../src/core/version";
+import { compatible, mismatch, readOnlyReason } from "../../src/core/version";
 
 describe("compatible", () => {
   it.each([
@@ -43,5 +43,16 @@ describe("mismatch", () => {
   it("says when the version is missing or unreadable", () => {
     expect(mismatch("2.0.0", undefined)).toMatch(/did not report its version/);
     expect(mismatch("2.0.0", "garbage")).toMatch(/reports version garbage, which this extension \(2\.0\.0\) cannot read/);
+  });
+});
+
+describe("readOnlyReason", () => {
+  it("names a failed health check, so the status bar's tooltip is never empty", () => {
+    expect(readOnlyReason("2.0.0", null)).toMatch(/^Kraft did not answer \/api\/health, so this extension can't check its version\./);
+  });
+
+  it("is the version mismatch, or null, when the server answered", () => {
+    expect(readOnlyReason("2.0.0", { version: "1.4.0" })).toBe(mismatch("2.0.0", "1.4.0"));
+    expect(readOnlyReason("2.0.0", { version: "2.0.0" })).toBeNull();
   });
 });

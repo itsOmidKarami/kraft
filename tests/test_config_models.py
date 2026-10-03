@@ -328,18 +328,20 @@ def test_theme_migration_runs_once(tmp_path):
     assert backup.read_text() == "palette: forest\n"
 
 
+@pytest.mark.parametrize("suffix", [".pre-1.5", ".pre-ux2"])
 @pytest.mark.parametrize(
     "returned", [False, True], ids=["converted-by-the-rc", "palette-came-back"]
 )
-def test_a_backup_a_release_candidate_left_is_the_only_backup(tmp_path, returned):
-    """A 1.5.0 release candidate saved the original as `theme.yaml.pre-1.5`.
-    Upgrading that home to 2.0 must not add a `theme.yaml.pre-2.0` beside it,
-    or change it, even when a `palette` comes back and is converted again:
-    the rc's copy is the one that holds the file from before any conversion."""
+def test_a_backup_a_release_candidate_left_is_the_only_backup(tmp_path, returned, suffix):
+    """A 1.5.0 release candidate saved the original as `theme.yaml.pre-1.5`
+    (rc5 to rc9: `theme.yaml.pre-ux2`). Upgrading that home to 2.0 must not
+    add a `theme.yaml.pre-2.0` beside it, or change it, even when a `palette`
+    comes back and is converted again: the rc's copy is the one that holds the
+    file from before any conversion."""
     from kraft import config
 
     p = tmp_path / "theme.yaml"
-    earlier = tmp_path / "theme.yaml.pre-1.5"
+    earlier = tmp_path / f"theme.yaml{suffix}"
     earlier.write_text("palette: forest\n")
     p.write_text("palette: amber\nsurface: sand\n" if returned else "surface: moss\n")
 
@@ -347,6 +349,18 @@ def test_a_backup_a_release_candidate_left_is_the_only_backup(tmp_path, returned
     assert config.theme_backup(p) == earlier
     assert earlier.read_text() == "palette: forest\n"
     assert not (tmp_path / "theme.yaml.pre-2.0").exists()
+
+
+def test_the_oldest_backup_a_release_candidate_left_is_the_one_named(tmp_path):
+    """rc5 to rc9 kept the 1.4 file as `.pre-ux2`; a later rc converting a
+    `palette` that came back kept that one as `.pre-1.5`. The 1.4 file is the
+    one to roll back to, so it is the one named."""
+    from kraft import config
+
+    p = tmp_path / "theme.yaml"
+    (tmp_path / "theme.yaml.pre-1.5").write_text("palette: amber\n")
+    (tmp_path / "theme.yaml.pre-ux2").write_text("palette: forest\n")
+    assert config.theme_backup(p) == tmp_path / "theme.yaml.pre-ux2"
 
 
 def test_a_theme_with_no_palette_or_surface_keeps_the_nocturne_look():

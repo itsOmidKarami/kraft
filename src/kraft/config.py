@@ -1295,10 +1295,12 @@ class Theme(_Model):
 
 #: What the 2.0 upgrade saves the original `theme.yaml` as, beside it.
 THEME_BACKUP = ".pre-2.0"
-#: What the 1.5.0 release candidates, which became 2.0, saved it as. One of
-#: these that exists is the backup: it holds the file from before the first
-#: conversion, so a later one never writes a second copy or replaces it.
-EARLIER_THEME_BACKUPS = (".pre-1.5",)
+#: What the 1.5.0 release candidates, which became 2.0, saved it as: rc5 to
+#: rc9 `.pre-ux2`, later ones `.pre-1.5`. One of these that exists is the
+#: backup: it holds the file from before the first conversion, so a later one
+#: never writes a second copy or replaces it. Oldest first, which is the one
+#: that holds the original when a home has both.
+EARLIER_THEME_BACKUPS = (".pre-ux2", ".pre-1.5")
 
 
 def theme_backup(path: str | Path) -> Path:
@@ -1321,9 +1323,9 @@ def migrate_theme(path: str | Path) -> bool:
 
     The original bytes go to `theme.yaml.pre-2.0` first (`theme_backup`),
     never overwriting an earlier copy, and none is written beside a
-    `theme.yaml.pre-1.5` a 1.5.0 release candidate left. A missing,
-    unreadable or invalid file, or one without `palette`, is left alone. True
-    when the file was rewritten."""
+    `theme.yaml.pre-ux2` or `theme.yaml.pre-1.5` a 1.5.0 release candidate
+    left. A missing, unreadable or invalid file, or one without `palette`, is
+    left alone. True when the file was rewritten."""
     path = Path(path)
     try:
         data = read_yaml(path)

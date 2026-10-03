@@ -37,3 +37,13 @@ export function mismatch(extension: string, daemon: string | undefined): string 
   }
   return `This extension (${extension}) needs Kraft ${e[0]}.${e[1]} or later; this server runs ${daemon}. Update Kraft. ${off}`;
 }
+
+/** Why the extension is read-only when `/api/health` did not answer: it can't
+ *  check the server's version, so it can't say which side to update. */
+export const HEALTH_FAILED = "Kraft did not answer /api/health, so this extension can't check its version. Actions are disabled until it does.";
+
+/** Why the extension is read-only against what `/api/health` answered, null
+ *  when it is not: `health` null is a health check that failed. */
+export function readOnlyReason(extension: string, health: { version?: string } | null): string | null {
+  return health === null ? HEALTH_FAILED : mismatch(extension, health.version);
+}

@@ -15,7 +15,7 @@ import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
 import { registerFindings } from "./review/findings";
-import { mismatch } from "./core/version";
+import { readOnlyReason } from "./core/version";
 
 export interface KraftApi {
   store: Store;
@@ -53,13 +53,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       try {
         const health = await api.health();
         runDir = health.run_dir;
-        why = mismatch(own, health.version);
-        readOnly = why !== null;
+        why = readOnlyReason(own, health);
         if (why) void vscode.window.showWarningMessage(why);
       } catch {
-        readOnly = true;
-        why = null;
+        why = readOnlyReason(own, null);
       }
+      readOnly = why !== null;
       void vscode.commands.executeCommand("setContext", "kraft.readOnly", readOnly);
     }
     setStatus(connected);
