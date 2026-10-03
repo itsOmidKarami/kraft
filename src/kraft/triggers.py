@@ -50,8 +50,14 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
     an incident (spec, Kraft-7izl).
     """
     st = app.state
-    # No early return on a broken policy.yaml: `schedules` leaves out only the
-    # legacy triggers it holds, and intake.yaml's still fire.
+    if getattr(st, "invalid_policy", None):
+        # Every intake door refuses here (`intake._poll`, the work-item
+        # routes): an item filed now would freeze an empty policy, and run
+        # with no maxima, caps or tool allowlist once someone resumed it.
+        logger.warning(
+            "schedules skipped: policy.yaml is invalid (%s)", "; ".join(st.invalid_policy)
+        )
+        return []
     now = now or datetime.now(UTC)
     stamp = now.strftime("%Y-%m-%dT%H:%M")
     filed: list[str] = []

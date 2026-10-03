@@ -240,16 +240,25 @@ def adopt_pre_2_home(in_use: Path) -> bool:
         return False
     if pre_2_config_dir() != old:
         return False
+    reads_old = os.path.realpath(in_use) == os.path.realpath(old)
+    if home.exists() or home.is_symlink():
+        if not home.is_dir() or home.is_symlink() or (home / "library.yaml").exists():
+            return False
+        if reads_old:
+            # A merge could leave a clash behind in `templates/`, which this
+            # process would then read without its library and seed over.
+            raise SystemExit(
+                f"kraft: {old} (named by KRAFT_TEMPLATES_DIR) and {home} both exist. "
+                f"Merge what {old} holds into {home} and remove {old}, then unset "
+                f"KRAFT_TEMPLATES_DIR or point it at {home}; or remove {home} if it holds "
+                "nothing you need. Then start Kraft again."
+            )
     try:
-        if not home.exists() and not home.is_symlink():
-            old.rename(home)
-            moved = [f"moved {old} to {home}"]
-        elif home.is_dir() and not home.is_symlink() and not (home / "library.yaml").exists():
+        if home.exists():
             moved = _merge_into(old, home)
         else:
-            return False
-        if not old.exists():
-            old.symlink_to(home.name, target_is_directory=True)
+            old.rename(home)
+            moved = [f"moved {old} to {home}"]
     except OSError as e:
         print(
             f"kraft: could not move {old} to {home} ({e}); reading it where it is. "
@@ -257,6 +266,15 @@ def adopt_pre_2_home(in_use: Path) -> bool:
             file=sys.stderr,
         )
         return False
+    if not old.exists():
+        try:
+            old.symlink_to(home.name, target_is_directory=True)
+        except OSError as e:
+            print(
+                f"kraft: moved {old} to {home}, but could not leave a link at {old} ({e}); "
+                "a 1.4 process still running reads its old path",
+                file=sys.stderr,
+            )
     for line in moved:
         print(f"kraft: {line}: the config directory is config/ since 2.0", file=sys.stderr)
     if old.is_dir() and not old.is_symlink():

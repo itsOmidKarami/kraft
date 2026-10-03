@@ -65,10 +65,10 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
     for key, value in data.items():
         if key in doc:
             current = doc[key]
-            if isinstance(current, CommentedMap) and isinstance(value, Mapping):
-                _merge(current, value, (doc, key))
-                continue
             if _same(current, value):
+                continue
+            if isinstance(current, CommentedMap) and isinstance(value, Mapping) and value:
+                _merge(current, value, (doc, key))
                 continue
             block = _take_block(doc, key)
             doc[key] = _node(value)
@@ -165,6 +165,10 @@ def _node(value: object) -> object:
         node = CommentedMap()
         for k, v in value.items():
             node[k] = _node(v)
+        if not node:
+            # A block-style empty mapping dumps as a bare `{}` on the line
+            # after its key, which is not YAML: `key: {}` is.
+            node.fa.set_flow_style()
         return node
     if isinstance(value, list | tuple):
         return CommentedSeq(_node(v) for v in value)

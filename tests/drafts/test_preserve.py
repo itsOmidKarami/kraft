@@ -96,6 +96,28 @@ def test_rewrite_applies_the_change_and_keeps_the_rest(change, expect, gone):
 
 
 @pytest.mark.parametrize(
+    "text, data, written",
+    [
+        (
+            "loops:\n  fix:\n    attempts: 3\n\n# the fallback\ndefault: 1\n",
+            {"loops": {}, "default": 1},
+            "loops: {}\n\n# the fallback\ndefault: 1\n",
+        ),
+        ("a:\n  b:\n    c: 1\n# after\nd: 2\n", {"a": {"b": {}}, "d": 2}, "  b: {}\n# after\n"),
+        ("a:\n  only: 1\n# after a\nz: 2\n", {"a": {}, "z": 2}, "a: {}\n# after a\n"),
+    ],
+    ids=["the-last-loop-removed", "a-nested-mapping-emptied", "the-only-key-dropped"],
+)
+def test_an_emptied_mapping_is_written_as_yaml_with_the_comment_after_it(text, data, written):
+    """A block mapping emptied by an op (Settings › Policy removing the last
+    loop) was dumped as a bare `{}` on the next line, after the comment that
+    followed it: not YAML, so the draft could not be published."""
+    out = preserve.rewrite(text, data)
+    assert yaml.safe_load(out) == data
+    assert written in out, out
+
+
+@pytest.mark.parametrize(
     "text",
     ["", "   \n", "- a\n- list\n", "key: [unterminated\n"],
     ids=["empty", "blank", "a-list", "unparsable"],

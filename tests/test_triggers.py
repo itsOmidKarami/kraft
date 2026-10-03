@@ -119,12 +119,13 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(
     assert await triggers.tick(app, now=now) == []
 
 
-@pytest.mark.parametrize("policy_file, want", [("readable", ["new", "old"]), ("broken", ["new"])])
+@pytest.mark.parametrize("policy_file, want", [("readable", ["new", "old"]), ("invalid", [])])
 async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app, policy_file, want):
     """2.0: schedules live in `intake.yaml` (`config.Intake.schedules`); a
     `policy.yaml` still naming `triggers:` fires too, keyed apart so neither
     double-files the other's minute. A `policy.yaml` that does not load
-    (`st.policy` None) stops only its own triggers."""
+    files nothing, as every intake door refuses: an item would freeze an
+    empty, uncapped policy."""
     repo = isolated_bd(tmp_path)
     pol = policy.Policy(
         loops={},
@@ -144,8 +145,9 @@ async def test_tick_files_from_intake_yaml_schedules(tmp_path, stub_app, policy_
         ],
     }
 
+    invalid = {"invalid_policy": ["policy.yaml: bad"]} if policy_file == "invalid" else {}
     policy_obj = pol if policy_file == "readable" else None
-    app = stub_app(**_state(tmp_path, policy_obj=policy_obj), intake=intake)
+    app = stub_app(**_state(tmp_path, policy_obj=policy_obj), intake=intake, **invalid)
     _connect(tmp_path, repo)
     now = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
     filed = await triggers.tick(app, now=now)
