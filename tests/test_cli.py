@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+import yaml
 from support.pidfile import hold_pidfile
 from support.server import child_env
 
@@ -648,6 +649,21 @@ def test_config_dir_reads_the_new_variable_then_the_1x_one(monkeypatch, tmp_path
     assert paths.config_dir({"KRAFT_TEMPLATES_DIR": "/elsewhere"}) == Path("/elsewhere")
 
 
+@pytest.mark.parametrize("marker", ["library.yaml", "registry.yaml"], ids=["1.x", "0.x"])
+def test_config_dir_reads_a_home_not_yet_renamed_under_its_old_name(monkeypatch, tmp_path, marker):
+    """Between the package upgrade and the first 2.0 start, `kraft admin
+    doctor` or `kraft view list` must find the 1.x home where it still is,
+    not report an empty `config/` beside it."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.delenv("KRAFT_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("KRAFT_TEMPLATES_DIR", raising=False)
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / marker).write_text("")
+    assert paths.config_dir() == tmp_path / "templates"
+    (tmp_path / "config").mkdir()
+    assert paths.config_dir() == tmp_path / "config"
+
+
 def test_seed_home_adopts_a_1x_templates_directory_instead_of_seeding(monkeypatch, tmp_path):
     """The 2.0 rename: a home whose config still sits in `templates/` is
     renamed to `config/` once, so an upgrade keeps every edited file and never
@@ -667,6 +683,46 @@ def test_seed_home_adopts_a_1x_templates_directory_instead_of_seeding(monkeypatc
     assert not (home / "access.yaml").exists()  # adopted, not seeded over
     # Once: the next start finds `config/` and leaves it alone.
     assert cli.admin.adopt_pre_2_home(home) is False
+
+
+def test_adopting_a_home_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_path):
+    """A 1.x `intake.yaml` `max_concurrent` and `policy.yaml` `triggers:` move
+    to the file 2.0 reads them from, once, at the rename, each file keeping
+    its comments."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    old = tmp_path / "home" / "templates"
+    old.mkdir(parents=True)
+    (old / "library.yaml").write_text("tasks: {}\n")
+    (old / "intake.yaml").write_text("# pickup\nenabled: false\nmax_concurrent: 1  # one\n")
+    (old / "policy.yaml").write_text(
+        "# caps\ndefault: {attempts: 1, wall_clock_s: 1}\n"
+        "triggers:\n  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}\n"
+    )
+    home = paths.default_config_dir()
+
+    assert cli.admin.adopt_pre_2_home(home) is True
+
+    intake = yaml.safe_load((home / "intake.yaml").read_text())
+    policy = yaml.safe_load((home / "policy.yaml").read_text())
+    assert "max_concurrent" not in intake and policy["max_concurrent"] == 1
+    assert "triggers" not in policy
+    assert intake["schedules"] == [
+        {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "t"}
+    ]
+    assert (home / "intake.yaml").read_text().startswith("# pickup\n")
+    assert (home / "policy.yaml").read_text().startswith("# caps\n")
+
+
+def test_adopting_a_0x_home_renames_it_for_the_major_update(monkeypatch, tmp_path):
+    """A 0.x home (a registry, no library) is adopted too, so `kraft admin
+    update` finds it where every reader now looks and offers the replacement."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    old = tmp_path / "home" / "templates"
+    old.mkdir(parents=True)
+    (old / "registry.yaml").write_text("hooks: {}\n")
+    home = paths.default_config_dir()
+    assert cli.admin.adopt_pre_2_home(home) is True
+    assert (home / "registry.yaml").is_file() and not old.exists()
 
 
 @pytest.mark.parametrize(

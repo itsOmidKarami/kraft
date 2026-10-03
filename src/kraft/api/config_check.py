@@ -330,6 +330,8 @@ class IntakeBody(BaseModel):
     # P0 is the *highest* priority, so the ceiling is "P<n> and below".
     priority_ceiling: int = Field(ge=0, le=4)
     repos: list[str] = []
+    #: Left out, the file's own are kept: a 1.x client never sent any.
+    schedules: list[dict] | None = None
 
 
 def _check_intake(path, data, ctx):

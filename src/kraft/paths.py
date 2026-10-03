@@ -47,9 +47,28 @@ def config_dir(environ: Mapping[str, str] | None = None) -> Path:
     time, never at import, so a test or a reload that sets the variable after
     import still takes effect."""
     env = os.environ if environ is None else environ
-    return Path(
-        env.get("KRAFT_CONFIG_DIR") or env.get(LEGACY_CONFIG_DIR_VAR) or default_config_dir()
-    )
+    named = env.get("KRAFT_CONFIG_DIR") or env.get(LEGACY_CONFIG_DIR_VAR)
+    if named:
+        return Path(named)
+    default = default_config_dir()
+    legacy = pre_2_config_dir()
+    if not default.exists() and legacy is not None and legacy != default:
+        # Until the first 2.0 start renames it (`cli.admin.adopt_pre_2_home`),
+        # a 1.x home's files are where they were: `kraft admin doctor` or
+        # `kraft view list` run before that restart must read them, not
+        # report an empty home beside them.
+        return legacy
+    return default
+
+
+def pre_2_config_dir() -> Path | None:
+    """`$KRAFT_HOME/templates`, when it holds a 1.x home (a `library.yaml`)
+    or a 0.x one (a `registry.yaml`): what `default_config_dir()` was called
+    before 2.0. None when there is no such directory."""
+    old = kraft_home() / "templates"
+    if (old / "library.yaml").is_file() or (old / "registry.yaml").is_file():
+        return old
+    return None
 
 
 def default_skills_dir() -> Path:

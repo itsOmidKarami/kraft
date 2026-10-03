@@ -583,7 +583,11 @@ async def put_intake(body: IntakeBody, request: Request):
     would otherwise keep the old interval until the next reboot."""
     app_ = request.app
     st = app_.state
-    data = body.model_dump()
+    data = body.model_dump(exclude_none=True)
+    if body.schedules is None:
+        # The schedules live in this file since 2.0; a body that says nothing
+        # about them (every 1.x client) must not write them away.
+        data["schedules"] = list(st.intake.get("schedules") or [])
     config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
     st.intake = data
     apply_mod.record(st, "intake.yaml")

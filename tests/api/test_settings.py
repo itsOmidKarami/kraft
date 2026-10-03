@@ -351,6 +351,23 @@ def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
     assert client.put("/api/intake", json=body).status_code == 422
 
 
+def test_put_intake_keeps_the_schedules_a_body_leaves_out(client, templates_dir):
+    """The schedules live in intake.yaml since 2.0; a 1.x-shaped body says
+    nothing about them and must not write them away. A body that names them
+    replaces them."""
+    schedule = {"cron": "0 9 * * 1", "repo": "/r", "chain": "default", "title": "t"}
+    (templates_dir / "intake.yaml").write_text(
+        yaml.safe_dump({"enabled": False, "schedules": [schedule]})
+    )
+    client.app.state.intake = config.Intake.load(templates_dir / "intake.yaml").model_dump()
+    body = {"enabled": False, "interval_s": 300, "priority_ceiling": 2, "repos": []}
+    assert client.put("/api/intake", json=body).status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "intake.yaml").read_text())
+    assert [s["title"] for s in on_disk["schedules"]] == ["t"]
+    assert client.put("/api/intake", json={**body, "schedules": []}).status_code == 200
+    assert yaml.safe_load((templates_dir / "intake.yaml").read_text())["schedules"] == []
+
+
 def test_put_intake_no_longer_requires_max_concurrent(client):
     body = client.put(
         "/api/intake",

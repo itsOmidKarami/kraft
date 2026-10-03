@@ -311,8 +311,6 @@ A name the library doesn't define is refused when the repository is saved
 library save that removes a profile a repository still names is refused too.
 You write profiles in Templates › Library, which edits `library.yaml`.
 
-A `templates/steering/*.md` directory from an older release is folded into `library.yaml` as steering profiles of the same name on first start. The old directory is kept as `templates/steering.pre-1.0/`.
-
 This is not a place for target-repo files: Kraft never reads `CLAUDE.md`,
 `AGENTS.md`, or anything else from inside the repo being worked on as a
 source of process context.

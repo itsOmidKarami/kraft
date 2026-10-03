@@ -48,7 +48,6 @@ def _yaml() -> YAML:
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.width = 4096  # never re-wrap a long line an author laid out
-    yaml.indent(mapping=2, sequence=4, offset=2)
     return yaml
 
 

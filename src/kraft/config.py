@@ -211,6 +211,9 @@ class TestScope(BaseModel):
 #: with a warning naming the new one, and written back under the new name at
 #: the next save.
 _RENAMED_KEYS = {"default_chain_template": "default_chain"}
+#: `(path, old key)` already warned about: the file is re-read on every
+#: request, and one line per process is what an operator needs.
+_RENAME_WARNED: set[tuple[object, str]] = set()
 
 #: A harness profile id, the key of `RepoEntry.models`: the same rule as
 #: `kraft.templates.environment.Identifier`, the id a task's `harness:` names.
@@ -313,14 +316,20 @@ class RepoEntry(BaseModel):
         for old, new in _RENAMED_KEYS.items():
             if old in data:
                 value = data.pop(old)
-                if data.get(new) is None:
+                kept = data.get(new) is None
+                if kept:
                     data[new] = value
-                logger.warning(
-                    "repos.yaml: %s: %r is %r since 2.0; it is read, and saved under the new name",
-                    data.get("path"),
-                    old,
-                    new,
-                )
+                if (data.get("path"), old) not in _RENAME_WARNED:
+                    _RENAME_WARNED.add((data.get("path"), old))
+                    logger.warning(
+                        "repos.yaml: %s: %r is %r since 2.0; %s",
+                        data.get("path"),
+                        old,
+                        new,
+                        "read as it, and written under the new name at the next save"
+                        if kept
+                        else "the entry names both, so the new one is read",
+                    )
         return data
 
     @field_validator("areas")

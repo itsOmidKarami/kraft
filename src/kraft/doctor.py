@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -234,13 +235,33 @@ def _config_checks() -> list[dict]:
     return checks
 
 
+def _repo_entries(data: object) -> list:
+    return [r for r in (data.get("repos") or []) if isinstance(r, dict)] if data else []
+
+
 #: What 2.0 moved or renamed in the config files, each still read under its
-#: old name: file, the old key, and where it lives now.
-MOVED_KEYS = (
-    ("intake.yaml", "max_concurrent", "policy.yaml's `max_concurrent`"),
-    ("policy.yaml", "triggers", "intake.yaml's `schedules`"),
-    ("repos.yaml", "default_chain_template", "`default_chain` on the entry"),
-    ("theme.yaml", "board.group_by: template", "`chain`"),
+#: old name: file, the old key, where it lives now, and whether the parsed
+#: file still has it.
+MOVED_KEYS: tuple[tuple[str, str, str, Callable[[dict], bool]], ...] = (
+    (
+        "intake.yaml",
+        "max_concurrent",
+        "policy.yaml's `max_concurrent`",
+        lambda d: "max_concurrent" in d,
+    ),
+    ("policy.yaml", "triggers", "intake.yaml's `schedules`", lambda d: "triggers" in d),
+    (
+        "repos.yaml",
+        "default_chain_template",
+        "`default_chain` on the entry",
+        lambda d: any("default_chain_template" in r for r in _repo_entries(d)),
+    ),
+    (
+        "theme.yaml",
+        "board.group_by: template",
+        "`chain`",
+        lambda d: isinstance(d.get("board"), dict) and d["board"].get("group_by") == "template",
+    ),
 )
 
 
@@ -250,23 +271,12 @@ def _moved_keys_check(templates: Path) -> dict:
     key no reader honours (intake.yaml's `max_concurrent`) or one the
     Settings screens no longer show (policy.yaml's `triggers`)."""
     found: list[str] = []
-    for name, key, now in MOVED_KEYS:
+    for name, key, now, has in MOVED_KEYS:
         try:
             data = config.read_yaml(templates / name, {})
         except config.ConfigError:
             continue  # its own row says so
-        if name == "repos.yaml":
-            hit = any(
-                isinstance(r, dict) and "default_chain_template" in r
-                for r in (data.get("repos") or [])
-                if data
-            )
-        elif name == "theme.yaml":
-            board = data.get("board") if isinstance(data, dict) else None
-            hit = isinstance(board, dict) and board.get("group_by") == "template"
-        else:
-            hit = isinstance(data, dict) and key in data
-        if hit:
+        if isinstance(data, dict) and has(data):
             found.append(f"{name}: {key} is {now} since 2.0")
     if not found:
         return _check("moved keys", True, "none: every key is where 2.0 reads it")

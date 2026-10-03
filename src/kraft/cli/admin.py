@@ -25,7 +25,14 @@ import yaml
 
 from kraft import client, config, permission_hooks, pidfile, render
 from kraft.cli import common, templates
-from kraft.paths import BUNDLED, RunDirs, config_dir, default_config_dir, default_run_dir
+from kraft.paths import (
+    BUNDLED,
+    RunDirs,
+    config_dir,
+    default_config_dir,
+    default_run_dir,
+    pre_2_config_dir,
+)
 from kraft.policy import CarriedPolicy
 
 #: launchd label / systemd unit name. One daemon, one name -- not
@@ -203,22 +210,75 @@ def adopt_pre_2_home(config_dir: Path) -> bool:
 
     Only the default location is adopted: `config_dir` is `$KRAFT_HOME/config`
     (not an operator's `KRAFT_CONFIG_DIR`), it does not exist, and `templates/`
-    beside it holds a `library.yaml`. A home pointed at by hand is the
-    operator's to name. Nothing is copied: one rename, and the old name is gone,
-    so no later start can read a stale copy."""
-    from kraft.templates.library import LIBRARY_FILE
-
+    beside it is a 1.x home (a `library.yaml`) or a 0.x one (a `registry.yaml`,
+    which `kraft admin update` then replaces where it now is). A home pointed
+    at by hand is the operator's to name. Nothing is copied: one rename, and
+    the old name is gone, so no later start can read a stale copy. The keys
+    2.0 moved between files move with it (`carry_moved_keys`)."""
     if config_dir != default_config_dir() or config_dir.exists() or config_dir.is_symlink():
         return False
-    old = config_dir.with_name("templates")
-    if not (old / LIBRARY_FILE).is_file():
+    old = pre_2_config_dir()
+    if old is None or old != config_dir.with_name("templates"):
         return False
     old.rename(config_dir)
     print(
         f"kraft: moved {old} to {config_dir}: the config directory is config/ since 2.0",
         file=sys.stderr,
     )
+    for line in carry_moved_keys(config_dir):
+        print(f"kraft: {line}", file=sys.stderr)
     return True
+
+
+def carry_moved_keys(config_dir: Path) -> list[str]:
+    """Move what 2.0 reads from another file: `intake.yaml`'s `max_concurrent`
+    into `policy.yaml` (unless it already sets one), and `policy.yaml`'s
+    `triggers:` onto `intake.yaml`'s `schedules:`. Each file is rewritten over
+    its own text (`drafts.preserve`), so its comments stay. Returns a line per
+    move; a file that does not parse is left alone, and its reader says why."""
+    import yaml
+
+    from kraft.drafts import preserve
+
+    def load(name: str) -> tuple[Path, str, dict] | None:
+        path = config_dir / name
+        try:
+            text = path.read_text() if path.is_file() else ""
+            data = yaml.safe_load(text) if text.strip() else {}
+        except (OSError, ValueError, yaml.YAMLError):
+            return None
+        return (path, text, data) if isinstance(data, dict) else None
+
+    moved: list[str] = []
+    intake, policy = load("intake.yaml"), load("policy.yaml")
+    if intake is None or policy is None:
+        return moved
+    (intake_path, intake_text, intake_data), (policy_path, policy_text, policy_data) = (
+        intake,
+        policy,
+    )
+    if "max_concurrent" in intake_data:
+        value = intake_data.pop("max_concurrent")
+        if "max_concurrent" not in policy_data and isinstance(value, int):
+            policy_data["max_concurrent"] = value
+            moved.append(
+                f"intake.yaml: max_concurrent {value} moved to policy.yaml, which reads it"
+            )
+        else:
+            moved.append("intake.yaml: dropped max_concurrent; policy.yaml's is the one read")
+    triggers = policy_data.pop("triggers", None)
+    if isinstance(triggers, list) and triggers:
+        schedules = intake_data.get("schedules")
+        intake_data["schedules"] = [*(schedules if isinstance(schedules, list) else []), *triggers]
+        moved.append(f"policy.yaml: {len(triggers)} trigger(s) moved to intake.yaml's schedules")
+    elif triggers is not None:
+        moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
+    if moved:
+        from kraft.config import write_text
+
+        write_text(intake_path, preserve.rewrite(intake_text, intake_data))
+        write_text(policy_path, preserve.rewrite(policy_text, policy_data))
+    return moved
 
 
 def seed_home(templates_dir: Path) -> bool:
@@ -241,7 +301,8 @@ def seed_home(templates_dir: Path) -> bool:
     `library.yaml`: each bundled file it lacks is added beside the ones it
     has, and the whole directory is then the operator's alone, as a seeded
     one is. A home with a `library.yaml` was seeded, and one with a legacy
-    registry is a pre-V1 home for `kraft admin update`; neither is touched.
+    registry is a pre-V1 home for `kraft admin update` (adopted under its 2.0
+    name first, so that command finds it); neither is touched.
     Nor is a directory holding none of Kraft's config names: a mistyped
     `KRAFT_CONFIG_DIR` must not fill some other directory with it.
     """
@@ -639,8 +700,15 @@ class _SignalLoggingServer(uvicorn.Server):
         super().handle_exit(sig, frame)
 
 
+def _adopting_config_dir() -> Path:
+    """`config_dir()`, after the one-time rename of a 1.x home at its default
+    location: the start is where that happens, before anything reads it."""
+    adopt_pre_2_home(default_config_dir())
+    return config_dir()
+
+
 def _serve() -> None:
-    templates_dir = config_dir()
+    templates_dir = _adopting_config_dir()
     pid_path = _pid_path()
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = RunDirs(pid_path.parent).logs / "server.log"
@@ -773,7 +841,7 @@ def _start_detached() -> None:
     same pidfile `_serve` always has, so `admin stop`/`health`/`doctor` never
     need to know a server was started this way.
     """
-    templates_dir = config_dir()
+    templates_dir = _adopting_config_dir()
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
     run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()

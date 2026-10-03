@@ -214,7 +214,7 @@ export interface HarnessProvider {
   kind: string;
   command: string[];
   path: string;
-  /** From `$KRAFT_HOME/settings/harnesses/` rather than the package. */
+  /** From `$KRAFT_HOME/config/harnesses/` rather than the package. */
   override: boolean;
   capabilities: Record<string, HarnessCapability>;
 }
