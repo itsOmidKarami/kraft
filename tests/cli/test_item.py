@@ -284,6 +284,12 @@ def test_a_stopped_item_says_where_to_read_why(monkeypatch, capsys):
             {"id": "w1", "status": "escalating"},
             "asked an agent about w1's stop; kraft view show w1 follows it",
         ),
+        (
+            ["item", "set-chain", "w1", "--chain", "quick-task"],
+            "set_chain",
+            {"id": "w1", "chain_template": "quick-task"},
+            "w1 now runs the quick-task chain",
+        ),
     ],
     ids=[
         "resume",
@@ -295,6 +301,7 @@ def test_a_stopped_item_says_where_to_read_why(monkeypatch, capsys):
         "pause",
         "pause-nothing-running",
         "escalate",
+        "set-chain",
     ],
 )
 def test_a_small_answer_reads_as_one_line_too(monkeypatch, capsys, argv, fn, answer, said):

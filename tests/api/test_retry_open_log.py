@@ -328,6 +328,7 @@ def test_open_document_reports_501_when_no_editor_is_installed(client, repo, mon
     assert r.status_code == 501
 
     assert client.post("/api/documents/nope/open", json={}).status_code == 404
+    assert client.post(f"/api/documents/attachment:{wid}/open", json={}).status_code == 404
     assert client.post(f"/api/documents/{doc_id}/open", json={"editor": "vi"}).status_code == 400
 
 

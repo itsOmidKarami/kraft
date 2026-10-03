@@ -149,7 +149,7 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
     )
     harnesses_p.add_argument("profile_id", metavar="ID", nargs="?", help="one profile")
     harnesses_p.set_defaults(func=_cmd_harnesses)
-    templates_p = subs.add_parser("templates", help="inspect the chain template library")
+    templates_p = subs.add_parser("templates", help="inspect the library and its chains")
     verbs = templates_p.add_subparsers(dest="templates_verb", required=True)
     lint_p = verbs.add_parser(
         "lint",
@@ -165,7 +165,7 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         "everything else matches the server route",
     )
     lint_p.set_defaults(func=_cmd_lint)
-    show_p = verbs.add_parser("show", parents=[common_parser], help="print one chain template")
+    show_p = verbs.add_parser("show", parents=[common_parser], help="print one chain")
     show_p.add_argument("template_id", metavar="ID")
     show_p.add_argument(
         "--resolved",

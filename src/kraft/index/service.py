@@ -728,8 +728,12 @@ class Indexer:
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
         """Content fetch for the synthetic `attachment:{work_item_id}:{kind}` ids
         `_synthesize_attachment_doc` hands out — there's no `documents` row to
-        join against, so read the file again where that did."""
-        _, work_item_id, kind = doc_id.split(":", 2)
+        join against, so read the file again where that did. An id with no
+        kind names nothing (it was a 500 on every door, R12F-09)."""
+        parts = doc_id.split(":", 2)
+        if len(parts) != 3:
+            return None
+        _, work_item_id, kind = parts
         row = self._state.read(
             lambda c: c.execute(
                 "SELECT repo, attachments FROM work_items WHERE id = ?", (work_item_id,)

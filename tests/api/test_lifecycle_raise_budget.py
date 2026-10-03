@@ -99,7 +99,7 @@ def test_raise_budget_on_unknown_spend_takes_only_no_cap(
 
 @pytest.mark.parametrize(
     "breach",
-    [ITEM_WIDE, {"scope": "work_item", "spent_usd": 5.0, "cap_usd": 5.0}],
+    [ITEM_WIDE, {"scope": "work_item", "spent_usd": 1.0, "cap_usd": 1.0}],
     ids=["policy", "own"],
 )
 def test_raise_budget_with_every_slot_busy_changes_nothing(client, repo, breach):
@@ -141,3 +141,26 @@ def test_a_retry_refused_after_the_raise_says_the_cap_was_raised(monkeypatch, cl
         "the cap was raised to $2, but the retry was refused: a walk is already running"
     )
     assert "kraft item retry" in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("breach", "budget_usd"),
+    [
+        (ITEM_WIDE, 0.06),
+        (ITEM_WIDE, 0.07),
+        ({"scope": "work_item", "spent_usd": 5.0, "cap_usd": 5.0}, 4.5),
+    ],
+    ids=["policy-below-the-spend", "policy-at-the-spend", "own-below-the-spend"],
+)
+def test_raise_budget_refuses_a_cap_the_spend_already_reaches(client, repo, breach, budget_usd):
+    """R12E-06: it was written and retried, and the item stopped again at
+    once. Refused before the write, naming what it has spent."""
+    wid = _budget_stopped_item(client, repo, breach, policy={"budget_usd": 0.05})
+    before = client.get(f"/api/work-items/{wid}").json()
+
+    r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": budget_usd})
+
+    assert r.status_code == 422, r.text
+    assert f"already spent ${breach['spent_usd']:g}" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["budget_cap"] == before["budget_cap"]
+    assert _raised(client, wid) == []

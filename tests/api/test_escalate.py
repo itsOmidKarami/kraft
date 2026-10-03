@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from support.api import (
     WALK_TIMEOUT,
+    _budget_stopped_item,
     _force_node,
     _poll_events,
     _post_default,
@@ -143,6 +144,18 @@ def test_escalate_still_409s_from_active(client, repo):
     wid = _settled(client, repo)
     _set_status(wid, "active")
     assert _escalate(client, wid).status_code == 409
+
+
+def test_escalate_refuses_a_budget_stop_up_front(client, repo):
+    """R12E-05: the escalation's session was refused by the same cap, and the
+    answer said it had started. Refused here, naming raise-budget."""
+    wid = _budget_stopped_item(
+        client, repo, {"scope": "work_item", "spent_usd": 1.0, "cap_usd": 1.0}
+    )
+    r = _escalate(client, wid)
+    assert r.status_code == 409
+    assert f"kraft item raise-budget {wid}" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
 
 def test_escalate_requires_a_nonempty_message(client, repo):
