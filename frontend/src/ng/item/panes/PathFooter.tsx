@@ -32,8 +32,8 @@ export function footerActs(item: ItemDetail, shown: FooterState): FooterAct[] {
  *  it. A confirm takes the focus when it opens (its steer, or its least
  *  destructive button), and Cancel or Escape hands it back to the button that
  *  opened it (R11b-03); Escape in a steer with text in it keeps the text. */
-export function PathFooter({ item, path, what, state, reload, extra }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode }) {
-  const acts = footerActs(item, state);
+export function PathFooter({ item, path, what, state, reload, extra, only }: { item: ItemDetail; path: string; what: "node" | "step" | "task"; state: FooterState; reload: () => void; extra?: React.ReactNode; only?: FooterAct }) {
+  const acts = footerActs(item, state).filter((x) => !only || x === only);
   const [confirm, setConfirm] = useState<"skip" | "retry" | null>(null);
   const [steer, setSteer] = useState("");
   const [busy, setBusy] = useState(false);
