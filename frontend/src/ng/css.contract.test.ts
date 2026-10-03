@@ -58,6 +58,12 @@ describe("ng CSS", () => {
     expect(css).toMatch(/\.rv-bar > \.rv-muted\s*{[^}]*text-overflow:\s*ellipsis/);
   });
 
+  it("keeps the Policy page's \"set below policy\" column at every width", () => {
+    const css = readFileSync(join(here, "settings/policy/policy.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).not.toMatch(/pol-below[^{]*{[^}]*display:\s*none/);
+    expect(css).not.toMatch(/has-below > :nth-child\(4\)[^{]*{[^}]*display:\s*none/);
+  });
+
   it("stacks a dialog under a popover (a menu opened in it) under a toast", () => {
     const css = readFileSync(join(here, "ui/ui.css"), "utf-8");
     const z = (sel: string) => Number(new RegExp(`^${sel}\\s*{[^}]*z-index:\\s*(\\d+)`, "m").exec(css)?.[1]);
