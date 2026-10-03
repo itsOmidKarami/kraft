@@ -314,6 +314,9 @@ def _chain_templates_check() -> dict:
             "chain_templates", True, "skipped: no chain templates in this version", skipped=True
         )
     live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    if not live_dir.is_dir():
+        # A home never started: nothing is missing from a copy not made yet.
+        return _check("chain_templates", True, "skipped: no templates dir", skipped=True)
     live = _chain_template_files(live_dir)
     parts = []
     for name, shipped_ids in shipped.items():

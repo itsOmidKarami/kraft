@@ -256,12 +256,14 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     red pipeline while passing on a developer machine that had the directory.
     """
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "nope"))
-    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+    # An installed Kraft's bundle: never started, its chains are not "missing".
+    (_chains(tmp_path / "bundled" / "templates") / "default.yaml").write_text("nodes: [{id: a}]\n")
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "bundled")
 
     rows = asyncio.run(doctor.run_checks())
     assert _by_name(rows, "templates")["ok"] is False
     chains = _by_name(rows, "chain_templates")
-    assert chains["ok"] is True and chains["skipped"] is True
+    assert chains == {**chains, "ok": True, "skipped": True, "detail": "skipped: no templates dir"}
     assert _by_name(rows, "chains")["skipped"] is True
     # Not the upgrade guide: a home never seeded has nothing to upgrade.
     assert _by_name(rows, "capabilities")["detail"] == "skipped: no templates dir"
