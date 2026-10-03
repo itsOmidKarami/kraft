@@ -630,3 +630,87 @@ async def test_a_hanging_rebase_abort_is_bounded_and_says_so(
             worktree, repo, wtree.branch(database), base="main", timeout=timeout
         )
     assert caps.monotonic() - started < 8
+
+
+def _mr_rebase(database, run_dirs, repo, worktree, branch):
+    return kraft_builtins.mr_rebase(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id="w1",
+        node_id="pre_mr_rebase",
+        hook_point="on.mr.rebase",
+        round=0,
+        repo=str(repo),
+        worktree=str(worktree),
+        branch=branch,
+    )
+
+
+async def test_mr_rebase_moves_the_base_past_untracked_session_notes(database, run_dirs, repo):
+    """Every agent session leaves an untracked `.engineering/sessions/` note,
+    which nothing ignores in an adopter's repo: counted as uncommitted, it
+    skipped every rebase, and the merge request opened on a stale base."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    note = worktree / ".engineering" / "sessions" / "s0.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("what the agent did\n")
+    new_head = _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+
+    assert await _mr_rebase(database, run_dirs, repo, worktree, branch) == "done"
+    assert wtree.base_ref(database) == new_head
+    assert git_read(worktree, "merge-base", "--is-ancestor", new_head, "HEAD") == ""
+    assert note.read_text() == "what the agent did\n"
+
+
+@pytest.mark.parametrize("base_commits_one", [True, False], ids=["base-commits-it", "base-not"])
+async def test_the_setups_lockfile_is_set_aside_for_the_rebase(
+    database, run_dirs, repo, base_commits_one
+):
+    """Kraft tells a repo with no `uv.lock` to commit one. Once its base
+    does, the setup's untracked `uv.lock` in every item's worktree made git
+    refuse the rebase ("could not detach HEAD"). The base's committed copy
+    wins; with none, the setup's is put back as it was."""
+    from kraft.adapters import forge
+
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    before = await forge.lockfile_digests(worktree)
+    (worktree / "uv.lock").write_text("by the setup\n")
+    await forge.record_setup_writes(worktree, before)
+    if base_commits_one:
+        new_head = _commit(repo, "uv.lock", "committed on the base\n", "commit a lockfile")
+    else:
+        new_head = _commit(repo, "upstream.txt", "landed meanwhile\n", "upstream change")
+
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    assert result == new_head
+    assert git_read(worktree, "merge-base", "--is-ancestor", new_head, "HEAD") == ""
+    expected = "committed on the base\n" if base_commits_one else "by the setup\n"
+    assert (worktree / "uv.lock").read_text() == expected
+    assert _porcelain(worktree) == ([] if base_commits_one else ["?? uv.lock"])
+
+
+async def test_an_untracked_file_the_base_would_overwrite_stops_for_a_person(
+    database, run_dirs, repo
+):
+    """Not a silent skip, and not a conflict an agent is sent to resolve:
+    git refuses to start, nothing moves, the file is kept, and `mr_rebase`
+    stops the item for a person with git's own words."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    (worktree / "notes.txt").write_text("the agent's, never added\n")
+    _commit(repo, "notes.txt", "the base's\n", "base adds notes.txt")
+    head = git_read(worktree, "rev-parse", "HEAD")
+
+    with pytest.raises(kraft_builtins.RebaseBlocked, match=r"could not start(.|\n)*notes\.txt"):
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+    assert git_read(worktree, "rev-parse", "HEAD") == head
+    assert (worktree / "notes.txt").read_text() == "the agent's, never added\n"
+
+    assert await _mr_rebase(database, run_dirs, repo, worktree, branch) == "config_error"
