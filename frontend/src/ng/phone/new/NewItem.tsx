@@ -115,7 +115,7 @@ export function NewItem() {
         <ConfirmSheet title="Discard this draft?" text="The title and brief you typed will be lost." confirm={{ label: "Discard", danger: true, run: () => { saveDraft(null); sheet.goTo("/"); } }} onClose={sheet.close} />
       )}
       {sheet.is("attach") && (
-        <EditSheet title={`Attach a ${kind}`} text={`Search this repo's ${kind}s, or paste a repo-relative path.`} placeholder={`search ${kind}s, or paste a path`} submitLabel="Find" error={error} onSubmit={(q) => (q.trim() ? attach(q) : setError("Type a search or paste a path."))} onClose={sheet.close} />
+        <EditSheet title={`Attach a ${kind}`} text={`Search this repo's ${kind}s, or paste a repo-relative path. The file must be inside the repo: it is committed on the item's branch.`} placeholder={`search ${kind}s, or paste a path`} submitLabel="Find" error={error} onSubmit={(q) => (q.trim() ? attach(q) : setError("Type a search or paste a path."))} onClose={sheet.close} />
       )}
       {sheet.is("attach-pick") && (
         <ChoiceSheet

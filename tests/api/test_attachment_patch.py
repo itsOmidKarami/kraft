@@ -144,6 +144,22 @@ def test_an_unreadable_attachment_is_refused_and_changes_nothing(client, repo, p
     assert after["materialized_chain"] == before["materialized_chain"]
 
 
+def test_an_attachment_outside_the_repo_is_refused_with_the_way_on(client, repo):
+    """R10a-02: "escapes the repo" alone left a newcomer with a spec in
+    ~/notes nowhere to go. The refusal says where the file must be."""
+    spec = _doc(repo, "specs/s.md", "# spec\n")
+    wid = _file(client, repo, attachments=[{"kind": "spec", "path": spec}])
+
+    r = client.patch(f"/api/work-items/{wid}", json={"attachments": {"spec": "../outside.md"}})
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == (
+        "attachment path escapes the repo: ../outside.md. A spec must be a file inside "
+        "the repo, since it is committed on the item's branch: copy it in, for example "
+        "to .engineering/specs/, and give that path"
+    )
+
+
 def test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with(
     client, repo, monkeypatch
 ):

@@ -178,6 +178,13 @@ describe("Composer", () => {
     expect(screen.getByRole("button", { name: "Create paused" })).toBeDisabled();
   });
 
+  it("says before a pick that the file must be inside the repo, and where to copy one (R10a-02)", async () => {
+    mount();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "+ plan" }));
+    expect(screen.getByRole("dialog", { name: "Attach a plan" })).toHaveTextContent("The file must be inside the repo: it is committed on the item's branch. Copy one from elsewhere into the repo first, for example to .engineering/plans/.");
+  });
+
   it("attaches a spec found by search (the shipped composer's call), or a pasted path", async () => {
     const search = vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [{ id: "d1", path: "docs/specs/cache.md" } as never] });
     const { calls } = mount();

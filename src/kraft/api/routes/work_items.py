@@ -179,7 +179,12 @@ def _validated_attachments(
                 422,
                 f"attachment not found: {a.path}"
                 if inside
-                else f"attachment path escapes the repo: {a.path}",
+                # The way on, not only the refusal (R10a-02): the file is
+                # snapshotted and committed on the item's branch, so it has
+                # to be one the repo holds.
+                else f"attachment path escapes the repo: {a.path}. A {a.kind} must be a "
+                f"file inside the repo, since it is committed on the item's branch: copy "
+                f"it in, for example to .engineering/{a.kind}s/, and give that path",
             )
     return out
 

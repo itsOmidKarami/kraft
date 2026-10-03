@@ -87,6 +87,12 @@ describe("the body (G.1): the same one the board's composer sends", () => {
 });
 
 describe("spec and plan (G.1)", () => {
+  it("says the file must be inside the repo (R10a-02)", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "+ spec" }));
+    expect(screen.getByRole("dialog", { name: "Attach a spec" })).toHaveTextContent("The file must be inside the repo: it is committed on the item's branch.");
+  });
+
   it("attaches a found document through two sheets, and removes it again", async () => {
     mount({ "GET /search": [200, { query: "cache", mode: "hybrid", results: [{ id: "d1", repo: "/r", source_kind: "artifact", kind: "spec", title: "Spec · cache", path: ".engineering/specs/cache.md", snippet: "", score: 1, links: [] }] }] });
     await userEvent.click(await screen.findByRole("button", { name: "+ spec" }));
