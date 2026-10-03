@@ -25,12 +25,6 @@ def test_worker_sessions_is_empty_before_anything_runs(app, make_item, repo):
     assert asyncio.run(client.worker_sessions(wid)) == []
 
 
-def test_latest_session_says_so_when_nothing_has_run(app, make_item, repo):
-    wid = make_item(repo)
-    with pytest.raises(ValueError, match="no worker session"):
-        asyncio.run(client.latest_session(wid))
-
-
 def test_events_returns_the_chain_history(app, make_item, repo):
     wid = make_item(repo, "the history")
     rows = asyncio.run(client.events(wid))
@@ -148,6 +142,20 @@ def test_events_follow_returns_at_once_on_an_item_that_already_ended(
     assert "999" not in out
 
 
+def _session(sid, node="verify", hook="verify.main.test", status="failed"):
+    return {"id": sid, "node_id": node, "hook_point": hook, "status": status}
+
+
+def _serves(monkeypatch, *sessions, status="active", stop=None):
+    """`client.get_work_item` answering an item that ran `sessions`, oldest
+    first, and is `status` with `stop`: what `view logs` picks its default from."""
+
+    async def fake_item(work_item_id=None, *, full=False):
+        return {"status": status, "stop": stop, "worker_sessions": list(sessions)}
+
+    monkeypatch.setattr(client, "get_work_item", fake_item)
+
+
 def test_logs_without_a_session_says_so(app, capsys, make_item, repo):
     wid = make_item(repo)
     with pytest.raises(SystemExit) as caught:
@@ -160,9 +168,6 @@ def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
     """The backlog path needs no server streaming: it is a plain GET."""
     wid = make_item(repo)
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
-
     async def fake_get(path, **params):
         assert path == "/worker-sessions/sess-1/log"
         return {
@@ -174,18 +179,81 @@ def test_logs_backlog_renders_lines(app, monkeypatch, capsys, make_item, repo):
             ],
         }
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid])
     out = capsys.readouterr().out
     assert "first" in out and "second" in out
 
 
+_IMPL = _session("s-impl", "implementation", "implementation.main.implement", "done")
+_RED = _session("s-red")
+_GREEN = _session("s-green", status="done")
+_ESCALATION = _session("s-esc", hook="escalation", status="running")
+_STOP = {"node": "verify", "facts": {}}
+
+
+_STOPPED = {"status": "needs_human", "stop": _STOP}
+
+
+@pytest.mark.parametrize(
+    ("item", "sessions", "follow", "shown", "named"),
+    [
+        pytest.param({}, [_IMPL, _RED, _GREEN], False, "s-green", None, id="running-newest"),
+        pytest.param(_STOPPED, [_IMPL, _RED, _ESCALATION], False, "s-red", "s-esc", id="escalated"),
+        pytest.param(
+            {**_STOPPED, "stop": {**_STOP, "facts": {"session_id": "s-red"}}},
+            [_IMPL, _RED, _GREEN, _ESCALATION],
+            False,
+            "s-red",
+            "s-esc",
+            id="red-scope-before-a-green-one",
+        ),
+        pytest.param(_STOPPED, [_IMPL, _RED], False, "s-red", None, id="nothing-newer"),
+        pytest.param(
+            _STOPPED, [_IMPL, _RED, _ESCALATION], True, "s-esc", "s-red", id="follow-the-escalation"
+        ),
+    ],
+)
+def test_logs_defaults_to_the_session_that_stopped_the_item(
+    app, monkeypatch, capsys, make_item, repo, item, sessions, follow, shown, named
+):
+    """R12a-03: an item stops, an auto-escalation starts at once, and `view
+    logs ID` showed the escalation rather than why it stopped. While stopped,
+    the default is the stop's own session (the failed scope `facts` names, or
+    the node's newest that is not an escalation); `-f` still follows the
+    newest, which can still write. stderr names the one it passed over, with
+    how to read it."""
+    wid = make_item(repo)
+    asked = []
+
+    async def fake_get(path, **params):
+        asked.append(path)
+        return {"lines": []}
+
+    async def fake_next_line(session_id):
+        return 0
+
+    async def fake_stream(session_id, after_line=0):
+        asked.append(f"follow {session_id}")
+        return
+        yield
+
+    _serves(monkeypatch, *sessions, **item)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    monkeypatch.setattr(client, "log_next_line", fake_next_line)
+    monkeypatch.setattr(client, "stream_log", fake_stream)
+    cli.main(["view", "logs", wid, *(["-f"] if follow else [])])
+
+    assert asked == [f"/worker-sessions/{shown}/log", *([f"follow {shown}"] if follow else [])]
+    err = capsys.readouterr().err
+    assert ("kraft view logs --session" in err) is (named is not None)
+    if named:
+        assert f"kraft view logs --session {named}" in err
+
+
 def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
     wid = make_item(repo)
-
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
 
     async def fake_get(path, **params):
         return {
@@ -194,7 +262,7 @@ def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
             "lines": [{"n": i, "t": None, "src": "stdout", "text": f"line{i}"} for i in range(10)],
         }
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "-n", "3"])
     out = capsys.readouterr().out.strip().splitlines()
@@ -205,13 +273,10 @@ def test_logs_n_limits_the_backlog(app, monkeypatch, capsys, make_item, repo):
 def test_logs_json_is_ndjson(app, monkeypatch, capsys, make_item, repo):
     wid = make_item(repo)
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
-
     async def fake_get(path, **params):
         return {"lines": [{"n": 0, "t": None, "src": "stdout", "text": "one"}]}
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "--json"])
     out = capsys.readouterr().out.strip()
@@ -311,13 +376,10 @@ def test_logs_n_zero_prints_no_backlog(app, monkeypatch, capsys, make_item, repo
     """`-n 0` means none. Truthiness would read it as "no limit"."""
     wid = make_item(repo)
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "stopped"}
-
     async def fake_get(path, **params):
         return {"lines": [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]}
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     cli.main(["view", "logs", wid, "-n", "0"])
     assert capsys.readouterr().out == ""
@@ -332,9 +394,6 @@ def test_logs_n_zero_follow_starts_after_the_lines_already_written(
     wid = make_item(repo)
     asked = []
 
-    async def fake_latest(work_item_id=None):
-        return {"id": "sess-1", "status": "running"}
-
     async def fake_get(path, **params):
         rows = [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]
         return {"lines": rows, "next_line": 5}
@@ -343,7 +402,7 @@ def test_logs_n_zero_follow_starts_after_the_lines_already_written(
         asked.append(after_line)
         yield {"n": 5, "t": None, "src": "stdout", "text": "new"}
 
-    monkeypatch.setattr(client, "latest_session", fake_latest)
+    _serves(monkeypatch, _session("sess-1"))
     monkeypatch.setattr(client.transport, "_get", fake_get)
     monkeypatch.setattr(client, "stream_log", fake_stream)
     cli.main(["view", "logs", wid, "-n", "0", "-f"])

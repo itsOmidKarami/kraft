@@ -374,6 +374,46 @@ def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) 
     return f" — {'; '.join(causes)}" if causes else ""
 
 
+def _failed_scopes(
+    db, work_item_id: str, node: ResolvedNode, failed: list, launch: LaunchContext | None
+) -> list[dict]:
+    """The test scopes behind a failed changed-test-scope builtin, for its
+    stop (`dispatch.failed_test_scopes`). Without them a red test stopped
+    naming `test_changed_scopes [builtin]`, and the command, its scope and
+    the session holding its output were nowhere a person looks first
+    (R12a-03)."""
+    repo_entry = launch.repo_entry if launch else None
+    return [
+        scope
+        for t in failed
+        if isinstance(t.task, BuiltinTask)
+        and t.task.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
+        for scope in dispatch.failed_test_scopes(db, work_item_id, node.id, t.path, repo_entry)
+    ]
+
+
+def _scope_text(scope: dict) -> str:
+    """One failed scope as its stop reason names it: "`npm test` (scope `**`,
+    exit 1)"."""
+    detail = []
+    if scope.get("setup"):
+        detail.append(f"setup of area `{scope['area']}`")
+    elif "scope" in scope:
+        detail.append(f"scope `{scope['scope']}`")
+    if "exit_code" in scope:
+        detail.append(f"exit {scope['exit_code']}")
+    return f"`{scope['command']}`" + (f" ({', '.join(detail)})" if detail else "")
+
+
+def _scope_facts(scopes: list[dict]) -> dict | None:
+    """The stop's `facts` for a red test: the first failed scope's own keys,
+    which the board's card and `kraft view logs` read, and every one of them
+    under `failed_scopes` when more than one went red."""
+    if not scopes:
+        return None
+    return {**scopes[0], **({"failed_scopes": scopes} if len(scopes) > 1 else {})}
+
+
 async def _stop_for_config_error(
     db, work_item_id: str, node: ResolvedNode, failed: list[ResolvedTask]
 ) -> str:
@@ -478,6 +518,8 @@ class _Stuck:
     suggested: dict | None = None
     #: A cap stop's `limit`, where an item override can raise it.
     limit: dict | None = None
+    #: `store.mark_needs_human`'s `facts`: a red test's command and scope.
+    facts: dict | None = None
 
 
 #: The round a stuck escalation's session is written under. Distinct from every
@@ -507,6 +549,7 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
             stuck=True,
             suggested=stuck.suggested,
             limit=stuck.limit,
+            facts=stuck.facts,
         )
     )
     return "needs_human"
@@ -1017,11 +1060,14 @@ async def _walk_node_once(
                 named = ", ".join(prompts.named_with_kind(t) for t in failed)
                 reason = f"task failed in node {node.id}: {named}"
                 reason += _in_process_causes(db, work_item_id, node, failed)
+                scopes = _failed_scopes(db, work_item_id, node, failed, launch)
+                if scopes:
+                    reason += f" — tests failed: {'; '.join(map(_scope_text, scopes))}"
                 if excs:
                     reason += f" ({', '.join(repr(e) for e in excs)})"
                 if repaired:
                     reason += " (after on_failure)"
-                return _Stuck(reason, kind="failed")
+                return _Stuck(reason, kind="failed", facts=_scope_facts(scopes))
         await node_runs.completed(db, Path(worktree) if worktree else None, work_item_id, node.id)
         return "ok"
 

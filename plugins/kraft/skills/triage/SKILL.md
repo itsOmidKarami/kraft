@@ -19,7 +19,7 @@ spend them again.
 ```bash
 kraft view show ID --json          # status, current node, pending gate
 kraft view events ID --type work_item_needs_human   # the stop's `reason`
-kraft view logs ID -n 60           # the last session's tail
+kraft view logs ID -n 60           # the tail of the session that stopped it
 ```
 
 The stop event's `reason` is the cause. A `budget` tag on it means a spend cap

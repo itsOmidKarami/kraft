@@ -162,6 +162,35 @@ def _last_own_round_head(
     return heads.pop() if len(heads) == 1 else None
 
 
+def _scope_table(repo_entry: RepoEntry | None) -> list[dict]:
+    """The repository's test scopes as verify runs them, before any selection:
+    `{paths, cmd, area, setup}` each, `cmd` and `setup` split into argv."""
+    if repo_entry is None:
+        return []
+    repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
+    if not repo_scopes and repo_entry.test_command:
+        # Wrapped here, at the point of use, never in the loaded entry: a
+        # re-save would persist it (`config.TestScope`, Kraft-9wzy).
+        repo_scopes = [{"paths": ["**"], "command": repo_entry.test_command}]
+    # One table after resolution: the repository's scopes, then each area's,
+    # every area scope carrying the setup it needs first
+    # (`repository-area-can-declare-setup-and-test-scopes`).
+    area_scopes = [
+        {**scope, "area": name, "setup": area.get("setup")}
+        for name, area in repo_entry.areas.items()
+        for scope in (area.get("verification") or {}).get("test_scopes") or []
+    ]
+    return [
+        {
+            "paths": s["paths"],
+            "cmd": shlex.split(s["command"]),
+            "area": s.get("area"),
+            "setup": shlex.split(s["setup"]) if s.get("setup") else None,
+        }
+        for s in [*repo_scopes, *area_scopes]
+    ]
+
+
 def _select_scopes(
     db,
     work_item_id: str,
@@ -213,32 +242,9 @@ def _select_scopes(
     only the one(s) that failed. Selecting less is only ever safe for a
     scope that passed.
     """
-    if repo_entry is None:
+    scopes = _scope_table(repo_entry)
+    if not scopes:
         return []
-    repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
-    if not repo_scopes and repo_entry.test_command:
-        # Wrapped here, at the point of use, never in the loaded entry: a
-        # re-save would persist it (`config.TestScope`, Kraft-9wzy).
-        repo_scopes = [{"paths": ["**"], "command": repo_entry.test_command}]
-    # One table after resolution: the repository's scopes, then each area's,
-    # every area scope carrying the setup it needs first
-    # (`repository-area-can-declare-setup-and-test-scopes`).
-    area_scopes = [
-        {**scope, "area": name, "setup": area.get("setup")}
-        for name, area in repo_entry.areas.items()
-        for scope in (area.get("verification") or {}).get("test_scopes") or []
-    ]
-    if not repo_scopes and not area_scopes:
-        return []
-    scopes = [
-        {
-            "paths": s["paths"],
-            "cmd": shlex.split(s["command"]),
-            "area": s.get("area"),
-            "setup": shlex.split(s["setup"]) if s.get("setup") else None,
-        }
-        for s in [*(repo_scopes or []), *area_scopes]
-    ]
     base_ref = _current_base_ref(db, work_item_id)
     # `since` is the diff's lower bound: round <= 0 always measures the whole
     # branch (never reads another round or another node's head), and only a
@@ -573,6 +579,83 @@ async def _run_changed_test_scopes(
     if stopped is not None:
         return stopped
     return next((s for s in results if s != "done"), "done")
+
+
+def failed_test_scopes(
+    db, work_item_id: str, node_id: str, task_hook: str, repo_entry: RepoEntry | None
+) -> list[dict]:
+    """What the changed-test-scope builtin's latest run of `task_hook` failed
+    on, in the order it ran: `{command, scope?, exit_code?, area?, setup?,
+    session_id}` per failed command, `setup` marking an area's setup.
+
+    A stop names these so a person reads the command that went red, not the
+    builtin's own id (R12a-03). The latest run is the rows created since the
+    node was last entered (its newest `node_started`: a retry, or a
+    re-measure after the node's repair) that share the newest row's round and
+    head_sha, which one dispatch stamps once. A retry at an unchanged head
+    measures at the same round and head as the attempt before it, so the
+    entry is what keeps a command the operator has since replaced out of it.
+    A command run twice in the run, a task's own retry, counts by its later
+    row.
+
+    The row records the command it ran, not its scope or area, so both are
+    read back off the repo's table by that command, and two scopes that share
+    one command read as one: their later row, both scopes' paths, and an area
+    only when they agree on it. One the table no longer declares names no
+    scope."""
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT ws.id, ws.status, ws.round, ws.head_sha, ws.command, ws.result_path "
+            "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
+            "AND e.type = 'worker_session_created' "
+            "AND json_extract(e.payload, '$.session_id') = ws.id "
+            "WHERE ws.work_item_id = ? AND ws.node_id = ? AND ws.hook_point = ? "
+            "AND e.seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE work_item_id = ? "
+            "AND type = 'node_started' AND node_id = ?) ORDER BY e.seq",
+            (work_item_id, node_id, task_hook, work_item_id, node_id),
+        ).fetchall()
+    )
+    if not rows:
+        return []
+    newest = rows[-1]
+    latest: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        if row["command"] and (row["round"], row["head_sha"]) == (
+            newest["round"],
+            newest["head_sha"],
+        ):
+            latest.pop(row["command"], None)
+            latest[row["command"]] = row
+    table = _scope_table(repo_entry)
+    failed = []
+    for command, row in latest.items():
+        if row["status"] != "failed":
+            continue
+        entry: dict = {"command": command}
+        scopes = [s for s in table if shlex.join(s["cmd"]) == command]
+        setups = [s for s in table if s["setup"] and shlex.join(s["setup"]) == command]
+        if scopes:
+            entry["scope"] = ", ".join(p for s in scopes for p in s["paths"])
+        if (code := _exit_code(row["result_path"])) is not None:
+            entry["exit_code"] = code
+        areas = {s["area"] for s in scopes or setups}
+        if len(areas) == 1 and (area := areas.pop()):
+            entry["area"] = area
+        if setups and not scopes:
+            entry["setup"] = True
+        entry["session_id"] = row["id"]
+        failed.append(entry)
+    return failed
+
+
+def _exit_code(result_path: str | None) -> int | None:
+    """The code a task exited with, off the sidecar its launch wrapper writes
+    (`subprocess._wrap_with_exit_file`), or None when there is none to read."""
+    try:
+        raw = Path(result_path).with_suffix(".exit").read_text().strip() if result_path else ""
+    except (OSError, UnicodeDecodeError):
+        return None
+    return int(raw) if raw.lstrip("-").isdigit() else None
 
 
 def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
