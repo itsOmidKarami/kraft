@@ -76,8 +76,8 @@ describe("ChainConfig", () => {
 
   // R11a-03: the field opened with the caret after the cap, so typing 0.03 saved $100.03.
   // R11b-03: the field that had the focus is gone after Escape, Cancel or a save; ✎ takes it back.
-  // A decimal comma is a point: "0,03" left Save off and saved nothing (#504 review).
-  it.each([["{Escape}", null], ["Cancel", null], ["7{Enter}", 7], ["0,03{Enter}", 0.03]] as const)("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close, saved) => {
+  // A decimal comma is a point: "0,03" left Save off and saved nothing (#504 review); a grouping one is not: "1,000" saved $1.00 (R12b-10).
+  it.each([["{Escape}", null], ["Cancel", null], ["7{Enter}", 7], ["0,03{Enter}", 0.03], ["1,000.50{Enter}", 1000.5]] as const)("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close, saved) => {
     const calls = stubFetch(WRITES);
     function Editing() {
       const [on, setOn] = useState(false);
@@ -92,6 +92,24 @@ describe("ChainConfig", () => {
     else await userEvent.keyboard(close);
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit budget" })).toHaveFocus());
     expect(posts(calls)).toEqual(saved === null ? [] : [{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: saved } }]);
+  });
+
+  // r12 review: "1,000" is a thousand or one, so it saves nothing and says how to type it.
+  it.each(["1,000", "Infinity"])("keeps Save off for %j and says how to type the amount", async (typed) => {
+    const calls = stubFetch(WRITES);
+    render(<ChainConfig item={detail({ budget_cap: { cap_usd: 100, source: "item", spent_usd: 4 } })} policy={null} reload={() => {}} editBudget onEditBudget={() => {}} />);
+    await userEvent.keyboard(`${typed}{Enter}`);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByText("Type the amount plainly, like 1000 or 1.5.")).toBeInTheDocument();
+    expect(posts(calls)).toEqual([]);
+  });
+
+  // r12 review: a cap of $1.234 was prefilled "1.234", which the editor then refused as ambiguous.
+  it("re-saves a cap in force with three decimals unchanged", async () => {
+    const calls = stubFetch(WRITES);
+    render(<ChainConfig item={detail({ budget_cap: { cap_usd: 1.234, source: "item", spent_usd: 1 } })} policy={null} reload={() => {}} editBudget onEditBudget={() => {}} />);
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: 1.234 } }]));
   });
 
   // An item with no budget meter has no ✎: the focus goes back to what opened the editor (Raise cap).

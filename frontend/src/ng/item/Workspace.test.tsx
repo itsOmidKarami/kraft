@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,7 +59,8 @@ describe("Workspace", () => {
     stubFetch({ "GET /documents/d1": [200, { id: "d1", title: "Review notes", path: "/r/n.md", content: "# Review notes\n\nThe cache has **no size bound**." }] });
     mount("/work-items/w1?doc=d1&q=bound");
     expect(await screen.findByText("no size bound")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Search matches" })).toHaveTextContent("bound1 of 1");
+    // The count lands after the highlight pass, a tick after the text: under load it was not there yet.
+    await waitFor(() => expect(screen.getByRole("group", { name: "Search matches" })).toHaveTextContent("bound1 of 1"));
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(where()).toBe("/work-items/w1");

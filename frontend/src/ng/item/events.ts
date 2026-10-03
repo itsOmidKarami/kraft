@@ -18,7 +18,8 @@ export function eventLine(e: KraftEvent): string | null {
     case "node_started": return `${node} started`;
     case "node_completed": return `${node} finished`;
     case "node_skipped": return `${node} skipped`;
-    case "worker_session_started": return p.hook_point ? `${taskName(s(p.hook_point))} is running on ${node}` : `${node} is running`;
+    // A start, in the past tense: the list keeps it after the session ended, and "is running" read as live (R12b-12).
+    case "worker_session_started": return p.hook_point ? `${taskName(s(p.hook_point))} started on ${node}` : `a session started on ${node}`;
     case "gate_requested": return `${s(p.gate) || node} is waiting for you`;
     case "gate_approved": return `${s(p.gate) || node} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
     case "gate_rejected": return `${s(p.gate) || node} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;

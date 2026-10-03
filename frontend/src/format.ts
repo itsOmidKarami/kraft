@@ -250,6 +250,40 @@ export function usd(n: number, complete = true, estimated = false): string {
   return complete ? amount : `${amount}+`;
 }
 
+/** A typed dollar amount, or NaN for what it cannot read for sure. A lone
+ *  comma is a decimal point (a comma-decimal locale, iOS's decimal keypad:
+ *  "0,5"); with both, the last is the decimal point and the other groups
+ *  thousands ("1,000.50", "1.000,50"); several of one alone group thousands.
+ *  "1,000" and "1.500" are refused: a thousand to one reader, one (or one and
+ *  a half) to another, and it read "1,000" as $1.00 (R12b-10). Only digits and
+ *  one point survive: Number() also took "Infinity", "0x10" and "1e3". */
+export function dollars(text: string): number {
+  const t = text.trim().replace(/^\$\s*/, "");
+  if (/^[1-9]\d{0,2}[.,]\d{3}$/.test(t)) return NaN;
+  const grouped = (int: string, sep: string) => new RegExp(`^[1-9]\\d{0,2}(\\${sep}\\d{3})+$`).test(int);
+  const seps = t.match(/[.,]/g) ?? [];
+  let plain = t;
+  if (new Set(seps).size === 2) {
+    const dec = t.lastIndexOf(",") > t.lastIndexOf(".") ? "," : ".";
+    const at = t.lastIndexOf(dec);
+    const int = t.slice(0, at);
+    plain = grouped(int, dec === "," ? "." : ",") ? `${int.replace(/[.,]/g, "")}.${t.slice(at + 1)}` : "";
+  } else if (seps.length > 1) plain = grouped(t, seps[0]!) ? t.replace(/[.,]/g, "") : "";
+  else plain = t.replace(",", ".");
+  return /^(\d+(\.\d+)?|\.\d+)$/.test(plain) ? Number(plain) : NaN;
+}
+
+/** An amount as a field starts with it, read back by `dollars` as the same
+ *  amount: a cap of $1.234 written "1.234" is the shape `dollars` refuses as
+ *  ambiguous, so re-saving it unchanged failed (r12 review); "1.2340" is not. */
+export const dollarsText = (n: number): string => {
+  const s = String(n);
+  return /^[1-9]\d{0,2}\.\d{3}$/.test(s) ? `${s}0` : s;
+};
+
+/** What to say when `dollars` refused what was typed. */
+export const DOLLARS_HINT = "Type the amount plainly, like 1000 or 1.5.";
+
 /** A repo's own name — the last segment of its path.
  *
  * The absolute path repeats on every board row, in the detail meta line and in

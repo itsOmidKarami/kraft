@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../../api";
 import { ago, until, usd } from "../../format";
-import type { KraftEvent } from "../../types";
+import type { ChainNode, KraftEvent } from "../../types";
 import { CircleHelp, Clock, Pause, X } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
@@ -71,6 +71,15 @@ export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
 
 type Run = (p: Promise<{ ok: true } | { ok: false; error: string }>) => Promise<void>;
 
+/** The card's Retry: named by the path it sends, so a stop inside a fix loop
+ *  reads "Retry from verification", not "from judge", a task it cannot name. */
+function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
+  const task = item.stop?.task;
+  const path = node ? actionPath(node, task) : null;
+  const label = task ? `Retry from ${taskName(path ?? task)}` : "Retry";
+  return { label, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
+}
+
 function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
@@ -85,7 +94,7 @@ function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,
       facts: [...fs.slice(0, 3), ...(spent ? [spent] : [])],
       actions: [
-        { label: stop.task ? `Retry from ${taskName(stop.task)}` : "Retry", primary: true, run: () => run(act.retry(item.id, node ? { path: actionPath(node, stop.task) } : {})) },
+        retryFrom(item, node, run),
         ...(stop.kind === "infra" ? [{ label: "Open Repos", run: h.onRepos }] : []),
         { label: "Escalate…", run: h.onEscalate },
       ],
@@ -173,7 +182,7 @@ function cardFor(item: ItemDetail, h: Handlers & { onRepos: () => void; onReview
       tone: "warn", glyph: <CircleHelp size={14} aria-hidden />, title: stop.kind === "stuck" ? "Stuck" : "Needs you", where, text: stop.reason ?? undefined, node: stop.node,
       facts: spent ? [spent] : [],
       actions: [
-        { label: stop.task ? `Retry from ${taskName(stop.task)}` : "Retry", primary: true, run: () => run(act.retry(item.id, node ? { path: actionPath(node, stop.task) } : {})) },
+        retryFrom(item, node, run),
         { label: "Escalate…", run: h.onEscalate },
       ],
     };

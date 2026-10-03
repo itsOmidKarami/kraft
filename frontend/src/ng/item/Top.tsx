@@ -115,9 +115,12 @@ export function Brief({ id, brief, onSaved }: { id: string; brief: string; onSav
 }
 
 /** The item's changed files, landed (base..HEAD) and in flight (HEAD..worktree), one row per path. */
-export function useDiffFiles(id: string, version: string): DiffFile[] | null {
+/** `gone`: the item's worktree is not on disk (archived, or reclaimed), so
+ *  there is nothing to read, and asking only logged a 404 (R12b-11). */
+export function useDiffFiles(id: string, version: string, gone = false): DiffFile[] | null {
   const [files, setFiles] = useState<DiffFile[] | null>(null);
   useEffect(() => {
+    if (gone) return void setFiles(null);
     // Read again on every read of the item: only the newest read may land.
     let live = true;
     api.getWorkItemDiff(id).then((d) => {
@@ -130,7 +133,7 @@ export function useDiffFiles(id: string, version: string): DiffFile[] | null {
       setFiles([...by.values()]);
     }, () => live && setFiles(null));
     return () => { live = false; };
-  }, [id, version]);
+  }, [id, version, gone]);
   return files;
 }
 
@@ -149,8 +152,8 @@ function useOpenThreads(id: string, version: string): number {
 
 /** `N files +A −D · K open threads · Review changes` (the prototype's diff
  *  line), the threads only when there are some; hidden with no diff. */
-export function DiffLine({ id, version }: { id: string; version: string }) {
-  const files = useDiffFiles(id, version);
+export function DiffLine({ id, version, gone }: { id: string; version: string; gone?: boolean }) {
+  const files = useDiffFiles(id, version, gone);
   const threads = useOpenThreads(id, version);
   if (!files?.length) return null;
   const { add, del } = totals(files);

@@ -46,9 +46,10 @@ describe("ng AppearancePage", () => {
   });
 
   it.each([
-    ["a choice this machine has", "zed", ["VS Code", "Zed", "System default"], "Zed"],
-    ["the system's default app", null, ["VS Code", "Zed", "System default"], "System default"],
-    ["a choice this machine no longer has, still shown", "obsidian", ["VS Code", "Zed", "Obsidian", "System default"], "Obsidian"],
+    // r12 review: unset is KRAFT_EDITOR first, so it is "Not set", not "System default".
+    ["a choice this machine has", "zed", ["VS Code", "Zed", "Not set"], "Zed"],
+    ["none set", null, ["VS Code", "Zed", "Not set"], "Not set"],
+    ["a choice this machine no longer has, still shown", "obsidian", ["VS Code", "Zed", "Obsidian", "Not set"], "Obsidian"],
   ])("lists the editors found on this machine for the default editor, with %s selected", async (_, editor, names, selected) => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { available: ["code", "zed"], system: true, default: editor } });
     const put = setup({ editor });
@@ -56,7 +57,7 @@ describe("ng AppearancePage", () => {
     expect(within(group).getAllByRole("radio").map((r) => r.textContent)).toEqual(names);
     expect(within(group).getByRole("radio", { name: selected })).toBeChecked();
     fireEvent.click(within(group).getByRole("radio", { name: "VS Code" }));
-    fireEvent.click(within(group).getByRole("radio", { name: "System default" }));
+    fireEvent.click(within(group).getByRole("radio", { name: "Not set" }));
     await waitFor(() => expect(put.mock.calls.map((c) => c[0])).toEqual([{ editor: "code" }, { editor: null }]));
   });
 

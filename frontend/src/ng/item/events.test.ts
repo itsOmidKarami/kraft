@@ -7,7 +7,8 @@ const ev = (type: string, payload: Record<string, unknown> = {}, node_id: string
 describe("eventLine", () => {
   it.each([
     [ev("node_completed", {}, "plan"), "plan finished"],
-    [ev("worker_session_started", { hook_point: "verification.review.code_review" }, "verification"), "code_review is running on verification"],
+    [ev("worker_session_started", { hook_point: "verification.review.code_review" }, "verification"), "code_review started on verification"],
+    [ev("worker_session_started", {}, "verification"), "a session started on verification"],
     [ev("gate_approved", { gate: "plan_approval", by: "human" }, "plan_approval"), "plan_approval · approved by you"],
     [ev("gate_approved", { gate: "chain_revision_approval", by: "agent" }), "chain_revision_approval · passed on its own"],
     [ev("fix_cycle_started", { cycle: 1 }, "verification"), "verification · fix loop round 2"],

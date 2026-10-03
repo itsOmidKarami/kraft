@@ -1,9 +1,10 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../store";
 import type { WorkerSession } from "../../types";
+import { Shell } from "../shell/Shell";
 import { ItemPage } from "./ItemPage";
 import { detail, stubFetch } from "./testkit";
 import { usePaneMemory } from "./Workspace";
@@ -12,12 +13,15 @@ const Where = () => {
   const l = useLocation();
   return <span data-testid="where">{l.pathname + l.search}</span>;
 };
-const mount = (path = "/work-items/w1") =>
+/** `shell`: inside the app shell, where the header's actions are drawn. */
+const mount = (path = "/work-items/w1", shell = false) =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/work-items/:id" element={<><ItemPage /><Where /></>} />
-        <Route path="/work-items/:id/nodes/:node" element={<><ItemPage /><Where /></>} />
+        <Route element={shell ? <Shell /> : <Outlet />}>
+          <Route path="/work-items/:id" element={<><ItemPage /><Where /></>} />
+          <Route path="/work-items/:id/nodes/:node" element={<><ItemPage /><Where /></>} />
+        </Route>
       </Routes>
     </MemoryRouter>,
   );
@@ -48,6 +52,28 @@ describe("ItemPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     expect(screen.getByTestId("where")).toHaveTextContent("tab=config");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toHaveFocus();
+  });
+
+  // R12b-11: an archived item's page asked for its diff, and the 404 went to the console on every load.
+  it("asks for no diff once the item's worktree is gone", async () => {
+    const calls = stubFetch({ "GET /work-items/w1": [200, detail({ status: "completed", display_status: "archived", worktree_exists: false })] });
+    mount();
+    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1")).toBe(true));
+    expect(calls.some((c) => c.path.endsWith("/diff"))).toBe(false);
+  });
+
+  // R12b-06: on a time cap the header's Raise cap only opened Config, which has no row for that cap.
+  it("opens the cap's own editor from the header's Raise cap on a stop that names its limit", async () => {
+    const limit = { path: "", key: "time_cap_minutes", value: 1, maximum: null };
+    const capped = detail({ status: "needs_human", display_status: "needs_you", stop: { kind: "cap", node: "verification", task: null, resume_at: null, reason: "running time hit its 1m cap", limit } as never });
+    stubFetch({ "GET /work-items/w1": [200, capped], "GET /policy": [200, {}] });
+    mount("/work-items/w1", true);
+    // The header's, not the banner's, which always opened it.
+    const raises = await screen.findAllByRole("button", { name: "Raise cap" });
+    await userEvent.click(raises.find((b) => b.classList.contains("item-main-action"))!);
+    expect(await screen.findByRole("dialog", { name: "Raise running-time cap" })).toBeInTheDocument();
+    expect(screen.getByTestId("where")).not.toHaveTextContent("tab=config");
   });
 });
 

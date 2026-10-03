@@ -126,8 +126,8 @@ describe("SearchOverlay", () => {
     await screen.findByText("Caching spec");
     const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
     // Waiting at a gate, it is an action: review that gate.
-    const gate = within(section("Needs you")).getByTitle("Review human_review").closest("[role=option]")!;
-    expect(gate).toHaveTextContent("Review human_reviewGated work · wi_gate · alpha");
+    const gate = within(section("Needs you")).getByTitle("Review human review").closest("[role=option]")!;
+    expect(gate).toHaveTextContent("Review human reviewGated work · wi_gate · alpha");
     // The item's title is the part of the sub that shortens.
     expect(gate.querySelector(".ng-search-sublead")).toHaveTextContent(/^Gated work$/);
     expect(gate.querySelector(".ng-search-sublead")).toHaveAttribute("data-allow-ellipsis");
@@ -153,7 +153,7 @@ describe("SearchOverlay", () => {
       const o = row(name);
       return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".ng-search-tag")?.textContent, o.querySelector(".ng-search-where")?.textContent];
     };
-    expect(parts("Review human_review")).toEqual(["lucide-diamond", undefined, undefined]);
+    expect(parts("Review human review")).toEqual(["lucide-diamond", undefined, undefined]);
     expect(parts("Plain work")).toEqual(["lucide-box", undefined, "beta"]);
     expect(parts("Caching spec")).toEqual(["lucide-file-text", "spec", "alpha"]);
     expect(parts("New bead")).toEqual(["lucide-circle-dot", "open", undefined]);
@@ -203,7 +203,7 @@ describe("SearchOverlay", () => {
     const go = async (name: RegExp | string) => {
       await user.click(within(screen.getByRole("listbox")).getByText(name));
     };
-    await go("Review human_review");
+    await go("Review human review");
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate/review");
     expect(screen.queryByRole("dialog")).toBeNull();
 
@@ -241,6 +241,22 @@ describe("SearchOverlay", () => {
     vi.unstubAllGlobals();
   });
 
+  // #502 review: with nothing focused when ⌘K opened, closing the document left focus on <body>.
+  it("hands focus to the page when a document opened from search closes and nothing had focus before ⌘K", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/documents/d2") ? { id: "d2", title: "Free spec", path: "/r/alpha/spec.md", content: "# Free spec\n\nThe **cache** has no bound." } : {}), { status: 200 })));
+    mount();
+    const user = userEvent.setup();
+    (document.activeElement as HTMLElement | null)?.blur();
+    await user.keyboard("{Meta>}k{/Meta}");
+    await user.type(await screen.findByRole("combobox"), "free");
+    await user.click(await screen.findByRole("option", { name: /Free spec/ }));
+    expect(await within(await screen.findByRole("dialog", { name: "Free spec" })).findByText("cache")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("main")).toHaveFocus();
+    vi.unstubAllGlobals();
+  });
+
   it("goes to pages from Go to, Archived included, without a page load", async () => {
     mount();
     const { user } = await open();
@@ -268,7 +284,7 @@ describe("SearchOverlay", () => {
 
   it.each([
     ["plain", "Plain work", "/work-items/wi_plain"],
-    ["gated", "Review human_review", "/work-items/wi_gate/review"],
+    ["gated", "Review human review", "/work-items/wi_gate/review"],
   ])("opens the active row on Enter: %s", async (query, row, to) => {
     mount();
     const { user, input } = await open();
@@ -286,7 +302,7 @@ describe("SearchOverlay", () => {
     expect(await screen.findByText("Documents could not be searched")).toBeInTheDocument();
     expect(headings()).toContain("Work items");
     expect(screen.getByTitle("Plain work")).toBeInTheDocument();
-    expect(screen.getByTitle("Review human_review")).toBeInTheDocument();
+    expect(screen.getByTitle("Review human review")).toBeInTheDocument();
   });
 
   it("sends one request for a burst of typing, not one per key", async () => {

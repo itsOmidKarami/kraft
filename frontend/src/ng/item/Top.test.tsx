@@ -145,6 +145,15 @@ describe("DiffLine", () => {
     await waitFor(() => expect(screen.getByText(/1 file/)).toHaveTextContent(text));
   });
 
+  // R12b-11: an archived item's page asked anyway, and the 404 went to the console on every load.
+  it("asks for no diff once the worktree is gone", async () => {
+    const calls = stubFetch({ "GET /work-items/w1/diff": [404, { detail: "this work item's worktree was removed from disk" }] });
+    const { container } = render(<MemoryRouter><DiffLine id="w1" version="v" gone /></MemoryRouter>);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container).toBeEmptyDOMElement();
+    expect(calls.filter((c) => c.path.endsWith("/diff"))).toEqual([]);
+  });
+
   it("reads the diff again on each read of the item, and an older read that answers late does not win", async () => {
     const reads = holdFetch(/\/work-items\/w1\/diff/);
     const { rerender } = render(<MemoryRouter><DiffLine id="w1" version="1" /></MemoryRouter>);

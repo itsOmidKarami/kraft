@@ -80,6 +80,13 @@ describe("the item screen (C)", () => {
     expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
   });
 
+  // R12b-11: an archived item's worktree is gone, and the compare's 404 went to the console on every load.
+  it("asks for no diff once the worktree is gone", async () => {
+    const calls = mount(item("archived", null, { status: "completed", worktree_exists: false }), "/work-items/w1");
+    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(calls.some((c) => c.path.startsWith("/work-items/w1/compare"))).toBe(false);
+  });
+
   describe("Start with a draft (R9b-01 on the phone)", () => {
     const NEVER = () => item("paused", null, { status: "paused", current_node_id: null, worker_sessions: [] });
     const DRAFT = { "GET /work-items/w1/draft": [200, { ops: [{ op: "override", path: "implementation", policy: { budget_usd: 2 }, passed: false }] }] } as Record<string, [number, unknown]>;
@@ -242,6 +249,12 @@ describe("the other composers (C.7)", () => {
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/resume", body: { steer: "Allow it" } }));
   });
 
+  // R12b-13: each opened with the focus on <body>.
+  it.each(["steer", "reject", "answer", "escalate", "cancel", "complete"])("%s opens with the focus in its box", async (kind) => {
+    mount(kind === "reject" ? gateItem() : item("running"), `/work-items/w1?compose=${kind}`, { "GET /work-items/w1/cancel-preview": [404, { detail: "not here" }] });
+    expect(await screen.findByRole("textbox")).toHaveFocus();
+  });
+
   it("Escalate offers a new thread only when there is an earlier one", async () => {
     mount(item("running", null, { escalation_threads: [{ thread: 1, session_id: "e", turns: 1, started_at: "x", ended_at: null, status: "done" }] }), "/work-items/w1?compose=escalate");
     expect(await screen.findByRole("switch", { name: "Start a new thread" })).toHaveAttribute("aria-checked", "false");
@@ -295,6 +308,13 @@ describe("Raise budget (C.6)", () => {
     await userEvent.type(input, "0{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("above 0");
     expect(posts(calls)).toEqual([]);
+    // r12 review: Number() took "Infinity", which removed the cap.
+    for (const typed of ["Infinity", "1,000"]) {
+      await userEvent.clear(input);
+      await userEvent.type(input, `${typed}{Enter}`);
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("like 1000 or 1.5"));
+      expect(posts(calls)).toEqual([]);
+    }
     await userEvent.clear(input);
     await userEvent.type(input, "25{Enter}");
     await waitFor(() => expect(lastPost(calls)).toEqual({ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: 25 } }));

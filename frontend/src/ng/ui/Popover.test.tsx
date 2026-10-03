@@ -3,13 +3,13 @@ import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Popover } from "./Popover";
 
-function Harness({ onClose }: { onClose: () => void }) {
+function Harness({ onClose, dirty }: { onClose: () => void; dirty?: boolean }) {
   const anchor = useRef<HTMLButtonElement>(null);
   return (
     <>
       <button ref={anchor}>anchor</button>
       <p>outside</p>
-      <Popover anchor={anchor} open onClose={onClose}>
+      <Popover anchor={anchor} open onClose={onClose} dirty={dirty}>
         <button>inside</button>
       </Popover>
     </>
@@ -27,6 +27,18 @@ describe("ng Popover", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  // R12b-05: the Cancel card's typed reason went with an Escape or a stray press.
+  it.each<[string, { dirty?: boolean }, { isComposing?: boolean }]>([
+    ["while dirty", { dirty: true }, {}],
+    ["on the Escape that ends an IME composition", {}, { isComposing: true }],
+  ])("stays open %s", (_, props, key) => {
+    const onClose = vi.fn();
+    render(<Harness onClose={onClose} {...props} />);
+    fireEvent.keyDown(document, { key: "Escape", ...key });
+    if (props.dirty) fireEvent.mouseDown(screen.getByText("outside"));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("renders nothing while closed", () => {

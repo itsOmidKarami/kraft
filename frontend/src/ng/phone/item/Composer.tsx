@@ -158,7 +158,8 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
       </header>
       <div className="ph-content">
         <p className="ph-help">{spec.help(item)}</p>
-        <textarea className="ph-input ph-input-area" aria-label={kind === "cancel" || kind === "complete" ? "Reason" : "Your note"} placeholder={spec.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
+        {/* Focus starts in the box, as in the desktop's dialogs: it opened on <body>, so a keyboard or switch user had to find it first (R12b-13). */}
+        <textarea autoFocus className="ph-input ph-input-area" aria-label={kind === "cancel" || kind === "complete" ? "Reason" : "Your note"} placeholder={spec.placeholder} value={text} onChange={(e) => setText(e.target.value)} />
         {flagLabel && <div className="ph-list"><SwitchRow label={flagLabel} on={flag} onChange={setFlag} /></div>}
         {kind === "cancel" && preview && (
           <Facts rows={[

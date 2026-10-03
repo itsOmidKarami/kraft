@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { repoName, tokens, usd } from "../../../format";
+import { dollars, DOLLARS_HINT, dollarsText, repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -119,9 +119,9 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
     : item.budget_cap?.key === "policy.budget_usd" ? { path: "", key: "budget_usd" as const, value: item.budget_cap.cap_usd ?? 0, maximum: null }
     : undefined;
   const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
-  const [value, setValue] = useState(String(cap || ""));
-  // A decimal comma, as a comma-decimal locale or iOS's decimal keypad types it, is a point.
-  const amount = Number(value.trim().replace(",", "."));
+  const [value, setValue] = useState(cap ? dollarsText(cap) : "");
+  // A decimal comma, as a comma-decimal locale or iOS's decimal keypad types it, is a point; "1,000" is a thousand.
+  const amount = dollars(value);
   const [error, setError] = useState<string | null>(null);
   const send = async (usdCap: number | null) => {
     let r;
@@ -149,6 +149,7 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
         <Button type="submit" variant="primary" disabled={!(amount > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
       </form>
+      {value.trim() && Number.isNaN(amount) && <p className="item-muted">{DOLLARS_HINT}</p>}
       {error && <p className="item-error" role="alert">{error}</p>}
     </div>
   );

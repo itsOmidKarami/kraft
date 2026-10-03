@@ -49,7 +49,8 @@ beforeEach(() => {
 describe("Chains page: the node view", () => {
   it("draws a node's resolved steps, its parallel tasks and their seams, under the strip", async () => {
     mount("/templates/chains/default/nodes/verification");
-    const g = await screen.findByRole("group", { name: "verification" });
+    // The file's first mount pays for the shell's and the chain page's imports: under a loaded CPU that ran past 1s.
+    const g = await screen.findByRole("group", { name: "verification" }, { timeout: 5000 });
     expect(within(g).getAllByRole("button", { name: /, step$/ }).map((b) => b.textContent)).toEqual(["tests", "review"]);
     expect(within(g).getByRole("button", { name: "code_review, agent task" })).toBeInTheDocument();
     expect(within(g).getByRole("button", { name: "test_changed_scopes, subprocess task" })).toBeInTheDocument();
@@ -84,7 +85,8 @@ describe("Chains page: the node view", () => {
       n.id === "verification" ? { id: "verification", extends: "verification", steps: [{ id: "tests", tasks: [] }, { id: "review", tasks: [] }, { id: "step_3", tasks: [{ id: "agent", kind: "agent" }] }] } : n);
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...withNodes(nodes), ops: [] }));
     mount("/templates/chains/default/nodes/verification");
-    const g = await screen.findByRole("group", { name: "verification" });
+    // The file's first mount pays for the shell's and the chain page's imports: under a loaded CPU that ran past 1s.
+    const g = await screen.findByRole("group", { name: "verification" }, { timeout: 5000 });
     await userEvent.click(within(g).getAllByRole("button", { name: "Add a step here" })[2]);
     await userEvent.click(await screen.findByRole("menuitem", { name: "Blank agent task" }));
     await waitFor(() => expect(post).toHaveBeenCalled());
@@ -99,7 +101,8 @@ describe("Chains page: the node view", () => {
   it("adds a library task beside a step's tasks from its parallel seam", async () => {
     const post = vi.spyOn(d, "postOps").mockImplementation(() => ok({ ...DEFAULT_VIEW, ops: [] }));
     mount("/templates/chains/default/nodes/verification");
-    const g = await screen.findByRole("group", { name: "verification" });
+    // The file's first mount pays for the shell's and the chain page's imports: under a loaded CPU that ran past 1s.
+    const g = await screen.findByRole("group", { name: "verification" }, { timeout: 5000 });
     await userEvent.click(within(g).getAllByRole("button", { name: "Add a parallel task" })[0]);
     await userEvent.click(await screen.findByRole("menuitem", { name: "From the library…" }));
     await userEvent.type(await screen.findByRole("textbox", { name: "Search the library" }), "impl{Enter}");

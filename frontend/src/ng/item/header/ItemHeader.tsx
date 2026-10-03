@@ -118,6 +118,9 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     if (ops.some((o) => !o.passed)) return draft.setReviewing(true, start);
     start();
   };
+  // Once a card's action is done the card is gone, and the button in it that had the
+  // focus with it: the focus goes to the main button, which is the next way on (R12b-08).
+  const toMain = () => requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(".item-main-action")?.focus());
   const itemUrl = `/work-items/${encodeURIComponent(item.id)}`;
   const onMain = () => {
     if (hs.main === "pause") return setPausing(true);
@@ -179,11 +182,11 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}
       <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
-        <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
+        <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) { setPausing(false); toMain(); } }} />
       </Popover>
-      {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
-      {escalating && <EscalateCard id={item.id} anchor={group} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
-      {completing && <CompleteCard id={item.id} anchor={group} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); }} />}
+      {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); toMain(); }} />}
+      {escalating && <EscalateCard id={item.id} anchor={group} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); toMain(); }} />}
+      {completing && <CompleteCard id={item.id} anchor={group} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); toMain(); }} />}
     </HeaderActions>
     </>
   );

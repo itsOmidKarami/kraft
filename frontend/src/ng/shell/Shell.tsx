@@ -42,7 +42,8 @@ export function Shell() {
           </div>
         </div>
         {searching && <SearchOverlay onClose={closeSearch} onDocument={(id, q) => setViewing({ id, q })} />}
-        {viewing && <DocViewer source={{ kind: "document", id: viewing.id }} query={viewing.q} onClose={() => setViewing(null)} />}
+        {/* The search that opened it is gone by its close: focus goes to the page, not <body> (#502 review). */}
+        {viewing && <DocViewer source={{ kind: "document", id: viewing.id }} query={viewing.q} onClose={() => setViewing(null)} returnTo={() => document.getElementById("ng-main")} />}
         <ApplyDialogs />
       </HeaderTailHost.Provider>
     </HeaderActionsHost.Provider>

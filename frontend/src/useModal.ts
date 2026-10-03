@@ -5,12 +5,13 @@ const FOCUSABLE =
 
 /**
  * Dialog keyboard behaviour: Escape closes, Tab stays inside (Kraft-2ih).
+ * Escape does not close while `dirty` (typed, unsaved input) or mid-composition.
  *
  * Returns a ref to put on the dialog container. Without the trap, Tab walks out
  * of the modal into the page behind it, which for a keyboard or screen-reader
  * user means the dialog is not really modal at all.
  */
-export function useModal<T extends HTMLElement>(onClose: () => void, returnTo?: () => HTMLElement | null | undefined) {
+export function useModal<T extends HTMLElement>(onClose: () => void, returnTo?: () => HTMLElement | null | undefined, dirty = false) {
   const ref = useRef<T>(null);
   // Read through refs, so a caller's inline `onClose` (a new closure each render)
   // does not re-run the effect: its cleanup and setup moved focus, and a page
@@ -20,6 +21,8 @@ export function useModal<T extends HTMLElement>(onClose: () => void, returnTo?: 
   close.current = onClose;
   const back = useRef(returnTo);
   back.current = returnTo;
+  const held = useRef(dirty);
+  held.current = dirty;
 
   useEffect(() => {
     const node = ref.current;
@@ -33,6 +36,10 @@ export function useModal<T extends HTMLElement>(onClose: () => void, returnTo?: 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
+        // The Escape that ends an input method's composition belongs to the
+        // field; and a form holding typed, unsaved text (`dirty`) keeps it, as
+        // the backdrop does: Cancel is the way out (R12b-05, R11b-02).
+        if (e.isComposing || held.current) return;
         close.current();
         return;
       }

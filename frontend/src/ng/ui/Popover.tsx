@@ -21,7 +21,8 @@ export const firstFocusable = (root: HTMLElement | null): HTMLElement | null =>
  *  - Tab and Shift+Tab cycle inside a dialog (a confirm card, a small form), as
  *    in a dialog: closing it on Tab would lose what was typed, and leaving it
  *    open would send focus to the top of the page;
- *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere. */
+ *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere;
+ *  - `dirty` (a card holding typed, unsaved text): neither Escape nor an outside press closes it. */
 export function Popover({ anchor, open, onClose, children, role, label, focusIn = true, dirty = false, notch = false, over = false }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean; dirty?: boolean; notch?: boolean; over?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -70,6 +71,8 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
+      // An input method's own Escape, or a card holding typed text, keeps it open (R12b-05).
+      if (e.isComposing || dirtyRef.current) return;
       closeBack();
     };
     document.addEventListener("mousedown", onDown);

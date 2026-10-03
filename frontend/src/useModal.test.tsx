@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { backdropProps, useModal } from "./useModal";
 
-function Dialog({ onClose }: { onClose: () => void }) {
-  const ref = useModal<HTMLDivElement>(onClose);
+function Dialog({ onClose, dirty }: { onClose: () => void; dirty?: boolean }) {
+  const ref = useModal<HTMLDivElement>(onClose, undefined, dirty);
   return (
     <div>
       <button>outside</button>
@@ -36,11 +36,17 @@ describe("useModal", () => {
     expect(screen.getByLabelText("title")).toHaveFocus();
   });
 
-  it("closes on Escape", async () => {
+  // R12b-05: Escape kept nothing typed in Escalate…, Mark complete… or Cancel; the
+  // backdrop already spared a dirty form, and an IME's own Escape belongs to the field.
+  it.each([
+    ["closes on Escape", false, false, 1],
+    ["stays open on Escape while dirty", true, false, 0],
+    ["stays open on the Escape that ends an IME composition", false, true, 0],
+  ])("%s", (_, dirty, isComposing, closes) => {
     const onClose = vi.fn();
-    render(<Dialog onClose={onClose} />);
-    await userEvent.keyboard("{Escape}");
-    expect(onClose).toHaveBeenCalled();
+    render(<Dialog onClose={onClose} dirty={dirty} />);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape", isComposing });
+    expect(onClose).toHaveBeenCalledTimes(closes);
   });
 
   it("keeps Tab inside the dialog", async () => {

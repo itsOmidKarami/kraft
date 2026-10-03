@@ -69,7 +69,8 @@ describe("Policy limits (N.1)", () => {
     const { calls } = open();
     await userEvent.click(within(await screen.findByRole("region", { name: "Instance" })).getByRole("button", { name: /^per day/ }));
     await userEvent.type(screen.getByLabelText("per day", { selector: "input" }), "abc{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a number above 0.");
+    // A dollar cell reads as the budget editor does, and says how to type an amount.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Type the amount plainly, like 1000 or 1.5.");
     expect(posts(calls)).toEqual([]);
   });
 

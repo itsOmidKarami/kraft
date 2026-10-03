@@ -22,11 +22,17 @@ export function stepsOf(node: ChainNode): { steps: Step[]; legacy: boolean } {
 
 export const taskName = (path: string) => path.split(".").at(-1) ?? path;
 
-/** The path a retry or skip may name: the task's own on a V1 node, else the node. */
+/** The path a retry or skip may name: the task's own on a V1 node, else the
+ *  node. Only one of the node's own step tasks is addressable (lifecycle's
+ *  `ChainPath.parse`): a stop inside a fix loop, a judge, a recovery pass or an
+ *  escalation names a task like `verification.fix_loop.judge`, which the
+ *  server refuses 422 ("node 'verification' has no step 'fix_loop'"), so that
+ *  one retries the node that owns it (R12b-01). */
 export function actionPath(node: ChainNode, task?: string | null): string {
   if (!task) return node.id;
   const { legacy, steps } = stepsOf(node);
   if (legacy) return node.id;
-  const full = task.includes(".") ? task : steps.flatMap((s) => s.tasks).find((t) => taskName(t) === task);
+  const own = steps.flatMap((s) => s.tasks);
+  const full = task.includes(".") ? own.find((t) => t === task) : own.find((t) => taskName(t) === task);
   return full ?? node.id;
 }

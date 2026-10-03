@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -102,6 +102,26 @@ describe("elapsedBetween + nodeRunSpan (W0.4)", () => {
         ses({ id: "scan", hook_point: "on.repos.scan", status: "done", created_at: at(3_499_999), exited_at: at(3_499_000) }),
       ]),
     ).toBe("50m");
+  });
+});
+
+// R12b-10: "1,000" saved a $1.00 cap; a lone decimal comma still reads as a point (#504 review).
+// Anything it cannot read for sure is NaN, so Save stays off (r12 review: "Infinity" removed the cap).
+describe("dollars", () => {
+  it.each([
+    ["7", 7], ["0.03", 0.03], ["$12.5", 12.5], [".5", 0.5],
+    ["0,5", 0.5], ["0,03", 0.03], ["0,500", 0.5], ["1,5", 1.5],
+    ["12,345,678", 12345678], ["1.000.000", 1000000], ["1,000.50", 1000.5], ["1.000,50", 1000.5],
+    ["1,000", NaN], ["1.000", NaN], ["1.500", NaN], ["1,500", NaN],
+    ["1,", NaN], ["1,234,56", NaN], ["1,00,0", NaN], ["1.000.000,5,0", NaN], ["abc", NaN], ["", NaN],
+    ["Infinity", NaN], ["0x10", NaN], ["0b11", NaN], ["1e3", NaN], ["-5", NaN],
+  ])("reads %j as %d", (typed, amount) => {
+    expect(dollars(typed)).toBe(amount);
+  });
+
+  // r12 review: a cap of $1.234 was prefilled "1.234", which it then refused as ambiguous.
+  it.each([1.234, 12.345, 123.456, 0.035, 5, 1.5, 1234.5])("reads back %d as it prefills it", (amount) => {
+    expect(dollars(dollarsText(amount))).toBe(amount);
   });
 });
 

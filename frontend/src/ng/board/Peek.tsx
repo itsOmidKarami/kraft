@@ -15,6 +15,7 @@ import { useDuplicate } from "../item/header/ItemHeader";
 import { useSelect } from "../item/draft/select";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
+import { openLimitEditor } from "../item/RaiseLimit";
 import { PausedCard, StateCard } from "../item/StateCard";
 import { headerState, MAIN_LABEL, neverStarted } from "../item/status";
 import { placeUrl } from "../item/url";
@@ -55,8 +56,13 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       </Inspector>
     );
   const item = loaded.item;
-  // Raise cap / Raise budget: the Config tab, its budget editor open for a budget stop.
-  const raise = () => { onTab("config"); onBudget(item.stop?.kind === "budget"); };
+  // Raise cap / Raise budget: the banner's editor for a stop that names its limit (R12b-06),
+  // else the Config tab, its budget editor open for a budget stop.
+  const raise = () => {
+    if (item.stop?.limit) return void (onTab("overview"), openLimitEditor(item.id));
+    onTab("config");
+    onBudget(item.stop?.kind === "budget");
+  };
   const fresh = neverStarted(item);
   return (
     <Inspector

@@ -5,14 +5,23 @@ import { intakeOf } from "./types";
 import { intervalFromText, showMinutes, toMinutes } from "./units";
 
 describe("Auto-intake", () => {
-  it("describes the cron shapes the page draws and leaves the rest as written", () => {
-    expect(describeCron("0 9 * * 1-5")).toBe("weekdays 09:00");
-    expect(describeCron("30 7 * * *")).toBe("daily 07:30");
-    expect(describeCron("0 9 * * 1")).toBe("Mondays 09:00");
-    expect(describeCron("0 9 * * 0")).toBe("Sundays 09:00");
-    expect(describeCron("*/15 * * * *")).toBe("every 15 minutes");
-    expect(describeCron("0 9 1 * *")).toBe("0 9 1 * *");
-    expect(describeCron("nonsense")).toBe("nonsense");
+  // r12: a time is UTC, as the scheduler runs (R12b-14: "61 9 * * *" read "daily 09:61").
+  it.each([
+    ["0 9 * * 1-5", "weekdays 09:00 UTC"],
+    ["30 7 * * *", "daily 07:30 UTC"],
+    ["0 9 * * 1", "Mondays 09:00 UTC"],
+    ["0 9 * * 0", "Sundays 09:00 UTC"],
+    ["0 9 * * 7", "Sundays 09:00 UTC"],
+    ["*/15 * * * *", "every 15 minutes"],
+    ["0 9 1 * *", "0 9 1 * *"],
+    ["nonsense", "nonsense"],
+    ["61 9 * * *", "61 9 * * *"],
+    ["0 24 * * *", "0 24 * * *"],
+    ["0 9 * * 8", "0 9 * * 8"],
+    ["*/0 * * * *", "*/0 * * * *"],
+    ["*/90 * * * *", "*/90 * * * *"],
+  ])("describes %j as %j, leaving what it cannot draw as written", (cron, words) => {
+    expect(describeCron(cron)).toBe(words);
   });
 
   it("converts the interval between seconds on the wire and minutes on the page, in one place", () => {

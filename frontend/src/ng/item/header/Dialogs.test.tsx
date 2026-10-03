@@ -56,4 +56,22 @@ describe("item cards", () => {
     fireEvent.mouseDown(document.body);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  // R12b-05: Escape closed the card and dropped what was typed; empty, it still closes.
+  it.each([
+    ["Escalate", EscalateCard, "Message"],
+    ["Mark complete", CompleteCard, "Reason"],
+  ])("%s keeps its typed text on Escape, and closes on one while empty", async (_, Card, field) => {
+    stubFetch(WRITES);
+    const onClose = vi.fn();
+    render(<Card id="w1" anchor={anchor()} onClose={onClose} onDone={() => {}} />);
+    const box = screen.getByRole("textbox", { name: new RegExp(field) });
+    await userEvent.type(box, "Half-written");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(box).toHaveValue("Half-written");
+    await userEvent.clear(box);
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

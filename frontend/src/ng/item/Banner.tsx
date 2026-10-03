@@ -3,7 +3,7 @@ import { CircleHelp } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { taskName } from "./paths";
-import { RaiseLimit } from "./RaiseLimit";
+import { RaiseLimit, useLimitAsked } from "./RaiseLimit";
 import { budgetRaise, NOT_RAISABLE } from "./status";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
@@ -15,6 +15,7 @@ const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replac
  *  or a cap; the action is the filled button. */
 export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail; onOpenGate: (gate: string) => void; onRaise: () => void; reload: () => void }) {
   const [raising, setRaising] = useState(false);
+  useLimitAsked(item.id, () => setRaising(true));
   const stop = item.stop;
   if (item.display_status !== "needs_you" || !stop) return null;
   if (stop.kind === "gate") {

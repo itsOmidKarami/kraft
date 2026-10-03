@@ -77,13 +77,26 @@ describe("Peek", () => {
     expect((await screen.findAllByText(text)).length).toBeGreaterThan(0);
   });
 
-  // The banner's Raise cap and the footer's main button, which says the same (R11a-05).
-  it.each([".item-banner", ".pane-footer"])("opens Config with the budget editor from a budget stop's Raise cap in %s", async (where) => {
-    mount({ status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] });
-    await screen.findAllByRole("button", { name: "Raise cap" });
-    fireEvent.click(within(document.querySelector<HTMLElement>(where)!).getByRole("button", { name: "Raise cap" }));
+  // The banner's Raise cap and the footer's main button, which says the same: a budget stop's
+  // opens Config's budget editor (R11a-05), a time cap's its own editor, which Config has no row for (R12b-06).
+  const budgetStop = { status: "needs_human", display_status: "needs_you", stop: stop("budget", { reason: "Spend cap reached", scope: "work_item" }), budget_cap: { cap_usd: 5, source: "policy", spent_usd: 5 } as ItemDetail["budget_cap"] } as Partial<ItemDetail>;
+  const timeCap = { status: "needs_human", display_status: "needs_you", stop: stop("cap", { reason: "running time hit its 1m cap", limit: { path: "", key: "time_cap_minutes", value: 1, maximum: null } }) } as Partial<ItemDetail>;
+  const budgetEditor = async () => {
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toBeInTheDocument();
+  };
+  const capEditor = async () => expect(await screen.findByRole("dialog", { name: "Raise running-time cap" })).toBeInTheDocument();
+  it.each([
+    ["a budget stop", ".item-banner", budgetStop, budgetEditor],
+    ["a budget stop", ".pane-footer", budgetStop, budgetEditor],
+    ["a time cap", ".item-banner", timeCap, capEditor],
+    ["a time cap", ".pane-footer", timeCap, capEditor],
+  ] as const)("opens the editor for %s from its Raise cap in %s", async (_, where, over, opened) => {
+    mount(over, { start: "activity" });
+    if (where === ".item-banner") fireEvent.click(await screen.findByRole("tab", { name: "Overview" }));
+    await screen.findAllByRole("button", { name: "Raise cap" });
+    fireEvent.click(within(document.querySelector<HTMLElement>(where)!).getByRole("button", { name: "Raise cap" }));
+    await opened();
   });
 
   it("moves focus into the budget editor's field, and Enter saves the typed cap (R10a-05)", async () => {

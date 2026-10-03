@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KraftEvent, WorkerSession } from "../../types";
+import { accessibleName } from "../graph/types";
 import { chainGraph, rejectTarget } from "./graph";
 import { detail, V1 } from "./testkit";
 
@@ -27,19 +28,28 @@ describe("chainGraph", () => {
     expect(chainGraph(item, [approved("plan_approval", "agent")], NOW).nodes[1].meta).toBe("auto");
   });
 
+  // R12b-09: the accessible name said "running" for every one of these but the running row.
   it.each([
-    ["failed", { kind: "failed", node: "verification" }, { state: "failed", meta: "failed", metaTone: "red" }],
-    ["needs_you", { kind: "cap", node: "verification" }, { state: "current", capped: true, attemptStopped: true, meta: "capped" }],
-    ["paused", null, { state: "current", paused: true, sub: "paused" }],
-    ["needs_you", { kind: "question", node: "verification" }, { state: "current", sub: "needs you" }],
-  ])("draws the current node of a %s item", (display_status, stop, want) => {
+    ["failed", { kind: "failed", node: "verification" }, { state: "failed", meta: "failed", metaTone: "red" }, "verification, node, failed"],
+    ["needs_you", { kind: "cap", node: "verification" }, { state: "current", capped: true, attemptStopped: true, meta: "capped" }, "verification, node, capped"],
+    ["paused", null, { state: "current", paused: true, sub: "paused" }, "verification, node, paused"],
+    ["needs_you", { kind: "question", node: "verification" }, { state: "current", sub: "needs you" }, "verification, node, needs you"],
+    ["needs_you", { kind: "stuck", node: "verification" }, { state: "current", sub: "needs you" }, "verification, node, needs you"],
+    ["waiting", { kind: "rate_limit", node: "verification" }, { state: "current", running: false, wait: "waiting · rate limit" }, "verification, node, waiting · rate limit"],
+    ["waiting", { kind: "wait", node: "verification" }, { state: "current", running: false, wait: "waiting on CI" }, "verification, node, waiting on CI"],
+    ["running", null, { state: "current", running: true }, "verification, node, running"],
+  ])("draws the current node of a %s item, and names it so", (display_status, stop, want, name) => {
     const item = detail({ display_status: display_status as never, stop: stop && ({ ...stop, resume_at: null, reason: null } as never) });
-    expect(chainGraph(item, [], NOW).nodes[2]).toMatchObject(want);
+    const node = chainGraph(item, [], NOW).nodes[2];
+    expect(node).toMatchObject(want);
+    expect(accessibleName(node, "node")).toBe(name);
   });
 
   it("draws a gate waiting for you as the current gate (the amber diamond)", () => {
     const item = detail({ current_node_id: "plan_approval", display_status: "needs_you", stop: { kind: "gate", node: "plan_approval", resume_at: null, reason: null } });
-    expect(chainGraph(item, [], NOW).nodes[1]).toMatchObject({ kind: "gate", state: "current", sub: "needs you" });
+    const gate = chainGraph(item, [], NOW).nodes[1];
+    expect(gate).toMatchObject({ kind: "gate", state: "current", sub: "needs you" });
+    expect(accessibleName(gate, "gate")).toBe("plan_approval, gate, needs you");
   });
 
   it("hides the escalation badge on a capped node, shows it elsewhere", () => {

@@ -54,8 +54,9 @@ afterEach(() => vi.unstubAllGlobals());
 describe("the gate review (F)", () => {
   it("shows a gate's document and the files that changed, and opens one file at a time", async () => {
     mount(gateItem());
-    expect(await screen.findByRole("heading", { level: 1, name: "Plan · doc-search-cache" })).toBeInTheDocument();
-    expect(await screen.findByText("Add EmbeddingCache")).toBeInTheDocument();
+    // The file's first mount pays for its imports, and the document and the diff come in two reads: under load, past 1s.
+    expect(await screen.findByRole("heading", { level: 1, name: "Plan · doc-search-cache" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText("Add EmbeddingCache", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText(".engineering/plans/doc-search-cache.md · 1 open thread")).toBeInTheDocument();
     const cache = screen.getByRole("button", { name: /search\/cache\.py/ });
     const docs = screen.getByRole("button", { name: /docs\/search\.md/ });

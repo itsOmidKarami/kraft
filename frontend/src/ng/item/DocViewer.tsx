@@ -9,7 +9,7 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { Markdown } from "../ui/Markdown";
 import { Menu } from "../ui/Menu";
-import { editorChoices, editorName, useEditors } from "./editors";
+import { editorChoices, editorName, SYSTEM_EDITOR, useEditors } from "./editors";
 import { showToast } from "../ui/Toast";
 import { detailOf, request } from "../http";
 
@@ -61,13 +61,14 @@ export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.sp
  *  GAP §2 #9): an indexed document opens in an editor and copies its path; a
  *  gate's artifact, read off the worktree with no index row or absolute path,
  *  shows only its text. A press on the scrim or Escape closes it. */
-export function DocViewer({ source, query, onClose }: { source: DocSource; query?: string; onClose: () => void }) {
+/** `returnTo`: where focus goes on close when what opened it is gone (search's overlay). */
+export function DocViewer({ source, query, onClose, returnTo }: { source: DocSource; query?: string; onClose: () => void; returnTo?: () => HTMLElement | null | undefined }) {
   const [doc, setDoc] = useState<Viewed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // Not kept across openings: the viewer unmounts on close.
   const [full, setFull] = useState(false);
-  const ref = useModal<HTMLDivElement>(onClose);
+  const ref = useModal<HTMLDivElement>(onClose, returnTo);
   const titleId = useId();
   const body = useRef<HTMLDivElement>(null);
   const [matches, setMatches] = useState<Range[]>([]);
@@ -77,7 +78,7 @@ export function DocViewer({ source, query, onClose }: { source: DocSource; query
     // The `by` line is display only: a new label must not read the document again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlOf(source)]);
-  const open = async (editor: string | null) => {
+  const open = async (editor: string) => {
     if (source.kind !== "document") return;
     const r = await request(`/documents/${encodeURIComponent(source.id)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
     setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
@@ -146,7 +147,7 @@ export function DocViewer({ source, query, onClose }: { source: DocSource; query
 
 /** One Open in editor button, on the default editor; ▾ lists the others this
  *  machine has. With none it stays, disabled, and says why. */
-function OpenInEditor({ editors, open }: { editors: ReturnType<typeof useEditors>; open: (editor: string | null) => void }) {
+function OpenInEditor({ editors, open }: { editors: ReturnType<typeof useEditors>; open: (editor: string) => void }) {
   const choices = editors && typeof editors !== "string" ? editorChoices(editors) : [];
   if (!choices.length) {
     const why = typeof editors === "string" ? editors : editors ? "No editor found on this machine" : "Looking for editors…";
@@ -155,7 +156,7 @@ function OpenInEditor({ editors, open }: { editors: ReturnType<typeof useEditors
   const [first, ...rest] = choices;
   return (
     <span className="dv-editor">
-      <Button title={first === null ? "Open with the system's default app" : `Open in ${editorName(first)}`} onClick={() => open(first)}>Open in editor</Button>
+      <Button title={first === SYSTEM_EDITOR ? "Open with the system's default app" : `Open in ${editorName(first)}`} onClick={() => open(first)}>Open in editor</Button>
       {rest.length > 0 && <Menu label="Other editors" trigger={<ChevronDown size={14} aria-hidden />} items={rest.map((e) => ({ label: editorName(e), onSelect: () => open(e) }))} />}
     </span>
   );
