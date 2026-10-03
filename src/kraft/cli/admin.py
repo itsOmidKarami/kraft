@@ -301,10 +301,15 @@ def adopt_pre_2_home(in_use: Path) -> bool:
 
 def _merge_into(old: Path, home: Path) -> list[str]:
     """Move each entry of `old` that `home` lacks (or holds only as an empty
-    directory) into `home`; `old` is removed once nothing is left in it."""
+    directory) into `home`; `old` is removed once nothing is left in it. An
+    empty directory in `old` holds nothing to merge and is removed, so it
+    does not keep `old` from becoming the link (R13c-05)."""
     moved = []
     for entry in sorted(old.iterdir()):
         target = home / entry.name
+        if entry.is_dir() and not entry.is_symlink() and not any(entry.iterdir()):
+            entry.rmdir()
+            continue
         if target.is_dir() and not target.is_symlink() and not any(target.iterdir()):
             target.rmdir()
         if target.exists() or target.is_symlink():
@@ -352,12 +357,14 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
     as schedules (a missing `description` is an empty one), and
     `intake.yaml` is written first: a start interrupted between the two
     writes moves nothing twice. A file that does not parse is left alone,
-    and its reader says why."""
+    and its reader says why. One whose rewrite would not read back as
+    itself is written without its comments, and the line says so
+    (`preserve.RewriteError`)."""
     import pydantic
     import yaml
 
     from kraft.config import Intake, Schedule, schedule_refusal, write_text
-    from kraft.drafts import preserve
+    from kraft.drafts import authored, preserve
 
     def schedule(entry: object) -> dict | None:
         try:
@@ -444,12 +451,26 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
     elif isinstance(triggers, list):
         del new_policy["triggers"]
         moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
+
+    def text_of(name: str, text: str, new: dict, offset: int = 0) -> str:
+        try:
+            return preserve.rewrite(text, new, list_offset=offset)
+        except preserve.RewriteError as exc:
+            # Written over its own text it would not read back as itself
+            # (R13d-01): a file without its comments beats one Kraft refuses.
+            moved.append(f"{name}: written without its comments, as keeping them {exc}")
+            return authored.dump(preserve.plain(new))
+
+    # Both texts are made before either is written. A moved list keeps the
+    # indent it had in policy.yaml.
+    writes = []
     if new_intake != intake_data:
-        # A moved list keeps the indent it had in policy.yaml.
         offset = preserve.list_offset(policy_text)
-        write_text(intake_path, preserve.rewrite(intake_text, new_intake, list_offset=offset))
+        writes.append((intake_path, text_of("intake.yaml", intake_text, new_intake, offset)))
     if new_policy != policy_data:
-        write_text(policy_path, preserve.rewrite(policy_text, new_policy))
+        writes.append((policy_path, text_of("policy.yaml", policy_text, new_policy)))
+    for path, text in writes:
+        write_text(path, text)
     return moved
 
 

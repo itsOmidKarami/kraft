@@ -58,9 +58,18 @@ class ConfigDraft:
 
     def finish(self) -> dict[str, str | None]:
         """The files, each dirty one rewritten over its own text so the
-        comments and layout an op did not touch survive (`preserve.rewrite`)."""
+        comments and layout an op did not touch survive (`preserve.rewrite`).
+        One that would not read back as its mapping is refused, not drafted:
+        the draft then held YAML its user did not write and could not publish
+        (R13d-01)."""
         for name in self.dirty:
-            self.files[name] = preserve.rewrite(self.files.get(name), self._maps[name])
+            try:
+                self.files[name] = preserve.rewrite(self.files.get(name), self._maps[name])
+            except preserve.RewriteError as exc:
+                raise OpError(
+                    f"{name}: this change can't be written over the file's own text, as {exc}; "
+                    "edit the file by hand"
+                ) from exc
         return self.files
 
 

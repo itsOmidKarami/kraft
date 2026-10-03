@@ -247,3 +247,69 @@ def test_a_removed_entrys_own_comment_goes_with_it_and_no_other(removed, key):
     assert labels == [names[e["path"]] for e in kept] + ["# after the list"]
     for entry in kept:
         assert f"{names[entry['path']]}\n  - path: {entry['path']}" in out
+
+
+#: Where a list of mappings carries comments, for `_layout`.
+COMMENTS = (
+    "none",
+    "above-first",
+    "above-key",
+    "on-key-line",
+    "between",
+    "trailing",
+    "above-each",
+    "on-key-and-above-first",
+)
+#: Which entries a rewrite drops: first, middle, last, and all but one.
+REMOVALS = {"first": (0,), "middle": (1,), "last": (2,), "keep-last": (0, 1), "keep-first": (1, 2)}
+
+
+def _layout(comments: str, indent: int) -> str:
+    """`repos:` with three two-key entries at `indent`, commented as named."""
+    pad = " " * indent
+    lines = ["# top", "repos:   # on the key" if "on-key" in comments else "repos:"]
+    if comments == "above-key":
+        lines.insert(1, "# above the key")
+    for i, name in enumerate("abc"):
+        if comments == "above-each" or (i == 0 and comments.endswith("above-first")):
+            lines.append(f"{pad}# {name}")
+        if comments == "between" and i == 1:
+            lines.append(f"{pad}# between")
+        lines += [f"{pad}- path: /{name}", f"{pad}  setup_command: make {name}"]
+    return "\n".join([*lines, *(["# trailing"] if comments == "trailing" else []), "other: 1\n"])
+
+
+@pytest.mark.parametrize(
+    ("comments", "removed", "indent"),
+    [
+        pytest.param(c, r, i, id=f"{c}-{r}-indent-{i}")
+        for c in COMMENTS
+        for r in REMOVALS
+        for i in (0, 2)
+    ],
+)
+def test_removing_entries_keeps_the_file_readable_in_every_layout(comments, removed, indent):
+    """A comment above the first entry, emptied when that entry went, still
+    wrote its indent before the next `- `, and the file no longer parsed
+    (R13d-01): every layout reads back as the mapping it was given, and the
+    lines no entry owns stay."""
+    text = _layout(comments, indent)
+    data = yaml.safe_load(text)
+    kept = [e for i, e in enumerate(data["repos"]) if i not in REMOVALS[removed]]
+    out = preserve.rewrite(text, {**data, "repos": kept})
+    assert yaml.safe_load(out) == {**data, "repos": kept}
+    for line in ("# top", "# above the key", "repos:   # on the key", "# trailing"):
+        assert (line in out) == (line in text), out
+
+
+@pytest.mark.parametrize(
+    ("tail", "why"),
+    [("b: [\n", "would not parse at line 3"), ("  - stray\n", "would read back as other values")],
+    ids=["does-not-parse", "other-values"],
+)
+def test_a_rewrite_that_would_not_read_back_is_refused(monkeypatch, tail, why):
+    """The guard behind every layout above: a rewrite is never handed back
+    unless it parses as the mapping it was given."""
+    monkeypatch.setattr(preserve, "_keep_flow_lines", lambda _text, out: out + tail)
+    with pytest.raises(preserve.RewriteError, match=why):
+        preserve.rewrite("a: 1\n", {"a": 2})

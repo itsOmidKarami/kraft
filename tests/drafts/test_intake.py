@@ -163,3 +163,33 @@ def test_an_intake_draft_lists_each_changed_key_and_a_schedule_by_its_index(clie
     assert by_path[("intake.yaml", "schedules.0.title")]["summary"] == "not set → Weekly sweep"
     # No file-level row alongside.
     assert {c["path"] for c in body["changes"]}.isdisjoint({"intake.yaml"})
+
+
+@pytest.mark.parametrize("reads_back", [True, False], ids=["kept-readable", "refused"])
+def test_removing_the_first_commented_schedule_drafts_a_readable_file(
+    client, connected, templates_dir, monkeypatch, reads_back
+):
+    """The comment above the first schedule left its indent before the next
+    `- `, and the draft held YAML its user never wrote and Publish refused
+    (R13d-01). A change whose rewrite would not read back is refused, naming
+    the file, rather than drafted."""
+    entry = "  - cron: '0 9 * * 1'\n    repo: %s\n    chain: default\n    title: %s\n"
+    (templates_dir / "intake.yaml").write_text(
+        "enabled: false\nschedules:\n  # first one\n"
+        + entry % (connected, "one")
+        + entry % (connected, "two")
+    )
+    if not reads_back:
+        from kraft.drafts import preserve
+
+        def refuse(*_a, **_k):
+            raise preserve.RewriteError("it would not parse at line 3")
+
+        monkeypatch.setattr(preserve, "rewrite", refuse)
+    r = ops(client, {"op": "remove_schedule", "index": 0})
+    if reads_back:
+        assert r.status_code == 200, r.text
+        assert [s["title"] for s in written(client, "intake.yaml")["schedules"]] == ["two"]
+    else:
+        assert r.status_code == 422
+        assert r.json()["detail"].startswith("intake.yaml: this change can't be written")
