@@ -47,6 +47,11 @@ app = FastAPI(
 #: on some deep links instead of the app shell.
 api_router = APIRouter(prefix="/api")
 
+#: The `type` of a body validator's error whose message is the whole answer:
+#: the 422's `detail` is that one sentence, not pydantic's list, which
+#: echoes the request body back (`_validation_error`).
+SENTENCE_ERROR = "kraft_sentence"
+
 # Registration order matters: Starlette runs the *last*-declared middleware
 # first, so `_perimeter` (who may talk to this server at all) has to be
 # declared after `_authenticate` (session/bearer), after `_spa_navigation`
@@ -121,7 +126,11 @@ async def _validation_error(request: Request, exc: RequestValidationError) -> JS
     """FastAPI's own 422, less pydantic's "Value error, " ahead of a sentence
     a model's validator wrote: `start_line must be >= 1 and <= end_line` is
     Kraft's, the prefix pydantic's. The CLI and MCP stripped it on their side;
-    a raw HTTP caller got it as sent (R11F-06). The shape is FastAPI's."""
+    a raw HTTP caller got it as sent (R11F-06). The shape is FastAPI's,
+    except for a `SENTENCE_ERROR`, whose message is the `detail`."""
+    for e in exc.errors():
+        if isinstance(e, dict) and e.get("type") == SENTENCE_ERROR:
+            return JSONResponse({"detail": e["msg"]}, status_code=422)
     errors = [
         {**e, "msg": e["msg"].removeprefix("Value error, ")}
         if isinstance(e, dict) and isinstance(e.get("msg"), str)

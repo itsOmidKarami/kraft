@@ -5,6 +5,7 @@ would break."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,7 @@ OTHER = {**SCHEDULE, "title": "monthly"}
         "a-trigger-intake-would-refuse",
         "one-refused-the-rest-move",
         "a-1.4-cron-out-of-range-stays",
+        "a-1.4-cron-in-other-digits-stays",
         "an-intake-that-does-not-load",
         "symlinked-files",
         "nothing-to-move",
@@ -33,7 +35,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     """A schedule already carried is not added twice (a start interrupted
     between the two writes, or a home with both keys). A trigger 1.4 fired
     but 2.0's schedule refuses (an `enabled: false`), or an `intake.yaml`
-    that would not load, leaves the triggers where they are, still read: an
+    that would not load, leaves the triggers where they are, and the line
+    says which are still read and which skipped (a 1.4 cron): an
     `intake.yaml` that fails turns every schedule in it off. A symlinked file
     is written where it points. A home with nothing to move is not written.
     A schedule is compared as one (Settings writes `description: ''`), and
@@ -52,6 +55,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
         triggers = [{**SCHEDULE, "enabled": False}, OTHER]
     elif case == "a-1.4-cron-out-of-range-stays":
         triggers = [{**SCHEDULE, "cron": "0 24 * * *"}, OTHER]
+    elif case == "a-1.4-cron-in-other-digits-stays":
+        triggers = [{**SCHEDULE, "cron": "\u00b2 9 * * 1"}, OTHER]
     elif case == "an-intake-that-does-not-load":
         intake["interval_s"] = "often"
     elif case == "nothing-to-move":
@@ -75,15 +80,26 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     if case in ("a-trigger-intake-would-refuse", "an-intake-that-does-not-load"):
         assert after["policy.yaml"]["triggers"] == triggers
         assert "schedules" not in after["intake.yaml"]
-        assert lines and "left where they are" in lines[0]
+        assert lines and "left where they are" in lines[0] and "still read" in lines[0]
     elif case == "nothing-to-move":
         assert lines == []
         assert {n: (files / n).stat().st_ino for n in before} == before  # not replaced
-    elif case in ("one-refused-the-rest-move", "a-1.4-cron-out-of-range-stays"):
+    elif case.startswith(("one-refused", "a-1.4-cron")):
         assert after["policy.yaml"]["triggers"] == triggers[:1]
         assert after["intake.yaml"]["schedules"] == [OTHER]
-        why = "triggers.0.enabled" if case.startswith("one") else "hour 24 is outside 0-23"
-        assert why in lines[1] and "next start moves them" in lines[1]
+        why, read = {
+            "one-refused-the-rest-move": ("triggers.0.enabled", "triggers.0 still read"),
+            "a-1.4-cron-out-of-range-stays": (
+                "hour 24 is outside 0-23",
+                "triggers.0 skipped, as 1.4 never ran it",
+            ),
+            "a-1.4-cron-in-other-digits-stays": (
+                "is not the digits 0-9",
+                "triggers.0 skipped, as a cron number is the digits 0-9",
+            ),
+        }[case]
+        assert why in lines[1] and read in lines[1] and "next start moves them" in lines[1]
+        assert "still read" not in lines[1] or case.startswith("one")
     else:
         assert "triggers" not in after["policy.yaml"]
         schedules = [{"description": ""} if case.endswith("settings") else {}, {}]
@@ -145,6 +161,7 @@ def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_pat
         ("config-variable-at-the-default", "config", "link"),
         ("config-made-by-hand", "config", "link"),
         ("config-made-by-hand-with-a-clash", "config", "dir"),
+        ("config-made-by-hand-and-an-empty-leftover", "config", "link"),
         ("0x-update-interrupted", "config", "link"),
         ("rename-refused", "templates", "dir"),
         ("pointed-by-hand", "elsewhere", "dir"),
@@ -160,7 +177,8 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
     `KRAFT_TEMPLATES_DIR` at the default included, and never seeds over the
     operator's repos. `templates` is left as a link, so a 1.4 process still
     running finds its `access.yaml`. A `config/` made by hand first gets what
-    it lacks; a clash stays put for the operator. A directory pointed at
+    it lacks; a clash stays put for the operator, an empty directory is no
+    clash (R13c-05). A directory pointed at
     elsewhere, or a 2.0 home already there, is not touched; a refused rename
     is read where it is. A `config/` beside a `templates/` the variable names
     stops the start: a merge could strand a clash where it reads. A
@@ -193,8 +211,10 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
         (old / name).write_text(text)
     if "config-made-by-hand" in case or case.endswith("beside-config"):
         (h / "config" / "harnesses").mkdir(parents=True)
-        if case.endswith("clash"):
+        if case.endswith(("clash", "leftover")):
             (h / "config" / "harnesses" / "theirs.yaml").write_text("y: 2\n")
+        if case.endswith("leftover"):
+            (old / "harnesses" / "mine.yaml").unlink()
     elif case == "a-2-0-home-beside-it":
         (h / "config").mkdir()
         (h / "config" / "library.yaml").write_text("tasks: {}\n")
@@ -226,6 +246,8 @@ def test_the_first_start_adopts_a_pre_2_home_only_at_the_default_location(
         assert "merge them by hand" in capsys.readouterr().err
     else:
         assert (old / "access.yaml").read_text() == "port: 9999\n"
+    if case.endswith("leftover"):
+        assert sorted(p.name for p in (h / "config" / "harnesses").iterdir()) == ["theirs.yaml"]
 
 
 def test_the_first_start_binds_the_address_of_the_home_it_finishes_moving(monkeypatch, tmp_path):
@@ -257,3 +279,78 @@ def test_the_first_start_binds_the_address_of_the_home_it_finishes_moving(monkey
 
     assert bound == [8927]
     assert (paths.default_config_dir() / "access.yaml").read_text() == "port: 8927\n"
+
+
+def _triggers(comments: str, stays: str) -> tuple[str, list, list]:
+    """A 1.4 `policy.yaml` with three triggers commented as `comments` says,
+    and which of them `stays` keeps there: (text, moved, stayed)."""
+    entries = [{**SCHEDULE, "title": t} for t in ("one", "two", "three")]
+    where = {"all-move": None}.get(stays, 0 if stays.endswith("first") else 2)
+    if where is not None:
+        bad = {"enabled": False} if "enabled" in stays else {"cron": "0 24 * * *"}
+        entries[where] = {**entries[where], **bad}
+    lines = ["# caps", "max_concurrent: 3"]
+    lines += ["# above the key"] if comments == "above-key" else []
+    lines += ["triggers:   # on the key" if comments == "on-key-line" else "triggers:"]
+    for i, entry in enumerate(entries):
+        if (comments == "above-first" and i == 0) or (comments == "between" and i == 1):
+            lines.append(f"  # before {entry['title']}")
+        for j, (key, value) in enumerate(entry.items()):
+            lines.append(f"  {'- ' if j == 0 else '  '}{key}: {json.dumps(value)}")
+    text = "\n".join([*lines, "# after", "forge_poll_s: 60\n"])
+    stayed = [] if where is None else [entries[where]]
+    return text, [e for e in entries if e not in stayed], stayed
+
+
+@pytest.mark.parametrize(
+    ("comments", "stays"),
+    [
+        pytest.param(c, s, id=f"{c}-{s}")
+        for c in ("none", "above-first", "above-key", "on-key-line", "between")
+        for s in ("all-move", "enabled-false-last", "cron-24-last", "cron-24-first")
+    ],
+)
+def test_carried_files_read_back_in_every_layout(tmp_path, comments, stays):
+    """A comment above the first trigger with one trigger left behind wrote a
+    `policy.yaml` that did not parse, and Kraft refused all work (R13d-01):
+    in every layout both files read back as what moved and what stayed,
+    comments kept. One above `triggers:` stays in `policy.yaml`."""
+    text, moved, stayed = _triggers(comments, stays)
+    (tmp_path / "policy.yaml").write_text(text)
+    (tmp_path / "intake.yaml").write_text("enabled: false\n")
+
+    lines = cli.admin.carry_moved_keys(tmp_path)
+
+    policy = yaml.safe_load((tmp_path / "policy.yaml").read_text())
+    intake = yaml.safe_load((tmp_path / "intake.yaml").read_text())
+    assert intake["schedules"] == moved
+    assert policy.get("triggers", []) == stayed
+    assert (policy["max_concurrent"], policy["forge_poll_s"]) == (3, 60)
+    assert not [line for line in lines if "without its comments" in line]
+    kept = (tmp_path / "policy.yaml").read_text()
+    assert ("# above the key" in kept) == (comments == "above-key")
+    assert "# after" in kept
+
+
+def test_a_carry_that_would_not_read_back_is_written_without_comments(tmp_path, monkeypatch):
+    """Defence behind the table above: a file Kraft would refuse is never
+    written. Both texts are made first, and one whose rewrite would not read
+    back is written plainly, comments dropped, and the line says so."""
+    from kraft.drafts import preserve
+
+    text, moved, _ = _triggers("above-first", "all-move")
+    (tmp_path / "policy.yaml").write_text(text)
+    (tmp_path / "intake.yaml").write_text("enabled: false\n")
+
+    def refuse(*_a, **_k):
+        raise preserve.RewriteError("it would not parse at line 3")
+
+    monkeypatch.setattr(preserve, "rewrite", refuse)
+    lines = cli.admin.carry_moved_keys(tmp_path)
+
+    assert yaml.safe_load((tmp_path / "intake.yaml").read_text())["schedules"] == moved
+    assert "triggers" not in yaml.safe_load((tmp_path / "policy.yaml").read_text())
+    assert [n for n in ("intake.yaml", "policy.yaml") if f"{n}: written without" in str(lines)] == [
+        "intake.yaml",
+        "policy.yaml",
+    ]

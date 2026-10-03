@@ -59,6 +59,12 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
     assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
 
 
+#: Two names for two chains, refused in one sentence (not pydantic's list).
+TWO_CHAINS = (
+    "`chain` 'default' and `chain_template` 'quick-task' name different chains; send `chain` alone"
+)
+
+
 @pytest.mark.parametrize(
     ("route", "body", "detail"),
     [
@@ -67,9 +73,13 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         (
             "work-items",
             {"title": "x", "repo": "REPO", "chain": "default", "chain_template": "quick-task"},
-            None,
+            TWO_CHAINS,
         ),
-        ("triggers", {"title": "x", "repo": "REPO", "chain": "a", "chain_template": "b"}, None),
+        (
+            "triggers",
+            {"title": "x", "repo": "REPO", "chain": "a", "chain_template": "b"},
+            "`chain` 'a' and `chain_template` 'b' name different chains; send `chain` alone",
+        ),
         ("work-items", {"title": "x"}, None),
         ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
@@ -120,8 +130,6 @@ def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):
     assert r.status_code == 422
     if detail:
         assert detail in r.json()["detail"]
-    elif "chain" in body:
-        assert "name different chains" in r.json()["detail"][0]["msg"]
 
 
 @pytest.mark.parametrize(
@@ -339,11 +347,19 @@ def test_patch_refuses_chain_template_once_started(client, repo):
     assert after["chain_template"] == "quick-task"
 
 
-def test_patch_refuses_an_unknown_chain_template(client, repo):
+@pytest.mark.parametrize(
+    ("body", "status", "detail"),
+    [
+        ({"chain": "does-not-exist"}, 404, "unknown chain 'does-not-exist'"),  # 2.0's name
+        ({"chain": "default", "chain_template": "quick-task"}, 422, TWO_CHAINS),
+    ],
+    ids=["an-unknown-chain", "chain-and-chain-template-differ"],
+)
+def test_patch_refuses_an_unknown_chain_template(client, repo, body, status, detail):
     wid = _paused(client, repo)
 
-    r = client.patch(f"/api/work-items/{wid}", json={"chain": "does-not-exist"})  # 2.0's name
-    assert r.status_code == 404, r.text
+    r = client.patch(f"/api/work-items/{wid}", json=body)
+    assert (r.status_code, r.json()["detail"]) == (status, detail), r.text
 
     after = client.get(f"/api/work-items/{wid}").json()
     assert after["chain_template"] is None
