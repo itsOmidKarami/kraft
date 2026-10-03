@@ -99,11 +99,12 @@ export interface Option<T extends string = string> {
   danger?: boolean;
 }
 
-export function ChoiceSheet<T extends string>({ title, text, options, value, onPick, onClose }: { title: string; text?: string; options: Option<T>[]; value?: T | null; onPick: (v: T) => void; onClose: () => void }) {
+export function ChoiceSheet<T extends string>({ title, text, options, value, onPick, onClose, children }: { title: string; text?: string; options: Option<T>[]; value?: T | null; onPick: (v: T) => void; onClose: () => void; children?: ReactNode }) {
   // `value` given (even null): a single choice, announced as radios. Absent: a menu of actions.
   const single = value !== undefined;
   return (
     <Frame title={title} text={text} onClose={onClose}>
+      {children}
       <ul className="ph-sheet-options" role={single ? "radiogroup" : undefined} aria-label={single ? title : undefined}>
         {options.map((o) => (
           <li key={o.value} role="presentation">

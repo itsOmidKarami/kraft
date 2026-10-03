@@ -93,6 +93,13 @@ describe("the item screen (C)", () => {
       await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
     });
 
+    it("lists the changes it would apply, as the desktop's dialog does (R10b-12)", async () => {
+      mount(NEVER(), "/work-items/w1", DRAFT);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const sheet = await screen.findByRole("dialog", { name: "Start with unapplied changes?" });
+      expect(within(sheet).getByLabelText("Changes")).toHaveTextContent("~ implementation budget ($) → 2");
+    });
+
     it("Start without them starts and leaves the draft", async () => {
       const calls = mount(NEVER(), "/work-items/w1", DRAFT);
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));

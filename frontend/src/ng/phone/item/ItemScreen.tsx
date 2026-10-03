@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
-import { act, draftWaits } from "../../item/actions";
+import { act, draftToStart } from "../../item/actions";
+import { lines as draftLines } from "../../item/draft/view";
 import { isEscalation } from "../../item/nodeGraph";
 import { budgetRaise, headerState, neverStarted } from "../../item/status";
 import { pathSel, placeUrl } from "../../item/url";
@@ -42,6 +43,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
   const [brief, setBrief] = useState(false);
+  const [startLines, setStartLines] = useState<string[]>([]);
   const status = item.display_status ?? "running";
   const hs = headerState(item);
   const card = cardOf(item, events);
@@ -69,7 +71,9 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
       case "resume": return void run(act.resume(item.id), "Resumed.");
       // Start never applies a draft: with one, the sheet asks first, as the desktop's Review & apply does.
-      case "start": return void draftWaits(item.id).then((waits) => {
+      case "start": return void draftToStart(item.id).then(({ waits, ops }) => {
+        // The sheet lists what it would apply, as the desktop's dialog does (R10b-12).
+        setStartLines(draftLines(ops as Parameters<typeof draftLines>[0]).map((l) => l.text));
         if (waits) sheet.open("start-draft");
         else void run(act.resume(item.id), "Started.");
       });
@@ -149,13 +153,13 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         )}
       </div>
       {(bar.secondary || bar.primary) && <ActionBar>{button(bar.secondary, false)}{button(bar.primary, true)}</ActionBar>}
-      <ItemSheets item={item} node={node?.id ?? null} sheet={sheet} reload={reload} />
+      <ItemSheets item={item} node={node?.id ?? null} sheet={sheet} reload={reload} startLines={startLines} />
     </>
   );
 }
 
 /** The sheets over the item: pause, ⋮, and the budget raise. */
-function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
+function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void; startLines?: string[] }) {
   const { busy, run } = useDo(reload);
   // One start per sheet: a second tap while the first is in flight sends nothing.
   const starting = useRef(false);
@@ -172,6 +176,7 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
         title="Start with unapplied changes?"
         text="This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft."
         options={[{ value: "apply", label: "Apply and start" }, { value: "without", label: "Start without them" }]}
+        children={startLines.length > 0 && <pre className="ph-start-lines" aria-label="Changes">{startLines.join("\n")}</pre>}
         onPick={async (v) => {
           if (starting.current) return;
           starting.current = true;

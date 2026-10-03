@@ -28,6 +28,7 @@ const ALLOWED = [
   "item/chainName",
   "item/nodeGraph",
   "item/graph",
+  "item/draft/view", // lines(): the draft's changes as the desktop's Start dialog lists them (R10b-12)
   "board/model",
   "board/counts", // the board's counts, one definition for every screen that shows one
   "board/rowText",
