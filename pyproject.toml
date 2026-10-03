@@ -43,7 +43,7 @@ classifiers = [
     "Topic :: Software Development :: Version Control :: Git",
 ]
 dependencies = [
-    "pyyaml>=6",
+    "pyyaml>=6.0.1",
     # Config is modelled in pydantic and every entry point loads config --
     # `kraft mcp` and the CLI must not reach it through a web framework's
     # transitive dependency.

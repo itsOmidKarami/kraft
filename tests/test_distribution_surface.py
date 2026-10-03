@@ -214,3 +214,17 @@ def test_install_script_keeps_its_own_stdin_from_the_uv_installer(tmp_path):
     result = _run_installer_without_uv(tmp_path, reads_stdin, piped=True)
     assert result.returncode == 0, result.stderr
     assert "installed-kraft" in result.stdout
+
+
+def test_the_pyyaml_floor_installs_on_the_oldest_supported_python():
+    """PyYAML 6.0 has no wheel past cp311 and its sdist no longer builds, so
+    `pyyaml>=6` resolved to its floor (`--resolution lowest-direct`) could
+    not install on 3.12. 6.0.1 is the first with a cp312 wheel."""
+    import tomllib
+
+    from packaging.requirements import Requirement
+
+    deps = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+    pyyaml = next(r for r in map(Requirement, deps) if r.name == "pyyaml")
+    assert not pyyaml.specifier.contains("6.0")
+    assert pyyaml.specifier.contains("6.0.1")
