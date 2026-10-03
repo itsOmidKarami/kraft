@@ -111,6 +111,9 @@ describe("nodeSub: a chain row's words", () => {
     expect(nodeSub(graph(mk("failed", stop("failed"))).find((n) => n.id === "verification")!)).toEqual({ text: "failed", tone: "bad" });
     expect(nodeSub(graph(mk("needs_you", stop("cap"))).find((n) => n.id === "verification")!)).toEqual({ text: "stopped at the cap", tone: "bad" });
     expect(nodeSub(graph(mk("paused")).find((n) => n.id === "verification")!)).toEqual({ text: "paused", tone: "warn" });
+    // R11b-04: a waiting node says what it waits on, not "running".
+    expect(nodeSub(graph(mk("waiting", stop("wait"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting on CI/);
+    expect(nodeSub(graph(mk("waiting", stop("rate_limit"))).find((n) => n.id === "verification")!).text).toMatch(/^waiting · rate limit/);
   });
 });
 

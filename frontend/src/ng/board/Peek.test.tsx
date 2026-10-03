@@ -57,11 +57,15 @@ describe("Peek", () => {
     expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
   });
 
-  it("is headed and named by the item's title, its id in the line under it", async () => {
-    mount({ status: "needs_human", display_status: "failed", stop: stop("failed") });
+  // R11b-05: a waiting item's line said Running.
+  it.each([
+    [{ status: "needs_human", display_status: "failed", stop: stop("failed") }, /^kraft-cb59 · Needs you · failed at/],
+    [{ status: "waiting", display_status: "waiting", stop: stop("wait") }, /^kraft-cb59 · Waiting · waiting at/],
+  ] as [Partial<ItemDetail>, RegExp][])("is headed and named by the item's title, its id and group in the line under it: %#", async (over, line) => {
+    mount(over);
     const pane = await screen.findByRole("complementary", { name: "Design the cache pane" });
     expect(pane.querySelector(".pane-title")).toHaveTextContent(/^Design the cache$/);
-    expect(within(pane).getByText(/^kraft-cb59 · Needs you · failed at/)).toBeInTheDocument();
+    expect(within(pane).getByText(line)).toBeInTheDocument();
   });
 
   it.each([

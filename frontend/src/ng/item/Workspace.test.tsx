@@ -132,6 +132,20 @@ describe("Workspace", () => {
   });
 });
 
+// R11b-04: a node waiting on CI or the provider, and one stopped at its cap, were called "running".
+describe("a node the run stands on but does not run", () => {
+  const stop = (kind: string, more = {}) => ({ kind, node: "verification", task: null, resume_at: null, reason: null, ...more }) as never;
+  it.each([
+    ["waiting on CI", { status: "waiting", display_status: "waiting", stop: stop("wait") }, /^exec node · waiting on CI/],
+    ["rate limited", { status: "rate_limited", display_status: "waiting", stop: stop("rate_limit") }, /^exec node · waiting · rate limit/],
+    ["stopped at its budget cap", { status: "needs_human", display_status: "needs_you", stop: stop("budget", { scope: "work_item" }) }, /^exec node · stopped at the cap$/],
+  ] as const)("%s says so in the pane", (_name, over, sub) => {
+    stubFetch();
+    mount("/work-items/w1?sel=verification", over as never);
+    expect(within(screen.getByRole("complementary", { name: "verification pane" })).getByText(sub)).toBeInTheDocument();
+  });
+});
+
 // R10a-06: a running node read "running 0s" for up to 30 s, the clock ticking every 30 s.
 describe("the item page's clock", () => {
   const running = { id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status: "running", attempt: 1, round: 0, thread: 1, created_at: "2026-09-13T09:59:57Z", started_at: "2026-09-13T09:59:57Z", exited_at: null, model: "m", tokens_in: 1, tokens_out: 1, cost_usd: 0, wall_ms: null } as unknown as WorkerSession;

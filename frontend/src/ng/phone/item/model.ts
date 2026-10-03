@@ -189,7 +189,8 @@ export function nodeSub(n: ChainNode): { text: string; tone: "warn" | "info" | "
       if (n.capped) return { text: "stopped at the cap", tone: "bad" };
       if (n.paused) return { text: "paused", tone: "warn" };
       if (n.sub === "needs you") return { text: gate ? "waiting for you" : "needs you", tone: "warn" };
-      return { text: ["running", n.sub].filter(Boolean).join(" · "), tone: "info" };
+      // A waiting node says what it waits on, as the badge does, not "running" (R11b-04).
+      return { text: [n.wait ?? "running", n.sub].filter(Boolean).join(" · "), tone: "info" };
     case "plain": return { text: n.meta ?? "", tone: "muted" };
     default: return { text: gate ? "you" : "not started", tone: "muted" };
   }

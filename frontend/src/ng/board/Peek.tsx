@@ -66,7 +66,8 @@ export function Peek({ id, tab, onTab, budget, onBudget, offline, size, onClose,
       // The item's title heads the peek and names its landmark; the id follows in the line under it (R7b-16).
       title={item.title}
       prose
-      sub={`${item.bead_id || shortId(item.id)} · ${fresh ? "Not started" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
+      // A waiting item sits in the board's Running group, but it is waiting, not running (R11b-05).
+      sub={`${item.bead_id || shortId(item.id)} · ${fresh ? "Not started" : item.display_status === "waiting" ? "Waiting" : GROUP_WORD[groupOf(item)]} · ${reasonTail(item)}`}
       tabs={[{ value: "overview", label: "Overview" }, { value: "activity", label: "Activity" }, { value: "config", label: "Config" }]}
       tab={tab}
       onTab={(t) => onTab(t as PeekTab)}

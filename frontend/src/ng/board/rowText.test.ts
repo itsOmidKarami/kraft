@@ -31,6 +31,7 @@ describe("reasonTail", () => {
       [row("running", { current_node_id: "post_merge_ci" }), "post merge ci"],
       [row("waiting", { stop: stop("rate_limit", { resume_at: "2026-09-13T10:04:00Z" }) }), "retry in 4m"],
       [row("waiting", { stop: stop("wait") }), "waiting at verification"],
+      [row("waiting", { stop: stop("wait", { resume_at: "2026-09-13T10:04:00Z" }) }), "next check in 4m"],
       [row("escalated"), "escalation running"],
       [row("done"), "completed"],
       [row("done", { mr_ref: { number: 139, url: "https://forge.example/mr/139" } }), "merged !139"],

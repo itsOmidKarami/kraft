@@ -40,7 +40,8 @@ export function reasonTail(i: Row, now = Date.now()): string {
         return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
       case "waiting": {
         const at = i.stop?.resume_at ?? i.retry_at;
-        return at ? `retry ${until(at, now)}` : `waiting at ${node}`;
+        // A CI wait checks again; only a rate limit retries (R11b-05).
+        return at ? `${i.stop?.kind === "wait" ? "next check" : "retry"} ${until(at, now)}` : `waiting at ${node}`;
       }
       case "escalated": return "escalation running";
       case "done": return i.mr_ref ? `merged !${i.mr_ref.number}` : "completed";
