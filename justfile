@@ -225,6 +225,12 @@ refresh-prices:
 check-tests:
     uv run python dev/check_tests.py
 
+# How big and how repetitive tests/ is: functions, collected cases, lines,
+# verbatim-repeat lines, duplicated helpers, densest modules. `--json` for tools.
+[doc("Print the shape of tests/: size, repeats, duplicated helpers, densest modules")]
+shape-report:
+    uv run python dev/test_shape_report.py
+
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
 # the two in step here, or the only way to find a type error is to spend a pipeline.
