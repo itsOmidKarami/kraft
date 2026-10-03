@@ -9,6 +9,7 @@ import { useItem, type ItemDetail } from "../../item/useItem";
 import { approveBlock, drafts } from "../../review/finish";
 import { useSubmit } from "../../review/FinishReview";
 import { parsePatch, type PatchFile } from "../../review/patch";
+import { rangeName, threadRange } from "../../review/range";
 import { readReview } from "../../review/url";
 import { useArtifact, useCompare, useThreads } from "../../review/useReview";
 import { Button } from "../../ui/Button";
@@ -81,7 +82,11 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
 
   if (params.get("compose") === "reject") return <ReviewComposer target={target} submit={submit} />;
 
-  const sub = hasDoc && artifact?.state === "ready" ? artifact.data.path : [`${files.length} ${files.length === 1 ? "file" : "files"}`, `+${adds} −${dels}`, open ? `${open} open ${open === 1 ? "thread" : "threads"}` : null, pending ? `${pending} pending` : null].filter(Boolean).join(" · ");
+  // The threads and pending counts show beside the document's path too: every shipped gate has one (R10b-03).
+  const counts = [open ? `${open} open ${open === 1 ? "thread" : "threads"}` : null, pending ? `${pending} pending` : null];
+  const sub = (hasDoc && artifact?.state === "ready" ? [artifact.data.path, ...counts] : [`${files.length} ${files.length === 1 ? "file" : "files"}`, `+${adds} −${dels}`, ...counts]).filter(Boolean).join(" · ");
+  // A thread on no file is on the whole change, listed above the files as the desktop does (R8b-08).
+  const whole = threads.filter((t) => !t.file_path);
   const approve = async () => {
     sheet.close();
     setBusy(true);
@@ -121,6 +126,12 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
           </section>
         )}
         {compare.state === "error" && !hasDoc && <p className="ph-error" role="alert">{compare.error}</p>}
+        {whole.length > 0 && (
+          <section aria-label="On the whole change" className="ph-list">
+            <h2 className="ph-review-group">On the whole change</h2>
+            {whole.map((t) => <ThreadNote key={t.id} thread={t} />)}
+          </section>
+        )}
         {files.length > 0 && (
           <section aria-label="Changed files" className="ph-list">
             {files.map((f) => {
@@ -171,15 +182,30 @@ export function GateReview({ item, events }: { item: ItemDetail; events: KraftEv
   );
 }
 
-/** One thread under its file, read-only: an agent's note or a person's. */
+/** One thread under its file, read-only: an agent's note or a person's. Its
+ *  range is named as the desktop names it, side and all, with the lines it
+ *  was written on; a comment not sent yet is marked pending (R10b-03). */
 function ThreadNote({ thread }: { thread: ReviewThread }) {
   const first = thread.comments[0];
   const agent = first && first.author !== "you";
-  const line = thread.start_line ? `line ${thread.start_line}` : "";
+  const range = threadRange(thread);
+  const where = range ? rangeName(range).replace(/^L/, "l") : "";
+  const status = thread.draft ? "pending" : thread.state === "resolved" ? "resolved" : "";
+  const quote = range && thread.quote ? thread.quote.split("\n") : [];
   return (
     <div className={`ph-thread${thread.state === "resolved" ? " ph-is-resolved" : ""}`}>
-      <b className="ph-thread-head">{agent ? "agent" : "you"}{line && ` · ${line}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{thread.state === "resolved" ? " · resolved" : ""}</b>
-      {thread.comments.map((c) => <div key={c.id} className="ph-thread-body"><Markdown text={c.body} /></div>)}
+      <b className="ph-thread-head">{agent ? "agent" : "you"}{where && ` · ${where}`}{thread.label ? ` · ${thread.label.replace("_", " ")}` : ""}{status && ` · ${status}`}</b>
+      {quote.length > 0 && (
+        <div className="ph-thread-quote" role="group" aria-label="Lines commented on">
+          {quote.map((l, i) => <div key={i} className={`ph-diff-line${l[0] === "+" ? " ph-diff-add" : l[0] === "-" ? " ph-diff-del" : ""}`}>{l}</div>)}
+        </div>
+      )}
+      {thread.comments.map((c) => (
+        <div key={c.id} className="ph-thread-body">
+          {!thread.draft && c.draft && <span className="ph-thread-pending">pending</span>}
+          <Markdown text={c.body} />
+        </div>
+      ))}
     </div>
   );
 }

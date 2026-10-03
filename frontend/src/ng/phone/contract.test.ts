@@ -38,6 +38,7 @@ const ALLOWED = [
   "review/url",
   "review/finish",
   "review/patch",
+  "review/range", // rangeName and threadRange: a thread's lines named as the desktop names them
   "review/FinishReview", // useSubmit only: the one review submit the desktop sends
   "review/model",
   "templates/draft/useConfigDraft",

@@ -1,4 +1,5 @@
 /** A line comment's range, and which of a file's diff lines it covers. Pure. */
+import type { ReviewThread } from "../../types";
 import type { PatchFile, PatchLine } from "./patch";
 import type { Anchor, Side } from "./rows";
 
@@ -16,6 +17,19 @@ export const startSideOf = (r: LineRange): Side => r.startSide ?? r.side;
 export const isMixed = (r: LineRange) => startSideOf(r) !== r.side;
 /** One line, on one side. */
 export const isOneLine = (r: LineRange) => !isMixed(r) && r.start === r.end;
+
+/** A line as the diff marks it: `−4` on the old side, `+5` on the new. */
+export const lineRef = (side: Side, line: number) => `${side === "old" ? "−" : "+"}${line}`;
+
+/** "Line +5", "Lines +5 to +7", "Lines −2 to +2": where a line comment sits, as its composer and its thread name it. */
+export const rangeName = (r: LineRange) =>
+  isOneLine(r) ? `Line ${lineRef(r.side, r.start)}` : `Lines ${lineRef(startSideOf(r), r.start)} to ${lineRef(r.side, r.end)}`;
+
+/** A thread's range, or null on a file or the whole item. */
+export const threadRange = (t: ReviewThread): LineRange | null =>
+  t.start_line === null || !t.side
+    ? null
+    : { side: t.side, start: t.start_line, end: t.end_line ?? t.start_line, ...(t.start_side && t.start_side !== t.side && { startSide: t.start_side }) };
 
 /** A file's diff lines in the unified order, and where each side's line numbers sit in it. */
 export interface LineIndex {

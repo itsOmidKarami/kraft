@@ -56,7 +56,7 @@ describe("the gate review (F)", () => {
     mount(gateItem());
     expect(await screen.findByRole("heading", { level: 1, name: "Plan · doc-search-cache" })).toBeInTheDocument();
     expect(await screen.findByText("Add EmbeddingCache")).toBeInTheDocument();
-    expect(screen.getByText(".engineering/plans/doc-search-cache.md")).toBeInTheDocument();
+    expect(screen.getByText(".engineering/plans/doc-search-cache.md · 1 open thread")).toBeInTheDocument();
     const cache = screen.getByRole("button", { name: /search\/cache\.py/ });
     const docs = screen.getByRole("button", { name: /docs\/search\.md/ });
     expect(cache).toHaveAttribute("aria-expanded", "false");
@@ -72,9 +72,48 @@ describe("the gate review (F)", () => {
   it("shows an agent's note under its file, labelled, read-only", async () => {
     mount(gateItem());
     await userEvent.click(await screen.findByRole("button", { name: /search\/cache\.py/ }));
-    expect(screen.getByText("agent · line 5")).toBeInTheDocument();
+    expect(screen.getByText("agent · line +5")).toBeInTheDocument();
     expect(screen.getByText("No bound on the cache.")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  // R10b-03: the phone half of the desktop's ranges, whole-change threads and pending drafts.
+  describe("threads as the desktop names them", () => {
+    const you = (id: string, body: string, draft = false) => [{ id: `c-${id}`, thread_id: id, review_id: null, author: "you", attempt: null, body, suggestion: null, claim: null, created_at: "2026-09-13T09:00:00Z", draft }];
+    const THREADS = [
+      thread({ id: "a", side: "new", start_side: "old", start_line: 2, end_line: 6, quote: "-    old = 1\n+class EmbeddingCache:", comments: you("a", "Shift-click cross") }),
+      thread({ id: "b", side: "old", start_line: 1, end_line: 2, comments: you("b", "Keyboard cross") }),
+      thread({ id: "c", side: "new", start_line: 14, end_line: 14, draft: true, comments: you("c", "Round two", true) }),
+      thread({ id: "d", file_path: null, side: null, start_line: null, end_line: null, draft: true, comments: you("d", "Whole change: please add a changelog line", true) }),
+    ];
+
+    it("counts the pending comments beside a gate document's path", async () => {
+      mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, THREADS] });
+      expect(await screen.findByText(".engineering/plans/doc-search-cache.md · 4 open threads · 2 pending")).toBeInTheDocument();
+    });
+
+    it("names each range with its sides and quotes its lines, as the desktop does", async () => {
+      mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, THREADS] });
+      await userEvent.click(await screen.findByRole("button", { name: /search\/cache\.py/ }));
+      expect(screen.getByText("you · lines −2 to +6")).toBeInTheDocument();
+      expect(screen.getByText("you · lines −1 to −2")).toBeInTheDocument();
+      const quote = screen.getByRole("group", { name: "Lines commented on" });
+      expect(within(quote).getByText("+class EmbeddingCache:")).toHaveClass("ph-diff-add");
+      expect(within(quote).getByText(/old = 1/)).toHaveClass("ph-diff-del");
+    });
+
+    it("marks a comment not sent yet as pending", async () => {
+      mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, THREADS] });
+      await userEvent.click(await screen.findByRole("button", { name: /search\/cache\.py/ }));
+      expect(screen.getByText("you · line +14 · pending")).toBeInTheDocument();
+    });
+
+    it("lists a thread on the whole change above the files", async () => {
+      mount(gateItem(), "/work-items/w1/review", { "GET /work-items/w1/threads": [200, THREADS] });
+      const whole = await screen.findByRole("region", { name: "On the whole change" });
+      expect(within(whole).getByText("Whole change: please add a changelog line")).toBeInTheDocument();
+      expect(within(whole).getByText("you · pending")).toBeInTheDocument();
+    });
   });
 
   it("shows no document for a gate without one, and the changes' counts", async () => {
