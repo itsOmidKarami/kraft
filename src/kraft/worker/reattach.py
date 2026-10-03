@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -78,6 +79,16 @@ def still_orphaned(conn, unknown: list[str]) -> list[str]:
     ).fetchall()
     kept = {r["id"] for r in rows}
     return [sid for sid in unknown if sid in kept]
+
+
+def _reap(pid: int) -> None:
+    """Reap `pid` if it is this process's own child, as the group's leader is
+    when a test launched it: a zombie leader still counts as a member of its
+    group (`_kill_group`). Not a child: nothing to do."""
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        pass
 
 
 def _pid_alive(pid: int) -> bool:
@@ -445,6 +456,11 @@ async def _adopt(
                 await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
         except Exception:
             logger.exception("usage progress tick failed for adopted session %s", session_id)
+    # What the session started into its own process group can outlive it and
+    # still be writing the worktree when the sweep commits it, as `run_task`
+    # ends it for a session it launched (R11E-03). Sessions start with
+    # `start_new_session=True`, so the pid is the group's id.
+    await _kill_group(pid, _KILL_GRACE_S, reap=lambda: _reap(pid))
     for backend in _backends.for_session(row["sandbox"]):
         await backend.collect(session_id, result_path)
     # Before `_guarded_adopt`'s `finally` closes the sandbox, which removes it.
