@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search } from "lucide-react";
+import { Diamond, Search } from "lucide-react";
 import * as api from "../../api";
-import { docTitle, repoName } from "../../format";
+import { docTitle, repoName, shortId } from "../../format";
 import { useStore } from "../../store";
 import type { Bead, SearchResult, WorkItem } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
@@ -25,6 +25,8 @@ interface Row {
   snippet?: string;
   /** What Enter does, in the footer. */
   note: string;
+  /** A glyph before the title: the gate diamond on a row that reviews a gate. */
+  glyph?: "gate";
   open: () => void;
 }
 
@@ -41,14 +43,26 @@ function Snippet({ text }: { text: string }) {
 /** What the board's row says of an item, not its stored status: "not started", "approve spec", "failed at plan". */
 const stateWords = (i: WorkItem) => (groupOf(i) === "not_started" ? "not started" : reasonTail(i));
 
-const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => void): Row => ({
-  id: `${section}:${i.id}`,
-  section,
-  label: i.title,
-  sub: [repoName(i.repo), stateWords(i)].filter(Boolean).join(" · "),
-  note: "opens the work item",
-  open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
-});
+const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => void): Row =>
+  // An item waiting at a gate is an action: review that gate.
+  section === "needs" && i.pending_gate
+    ? {
+        id: `${section}:${i.id}`,
+        section,
+        label: `Review ${i.pending_gate}`,
+        sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
+        glyph: "gate",
+        note: `reviews ${i.title}`,
+        open: () => go(`/work-items/${encodeURIComponent(i.id)}/review`),
+      }
+    : {
+        id: `${section}:${i.id}`,
+        section,
+        label: i.title,
+        sub: [repoName(i.repo), stateWords(i)].filter(Boolean).join(" · "),
+        note: "opens the work item",
+        open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
+      };
 
 /** The ⌘K palette. A document of a work item opens on that item's page (`?doc=&q=`),
  *  one with no item in `onDocument`'s dialog, and a bead starts a draft item that implements it. */
@@ -185,7 +199,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
             >
               {s === "goto" && !query ? r.label : (
                 <>
-                  <span className="ng-search-title" title={r.label}>{r.label}</span>
+                  <span className="ng-search-title" title={r.label}>{r.glyph && <Diamond size={12} aria-hidden className="ng-search-glyph" />}{r.label}</span>
                   {r.sub && <span className="ng-search-sub">{r.sub}</span>}
                   {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
                 </>

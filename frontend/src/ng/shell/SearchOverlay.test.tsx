@@ -106,7 +106,10 @@ describe("SearchOverlay", () => {
     await user.type(input, "work");
     await screen.findByText("Caching spec");
     const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
-    expect(within(section("Needs you")).getByText("Gated work").closest("[role=option]")).toHaveTextContent("alpha · approve human review");
+    // Waiting at a gate, it is an action: review that gate.
+    const gate = within(section("Needs you")).getByText("Review human_review").closest("[role=option]")!;
+    expect(gate).toHaveTextContent("Review human_reviewwi_gate · alpha");
+    expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
     expect(within(section("Needs you")).getByText("Failed work").closest("[role=option]")).toHaveTextContent("beta · failed at plan");
     expect(within(section("Work items")).getByText("Fresh work").closest("[role=option]")).toHaveTextContent("beta · not started");
     expect(within(section("Work items")).getByText("Plain work").closest("[role=option]")).toHaveTextContent("beta · implementation");
@@ -137,8 +140,8 @@ describe("SearchOverlay", () => {
     const go = async (name: RegExp | string) => {
       await user.click(within(screen.getByRole("listbox")).getByText(name));
     };
-    await go("Gated work");
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
+    await go("Review human_review");
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate/review");
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await user.keyboard("{Meta>}k{/Meta}");
@@ -200,13 +203,16 @@ describe("SearchOverlay", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("opens the active row on Enter", async () => {
+  it.each([
+    ["plain", "Plain work", "/work-items/wi_plain"],
+    ["gated", "Review human_review", "/work-items/wi_gate/review"],
+  ])("opens the active row on Enter: %s", async (query, row, to) => {
     mount();
     const { user, input } = await open();
-    await user.type(input, "plain");
-    await screen.findByText("Plain work");
+    await user.type(input, query);
+    await screen.findByText(row);
     await user.keyboard("{Enter}");
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_plain");
+    expect(screen.getByTestId("where")).toHaveTextContent(new RegExp(`^${to}$`));
   });
 
   it("keeps Items and Go to and says so inline when the document search fails", async () => {
@@ -217,7 +223,7 @@ describe("SearchOverlay", () => {
     expect(await screen.findByText("Documents could not be searched")).toBeInTheDocument();
     expect(headings()).toContain("Work items");
     expect(screen.getByText("Plain work")).toBeInTheDocument();
-    expect(screen.getByText("Gated work")).toBeInTheDocument();
+    expect(screen.getByText("Review human_review")).toBeInTheDocument();
   });
 
   it("sends one request for a burst of typing, not one per key", async () => {
