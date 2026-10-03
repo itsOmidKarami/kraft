@@ -17,9 +17,8 @@ import { useApplied } from "./draft/useApplied";
 import { markNodes, markSteps } from "./draft/draftGraph";
 import { chainGraph } from "./graph";
 import { DocViewer, docBy } from "./DocViewer";
-import { gateView } from "./gateView";
+import { gateView, reviewerSel } from "./gateView";
 import { nodeGraph } from "./nodeGraph";
-import { taskName } from "./paths";
 import { paneContent } from "./panes/paneContent";
 import { pushes, placeUrl, readPlace, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
@@ -173,7 +172,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
         {viewing?.kind === "gate" ? (
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
             onGate={() => pick({ kind: "node", node: viewing.id })}
-            onReviewer={() => { const t = viewing.tasks[0]; pick(t ? { kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) } : { kind: "node", node: viewing.id }); }}
+            onReviewer={() => pick(reviewerSel(item, viewing))}
             onBackground={() => dispatch({ type: "background" })}
           />
         ) : viewing && inside ? (

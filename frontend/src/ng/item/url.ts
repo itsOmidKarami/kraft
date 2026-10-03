@@ -1,6 +1,6 @@
 import type { ChainNode } from "../../types";
 import type { Sel } from "../graph/usePaneSelection";
-import { ESCALATION } from "./nodeGraph";
+import { AUTO_REVIEW, ESCALATION } from "./nodeGraph";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
@@ -21,7 +21,7 @@ export interface Place {
 export function selPath(sel: Sel): string | null {
   if (sel.kind === "chain") return null;
   if (sel.kind === "node") return sel.node;
-  if (sel.kind === "step") return `${sel.node}.${sel.step}`;
+  if (sel.kind === "step" || (sel.kind === "task" && sel.step === AUTO_REVIEW)) return `${sel.node}.${sel.step}`;
   return `${sel.node}.${sel.step}.${sel.task}`;
 }
 
@@ -31,6 +31,8 @@ export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
   const node = nodes.find((x) => x.id === n);
   if (!node || rest.length) return null;
   if (!step) return { kind: "node", node: n };
+  // A gate's reviewer is `<gate>.auto_review`: the chain lists no step there, the frozen chain has its task.
+  if (step === AUTO_REVIEW && !task && node.kind === "gate") return { kind: "task", node: n, step, task: step };
   // The escalation task is no step of the chain: it hangs off the node (NodeGraph's side branch).
   if (step === ESCALATION && task === ESCALATION) return { kind: "task", node: n, step, task };
   const s = stepsOf(node).steps.find((x) => x.id === step);

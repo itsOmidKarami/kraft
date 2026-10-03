@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { ESCALATION, escalationsOf, footerState, isEscalation, lookWord, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, footerState, isEscalation, lookWord, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -105,7 +105,7 @@ export function paneContent(a: PaneArgs): PaneContent {
   }
   const toNode = { label: node.id, onClick: () => a.pick({ kind: "node", node: node.id }) };
   if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, toNode]);
-  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);
+  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);
   const drawn = a.graph.find((g) => g.id === sel.node);
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
@@ -203,7 +203,9 @@ const TASK_TABS = [{ value: "overview", label: "Overview" }, { value: "input", l
 function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId: string, task: string, crumbs: Crumbs): PaneContent {
   const { item } = a;
   const esc = stepId === ESCALATION;
-  const path = esc ? ESCALATION : `${node.id}.${stepId}.${task}`;
+  // A gate's reviewer is no step of the chain: its sessions run at `<gate>.auto_review`, and the server addresses nothing under it.
+  const rev = node.kind === "gate" && stepId === AUTO_REVIEW;
+  const path = esc ? ESCALATION : rev ? `${node.id}.${AUTO_REVIEW}` : `${node.id}.${stepId}.${task}`;
   const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
@@ -215,7 +217,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     // A task that has not run keeps its tabs, each saying why it is empty (LV-5). Config is the
     // draft's while it may override the task (W11). On the node the run stands on it can be skipped
     // before it runs (`/skip` takes a task of the current node).
-    const edit = !esc && !!a.canEdit?.(node.id);
+    const edit = !esc && !rev && !!a.canEdit?.(node.id);
     const empty = (text: string) => <p className="item-muted">{text}</p>;
     const bodies: Record<string, ReactNode> = {
       thread: empty("No turns yet."),
@@ -225,7 +227,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       log: empty("No log yet. It starts when the step before this one finishes."),
       config: edit ? <DraftConfig path={path} /> : <><dl className="item-facts ip-facts"><div><dt>path</dt><dd className="is-mono">{path}</dd></div></dl><AppliedRows applied={a.applied} path={path} /></>,
     };
-    const here = !esc && item.current_node_id === node.id;
+    const here = !esc && !rev && item.current_node_id === node.id;
     return {
       ...head,
       tabs,
@@ -256,6 +258,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       // The escalation's footer: stop it while it runs (GAP §2 #13); retry the node with a steer once it answered (#12).
       ? <PathFooter item={item} path={node.id} what="node" state={live ? null : footerState(item, item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)))} reload={a.reload}
           extra={live ? <button type="button" className="btn btn-secondary" onClick={async () => { const r = await act.stopEscalation(item.id); if (r.ok) a.reload(); }}>Stop escalation</button> : undefined} />
-      : footerOf(item, path, "task", footerState(item, sessions), a.reload),
+      // `/retry` and `/skip` parse the path against the chain, which has no step on a gate (422): the reviewer has no footer.
+      : rev ? undefined : footerOf(item, path, "task", footerState(item, sessions), a.reload),
   };
 }

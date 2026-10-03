@@ -7,6 +7,8 @@ import { stepsOf, taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 
 export const ESCALATION = "escalation";
+/** A gate's reviewer: its sessions run at `<gate>.auto_review`, a path no step of the chain lists. */
+export const AUTO_REVIEW = "auto_review";
 export const isEscalation = (s: WorkerSession) => s.hook_point === ESCALATION || s.hook_point.endsWith(`.${ESCALATION}`);
 const LIVE = new Set(["running", "pending", "rate_limited", "waiting", "needs_context"]);
 
