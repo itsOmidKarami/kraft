@@ -93,7 +93,17 @@ describe("ng Sidebar", () => {
   it("starts from the stored choice", () => {
     localStorage.setItem(SIDEBAR_KEY, "pinned");
     mount();
-    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps one name for the pin, its state in aria-pressed alone, so it never reads \"Collapse sidebar, pressed\"", async () => {
+    localStorage.setItem(SIDEBAR_KEY, "pinned");
+    mount();
+    const pin = screen.getByRole("button", { name: "Pin sidebar" });
+    expect(pin).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(pin);
+    expect(pin).toHaveAccessibleName("Pin sidebar");
+    expect(pin).toHaveAttribute("aria-pressed", "false");
   });
 
   it("falls back to the width default, without an error, when storage throws", () => {
@@ -133,7 +143,7 @@ describe("ng Sidebar", () => {
   it("collapses at once on unpin, with the pointer still on the pin, and keeps no focus that would hold it open", async () => {
     localStorage.setItem(SIDEBAR_KEY, "pinned");
     mount();
-    const pin = screen.getByRole("button", { name: "Collapse sidebar" });
+    const pin = screen.getByRole("button", { name: "Pin sidebar" });
     await userEvent.click(pin);
     expect(pin).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector(".ng-side")).toHaveAttribute("data-dismissed");
@@ -143,7 +153,7 @@ describe("ng Sidebar", () => {
   it("collapses on unpin from the keyboard too, keeping focus on the pin", async () => {
     localStorage.setItem(SIDEBAR_KEY, "pinned");
     mount();
-    const pin = screen.getByRole("button", { name: "Collapse sidebar" });
+    const pin = screen.getByRole("button", { name: "Pin sidebar" });
     pin.focus();
     await userEvent.keyboard("{Enter}");
     expect(pin).toHaveAttribute("aria-pressed", "false");

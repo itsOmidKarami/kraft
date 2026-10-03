@@ -166,7 +166,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
             className="ng-side-pin"
             aria-pressed={mode === "pinned"}
             title={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
-            aria-label={mode === "pinned" ? "Collapse sidebar" : "Pin sidebar"}
+            // One name, its state in aria-pressed: a label that swapped with it read "Collapse sidebar, pressed" (R8b-11).
+            aria-label="Pin sidebar"
             // A click's detail counts its presses; Enter or Space on the button reads 0.
             onClick={(e) => toggle(e.detail > 0)}
           >
