@@ -152,8 +152,7 @@ export function useOpenThreads(id: string, version: string): number {
 
 /** `N files +A −D · K open threads · Review changes` (the prototype's diff
  *  line), the threads only when there are some; hidden with no diff. */
-export function DiffLine({ id, version, gone }: { id: string; version: string; gone?: boolean }) {
-  const files = useDiffFiles(id, version, gone);
+export function DiffLine({ id, version, files }: { id: string; version: string; files: DiffFile[] | null }) {
   const threads = useOpenThreads(id, version);
   if (!files?.length) return null;
   const { add, del } = totals(files);

@@ -8,8 +8,6 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { neverStarted, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
-import { useDiffFiles } from "./Top";
-import { runVersion } from "./useItem";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
@@ -31,13 +29,11 @@ const pathOf = (task?: string | null) => (task ? task.split(".").join(" › ") :
  *  where, a paragraph, up to four facts, actions with the primary first, and
  *  "Open <node> →". Content from `stop` and `stop.facts` only: a fact the
  *  server does not send is left out, never written here. */
-export function StateCard({ item, ...h }: { item: ItemDetail } & Handlers) {
+export function StateCard({ item, files = null, ...h }: { item: ItemDetail; files?: DiffFile[] | null } & Handlers) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const events = useEndEvents(item);
   const navigate = useNavigate();
-  // What a failed run kept (WI-4): read only for a failed item whose worktree is still there.
-  const files = useDiffFiles(item.id, runVersion(item), item.display_status !== "failed" || item.worktree_exists === false);
   const card = cardFor(item, { ...h, files, onRepos: () => navigate(`/settings/repos/${encodeURIComponent(item.repo)}`), onReview: (nodes) => navigate(`/work-items/${encodeURIComponent(item.id)}/review${nodes ? `?nodes=${encodeURIComponent(nodes)}` : ""}`) }, events, async (p) => {
     setBusy(true);
     setError(null);

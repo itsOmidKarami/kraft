@@ -69,6 +69,15 @@ describe("ItemPage", () => {
     expect(calls.some((c) => c.path.endsWith("/diff"))).toBe(false);
   });
 
+  it("reads a failed item's diff once for both the diff line and the card's work kept", async () => {
+    const failed = detail({ status: "needs_human", display_status: "failed", branch: "kraft/design-the-cache-w1", worktree_exists: true, stop: { kind: "failed", node: "verification", task: null, attempt: 1, resume_at: null, reason: "Tests failed.", facts: {} } as never });
+    const calls = stubFetch({ "GET /work-items/w1": [200, failed], "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }, { path: "b.py", insertions: 1, deletions: 0 }] }] });
+    mount();
+    expect((await screen.findByRole("link", { name: "Review changes" })).parentElement).toHaveTextContent("2 files +3 −1");
+    expect(await screen.findByRole("region", { name: "Failed" })).toHaveTextContent("work keptbranch kraft/design-the-cache-w1 · 2 files");
+    expect(calls.filter((c) => c.path.endsWith("/diff"))).toHaveLength(1);
+  });
+
   // R12b-06: on a time cap the header's Raise cap only opened Config, which has no row for that cap.
   it("opens the cap's own editor from the header's Raise cap on a stop that names its limit", async () => {
     const limit = { path: "", key: "time_cap_minutes", value: 1, maximum: null };

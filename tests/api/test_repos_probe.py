@@ -12,6 +12,8 @@ import yaml
 from support.harness import commit_all, make_repo, make_repo_with_submodule
 from support.probe import JEST
 
+from kraft import config as config_mod
+
 
 #: Reads real config: no default repo entry stands in for the one under test.
 @pytest.mark.api_client(default_setup=False)
@@ -34,8 +36,20 @@ def test_lists_the_servers_own_checkout_as_the_suggested_repo(
     if connect:
         assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
     monkeypatch.chdir(tmp_path / cwd)
+    toplevel_reads = []
+    real = config_mod.git_read
+
+    def counting(cwd, *args, **kw):
+        if "--show-toplevel" in args:
+            toplevel_reads.append(args)
+        return real(cwd, *args, **kw)
+
+    monkeypatch.setattr(config_mod, "git_read", counting)
     got = client.get("/api/repos").json()["suggested"]
+    assert client.get("/api/repos").json()["suggested"] == got
     assert (got and Path(got).resolve()) == (suggested and (tmp_path / suggested).resolve())
+    # About ten places in the UI read /repos: git is asked about the checkout once.
+    assert len(toplevel_reads) == 1
 
 
 def test_a_repo_that_declares_no_tests_connects_enabled(tmp_path, client, templates_dir):

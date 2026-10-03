@@ -10,7 +10,7 @@ import { LeaveGuard } from "./draft/LeaveDialog";
 import { ReviewDialog } from "./draft/ReviewDialog";
 import { ItemHeader, useDuplicate } from "./header/ItemHeader";
 import { PausedCard, StateCard } from "./StateCard";
-import { Brief, DiffLine, Title } from "./Top";
+import { Brief, DiffLine, Title, useDiffFiles } from "./Top";
 import { ESCALATION } from "./nodeGraph";
 import { placeUrl } from "./url";
 import { openBudgetEditor, Workspace } from "./Workspace";
@@ -47,6 +47,8 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   const [escalating, setEscalating] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
   const duplicate = useDuplicate(item.id, setCardError);
+  // Read once for the diff line and the failed card's "work kept".
+  const files = useDiffFiles(item.id, runVersion(item), item.worktree_exists === false);
   const openGate = useSelect(item.id);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
@@ -70,10 +72,10 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
       <div className="item-top">
         <Title id={item.id} title={item.title} onSaved={reload} />
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
-        <DiffLine id={item.id} version={runVersion(item)} gone={item.worktree_exists === false} />
+        <DiffLine id={item.id} version={runVersion(item)} files={files} />
       </div>
       <Banner item={item} onRaise={raise} reload={reload} />
-      <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
+      <StateCard item={item} files={files} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />
       <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={threadOf} />
