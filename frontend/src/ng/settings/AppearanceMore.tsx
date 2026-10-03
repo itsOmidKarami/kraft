@@ -141,13 +141,15 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
 function DefaultEditor({ value, save }: { value: string | null; save: (editor: string | null) => void }) {
   const editors = useEditors();
   const ids = typeof editors === "object" && editors ? editors.available : [];
-  const options = [...ids, ...(value && !ids.includes(value) ? [value] : []), ""].map((id) => ({ value: id, label: editorName(id || null) }));
+  // Unset is not the system opener: Open in editor then takes KRAFT_EDITOR first (r12 review).
+  const options = [...ids, ...(value && !ids.includes(value) ? [value] : []), ""].map((id) => ({ value: id, label: id ? editorName(id) : "Not set" }));
   return (
     <section aria-labelledby="set-editor">
       <h2 id="set-editor">Default editor</h2>
       {typeof editors === "string" ? <p className="set-hint">{editors}</p> : (
         <Segmented label="Default editor" options={options} value={value ?? ""} onChange={(v) => save(v || null)} />
       )}
+      <p className="set-hint">Not set: KRAFT_EDITOR, else the system's default app.</p>
     </section>
   );
 }
