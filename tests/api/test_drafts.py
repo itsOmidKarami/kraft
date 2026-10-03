@@ -304,6 +304,16 @@ def test_a_chain_rename_is_a_change_in_the_draft_and_in_what_publish_answers(cli
     assert published["changes"] == [row]
 
 
+def test_renaming_a_chain_never_published_says_publish_creates_it(client):
+    """Review L4: with no published file there is nothing to move."""
+    assert post_ops(client, {"op": "new_chain"}, ADD_GATE, key="copy1").status_code == 200
+    r = post_ops(client, {"op": "rename", "path": "", "id": "copy2"}, key="copy1")
+    [row] = [c for c in r.json()["result"]["changes"] if c["kind"] == "rename"]
+    assert row["summary"] == (
+        "chain id copy1 → copy2 · publish creates chains/copy2.yaml, and new items name it copy2"
+    )
+
+
 def test_a_fragment_yaml_error_answers_its_line_and_column(client):
     r = post_ops(client, {"op": "set_fragment", "path": "spec", "yaml": "id: spec\nkind: [\n"})
     assert (r.status_code, r.json()["line"], r.json()["col"]) == (422, 3, 1)
