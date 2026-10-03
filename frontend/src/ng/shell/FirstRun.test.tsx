@@ -101,6 +101,8 @@ describe("FirstRun", () => {
     await user.click(screen.getByRole("button", { name: "Skip to chain →" }));
     expect(screen.getByRole("heading", { name: "Chain and policy" })).toBeInTheDocument();
     expect(screen.getByText(/^Set up/)).toHaveTextContent("Set up › Step 2 of 3");
+    // Skipped is not done: no repo was added, so step 1 shows no check.
+    expect(screen.getByRole("button", { name: "Step 1: Connect a repo" })).toHaveClass("fr-todo");
   });
 
   it("names the address the server is on", async () => {
