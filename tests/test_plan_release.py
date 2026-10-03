@@ -214,20 +214,20 @@ _WHEEL = "https://github.com/itsOmidKarami/kraft/releases/download"
     ("tag", "line"),
     [
         (
-            "v2.0.0rc1",
-            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector]==2.0.0rc1"`, '
+            "v1.5.0rc2",
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector]==1.5.0rc2"`, '
             f"{_KEEP}`kraft admin update --channel rc` installs it too, keeping both.",
         ),
         (
-            "v2.0.0b1",
+            "v1.5.0b1",
             f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
-            f'{_WHEEL}/v2.0.0b1/kraft_sdlc-2.0.0b1-py3-none-any.whl"`, '
+            f'{_WHEEL}/v1.5.0b1/kraft_sdlc-1.5.0b1-py3-none-any.whl"`, '
             f"{_KEEP}`kraft admin update --channel beta` installs it too, keeping both.",
         ),
         (
-            "v2.0.0a3",
+            "v1.5.0a3",
             f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
-            f'{_WHEEL}/v2.0.0a3/kraft_sdlc-2.0.0a3-py3-none-any.whl"`, '
+            f'{_WHEEL}/v1.5.0a3/kraft_sdlc-1.5.0a3-py3-none-any.whl"`, '
             f"{_KEEP}`kraft admin update --channel alpha` installs it too, keeping both.",
         ),
     ],
