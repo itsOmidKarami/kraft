@@ -31,6 +31,12 @@ RELEASES_URL = "https://api.github.com/repos/itsOmidKarami/kraft/releases"
 #: cost of being a day late is a notice that appears tomorrow instead of today.
 CACHE_TTL = 86_400
 
+#: How long a check that failed (no route, a bad feed, no usable release) is
+#: not repeated. Shorter than `CACHE_TTL`, since the cause is often a link that
+#: comes back, but long enough that an offline host does not pay `TIMEOUT` on
+#: every page load.
+RETRY_AFTER = 3_600
+
 #: Long enough for a slow link, short enough that a server start on a machine
 #: with no route out is not something anybody times.
 TIMEOUT = 2.0
@@ -156,6 +162,38 @@ def _read_cache(now: float, channel: str) -> Release | None:
         return None
 
 
+def _recently_failed(now: float, channel: str) -> bool:
+    """True when a check on `channel` failed less than `RETRY_AFTER` ago."""
+    try:
+        blob = json.loads(_cache_path().read_text())
+        if blob.get("channel", "stable") != channel:
+            return False
+        return 0 <= now - float(blob["failed_at"]) < RETRY_AFTER
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _write_failure(now: float, channel: str) -> None:
+    """Remember that a check just failed, keeping the last good one's fields.
+
+    `last_checked` reads `checked_at`, which stays the time of the last
+    success; the failure rides beside it as `failed_at`.
+    """
+    path = _cache_path()
+    try:
+        try:
+            blob = json.loads(path.read_text())
+        except (OSError, ValueError):
+            blob = None
+        if not isinstance(blob, dict) or blob.get("channel", "stable") != channel:
+            blob = {"channel": channel}
+        blob["failed_at"] = now
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(blob))
+    except OSError:
+        pass
+
+
 def _write_cache(release: Release, now: float, channel: str) -> None:
     path = _cache_path()
     try:
@@ -184,13 +222,22 @@ def last_checked(channel: str = "stable") -> float | None:
         return None
 
 
-def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
-    """The newest installable release in `channel`, or `None` if that cannot be established."""
+def latest(
+    *, force: bool = False, channel: str = "stable", cache_only: bool = False
+) -> Release | None:
+    """The newest installable release in `channel`, or `None` if that cannot be established.
+
+    A failed check is remembered for `RETRY_AFTER`, so it is not retried (and
+    its timeout not paid again) until then; `force` ignores that. `cache_only`
+    never fetches: a cold cache is `None`.
+    """
     now = time.time()
     if not force:
         cached = _read_cache(now, channel)
         if cached is not None:
             return cached
+        if cache_only or _recently_failed(now, channel):
+            return None
     try:
         # The most a page holds: GitHub's default 30 is one long pre-release
         # cycle, which would push the newest final off it.
@@ -200,8 +247,11 @@ def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
         # version check is never worth turning a working command into a
         # traceback. There is nothing this function could do with the
         # distinction that "no update known" does not already cover.
+        _write_failure(now, channel)
         return None
-    if release is not None:
+    if release is None:
+        _write_failure(now, channel)
+    else:
         _write_cache(release, now, channel)
     return release
 
