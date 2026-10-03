@@ -61,3 +61,41 @@ def test_a_worker_cannot_set_its_own_items_attachments(app, capsys, monkeypatch,
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
     cli.main(["view", "show", wid, "--json"])
     assert json.loads(capsys.readouterr().out)["attachments"] == []
+
+
+def test_view_docs_lists_and_prints_what_an_unstarted_item_was_filed_with(
+    app, capsys, monkeypatch, make_item, repo
+):
+    """Before it starts, nothing is indexed: `view docs` printed "(nothing)",
+    though the item had a spec, and no verb could print it (R10F-06)."""
+    wid = make_item(repo)
+    (repo / "s.md").write_text("---\ntitle: My spec\n---\n# The spec\n")
+    monkeypatch.chdir(repo)
+    cli.main(["item", "set-attachments", wid, "--spec", "s.md", "--json"])
+    capsys.readouterr()
+
+    cli.main(["view", "docs", wid])
+    out = capsys.readouterr().out
+    assert "attached when it was filed:" in out and "spec  s.md" in out
+    assert f"read one: kraft view docs {wid} --attachment spec" in out
+    assert "(nothing)" not in out
+
+    cli.main(["view", "docs", wid, "--attachment", "spec", "--no-pager"])
+    assert capsys.readouterr().out == "# The spec\n\n"
+    cli.main(["view", "docs", wid, "--attachment", "spec", "--json"])
+    assert json.loads(capsys.readouterr().out)["title"] == "My spec"
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["view", "docs", wid, "--attachment", "plan"])
+    assert caught.value.code == 1
+    assert "no plan attached" in capsys.readouterr().err
+
+
+def test_view_docs_json_is_still_the_indexed_documents(app, capsys, monkeypatch, make_item, repo):
+    """`--json` prints the documents route's answer and nothing else."""
+    wid = make_item(repo)
+    (repo / "s.md").write_text("# The spec\n")
+    monkeypatch.chdir(repo)
+    cli.main(["item", "set-attachments", wid, "--spec", "s.md", "--json"])
+    capsys.readouterr()
+    cli.main(["view", "docs", wid, "--json"])
+    assert json.loads(capsys.readouterr().out) == []

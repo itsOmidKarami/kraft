@@ -31,6 +31,7 @@ def test_the_tools_are_registered():
         "list_work_items",
         "get_work_item",
         "get_gate_artifact",
+        "get_attachment",
         "search",
         "create_work_item",
         "ensure_repo",
@@ -490,3 +491,17 @@ def test_a_sync_tool_is_refused_when_it_is_registered():
 
     with pytest.raises(TypeError, match="sync_tool must be `async def`"):
         mcp._Server("kraft").tool()(sync_tool)
+
+
+def test_get_attachment_reads_what_the_item_was_filed_with(monkeypatch):
+    """The MCP door onto `GET /work-items/{id}/attachments/{kind}` (R10F-06),
+    the only reader of a spec before its item starts."""
+    seen = {}
+
+    async def fake(kind, work_item_id=None):
+        seen.update(kind=kind, work_item_id=work_item_id)
+        return {"kind": kind, "content": "# spec"}
+
+    monkeypatch.setattr(mcp.client, "attachment", fake)
+    asyncio.run(mcp.build().call_tool("get_attachment", {"kind": "plan", "work_item_id": "w1"}))
+    assert seen == {"kind": "plan", "work_item_id": "w1"}

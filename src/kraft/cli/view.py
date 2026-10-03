@@ -295,7 +295,35 @@ def _cmd_compare(ns: argparse.Namespace) -> None:
 
 
 def _cmd_docs(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.documents(ns.id)), _render_docs, ns.json)
+    if ns.attachment:
+        payload = asyncio.run(client.attachment(ns.attachment, ns.id))
+        if ns.json:
+            common.emit(payload, str, True)
+            return
+        render.page(payload.get("content", ""), force_plain=ns.no_pager)
+        return
+    docs = asyncio.run(client.documents(ns.id))
+    if ns.json:
+        common.emit(docs, str, True)
+        return
+    print(_docs_text(docs, asyncio.run(client.get_work_item(ns.id))))
+
+
+def _docs_text(docs: list[dict], item: dict) -> str:
+    """The indexed documents, then what was attached at filing that the index
+    does not hold yet: before an item starts, that is all it has, and a bare
+    "(nothing)" read as though it had no spec (R10F-06)."""
+    indexed = {d.get("path") for d in docs}
+    attached = [a for a in item.get("attachments") or [] if a.get("path") not in indexed]
+    if not attached:
+        return _render_docs(docs)
+    blocks = [_render_docs(docs)] if docs else []
+    blocks.append(
+        "attached when it was filed:\n"
+        + render.table(attached, [("KIND", "kind"), ("PATH", "path")])
+        + f"\nread one: kraft view docs {item['id']} --attachment {attached[0]['kind']}"
+    )
+    return "\n\n".join(blocks)
 
 
 def _cmd_doc(ns: argparse.Namespace) -> None:
@@ -400,8 +428,18 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     compare.add_argument("--no-pager", action="store_true")
     compare.set_defaults(func=_cmd_compare)
 
-    docs = subs.add_parser("docs", parents=[common], help="documents linked to a work item")
+    docs = subs.add_parser(
+        "docs",
+        parents=[common],
+        help="documents linked to a work item, and the spec or plan it was filed with",
+    )
     docs.add_argument("id", nargs="?")
+    docs.add_argument(
+        "--attachment",
+        choices=["spec", "plan"],
+        help="print the spec or plan attached when the item was filed, as Kraft stored it",
+    )
+    docs.add_argument("--no-pager", action="store_true")
     docs.set_defaults(func=_cmd_docs)
 
     doc = subs.add_parser("doc", parents=[common], help="print one document, or open it")

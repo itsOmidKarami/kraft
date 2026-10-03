@@ -89,6 +89,13 @@ def build() -> MCPServer:
         return await client.artifact(work_item_id)
 
     @server.tool()
+    async def get_attachment(kind: str, work_item_id: str | None = None) -> dict:
+        """The spec or plan (`kind`) attached when the work item was filed, as
+        Kraft stored it then: readable before the item starts, when nothing
+        else holds it. 404 when the item has no such attachment."""
+        return await client.attachment(kind, work_item_id)
+
+    @server.tool()
     async def search(q: str, limit: int = 20) -> dict:
         """Search Kraft's cross-repo index of specs, plans, and session
         summaries. Use this before writing a spec, to find whether the decision

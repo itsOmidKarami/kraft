@@ -412,6 +412,16 @@ async def documents(work_item_id: str | None = None) -> list[dict]:
     return payload.get("documents", [])
 
 
+async def attachment(kind: str, work_item_id: str | None = None) -> dict:
+    """The spec or plan attached when the item was filed (`kind`), read from
+    the copy Kraft stored then: before the item starts, nothing is indexed and
+    there is no worktree, so this is the only way to read it."""
+    wid = await context.resolve_work_item(work_item_id)
+    return await transport._get(
+        f"/work-items/{transport.segment(wid)}/attachments/{transport.segment(kind)}"
+    )
+
+
 async def document(doc_id: str) -> dict:
     return await transport._get(f"/documents/{transport.segment(doc_id)}")
 
