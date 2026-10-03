@@ -394,6 +394,31 @@ def test_each_config_area_keeps_a_draft_of_its_files(client, templates_dir, area
     assert client.get(f"/api/drafts/{area}/{area}").json()["files"][file] == text
 
 
+@pytest.mark.parametrize(
+    ("area", "op", "file"),
+    [
+        (
+            "policy",
+            {"op": "set_value", "scope": "housekeeping", "key": "max_concurrent", "value": 9},
+            "policy.yaml",
+        ),
+        ("intake", {"op": "set_intake", "patch": {"interval_s": 90}}, "intake.yaml"),
+    ],
+)
+def test_a_config_op_keeps_the_files_comments_and_says_nothing_of_dropping_them(
+    client, templates_dir, area, op, file
+):
+    """Unlike a chain's, a config file is written over its own text, so a
+    Settings publish no longer warns its comments will go (R12a-02)."""
+    if not (templates_dir / file).exists():
+        (templates_dir / file).write_text("# auto-intake\nenabled: false  # off\n")
+    r = client.post(f"/api/drafts/{area}/{area}/ops", json={"ops": [op]}).json()
+    assert r["result"]["warnings"] == []
+    shipped = (templates_dir / file).read_text().splitlines()
+    comments = [line.partition("#")[2] for line in shipped if "#" in line]
+    assert comments and [c for c in comments if c not in r["files"][file]] == []
+
+
 def test_a_config_area_opens_before_its_file_exists(client):
     got = client.get("/api/drafts/repos/repos")
     assert got.status_code == 200

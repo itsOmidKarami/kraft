@@ -32,6 +32,15 @@ def test_doctor_names_each_key_2_0_moved_and_still_reads(tmp_path, monkeypatch):
     assert check["ok"] is True and check["warn"] is True
     for old in ("max_concurrent", "triggers", "default_chain_template", "group_by: template"):
         assert old in check["detail"], check["detail"]
+    assert "the next start moves them" in check["detail"]
+
+    # A key 1.4 ignored and 2.0's schedule refuses keeps them there: say so (R12c-02).
+    (live / "policy.yaml").write_text(
+        "default: {attempts: 1, wall_clock_s: 1}\ntriggers:\n"
+        "  - {cron: '0 9 * * *', repo: /r, chain: default, title: t, enabled: false}\n"
+    )
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "moved keys")
+    assert "they stay because intake.yaml's schedules refuse triggers.0.enabled" in check["detail"]
 
     (live / "intake.yaml").write_text("enabled: false\n")
     (live / "policy.yaml").write_text("default: {attempts: 1, wall_clock_s: 1}\n")

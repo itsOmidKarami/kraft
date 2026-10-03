@@ -24,6 +24,9 @@ class ConfigDraft:
     written, written back over the file's own text when an op touched it, so
     the comments stay (`preserve.rewrite`)."""
 
+    #: So a publish does not warn that its comments will be dropped.
+    drops_comments = False
+
     def __init__(
         self, st, key: str, files: Mapping[str, str | None], *, exists: bool, names: Sequence[str]
     ) -> None:

@@ -15,11 +15,14 @@ plain way (`authored.dump`): there is nothing to keep.
 from __future__ import annotations
 
 import io
+import re
 from collections.abc import Mapping
 
+import yaml as pyyaml
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import CommentMark, YAMLError
+from ruamel.yaml.scalarstring import ScalarString, SingleQuotedScalarString
 from ruamel.yaml.tokens import CommentToken
 
 from kraft.drafts import authored
@@ -29,8 +32,11 @@ def rewrite(text: str | None, data: Mapping) -> str:
     """`data` written over `text`. A key `text` has keeps its comments, its
     place and its layout (a flow-style block stays flow-style); a key `data`
     adds goes at the end of its mapping; one `data` drops or replaces keeps
-    the comment block that followed it (the next key's documentation); a
-    list is replaced whole."""
+    the comment block that followed it (the next key's documentation). A
+    block list of mappings keeps each entry `data` still has (`_merge_seq`),
+    with its comments; any other list is replaced whole. A value in `data`
+    that is already a ruamel node (`carried`) is written as it is, with its
+    own comments."""
     if not text or not text.strip():
         return authored.dump(data)
     yaml = _yaml()
@@ -40,17 +46,97 @@ def rewrite(text: str | None, data: Mapping) -> str:
         return authored.dump(data)
     if not isinstance(doc, CommentedMap):
         return authored.dump(data)
+    if offset := _list_offset(text):
+        # `  - path: …` under its key, as the file has it, not `- path: …`.
+        yaml.indent(mapping=2, sequence=offset + 2, offset=offset)
     _merge(doc, data)
     out = io.StringIO()
     yaml.dump(doc, out)
-    return out.getvalue()
+    return _keep_flow_lines(text, out.getvalue())
 
 
 def _yaml() -> YAML:
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.width = 4096  # never re-wrap a long line an author laid out
+    # ruamel writes None as nothing (`project:`); every other writer here,
+    # and the operator's own file, says `null`.
+    yaml.representer.add_representer(
+        type(None), lambda r, _: r.represent_scalar("tag:yaml.org,2002:null", "null")
+    )
     return yaml
+
+
+_KEY_LINE = re.compile(r"(?P<indent> *)[^\s#-][^:#]*:\s*(#.*)?")
+_ITEM_LINE = re.compile(r"(?P<indent> *)- ")
+
+
+def _list_offset(text: str) -> int:
+    """How far the file indents a block list's `- ` past its key: the first
+    one it has decides, 0 when it has none (ruamel's own default)."""
+    lines = [
+        line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    ]
+    for key, item in zip(lines, lines[1:], strict=False):
+        head, dash = _KEY_LINE.fullmatch(key), _ITEM_LINE.match(item)
+        if head and dash:
+            return max(0, len(dash["indent"]) - len(head["indent"]))
+    return 0
+
+
+def _line_value(line: str) -> object:
+    """One line read on its own, or a marker no other line equals."""
+    try:
+        return pyyaml.safe_load(line.strip())
+    except pyyaml.YAMLError:
+        return _line_value
+
+
+def _keep_flow_lines(text: str, out: str) -> str:
+    """Each line of `out` holding a flow collection the rewrite left as it
+    was, written as the author spaced it (`default:   { attempts: 3 }`):
+    ruamel keeps the flow style but not the spaces. A line is put back only
+    when it reads as the same YAML at the same indent."""
+    authored_lines: dict[tuple[int, str], list[str]] = {}
+    for line in text.splitlines():
+        if "{" in line or "[" in line:
+            squeezed = re.sub(r"\s+", "", line)
+            authored_lines.setdefault((len(line) - len(line.lstrip()), squeezed), []).append(line)
+    if not authored_lines:
+        return out
+    lines = out.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if "{" not in line and "[" not in line:
+            continue
+        body = line.rstrip("\n")
+        key = (len(body) - len(body.lstrip()), re.sub(r"\s+", "", body))
+        found = authored_lines.get(key)
+        if found and len(set(found)) == 1 and _line_value(found[0]) == _line_value(body):
+            lines[i] = found[0] + line[len(body) :]
+    return "".join(lines)
+
+
+def carried(text: str | None, key: str) -> list:
+    """The entries of `text`'s top-level block list `key`, as ruamel nodes
+    with their own comments, for `rewrite` to put in another file (the 2.0
+    move of `policy.yaml`'s `triggers:`). The comment block after the list,
+    the next key's documentation, stays behind. Empty when `text` has no
+    such list."""
+    try:
+        doc = _yaml().load(text or "")
+    except YAMLError:
+        return []
+    seq = doc.get(key) if isinstance(doc, CommentedMap) else None
+    if not isinstance(seq, CommentedSeq) or not seq:
+        return []
+    _take_block(doc, key)
+    items = list(seq)
+    for index, item in enumerate(items):
+        # A flow entry's own comment (`- {cron: …}  # weekly`) is the list's,
+        # by position: it goes with the entry.
+        if isinstance(item, CommentedMap | CommentedSeq) and seq.ca.items.get(index):
+            item._kraft_entry_comment = seq.ca.items[index]
+    return items
 
 
 def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> None:
@@ -69,6 +155,9 @@ def _merge(doc: CommentedMap, data: Mapping, parent: tuple | None = None) -> Non
                 continue
             if isinstance(current, CommentedMap) and isinstance(value, Mapping) and value:
                 _merge(current, value, (doc, key))
+                continue
+            if _mappings(current) and isinstance(value, list | tuple) and value:
+                _merge_seq(current, value)
                 continue
             block = _take_block(doc, key)
             doc[key] = _node(value)
@@ -159,8 +248,82 @@ def _keep_block(doc: CommentedMap, before: object, block: str, parent: tuple | N
         doc.ca.comment[1].append(CommentToken(block, CommentMark(0), None))
 
 
+def _mappings(node: object) -> bool:
+    """A block list whose every entry is a mapping: `repos:`, `schedules:`."""
+    return (
+        isinstance(node, CommentedSeq)
+        and not node.fa.flow_style()
+        and all(isinstance(item, CommentedMap) for item in node)
+    )
+
+
+def _identity(item: object) -> object:
+    """What names one entry of a list of mappings across a rewrite: a repo's
+    `path`. None for an entry with none."""
+    return item.get("path") if isinstance(item, Mapping) else None
+
+
+def _merge_seq(seq: CommentedSeq, values: list | tuple) -> None:
+    """`seq` holding `values`, in their order: an entry already there (the
+    same `path`, or the same value) is kept with its comments and merged
+    into, a new one is added. A Settings save of one repo once rewrote the
+    whole `repos:` list and every comment inside it (R12b-04)."""
+    unused = list(seq)
+    items = []
+    for value in values:
+        match = next(
+            (
+                node
+                for node in unused
+                if (_identity(value) is not None and _identity(node) == _identity(value))
+                or _same(node, value)
+            ),
+            None,
+        )
+        if match is None or not isinstance(value, Mapping):
+            items.append(_node(value))
+            continue
+        unused.remove(match)
+        if not _same(match, value):
+            _merge(match, value)
+        items.append(match)
+    # The list's own comments are by position: each follows its entry.
+    by_entry = {id(node): seq.ca.items[i] for i, node in enumerate(seq) if seq.ca.items.get(i)}
+    seq.clear()
+    seq.extend(items)
+    seq.ca.items.clear()
+    _place_entry_comments(seq, by_entry)
+
+
+def _place_entry_comments(seq: CommentedSeq, by_entry: dict | None = None) -> None:
+    """Each entry's own comment on `seq` at its new position: one it had
+    there (`by_entry`, by node id) or one it was `carried` with."""
+    for index, node in enumerate(seq):
+        entry = (by_entry or {}).get(id(node)) or getattr(node, "_kraft_entry_comment", None)
+        if entry:
+            seq.ca.items[index] = entry
+
+
+def _quoted(value: str) -> str:
+    """A string Kraft's readers (PyYAML, YAML 1.1) would not read back as
+    the same string is single-quoted: ruamel writes `yes`, `off` or `on`
+    bare by YAML 1.2's rules, and Kraft then read a boolean (R12E-02)."""
+    if isinstance(value, ScalarString) or "\n" in value:
+        return value
+    try:
+        same = pyyaml.safe_load(value) == value
+    except pyyaml.YAMLError:
+        same = False
+    return value if same else SingleQuotedScalarString(value)
+
+
 def _node(value: object) -> object:
-    """`value` as ruamel nodes, so a comment can be attached to it."""
+    """`value` as ruamel nodes, so a comment can be attached to it. A node
+    already (`carried`) is kept, comments and all."""
+    if isinstance(value, CommentedMap | CommentedSeq):
+        return value
+    if isinstance(value, str):
+        return _quoted(value)
     if isinstance(value, Mapping):
         node = CommentedMap()
         for k, v in value.items():
@@ -171,7 +334,9 @@ def _node(value: object) -> object:
             node.fa.set_flow_style()
         return node
     if isinstance(value, list | tuple):
-        return CommentedSeq(_node(v) for v in value)
+        seq = CommentedSeq(_node(v) for v in value)
+        _place_entry_comments(seq)
+        return seq
     return value
 
 

@@ -138,9 +138,11 @@ class Ops(BaseModel):
 
 @api_router.post("/drafts/{area}/{key}/ops")
 async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, preview: bool = False):
-    """Apply `ops` in order, all or nothing, as one undo step: each op's file
-    is written back whole (`authored.dump`), comments dropped. With
-    `?preview=1`, the result without saving."""
+    """Apply `ops` in order, all or nothing, as one undo step. A chain or the
+    library is written back whole (`authored.dump`), comments dropped, and
+    the result warns of it; a config file (`drafts.config.ConfigDraft`) is
+    written over its own text, comments kept. With `?preview=1`, the result
+    without saving."""
     st = request.app.state
     found = _area(area, key)
     old = st.db.read(lambda c: store.get(c, area, key))
@@ -161,9 +163,14 @@ async def apply_draft_ops(area: str, key: str, body: Ops, request: Request, prev
         )
     written = working.finish()
     names = {*(old["files"] if old else ()), *working.dirty}
+    # Only a file whose comments the write drops is `serialized`: the
+    # results warn of it (`drafts.resolve`). A config area keeps them.
+    drops = getattr(working, "drops_comments", True)
     draft = {
         "files": {n: written.get(n) for n in names},
-        "serialized": sorted({*(old["serialized"] if old else ()), *working.dirty}),
+        "serialized": sorted({*(old["serialized"] if old else ()), *working.dirty})
+        if drops
+        else [],
     }
     history = [*history, {"files": old["files"] if old else {}}]
     files, published, result = _state(st, area, key, draft, history)

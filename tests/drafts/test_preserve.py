@@ -22,6 +22,13 @@ budget:
   work_item_usd: 10     # per item
   daily_usd: 50
 
+repos:
+  - path: /a   # the dev repo
+    project: null
+  # the scratch repo
+  - path: /b
+    setup_command: x
+
 schedules:
   - {cron: '0 9 * * 1', title: weekly}
 
@@ -82,6 +89,36 @@ archive:
             [],
             id="no-change-keeps-every-comment",
         ),
+        pytest.param(
+            lambda d: d["budget"].__setitem__("daily_usd", 60),
+            ["default:             { attempts: 3, wall_clock_s: 3600 }   # trailing note"],
+            [],
+            id="an-untouched-flow-mapping-keeps-its-spacing",
+        ),
+        pytest.param(
+            lambda d: d["repos"][1].__setitem__("setup_command", "y"),
+            [
+                "  - path: /a   # the dev repo\n    project: null\n"
+                "  # the scratch repo\n  - path: /b"
+            ],
+            ["setup_command: x"],
+            id="one-entry-of-a-list-edited-keeps-the-others-comments",
+        ),
+        pytest.param(
+            lambda d: d["repos"].pop(0),
+            ["repos:\n  - path: /b\n    setup_command: x"],
+            ["/a"],
+            id="an-entry-removed-keeps-the-rest-as-written",
+        ),
+        *[
+            pytest.param(
+                lambda d, word=word: d["repos"][1].__setitem__("env", {"DEBUG": word}),
+                [f"DEBUG: '{word}'"],
+                [],
+                id=f"the-string-{word}-stays-a-string",
+            )
+            for word in ("yes", "no", "on", "off", "Yes", "OFF")
+        ],
     ],
 )
 def test_rewrite_applies_the_change_and_keeps_the_rest(change, expect, gone):

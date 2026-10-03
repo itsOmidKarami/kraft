@@ -287,6 +287,19 @@ MOVED_KEYS: tuple[tuple[str, str, str, Callable[[dict], bool]], ...] = (
 )
 
 
+def _why_it_stayed(key: str, data: dict) -> str:
+    """Why the start did not move `policy.yaml`'s triggers (`carry_moved_keys`),
+    which still fire but which Settings › Auto-intake does not show: a
+    re-made copy there fires twice (R12c-02)."""
+    triggers = data.get("triggers")
+    if key != "triggers" or not isinstance(triggers, list):
+        return ""
+    why = config.schedule_refusal(triggers, "triggers")
+    if why is None:
+        return "; the next start moves them"
+    return f"; they stay because intake.yaml's schedules refuse {why}: fix that and restart"
+
+
 def _moved_keys_check(templates: Path) -> dict:
     """A key 2.0 moved, still written under its old name: read, so nothing
     stops, and named here so the file gets tidied rather than carrying a
@@ -299,7 +312,7 @@ def _moved_keys_check(templates: Path) -> dict:
         except config.ConfigError:
             continue  # its own row says so
         if isinstance(data, dict) and has(data):
-            found.append(f"{name}: {key} is {now} since 2.0")
+            found.append(f"{name}: {key} is {now} since 2.0" + _why_it_stayed(key, data))
     if not found:
         return _check("moved keys", True, "none: every key is where 2.0 reads it")
     return _check("moved keys", True, "; ".join(found), warn=True)

@@ -154,11 +154,23 @@ def test_connect_detected_sets_managed(client, repo, templates_dir):
     assert ops(client, {"op": "connect_detected", "path": path}).status_code == 422
 
 
-def test_set_repo_is_a_touch_like_patch_repos(client, repo, templates_dir):
+@pytest.mark.parametrize(
+    "key", ["default_chain", "default_chain_template"], ids=["a-touch", "the-1x-key-renamed"]
+)
+def test_set_repo_is_a_touch_like_patch_repos(client, repo, templates_dir, key):
+    """A save writes the 1.x `default_chain_template` as `default_chain`,
+    not the new key beside the old one, which doctor warned of forever (R12c-06)."""
     connect_repo(repo, templates_dir, managed=False, enabled=False)
+    file = templates_dir / "repos.yaml"
+    data = yaml.safe_load(file.read_text())
+    data["repos"][0].pop("default_chain", None)
+    data["repos"][0][key] = "default"
+    file.write_text(yaml.safe_dump(data))
     path = str(repo.resolve())
     body = resolved(client, {"op": "set_repo", "path": path, "patch": {"name": "x"}})
     assert view(body, path)["managed"] is True
+    (written,) = yaml.safe_load(client.get(URL).json()["files"]["repos.yaml"])["repos"]
+    assert (written["default_chain"], "default_chain_template" in written) == ("default", False)
 
 
 def test_remove_repo_with_a_running_item_is_a_problem_and_blocks_publish(client, connected):
