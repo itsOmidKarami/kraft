@@ -31,6 +31,35 @@ describe("Title", () => {
   });
 });
 
+describe("Title, leaving the field", () => {
+  it.each([
+    ["saves an edit, as Enter does", "New", [{ title: "New" }], "New"],
+    ["restores the old title when the field is blank", "   ", [], "Old"],
+    ["sends nothing when the title is unchanged", "Old", [], "Old"],
+  ])("%s", async (_, typed, sent, shown) => {
+    const calls = stubFetch(WRITES);
+    render(<><Title id="w1" title="Old" onSaved={() => {}} /><button>elsewhere</button></>);
+    await userEvent.click(screen.getByRole("button", { name: "Old" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), typed);
+    await userEvent.click(screen.getByRole("button", { name: "elsewhere" }));
+    await waitFor(() => expect(writes(calls).map((c) => (c as { body?: unknown }).body)).toEqual(sent));
+    // A saved title shows once the item is read again; the field has closed either way.
+    if (!sent.length) expect(screen.getByRole("heading", { name: shown })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
+  });
+
+  it("sends one save on Enter, not a second one when the field then goes away", async () => {
+    const calls = stubFetch(WRITES);
+    render(<Title id="w1" title="Old" onSaved={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: "Old" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "Title" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Title" }), "New{Enter}");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull());
+    expect(writes(calls)).toHaveLength(1);
+  });
+});
+
 describe("Brief", () => {
   it("edits in the same spot, says who reads it, and saves the description", async () => {
     const calls = stubFetch(WRITES);

@@ -7,14 +7,18 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { sendOnModEnter } from "../keys";
 
-/** The title, edited in place (Decisions §2): Enter saves, Esc restores. */
+/** The title, edited in place (Decisions §2): Enter or leaving the field
+ *  saves, Esc restores; a blank one left by blur restores too. */
 export function Title({ id, title, onSaved }: { id: string; title: string; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(title);
   const [error, setError] = useState<string | null>(null);
   const hint = useId();
+  // Set by Enter or Esc: the blur that follows (the field going away) is not a second answer.
+  const settled = useRef(false);
   useEffect(() => setText(title), [title]);
   const stop = () => {
+    settled.current = true;
     setEditing(false);
     setText(title);
     setError(null);
@@ -23,10 +27,16 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
     const t = text.trim();
     if (!t) return setError("A title can't be blank.");
     if (t === title) return stop();
+    settled.current = true;
     const r = await act.patch(id, { title: t });
-    if (!r.ok) return setError(r.error);
+    if (!r.ok) { settled.current = false; return setError(r.error); }
     setEditing(false);
     onSaved();
+  };
+  const blur = () => {
+    if (settled.current) return;
+    if (!text.trim()) stop();
+    else void save();
   };
   if (!editing)
     return (
@@ -48,7 +58,7 @@ export function Title({ id, title, onSaved }: { id: string; title: string; onSav
           if (e.key === "Enter") void save();
           if (e.key === "Escape") { e.stopPropagation(); stop(); }
         }}
-        onBlur={stop}
+        onBlur={blur}
       />
       <span id={hint} className="item-muted">{error ? <span className="item-error" role="alert">{error}</span> : "Enter to save · Esc"}</span>
     </div>
