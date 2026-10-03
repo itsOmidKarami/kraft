@@ -203,6 +203,12 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .dv-full { padding: 4px 6px; border: 0; border-radius: 5px; background: none; font: inherit; font-size: 12px; color: var(--text-sub); white-space: nowrap; cursor: pointer; }
 .dv-full:hover { color: var(--text); background: var(--surface-2); }
 .dv-full:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.dv-find { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--text-sub); }
+.dv-find-q { min-width: 0; overflow-wrap: anywhere; color: var(--text); font-weight: 500; }
+.dv-find-n { flex: none; font-variant-numeric: tabular-nums; }
+.dv-find-from { flex: none; margin-left: auto; color: var(--text-muted); }
+::highlight(dv-match) { background-color: color-mix(in oklab, var(--warn) 30%, transparent); }
+::highlight(dv-current) { background-color: var(--warn); color: var(--bg); }
 .dv-note { margin: 0; padding: 8px 16px 0; }
 .dv-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 18px 24px; font-size: 13px; line-height: 1.6; color: var(--text); }
 

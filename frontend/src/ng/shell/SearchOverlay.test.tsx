@@ -146,7 +146,7 @@ describe("SearchOverlay", () => {
     await screen.findByText("Caching spec");
     await go("Caching spec");
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
-    expect(screen.getByTestId("search")).toHaveTextContent("?doc=d1");
+    expect(screen.getByTestId("search")).toHaveTextContent("?doc=d1&q=work");
 
     await user.keyboard("{Meta>}k{/Meta}");
     await user.type(await screen.findByRole("combobox"), "work");

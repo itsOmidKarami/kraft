@@ -50,9 +50,9 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
   open: () => go(`/work-items/${encodeURIComponent(i.id)}`),
 });
 
-/** The ⌘K palette. A document of a work item opens on that item's page (`?doc=`),
+/** The ⌘K palette. A document of a work item opens on that item's page (`?doc=&q=`),
  *  one with no item in `onDocument`'s dialog, and a bead starts a draft item that implements it. */
-export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; onDocument: (id: string) => void }) {
+export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; onDocument: (id: string, query: string) => void }) {
   const navigate = useNavigate();
   const ref = useModal<HTMLDivElement>(onClose);
   const uid = useId();
@@ -114,7 +114,8 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
           sub: `${r.kind ?? r.source_kind} · ${repoName(r.repo)}`,
           snippet: r.snippet,
           note: wid ? "opens the document on its work item" : "opens the document",
-          open: () => (wid ? navigate(`/work-items/${encodeURIComponent(wid)}?doc=${encodeURIComponent(r.id)}`) : onDocument(r.id)),
+          // The query goes along, so the viewer can find it in the text.
+          open: () => (wid ? navigate(`/work-items/${encodeURIComponent(wid)}?${new URLSearchParams({ doc: r.id, q: query })}`) : onDocument(r.id, query)),
         };
       }),
       ...beads.list

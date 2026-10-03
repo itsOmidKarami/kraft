@@ -138,7 +138,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
-    onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id }),
+    onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id, q: undefined }),
     onArtifact: () => setArtifact(true),
     canEdit: draft?.editable,
     applied,
@@ -217,7 +217,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
         </Inspector>
       </div>
       {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
-      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc)) }} onClose={() => go({ ...place, doc: undefined })} />}
+      {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc)) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id }} onClose={() => setArtifact(false)} />}
     </div>
   );

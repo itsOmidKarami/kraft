@@ -89,6 +89,51 @@ describe("DocViewer", () => {
     expect([...drawer.querySelectorAll(".dv-title, .dv-path, .dv-by")].map((c) => c.textContent)).toEqual(["Review notes", doc.path, "written by review › code_review › attempt 2"]);
   });
 
+  describe("opened from search", () => {
+    const bar = () => screen.getByRole("group", { name: "Search matches" });
+
+    it("counts the query's matches in the text, steps through them with ↑/↓, wrapping, and scrolls the body, not the page", async () => {
+      stubFetch({ "GET /documents/d1": [200, doc] });
+      // jsdom lays nothing out: each match reads as far down as its text node says.
+      Range.prototype.getBoundingClientRect = function (this: Range) { return { top: this.startContainer.nodeValue!.includes("bound") ? 400 : 100 } as DOMRect; };
+      const into = vi.fn();
+      Element.prototype.scrollIntoView = into;
+      render(<DocViewer source={{ kind: "document", id: "d1" }} query="cache bound" onClose={() => {}} />);
+      await screen.findByText("no size bound");
+      await waitFor(() => expect(bar()).toHaveTextContent("cache bound1 of 2↑↓from search"));
+      const body = document.querySelector<HTMLElement>(".dv-body")!;
+      expect(body.scrollTop).toBe(100);
+      await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+      expect(bar()).toHaveTextContent("2 of 2");
+      expect(body.scrollTop).toBe(500);
+      await userEvent.click(screen.getByRole("button", { name: "Next match" }));
+      expect(bar()).toHaveTextContent("1 of 2");
+      await userEvent.click(screen.getByRole("button", { name: "Previous match" }));
+      expect(bar()).toHaveTextContent("2 of 2");
+      expect(into).not.toHaveBeenCalled();
+      delete (Range.prototype as Partial<Range>).getBoundingClientRect;
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    });
+
+    it.each([
+      ["Review", "matched in the title"],
+      ["vector", "no match in the text"],
+    ])("says where %s matched when the text has none", async (query, says) => {
+      stubFetch({ "GET /documents/d1": [200, { ...doc, content: "Nothing here." }] });
+      render(<DocViewer source={{ kind: "document", id: "d1" }} query={query} onClose={() => {}} />);
+      await screen.findByText("Nothing here.");
+      expect(bar()).toHaveTextContent(says);
+      expect(screen.getByRole("button", { name: "Next match" })).toBeDisabled();
+    });
+
+    it("has no bar when it was not opened from search", async () => {
+      stubFetch({ "GET /documents/d1": [200, doc] });
+      render(<DocViewer source={{ kind: "document", id: "d1" }} onClose={() => {}} />);
+      await screen.findByText("no size bound");
+      expect(screen.queryByRole("group", { name: "Search matches" })).toBeNull();
+    });
+  });
+
   it("goes full screen and back, and opens as a drawer again after a close", async () => {
     stubFetch({ "GET /documents/d1": [200, doc] });
     render(<Harness source={{ kind: "document", id: "d1" }} />);

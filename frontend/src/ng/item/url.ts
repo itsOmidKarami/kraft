@@ -13,6 +13,8 @@ export interface Place {
   attempt?: number;
   /** The document id open over the page (`?doc=`), so ⌘K and a pasted link land on it. */
   doc?: string;
+  /** The search that opened `doc` (`?q=`), highlighted in it. */
+  q?: string;
 }
 
 /** A selection's canonical path: `node`, `node.step` or `node.step.task`. */
@@ -45,7 +47,7 @@ export function readPlace(nodeParam: string | undefined, search: URLSearchParams
   const raw = search.get("sel");
   const sel = (raw && pathSel(raw, nodes)) || floor;
   const attempt = Number(search.get("attempt"));
-  return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined, doc: search.get("doc") || undefined };
+  return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
 }
 
 /** The URL for a place. */
@@ -56,6 +58,7 @@ export function placeUrl(id: string, p: Place): string {
   if (p.tab) q.set("tab", p.tab);
   if (p.attempt) q.set("attempt", String(p.attempt));
   if (p.doc) q.set("doc", p.doc);
+  if (p.doc && p.q) q.set("q", p.q);
   const qs = q.toString();
   return `/work-items/${encodeURIComponent(id)}${p.node ? `/nodes/${encodeURIComponent(p.node)}` : ""}${qs ? `?${qs}` : ""}`;
 }

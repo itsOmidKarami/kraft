@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Search } from "lucide-react";
 import { createPortal } from "react-dom";
 import { docBody } from "../../format";
 import type { WorkItemDocument } from "../../types";
@@ -21,6 +22,38 @@ const urlOf = (s: DocSource) =>
   : `/work-items/${encodeURIComponent(s.workItemId)}/attachments/${encodeURIComponent(s.attachment)}`;
 type Viewed = { title: string; path: string; content: string; truncated?: boolean };
 
+/** The search's terms, two letters or more, as one case-blind pattern; null for none. */
+export function termsOf(query: string): RegExp | null {
+  const terms = query.split(/\s+/).filter((t) => t.length > 1).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return terms.length ? new RegExp(terms.join("|"), "gi") : null;
+}
+
+/** Every match of the search's terms in the text under `root`, in reading order. */
+export function findMatches(root: Node, query: string): Range[] {
+  const re = termsOf(query);
+  if (!re) return [];
+  const out: Range[] = [];
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    for (const m of (n.nodeValue ?? "").matchAll(re)) {
+      const r = document.createRange();
+      r.setStart(n, m.index);
+      r.setEnd(n, m.index + m[0].length);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** Paints the matches with the CSS Custom Highlight API, which leaves the
+ *  rendered Markdown's nodes alone; a browser without it shows the bar only. */
+function paint(all: Range[], current: Range | undefined) {
+  if (typeof CSS === "undefined" || !("highlights" in CSS) || typeof Highlight === "undefined") return;
+  CSS.highlights.set("dv-match", new Highlight(...all));
+  if (current) CSS.highlights.set("dv-current", new Highlight(current));
+  else CSS.highlights.delete("dv-current");
+}
+
 /** Where in the chain a document was written: node › task › attempt. */
 export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.split(".").at(-1), d.attempt ? `attempt ${d.attempt}` : ""].filter(Boolean).join(" › ") : "");
 
@@ -28,7 +61,7 @@ export const docBy = (d?: WorkItemDocument) => (d ? [d.node_id, d.hook_point?.sp
  *  GAP §2 #9): an indexed document opens in an editor and copies its path; a
  *  gate's artifact, read off the worktree with no index row or absolute path,
  *  shows only its text. A press on the scrim or Escape closes it. */
-export function DocViewer({ source, onClose }: { source: DocSource; onClose: () => void }) {
+export function DocViewer({ source, query, onClose }: { source: DocSource; query?: string; onClose: () => void }) {
   const [doc, setDoc] = useState<Viewed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -36,6 +69,9 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
   const [full, setFull] = useState(false);
   const ref = useModal<HTMLDivElement>(onClose);
   const titleId = useId();
+  const body = useRef<HTMLDivElement>(null);
+  const [matches, setMatches] = useState<Range[]>([]);
+  const [at, setAt] = useState(0);
   useEffect(() => {
     request<Viewed>(urlOf(source)).then((r) => (r.status === 200 ? setDoc(r.body) : setError(detailOf(r.body))));
     // The `by` line is display only: a new label must not read the document again.
@@ -46,6 +82,22 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
     const r = await request(`/documents/${encodeURIComponent(source.id)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
     setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
   };
+  // The matches of the search that opened it, found once the text is on the page.
+  useEffect(() => {
+    setMatches(doc && query && body.current ? findMatches(body.current, query) : []);
+    setAt(0);
+  }, [doc, query]);
+  // The current one is scrolled into the body with scrollTop: scrollIntoView
+  // would scroll the page behind the drawer too.
+  useEffect(() => {
+    paint(matches, matches[at]);
+    const el = body.current;
+    const rect = matches[at]?.getBoundingClientRect?.();
+    if (el && rect) el.scrollTop += rect.top - el.getBoundingClientRect().top - el.clientHeight / 3;
+  }, [matches, at]);
+  useEffect(() => () => paint([], undefined), []);
+  const step = (by: number) => setAt((a) => (a + by + matches.length) % matches.length);
+  const titleHit = !!(doc && query && termsOf(query)?.test(doc.title));
   const indexed = source.kind === "document";
   const editors = useEditors(indexed);
   const by = source.kind === "document" ? source.by : undefined;
@@ -67,8 +119,18 @@ export function DocViewer({ source, onClose }: { source: DocSource; onClose: () 
             </div>
           )}
         </header>
+        {query && doc && (
+          <div className="dv-find" role="group" aria-label="Search matches">
+            <Search size={14} aria-hidden />
+            <span className="dv-find-q">{query}</span>
+            <span className="dv-find-n" role="status">{matches.length ? `${at + 1} of ${matches.length}` : titleHit ? "matched in the title" : "no match in the text"}</span>
+            <IconButton label="Previous match" disabled={matches.length < 2} onClick={() => step(-1)}>↑</IconButton>
+            <IconButton label="Next match" disabled={matches.length < 2} onClick={() => step(1)}>↓</IconButton>
+            <span className="dv-find-from">from search</span>
+          </div>
+        )}
         {note && <p className="dv-note item-muted" role="status">{note}</p>}
-        <div className="dv-body">
+        <div ref={body} className="dv-body">
           {error ? <p className="item-error" role="alert">{error}</p> : !doc ? <p className="item-muted">Reading…</p> : (
             <>
               <Markdown text={docBody(doc.content, doc.title)} />
