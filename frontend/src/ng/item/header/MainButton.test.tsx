@@ -12,60 +12,74 @@ function Harness({ main = "pause", panel = ["escalate", "complete", "archive", "
 const menu = () => screen.getByRole("menu", { name: "Item actions" });
 
 describe("MainButton", () => {
-  it("is one button with ▾ and no separate toggle; Enter opens its menu on the main action, and Escape hands focus back with the menu shut", async () => {
+  it("runs the main action from its label, by a click, Enter or Space, without opening the menu", async () => {
+    const onMain = vi.fn();
+    render(<Harness onMain={onMain} />);
+    const label = screen.getByRole("button", { name: "Pause" });
+    label.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onMain).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+    label.focus();
+    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard(" ");
+    expect(onMain).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it.each(["{ArrowDown}", "{Enter}"])("opens the menu on the main action from ▾ with %s, and Escape hands focus back to ▾", async (key) => {
     render(<Harness />);
     await userEvent.tab();
     await userEvent.tab();
-    const main = screen.getByRole("button", { name: "Pause" });
-    expect(main).toHaveFocus();
-    expect(main).toHaveAttribute("aria-haspopup", "menu");
-    expect(screen.getAllByRole("button")).toHaveLength(2);
-    // Focus alone opens nothing: the menu would cover the button under the reader.
+    await userEvent.tab();
+    const toggle = screen.getByRole("button", { name: "More actions" });
+    expect(toggle).toHaveFocus();
+    // Focus alone opens nothing.
     expect(screen.queryByRole("menu")).toBeNull();
-    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard(key);
     expect(within(menu()).getAllByRole("menuitem").map((m) => m.textContent?.trim())).toEqual(["Pause", "Escalate…", "Mark complete…", "Archive", "Cancel…"]);
     await vi.waitFor(() => expect(within(menu()).getByRole("menuitem", { name: "Pause" })).toHaveFocus());
     await userEvent.keyboard("{ArrowDown}");
     expect(within(menu()).getByRole("menuitem", { name: /Escalate/ })).toHaveFocus();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(main).toHaveFocus();
+    expect(toggle).toHaveFocus();
   });
 
   it.each([
-    ["hover", async (b: HTMLElement) => userEvent.hover(b)],
-    ["a click", async (b: HTMLElement) => { b.dispatchEvent(new MouseEvent("click", { bubbles: true })); }],
-  ])("opens its menu on %s, laid over the button", async (_, open) => {
+    ["hovering the button", async () => userEvent.hover(screen.getByRole("button", { name: "Pause" }))],
+    ["a click on ▾", async () => void screen.getByRole("button", { name: "More actions" }).dispatchEvent(new MouseEvent("click", { bubbles: true }))],
+  ])("opens the menu on %s", async (_, open) => {
     render(<Harness />);
-    const main = screen.getByRole("button", { name: "Pause" });
-    await open(main);
+    await open();
     expect(await screen.findByRole("menu", { name: "Item actions" })).toBeInTheDocument();
-    expect(main).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "More actions" })).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("runs the main action from the menu's first row, a panel item from its row, and disables Archive until the item is done or cancelled", async () => {
+  it("runs the main action from the menu's first row, but not from its ▴ over ▾; a panel item from its row; Archive disabled until done or cancelled", async () => {
     const onItem = vi.fn();
     const onMain = vi.fn();
     const { unmount } = render(<Harness onItem={onItem} onMain={onMain} />);
-    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(within(menu()).getByRole("menuitem", { name: /Archive/ })).toBeDisabled();
+    await userEvent.click(menu().querySelector(".item-panel-caret")!);
+    expect(onMain).not.toHaveBeenCalled();
+    expect(menu()).toBeInTheDocument();
     await userEvent.click(within(menu()).getByRole("menuitem", { name: "Pause" }));
     expect(onMain).toHaveBeenCalledTimes(1);
-    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     await userEvent.click(within(menu()).getByRole("menuitem", { name: /Mark complete/ }));
     expect(onItem).toHaveBeenCalledWith("complete");
     unmount();
     render(<Harness main="archive" panel={["archive", "cancel"]} archivable />);
-    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(within(menu()).getAllByRole("menuitem").map((m) => m.textContent?.trim())).toEqual(["Archive", "Cancel…"]);
   });
 
-  it("is the action itself, with no menu, when the panel is off (done, archived)", async () => {
+  it("has no ▾ and no menu when the panel is off (done, archived)", async () => {
     const onMain = vi.fn();
     render(<Harness main="restore" panel={[]} onMain={onMain} />);
-    const main = screen.getByRole("button", { name: /Restore/ });
-    expect(main).not.toHaveAttribute("aria-haspopup");
-    await userEvent.click(main);
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /Restore/ }));
     expect(onMain).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).toBeNull();
   });

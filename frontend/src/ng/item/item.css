@@ -36,18 +36,20 @@
 .item-badge.is-ok { background: color-mix(in oklab, var(--ok) 9%, transparent); color: var(--ok); }
 .item-badge.is-muted { background: var(--surface-2); color: var(--text-sub); }
 .item-main-group { display: flex; align-items: center; gap: 2px; }
-/* One button, label and ▾; its menu lies over it at its width (prototype). */
-.item-main { display: flex; align-items: stretch; height: 28px; }
-.item-main-action { box-sizing: border-box; min-width: 118px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
+/* One bordered button: the label (the action) and ▾ (the menu); the menu lies over it at its width (prototype). */
+.item-main { display: flex; align-items: stretch; box-sizing: border-box; min-width: 118px; height: 28px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.item-main-action { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 10px; border: 0; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
 .item-main-label { flex: 1 1 auto; display: grid; text-align: left; white-space: nowrap; }
 .item-main-label > * { grid-area: 1 / 1; }
 .item-main-sizer { visibility: hidden; }
-.item-main-caret { flex: none; color: var(--text-muted); }
-.item-main-action:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); color: var(--text); }
-.item-main-action:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.item-main-toggle { flex: none; width: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+.item-main-action:is(:hover, :focus-visible), .item-main-toggle:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--line); color: var(--text); }
+.item-main-action:focus-visible, .item-main-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .item-main-action[aria-disabled="true"] { cursor: progress; color: var(--text-muted); }
 .item-panel { box-sizing: border-box; }
 .item-panel-main { background: var(--surface-2); }
+/* The ▴ covers the row's right end, over ▾, so a press there is not the action. */
+.item-panel-caret { display: inline-flex; align-self: stretch; align-items: center; margin: -6px -10px -6px auto; padding: 0 10px; color: var(--text-muted); cursor: default; }
 .item-panel-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .item-panel-item.is-warn:not(:disabled) { color: var(--warn); }
 .item-panel-item.is-bad:not(:disabled) { color: var(--bad); }
