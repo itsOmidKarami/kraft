@@ -80,6 +80,19 @@ describe("Auto-intake page", () => {
     expect(status()).toHaveTextContent(/^On$/);
   });
 
+  it("counts the next check from a live check frame, not the last read's clock", async () => {
+    const t0 = Date.parse("2026-10-01T10:00:00Z");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(t0);
+    vi.mocked(http.request).mockImplementation(((path: string) => (path.startsWith("/intake/checks") ? ok([{ id: 1, at: new Date(t0 - 60_000).toISOString(), ready: 0, started: [], skipped: [] }]) : ok({ repos: [] }))) as never);
+    mount();
+    const status = () => within(screen.getByRole("main")).getByRole("button", { pressed: true }).querySelector(".ink-status")!;
+    await waitFor(() => expect(status()).toHaveTextContent(/^On · next check in 4 min$/));
+    clock.mockReturnValue(t0 + 3 * 60_000);
+    act(() => onLiveFrame({ type: "intake_checked", payload: { id: 2, at: new Date(t0 + 3 * 60_000).toISOString(), ready: 0, started: [], skipped: [] } }));
+    expect(status()).toHaveTextContent(/^On · next check in 5 min$/);
+    clock.mockRestore();
+  });
+
   it("lists recent checks with each skip reason in its own words, and the empty state", async () => {
     mount();
     const list = await screen.findByRole("region", { name: "Recent checks" });

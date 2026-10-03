@@ -49,7 +49,9 @@ function Editor({ draft }: { draft: ConfigDraft }) {
   // A live `intake_checked` frame is the check, prepended; the refetch below is the fallback for a missed frame.
   useEffect(() => subscribeLive("intake_checked", (payload) => {
     const c = payload as Check;
-    if (c && typeof c === "object" && "ready" in c) setChecks((prev) => [c, ...(prev ?? []).filter((x) => x.id !== c.id)].slice(0, 20));
+    if (!c || typeof c !== "object" || !("ready" in c)) return;
+    setNow(Date.now());
+    setChecks((prev) => [c, ...(prev ?? []).filter((x) => x.id !== c.id)].slice(0, 20));
   }), []);
   useEffect(() => {
     let live = true;
