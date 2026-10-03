@@ -23,3 +23,21 @@ def test_a_comment_review_says_no_reply_agent_runs_in_a_sandbox_without_network(
     assert [e["payload"]["gate"] for e in events if e["type"] == "reply_agent_skipped"] == [
         "chain_review"
     ]
+
+
+@_REVIEW
+def test_no_quote_is_read_while_a_sandboxed_session_is_live(client, gated, monkeypatch):
+    """Host git does not read a worktree a sandboxed worker can still write:
+    the thread is filed, with no quote, and the quote is never attempted."""
+    monkeypatch.setattr("kraft.store.live_session_ids", lambda conn, wid: ["s1"])
+    monkeypatch.setattr(
+        "kraft.executor.stops._item_sandbox", lambda row, launch: {"kind": "docker"}
+    )
+
+    def never(*_a, **_kw):
+        raise AssertionError("quote_range ran while a sandboxed session was live")
+
+    monkeypatch.setattr("kraft.review.quote_range", never)
+    r = _new_thread(client, gated, file_path="calc.py", start_line=1, end_line=2)
+    assert r.status_code == 201, r.text
+    assert r.json()["quote"] is None

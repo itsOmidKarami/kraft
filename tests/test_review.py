@@ -195,5 +195,15 @@ def test_a_range_that_cannot_be_read_has_no_quote(tmp_path):
     repo, base, head = _quoting(tmp_path)
     assert review.quote_range(repo, base, head, "q.py", "new", 90, 91) is None
     assert review.quote_range(repo, base, head, "missing.py", "new", 1, 1) is None
-    # Never anything git could read as an option.
+    # Never anything git could read as an option: `git diff --output=x` writes x.
     assert review.quote_range(repo, base, "--output=x", "q.py", "new", 1, 1) is None
+    assert not (repo / "x").exists()
+
+
+def test_a_file_path_is_a_path_not_a_pathspec(tmp_path):
+    """`--file '*'` quoted whichever file the glob matched."""
+    repo, base, head = _quoting(tmp_path)
+    assert review.quote_range(repo, base, head, "*", "new", 1, 2) is None
+    # Across sides only the diff is read: as a pathspec, `*` read q.py's.
+    assert review.quote_range(repo, base, head, "*", "new", 2, 2, "old") is None
+    assert review.quote_range(repo, base, head, "q.*", "new", 2, 2, "old") is None

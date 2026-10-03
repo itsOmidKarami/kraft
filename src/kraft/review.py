@@ -347,7 +347,10 @@ def quote_range(
     if not (_SHA.fullmatch(base) and _SHA.fullmatch(head)):
         return None
     unentered = _sandbox.SUBMODULES_UNENTERED
-    diff = _config.git_read(worktree, "diff", unentered, base, head, "--", path, strip=False)
+    # A path, not a pathspec: `*` must not quote whatever file it matches.
+    diff = _config.git_read(
+        worktree, "--literal-pathspecs", "diff", unentered, base, head, "--", path, strip=False
+    )
     if diff is None:
         return None
     lines = _diff_lines(diff)

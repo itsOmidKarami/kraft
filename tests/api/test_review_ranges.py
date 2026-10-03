@@ -81,3 +81,14 @@ def test_a_suggestion_on_old_side_lines_is_refused(client, gated):
     tid = _new_thread(client, gated, side="old").json()["id"]
     assert client.patch(f"/api/threads/{tid}", json={"suggestion": fix}).status_code == 422
     assert _new_thread(client, gated, suggestion=fix).status_code == 201
+
+
+@_REVIEW
+def test_a_thread_on_a_path_outside_the_repo_is_refused(client, gated):
+    """Host git reads `file_path` to quote the range: it is a path in the
+    repository, as `PUT /viewed` takes one."""
+    for path in ("/etc/passwd", "../other/calc.py", "a/../../calc.py"):
+        r = _new_thread(client, gated, file_path=path)
+        assert r.status_code == 422, (path, r.text)
+        assert "file_path must be a path inside the repository" in r.text
+    assert client.get(f"/api/work-items/{gated}/threads").json() == []

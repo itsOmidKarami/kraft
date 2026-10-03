@@ -7,6 +7,7 @@ Human routes refuse a worker session outright: agents speak only through
 
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -66,6 +67,12 @@ class ThreadIn(BaseModel):
             raise ValueError("side, start_line and end_line are all set or all omitted")
         if self.start_line is None and (self.start_side is not None or self.quote is not None):
             raise ValueError("start_side and quote need a line range")
+        # A path in the repository, as `PUT /viewed` takes one: it is read by
+        # host git to quote the range.
+        if self.file_path is not None and (
+            self.file_path.startswith("/") or ".." in self.file_path.split("/")
+        ):
+            raise ValueError("file_path must be a path inside the repository")
         if self.start_line is not None:
             if self.file_path is None:
                 raise ValueError("a line range needs a file_path")
@@ -172,7 +179,7 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
     )
     if not anchor:
         raise HTTPException(409, "this work item has no commit to anchor a thread to")
-    quote = body.quote if body.quote is not None else _quote(st, row, body, anchor)
+    quote = body.quote if body.quote is not None else await _quote(st, row, body, anchor)
     tid = await st.db.write(
         lambda c: store.create_thread(
             c,
@@ -194,7 +201,7 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
     return _one(st, wid, tid)
 
 
-def _quote(st, row, body: ThreadIn, anchor: str) -> str | None:
+async def _quote(st, row, body: ThreadIn, anchor: str) -> str | None:
     """The range's lines, when the client sent none: the CLI and MCP draw no
     diff to quote from, and a thread with no quote reaches the agent as a bare
     line number (R10F-04). Best effort: None when the lines cannot be read,
@@ -210,7 +217,9 @@ def _quote(st, row, body: ThreadIn, anchor: str) -> str | None:
         )
     except RuntimeError:
         return None
-    quote = review_mod.quote_range(
+    # Off the event loop: two git calls on the worktree.
+    quote = await asyncio.to_thread(
+        review_mod.quote_range,
         worktree,
         row["base_ref"],
         anchor,
