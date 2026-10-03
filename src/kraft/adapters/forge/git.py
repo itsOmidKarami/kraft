@@ -5,6 +5,9 @@ which CLI talks to the remote.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import logging
 import os
 import subprocess
 from collections.abc import Collection, Mapping
@@ -13,6 +16,8 @@ from pathlib import Path
 from kraft.adapters.forge.models import ForgeError
 from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
 from kraft.worker import sandbox
+
+logger = logging.getLogger(__name__)
 
 
 class UnsafeWorktree(ForgeError):
@@ -153,16 +158,39 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
 #: the probe stopped proposing it for one still runs.
 WRITTEN_LOCKFILES = frozenset({"uv.lock"})
 
-#: In the worktree's own git dir (`git rev-parse --absolute-git-dir`): the
-#: untracked `WRITTEN_LOCKFILES` its setup command wrote, one per line. Only
-#: these are left out of a commit; a lockfile the agent made is its work.
+#: In the worktree's own git dir (`git rev-parse --absolute-git-dir`): a JSON
+#: object naming the untracked `WRITTEN_LOCKFILES` its setup command wrote,
+#: each with the sha256 of what the setup left in it. Only these, as the
+#: setup left them, are left out of a commit; a lockfile the agent made, or
+#: an edit the agent made to the setup's, is its work.
 SETUP_WROTE = "kraft-setup-wrote"
+
+#: What a package manager leaves at the top of a `node_modules` it installed:
+#: npm 7 and later, pnpm, Yarn 1 and Yarn 2+'s node-modules linker.
+_NODE_MODULES_MARKERS = (
+    ".package-lock.json",
+    ".modules.yaml",
+    ".yarn-integrity",
+    ".yarn-state.yml",
+)
 
 
 def is_environment(path: Path) -> bool:
-    """Whether untracked `path` is a directory a setup installs into: a
-    virtualenv (it holds `pyvenv.cfg`) or a `node_modules`."""
-    return path.name == "node_modules" or (path / "pyvenv.cfg").is_file()
+    """Whether untracked directory `path` is one a setup installs into: a
+    virtualenv (`pyvenv.cfg` beside its `python`) or a `node_modules` a
+    package manager made (its marker file inside, or a `package.json`
+    beside it). A directory that only has the name or a bare `pyvenv.cfg`
+    is something the agent wrote, such as a resolver's test fixture, and
+    is its work. `lexists`, not `exists`: a virtualenv's `python` is a link
+    to an interpreter the host may not have, when a sandbox made it."""
+    if path.name == "node_modules":
+        return (
+            any(os.path.lexists(path / m) for m in _NODE_MODULES_MARKERS)
+            or (path.parent / "package.json").is_file()
+        )
+    return (path / "pyvenv.cfg").is_file() and any(
+        os.path.lexists(path / p) for p in ("bin/python", "Scripts/python.exe")
+    )
 
 
 async def untracked_lockfiles(repo: Path) -> set[str]:
@@ -182,44 +210,111 @@ async def untracked_lockfiles(repo: Path) -> set[str]:
     }
 
 
+def _digest(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+async def lockfile_digests(repo: Path) -> dict[str, str | None]:
+    """`untracked_lockfiles`, each with the sha256 of its content now: what
+    `_prepare` reads before a setup runs, for `record_setup_writes`."""
+    return {p: _digest(repo / p) for p in await untracked_lockfiles(repo)}
+
+
 async def _setup_wrote_path(repo: Path) -> Path:
     return Path((await run_git(repo, ["git", "rev-parse", "--absolute-git-dir"])).strip()) / (
         SETUP_WROTE
     )
 
 
-async def setup_wrote(repo: Path) -> set[str]:
-    """What `record_setup_writes` recorded for this worktree."""
+async def setup_wrote(repo: Path) -> dict[str, str | None]:
+    """What `record_setup_writes` recorded for this worktree: each lockfile's
+    path, with the sha256 the setup left it at (None in a record written
+    before digests were kept, which counts as unchanged).
+
+    Read through the filter it was written with: only a `WRITTEN_LOCKFILES`
+    name. The file sits in a git dir a worker can write, so any other path
+    in it was never the setup's and is ignored, not left out of a commit.
+
+    A record that cannot be read or decoded counts as empty, and says so in
+    the log: never a failed task. The setup's lockfile then reads as the
+    agent's, and the sweep commits it, which a person can see and undo."""
     try:
-        return set((await _setup_wrote_path(repo)).read_text().split())
-    except (OSError, ForgeError):
-        return set()
+        path = await _setup_wrote_path(repo)
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return {}
+    except (OSError, ForgeError) as exc:
+        logger.warning("ignoring the setup record of %s: %s", repo, exc)
+        return {}
+    try:
+        text = raw.decode("utf-8")
+        # Before digests (1.5.0rc14): one path per line.
+        data = json.loads(text) if text.lstrip()[:1] in ("{", "[") else dict.fromkeys(text.split())
+    except ValueError as exc:  # UnicodeDecodeError and JSONDecodeError included
+        logger.warning("ignoring an unreadable setup record %s: %s", path, exc)
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("ignoring a setup record that is not an object: %s", path)
+        return {}
+    return {
+        p: d if isinstance(d, str) else None
+        for p, d in data.items()
+        if Path(p).name in WRITTEN_LOCKFILES
+    }
 
 
-async def record_setup_writes(repo: Path, before: set[str]) -> None:
-    """Record the lockfiles a setup command just wrote: untracked now and not
-    before it ran, plus those it wrote before that are still untracked. One
-    that was there before this setup and not recorded is the agent's."""
-    after = await untracked_lockfiles(repo)
-    wrote = (after - before) | (await setup_wrote(repo) & after)
+async def record_setup_writes(repo: Path, before: Mapping[str, str | None]) -> None:
+    """Record the lockfiles a setup command just wrote, with what it wrote in
+    them. `before` is `lockfile_digests` from before it ran. A lockfile is the
+    setup's when it was not there before, or was recorded as the setup's and
+    nobody has changed it since. One that was there before this setup and
+    not recorded, or that changed after the last setup recorded it, is the
+    agent's. Written whole or not at all (a temporary file, then a rename)."""
+    after = await lockfile_digests(repo)
+    prior = await setup_wrote(repo)
+    wrote = {
+        p: d
+        for p, d in after.items()
+        if p not in before or (p in prior and prior[p] in (None, before[p]))
+    }
     try:
-        (await _setup_wrote_path(repo)).write_text("".join(f"{p}\n" for p in sorted(wrote)))
+        target = await _setup_wrote_path(repo)
+        partial = target.with_name(f"{SETUP_WROTE}.partial")
+        partial.write_text(json.dumps(wrote, sort_keys=True), encoding="utf-8")
+        os.replace(partial, target)
     except (OSError, ForgeError):
         # Not a git checkout: nothing commits from it, so nothing to keep out.
         return
+
+
+async def setup_lockfiles(repo: Path) -> set[str]:
+    """The lockfiles this worktree's setup wrote that are still untracked and
+    still hold what the setup left in them: the ones no commit takes. One the
+    agent has since edited is its work, and is committed."""
+    wrote = await setup_wrote(repo)
+    if not wrote:
+        return set()
+    return {
+        p
+        for p in await untracked_lockfiles(repo)
+        if p in wrote and wrote[p] in (None, _digest(repo / p))
+    }
 
 
 async def environment_paths(repo: Path, base: str) -> list[str]:
     """Untracked paths that are an install, not work: a virtualenv or
     `node_modules` (`is_environment`) -- a setup's `.venv/` in a repo that
     never ignored it is a thousand files -- and a lockfile this worktree's
-    setup command wrote (`record_setup_writes`), which would otherwise land
-    in every work item's merge request. No merge request wants either. Only
-    a path git lists as untracked: one the repo tracks is the repo's own,
-    edits and all. Asked for as `normal`, since `status.showUntrackedFiles=
-    all` in a user's or the repo's config would list a directory's files one
-    by one instead."""
-    wrote = await setup_wrote(repo)
+    setup command wrote and nobody has changed since (`setup_lockfiles`),
+    which would otherwise land in every work item's merge request. No merge
+    request wants either. Only a path git lists as untracked: one the repo
+    tracks is the repo's own, edits and all. Asked for as `normal`, since
+    `status.showUntrackedFiles=all` in a user's or the repo's config would
+    list a directory's files one by one instead."""
+    wrote = await setup_lockfiles(repo)
     with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
             repo,

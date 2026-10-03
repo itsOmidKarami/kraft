@@ -64,4 +64,4 @@ async def test_the_setup_records_only_the_lockfile_it_wrote(tmp_path):
     entry = entry_of({"setup_command": "echo v1 > uv.lock && echo v2 >> agent/uv.lock"})
     for _ in range(2):  # every walk entry runs it again
         await kraft_builtins._prepare(repo, repo, entry)
-        assert await forge.setup_wrote(repo) == {"uv.lock"}
+        assert set(await forge.setup_wrote(repo)) == {"uv.lock"}

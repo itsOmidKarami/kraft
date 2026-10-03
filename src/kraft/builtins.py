@@ -976,7 +976,7 @@ async def _prepare(
         return await run_setup_command(
             worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout
         )
-    before = await git.untracked_lockfiles(worktree)
+    before = await git.lockfile_digests(worktree)
     said = await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout)
     await git.record_setup_writes(worktree, before)
     return said

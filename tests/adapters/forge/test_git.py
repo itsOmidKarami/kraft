@@ -458,11 +458,14 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("made", "marker"),
-    [(".venv", "pyvenv.cfg"), ("web/node_modules", "left-pad/index.js")],
+    ("made", "markers"),
+    [
+        (".venv", ("pyvenv.cfg", "bin/python")),
+        ("web/node_modules", (".package-lock.json", "left-pad/index.js")),
+    ],
     ids=["virtualenv", "node_modules"],
 )
-def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, marker):
+def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, markers):
     """A setup's `.venv/` or `node_modules/` in a repo that never ignored it
     is an install, not work: swept, it put 1,023 virtualenv files into one
     merge request. The agent's own file beside it still commits, and the
@@ -472,8 +475,9 @@ def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, marke
     (repo / "web" / "app.js").write_text("tracked\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "a web dir")
-    (repo / made / marker).parent.mkdir(parents=True)
-    (repo / made / marker).write_text("installed\n")
+    for marker in markers:
+        (repo / made / marker).parent.mkdir(parents=True, exist_ok=True)
+        (repo / made / marker).write_text("installed\n")
     (repo / "forgotten.py").write_text("never added\n")
 
     committed = asyncio.run(
@@ -491,8 +495,10 @@ def test_an_unignored_install_stays_out_when_git_lists_every_untracked_file(tmp_
     committed the virtualenv again."""
     repo = _repo_with_origin(tmp_path)
     _git(repo, "config", "status.showUntrackedFiles", "all")
-    (repo / ".venv" / "lib").mkdir(parents=True)
+    for d in ("lib", "bin"):
+        (repo / ".venv" / d).mkdir(parents=True)
     (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (repo / ".venv" / "bin" / "python").symlink_to("/nonexistent/python3")
     (repo / ".venv" / "lib" / "site.py").write_text("installed\n")
     (repo / "forgotten.py").write_text("never added\n")
 
@@ -515,7 +521,7 @@ def test_commit_stragglers_leaves_out_only_the_lockfile_the_setup_wrote(tmp_path
     (repo / "web" / "uv.lock").write_text("version = 1\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "two projects, web's locked")
-    before = asyncio.run(forge.untracked_lockfiles(repo))
+    before = asyncio.run(forge.lockfile_digests(repo))
     (repo / "uv.lock").write_text("by the setup\n")
     asyncio.run(forge.record_setup_writes(repo, before))
     (repo / "api" / "uv.lock").write_text("by the agent\n")

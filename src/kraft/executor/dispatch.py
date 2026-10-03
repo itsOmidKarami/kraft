@@ -1171,13 +1171,13 @@ async def _dispatch_task(
             mounts=_builtins.item_mounts(work_item_row),
             identity=_builtins.item_identity(db, work_item_row["id"]),
         )
-        # Said, not silent: a lockfile the setup command wrote stays out of the
-        # commit, and a person reading the item can see that it did.
-        dropped = sorted(
-            await _forge.setup_wrote(Path(worktree))
-            & await _forge.untracked_lockfiles(Path(worktree))
-        )
-        if dropped:
+        # Said, not silent: every path the commit left out -- a lockfile the
+        # setup command wrote, a virtualenv or `node_modules` -- is named, so
+        # a person reading the item can see it. Once, not after every task:
+        # only when the set differs from what the item's last such event
+        # named.
+        dropped = sorted(await _forge.environment_paths(Path(worktree), base))
+        if dropped and dropped != _last_left_out(db, work_item_row["id"]):
             await db.write(
                 lambda c: events.append(
                     c,
@@ -1202,6 +1202,18 @@ async def _dispatch_task(
             )
         )
     return status
+
+
+def _last_left_out(db, work_item_id: str) -> list[str] | None:
+    """The paths the item's newest `sweep_left_out` named, if any."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'sweep_left_out' "
+            "ORDER BY seq DESC LIMIT 1",
+            (work_item_id,),
+        ).fetchone()
+    )
+    return json.loads(row["payload"]).get("paths") if row is not None else None
 
 
 async def _launch_agent(
