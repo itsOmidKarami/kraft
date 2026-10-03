@@ -23,6 +23,8 @@ interface Row {
   section: "needs" | "items" | "docs" | "beads" | "goto";
   label: string;
   sub?: string;
+  /** Leads the sub and is the one part of it that shortens: a gate row's item title. */
+  subLead?: string;
   snippet?: string;
   /** What Enter does, in the footer. */
   note: string;
@@ -64,6 +66,7 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         id: `${section}:${i.id}`,
         section,
         label: `Review ${i.pending_gate}`,
+        subLead: i.title,
         sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
         icon: Diamond,
         note: `reviews ${i.title}`,
@@ -224,7 +227,12 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
                   <r.icon size={14} aria-hidden className={`ng-search-ico${r.icon === Diamond ? " is-gate" : ""}`} />
                   <span className="ng-search-main">
                     <span className="ng-search-title" title={r.label}><Marked text={r.label} query={query} /></span>
-                    {r.sub && <span className="ng-search-sub">{r.sub}</span>}
+                    {r.sub && (
+                      <span className="ng-search-sub">
+                        {r.subLead && <><span className="ng-search-sublead" data-allow-ellipsis title={r.subLead}><Marked text={r.subLead} query={query} /></span><span aria-hidden>&nbsp;·&nbsp;</span></>}
+                        <span className="ng-search-subrest">{r.sub}</span>
+                      </span>
+                    )}
                     {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
                   </span>
                   {r.tag && <span className="ng-search-tag">{r.tag}</span>}

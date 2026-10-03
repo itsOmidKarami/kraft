@@ -127,7 +127,10 @@ describe("SearchOverlay", () => {
     const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
     // Waiting at a gate, it is an action: review that gate.
     const gate = within(section("Needs you")).getByTitle("Review human_review").closest("[role=option]")!;
-    expect(gate).toHaveTextContent("Review human_reviewwi_gate · alpha");
+    expect(gate).toHaveTextContent("Review human_reviewGated work · wi_gate · alpha");
+    // The item's title is the part of the sub that shortens.
+    expect(gate.querySelector(".ng-search-sublead")).toHaveTextContent(/^Gated work$/);
+    expect(gate.querySelector(".ng-search-sublead")).toHaveAttribute("data-allow-ellipsis");
     expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
     const says = (row: string) => {
       const o = screen.getByTitle(row).closest("[role=option]")!;
