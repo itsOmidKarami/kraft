@@ -22,6 +22,12 @@ type Handlers = { reload: () => void; onSettings: () => void; onRunLog: () => vo
 const show = (over: Parameters<typeof detail>[0] = {}, handlers: Partial<Handlers> = {}) =>
   inShell(<ItemHeader item={detail(over)} reload={handlers.reload ?? (() => {})} onSettings={handlers.onSettings ?? (() => {})} onRunLog={handlers.onRunLog ?? (() => {})} onRaise={handlers.onRaise} onGate={handlers.onGate} onAnswer={handlers.onAnswer} />);
 
+/** The main button opens its menu; the main action is the menu's first row. */
+async function pressMain(name: RegExp) {
+  await userEvent.click(screen.getByRole("button", { name }));
+  await userEvent.click(within(screen.getByRole("menu", { name: "Item actions" })).getByRole("menuitem", { name }));
+}
+
 describe("ItemHeader", () => {
   it("counts the others that need you, never this item, and hides at zero", () => {
     useStore.setState({ workItems: { w1: item({ id: "w1", display_status: "needs_you" }), a: item({ id: "a", display_status: "needs_you" }), b: item({ id: "b", display_status: "needs_you" }), c: item({ id: "c", display_status: "running" }) } });
@@ -65,7 +71,7 @@ describe("ItemHeader", () => {
     const reload = vi.fn();
     show({ display_status: "failed", stop: { kind: "failed", node: "merge_request", task: "merge_request.open.open_draft", attempt: 3, resume_at: null, reason: "403" } }, { reload });
     expect(screen.getByText("FAILED")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    await pressMain(/Retry/);
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "merge_request.open.open_draft" } }]);
   });
@@ -77,7 +83,7 @@ describe("ItemHeader", () => {
     expect(screen.getByText("NOT STARTED")).toBeInTheDocument();
     expect(screen.queryByText("PAUSED")).toBeNull();
     expect(screen.queryByRole("button", { name: /Resume/ })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+    await pressMain(/^Start$/);
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(writes(calls)).toEqual([{ method: "POST", path: "/work-items/w1/resume", body: { steer: null } }]);
   });
@@ -97,7 +103,7 @@ describe("ItemHeader", () => {
       const calls = stubFetch(DRAFT);
       const reload = mount();
       await screen.findByText("DRAFT · 1 CHANGE");
-      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await pressMain(/^Start$/);
       const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
       expect(sends(calls)).toEqual([]);
       await userEvent.click(within(d).getByRole("button", { name: "Apply and start" }));
@@ -110,7 +116,7 @@ describe("ItemHeader", () => {
       const calls = stubFetch(DRAFT);
       mount();
       await screen.findByText("DRAFT · 1 CHANGE");
-      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await pressMain(/^Start$/);
       await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
       await waitFor(() => expect(sends(calls)).toEqual(["POST /work-items/w1/resume"]));
     });
@@ -129,7 +135,7 @@ describe("ItemHeader", () => {
       stubFetch(DRAFT);
       mount();
       await screen.findByText("DRAFT · 1 CHANGE");
-      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await pressMain(/^Start$/);
       const d = await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" });
       expect(within(d).getByRole("button", { name: "Apply and start" })).toHaveFocus();
     });
@@ -146,7 +152,7 @@ describe("ItemHeader", () => {
       mount();
       await screen.findByText("DRAFT · 1 CHANGE");
       const startButton = screen.getByRole("button", { name: /^Start$/ });
-      await userEvent.click(startButton);
+      await pressMain(/^Start$/);
       await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
       await waitFor(() => expect(startButton).toHaveAttribute("aria-disabled", "true"));
       expect(startButton).not.toBeDisabled();
@@ -171,7 +177,7 @@ describe("ItemHeader", () => {
       expect(screen.queryByText(/DRAFT ·/)).toBeNull();
       // Another tab saves a draft; this page has not read it.
       answers["GET /work-items/w1/draft"] = answer([ov("implementation", undefined, { budget_usd: 2 })]);
-      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await pressMain(/^Start$/);
       expect(await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" })).toBeInTheDocument();
       expect(sends(calls)).toEqual([]);
     });
@@ -180,7 +186,7 @@ describe("ItemHeader", () => {
       const calls = stubFetch(DRAFT);
       mount();
       await screen.findByText("DRAFT · 1 CHANGE");
-      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      await pressMain(/^Start$/);
       await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Back to editing" }));
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(sends(calls)).toEqual([]);
@@ -190,7 +196,7 @@ describe("ItemHeader", () => {
   it("asks before pausing, then pauses", async () => {
     const calls = stubFetch(WRITES);
     show();
-    await userEvent.click(screen.getByRole("button", { name: /^Pause$/ }));
+    await pressMain(/^Pause$/);
     const card = screen.getByRole("dialog", { name: "Pause this item?" });
     expect(writes(calls)).toEqual([]);
     await userEvent.click(within(card).getByRole("button", { name: "Pause now" }));

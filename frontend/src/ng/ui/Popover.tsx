@@ -22,10 +22,10 @@ export const firstFocusable = (root: HTMLElement | null): HTMLElement | null =>
  *    in a dialog: closing it on Tab would lose what was typed, and leaving it
  *    open would send focus to the top of the page;
  *  - Escape hands focus back to what had it when it opened, unless `onClose` moved it elsewhere. */
-export function Popover({ anchor, open, onClose, children, role, label, focusIn = true, dirty = false, notch = false }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean; dirty?: boolean; notch?: boolean }) {
+export function Popover({ anchor, open, onClose, children, role, label, focusIn = true, dirty = false, notch = false, over = false }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; role?: string; label?: string; focusIn?: boolean; dirty?: boolean; notch?: boolean; over?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; side: "below" | "above"; align: "start" | "end" } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; side: "below" | "above"; align: "start" | "end"; width?: number } | null>(null);
   const placed = pos !== null;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -35,10 +35,12 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
     const a = anchor.current.getBoundingClientRect();
     const w = ref.current.offsetWidth, h = ref.current.offsetHeight;
     // Above the anchor when it would run off the bottom (a pane footer's card).
+    // `over`: on top of the anchor at its width (a button's own menu).
+    if (over) return setPos({ top: a.top, left: a.left, side: "below", align: "start", width: a.width });
     const above = a.bottom + 4 + h > window.innerHeight - 8 && a.top - 4 - h >= 8;
     const end = a.left + w > window.innerWidth - 8;
     setPos({ top: above ? a.top - 4 - h : a.bottom + 4, left: end ? Math.max(8, a.right - w) : a.left, side: above ? "above" : "below", align: end ? "end" : "start" });
-  }, [open, anchor]);
+  }, [open, anchor, over]);
 
   // What had focus as it opened: where Escape hands it back. Read before Menu
   // moves focus in (its effect runs after this); a field inside that took it
@@ -123,7 +125,7 @@ export function Popover({ anchor, open, onClose, children, role, label, focusIn 
   // focus in before the placed frame. That frame comes before the first paint;
   // until then nothing in it takes a pointer.
   return createPortal(
-    <div ref={ref} role={role} aria-label={label} className="popover" data-notch={notch || undefined} data-side={pos?.side} data-align={pos?.align} style={pos ? { top: pos.top, left: pos.left } : { opacity: 0, pointerEvents: "none" }} onKeyDown={onItemKey}>
+    <div ref={ref} role={role} aria-label={label} className="popover" data-notch={notch || undefined} data-side={pos?.side} data-align={pos?.align} style={pos ? { top: pos.top, left: pos.left, ...(pos.width !== undefined && { width: pos.width, minWidth: 0, boxSizing: "border-box" as const }) } : { opacity: 0, pointerEvents: "none" }} onKeyDown={onItemKey}>
       {children}
     </div>,
     document.body,

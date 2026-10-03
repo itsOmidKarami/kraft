@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Archive, ArchiveRestore, ChevronDown, CircleAlert, CircleCheck, MessageSquare, Pause, Play, RotateCcw, Siren, X } from "../../icons";
+import { Archive, ArchiveRestore, ChevronDown, ChevronUp, CircleAlert, CircleCheck, MessageSquare, Pause, Play, RotateCcw, Siren, X } from "../../icons";
 import { Popover } from "../../ui/Popover";
 import { MAIN_LABEL, type Main, type PanelItem } from "../status";
 
@@ -23,42 +23,39 @@ type Props = {
   children?: ReactNode;
 };
 
-/** The main button and its panel (Decisions §1, §14): the action, and a ▾
- *  toggle whose panel opens on hover of the group, on the toggle's focus, and
- *  on click, Enter, Space or ↓ there. Escape closes it and focus stays on the
- *  toggle, so nothing here is reachable by hover alone. */
-export function MainButton({ main, panel, archivable, busy, onMain, onItem, groupRef, children }: Props) {
+/** The main button (Decisions §1, §14): one button, its label and a ▾. With
+ *  a panel, hovering it or pressing it opens a menu over it at its width, the
+ *  main action first (▴) and the panel's items under it; Enter, Space or ↓
+ *  open it from the keyboard, on the main action. Escape closes it and focus
+ *  goes back to the button, so nothing here is reachable by hover alone.
+ *  Without a panel (done, archived) the button is the action. */
+export function MainButton({ main, panel: all, archivable, busy, onMain, onItem, groupRef, children }: Props) {
+  // The main action is the menu's first row; a panel item that is the same action would repeat it.
+  const panel = all.filter((it) => it !== main);
   const [open, setOpen] = useState(false);
-  const toggle = useRef<HTMLButtonElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const leave = useRef<ReturnType<typeof setTimeout> | null>(null);
   const list = useRef<HTMLDivElement>(null);
-  // Focus handed back to the toggle on Escape must not reopen the panel.
-  const quiet = useRef(false);
   const focusFirst = useRef(false);
   useEffect(() => {
     // A frame later: the popover is hidden until it has measured its place, and a hidden element takes no focus.
-    if (open && focusFirst.current) requestAnimationFrame(() => refs.current[live[0]]?.focus());
+    if (open && focusFirst.current) requestAnimationFrame(() => refs.current[0]?.focus());
     focusFirst.current = false;
-    // Only when the panel opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  const live = panel.flatMap((it, i) => (it === "archive" && !archivable ? [] : [i]));
   const close = useCallback(() => setOpen(false), []);
   const Icon = MAIN_ICON[main];
+  const menu = panel.length > 0;
+  const act = () => !busy && onMain();
 
-  const onToggleKey = (e: KeyboardEvent) => {
-    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      if (open) refs.current[live[0]]?.focus();
-      else {
-        focusFirst.current = true;
-        setOpen(true);
-      }
-    }
+  const onKey = (e: KeyboardEvent) => {
+    if (!menu || !(e.key === "ArrowDown" || e.key === "Enter" || e.key === " ")) return;
+    e.preventDefault();
+    focusFirst.current = true;
+    setOpen(true);
   };
   const hover = (on: boolean) => {
-    if (!panel.length) return;
+    if (!menu) return;
     if (leave.current) clearTimeout(leave.current);
     if (on) setOpen(true);
     else leave.current = setTimeout(close, 160);
@@ -68,41 +65,44 @@ export function MainButton({ main, panel, archivable, busy, onMain, onItem, grou
     <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
       {/* aria-disabled, not disabled, while busy: a browser takes focus off a button it
           disables, and the focus of Start, Apply and start or Resume fell to the page (R10b-04). */}
-      <button type="button" className={`item-main-action is-${main}`} onClick={() => !busy && onMain()} aria-disabled={busy || undefined}>
-        <Icon size={13} aria-hidden /> {MAIN_LABEL[main]}
+      <button
+        ref={button}
+        type="button"
+        className={`item-main-action is-${main}`}
+        aria-disabled={busy || undefined}
+        {...(menu && { "aria-haspopup": "menu" as const, "aria-expanded": open })}
+        onClick={() => (menu ? setOpen(true) : act())}
+        onKeyDown={onKey}
+      >
+        <Icon size={13} aria-hidden />
+        {/* Every row's label in one cell, only the main one shown: the button is as wide as its widest row, so the menu over it fits at its width. */}
+        <span className="item-main-label">
+          <span>{MAIN_LABEL[main]}</span>
+          {panel.map((it) => <span key={it} className="item-main-sizer" aria-hidden>{ITEM[it].label}</span>)}
+        </span>
+        {menu && <ChevronDown size={12} aria-hidden className="item-main-caret" />}
       </button>
-      {panel.length > 0 && (
-        <button
-          ref={toggle}
-          type="button"
-          className="item-main-toggle"
-          aria-label="More actions"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onFocus={() => (quiet.current ? (quiet.current = false) : setOpen(true))}
-          onClick={() => setOpen(true)}
-          onKeyDown={onToggleKey}
-        >
-          <ChevronDown size={12} aria-hidden />
-        </button>
-      )}
-      <Popover anchor={groupRef} open={open && panel.length > 0} onClose={() => {
+      <Popover anchor={button} over open={open && menu} onClose={() => {
         close();
-        if (list.current?.contains(document.activeElement)) { quiet.current = true; toggle.current?.focus(); }
+        if (list.current?.contains(document.activeElement)) button.current?.focus();
       }} role="menu" label="Item actions" focusIn={false}>
-        <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)} style={{ width: groupRef.current?.offsetWidth }}>
+        <div ref={list} className="menu item-panel" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+          <button ref={(el) => void (refs.current[0] = el)} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={`menu-item item-panel-item item-panel-main is-${main}`} onClick={() => { close(); button.current?.focus(); act(); }}>
+            <Icon size={13} aria-hidden /> <span className="item-main-label">{MAIN_LABEL[main]}</span>
+            <ChevronUp size={12} aria-hidden className="item-main-caret" />
+          </button>
           {panel.map((it, i) => {
             const { label, icon: I, tone } = ITEM[it];
             return (
               <button
                 key={it}
-                ref={(el) => void (refs.current[i] = el)}
+                ref={(el) => void (refs.current[i + 1] = el)}
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
                 disabled={it === "archive" && !archivable}
                 className={`menu-item item-panel-item${tone ? ` is-${tone}` : ""}`}
-                onClick={() => { close(); onItem(it); }}
+                onClick={() => { close(); button.current?.focus(); onItem(it); }}
               >
                 <I size={13} aria-hidden /> {label}
               </button>
