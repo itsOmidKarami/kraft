@@ -105,22 +105,34 @@ def _render_created(result: dict) -> str:
     )
 
 
+async def _gate_of(ns: argparse.Namespace) -> str:
+    """The gate `--gate` names, else the one pending, which the summary line
+    names: resolved here rather than in the client, the same one read."""
+    if ns.gate:
+        return ns.gate
+    return await client.actions._pending_gate_of(client.context._forbid_self_action(ns.id))
+
+
 def _cmd_approve(ns: argparse.Namespace) -> None:
-    common.emit(
-        asyncio.run(client.approve_gate(ns.gate, ns.id, ns.digest)), common._render_action, ns.json
-    )
+    async def go():
+        gate = await _gate_of(ns)
+        return gate, await client.approve_gate(gate, ns.id, ns.digest)
+
+    gate, result = asyncio.run(go())
+    common.emit(result, common.item_action(f"approved {gate} on {{id}}"), ns.json)
 
 
 def _cmd_reject(ns: argparse.Namespace) -> None:
-    common.emit(
-        asyncio.run(client.reject_gate(ns.note, ns.gate, ns.id, ns.node)),
-        common._render_action,
-        ns.json,
-    )
+    async def go():
+        gate = await _gate_of(ns)
+        return gate, await client.reject_gate(ns.note, gate, ns.id, ns.node)
+
+    gate, result = asyncio.run(go())
+    common.emit(result, common.item_action(f"rejected {gate} on {{id}}"), ns.json)
 
 
 def _cmd_pause(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.pause(ns.id)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.pause(ns.id)), common.item_action("paused {id}"), ns.json)
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -147,7 +159,7 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
             "abandon deletes the worktree and the item's branch: uncommitted work and "
             f"commits you never pushed are lost. {keep} To go ahead, pass --yes"
         )
-    common.emit(asyncio.run(client.abandon(ns.id)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.abandon(ns.id)), common.item_action("abandoned {id}"), ns.json)
 
 
 def _cmd_resume(ns: argparse.Namespace) -> None:
@@ -159,7 +171,7 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
         steers[path] = text
     common.emit(
         asyncio.run(client.resume(ns.steer, ns.id, steers=steers or None)),
-        common._render_action,
+        common.item_action("resumed {id}"),
         ns.json,
     )
 
@@ -167,31 +179,49 @@ def _cmd_resume(ns: argparse.Namespace) -> None:
 def _cmd_retry(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
-        common._render_action,
+        common.item_action("retried {id}"),
         ns.json,
     )
 
 
 def _cmd_raise_budget(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.raise_budget(ns.usd, ns.id)), common._render_action, ns.json)
+    cap = "no cap" if ns.usd is None else f"${ns.usd:g}"
+    common.emit(
+        asyncio.run(client.raise_budget(ns.usd, ns.id)),
+        common.item_action(f"raised the cap on {{id}} to {cap} and retried it"),
+        ns.json,
+    )
 
 
 def _cmd_skip(ns: argparse.Namespace) -> None:
     common.emit(
-        asyncio.run(client.skip(ns.note, ns.id, path=ns.path)), common._render_action, ns.json
+        asyncio.run(client.skip(ns.note, ns.id, path=ns.path)),
+        common.item_action(f"skipped {ns.path} on {{id}}" if ns.path else "skipped on {id}"),
+        ns.json,
     )
 
 
 def _cmd_complete(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.complete(ns.reason, ns.id, close_beads=ns.close_beads)),
-        common._render_action,
+        common.item_action(
+            "marked {id} complete" + ("; its beads are closed" if ns.close_beads else ""),
+            status=False,
+        ),
         ns.json,
     )
 
 
 def _cmd_cancel(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.cancel(ns.reason, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.cancel(ns.reason, ns.id)),
+        common.item_action(
+            "cancelled {id}; its worktree and branch stay (kraft item abandon {id} --yes "
+            "deletes them)",
+            status=False,
+        ),
+        ns.json,
+    )
 
 
 def _cmd_progress(ns: argparse.Namespace) -> None:
@@ -319,7 +349,7 @@ def _cmd_review(ns: argparse.Namespace) -> None:
         print(
             f"request-changes -> {result['target']} ({result['target_reason']}), {result['action']}"
         )
-    common.emit(result, common._render_action, ns.json)
+    common.emit(result, common.item_action(f"sent your review ({ns.outcome}) on {{id}}"), ns.json)
 
 
 def _cmd_set_policy(ns: argparse.Namespace) -> None:

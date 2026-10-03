@@ -118,3 +118,110 @@ def test_item_create_passes_auto_gate(monkeypatch, flag, auto_gate):
     monkeypatch.setattr("kraft.client.create_work_item", fake_create)
     cli.main(["item", "create", "t", "--repo", "/r", *flag])
     assert seen["auto_gate"] is auto_gate
+
+
+#: A whole row, as the gate and lifecycle routes hand one back: its frozen
+#: chain alone ran a real `kraft item approve` to 30 KB (R7a-05).
+_ROW = {
+    "id": "w1",
+    "status": "active",
+    "current_node_id": "spec_approval",
+    "chain_definition": "{}",
+    "materialized_chain": "x" * 30_000,
+}
+
+
+def test_approve_prints_one_line_naming_the_pending_gate(monkeypatch, capsys):
+    """No `--gate`: the line names the gate that was pending, and `--json`
+    still prints the whole row."""
+    from kraft.client import transport
+
+    async def get(path, **_):
+        return {"id": "w1", "pending_gate": "spec_approval"}
+
+    async def act(path, payload=None):
+        assert path == "/work-items/w1/gates/spec_approval/approve"
+        return dict(_ROW)
+
+    monkeypatch.setattr(transport, "_get", get)
+    monkeypatch.setattr(transport, "_act", act)
+    cli.main(["item", "approve", "w1"])
+    assert capsys.readouterr().out == "approved spec_approval on w1; the item is now running\n"
+    cli.main(["item", "approve", "w1", "--json"])
+    assert json.loads(capsys.readouterr().out) == _ROW
+
+
+@pytest.mark.parametrize(
+    ("argv", "fn", "said"),
+    [
+        (
+            ["item", "reject", "w1", "--gate", "plan_approval", "--note", "no"],
+            "reject_gate",
+            "rejected plan_approval on w1; the item is now running",
+        ),
+        (["item", "resume", "w1"], "resume", "resumed w1; the item is now running"),
+        (["item", "retry", "w1"], "retry", "retried w1; the item is now running"),
+        (
+            ["item", "raise-budget", "w1", "--usd", "2.5"],
+            "raise_budget",
+            "raised the cap on w1 to $2.5 and retried it; the item is now running",
+        ),
+        (["item", "skip", "w1"], "skip", "skipped on w1; the item is now running"),
+        (
+            ["item", "skip", "w1", "--path", "verify.main"],
+            "skip",
+            "skipped verify.main on w1; the item is now running",
+        ),
+        (["item", "complete", "w1", "--reason", "done"], "complete", "marked w1 complete"),
+        (
+            ["item", "cancel", "w1", "--reason", "dropped"],
+            "cancel",
+            "cancelled w1; its worktree and branch stay (kraft item abandon w1 --yes deletes them)",
+        ),
+        (
+            ["item", "review", "w1", "approve"],
+            "submit_review",
+            "sent your review (approve) on w1; the item is now running",
+        ),
+    ],
+    ids=[
+        "reject",
+        "resume",
+        "retry",
+        "raise-budget",
+        "skip",
+        "skip-path",
+        "complete",
+        "cancel",
+        "review",
+    ],
+)
+def test_a_verb_answered_with_the_whole_row_prints_one_line(monkeypatch, capsys, argv, fn, said):
+    async def fake(*_a, **_kw):
+        return dict(_ROW)
+
+    monkeypatch.setattr(cli.item.client, fn, fake)
+    cli.main(argv)
+    assert capsys.readouterr().out == said + "\n"
+
+
+def test_a_stopped_item_says_where_to_read_why(monkeypatch, capsys):
+    async def fake(*_a, **_kw):
+        return {**_ROW, "status": "needs_human"}
+
+    monkeypatch.setattr(cli.item.client, "retry", fake)
+    cli.main(["item", "retry", "w1"])
+    out = capsys.readouterr().out
+    assert out == "retried w1; the item is now stopped for a person: kraft view show w1 says why\n"
+
+
+def test_a_small_answer_still_reads_as_its_fields(monkeypatch, capsys):
+    """resume's usual answer is a handful of keys, not a row."""
+
+    async def fake(*_a, **_kw):
+        return {"id": "w1", "node_id": "spec", "steer": None, "steered": []}
+
+    monkeypatch.setattr(cli.item.client, "resume", fake)
+    cli.main(["item", "resume", "w1"])
+    out = capsys.readouterr().out
+    assert "node_id  spec" in out and "resumed" not in out
