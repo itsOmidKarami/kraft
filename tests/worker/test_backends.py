@@ -655,7 +655,7 @@ async def test_a_setup_command_under_network_uses_the_install_list_not_runtime(
             answers.append(s.makefile("rb").read())
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+    monkeypatch.setattr(kraft_builtins, "_run_setup", run)
 
     await kraft_builtins.run_setup_command(
         worktree,
@@ -685,7 +685,7 @@ async def test_a_setup_command_under_network_without_a_channel_or_route_never_ru
     else:
         remote.route = {}
     ran = []
-    monkeypatch.setattr(kraft_builtins.subprocess, "run", lambda *a, **kw: ran.append(a))
+    monkeypatch.setattr(kraft_builtins, "_run_setup", lambda *a, **kw: ran.append(a))
 
     with pytest.raises(RuntimeError, match="cannot run: .*egress"):
         await kraft_builtins.run_setup_command(

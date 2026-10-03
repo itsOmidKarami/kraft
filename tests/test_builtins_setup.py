@@ -65,3 +65,36 @@ async def test_the_setup_records_only_the_lockfile_it_wrote(tmp_path):
     for _ in range(2):  # every walk entry runs it again
         await kraft_builtins._prepare(repo, repo, entry)
         assert set(await forge.setup_wrote(repo)) == {"uv.lock"}
+
+
+async def test_a_shutdown_ends_a_running_setup_and_everything_it_started(tmp_path):
+    """A setup command outlived `kraft admin stop`, and the next server ran
+    the same setup in the same worktree beside it: two `npm ci` runs can
+    corrupt a tree. Shutdown ends its whole process group, children too."""
+    import asyncio
+    import os
+
+    child = tmp_path / "child.pid"
+    setup = f"sleep 20 & echo $! > {child}; wait"
+    running = asyncio.create_task(
+        kraft_builtins.run_setup_command(tmp_path, tmp_path, entry_of({"setup_command": setup}))
+    )
+    for _ in range(200):
+        if child.exists() and child.read_text().strip():
+            break
+        await asyncio.sleep(0.05)
+    pid = int(child.read_text())
+
+    kraft_builtins.end_running_setups()
+
+    with pytest.raises(RuntimeError, match="setup command failed"):
+        await asyncio.wait_for(running, 5)
+    for _ in range(100):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        os.kill(pid, 9)
+        raise AssertionError("the setup's own child outlived the shutdown")

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import uuid
 from collections.abc import Mapping
@@ -921,7 +922,7 @@ async def run_setup_command(
     oom = None
     try:
         done = await asyncio.to_thread(
-            subprocess.run,
+            _run_setup,
             **run,
             # A managed credential's value is the egress proxy's alone.
             env={k: v for k, v in client_env.items() if k not in withheld},
@@ -957,6 +958,37 @@ async def run_setup_command(
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")
     return f"$ {cmd}\n{done.stdout}{done.stderr}"
+
+
+#: The process groups of the setup commands running now, by leader pid.
+_RUNNING_SETUPS: set[int] = set()
+
+
+def _run_setup(args, *, capture_output: bool = False, **kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run` for a setup command, run as the leader of its own
+    process group, which `end_running_setups` can end with everything it
+    started. The seam a test replaces to see or stub the setup's spawn."""
+    if capture_output:
+        kwargs |= {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    with subprocess.Popen(args, stdin=subprocess.DEVNULL, start_new_session=True, **kwargs) as proc:
+        _RUNNING_SETUPS.add(proc.pid)
+        try:
+            out, err = proc.communicate()
+        finally:
+            _RUNNING_SETUPS.discard(proc.pid)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def end_running_setups() -> None:
+    """End every setup command still running, its children included: the
+    server is shutting down. One left running outlived `kraft admin stop`
+    and ran beside the next server's own run of the same setup in the same
+    worktree, where two `npm ci` or `pip install` runs can corrupt it."""
+    for pid in list(_RUNNING_SETUPS):
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 async def _prepare(

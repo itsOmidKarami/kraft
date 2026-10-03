@@ -20,6 +20,7 @@ from kraft import (
     waits,
 )
 from kraft import auth as auth_mod
+from kraft import builtins as _builtins
 from kraft import config as config_mod
 from kraft import intake as intake_mod
 from kraft import notify as notify_mod
@@ -346,6 +347,9 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(app.state.mr_poller_task, return_exceptions=True)
         app.state.apply_task.cancel()
         await asyncio.gather(app.state.apply_task, return_exceptions=True)
+        # Before the walks are cancelled: a setup command runs in a thread
+        # no cancel reaches, and would outlive this server.
+        _builtins.end_running_setups()
         tasks = list(app.state.tasks.values())
         for task in tasks:
             task.cancel()
