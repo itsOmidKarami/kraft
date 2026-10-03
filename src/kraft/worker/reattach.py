@@ -28,9 +28,9 @@ from kraft.adapters.subprocess import (
 from kraft.config import ConfigError
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
-from kraft.executor.dispatch import ESCALATION_HOOK
+from kraft.executor.dispatch import ESCALATION_HOOK, sweep_stragglers
 from kraft.store._common import _now, _span_ms
-from kraft.templates.models import AgentTask
+from kraft.templates.models import AgentTask, TaskScope
 from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
 from kraft.worker import sandbox as _sandbox
@@ -351,6 +351,50 @@ def _evidenced_status(result_path, *, is_agent: bool) -> str | None:
     return status
 
 
+async def _sweep_after(db, run_dirs, row, launch_factory) -> None:
+    """The straggler sweep `_dispatch_task` runs after an agent task
+    (`dispatch.sweep_stragglers`), for a session a restart re-adopted or
+    resolved from what it left on disk. Only dispatch ran it, so an agent
+    that finished across a restart had its uncommitted work left untracked,
+    and the item went on, or completed, without it (R11E-03).
+
+    Only for one of the chain's own agent tasks: the escalation hook is not
+    a node task and is not swept after its normal launch either. A fanned-out
+    task in a workspace ran in a checkout its row does not name, so the next
+    sweep, or `assert_clean` before the merge request, names its work."""
+    item = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
+        ).fetchone()
+    )
+    snapshot = store.materialized_chain_of(item) if item is not None else None
+    if snapshot is None or item["status"] in store.ENDED:
+        return
+    task = next(
+        (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
+        None,
+    )
+    if task is None or not isinstance(task.task, AgentTask):
+        return
+    if task.task.scope is TaskScope.EACH_REPOSITORY and snapshot.target.kind == "workspace":
+        return
+    worktree = run_dirs.worktrees / item["id"]
+    if not worktree.is_dir():
+        return
+    try:
+        await sweep_stragglers(
+            db,
+            item,
+            worktree,
+            node_id=row["node_id"],
+            task_path=row["hook_point"],
+            launch=launch_factory(item["repo"]) if launch_factory is not None else None,
+            sandboxed=row["sandbox"] is not None,
+        )
+    except Exception:  # noqa: BLE001 -- never at the cost of the adoption itself
+        logger.exception("straggler sweep after re-adopted session %s failed", row["id"])
+
+
 async def _adopt(
     db,
     session_id: str,
@@ -479,6 +523,7 @@ async def _guarded_adopt(
     watching it: no log, no needs_human, and the task itself leaks in
     `app.state.tasks` forever, since nothing keyed by session_id ever pops it
     (Kraft-mjwz)."""
+    adopted = False
     try:
         await _adopt(
             db,
@@ -490,6 +535,7 @@ async def _guarded_adopt(
             bd_cwd=bd_cwd,
             on_approve=on_approve,
         )
+        adopted = True
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -512,6 +558,15 @@ async def _guarded_adopt(
         await asyncio.shield(_close_sandbox(sandbox, session_id, egress=egress))
         if run_dirs is not None:
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
+    # After the sandbox is closed, as dispatch sweeps once its launch is over;
+    # before the resumed walk, which awaits this task, moves past the node.
+    if adopted and run_dirs is not None:
+        row = db.read(
+            lambda c: c.execute(
+                "SELECT * FROM worker_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        )
+        await _sweep_after(db, run_dirs, row, launch_factory)
 
 
 async def _oom_killed(kind: str | None, session_id: str) -> _backends.OomKill | None:
@@ -744,6 +799,7 @@ async def reattach(
                 db, sid, Path(r["log_path"]), Path(r["result_path"]), status, _reader_of(r)
             )
             summary.resolved_from_file.append(sid)
+            await _sweep_after(db, run_dirs, r, launch_factory)
             if r["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
                 # Deferred: starting this task now would let its own
                 # claim_for_run race the closing active-items scan below,
