@@ -2,10 +2,11 @@ import type { ChainNode as ApiNode, KraftEvent } from "../../../types";
 import type { ChainNode } from "../../graph/layout";
 import { rejectTarget } from "../../item/graph";
 import type { ItemDetail } from "../../item/useItem";
+import { retryable } from "../../item/status";
 
 /** The node screen's decisions, pure (W17 brief D). */
 
-export type NodeActId = "pause" | "skip" | "retry-node" | "retry-from" | "review";
+export type NodeActId = "pause" | "resume" | "skip" | "retry-node" | "retry-from" | "review";
 export interface NodeAct {
   id: NodeActId;
   label: string;
@@ -15,15 +16,18 @@ const a = (id: NodeActId, label: string): NodeAct => ({ id, label });
 /** The bottom bar of a node: one pair (Decisions §5 over the prototype, GAP §5.1).
  *  Pause · Skip while the node runs, Skip · Retry once it has stopped, **no
  *  Retry while it runs**; a done node offers Retry from here; a waiting gate
- *  offers the decision; a node not reached, or an ended item, has no bar. */
+ *  offers the decision; a node not reached, or an ended item, has no bar.
+ *  Retry only on an item the server would retry (`retryable`): a paused one
+ *  has Skip · Resume, and a waiting one Pause · Skip (R10b-01). */
 export function nodeBar(item: ItemDetail, node: ApiNode, graph: ChainNode): { secondary: NodeAct | null; primary: NodeAct | null } {
   const none = { secondary: null, primary: null };
   const status = item.display_status ?? "running";
   if (status === "done" || status === "cancelled" || status === "archived") return none;
   if (node.kind === "gate") return item.pending_gate === node.id ? { secondary: null, primary: a("review", "Review and decide") } : none;
-  if (graph.state === "done") return { secondary: null, primary: a("retry-from", "Retry from here") };
+  if (graph.state === "done") return retryable(item) ? { secondary: null, primary: a("retry-from", "Retry from here") } : none;
   if (graph.state !== "current" && graph.state !== "failed") return none;
-  if (status === "running" || status === "escalated") return { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") };
+  if (status === "running" || status === "escalated" || status === "waiting") return { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") };
+  if (status === "paused") return { secondary: a("skip", "Skip node"), primary: a("resume", "Resume") };
   return { secondary: a("skip", "Skip node"), primary: a("retry-node", "Retry node") };
 }
 

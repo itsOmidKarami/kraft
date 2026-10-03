@@ -109,7 +109,7 @@ describe("task pane", () => {
   });
 
   it("has no Thread tab on an ordinary task, and offers Retry once it stopped", () => {
-    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review", { ...item, display_status: "failed" });
     expect(within(pane("code_review")).queryByRole("tab", { name: "Thread" })).toBeNull();
     expect(within(pane("code_review")).getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });

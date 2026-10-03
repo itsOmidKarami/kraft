@@ -12,12 +12,29 @@ const posts = (c: Call[]) => c.filter((x) => x.method === "POST");
 
 describe("PathFooter", () => {
   it.each([
-    ["running", ["Pause", "Skip task"]],
-    ["paused", ["Resume", "Skip task", "Retry"]],
-    ["stopped", ["Retry"]],
-  ] as const)("%s shows %j, in that order, and no Retry while running", (state, names) => {
-    render(<PathFooter item={detail()} path="v.r.code_review" what="task" state={state} reload={() => {}} />);
+    ["running", "running", ["Pause", "Skip task"]],
+    ["paused", "paused", ["Resume", "Skip task"]],
+    ["stopped", "failed", ["Retry"]],
+  ] as const)("%s shows %j, in that order, and no Retry while running", (state, status, names) => {
+    render(<PathFooter item={detail({ display_status: status })} path="v.r.code_review" what="task" state={state} reload={() => {}} />);
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(names);
+  });
+
+  // R10b-01: /retry claims only a stopped item and answers 409 to any other, so
+  // a paused task offers Resume, and a done task of a running or waiting item nothing.
+  it.each([
+    ["paused", "paused"],
+    ["stopped", "running"],
+    ["stopped", "waiting"],
+    ["stopped", "paused"],
+  ] as const)("offers no Retry on a %s footer while the item is %s: the server would refuse it", (state, status) => {
+    render(<PathFooter item={detail({ display_status: status })} path="v.r.code_review" what="task" state={state} reload={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it.each(["failed", "needs_you", "escalated"] as const)("offers Retry on a stopped footer while the item is %s", (status) => {
+    render(<PathFooter item={detail({ display_status: status })} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("confirms Skip in the pane before sending it, by path", async () => {
@@ -34,13 +51,13 @@ describe("PathFooter", () => {
 
   it("retries by path with the steer, and without the steer field when no agent can read it", async () => {
     const calls = stubFetch(WRITES);
-    const { unmount } = render(<PathFooter item={detail()} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
+    const { unmount } = render(<PathFooter item={detail({ display_status: "failed" })} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.type(screen.getByLabelText("Steer for the retry"), "check reindex");
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/retry", body: { path: "v.r.code_review", steer: "check reindex" } }]));
     unmount();
-    render(<PathFooter item={detail({ steerable: false })} path="m.o.open" what="task" state="stopped" reload={() => {}} />);
+    render(<PathFooter item={detail({ steerable: false, display_status: "failed" })} path="m.o.open" what="task" state="stopped" reload={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(screen.queryByLabelText("Steer for the retry")).toBeNull();
   });
@@ -52,7 +69,7 @@ describe("PathFooter", () => {
 
   it("retries on ⌘↵ from the steer", async () => {
     const calls = stubFetch(WRITES);
-    render(<PathFooter item={detail()} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
+    render(<PathFooter item={detail({ display_status: "failed" })} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.type(screen.getByLabelText("Steer for the retry"), "check reindex");
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");

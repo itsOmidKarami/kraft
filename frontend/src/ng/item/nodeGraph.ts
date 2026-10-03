@@ -68,8 +68,9 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now()) {
 export type FooterState = "running" | "paused" | "stopped" | null;
 
 /** Which footer a node, step or task gets (Decisions §5 Pause on a path):
- *  running → Pause, Skip; paused → Resume, Skip, Retry; done or stopped →
- *  Retry; not reached → none. */
+ *  running → Pause, Skip; paused → Resume, Skip; done or stopped → Retry
+ *  when the item is stopped (`PathFooter`, `status.retryable`); not reached →
+ *  none. */
 export function footerState(item: ItemDetail, sessions: WorkerSession[]): FooterState {
   if (!sessions.length) return null;
   const live = sessions.some((s) => LIVE.has(s.status));

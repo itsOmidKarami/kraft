@@ -52,6 +52,12 @@ export const NOT_RAISABLE = "The item can't raise this cap: the policy or the ch
  *  yet" that decides whether its config can still be edited. */
 export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
 
+/** Whether `/retry` would take this item. It claims only a stopped item
+ *  (`needs_human`, which the server shows as failed, needs you or escalated)
+ *  and answers 409 "work item is not stopped" to a paused, running or waiting
+ *  one, so no surface offers Retry there (R10b-01): a paused item has Resume. */
+export const retryable = (item: Pick<WorkItem, "display_status">) => item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated";
+
 /** GAP §1.4a, Decisions §1 and §14. `raise` is the capped Resume: it opens the
  *  chain's Config at the limit that stopped the item. A budget stop the item
  *  cannot raise (`budgetRaise`) has Retry instead. A never-started item

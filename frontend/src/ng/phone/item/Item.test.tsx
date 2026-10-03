@@ -322,7 +322,6 @@ describe("pair actions that call straight through", () => {
   it.each([
     ["paused mid-chain → Resume", item("paused"), "Resume", "POST /work-items/w1/resume"],
     ["failed → Retry from the failed node", item("failed", stop("failed")), "Retry", "POST /work-items/w1/retry"],
-    ["rate limited → Retry now", item("waiting", stop("rate_limit")), "Retry now", "POST /work-items/w1/retry"],
     ["MR closed → Reopen", item("needs_you", stop("mr_closed", { facts: { ref: 142 } })), "Reopen MR", "POST /work-items/w1/reopen-mr"],
   ])("%s", async (_n, it, label, call) => {
     const calls = mount(it);

@@ -74,7 +74,6 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         else void run(act.resume(item.id), "Started.");
       });
       case "retry": return void run(act.retry(item.id, node ? { path: actionPath(node, item.stop?.task) } : {}), "Retrying.");
-      case "retry-now": return void run(act.retry(item.id), "Retrying.");
       case "reopen-mr": return void run(act.reopenMr(item.id), "MR reopened.");
       case "restore": return void run(act.restore(item.id), "Restored.");
       case "board": return navigate("/");

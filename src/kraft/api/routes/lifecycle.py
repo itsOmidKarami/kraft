@@ -701,6 +701,14 @@ def review_reachable(row) -> bool:
     return not reached
 
 
+def _not_stopped(row) -> str:
+    """The 409 a retry on an item that is not stopped gets. A paused one is
+    told its way on, since Resume, not Retry, is what picks it up (R10b-01)."""
+    if row["status"] == "paused":
+        return "work item is paused, not stopped: resume it instead, or skip what it would run"
+    return "work item is not stopped"
+
+
 def not_paused(row) -> str:
     """The 409 a steer or resume on an item that is not paused gets. A running
     one is told what to do (Ruling 183: a steer never reaches a running item)."""
@@ -1008,7 +1016,7 @@ async def _retry(wid: str, body: Retry, request: Request):
         # below is still the authoritative gate, but reaching it only after
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
-        raise HTTPException(409, "work item is not stopped")
+        raise HTTPException(409, _not_stopped(row))
     if body.path is None and not body.restart:
         rewind = st.db.read(lambda c: store.pending_rewind(c, wid))
         if rewind is not None:
