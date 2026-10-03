@@ -110,6 +110,10 @@ def test_counts_a_helper_body_defined_in_two_files_once_per_file(report, tree):
     (group,) = helpers["groups"]
     assert group["name"] == "_git"
     assert group["files"] == ["tests/test_a.py", "tests/test_b.py"]
+    fingerprint = (
+        "return subprocess.run(['git', *args], capture_output=True, check=True, text=True)"
+    )
+    assert group["key"] == f"_git#{hashlib.sha1(fingerprint.encode()).hexdigest()[:8]}"
 
 
 def test_json_output_carries_the_same_numbers(report, tree, capsys):
@@ -238,14 +242,17 @@ def test_helpers_over_different_module_constants_are_not_one_group(report, tmp_p
     ]
 
 
-def test_print_helper_allowlist_keys_by_name_and_fingerprint_hash(report, tree, capsys):
-    assert report.main(["--root", str(tree), "--print-helper-allowlist"]) == 0
-    printed = capsys.readouterr().out
-    fingerprint = (
-        "return subprocess.run(['git', *args], capture_output=True, check=True, text=True)"
-    )
-    key = f"_git#{hashlib.sha1(fingerprint.encode()).hexdigest()[:8]}"
-    assert f'"{key}": 2' in printed
+def test_print_helper_ceiling_prints_rule_e_numbers_over_both_testpaths(report, tree, capsys):
+    # a second duplicated group, so the two numbers differ, and a copy of it in the
+    # plugin's testpath: out of the shape report's numbers, in rule (e)'s
+    row = "def _row():\n    return 1\n"
+    for name in ("test_a", "test_b", "test_c"):
+        write(tree, f"tests/{name}_rows.py", row)
+    write(tree, "plugins/kraft-lite/tests/test_p_rows.py", row)
+    helpers = report.measure(tree)["duplicated_helpers"]
+    assert (helpers["names"], helpers["copies"]) == (2, 5)
+    assert report.main(["--root", str(tree), "--print-helper-ceiling"]) == 0
+    assert capsys.readouterr().out == 'DUPLICATE_HELPER_CEILING = {"groups": 2, "copies": 6}\n'
 
 
 def test_a_file_that_does_not_parse_fails_the_report(report, tree, capsys):

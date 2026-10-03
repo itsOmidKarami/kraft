@@ -1,6 +1,6 @@
 """`dev/check_tests.py` is itself unexercised by the suite it checks -- these
-pin its five rules against a deliberately bad file each, the allowlist-
-staleness rules that keep (c), (d) and (e) from rotting into a one-way ratchet,
+pin its five rules against a deliberately bad file each, the staleness rules
+that keep (c), (d) and (e)'s exceptions from rotting into a one-way ratchet,
 plus the "a parse failure is a failure" rule the project keeps re-learning
 the hard way (a checker that reads an error as "nothing to check" is the
 same bug class as a chain step that swallows an exception into "done").
@@ -377,26 +377,40 @@ _GIT = (
     "def _git(*args):\n"
     '    return subprocess.run(["git", *args], check=True, text=True)\n'
 )
+_MOVE_IT = "-- move it into tests/support/ and import it"
+_ZERO = {"groups": 0, "copies": 0}
+
+
+def _group_lines(ct, trees: dict, support: dict | None = None) -> list[str]:
+    """What breaching a zero ceiling says about each group, past the two summary lines."""
+    lines = ct.check_duplicate_helpers(trees, support or {})
+    if not lines:
+        return []
+    assert [line.split(":")[0] for line in lines[:2]] == [
+        "duplicated helper groups across test files",
+        "duplicated helper copies across test files",
+    ]
+    return lines[2:]
 
 
 class TestDuplicateHelpers:
     @pytest.fixture(autouse=True)
-    def _empty_allowlist(self, ct, monkeypatch):
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {})
+    def _zero_ceiling(self, ct, monkeypatch):
+        monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", dict(_ZERO))
 
-    def test_the_same_helper_body_in_two_files_is_flagged_once_per_extra_copy(self, ct, tmp_path):
+    def test_the_same_helper_body_in_several_files_is_one_group_naming_every_copy(
+        self, ct, tmp_path
+    ):
         trees = _parsed(tmp_path, {f"tests/test_{x}.py": _GIT for x in "cab"})
-        assert ct.check_duplicate_helpers(trees, {}) == [
-            f"tests/test_{x}.py:4: _git() has the same body as _git() at tests/test_a.py:4 "
-            f"-- move it into tests/support/ and import it from there"
-            for x in "bc"
+        assert _group_lines(ct, trees) == [
+            f"_git (3 copies): tests/test_a.py:4, tests/test_b.py:4, tests/test_c.py:4 {_MOVE_IT}"
         ]
 
     def test_a_body_that_differs_only_in_keyword_order_is_the_same_body(self, ct, tmp_path):
         reordered = _GIT.replace("check=True, text=True", "text=True, check=True")
         trees = _parsed(tmp_path, {"tests/test_a.py": _GIT, "tests/test_b.py": reordered})
-        (violation,) = ct.check_duplicate_helpers(trees, {})
-        assert violation.startswith("tests/test_b.py:4: _git() has the same body as _git() at ")
+        (line,) = _group_lines(ct, trees)
+        assert line.startswith("_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 ")
 
     def test_a_body_that_differs_only_in_a_docstring_or_annotation_is_the_same_body(
         self, ct, tmp_path
@@ -406,8 +420,8 @@ class TestDuplicateHelpers:
             'def _git(*args: str) -> subprocess.CompletedProcess:\n    """Run git."""\n',
         )
         trees = _parsed(tmp_path, {"tests/test_a.py": _GIT, "tests/test_b.py": dressed})
-        (violation,) = ct.check_duplicate_helpers(trees, {})
-        assert violation.startswith("tests/test_b.py:4: _git() has the same body as _git() at ")
+        (line,) = _group_lines(ct, trees)
+        assert line.startswith("_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 ")
 
     def test_a_body_over_a_different_module_constant_is_a_different_helper(self, ct, tmp_path):
         row = "def _row(**f):\n    return {**DEFAULTS, **f}\n"
@@ -420,34 +434,48 @@ class TestDuplicateHelpers:
         )
         assert ct.check_duplicate_helpers(trees, {}) == []
         trees |= _parsed(tmp_path, {"tests/test_c.py": "DEFAULTS = {'status': 'done'}\n\n\n" + row})
-        (violation,) = ct.check_duplicate_helpers(trees, {})
-        assert violation.startswith("tests/test_c.py:4: _row() has the same body as _row() at ")
-        assert "tests/test_b.py:4" in violation
+        assert _group_lines(ct, trees) == [
+            f"_row (2 copies): tests/test_b.py:4, tests/test_c.py:4 {_MOVE_IT}"
+        ]
 
-    def test_a_helper_matching_a_support_function_is_told_which_one_to_import(self, ct, tmp_path):
-        public = "def commit_all(repo):\n    return run(repo, 'commit', '-am', 'files')\n"
-        copy = public.replace("commit_all", "_commit")
-        # `tests/api/...` sorts before `tests/support/...`: the support function is
-        # still the one every copy is told to use.
-        trees = _parsed(tmp_path, {"tests/api/test_a.py": copy, "tests/test_b.py": copy})
-        support = _parsed(tmp_path, {"tests/support/harness.py": public})
-        assert ct.check_duplicate_helpers(trees, support) == [
-            f"{relpath}:1: _commit() has the same body as support.harness.commit_all "
-            f"(tests/support/harness.py:1) -- use support.harness.commit_all instead"
-            for relpath in ("tests/api/test_a.py", "tests/test_b.py")
-        ]
-        # a private support function is no import target, and nor is a public
-        # name in a test file: the first copy in path order is the original then
-        trees = _parsed(tmp_path, {"tests/api/test_a.py": copy, "tests/test_b.py": public})
-        private = _parsed(tmp_path, {"tests/support/harness.py": copy})
-        assert ct.check_duplicate_helpers(trees, private) == [
-            f"{relpath}:1: {name}() has the same body as _commit() at tests/api/test_a.py:1 "
-            f"-- move it into tests/support/ and import it from there"
-            for relpath, name in (
-                ("tests/support/harness.py", "_commit"),
-                ("tests/test_b.py", "commit_all"),
-            )
-        ]
+    _PUBLIC = "def commit_all(repo):\n    return run(repo, 'commit', '-am', 'files')\n"
+    _PRIVATE = _PUBLIC.replace("commit_all", "_commit")
+
+    # `tests/api/...` sorts before `tests/support/...`: a support function is still
+    # the one every copy is told to use, underscore or not (`support.api._await_gate`
+    # is a shared poller). A public name in a test file is no import target: with
+    # no support function in the group, every copy is listed, in path order.
+    @pytest.mark.parametrize(
+        ("in_support", "in_test_b", "line"),
+        [
+            (
+                _PUBLIC,
+                _PRIVATE,
+                "_commit (3 copies): tests/api/test_a.py:1, tests/test_b.py:1 "
+                "-- use support.harness.commit_all (tests/support/harness.py:1)",
+            ),
+            (
+                _PRIVATE,
+                _PRIVATE,
+                "_commit (3 copies): tests/api/test_a.py:1, tests/test_b.py:1 "
+                "-- use support.harness._commit (tests/support/harness.py:1)",
+            ),
+            (
+                None,
+                _PUBLIC,
+                f"_commit (2 copies): tests/api/test_a.py:1, tests/test_b.py:1 {_MOVE_IT}",
+            ),
+        ],
+        ids=["public-support", "underscore-support", "public-name-in-a-test-file"],
+    )
+    def test_a_helper_matching_a_support_function_is_told_which_one_to_import(
+        self, ct, tmp_path, in_support, in_test_b, line
+    ):
+        trees = _parsed(
+            tmp_path, {"tests/api/test_a.py": self._PRIVATE, "tests/test_b.py": in_test_b}
+        )
+        support = _parsed(tmp_path, {"tests/support/harness.py": in_support} if in_support else {})
+        assert _group_lines(ct, trees, support) == [line]
 
     def test_a_genuinely_different_helper_with_the_same_name_is_not_flagged(self, ct, tmp_path):
         other = _GIT.replace("check=True", "check=False")
@@ -455,64 +483,78 @@ class TestDuplicateHelpers:
             tmp_path,
             {"tests/test_a.py": _GIT, "tests/test_b.py": _GIT, "tests/test_c.py": other},
         )
-        (violation,) = ct.check_duplicate_helpers(trees, {})
-        assert violation.startswith("tests/test_b.py:4:")
-        assert "test_c.py" not in violation
+        (line,) = _group_lines(ct, trees)
+        assert line.startswith("_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 ")
+        assert "test_c.py" not in line
 
-    def test_an_allowlisted_name_may_not_gain_a_copy(self, ct, tmp_path, monkeypatch):
-        # a renamed copy still counts against the entry, keyed by the commonest name
-        renamed = _GIT.replace("def _git", "def _call_git")
+    # `_commit` sits on line 8 of a file that is `_GIT` and then this.
+    _COMMIT = "\n\ndef _commit(repo):\n    return run(repo, 'commit', '-am', 'files')\n"
+
+    def _two_groups(self, ct, tmp_path) -> dict:
+        """`_git` in three files and `_commit` in two: 2 groups, 5 copies."""
         trees = _parsed(
             tmp_path,
-            {"tests/test_a.py": _GIT, "tests/test_b.py": _GIT, "tests/test_c.py": renamed},
+            {
+                "tests/test_a.py": _GIT + self._COMMIT,
+                "tests/test_b.py": _GIT + self._COMMIT,
+                "tests/test_c.py": _GIT,
+            },
         )
-        (key,) = ct.duplicate_helper_counts(trees, {})
-        assert key.startswith("_git#")
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {key: 3})
+        assert sorted(ct.duplicate_helper_counts(trees, {}).values()) == [2, 3]
+        return trees
+
+    @pytest.mark.parametrize(("over", "actual"), [("groups", 2), ("copies", 5)])
+    def test_copies_at_the_ceiling_pass_and_one_more_fails(
+        self, ct, tmp_path, monkeypatch, over, actual
+    ):
+        trees = self._two_groups(ct, tmp_path)
+        monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", {"groups": 2, "copies": 5})
         assert ct.check_duplicate_helpers(trees, {}) == []
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {key: 2})
-        assert ct.check_duplicate_helpers(trees, {}) == [
-            f"{key}: 3 copies, over its allowlisted ceiling of 2 "
-            f"(dev/check_tests.py:DUPLICATE_HELPER_ALLOWLIST) -- it may shrink, not grow: "
-            f"move the copy at tests/test_a.py:4 into tests/support/ and import it "
-            f"instead of adding a copy"
-        ]
-        # once tests/support has it as a public function, that is the one named
-        support = _parsed(tmp_path, {"tests/support/harness.py": _GIT.replace("_git", "git")})
-        assert ct.duplicate_helper_counts(trees, support) == {key: 4}
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {key: 3})
-        (violation,) = ct.check_duplicate_helpers(trees, support)
-        assert violation.endswith(
-            "use support.harness.git (tests/support/harness.py:4) instead of adding a copy"
+        monkeypatch.setitem(ct.DUPLICATE_HELPER_CEILING, over, actual - 1)
+        summary, *groups = ct.check_duplicate_helpers(trees, {})
+        assert summary == (
+            f"duplicated helper {over} across test files: {actual}, over the ceiling of "
+            f"{actual - 1} (dev/check_tests.py:DUPLICATE_HELPER_CEILING) -- it may shrink, not grow"
         )
+        assert len(groups) == 2
+        assert not any(line.startswith("duplicated helper ") for line in groups)
 
-    def test_an_allowlisted_name_whose_count_fell_to_one_is_stale(self, ct, tmp_path, monkeypatch):
-        trees = _parsed(tmp_path, {"tests/test_a.py": _GIT, "tests/test_b.py": _GIT})
-        counts = ct.duplicate_helper_counts(trees, {})
-        (key,) = counts
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {key: 2})
-        assert ct.check_duplicate_helper_allowlist_is_current(counts) == []
-        del trees["tests/test_b.py"]
-        assert ct.check_duplicate_helper_allowlist_is_current(
-            ct.duplicate_helper_counts(trees, {})
-        ) == [
-            f"DUPLICATE_HELPER_ALLOWLIST[{key!r}] = 2 is stale: it is no longer duplicated "
-            f"across test files -- remove the entry"
+    def test_a_breach_names_every_group_with_its_copies(self, ct, tmp_path, monkeypatch):
+        trees = self._two_groups(ct, tmp_path)
+        support = _parsed(
+            tmp_path, {"tests/support/harness.py": self._COMMIT.replace("_commit", "commit_all")}
+        )
+        # tests/support's public `commit_all` is a sixth copy, in the same two groups
+        monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", {"groups": 2, "copies": 5})
+        assert ct.check_duplicate_helpers(trees, support) == [
+            "duplicated helper copies across test files: 6, over the ceiling of 5 "
+            "(dev/check_tests.py:DUPLICATE_HELPER_CEILING) -- it may shrink, not grow",
+            f"_git (3 copies): tests/test_a.py:4, tests/test_b.py:4, tests/test_c.py:4 {_MOVE_IT}",
+            "_commit (3 copies): tests/test_a.py:8, tests/test_b.py:8 "
+            "-- use support.harness.commit_all (tests/support/harness.py:3)",
         ]
 
-    def test_an_allowlisted_ceiling_too_far_above_the_real_count_is_stale(self, ct, monkeypatch):
-        ceiling = 3 + ct.STALE_ALLOWLIST_MARGIN_COPIES
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {"_x#00000000": ceiling})
-        assert ct.check_duplicate_helper_allowlist_is_current({"_x#00000000": 3}) == []
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {"_x#00000000": ceiling + 1})
-        (violation,) = ct.check_duplicate_helper_allowlist_is_current({"_x#00000000": 3})
-        assert "tighten it to 3" in violation
+    @pytest.mark.parametrize(("stale", "actual"), [("groups", 2), ("copies", 5)])
+    def test_a_ceiling_more_than_its_margin_above_the_real_count_is_stale(
+        self, ct, monkeypatch, stale, actual
+    ):
+        counts = {"_x#00000000": 3, "_y#00000000": 2}
+        margin = ct.DUPLICATE_HELPER_STALE_MARGIN[stale]
+        monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", {"groups": 2, "copies": 5})
+        monkeypatch.setitem(ct.DUPLICATE_HELPER_CEILING, stale, actual + margin)
+        assert ct.check_duplicate_helper_ceiling_is_current(counts) == []
+        monkeypatch.setitem(ct.DUPLICATE_HELPER_CEILING, stale, actual + margin + 1)
+        assert ct.check_duplicate_helper_ceiling_is_current(counts) == [
+            f'DUPLICATE_HELPER_CEILING["{stale}"] = {actual + margin + 1} sits {margin + 1} '
+            f"above the real {actual} -- tighten it to {actual} (margin is {margin})"
+        ]
 
     def test_a_test_function_is_never_a_helper(self, ct, tmp_path):
         test = "\n\ndef test_x():\n    assert _git('status')\n"
         trees = _parsed(tmp_path, {"tests/test_a.py": _GIT + test, "tests/test_b.py": _GIT + test})
-        (violation,) = ct.check_duplicate_helpers(trees, {})
-        assert violation.startswith("tests/test_b.py:4: _git() ")
+        assert _group_lines(ct, trees) == [
+            f"_git (2 copies): tests/test_a.py:4, tests/test_b.py:4 {_MOVE_IT}"
+        ]
 
     def test_a_body_repeated_within_one_file_is_not_flagged(self, ct, tmp_path):
         again = _GIT.split("\n\n\n", 1)[1].replace("def _git", "def _git_again")
@@ -540,12 +582,16 @@ class TestDuplicateHelpers:
         monkeypatch.setattr(ct, "LINE_BUDGET_ALLOWLIST", {})
         monkeypatch.setattr(ct, "EXPECTATION_ALLOWLIST", set())
         monkeypatch.setattr(ct, "REAL_CLI_ALLOWLIST", {})
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {"_gone#00000000": 2})
+        # one group over a ceiling of none, and a copies ceiling left far above its 3
+        monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", {"groups": 0, "copies": 9})
         assert ct.main() == 1
         out = capsys.readouterr().out
-        for relpath in ("plugins/kraft-lite/tests/test_p.py", "tests/test_a.py"):
-            assert f"{relpath}:1: _commit() has the same body as support.harness.commit_all" in out
-        assert "DUPLICATE_HELPER_ALLOWLIST['_gone#00000000'] = 2 is stale" in out
+        assert "duplicated helper groups across test files: 1, over the ceiling of 0" in out
+        assert (
+            "_commit (3 copies): plugins/kraft-lite/tests/test_p.py:1, tests/test_a.py:1 "
+            "-- use support.harness.commit_all (tests/support/harness.py:1)"
+        ) in out
+        assert 'DUPLICATE_HELPER_CEILING["copies"] = 9 sits 6 above the real 3' in out
         assert "\n3 violation(s)" in out
 
 
@@ -634,7 +680,7 @@ class TestPluginTestsAreChecked:
         monkeypatch.setattr(ct, "REAL_CLI_ALLOWLIST", {})
         monkeypatch.setattr(ct, "EXPECTATION_ALLOWLIST", set())
         monkeypatch.setattr(ct, "LINE_BUDGET_ALLOWLIST", {})
-        monkeypatch.setattr(ct, "DUPLICATE_HELPER_ALLOWLIST", {})
+        monkeypatch.setattr(ct, "DUPLICATE_HELPER_CEILING", dict(_ZERO))
 
     def test_a_bad_plugin_test_fails_the_check(self, ct, tmp_path, monkeypatch, capsys):
         self._tree_with(ct, tmp_path, monkeypatch, "def test_x():\n    1 + 1\n")
