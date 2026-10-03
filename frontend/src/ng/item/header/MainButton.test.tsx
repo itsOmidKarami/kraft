@@ -78,6 +78,22 @@ describe("MainButton", () => {
     vi.useRealTimers();
   });
 
+  it("closes the hover menu 160ms after the toast the pointer went to goes away on its own", async () => {
+    vi.useFakeTimers();
+    render(<><Harness /><div className="toasts"><div className="toast">Copied</div></div></>);
+    const group = document.querySelector(".item-main")!;
+    const toasts = document.querySelector(".toasts")!;
+    fireEvent.mouseEnter(group);
+    fireEvent.mouseLeave(group, { relatedTarget: toasts.firstElementChild });
+    // The toast's own timeout removes it; the pointer does not move, so no mouseleave comes.
+    await act(async () => void toasts.firstElementChild!.remove());
+    act(() => void vi.advanceTimersByTime(150));
+    expect(screen.getByRole("menu", { name: "Item actions" })).toBeInTheDocument();
+    act(() => void vi.advanceTimersByTime(20));
+    expect(screen.queryByRole("menu")).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("keeps the hover menu open when the pointer comes back from a toast to the button", () => {
     vi.useFakeTimers();
     render(<><Harness /><div className="toasts"><div className="toast">Copied</div></div></>);

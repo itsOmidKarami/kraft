@@ -57,12 +57,18 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
   };
   // A toast that shows up over the button (they sit top-right, as the header
   // does) is part of the hover area: the close waits until the pointer leaves it too.
-  const onToast = useRef<{ el: Element; off: () => void } | null>(null);
+  // A toast that goes (its timeout, not the pointer) counts as left: a still
+  // pointer gets no mouseleave from an element that shrinks away under it.
+  const onToast = useRef<{ el: Element; off: () => void; gone: MutationObserver } | null>(null);
+  const unwatch = () => {
+    onToast.current?.el.removeEventListener("mouseleave", onToast.current.off);
+    onToast.current?.gone.disconnect();
+    onToast.current = null;
+  };
   const hover = (on: boolean) => {
     if (!menu) return;
     if (leave.current) clearTimeout(leave.current);
-    onToast.current?.el.removeEventListener("mouseleave", onToast.current.off);
-    onToast.current = null;
+    unwatch();
     if (on) setOpen(true);
     else leave.current = setTimeout(close, 160);
   };
@@ -70,11 +76,14 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
     const toasts = e.relatedTarget instanceof Element ? e.relatedTarget.closest(".toasts") : null;
     if (!menu || !toasts) return hover(false);
     if (leave.current) clearTimeout(leave.current);
+    unwatch();
     const off = () => hover(false);
+    const gone = new MutationObserver((changes) => changes.some((c) => c.removedNodes.length) && off());
     toasts.addEventListener("mouseleave", off);
-    onToast.current = { el: toasts, off };
+    gone.observe(toasts, { childList: true });
+    onToast.current = { el: toasts, off, gone };
   };
-  useEffect(() => () => onToast.current?.el.removeEventListener("mouseleave", onToast.current.off), []);
+  useEffect(() => unwatch, []);
 
   return (
     <div className="item-main" ref={groupRef} onMouseEnter={() => hover(true)} onMouseLeave={left}>
