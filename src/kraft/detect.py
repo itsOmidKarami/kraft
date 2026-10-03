@@ -1038,33 +1038,70 @@ _TEST_RUNNERS = frozenset(
         "rspec", "phpunit", "mix", "swift", "ctest", "bats",
     }
 )  # fmt: skip
-#: `uv run pytest`, `python -m pytest`, `npx jest`: what runs the runner.
+#: Of `_TEST_RUNNERS`, the tools that also run anything else, a shell string
+#: included (`npm exec --call "…"`, `cargo --config "target.….runner=…"`):
+#: trusted only on their test verb (`npm test`, `npm run test:unit`, `go test`).
+_MULTI_PURPOSE = frozenset({"npm", "pnpm", "yarn", "bun", "deno", "cargo", "go", "dotnet"})
+_TEST_VERBS = frozenset({"test", "t"})
+#: Words that make a runner run something else: a shell string, a program, a
+#: config that names one (`go test -exec`, `cargo test --config`).
+_RUNS_SOMETHING_ELSE = frozenset(
+    {"exec", "dlx", "--call", "-c", "--shell-mode", "--config", "-exec", "--exec"}
+)
+#: `uv run pytest`, `python -m pytest`, `npx jest`, `xvfb-run npm test`: what
+#: runs the runner, and the verb it takes first (None: the runner is next).
 _RUNNER_LAUNCHERS: dict[str, str | None] = {
     **dict.fromkeys(("uv", "poetry", "pdm", "hatch", "pipenv", "rye"), "run"),
     "bundle": "exec",
-    **dict.fromkeys(("npx", "pnpx", "bunx")),
+    **dict.fromkeys(("npx", "pnpx", "bunx", "xvfb-run")),
 }
+#: A launcher's options that take the next word as their value.
+_LAUNCHER_VALUE_OPTIONS = frozenset(
+    {
+        "--with", "--python", "-p", "--extra", "--group", "--only-group", "--package",
+        "--directory", "--project", "--env-file", "-n", "-s", "-f", "-e", "-w",
+        "--server-args", "--server-num", "--auth-file", "--error-file",
+    }
+)  # fmt: skip
+
+
+def _skip_options(words: list[str]) -> list[str]:
+    """`words` from the first one that is not a launcher's option."""
+    while words and words[0].startswith("-"):
+        words = words[2:] if words[0] in _LAUNCHER_VALUE_OPTIONS else words[1:]
+    return words
 
 
 def _runner(command: str) -> bool:
     """Whether `command`'s program is one of `_TEST_RUNNERS`, past what
-    launches it."""
+    launches it and that launcher's options, running its tests and nothing
+    else: a multi-purpose tool only on its test verb, and no runner told to
+    run a shell string or a program of the line's choosing."""
     words = shlex.split(command)
     while words:
         name = posixpath.basename(words[0])
         if name in _RUNNER_LAUNCHERS:
             verb = _RUNNER_LAUNCHERS[name]
-            if verb is None:
-                words = words[1:]
-            elif len(words) > 1 and words[1] == verb:
-                words = words[2:]
-            else:
-                break
+            words = _skip_options(words[1:])
+            if verb is not None:
+                if words[:1] != [verb]:
+                    return False
+                words = _skip_options(words[1:])
         elif name.startswith("python") and len(words) > 1 and words[1] == "-m":
             words = words[2:]
         else:
             break
-    return bool(words) and posixpath.basename(words[0]) in _TEST_RUNNERS
+    if not words or posixpath.basename(words[0]) not in _TEST_RUNNERS:
+        return False
+    if any(w in _RUNS_SOMETHING_ELSE or w.startswith(("--config=", "--call=")) for w in words):
+        return False
+    if posixpath.basename(words[0]) not in _MULTI_PURPOSE:
+        return True
+    rest = words[1:]
+    return bool(rest) and (
+        rest[0] in _TEST_VERBS
+        or (rest[0] in ("run", "task") and len(rest) > 1 and rest[1].startswith("test"))
+    )
 
 
 def _a_script(command: str) -> bool:
