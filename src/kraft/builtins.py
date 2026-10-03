@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import shutil
 import signal
 import subprocess
+import time
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -26,6 +28,7 @@ from kraft.worker import inject as _inject
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
+from kraft.worker.worktree_read import open_dir_no_symlinks
 
 logger = logging.getLogger(__name__)
 
@@ -1188,6 +1191,12 @@ async def refresh_worktree_base(
     """
     if not worktree.is_dir():
         return None
+    # First, ahead of every skip below: a rebase cut short (its time cap, a
+    # server killed mid-rebase) leaves HEAD detached at the base with the
+    # item's commits off it, and the skips then read that worktree as up to
+    # date or merely dirty, so the item went on without its work (R11E-02).
+    # Kraft never aborts one it finds, which a worker could have planted.
+    git.assert_no_operation(worktree, branch=branch)
     # Cheaper, purely local check first -- ahead of `upstream_head`'s fetch: a
     # branch already pushed past a prior open_mr gate must not be silently
     # rewritten here -- a reviewer or a pipeline may already be looking at
@@ -1230,24 +1239,26 @@ async def refresh_worktree_base(
         return None
     # Kraft never rebases over, or aborts, an operation it did not start.
     git.assert_on_branch(worktree, branch)
+    lock_before = os.path.lexists(_index_lock(worktree))
     aside = await _set_aside_setup_lockfiles(worktree)
     try:
         try:
             done = await asyncio.to_thread(
-                subprocess.run,
+                _run_git_group,
                 ["git", "-C", str(worktree), "rebase", head],
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 env=_committer_env(identity),
             )
-        except subprocess.TimeoutExpired:
-            # `subprocess.run` already killed the `git rebase` process on the
-            # timeout; its abort left mid-operation, the same clean-up a
-            # conflict's abort below does.
+        except _GroupTimedOut as exc:
+            # The whole `git rebase` group is killed by now, a hung filter or
+            # hook included; the abort undoes what it left mid-operation, the
+            # same clean-up a conflict's abort below does. The `index.lock`
+            # the killed git held is stale only when that group is gone and
+            # the lock was not there before it started.
             await _abort_rebase(
                 worktree,
                 RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}"),
+                stale_lock=exc.group_gone and not lock_before,
             )
         if done.returncode != 0:
             _refuse_unstarted_rebase(worktree, done)
@@ -1305,31 +1316,87 @@ def _refuse_unstarted_rebase(worktree: Path, done: subprocess.CompletedProcess) 
     )
 
 
-#: In the worktree's own git dir: where `_set_aside_setup_lockfiles` keeps
-#: the setup's lockfiles while a rebase runs.
-SET_ASIDE = "kraft-set-aside"
+#: Under Kraft's own run dir: where `_set_aside_setup_lockfiles` keeps the
+#: setup's lockfiles while a rebase runs, one directory per worktree.
+SET_ASIDE = "set-aside"
+
+
+def set_aside_dir(worktree: Path) -> Path:
+    """Where `worktree`'s set-aside lockfiles wait out a rebase: under Kraft's
+    run dir, never the worktree's git dir. A sandboxed worker can write its
+    git dir, and a link it planted there was followed by the host-side move,
+    so the setup's lockfile went into, and came back out of, any directory
+    the server user can write. Named after the worktree and a digest of its
+    path, so a member's checkout never shares its root's."""
+    run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+    key = hashlib.sha256(os.fsencode(worktree.resolve())).hexdigest()[:16]
+    return run_base / SET_ASIDE / f"{worktree.name}-{key}"
+
+
+def _move_no_symlinks(src_root: Path, dst_root: Path, rel: str) -> None:
+    """Rename `src_root/rel` to `dst_root/rel`, making `dst_root/rel`'s
+    parents as needed. Every directory on both sides is opened without
+    following a link (`open_dir_no_symlinks`), and the rename itself never
+    follows one, so a worker that swaps a component for a link while this
+    runs gets an `OSError`, not a write outside its worktree."""
+    parts = Path(rel).parts
+    src = open_dir_no_symlinks(src_root, parts[:-1])
+    try:
+        dst = open_dir_no_symlinks(dst_root, parts[:-1], create=True)
+        try:
+            os.replace(parts[-1], parts[-1], src_dir_fd=src, dst_dir_fd=dst)
+        finally:
+            os.close(dst)
+    finally:
+        os.close(src)
+
+
+def _exists_no_symlinks(root: Path, rel: str) -> bool:
+    """Whether `root/rel` exists, as a link or anything else, reached without
+    following a link on the way. A parent that is a link counts as there:
+    nothing is written through it."""
+    parts = Path(rel).parts
+    try:
+        fd = open_dir_no_symlinks(root, parts[:-1])
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        os.lstat(parts[-1], dir_fd=fd)
+    except FileNotFoundError:
+        return False
+    finally:
+        os.close(fd)
+    return True
 
 
 async def _set_aside_setup_lockfiles(worktree: Path) -> list[str]:
     """Move the untouched lockfiles this worktree's setup wrote
-    (`forge.git.setup_lockfiles`) into the git dir, out of the rebase's way:
-    a base that has since committed its own `uv.lock`, as Kraft advises,
+    (`forge.git.setup_lockfiles`) into `set_aside_dir`, out of the rebase's
+    way: a base that has since committed its own `uv.lock`, as Kraft advises,
     could not be checked out over the setup's untracked one. Returns what
-    was moved, for `_put_back_setup_lockfiles`."""
-    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
-    if gitdir is None:
-        return []
-    store_dir = Path(gitdir) / SET_ASIDE
+    was moved, for `_put_back_setup_lockfiles`. A path that cannot be moved
+    without following a link stays where it is, for the rebase to judge."""
+    store_dir = set_aside_dir(worktree)
     # What a server killed mid-rebase left: the setup's next run rewrites it.
+    # Kraft's own directory, and `rmtree` unlinks a link inside it rather
+    # than following it.
     shutil.rmtree(store_dir, ignore_errors=True)
     # Only a lockfile known to be as the setup left it: one with no digest (a
     # record from before them) may hold the agent's edit, and moving it out
     # of the way of a base's copy would lose that.
     lockfiles = await git.setup_lockfiles(worktree, unknown=False)
+    if not lockfiles:
+        return []
+    store_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     moved = []
     for rel in sorted(lockfiles):
-        (store_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-        os.replace(worktree / rel, store_dir / rel)
+        try:
+            _move_no_symlinks(worktree, store_dir, rel)
+        except OSError as exc:
+            logger.warning("not setting %s aside in %s: %s", rel, worktree, exc)
+            continue
         moved.append(rel)
     return moved
 
@@ -1337,17 +1404,18 @@ async def _set_aside_setup_lockfiles(worktree: Path) -> list[str]:
 def _put_back_setup_lockfiles(worktree: Path, moved: list[str]) -> None:
     """Undo `_set_aside_setup_lockfiles`. A path the rebase brought a tracked
     copy to keeps the base's: the setup's is dropped, and its next run (every
-    walk entry runs it) works from the committed one."""
+    walk entry runs it) works from the committed one. So is one whose way
+    back into the worktree passes through a link: the setup writes it again."""
     if not moved:
         return
-    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
-    if gitdir is None:
-        return
-    store_dir = Path(gitdir) / SET_ASIDE
+    store_dir = set_aside_dir(worktree)
     for rel in moved:
-        if not os.path.lexists(worktree / rel):
-            (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
-            os.replace(store_dir / rel, worktree / rel)
+        if _exists_no_symlinks(worktree, rel):
+            continue
+        try:
+            _move_no_symlinks(store_dir, worktree, rel)
+        except OSError as exc:
+            logger.warning("not putting %s back in %s: %s", rel, worktree, exc)
     shutil.rmtree(store_dir, ignore_errors=True)
 
 
@@ -1358,23 +1426,120 @@ def _put_back_setup_lockfiles(worktree: Path, moved: list[str]) -> None:
 REBASE_ABORT_TIMEOUT_S = 30.0
 
 
-async def _abort_rebase(worktree: Path, error: RebaseConflict | RebaseTimedOut) -> NoReturn:
-    """`git rebase --abort` in `worktree`, then raise `error`. An abort that
-    runs past `REBASE_ABORT_TIMEOUT_S` still raises `error`'s own class, so the
-    caller's handling is unchanged, but says the worktree was left mid-rebase:
-    the one case where `refresh_worktree_base` does not leave it clean."""
+class _GroupTimedOut(subprocess.TimeoutExpired):
+    """`_run_git_group`'s timeout. `group_gone`: every process the command
+    started is dead, so nothing of it still holds a lock."""
+
+    def __init__(self, cmd, timeout: float, group_gone: bool):
+        super().__init__(cmd, timeout)
+        self.group_gone = group_gone
+
+
+def _run_git_group(
+    args: list[str], *, timeout: float | None, env: Mapping[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """`subprocess.run(args, capture_output=True, text=True)` as the leader of
+    its own process group. Past `timeout` the whole group is killed, not git
+    alone: a smudge filter or hook git started outlived it, holding the
+    worker's slot's files and never ending (R11E-02). Raises `_GroupTimedOut`
+    once git is reaped."""
+    with subprocess.Popen(
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=True,
+    ) as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc.pid)
+            proc.wait()
+            raise _GroupTimedOut(args, timeout or 0.0, _group_gone(proc.pid)) from None
+        except BaseException:
+            _kill_group(proc.pid)
+            proc.wait()
+            raise
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
+def _kill_group(pgid: int) -> None:
     try:
-        await asyncio.to_thread(
-            subprocess.run,
-            ["git", "-C", str(worktree), "rebase", "--abort"],
-            capture_output=True,
-            text=True,
-            timeout=REBASE_ABORT_TIMEOUT_S,
-        )
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _group_gone(pgid: int, wait_s: float = 5.0) -> bool:
+    """Whether process group `pgid` has no member left, waiting up to
+    `wait_s` for the killed ones to be reaped. macOS answers `PermissionError`
+    for a group of zombies only (`adapters.subprocess._kill_group`)."""
+    deadline = _caps.monotonic() + wait_s
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except (ProcessLookupError, PermissionError):
+            return True
+        if _caps.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
+def _index_lock(worktree: Path) -> Path:
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    return Path(gitdir or worktree / ".git") / "index.lock"
+
+
+def _clear_stale_index_lock(worktree: Path) -> bool:
+    """Remove the `index.lock` a killed `git rebase` left, so the abort can
+    take the index. Only called when that git's process group is gone and the
+    lock was not there before it started. True when there was one."""
+    lock = _index_lock(worktree)
+    try:
+        lock.unlink()
+    except FileNotFoundError:
+        return False
+    logger.warning("removed the index.lock a killed git rebase left in %s", lock.parent)
+    return True
+
+
+def _with_note(error: RebaseConflict | RebaseTimedOut, note: str) -> RuntimeError:
+    """`error`'s own class, with `note` after its message (and its paths)."""
+    if isinstance(error, RebaseConflict):
+        return RebaseConflict(f"{error}\n{note}", error.paths)
+    return type(error)(f"{error}\n{note}")
+
+
+async def _abort_rebase(
+    worktree: Path, error: RebaseConflict | RebaseTimedOut, *, stale_lock: bool = False
+) -> NoReturn:
+    """`git rebase --abort` in `worktree`, then raise `error`. An abort that
+    fails, or runs past `REBASE_ABORT_TIMEOUT_S`, still raises `error`'s own
+    class, so the caller's handling is unchanged, but says the worktree was
+    left mid-rebase: the one case where `refresh_worktree_base` does not
+    leave it clean. Never silent: a failed abort the item walked past left
+    HEAD detached at the base without the item's commits (R11E-02).
+
+    `stale_lock`: the timed-out rebase's `index.lock` may be cleared and the
+    abort tried once more (`_clear_stale_index_lock`)."""
+    args = ["git", "-C", str(worktree), "rebase", "--abort"]
+    try:
+        done = await asyncio.to_thread(_run_git_group, args, timeout=REBASE_ABORT_TIMEOUT_S)
+        if done.returncode != 0 and stale_lock and _clear_stale_index_lock(worktree):
+            done = await asyncio.to_thread(_run_git_group, args, timeout=REBASE_ABORT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        raise type(error)(
-            f"{error}\n`git rebase --abort` also timed out after "
-            f"{REBASE_ABORT_TIMEOUT_S:.0f}s; {worktree} was left mid-rebase for a human"
+        raise _with_note(
+            error,
+            f"`git rebase --abort` also timed out after {REBASE_ABORT_TIMEOUT_S:.0f}s; "
+            f"{worktree} was left mid-rebase for a human",
+        ) from None
+    if done.returncode != 0:
+        detail = (done.stderr.strip() or done.stdout.strip() or "no output").splitlines()[0]
+        raise _with_note(
+            error,
+            f"`git rebase --abort` failed ({detail}); {worktree} was left mid-rebase for a human",
         ) from None
     raise error
 

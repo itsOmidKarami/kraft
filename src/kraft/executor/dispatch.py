@@ -1091,6 +1091,35 @@ async def _dispatch_task(
                 f"{task.path}: no launch candidate is available:\n"
                 + "".join(f"  - {why}\n" for why in tried.unavailable),
             )
+    await sweep_stragglers(
+        db,
+        work_item_row,
+        worktree,
+        node_id=node.id,
+        task_path=task.path,
+        launch=launch,
+        sandboxed=bool(sandbox),
+        repository=repository,
+    )
+    return status
+
+
+async def sweep_stragglers(
+    db,
+    work_item_row,
+    worktree,
+    *,
+    node_id: str,
+    task_path: str,
+    launch: LaunchContext | None,
+    sandboxed: bool,
+    repository: str | None = None,
+) -> None:
+    """Commit what an agent task left uncommitted in `worktree`, and name
+    what the commit left out. Run after every agent task `_dispatch_task`
+    launches, and after one a restart re-adopted
+    (`worker.reattach`): its work is no less the item's for the server
+    having restarted under it (R11E-03)."""
     # The agent is told to commit everything it changes before it exits.
     # When it does not, the work is still on disk -- so verification passes,
     # and only `_assert_clean` two nodes later notices, by which point the
@@ -1134,12 +1163,12 @@ async def _dispatch_task(
                 c,
                 work_item_row["id"],
                 "sweep_failed",
-                {"node_id": node.id, "task": task.path, "error": f"deferred: {exc}"},
+                {"node_id": node_id, "task": task_path, "error": f"deferred: {exc}"},
             )
         )
-        return status
+        return
     try:
-        if sandbox:
+        if sandboxed:
             stops.refuse_planted_repos(
                 work_item_row, launch, _item_root(work_item_row, worktree, repository)
             )
@@ -1153,21 +1182,21 @@ async def _dispatch_task(
                 work_item_row["id"],
                 "sweep_failed",
                 {
-                    "node_id": node.id,
-                    "task": task.path,
+                    "node_id": node_id,
+                    "task": task_path,
                     "error": "skipped: the sandboxed worktree holds a git repository "
                     "Kraft did not create",
                 },
             )
         )
-        return status
+        return
     try:
         _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
         await _forge.commit_stragglers(
             Path(worktree),
             branch=store.branch_for(work_item_row),
             base=base,
-            message=f"wip: uncommitted work from {node.id}",
+            message=f"wip: uncommitted work from {node_id}",
             mounts=_builtins.item_mounts(work_item_row),
             identity=_builtins.item_identity(db, work_item_row["id"]),
         )
@@ -1183,11 +1212,11 @@ async def _dispatch_task(
                     c,
                     work_item_row["id"],
                     "sweep_left_out",
-                    {"node_id": node.id, "task": task.path, "paths": dropped},
+                    {"node_id": node_id, "task": task_path, "paths": dropped},
                 )
             )
     except RuntimeError as exc:  # ForgeError included
-        logger.warning("could not commit stragglers after %s: %r", task.path, exc)
+        logger.warning("could not commit stragglers after %s: %r", task_path, exc)
         # A log line only reaches whoever is tailing the server at the
         # time. The failure it describes doesn't surface again until
         # `_assert_clean` refuses `open_mr`, nodes later, with no trail
@@ -1198,10 +1227,9 @@ async def _dispatch_task(
                 c,
                 work_item_row["id"],
                 "sweep_failed",
-                {"node_id": node.id, "task": task.path, "error": str(exc)},
+                {"node_id": node_id, "task": task_path, "error": str(exc)},
             )
         )
-    return status
 
 
 def _last_left_out(db, work_item_id: str) -> list[str] | None:

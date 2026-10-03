@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -12,7 +11,7 @@ from pathlib import Path
 import pytest
 from support.api import WALK_TIMEOUT, _completed_item
 from support.harness import (
-    _git,
+    commit_all,
     make_repo_with_engineering,
 )
 
@@ -334,13 +333,17 @@ def test_open_document_launches_the_named_editor(client, repo, monkeypatch):
     assert launched == [["/usr/bin/code", str(Path(doc["repo"]) / doc["path"])]]
 
 
+@pytest.mark.parametrize("started", [True, False], ids=["worktree", "not-started"])
 def test_open_document_on_an_attachment_resolves_the_worktree_not_the_repo(
-    client, tmp_path, monkeypatch
+    client, tmp_path, monkeypatch, started
 ):
     """Kraft-2jy6: a synthetic `attachment:{id}:{kind}` doc's file lives on
     the item's own branch, not the connected repo's checkout — `open_document`
     must resolve it the same worktree-first way `GET /documents/{id}` already
-    does, not `doc['repo'] / doc['path']`."""
+    does, not `doc['repo'] / doc['path']`. Before the item starts, the
+    document reads from Kraft's stored copy, but there is nothing to open: an
+    editor saving into the worktree's path would create it as a plain
+    directory, which the item would then run in (R11F-02 review)."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# Repo copy\nold\n"})
     wid = client.post(
         "/api/work-items",
@@ -358,14 +361,22 @@ def test_open_document_on_an_attachment_resolves_the_worktree_not_the_repo(
     # resolution that fell back to `doc['repo'] / doc['path']` would open
     # the stale file instead.
     st = client.app.state
+    doc_id = f"attachment:{wid}:plan"
+    launched = _spy_on_launches(monkeypatch)
+    if not started:
+        assert client.get(f"/api/documents/{doc_id}").json()["content"] == "# Repo copy\nold\n"
+        r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
+        assert r.status_code == 409, r.text
+        assert f"kraft view docs {wid} --attachment plan" in r.json()["detail"]
+        assert launched == []
+        assert not (st.run_dirs.worktrees / wid).exists()
+        return
     wt = st.run_dirs.worktrees / wid / ".engineering" / "plans"
     wt.mkdir(parents=True)
     (wt / "p.md").write_text("# Worktree copy\nnew\n")
 
-    doc_id = f"attachment:{wid}:plan"
     assert client.get(f"/api/documents/{doc_id}").json()["content"] == "# Worktree copy\nnew\n"
 
-    launched = _spy_on_launches(monkeypatch)
     r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
     assert r.status_code == 200
     assert launched == [["/usr/bin/code", str((wt / "p.md").resolve())]]
@@ -561,11 +572,7 @@ def test_retry_rebases_the_worktree_onto_a_moved_head(client, repo):
 
     # repo's default branch moves on while the item sits stopped
     (repo / "moved.txt").write_text("moved on\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "moved on")
-    new_head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    new_head = commit_all(repo, "moved on")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "the tests pass now"})
     assert r.status_code == 200, r.text

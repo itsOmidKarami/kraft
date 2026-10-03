@@ -7,7 +7,7 @@ import shlex
 import subprocess
 
 import pytest
-from support.harness import _git, entry_of
+from support.harness import commit_all, entry_of, git
 
 from kraft import executor, store
 from kraft import policy as _policy
@@ -104,7 +104,8 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
     # it, so it is reported undelivered -- which is where its text is readable.
     assert script.steers["check"][1].source == "seeded"
     [undelivered] = it.events("steer_undelivered")
-    assert "rebased onto a newer" in undelivered["payload"]["steer"]
+    # Named by its base branch, never the item's own (R11E-07).
+    assert "rebased onto a newer main before opening its MR" in undelivered["payload"]["steer"]
 
 
 @pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
@@ -197,10 +198,7 @@ def _with_handler():
 async def _upstream_moves(it) -> str:
     """A commit lands on the repo the worktree was cut from; its sha."""
     (it.repo / "upstream.txt").write_text("landed upstream\n")
-    _git(it.repo, "add", "-A")
-    _git(it.repo, "commit", "-m", "landed upstream")
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=it.repo, capture_output=True, text=True)
-    return head.stdout.strip()
+    return commit_all(it.repo, "landed upstream")
 
 
 async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_on, script):
@@ -214,7 +212,7 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
             upstream["sha"] = await _upstream_moves(it)
 
     async def rebase(_row):
-        _git(it.worktree, "rebase", upstream["sha"])
+        git(it.worktree, "rebase", upstream["sha"])
 
     script.effects = {"check": land_upstream, "resolve": rebase}
 
@@ -240,7 +238,7 @@ async def test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase(ite
             upstream["sha"] = await _upstream_moves(it)
 
     async def rebase(_row):
-        _git(it.worktree, "rebase", upstream["sha"])
+        git(it.worktree, "rebase", upstream["sha"])
         await it.session(
             "s-resolve", "rebase.on_base_changed.on_conflict.main.resolve", "done_with_concerns"
         )
@@ -293,7 +291,7 @@ async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
             landed.append(await _upstream_moves(it))
 
     async def record(_row):
-        _git(it.worktree, "add", "file_a.txt")
+        git(it.worktree, "add", "file_a.txt")
         await it.session("s-resolve", "rebase.on_base_changed.on_conflict.main.resolve", ending)
 
     script.effects = {"check": land_upstream, "resolve": record}
@@ -415,7 +413,7 @@ async def test_a_resolved_conflict_reopens_the_approved_gates_in_its_span(item_o
             upstream["sha"] = await _upstream_moves(it)
 
     async def rebase(_row):
-        _git(it.worktree, "rebase", upstream["sha"])
+        git(it.worktree, "rebase", upstream["sha"])
 
     script.effects = {"sync": land_upstream, "resolve": rebase}
 
@@ -435,7 +433,7 @@ async def test_a_conflict_at_the_door_goes_to_the_nodes_handler(item_on, script,
     sha = await _upstream_moves(it)
 
     async def rebase(_row):
-        _git(it.worktree, "rebase", sha)
+        git(it.worktree, "rebase", sha)
 
     script.effects = {"resolve": rebase}
 

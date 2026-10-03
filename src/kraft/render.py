@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from datetime import UTC, datetime
 from typing import TextIO
 
@@ -138,9 +139,38 @@ def kv(pairs: list[tuple[str, str]]) -> str:
     )
 
 
+#: The bidi embeddings, overrides and isolates (U+202A-202E, U+2066-2069):
+#: each reorders the text after it. The marks (LRM, RLM, ALM) only nudge
+#: their neighbour, and stay.
+BIDI_CONTROLS = frozenset("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+
+
+def is_control(ch: str) -> bool:
+    """Whether `ch` is a character a title or a table cell never shows: a C0
+    or C1 control or DEL (Unicode's `Cc`), or a bidi embedding, override or
+    isolate. Line breaks are `Cc` too: split on them first."""
+    return unicodedata.category(ch) == "Cc" or ch in BIDI_CONTROLS
+
+
+def plain_text(line: str, keep: str = "") -> str:
+    """`line` with a tab as a space and every other control dropped, but `keep`."""
+    return "".join(c for c in line.replace("\t", " ") if c in keep or not is_control(c))
+
+
 def _cell(value: object) -> str:
-    """None and "" are the same absence to a reader, and both read as "-"."""
-    return "-" if value in (None, "") else str(value)
+    """None and "" are the same absence to a reader, and both read as "-".
+
+    A cell is one line: a line break in it, such as in a title 1.4 stored
+    with one, wrapped its row under the first column. Its first line that
+    has any text stands for it, without control characters but ESC, which
+    is a painted cell's colour."""
+    if value in (None, ""):
+        return "-"
+    text = str(value)
+    lines = [plain_text(line, keep="\x1b") for line in text.splitlines()]
+    if text.splitlines() == [text]:
+        return lines[0] or "-"
+    return next((line for line in lines if line.strip()), "-")
 
 
 def _pad(value: str, width: int) -> str:

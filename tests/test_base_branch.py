@@ -4,10 +4,11 @@ the repository's default branch, which is what every item used before."""
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, entry_of, make_repo, v1_chain
+from support.harness import commit_all, entry_of, git, make_repo, v1_chain, write
 
 from kraft import builtins as kraft_builtins
 from kraft.config import base_ignore_args, git_read
@@ -20,12 +21,11 @@ _ONE_NODE = [
 
 def _land(other, branch, name):
     """Commit `name` on `branch` in `other` and push it to origin; the new tip."""
-    _git(other, "checkout", "-q", branch)
-    (other / name).write_text(f"landed on {branch}\n")
-    _git(other, "add", "-A")
-    _git(other, "commit", "-q", "-m", f"{branch}: {name}")
-    _git(other, "push", "-q", "origin", branch)
-    return git_read(other, "rev-parse", "HEAD")
+    git(other, "checkout", "-q", branch)
+    write(other, name, f"landed on {branch}\n")
+    head = commit_all(other, f"{branch}: {name}")
+    git(other, "push", "-q", "origin", branch)
+    return head
 
 
 @pytest.fixture
@@ -34,15 +34,13 @@ def origin(tmp_path):
     which carries `release.txt` that `main` does not; plus `other`, a second
     clone through which commits land on origin but not in `repo`."""
     bare = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], check=True)
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(bare))
     repo = make_repo(tmp_path)
-    _git(repo, "remote", "add", "origin", str(bare))
-    _git(repo, "push", "-q", "-u", "origin", "main")
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "-u", "origin", "main")
     other = tmp_path / "other"
-    subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True)
-    _git(other, "config", "user.email", "o@o")
-    _git(other, "config", "user.name", "o")
-    _git(other, "checkout", "-q", "-b", "release")
+    git(tmp_path, "clone", "-q", str(bare), str(other))
+    git(other, "checkout", "-q", "-b", "release")
     _land(other, "release", "release.txt")
     return repo, other
 
@@ -187,31 +185,40 @@ async def test_the_base_branch_names_the_items_own_repository_or_its_default(
     assert await kraft_builtins.base_branch(database, "legacy", repo) == "main"
 
 
-def test_the_ignore_rules_come_from_the_items_base_branch(origin):
+@pytest.mark.parametrize("rule", [b"release-only/\n", b"caf\xe9-only/\n"], ids=["utf-8", "latin-1"])
+def test_the_ignore_rules_come_from_the_items_base_branch(origin, rule):
     """A rule the base branch gained after the worktree was cut still binds
     it -- the base's, not `main`'s, which an item on `release` never merges
-    into."""
+    into. Byte for byte (R11s-01): a rule naming a path that is not UTF-8
+    still names that path, not one with a replacement character."""
     repo, other = origin
-    _git(other, "checkout", "-q", "release")
-    (other / ".gitignore").write_text("release-only/\n")
-    _git(other, "add", "-A")
-    _git(other, "commit", "-q", "-m", "ignore release-only")
-    _git(other, "push", "-q", "origin", "release")
-    _git(repo, "fetch", "-q", "origin")
+    git(other, "checkout", "-q", "release")
+    (other / ".gitignore").write_bytes(rule)
+    commit_all(other, "ignore release-only")
+    git(other, "push", "-q", "origin", "release")
+    git(repo, "fetch", "-q", "origin")
 
     with base_ignore_args(repo, "release") as args:
-        rules = open(args[1].split("=", 1)[1]).read()
-    assert rules == "release-only/\n"
+        rules = Path(args[1].split("=", 1)[1]).read_bytes()
+    assert rules == rule
     with base_ignore_args(repo, "main") as args:
         assert args == []
 
 
+@pytest.mark.parametrize(
+    ("node", "rebased"),
+    [("spec", ["release"]), ("merge_request_feedback", [])],
+    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+)
 @pytest.mark.parametrize("door, stopped", [("retry", "needs_human"), ("resume", "paused")])
 def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
-    client, origin, monkeypatch, door, stopped
+    client, origin, monkeypatch, door, stopped, node, rebased
 ):
     """`/retry` and `/resume` rebase the worktree before the walk: onto the
-    item's base branch, like every other rebase."""
+    item's base branch, like every other rebase. Not when the item stands at
+    a node with `on_base_changed` (R11E-06): it rebases itself, and the
+    door's rebase took the move from it, so the span it restarts on a move
+    never ran on the new base."""
     from support.api import _force_node
 
     from kraft import executor
@@ -231,14 +238,28 @@ def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
         "/api/work-items",
         json={"title": "t", "repo": str(repo), "autostart": False, "base_branch": "release"},
     )
-    _force_node(r.json()["id"], "spec", stopped)
+    _force_node(r.json()["id"], node, stopped)
 
     assert client.post(f"/api/work-items/{r.json()['id']}/{door}", json={}).status_code == 200
-    assert bases == ["release"]
+    assert bases == rebased
 
 
+@pytest.mark.parametrize(
+    ("chain", "rebased"),
+    [
+        (_ONE_NODE, ["release"]),
+        (
+            [
+                {**_ONE_NODE[0], "id": "m"},
+                {**_ONE_NODE[0], "on_base_changed": {"restart_from": "m"}},
+            ],
+            [],
+        ),
+    ],
+    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+)
 async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
-    item_on, run_dirs, repo, monkeypatch
+    item_on, run_dirs, repo, monkeypatch, chain, rebased
 ):
     from kraft import events, store
     from kraft.executor import gates
@@ -256,7 +277,7 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     # the function.
     monkeypatch.setattr(sys.modules["kraft.executor.retry"], "retry", walk)
     target = WorkItemTarget.for_repository("target", base_branch="release")
-    it = await item_on(_ONE_NODE, "n", target=target)
+    it = await item_on(chain, "n", target=target)
     await it.database.write(
         lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True, kind="stuck")
     )
@@ -268,7 +289,7 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
 
     await gates.resume_after_escalation(it.database, run_dirs, work_item_id=it.id, cursor=cursor)
 
-    assert bases == ["release"]
+    assert bases == rebased
 
 
 async def test_an_escalations_self_retry_that_cannot_rebase_stops_infra(
@@ -315,8 +336,7 @@ async def test_the_merge_request_lists_the_commits_it_adds_to_its_base(
     await _item_on(database, repo, "release")
     worktree = await wtree.ensure(database, run_dirs, repo)
     (worktree / "work.txt").write_text("the item's work\n")
-    _git(worktree, "add", "-A")
-    _git(worktree, "commit", "-q", "-m", "the item's work")
+    commit_all(worktree, "the item's work")
     fake = forge.FakeForge()
     monkeypatch.setattr(forge.run, "resolve", lambda _name: fake)
 
@@ -389,8 +409,8 @@ async def test_a_base_branch_gone_from_origin_is_a_stop_naming_it(
     no longer exists -- but stop and name the branch."""
     repo, other = origin
     if fetched_before:
-        _git(repo, "fetch", "-q", "origin", "release:refs/remotes/origin/release")
-    _git(other, "push", "-q", "origin", "--delete", "release")
+        git(repo, "fetch", "-q", "origin", "release:refs/remotes/origin/release")
+    git(other, "push", "-q", "origin", "--delete", "release")
     await _item_on(database, repo, "release")
 
     with pytest.raises(kraft_builtins.BaseBranchMissing, match="base branch 'release'"):
@@ -404,7 +424,7 @@ async def test_the_pre_mr_rebase_onto_a_vanished_base_is_a_config_stop(database,
     repo, other = origin
     await _item_on(database, repo, "release")
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _git(other, "push", "-q", "origin", "--delete", "release")
+    git(other, "push", "-q", "origin", "--delete", "release")
 
     status = await kraft_builtins.mr_rebase(
         database,

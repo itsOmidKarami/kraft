@@ -330,6 +330,8 @@ async def _remove_worktree(
     it, and the answer names the path as `repo_missing`. Its branch, if the
     repository was only moved, stays there.
     """
+    # Lockfiles a server killed mid-rebase left set aside, under the run dir.
+    await asyncio.to_thread(shutil.rmtree, builtins_mod.set_aside_dir(worktree), ignore_errors=True)
     if not repo.is_dir():
         logger.warning(
             "abandon %s: repository %s is gone; removing the worktree directory itself",
@@ -711,11 +713,23 @@ def _not_stopped(row) -> str:
     return "work item is not stopped"
 
 
-def not_paused(row) -> str:
+def not_paused(row, gate: str | None = None) -> str:
     """The 409 a steer or resume on an item that is not paused gets. A running
-    one is told what to do (Ruling 183: a steer never reaches a running item)."""
+    one is told what to do (Ruling 183: a steer never reaches a running item),
+    and so is one waiting for a person: at a `gate`, approve or reject it;
+    stopped anywhere else, retry it, which takes a steer too (R11a)."""
     if row["status"] in ("active", "waiting"):
         return f"work item is {row['status']}: it is running, so pause it first"
+    if row["status"] == "needs_human" and gate is not None:
+        return (
+            f"work item is waiting at its {gate} gate, not paused: approve or reject it "
+            f"(kraft item approve {row['id']}, or kraft item reject {row['id']} --note ...)"
+        )
+    if row["status"] == "needs_human":
+        return (
+            "work item is needs_human, not paused: it stopped, so retry it instead "
+            f"(kraft item retry {row['id']}, which takes --steer too)"
+        )
     return f"work item is {row['status']}, not paused"
 
 
@@ -751,7 +765,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     if row["status"] != "paused" and not (
         row["status"] == "needs_human" and board._needs_context_stop(st, wid)
     ):
-        raise HTTPException(409, not_paused(row))
+        raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "steer text is required")
@@ -774,7 +788,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # Same reason as retry: claim_for_run below still decides, but an item
         # that was never paused should hear that, not a complaint about its
         # steer text or a busy slot.
-        raise HTTPException(409, not_paused(row))
+        raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -881,11 +895,18 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
-            new_base = await builtins_mod.refresh_worktree_base(
-                worktree,
-                Path(row["repo"]),
-                store.branch_for(row),
-                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+            # Left to a starting node that rebases itself, which then restarts
+            # its span on the move (`walk.rebases_itself`).
+            start = rewind["target"] if rewind is not None else row["current_node_id"]
+            new_base = (
+                None
+                if walk.rebases_itself(row, start)
+                else await builtins_mod.refresh_worktree_base(
+                    worktree,
+                    Path(row["repo"]),
+                    store.branch_for(row),
+                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+                )
             )
         except builtins_mod.RebaseConflict as exc:
             # Handed to the walk, which gives it to the node's `on_conflict`
@@ -1202,11 +1223,16 @@ async def _retry(wid: str, body: Retry, request: Request):
         try:
             # The refresh runs host git in the worktree and its members (Kraft-ju36l).
             stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
-            new_base = await builtins_mod.refresh_worktree_base(
-                worktree,
-                Path(row["repo"]),
-                store.branch_for(row),
-                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+            # Left to a node that rebases itself (`walk.rebases_itself`).
+            new_base = (
+                None
+                if walk.rebases_itself(row, node_id)
+                else await builtins_mod.refresh_worktree_base(
+                    worktree,
+                    Path(row["repo"]),
+                    store.branch_for(row),
+                    base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+                )
             )
         except builtins_mod.RebaseConflict as exc:
             # The retry still forks; the walk hands the conflict to the

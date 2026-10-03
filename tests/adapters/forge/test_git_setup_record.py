@@ -8,29 +8,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import git, make_repo, write
 
 from kraft.adapters import forge
-from kraft.worker import sandbox
-
-
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=True,
-        env=sandbox.unhardened_git_env(),
-    ).stdout
 
 
 def _record(repo: Path) -> Path:
-    return Path(_git(repo, "rev-parse", "--absolute-git-dir").strip()) / forge.git.SETUP_WROTE
+    return Path(git(repo, "rev-parse", "--absolute-git-dir")) / forge.git.SETUP_WROTE
 
 
 def _setup_writes(repo: Path, name: str = "uv.lock", text: str = "by the setup\n") -> None:
@@ -42,9 +29,9 @@ def _setup_writes(repo: Path, name: str = "uv.lock", text: str = "by the setup\n
 
 def _sweep(repo: Path) -> list[str]:
     """Run the sweep; what its commit took."""
-    branch = _git(repo, "branch", "--show-current").strip()
+    branch = git(repo, "branch", "--show-current")
     asyncio.run(forge.commit_stragglers(repo, branch=branch, base="main", message="wip: t"))
-    return sorted(_git(repo, "show", "--name-only", "--format=", "HEAD").split())
+    return sorted(git(repo, "show", "--name-only", "--format=", "HEAD").split())
 
 
 def test_an_agents_edit_to_the_setups_lockfile_is_committed(tmp_path):
@@ -118,45 +105,55 @@ def test_a_record_from_before_digests_still_leaves_its_lockfile_out(tmp_path):
     assert _sweep(repo) == ["work.py"]
 
 
+def _write_each(repo: Path, files, text: str) -> None:
+    """Write each of `files`; a `package.json` is the repo's own, so committed."""
+    for f in files:
+        write(repo, f, text)
+        if f.endswith("package.json"):
+            git(repo, "add", f)
+            git(repo, "commit", "-q", "-m", "a package")
+
+
 @pytest.mark.parametrize(
     "files",
     [
         ("node_modules/fixpkg/index.js",),
         ("env/pyvenv.cfg", "env/lib/site.py"),
+        ("fixtures/proj/package.json", "fixtures/proj/node_modules/dep/index.js"),
     ],
-    ids=["node_modules-with-no-marker", "bare-pyvenv-cfg"],
+    ids=["node_modules-with-no-marker", "bare-pyvenv-cfg", "beside-a-tracked-package-json"],
 )
 def test_a_directory_that_only_looks_like_an_install_is_committed(tmp_path, files):
     """A resolver's test fixture named `node_modules`, or a directory with a
     `pyvenv.cfg` and no interpreter, is the agent's work, not an install:
-    it used to be dropped from the merge request with no trace."""
+    it used to be dropped from the merge request with no trace. So is one
+    beside a `package.json` the repo tracks, with no package manager's
+    marker in it (R11E-04)."""
     repo = make_repo(tmp_path)
-    for f in files:
-        (repo / f).parent.mkdir(parents=True, exist_ok=True)
-        (repo / f).write_text("work\n")
+    _write_each(repo, files, "work\n")
+    added = [f for f in files if not f.endswith("package.json")]
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == []
-    assert _sweep(repo) == sorted(files)
+    assert _sweep(repo) == sorted(added)
 
 
 @pytest.mark.parametrize(
     ("files", "install"),
     [
         (("node_modules/.modules.yaml", "node_modules/x/i.js"), "node_modules"),
-        (("web/package.json", "web/node_modules/x/i.js"), "web/node_modules"),
+        (
+            ("web/package.json", "web/node_modules/.package-lock.json", "web/node_modules/x/i.js"),
+            "web/node_modules",
+        ),
+        (("node_modules/.pnpm/x/i.js",), "node_modules"),
         (("env/pyvenv.cfg", "env/Scripts/python.exe"), "env"),
     ],
-    ids=["pnpm-marker", "beside-package-json", "windows-venv"],
+    ids=["pnpm-marker", "beside-package-json", "pnpm-store", "windows-venv"],
 )
 def test_a_real_install_is_left_out(tmp_path, files, install):
     """A `package.json` beside it is the repo's own, so committed first."""
     repo = make_repo(tmp_path)
-    for f in files:
-        (repo / f).parent.mkdir(parents=True, exist_ok=True)
-        (repo / f).write_text("installed\n")
-        if f.endswith("package.json"):
-            _git(repo, "add", f)
-            _git(repo, "commit", "-q", "-m", "a package")
+    _write_each(repo, files, "installed\n")
 
     assert asyncio.run(forge.environment_paths(repo, "main")) == [install]
 
@@ -169,3 +166,24 @@ def test_a_cargo_lock_the_setup_wrote_is_left_out(tmp_path):
     (repo / "work.py").write_text("x = 1\n")
 
     assert _sweep(repo) == ["work.py"]
+
+
+def test_a_linked_lockfile_is_recorded_by_its_link_never_its_target(tmp_path):
+    """R11E-01: the record sits where a worker can read it. A `uv.lock` that
+    is a link to a host file was hashed through the link, so the record held
+    a digest of that file. The link itself is recorded: a change to the
+    target never touches the record, and its digest is not the target's."""
+    import hashlib
+
+    repo = make_repo(tmp_path)
+    secret = tmp_path / "host-secret"
+    secret.write_text("the host's\n")
+    before = asyncio.run(forge.lockfile_digests(repo))
+    (repo / "uv.lock").symlink_to(secret)
+    asyncio.run(forge.record_setup_writes(repo, before))
+    recorded = json.loads(_record(repo).read_text())["uv.lock"]
+
+    secret.write_text("changed on the host\n")
+
+    assert recorded != hashlib.sha256(b"the host's\n").hexdigest()
+    assert asyncio.run(forge.setup_lockfiles(repo)) == {"uv.lock"}

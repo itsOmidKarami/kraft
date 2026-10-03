@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import entry_of, make_repo, seed_v1_library
+from support.harness import entry_of, git, make_repo, seed_v1_library
 
 from kraft import executor, review_reply, store
 
@@ -40,10 +39,6 @@ def _seed(tmp_path, monkeypatch):
     return prompts, argv
 
 
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
-
-
 async def _item(item_on, run_dirs):
     """An item at a pending gate, with a real git repo standing in for its
     worktree (`review_reply.run` reads it through `read_only`).
@@ -55,8 +50,8 @@ async def _item(item_on, run_dirs):
     it = await item_on(NODES, GATE, status="needs_human")
     worktree = make_repo(run_dirs.worktrees, name=it.id)
     (worktree / ".gitignore").write_text(".engineering/\n")
-    _git(worktree, "add", ".gitignore")
-    _git(worktree, "commit", "-qm", "ignore .engineering")
+    git(worktree, "add", ".gitignore")
+    git(worktree, "commit", "-qm", "ignore .engineering")
     return it
 
 

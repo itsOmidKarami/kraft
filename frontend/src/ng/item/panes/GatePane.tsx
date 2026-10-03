@@ -8,7 +8,7 @@ import { act } from "../actions";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
-import { sendOnModEnter } from "../../keys";
+import { holdsText, isEscape, sendOnModEnter } from "../../keys";
 
 type ThreadRow = { id: string; state: string; gate: string | null; node_id: string | null; file_path: string | null; comments?: { body: string }[] };
 
@@ -86,7 +86,13 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
   }, [rejecting]);
   if (rejecting)
     return (
-      <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`}>
+      // Escape closes the note, not the pane, and only when there is no text in it to lose (R11b-02).
+      <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`} onKeyDown={(e) => {
+        if (!isEscape(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!holdsText(e.target)) { refocus.current = true; setRejecting(false); }
+      }}>
         <p className="ip-confirm-q">Reject <code>{gate.id}</code>{to && <> · goes back to <code>{to}</code></>}</p>
         {/* Focus moves into the note: the Reject… button that had it is gone (R7b-10, R10b-04). */}
         <textarea autoFocus aria-label="Why (the next agent reads it)" className="item-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={sendOnModEnter(reject, !busy && !!note.trim())} />

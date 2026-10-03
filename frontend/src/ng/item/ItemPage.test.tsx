@@ -39,6 +39,16 @@ describe("ItemPage", () => {
     expect(screen.getByRole("button", { name: "Collapse pane" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
   });
+
+  // R11a-05: Raise cap only opened Config; the editor stayed shut and the focus on the button.
+  it("opens the budget editor on Config from a budget stop's Raise cap, the focus in its field", async () => {
+    const capped = detail({ status: "needs_human", display_status: "needs_you", stop: { kind: "budget", node: "verification", task: null, resume_at: null, reason: "Spend cap reached", scope: "work_item" } as never, budget_cap: { cap_usd: 5, source: "item", spent_usd: 5 } as never });
+    stubFetch({ "GET /work-items/w1": [200, capped], "GET /policy": [200, {}] });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("tab=config");
+    expect(await screen.findByRole("textbox", { name: "Budget in dollars" })).toHaveFocus();
+  });
 });
 
 const sess = (id: string, hook_point: string, attempt: number, over: Partial<WorkerSession> = {}) =>

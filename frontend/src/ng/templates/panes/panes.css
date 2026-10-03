@@ -57,7 +57,7 @@
 .tpl-rv-sign.is-remove { color: var(--bad); }
 .tpl-rv-sign.is-rename { color: var(--warn); }
 .tpl-rv-path { flex: none; max-width: 60%; font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
-.tpl-rv-sum { margin-left: auto; font-size: 11.5px; color: var(--text-muted); text-align: right; }
+.tpl-rv-sum { flex: 0 1 auto; min-width: 0; margin-left: auto; font-size: 11.5px; color: var(--text-muted); text-align: right; overflow-wrap: anywhere; }
 .tpl-rv-prob { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 6px; padding: 6px 8px; border-left: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); font-size: 12px; color: var(--text); }
 .tpl-rv-prob > span:nth-child(2) { flex-basis: 100%; }
 .tpl-rv-fix { margin-left: auto; padding: 0 6px; border: 0; border-radius: 4px; background: none; font-size: 11.5px; color: var(--text); text-decoration: underline; cursor: pointer; }

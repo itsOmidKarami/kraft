@@ -204,7 +204,6 @@ DUPLICATE_HELPER_ALLOWLIST: dict[str, int] = {
     "_capture#601f0018": 2,
     "_claude_profile#e3d12ce4": 2,
     "_closed_port#deb4dc33": 2,
-    "_commit#27e09d8c": 3,
     "_cycles#28a90170": 2,
     "_dispatch#a1fa46d1": 2,
     "_dispatch#d9bd549e": 2,
@@ -214,7 +213,6 @@ DUPLICATE_HELPER_ALLOWLIST: dict[str, int] = {
     "_fallbacks#f411c9ff": 2,
     "_file#4cd7a538": 3,
     "_forge_task#c38ff87f": 2,
-    "_git#3eda7a58": 10,
     "_head#4682633e": 2,
     "_instance#4798ec17": 2,
     "_invalid_policy#cfd00c64": 2,
@@ -227,7 +225,7 @@ DUPLICATE_HELPER_ALLOWLIST: dict[str, int] = {
     "_paused_item#7bc47ea9": 2,
     "_policy#2a2ff9e2": 2,
     "_poll_for#cb741314": 2,
-    "_porcelain#d2b67cd1": 2,
+    "_porcelain#1bd0b559": 2,
     "_quick_task#4d1620ad": 4,
     "_reason#6b8c673d": 4,
     "_row#3af4ea33": 3,
@@ -255,7 +253,6 @@ DUPLICATE_HELPER_ALLOWLIST: dict[str, int] = {
     "_walk#e4e690bb": 2,
     "_workspace_item#131b1971": 2,
     "_worktree#6fa35a84": 2,
-    "_write#e479fa70": 2,
     "agent_task#7964819a": 2,
     "connected#60551aef": 2,
     "ct#bd32a8a1": 2,
@@ -579,7 +576,7 @@ def _is_pytest_collected(relpath: str) -> bool:
     """pytest's own default `python_files` patterns: `test_*.py`/`*_test.py`.
     `tests/support/**` (harness.py, fake_beads.py, ...) is deliberately out
     of scope -- it is fixture/fake infrastructure, never itself collected as
-    a test module, and some of it (`fake_beads.Bd._cli`, `harness._git`'s bd
+    a test module, and some of it (`fake_beads.Bd._cli`, `harness.git`'s bd
     counterpart) *is* the real-CLI path an `e2e` test asks for through the
     `bd` fixture. What matters is that no *test* reaches it unmarked; the
     runtime guard in tests/conftest.py is what actually stops that."""

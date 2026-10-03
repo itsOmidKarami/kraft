@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 
 import pytest
+from support.harness import write
 
 from kraft import harness, policy
 from kraft.templates import environment as template_environment
@@ -164,14 +164,6 @@ def test_codex_effort_values_include_xhigh():
     assert not codex.value_ok("effort", "bogus")
 
 
-def _write(tmp_path: Path, name: str, body: str) -> Path:
-    d = tmp_path / "harnesses"
-    d.mkdir(exist_ok=True)
-    p = d / name
-    p.write_text(body)
-    return p
-
-
 _MINIMAL = """
 id: {id}
 kind: cli
@@ -184,7 +176,7 @@ capabilities:
 
 
 def test_minimal_harness_is_valid(tmp_path):
-    _write(tmp_path, "mini.yaml", _MINIMAL.format(id="mini"))
+    write(tmp_path, "harnesses/mini.yaml", _MINIMAL.format(id="mini"))
     hs = harness.load(tmp_path / "harnesses")
     assert hs.invalid == {}
     assert "mini" in hs.valid
@@ -333,7 +325,7 @@ _HOOK_CAPS = (
     ],
 )
 def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect):
-    _write(tmp_path, "x.yaml", body)
+    write(tmp_path, "harnesses/x.yaml", body)
     hs = harness.load(tmp_path / "harnesses")
     assert "x" not in hs.valid
     assert expect in hs.invalid["x"]
@@ -429,7 +421,7 @@ def test_a_misshapen_harness_is_refused_in_prose_naming_the_key(tmp_path, body, 
     """Kraft-5d510.2: the shape is `HarnessInput`'s, but the reason an operator
     reads is still the one the hand-rolled parser gave, never pydantic's
     "Input should be a valid list"."""
-    _write(tmp_path, "x.yaml", body)
+    write(tmp_path, "harnesses/x.yaml", body)
     assert expect in harness.load(tmp_path / "harnesses").invalid["x"]
 
 
@@ -500,8 +492,8 @@ def test_config_dir_files_are_written_as_json_and_must_stay_in_the_dir():
 
 def test_one_bad_file_does_not_take_the_others_down(tmp_path):
     """The `load_templates` precedent: quarantine by name, keep serving."""
-    _write(tmp_path, "good.yaml", _MINIMAL.format(id="good"))
-    _write(tmp_path, "bad.yaml", "id: bad\nkind: nope\ncommand: [b]\ncapabilities: {}\n")
+    write(tmp_path, "harnesses/good.yaml", _MINIMAL.format(id="good"))
+    write(tmp_path, "harnesses/bad.yaml", "id: bad\nkind: nope\ncommand: [b]\ncapabilities: {}\n")
     hs = harness.load(tmp_path / "harnesses")
     assert "good" in hs.valid
     assert "bad" in hs.invalid
@@ -510,7 +502,7 @@ def test_one_bad_file_does_not_take_the_others_down(tmp_path):
 
 
 def test_overlay_wins_and_takes_ownership(tmp_path):
-    _write(tmp_path, "claude.yaml", _MINIMAL.format(id="claude"))
+    write(tmp_path, "harnesses/claude.yaml", _MINIMAL.format(id="claude"))
     hs = harness.load(tmp_path / "harnesses")
     # The operator's file replaces the shipped one entirely -- it does not
     # merge -- so the shipped `always: [Monitor]` is gone.
@@ -519,7 +511,7 @@ def test_overlay_wins_and_takes_ownership(tmp_path):
 
 
 def test_id_must_match_file_name(tmp_path):
-    _write(tmp_path, "wrong.yaml", _MINIMAL.format(id="right"))
+    write(tmp_path, "harnesses/wrong.yaml", _MINIMAL.format(id="right"))
     hs = harness.load(tmp_path / "harnesses")
     assert "does not match its file name" in hs.invalid["wrong"]
 

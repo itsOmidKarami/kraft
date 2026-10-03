@@ -451,7 +451,7 @@ class Indexer:
                 # Not indexed yet: scan_repo lists via `git ls-files` against the
                 # registered main checkout, so a committed-but-unmerged attachment
                 # doesn't show up there. Read it live from the item's own worktree
-                # instead — the same lookup `_worktree_file` does.
+                # instead, or from its stored copy before it has one.
                 synthesized = self._synthesize_attachment_doc(work_item_id, row["repo"], attachment)
                 if synthesized is None:
                     continue
@@ -468,13 +468,31 @@ class Indexer:
             )
         return out
 
+    def _read_attachment(self, work_item_id: str, attachment: dict) -> str | None:
+        """An unindexed attachment's text: from the item's own worktree while
+        it has one, else from the copy Kraft stored at intake under
+        `run/attachments/<id>/`: before the item starts (the copy the
+        worktree will get), and after its worktree is removed (what it was
+        filed with). Never the main checkout, which holds files no one
+        attached (R11F-02). While the worktree exists it is the only source,
+        so a worker's edit, or its deletion, is what shows."""
+        if self._run_dirs is None:
+            return None
+        if (self._run_dirs.worktrees / work_item_id).exists():
+            return self._read_worktree_file(attachment["path"], work_item_id)
+        source = attachment.get("source")
+        if not source:
+            return None
+        return ingest.read_inside(self._run_dirs.attachments / work_item_id, Path(source).name)
+
     def _synthesize_attachment_doc(
         self, work_item_id: str, repo: str, attachment: dict
     ) -> dict | None:
-        """Read an unindexed attachment straight from the item's own worktree
-        and shape it like a `documents` row, so an attach-based item shows its
-        spec/plan before the branch that carries them ever merges."""
-        text = self._read_worktree_file(attachment["path"], work_item_id)
+        """Read an unindexed attachment straight from the item's own worktree,
+        or from its stored copy before it has one, and shape it like a
+        `documents` row, so an attach-based item shows its spec/plan before it
+        starts, and before the branch that carries them ever merges."""
+        text = self._read_attachment(work_item_id, attachment)
         if text is None:
             return None
         fm, body = ingest.split_front_matter(text)
@@ -698,12 +716,19 @@ class Indexer:
         attachment = next((a for a in json.loads(row["attachments"]) if a["kind"] == kind), None)
         if attachment is None:
             return None
-        return self._worktree_file(attachment["path"], work_item_id)
+        # Only a file that is there. Before the item starts there is no
+        # worktree, and an editor saving to this path would make
+        # `run/worktrees/<id>/` a plain directory, which `ensure_worktree`
+        # then takes for the worktree (R11F-02 review). The stored copy is
+        # never offered either: editing it would change what the item is
+        # filed with behind `kraft item set-attachments`' back.
+        path = self._worktree_file(attachment["path"], work_item_id)
+        return path if path is not None and path.is_file() else None
 
     def _get_synthetic_attachment_document(self, doc_id: str) -> dict | None:
         """Content fetch for the synthetic `attachment:{work_item_id}:{kind}` ids
         `_synthesize_attachment_doc` hands out — there's no `documents` row to
-        join against, so read the file straight from the worktree again."""
+        join against, so read the file again where that did."""
         _, work_item_id, kind = doc_id.split(":", 2)
         row = self._state.read(
             lambda c: c.execute(
@@ -718,7 +743,7 @@ class Indexer:
         doc = self._synthesize_attachment_doc(work_item_id, row["repo"], attachment)
         if doc is None:
             return None
-        text = self._read_worktree_file(attachment["path"], work_item_id)
+        text = self._read_attachment(work_item_id, attachment)
         if text is None:
             return None
         _, content = ingest.split_front_matter(text)

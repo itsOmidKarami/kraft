@@ -38,10 +38,15 @@ def cache_dir() -> Path:
     return Path(base) / "kraft" / "fastembed"
 
 
-_MISSING = (
-    "the 'vector' extra is not installed — "
-    "`uv tool install --force 'kraft-sdlc[vector]'` to enable semantic search"
-)
+def missing() -> str:
+    """Why vector search is off, and the command that turns it on for this
+    install, at this version, on this Python (`update.add_extra_hint`)."""
+    from kraft import update
+
+    return (
+        "the 'vector' extra is not installed — "
+        f"{update.add_extra_hint('vector')} to enable semantic search"
+    )
 
 
 class Embedder:
@@ -58,7 +63,7 @@ class Embedder:
         try:
             import fastembed  # noqa: F401
         except ImportError:
-            self.reason = _MISSING
+            self.reason = missing()
             return False
         return True
 
@@ -86,7 +91,7 @@ class Embedder:
         # reports it as "installed but broken" (Kraft-pm2rj).
         try:
             if not self.available():
-                raise RuntimeError(self.reason or _MISSING)
+                raise RuntimeError(self.reason or missing())
             vectors = [list(map(float, v)) for v in self._load().embed(texts)]
         except Exception as exc:
             self.reason = str(exc) or type(exc).__name__

@@ -3,7 +3,13 @@ import type { GraphItem } from "./types";
 /** Chain canvas geometry, from StageGraph.dc.html `static L`. */
 export const L = { BOX: 54, GATE: 26, COLE: 138, COLG: 96, CY: 96, PAD: 86, H: 250 } as const;
 
-export type ChainNode = GraphItem & { kind: "exec" | "gate"; sub?: string; subTone?: "amber" | "muted" };
+export type ChainNode = GraphItem & {
+  kind: "exec" | "gate";
+  sub?: string;
+  subTone?: "amber" | "muted";
+  /** What a node the run stands on waits for, in words ("waiting on CI"), for a pane or a row; the canvas does not draw it. */
+  wait?: string;
+};
 export type ChainArc =
   | { kind: "loop"; node: string; tone?: "idle" | "active" | "red"; label?: string }
   | { kind: "rebase"; from: string; to: string; label?: string }

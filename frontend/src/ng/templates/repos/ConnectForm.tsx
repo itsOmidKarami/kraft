@@ -148,7 +148,7 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
           {alsoTest && <p className="rp-connect-note">Also found for tests: {alsoTest}</p>}
           {alsoSetup && <p className="rp-connect-note">Also found for setup: {alsoSetup}</p>}
           {gains && <p className="rp-connect-note">{Object.keys(gains).length ? `Already connected: Update saves ${gainedLine(gains)}.` : "Already connected, and nothing it leaves undecided was found."}</p>}
-          {!gains && !noCommit && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connects enabled." : `${stopped ? "No test command proposed" : "No tests found"}: connects disabled until you set a test command in Settings › Repos.`}</p>}
+          {!gains && !noCommit && <p className="rp-connect-note">{fieldsFrom(probe).enabled ? "Connects enabled." : `${stopped ? "No test command proposed" : "No tests found"}: connects disabled. Once it is connected, set its test command in its pane here, then Enable it.`}</p>}
         </div>
       )}
     </form>

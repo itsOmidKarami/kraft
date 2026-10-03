@@ -14,12 +14,11 @@ import shlex
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of, fake_docker_bin
+from support.harness import entry_of, fake_docker_bin, git
 from support.sandbox_image import build_git_image
 from support.workspace import repositories
 from templates.test_workspace_publication import (
     _PUBLISH,
-    _git_out,
     _LandingForge,
     _publishable,
     _repos,
@@ -118,12 +117,12 @@ async def test_a_sandboxed_workspace_item_walks_to_merged_with_its_pointer_bumpe
     branch = store.branch_for(row)
     stores = [(wt / _REL, member_gitdirs(m, wt, _REL)[1]), (wt, linked_gitdirs(wt)[1])]
     fake = [
-        (repo, _git_out(repo, "rev-parse", "HEAD"), refstore.shadow_dir(run_dirs.base, admin))
+        (repo, git(repo, "rev-parse", "HEAD"), refstore.shadow_dir(run_dirs.base, admin))
         for repo, admin in stores
     ]
     script = _script(wt, branch, fake if name == "fake" else [])
     (wt / "worker.sh").write_text(script)
-    mains = {r: _git_out(r, "rev-parse", "main") for r in (m, Path(row["repo"]))}
+    mains = {r: git(r, "rev-parse", "main") for r in (m, Path(row["repo"]))}
     landing = _LandingForge()
     monkeypatch.setattr(forge.run, "resolve", lambda _name: landing)
 
@@ -146,9 +145,9 @@ async def test_a_sandboxed_workspace_item_walks_to_merged_with_its_pointer_bumpe
     assert status == "completed", _stopped(database, row)
     assert _repos(database, row) == {"root": "merged", "submodule": "merged"}
     assert [e for e in landing.order if e[0] == "merge"] == [("merge", "pkg"), ("merge", wt.name)]
-    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    merged = git(tmp_path / "pkg", "rev-parse", "main")
     # Each branch reached its origin and landed there, the worker's commits in it.
-    assert "member work" in _git_out(tmp_path / "pkg", "log", "--format=%s", "main")
-    assert "root work" in _git_out(origin, "log", "--format=%s", "main")
-    assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
-    assert {r: _git_out(r, "rev-parse", "main") for r in mains} == mains
+    assert "member work" in git(tmp_path / "pkg", "log", "--format=%s", "main")
+    assert "root work" in git(origin, "log", "--format=%s", "main")
+    assert git(origin, "rev-parse", "main:repos/pkg") == merged
+    assert {r: git(r, "rev-parse", "main") for r in mains} == mains

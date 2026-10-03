@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -593,13 +594,18 @@ async def duplicate_work_item(wid: str, request: Request):
         ).item_policy
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    duplicates = st.db.read(lambda c: store.open_duplicates(c, row["repo"], row["title"], []))
+    # A title 1.4 stored on several lines, or blank, is folded as a cron
+    # trigger's is (`entry.one_line_title`); one with no text anywhere is refused.
+    title, description = entry.one_line_title(row["title"], row["description"] or "")
+    if not title.strip():
+        raise HTTPException(422, "title cannot be empty: give the item a title first")
+    duplicates = st.db.read(lambda c: store.open_duplicates(c, row["repo"], title, []))
     try:
         new_id = await executor.intake(
             st.db,
             st.run_dirs,
-            title=row["title"],
-            description=row["description"] or "",
+            title=title,
+            description=description,
             repo=row["repo"],
             chain=chain,
             effective_policy=policy,
@@ -652,6 +658,18 @@ def _check_one_line(title: str) -> None:
     blank-title refusal refuses rather than strips."""
     if not _LINE_BREAKS.isdisjoint(title):
         raise HTTPException(422, "the title is one line: put the rest in the description instead")
+    # A tab misaligned the same table; an escape or a bidi override in a title
+    # `kraft view list` prints raw can make a terminal show something else.
+    if any(unicodedata.category(ch) == "Cc" or ch in _BIDI_CONTROLS for ch in title):
+        raise HTTPException(
+            422, "the title is plain text: no tab, escape or other control character"
+        )
+
+
+#: The characters that reorder text as it is shown (Unicode's bidi controls).
+_BIDI_CONTROLS = frozenset(
+    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
 
 
 class TriggerBody(BaseModel):

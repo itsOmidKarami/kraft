@@ -15,11 +15,10 @@ faked at `kraft.adapters.subprocess.run_task`, so no container ever starts.
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import entry_of
+from support.harness import ALLOW_FILE, entry_of, git
 
 from kraft import store
 from kraft.executor import dispatch, walk
@@ -35,21 +34,15 @@ _SANDBOX = {
 _SANDBOXED = pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
 
 
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    ).stdout.strip()
-
-
 def _nested(parent: Path, rel: str) -> None:
     """A plain repository at `parent/rel` with one commit, no config of its own
     (tests/worker/test_planted_repos.py's `_nested`)."""
     path = parent / rel
     path.mkdir(parents=True)
-    _git(path, "init", "-q", "-b", "main")
+    git(path, "init", "-q", "-b", "main")
     (path / "f").write_text("x\n")
-    _git(path, "add", "f")
-    _git(path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "n")
+    git(path, "add", "f")
+    git(path, "commit", "-q", "-m", "n")
 
 
 async def _item(item_on, task: dict, sandboxed: bool):
@@ -57,8 +50,8 @@ async def _item(item_on, task: dict, sandboxed: bool):
     not, with `base_ref` stamped at the repo's HEAD the way env setup does."""
     policy = {"policy": {"sandbox": _SANDBOX}} if sandboxed else {}
     it = await item_on([{"id": "implementation", "kind": "exec", "tasks": [task], **policy}])
-    _git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
-    head = _git(it.repo, "rev-parse", "HEAD")
+    git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
+    head = git(it.repo, "rev-parse", "HEAD")
     await it.database.write(lambda c: store.set_base_ref(c, it.id, head))
     return it
 
@@ -176,7 +169,7 @@ async def test_the_straggler_sweep_leaves_a_sandboxed_worktree_alone(
     assert await _dispatch(it) == "done"
 
     errors = [e["payload"]["error"] for e in it.events("sweep_failed")]
-    committed = "left.txt" in _git(it.repo, "ls-files").splitlines()
+    committed = "left.txt" in git(it.repo, "ls-files").splitlines()
     if sandboxed:
         assert (committed, len(errors)) == (False, 1)
         assert errors[0].startswith(expected)
@@ -248,7 +241,7 @@ def _swap_member(worktree: Path, rel: str) -> None:
     top = worktree / Path(rel).parts[0]
     top.rename(top.with_name(top.name + "-moved"))
     (worktree / "evil").mkdir()
-    _git(worktree / "evil", "init", "-q")
+    git(worktree / "evil", "init", "-q")
     (worktree / rel).mkdir(parents=True)
     (worktree / rel / ".git").write_text(f"gitdir: {worktree / 'evil' / '.git'}\n")
 
@@ -294,8 +287,8 @@ def _old_layout(root: Path, worktree: Path, rel: str) -> None:
     """`worktree` with member `rel` checked out as Kraft did before
     Kraft-ju36l: `submodule update --init`, its gitdir under the root's
     worktree gitdir, which a sandboxed worker writes."""
-    _git(root, "worktree", "add", "-q", "-b", "kraft/old-layout", str(worktree))
-    _git(worktree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--", rel)
+    git(root, "worktree", "add", "-q", "-b", "kraft/old-layout", str(worktree))
+    git(worktree, *ALLOW_FILE, "submodule", "update", "--init", "--", rel)
 
 
 def _reason(evts) -> str:

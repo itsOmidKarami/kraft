@@ -61,6 +61,13 @@ async function probeAndAdd(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("FirstRun", () => {
+  // R11a-08: a Mac's home in the placeholder read wrong on Linux.
+  it.each([["MacIntel", "/Users/you/code/project"], ["Linux x86_64", "/home/you/code/project"]])("on %s, the path's placeholder is %s", (platform, placeholder) => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+    mount();
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveAttribute("placeholder", placeholder);
+  });
+
   it("names the address the server is on", async () => {
     mount();
     expect(await screen.findByText("127.0.0.1:4317")).toBeInTheDocument();
@@ -118,6 +125,8 @@ describe("FirstRun", () => {
     await user.type(screen.getByLabelText(/Path to a local git checkout/), "/code/acme");
     await user.click(screen.getByRole("button", { name: "+ Add repo" }));
     expect(await screen.findAllByText("checking…")).toHaveLength(5);
+    // + Add repo is gone with the probe: focus is in the path field, where Enter adds, not on the page (R11a-08).
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveFocus();
     expect(api.addRepo).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Add repo" })).toBeDisabled();
     await tick(PROBE_STEP_MS / 3);
@@ -321,7 +330,11 @@ describe("FirstRun", () => {
     expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
     expect(screen.getByText(/Claude workers need Kraft's MCP server, or Kraft refuses to launch them/)).toBeInTheDocument();
     expect(screen.getByText(/without the plugin, run/)).toHaveTextContent("kraft admin init");
-    expect(screen.getByText(/open a Claude Code session in your repo and run/)).toHaveTextContent("/kraft:onboard");
+    // Step 1 connected the repo, so onboard checks it rather than connecting it.
+    const onboard = screen.getByText(/open a Claude Code session in your repo and run/);
+    expect(onboard).toHaveTextContent("/kraft:onboard");
+    expect(onboard).toHaveTextContent(/connected already: it checks the setup and test commands/);
+    expect(onboard).not.toHaveTextContent(/connects the repo/);
     await user.click(screen.getByRole("button", { name: /Copy commands/ }));
     expect(await screen.findByRole("button", { name: /Copied/ })).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe(

@@ -176,6 +176,15 @@ async def open_document(doc_id: str, body: OpenDocument, request: Request):
         # from. `resolve_attachment_path` does its own containment check
         # (`Indexer._worktree_file`), so there is no separate escape check here.
         path = st.indexer.resolve_attachment_path(doc_id)
+        _, wid, kind = doc_id.split(":", 2)
+        if path is None and not (st.run_dirs.worktrees / wid).exists():
+            # Before the item starts, an editor saving here would create the
+            # worktree's directory as a plain one (R11F-02 review).
+            raise HTTPException(
+                409,
+                "this work item has not started yet, so it has no worktree to open the "
+                f"attachment in; read it with `kraft view docs {wid} --attachment {kind}`",
+            )
         if path is None:
             raise HTTPException(404, "attachment file not found")
         return {"document_id": doc_id, **_launch_editor(request, body.editor, path)}

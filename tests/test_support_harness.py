@@ -11,16 +11,16 @@ from pathlib import Path
 import pytest
 from support import harness
 from support.fake_beads import ON_FAKE_AND_REAL_BD
-from support.harness import _git, isolated_bd, make_repo
+from support.harness import git, isolated_bd, make_repo
 
 
 def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
     """Kraft-f5it: test_resume_marks_needs_human_on_a_rebase_conflict failed
     with `git commit` exiting 128 on a clean checkout. `_isolated_kraft_home`
     (tests/conftest.py) already points HOME at a directory with no
-    .gitconfig for every test in the suite; this drives `_git` directly, with
+    .gitconfig for every test in the suite; this drives `support.harness.git` directly, with
     none of `make_repo`'s own `git config user.email/name` calls, to prove
-    `_git` no longer depends on any config existing anywhere.
+    `git` no longer depends on any config existing anywhere.
     """
     monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
     # Block git's own username@hostname auto-detect so this test actually
@@ -31,12 +31,12 @@ def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git(repo, "init", "-q", "-b", "main")
+    git(repo, "init", "-q", "-b", "main")
     (repo / "f.txt").write_text("x\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "no ambient identity")  # must not exit 128
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "no ambient identity")  # must not exit 128
     log = Path.read_text(repo / ".git" / "HEAD")
-    assert log  # the commit landed; a 128 exit would have raised in _git first
+    assert log  # the commit landed; a 128 exit would have raised in git first
 
 
 def test_a_make_repo_copy_reads_clean_to_git_plumbing(tmp_path):

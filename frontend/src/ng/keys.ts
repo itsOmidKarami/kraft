@@ -24,3 +24,17 @@ export const sendOnModEnter = (send: () => unknown, ready: boolean) => (e: React
   e.preventDefault();
   if (ready) void send();
 };
+
+/** Whether a key came from a field that holds typed text: Escape there must not
+ *  close what holds the field and drop the text (R11b-02). A select, a checkbox
+ *  or an empty box holds nothing to lose. */
+export const holdsText = (t: EventTarget | null) => {
+  if (!(t instanceof HTMLElement)) return false;
+  if (t.isContentEditable) return (t.textContent ?? "") !== "";
+  if (t instanceof HTMLTextAreaElement) return t.value !== "";
+  return t instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"].includes(t.type) && t.value !== "";
+};
+
+/** An Escape the page may act on: not one that ends an input method's composition, which
+ *  belongs to the field (Safari sends it with `isComposing` set). */
+export const isEscape = (e: ReactKeyboardEvent) => e.key === "Escape" && !e.nativeEvent.isComposing;

@@ -312,7 +312,8 @@ describe("⋮ (C.5)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "More actions" }));
     const sheet = screen.getByRole("dialog");
     const labels = within(sheet).getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toEqual(["Escalate", "Item settings", "Open MR !142", "Duplicate", "Mark complete…", "Cancel item…"]);
+    // No Escalate: /escalate refuses a running item.
+    expect(labels).toEqual(["Item settings", "Open MR !142", "Duplicate", "Mark complete…", "Cancel item…"]);
     await userEvent.click(within(sheet).getByRole("button", { name: "Duplicate" }));
     await waitFor(() => expect(where()).toBe("/work-items/w2"));
     expect(posts(calls)).toEqual(["POST /work-items/w1/duplicate"]);

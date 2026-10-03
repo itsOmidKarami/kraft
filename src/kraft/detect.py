@@ -1019,8 +1019,16 @@ def _shell_syntax(command: str) -> bool:
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish", "csh", "tcsh"}
 _SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
 #: The flag an interpreter takes a script after: `python -c`, `python -Ic`,
-#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`.
+#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`, `php -r`.
 _SCRIPT_FLAGS = re.compile(r"-[a-zA-Z]*[ceEp][a-zA-Z]*|--(?:eval|print|command)=?")
+_PHP_SCRIPT_FLAG = re.compile(r"-[a-zA-Z]*r[a-zA-Z]*|--run=?")
+#: Programs that run the script a flag hands them (`_SCRIPT_FLAGS`): its
+#: text needs none of the characters `_shell_syntax` looks for to run a
+#: shell command (`perl -e 'eval qx!curl …!'`, `ruby -e 'eval %x!…!'`).
+_INTERPRETERS = re.compile(
+    r"(?:python|pypy)[\d.]*|node(?:js)?|perl[\d.]*|ruby[\d.]*|php[\d.]*|lua(?:jit|[\d.]*)"
+    r"|R(?:script)?|julia|tclsh[\d.]*|osascript|elixir|erl|groovy"
+)
 
 
 #: Programs a CI line may hand quoted shell syntax to as an argument they
@@ -1130,6 +1138,17 @@ def _a_script(command: str) -> bool:
             _SHELL_FLAGS.fullmatch(w) for w in words[i + 1 :]
         ):
             return True
+        # An interpreter given a script by a flag: whatever the script holds.
+        # Only its own options, up to the first other word (`python -m
+        # pytest -p xdist` hands pytest the `-p`).
+        name = posixpath.basename(word)
+        if _INTERPRETERS.fullmatch(name):
+            flags = _PHP_SCRIPT_FLAG if name.startswith("php") else _SCRIPT_FLAGS
+            for option in words[i + 1 :]:
+                if not option.startswith("-") or option == "-m":
+                    break
+                if flags.fullmatch(option.split("=", 1)[0]):
+                    return True
     for quoted in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
         before = command[: quoted.start()].split()
         flag = before[-1] if before else ""

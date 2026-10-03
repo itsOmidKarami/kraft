@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import os
 import sqlite3
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from support.api import _completed_item, _force_node, _poll_events, _post_default, _set_status
+from support.api import (
+    _cancel_task,
+    _completed_item,
+    _create_escalation_session,
+    _force_node,
+    _in_state,
+    _poll_events,
+    _post_default,
+    _set_status,
+    _spawn_never_returning,
+)
 
 
 def test_happy_path_via_api(client, repo, monkeypatch):
@@ -260,25 +272,6 @@ def test_a_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeyp
     assert item["pending_steer_context"] == "watch the auth module"
 
 
-def _create_escalation_session(
-    wid: str, session_id: str, node_id: str, *, pid: int | None = None
-) -> None:
-    """A live `worker_sessions` row for `wid` (`hook_point='escalation'`,
-    `status='running'`) -- the shape `retry`'s self-retry check reads,
-    without actually dispatching an agent."""
-    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-    try:
-        conn.execute(
-            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
-            "log_path, result_path, status, created_at) VALUES (?, ?, ?, 'escalation', ?, "
-            "'x', 'x', 'running', datetime('now'))",
-            (session_id, wid, node_id, pid),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session(client, repo):
     """The escalation agent calling `kraft item retry` on itself must not run
     the rebase/spawn inline: its own session is still `running` (it is
@@ -332,55 +325,47 @@ def test_retry_kills_a_strangers_running_escalation_and_proceeds(client, repo, m
     assert "pause_requested" not in types
 
 
-@pytest.mark.parametrize(
-    ("verb", "status", "body"),
-    [
-        ("retry", "needs_human", {}),
-        ("resume", "paused", {}),
-        ("escalate", "needs_human", {"message": "help"}),
-    ],
-    ids=["retry", "resume", "escalate"],
-)
-def test_a_door_refuses_and_writes_nothing_when_a_walk_is_still_live(
-    client, repo, verb, status, body
-):
-    """A stopped item can still have a live walk task behind it -- a pending
-    gate under auto_escalate review, or the brief window while the walk that
-    just called request_gate/mark_needs_human is still unwinding. `/retry`
-    must refuse before it claims and rebases, not claim, rebase, and clear
-    the fix-loop cap only for `spawn` to 409 on top of those writes; `/resume`
-    likewise from `paused`. Kraft-s7c04.20: `/escalate` too -- a gate's own
-    auto-review is a live walk task under this same `wid`, invisible to
-    `escalation_running`'s check, and until this guard existed a human could
-    escalate straight into a worktree that live review agent was still
-    writing to (43717ee6: two agents, one worktree, both committed)."""
+DOORS = json.loads((Path(__file__).parent / "lifecycle_doors.json").read_text())
+
+
+@pytest.mark.parametrize("door", sorted(DOORS["doors"]))
+@pytest.mark.parametrize("state", list(DOORS["states"]))
+def test_a_door_takes_only_the_states_this_table_lists(client, repo, monkeypatch, state, door):
+    """The server's half of `lifecycle_doors.json`, which the web interface's
+    surfaces are checked against too (`frontend/src/ng/item/status.test.ts`):
+    a door either takes a state or answers 409, and a 409 writes nothing. A
+    live walk (a gate's auto-review, a walk still unwinding) is refused by
+    every door that would start one (Kraft-s7c04.20: `/escalate` into a
+    worktree a review agent was still writing to). Nothing taken runs here:
+    `spawn` closes what it is handed, and the forge's reopen is a no-op."""
     from kraft.api import deps
+    from kraft.api.routes import lifecycle
 
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _force_node(wid, "verify", status)
+    async def reopened(**_):
+        return None
 
-    async def _never_returning():
-        await asyncio.Event().wait()
-
-    async def inject():
-        deps.spawn(client.app, wid, _never_returning())
-
-    client.portal.call(inject)
+    monkeypatch.setattr(lifecycle.forge_mod, "backend_for", lambda *_: "fake")
+    monkeypatch.setattr(
+        lifecycle.forge_mod, "resolve", lambda _b: SimpleNamespace(reopen_mr=reopened)
+    )
+    monkeypatch.setattr(lifecycle, "_terminate", lambda pid: None)
+    row, spec = DOORS["states"][state], DOORS["doors"][door]
+    wid = _in_state(client, repo, row)
+    if row.get("walk"):
+        client.portal.call(lambda: _spawn_never_returning(client.app, wid))
+    monkeypatch.setattr(deps, "spawn", lambda app, w, coro: deps.discard(coro))
     before = client.get(f"/api/work-items/{wid}/events").json()
 
-    r = client.post(f"/api/work-items/{wid}/{verb}", json=body)
+    r = client.post(f"/api/work-items/{wid}/{spec['path']}", json=spec["body"])
 
-    assert r.status_code == 409, r.text
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == status
-    assert client.get(f"/api/work-items/{wid}/events").json() == before
-
-    async def cleanup():
-        task = client.app.state.tasks.pop(wid)
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    client.portal.call(cleanup)
+    if state in spec["takes"]:
+        assert r.status_code == 200, r.text
+    else:
+        assert r.status_code == 409, r.text
+        assert client.get(f"/api/work-items/{wid}").json()["status"] == row["status"]
+        assert client.get(f"/api/work-items/{wid}/events").json() == before
+    if row.get("walk"):
+        client.portal.call(lambda: _cancel_task(client.app, wid))
 
 
 def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):

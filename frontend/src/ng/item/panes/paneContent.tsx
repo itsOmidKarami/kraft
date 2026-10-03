@@ -117,8 +117,9 @@ export function paneContent(a: PaneArgs): PaneContent {
     icon: (node.steps?.length ?? 0) > 1 ? "layers" : undefined,
     gate: node.kind === "gate",
     title: node.id,
-    // A node the run stands on but that isn't running says why ("needs you", "paused").
-    sub: `${node.kind === "gate" ? "gate" : "exec"} node · ${drawn?.state === "current" && !live && drawn.sub ? drawn.sub : stateWord(drawn?.state)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
+    // A node the run stands on but that isn't running says why: "needs you", "paused", "stopped at the cap",
+    // "waiting on CI" (R11b-04: those last two read "running").
+    sub: `${node.kind === "gate" ? "gate" : "exec"} node · ${currentWords(drawn, live)}${live && started ? ` ${elapsedBetween(started, null, a.now)}` : ""}`,
     tabs: OVERVIEW_CONFIG,
     body: (
       <>
@@ -130,6 +131,13 @@ export function paneContent(a: PaneArgs): PaneContent {
     ),
     footer: footerOf(item, node.id, "node", footerState(item, sessions), a.reload),
   };
+}
+
+/** A node's state in the pane's subtitle, the phone's words for the same node (`phone/item/model`'s `nodeSub`). */
+function currentWords(drawn: GraphNode | undefined, live: boolean | undefined): string {
+  if (drawn?.state !== "current" || live) return stateWord(drawn?.state);
+  if (drawn.capped) return "stopped at the cap";
+  return [drawn.wait, drawn.sub].filter(Boolean).join(" · ") || stateWord(drawn.state);
 }
 
 type Crumbs = PaneContent["crumbs"];

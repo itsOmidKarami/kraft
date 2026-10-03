@@ -1,7 +1,6 @@
-from support.harness import _git, entry_of, make_repo, v1_named_chain
+from support.harness import commit_all, entry_of, git, make_repo, v1_named_chain
 
 from kraft import executor, policy, store
-from kraft.config import git_read
 
 #: A repo that deliberately needs no preparation. Most tests here are about
 #: resuming a chain, not environments.
@@ -59,11 +58,9 @@ async def test_reconcile_reuses_a_done_measuring_session_after_a_crash(item_on, 
     # `ensure_worktree` is idempotent on an existing directory, so
     # `executor.resume`'s own call to it just returns this untouched.
     it.worktree.mkdir(parents=True)
-    _git(it.worktree, "init", "-q", "-b", "main")
+    git(it.worktree, "init", "-q", "-b", "main")
     (it.worktree / "f.txt").write_text("x")
-    _git(it.worktree, "add", "-A")
-    _git(it.worktree, "commit", "-q", "-m", "init")
-    head = git_read(it.worktree, "rev-parse", "HEAD")
+    head = commit_all(it.worktree, "init")
     await it.session("s-done", "verify.main.review", "done", head_sha=head)
     await it.session("s-failed", "verify.main.suite", "failed", head_sha=head)
 
@@ -153,8 +150,7 @@ async def test_resume_threads_local_files_from_the_launch_context(
     this actually exercises `_carry_local_files`, not just an early return."""
     repo = make_repo(tmp_path)
     (repo / ".gitignore").write_text(".python-version\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "ignore the pin")
+    commit_all(repo, "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
     # No env node in V1: the worktree is prepared before the first node.
     it = await item_on(

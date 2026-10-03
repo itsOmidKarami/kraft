@@ -3,6 +3,7 @@ import { usd } from "../../../format";
 import type { CancelPreview } from "../../../types";
 import { act, cancelPreview, type Done } from "../../item/actions";
 import { rejectTarget } from "../../item/graph";
+import { actionPath } from "../../item/paths";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
@@ -14,7 +15,9 @@ export type ComposeKind = "steer" | "reject" | "answer" | "escalate" | "cancel" 
 export const COMPOSE_KINDS: ComposeKind[] = ["steer", "reject", "answer", "escalate", "cancel", "complete"];
 export const isComposeKind = (v: string | null): v is ComposeKind => COMPOSE_KINDS.includes(v as ComposeKind);
 
-const running = (item: ItemDetail) => item.display_status === "running" || item.display_status === "escalated";
+const running = (item: ItemDetail) => item.display_status === "running";
+/** A stop no resume takes (a cap, a stuck loop): `/steer` and `/resume` answer it 409, and `/retry` carries the note instead. */
+const stopped = (item: ItemDetail) => item.display_status === "failed" || (item.display_status === "needs_you" && item.stop?.kind !== "question");
 const gateOf = (item: ItemDetail) => item.pending_gate ?? item.stop?.node ?? "";
 const nodeOf = (item: ItemDetail) => item.stop?.node ?? item.current_node_id;
 
@@ -22,8 +25,16 @@ const nodeOf = (item: ItemDetail) => item.stop?.node ?? item.current_node_id;
  *  after the other and never together (R12, R66): the pause is what lets the
  *  agent read the note at its next launch. A pause that went through and a
  *  resume that was refused leaves the item paused, and says so. */
+/** The door a steer goes through: a running item's pause then resume, a stopped one's retry, else resume (a pause, a question). */
+export const steerDoor = (item: ItemDetail): "pause" | "retry" | "resume" => (stopped(item) ? "retry" : running(item) ? "pause" : "resume");
+
 export async function steer(item: ItemDetail, text: string): Promise<Done & { paused?: boolean }> {
-  if (running(item)) {
+  const door = steerDoor(item);
+  if (door === "retry") {
+    const node = item.chain_definition.nodes.find((n) => n.id === nodeOf(item));
+    return act.retry(item.id, { ...(node && { path: actionPath(node, item.stop?.task) }), steer: text });
+  }
+  if (door === "pause") {
     const p = await act.pause(item.id);
     if (!p.ok) return p;
     const r = await act.resume(item.id, text);
@@ -44,7 +55,9 @@ interface Spec {
 const SPEC: Record<ComposeKind, Spec> = {
   steer: {
     title: "Steer",
-    help: (i) => (running(i) ? `Steering pauses the item. The running attempt${nodeOf(i) ? ` on ${nodeOf(i)}` : ""} stops now and restarts with your note.` : "Your note goes to the next agent launch, and the item resumes with it."),
+    help: (i) => (running(i) ? `Steering pauses the item. The running attempt${nodeOf(i) ? ` on ${nodeOf(i)}` : ""} stops now and restarts with your note.`
+      : stopped(i) ? `Steering retries${nodeOf(i) ? ` ${nodeOf(i)}` : " the item"} with your note as the first thing its next agent reads.`
+      : "Your note goes to the next agent launch, and the item resumes with it."),
     placeholder: "What should the next attempt do differently?",
     label: "Send steer",
     target: (i) => (nodeOf(i) ? `goes to ${nodeOf(i)} · added to that agent's next launch` : null),
@@ -114,7 +127,7 @@ export function Composer({ item, kind, reload }: { item: ItemDetail; kind: Compo
     let r: Done & { paused?: boolean };
     let ok = "";
     switch (kind) {
-      case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeOf(item) ?? "The item"} is running again.` : "Steer sent. The item is running again."; break;
+      case "steer": r = await steer(item, t); ok = running(item) ? `Steered. ${nodeOf(item) ?? "The item"} is running again.` : stopped(item) ? "Retrying with your steer." : "Steer sent. The item is running again."; break;
       case "reject": r = await act.reject(item.id, gateOf(item), t); ok = "Rejected."; break;
       case "answer": r = await act.resume(item.id, t); ok = "Sent. The item is running again."; break;
       case "escalate": r = await act.escalate(item.id, t, flag); ok = "Escalated. A new thread started."; break;

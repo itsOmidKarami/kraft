@@ -37,6 +37,15 @@ export const usePaneMemory = create<{ pane: { open: boolean; userCollapsed: bool
   setPane: (pane) => set({ pane }),
 }));
 
+/** A request to open Config's budget editor: Raise cap, from the banner or the
+ *  header (R11a-05), from outside the workspace, the review page's before it
+ *  goes to the item page. For one item, taken once, and only within a few
+ *  seconds: one the item page never took (a navigation that went elsewhere)
+ *  does not open the editor on a later visit (#504 review). */
+const useBudgetEditor = create<{ id: string | null; at: number }>(() => ({ id: null, at: 0 }));
+const BUDGET_ASK_MS = 5_000;
+export const openBudgetEditor = (id: string, at = Date.now()) => useBudgetEditor.setState({ id, at });
+
 /** Opens the pane for what someone asked to see (Open gate, a problem, a new
  *  node): an earlier collapse does not keep it shut. */
 export const openPane = () => usePaneMemory.getState().setPane({ open: true, userCollapsed: false });
@@ -62,6 +71,12 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
+  const asked = useBudgetEditor((s) => s.id === raw.id && Date.now() - s.at < BUDGET_ASK_MS);
+  useEffect(() => {
+    if (!asked) return;
+    useBudgetEditor.setState({ id: null, at: 0 });
+    setEditBudget(true);
+  }, [asked]);
   const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // Every second while an agent or a check runs, so "running 12s" counts; every

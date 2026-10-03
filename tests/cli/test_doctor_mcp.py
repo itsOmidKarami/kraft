@@ -5,21 +5,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
-from support.harness import make_repo
+from support.harness import git, make_repo, write
 
 from kraft import client, doctor
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
-
-
-def _write(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
 
 
 def test_mcp_check_warns_naming_a_repo_whose_committed_settings_turn_the_plugin_off(app, tmp_path):
@@ -29,16 +23,17 @@ def test_mcp_check_warns_naming_a_repo_whose_committed_settings_turn_the_plugin_
     sandboxed or on another harness never meets that refusal (Kraft-9efnk.31)."""
     home = Path.home()
     (home / ".claude.json").unlink()
-    _write(home / ".claude" / "settings.json", {"enabledPlugins": {"kraft@kraft": True}})
-    _write(
-        home / ".claude" / "plugins" / "installed_plugins.json",
-        {"version": 2, "plugins": {"kraft@kraft": [{"scope": "user"}]}},
+    write(home, ".claude/settings.json", json.dumps({"enabledPlugins": {"kraft@kraft": True}}))
+    write(
+        home,
+        ".claude/plugins/installed_plugins.json",
+        json.dumps({"version": 2, "plugins": {"kraft@kraft": [{"scope": "user"}]}}),
     )
     repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
-    _write(repo / ".claude" / "settings.json", {"enabledPlugins": {"kraft@kraft": False}})
-    subprocess.run(["git", "add", ".claude"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "off"], cwd=repo, check=True)
+    write(repo, ".claude/settings.json", json.dumps({"enabledPlugins": {"kraft@kraft": False}}))
+    git(repo, "add", ".claude")
+    git(repo, "commit", "-qm", "off")
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
     assert check["ok"] is True and check["warn"] is True
     assert str(repo) in check["detail"]
@@ -67,9 +62,9 @@ def test_mcp_check_still_only_warns_when_one_repo_registers_it_and_another_does_
     registered, bare = make_repo(tmp_path, "registered"), make_repo(tmp_path, "bare")
     for repo in (registered, bare):
         asyncio.run(client.ensure_repo(str(repo)))
-    _write(registered / ".mcp.json", {"mcpServers": {"kraft": {}}})
-    subprocess.run(["git", "add", ".mcp.json"], cwd=registered, check=True)
-    subprocess.run(["git", "commit", "-qm", "mcp"], cwd=registered, check=True)
+    write(registered, ".mcp.json", json.dumps({"mcpServers": {"kraft": {}}}))
+    git(registered, "add", ".mcp.json")
+    git(registered, "commit", "-qm", "mcp")
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "mcp server")
     assert check["ok"] is True and check["warn"] is True
     assert str(bare) in check["detail"] and str(registered) not in check["detail"]

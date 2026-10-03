@@ -136,8 +136,16 @@ def _cmd_reject(ns: argparse.Namespace) -> None:
     common.emit(result, common.item_action(f"rejected {gate} on {{id}}"), ns.json)
 
 
+def _paused(result: dict) -> str:
+    stopped = len(result.get("paused_sessions") or [])
+    how = f", stopping {stopped} running session{'s' if stopped != 1 else ''}" if stopped else ""
+    return f"paused {result['id']}{how}; kraft item resume {result['id']} carries on"
+
+
 def _cmd_pause(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.pause(ns.id)), common.item_action("paused {id}"), ns.json)
+    common.emit(
+        asyncio.run(client.pause(ns.id)), common.item_action("paused {id}", small=_paused), ns.json
+    )
 
 
 def _is_cancelled(item_id: str | None) -> bool:
@@ -278,7 +286,12 @@ def _cmd_reply(ns: argparse.Namespace) -> None:
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
-        common._render_action,
+        common.item_action(
+            "asked an agent about {id}",
+            small=lambda r: (
+                f"asked an agent about {r['id']}'s stop; kraft view show {r['id']} follows it"
+            ),
+        ),
         ns.json,
     )
 
@@ -387,12 +400,24 @@ def _render_comment(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _thread_state(done: str):
+    """`resolved thread T on calc.py:+9 to +11`: one line, as `comment` names a
+    new thread, not the whole thread as `key  value` lines (R11a)."""
+
+    def render_state(result: dict) -> str:
+        if "comments" not in result:
+            return common._render_action(result)
+        return f"{done} thread {result['id']} on {render.thread_where(result)}"
+
+    return render_state
+
+
 def _cmd_resolve(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.resolve_thread(ns.thread)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.resolve_thread(ns.thread)), _thread_state("resolved"), ns.json)
 
 
 def _cmd_reopen(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.reopen_thread(ns.thread)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.reopen_thread(ns.thread)), _thread_state("reopened"), ns.json)
 
 
 def _cmd_review(ns: argparse.Namespace) -> None:

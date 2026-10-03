@@ -126,7 +126,9 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     // across sides) instead of dropping it unsaid (R10b-09).
     const d = drafts.get(targetKey(o.target));
     drafts.delete(targetKey(o.target));
-    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: d.wrote ?? rangeName(r) });
+    // Moved back onto the lines it was written for, it is in place again: no note (R11b-06).
+    const wrote = d?.wrote ?? rangeName(r);
+    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: target.range && rangeName(target.range) === wrote ? undefined : wrote });
     setOpen({ ...o, target });
     onRetarget?.(target);
   };

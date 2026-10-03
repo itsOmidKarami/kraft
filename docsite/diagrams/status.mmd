@@ -5,6 +5,7 @@ stateDiagram-v2
   paused --> active: resume
   active --> paused: pause, bead blocker, broken base
   waiting --> paused: pause
+  rate_limited --> paused: pause
   active --> waiting: external wait
   waiting --> active: wait scheduler
   active --> rate_limited: rate limit

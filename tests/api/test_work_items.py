@@ -13,14 +13,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.api import (
-    _await_gate,
-    _paused,
-    _poll_events,
-    _post_default,
-    _set_status,
-    _started,
-)
+from support.api import _await_gate, _paused, _poll_events, _post_default, _set_status, _started
 from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
@@ -76,6 +69,9 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         ("work-items", {"title": "line1\nline2", "repo": "REPO"}, "the title is one line"),
         ("triggers", {"title": "a\r\nb", "repo": "REPO"}, "the title is one line"),
         ("work-items", {"title": "one line\n", "repo": "REPO"}, "the title is one line"),
+        ("work-items", {"title": "a\tb", "repo": "REPO"}, "the title is plain text"),
+        ("triggers", {"title": "a \x1b[31mred", "repo": "REPO"}, "the title is plain text"),
+        ("work-items", {"title": "fix \u202etxt.exe", "repo": "REPO"}, "the title is plain text"),
     ],
     ids=[
         "an-unknown-template",
@@ -89,6 +85,9 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         "a-multi-line-title",
         "trigger-a-multi-line-title",
         "a-trailing-line-break",
+        "a-tab",
+        "trigger-an-escape",
+        "a-bidi-override",
     ],
 )
 def test_intake_refuses_a_bad_body_with_422(client, repo, route, body, detail):

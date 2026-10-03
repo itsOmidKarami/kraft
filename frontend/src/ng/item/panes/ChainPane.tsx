@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { repoName, tokens, usd } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import { Button } from "../../ui/Button";
@@ -53,12 +53,14 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
               {item.attachments.map((a) => {
                 const doc = docs?.find((d) => d.attachment_kind === a.kind);
                 const name = a.path.split("/").at(-1);
+                // The kind is in the name: a spec and its plan are often both <x>.md (R11b-07).
+                const label = `${a.kind.charAt(0).toUpperCase()}${a.kind.slice(1)}: ${name}`;
                 return (
                   <span key={a.kind} className="ip-attached">
                     {a.kind}{" "}
-                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} onClick={() => onDoc(doc)}>{name}</button>
+                    {doc && onDoc ? <button type="button" className="item-link is-mono" title={a.path} aria-label={label} onClick={() => onDoc(doc)}>{name}</button>
                       // Not indexed yet (before start nothing is): it reads from the copy Kraft kept at intake.
-                      : <button type="button" className="item-link is-mono" title={a.path} onClick={() => setAttached(a.kind)}>{name}</button>}
+                      : <button type="button" className="item-link is-mono" title={a.path} aria-label={label} onClick={() => setAttached(a.kind)}>{name}</button>}
                   </span>
                 );
               })}
@@ -82,14 +84,14 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc }: { it
   );
 }
 
-function Meter({ label, used, of, ratio, max, onEdit }: { label: string; used: string; of: string | null; ratio?: number; max?: string; onEdit?: () => void }) {
+function Meter({ label, used, of, ratio, max, onEdit, editRef }: { label: string; used: string; of: string | null; ratio?: number; max?: string; onEdit?: () => void; editRef?: Ref<HTMLButtonElement> }) {
   const tone = ratio == null ? "" : ratio >= 1 ? " is-bad" : ratio > 0.75 ? " is-warn" : "";
   return (
     <div className={`meter${tone}`}>
       <div className="meter-row">
         <span className="meter-label">{label}</span>
         <span className="meter-value"><strong>{used}</strong>{of ? <> of {of}</> : " · no cap"}</span>
-        {onEdit && <button type="button" className="icon-btn meter-edit" aria-label={`Edit ${label.toLowerCase()}`} onClick={onEdit}>✎</button>}
+        {onEdit && <button ref={editRef} type="button" className="icon-btn meter-edit" aria-label={`Edit ${label.toLowerCase()}`} onClick={onEdit}>✎</button>}
       </div>
       {ratio != null && (
         <div className="meter-bar-row">
@@ -118,6 +120,8 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
     : undefined;
   const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
   const [value, setValue] = useState(String(cap || ""));
+  // A decimal comma, as a comma-decimal locale or iOS's decimal keypad types it, is a point.
+  const amount = Number(value.trim().replace(",", "."));
   const [error, setError] = useState<string | null>(null);
   const send = async (usdCap: number | null) => {
     let r;
@@ -139,9 +143,10 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
       </div>
       {/* A form, focused on open: Enter saves the typed cap and Escape cancels, so the editor
           Raise cap and ✎ open needs no pointer (R10a-05). */}
-      <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (Number(value) > 0) void send(Number(value)); }}>
-        <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
-        <Button type="submit" variant="primary" disabled={!(Number(value) > 0)}>Save</Button>
+      <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (amount > 0) void send(amount); }}>
+        {/* The cap in force is selected on focus, so what is typed replaces it: typing 0.03 after the caret saved $100.03 (R11a-03). */}
+        <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
+        <Button type="submit" variant="primary" disabled={!(amount > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
       </form>
       {error && <p className="item-error" role="alert">{error}</p>}
@@ -169,6 +174,23 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
   const [error, setError] = useState<string | null>(null);
   const cap = item.budget_cap;
   const daily = cap?.daily;
+  // The editor's Escape, Cancel and save hand the focus back to ✎, as an override row's do: the field that had it is gone (R11b-03).
+  const pencil = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  // What had the focus when the editor opened (✎, or a Raise cap outside), read before the field takes it:
+  // with no budget meter there is no ✎ to come back to.
+  const opener = useRef<HTMLElement | null>(editBudget && typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null);
+  const wasEditing = useRef(editBudget);
+  if (editBudget && !wasEditing.current && typeof document !== "undefined") opener.current = document.activeElement as HTMLElement | null;
+  wasEditing.current = editBudget;
+  useEffect(() => {
+    if (!editBudget && refocus.current) (pencil.current ?? (opener.current?.isConnected ? opener.current : null))?.focus();
+    refocus.current = false;
+  }, [editBudget]);
+  const closeBudget = () => {
+    refocus.current = true;
+    onEditBudget(false);
+  };
   const used = item.usage?.total;
   const overrides = Object.entries(item.node_overrides ?? {});
   const draftRows = appliedRows(applied);
@@ -199,9 +221,10 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
           of={cap.cap_usd != null ? usd(cap.cap_usd) : null}
           ratio={cap.cap_usd ? cap.spent_usd / cap.cap_usd : undefined}
           onEdit={() => onEditBudget(!editBudget)}
+          editRef={pencil}
         />
       )}
-      {editBudget && <BudgetEditor item={item} onCancel={() => onEditBudget(false)} onDone={() => { onEditBudget(false); reload(); }} />}
+      {editBudget && <BudgetEditor item={item} onCancel={closeBudget} onDone={() => { closeBudget(); reload(); }} />}
       {used && <Meter label="Tokens" used={tokens(used.tokens_in + used.tokens_out)} of={null} />}
       {daily && <Meter label="Today, all items" used={usd(daily.spent_usd)} of={daily.cap_usd != null ? usd(daily.cap_usd) : null} ratio={daily.cap_usd ? daily.spent_usd / daily.cap_usd : undefined} max="policy · shared" />}
       <p className="item-muted">Whichever limit is reached first stops the item. An item cap can't go above the policy maximum.</p>

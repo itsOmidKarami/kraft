@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import _git, commit_all, entry_of, v1_chain, v1_walk
+from support.harness import commit_all, entry_of, git, v1_chain, v1_walk, write
 
 from kraft import executor, store
-from kraft.config import git_read, probe_repo
+from kraft.config import probe_repo
 from kraft.executor import dispatch
 from kraft.findings import JobRef
 
@@ -23,20 +23,10 @@ def _verify(task=_BUILTIN, node_id="verify"):
     return [{"id": node_id, "kind": "exec", "tasks": [task]}]
 
 
-def _commit(repo, *paths, content="a"):
-    """Write `paths` in `repo` and commit them; returns the new HEAD."""
-    for path in paths:
-        (repo / path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / path).write_text(content)
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", f"touch {' '.join(paths)}")
-    return git_read(repo, "rev-parse", "HEAD")
-
-
 async def _on_a_branch(item_on, repo):
     """An item on the builtin, its branch based at `repo`'s current HEAD."""
     it = await item_on(_verify())
-    base = git_read(repo, "rev-parse", "HEAD")
+    base = git(repo, "rev-parse", "HEAD")
     await it.database.write(lambda c: store.set_base_ref(c, it.id, base))
     return it
 
@@ -148,7 +138,8 @@ async def test_changed_test_scopes_run_all_scopes_when_nothing_matches(item_on, 
     every = [("echo", "src"), ("echo", "tests")]
 
     assert _selected(it, 0, scopes) == every  # an empty diff
-    _commit(repo, "docs/note.md")  # a changed path no scope claims
+    write(repo, "docs/note.md", "a")  # a changed path no scope claims
+    commit_all(repo)
     assert _selected(it, 0, scopes) == every
 
 
@@ -156,7 +147,8 @@ async def test_select_scopes_on_the_first_round_uses_the_whole_branch_diff(item_
     """No prior measurement for this hook -- the first round always selects
     from the full branch diff, same as before C7."""
     it = await _on_a_branch(item_on, repo)
-    _commit(repo, "frontend/x.txt")
+    write(repo, "frontend/x.txt", "a")
+    commit_all(repo)
 
     assert _selected(it, 0) == [("frontend-cmd",)]
 
@@ -167,10 +159,13 @@ async def test_select_scopes_stays_incremental_after_a_clean_round(item_on, repo
     only the scope the new diff actually touches runs (6c712ea8 ran a
     13-minute `just ci-test` for a frontend-only fix)."""
     it = await _on_a_branch(item_on, repo)
-    round0_head = _commit(repo, "frontend/x.txt", "backend/y.txt")
+    write(repo, "frontend/x.txt", "a")
+    write(repo, "backend/y.txt", "a")
+    round0_head = commit_all(repo)
     for sid in ("r0-frontend", "r0-backend"):
         await it.session(sid, "verify.main.t", "done", head_sha=round0_head)
-    _commit(repo, "frontend/x.txt", content="b")
+    write(repo, "frontend/x.txt", "b")
+    commit_all(repo)
 
     assert _selected(it, 1) == [("frontend-cmd",)]
 
@@ -188,12 +183,15 @@ async def test_select_scopes_reruns_everything_after_any_scope_failed_last_round
     this hook does not trust the incremental diff and runs the full scope
     set again."""
     it = await _on_a_branch(item_on, repo)
-    round0_head = _commit(repo, "frontend/x.txt", "backend/y.txt")
+    write(repo, "frontend/x.txt", "a")
+    write(repo, "backend/y.txt", "a")
+    round0_head = commit_all(repo)
     # backend's row is created first and fails; frontend's is created last and
     # passes -- the mixed shape a bare "last row wins" read gets wrong.
     await it.session("r0-backend", "verify.main.t", "failed", head_sha=round0_head)
     await it.session("r0-frontend", "verify.main.t", "done", head_sha=round0_head)
-    _commit(repo, "frontend/x.txt", content="b")
+    write(repo, "frontend/x.txt", "b")
+    commit_all(repo)
 
     assert set(_selected(it, 1)) == {("frontend-cmd",), ("backend-cmd",)}
 
@@ -209,7 +207,8 @@ async def test_select_scopes_verify_round_0_ignores_a_same_head_c1_gate_dispatch
     ignore any other node's dispatch and always measure since `base_ref`,
     which here touches only frontend."""
     it = await _on_a_branch(item_on, repo)
-    head = _commit(repo, "frontend/x.txt")
+    write(repo, "frontend/x.txt", "a")
+    head = commit_all(repo)
     # C1's own gate dispatch at `implementation`, round 0, clean, at the same
     # head verify is about to measure from.
     await it.session("c1-gate", "verify.main.t", "done", node="implementation", head_sha=head)
@@ -230,12 +229,15 @@ async def test_select_scopes_round_0_reentry_after_a_partial_failure_still_runs_
     with backend still broken. Round 0 must measure the whole branch diff
     instead, which still covers backend's files."""
     it = await _on_a_branch(item_on, repo)
-    h1 = _commit(repo, "frontend/x.txt", "backend/y.txt")
+    write(repo, "frontend/x.txt", "a")
+    write(repo, "backend/y.txt", "a")
+    h1 = commit_all(repo)
     await it.session("backend-fail", "verify.main.t", "failed", head_sha=h1)
     await it.session("frontend-pass", "verify.main.t", "done", head_sha=h1)
     # A fix commit lands touching only frontend before the cap's counter reset
     # re-enters at round 0.
-    _commit(repo, "frontend/x.txt", content="b")
+    write(repo, "frontend/x.txt", "b")
+    commit_all(repo)
 
     assert set(_selected(it, 0)) == {("frontend-cmd",), ("backend-cmd",)}
 
@@ -325,8 +327,7 @@ async def test_a_probed_nested_scope_finds_its_project_from_the_worktree_root(it
     worktree root, without a shell. A bare `npm test` there read
     `<worktree>/package.json` and failed, so a nested scope could never pass."""
     for path, text in files.items():
-        (repo / path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / path).write_text(text)
+        write(repo, path, text)
     commit_all(repo)  # the probe reads the committed tree
 
     status, it = await _dispatch(item_on, test_scopes=probe_repo(repo)["test_scopes"])

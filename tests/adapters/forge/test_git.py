@@ -13,15 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo, make_repo_with_submodule
+from support.harness import commit_all, git, make_repo, make_repo_with_submodule
 
 from kraft import builtins as kraft_builtins
 from kraft.adapters import forge
-from kraft.adapters.forge import git
+from kraft.adapters.forge import git as forge_git
 from kraft.worker import sandbox
 
 from .outputs import GLAB_MR_VIEW
@@ -29,49 +28,30 @@ from .outputs import GLAB_MR_VIEW
 BRANCH = "kraft/abc"
 
 
-def _git(repo: Path, *args: str) -> str:
-    """Runs with `sandbox.unhardened_git_env()`, not the inherited process
-    env: a test session started under Kraft is itself a child of a process
-    that already called `harden_host_git_env` (Kraft-rki), and this helper
-    sets up the real repos and hook paths these tests assert against."""
-    return subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-        env=sandbox.unhardened_git_env(),
-    ).stdout
-
-
 def _repo_with_origin(tmp_path: Path) -> Path:
     """A real repo on BRANCH, really pushed to a real bare origin in tmp_path."""
     origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
+    git(tmp_path, "init", "--bare", "-q", "-b", "main", str(origin))
     repo = make_repo(tmp_path)
-    _git(repo, "remote", "add", "origin", str(origin))
-    _git(repo, "push", "-q", "-u", "origin", "main")
-    _git(repo, "checkout", "-q", "-b", BRANCH)
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "push", "-q", "-u", "origin", "main")
+    git(repo, "checkout", "-q", "-b", BRANCH)
     (repo / "work.txt").write_text("the work\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "the work")
-    _git(repo, "push", "-q", "-u", "origin", BRANCH)
+    commit_all(repo, "the work")
+    git(repo, "push", "-q", "-u", "origin", BRANCH)
     # What `forge.push` records, without its event loop: some callers are async.
-    _git(repo, "update-ref", f"{git.PUSHED_REFS}/{BRANCH}", "HEAD")
+    git(repo, "update-ref", f"{forge_git.PUSHED_REFS}/{BRANCH}", "HEAD")
     return repo
 
 
 def _someone_else_pushes(tmp_path: Path) -> str:
     """A commit on BRANCH pushed from another clone, as a person would; its sha."""
     other_clone = tmp_path / "other-clone"
-    _git(tmp_path, "clone", "-q", "-b", BRANCH, str(tmp_path / "origin.git"), str(other_clone))
-    _git(other_clone, "config", "user.email", "t@t")
-    _git(other_clone, "config", "user.name", "t")
+    git(tmp_path, "clone", "-q", "-b", BRANCH, str(tmp_path / "origin.git"), str(other_clone))
     (other_clone / "elsewhere.txt").write_text("someone else's commit\n")
-    _git(other_clone, "add", "-A")
-    _git(other_clone, "commit", "-q", "-m", "a concurrent writer")
-    _git(other_clone, "push", "-q", "origin", BRANCH)
-    return _git(other_clone, "rev-parse", "HEAD").strip()
+    head = commit_all(other_clone, "a concurrent writer")
+    git(other_clone, "push", "-q", "origin", BRANCH)
+    return head
 
 
 @pytest.fixture
@@ -101,9 +81,8 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
     fail a node. Real git does that exclusion, so only real git can prove it."""
     repo = _repo_with_origin(tmp_path)
     (repo / ".gitignore").write_text("junk/\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "ignore junk")
-    _git(repo, "push", "-q", "origin", BRANCH)
+    commit_all(repo, "ignore junk")
+    git(repo, "push", "-q", "origin", BRANCH)
     (repo / "junk").mkdir()
     (repo / "junk" / "cache.txt").write_text("noise\n")
 
@@ -141,8 +120,7 @@ def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
     shape — and `git rev-list --count origin/BRANCH..HEAD` from real git."""
     repo = _repo_with_origin(tmp_path)
     (repo / "late.txt").write_text("committed after the push\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "late")
+    commit_all(repo, "late")
 
     with pytest.raises(forge.ForgeError, match="ahead of origin/kraft/abc by 1"):
         asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
@@ -170,29 +148,25 @@ def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, recorded):
     the remote-tracking ref instead, as every branch was."""
     repo = _repo_with_origin(tmp_path)
     (repo / "fix.txt").write_text("a verify fix\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "a verify fix")
+    commit_all(repo, "a verify fix")
     if recorded:
         asyncio.run(forge.push(repo, BRANCH))
     else:
-        _git(repo, "update-ref", "-d", f"{git.PUSHED_REFS}/{BRANCH}")
-        _git(repo, "push", "-q", "origin", BRANCH)
+        git(repo, "update-ref", "-d", f"{forge_git.PUSHED_REFS}/{BRANCH}")
+        git(repo, "push", "-q", "origin", BRANCH)
     origin = tmp_path / "origin.git"
     main_clone = tmp_path / "main-clone"
-    _git(tmp_path, "clone", "-q", str(origin), str(main_clone))
-    _git(main_clone, "config", "user.email", "t@t")
-    _git(main_clone, "config", "user.name", "t")
+    git(tmp_path, "clone", "-q", str(origin), str(main_clone))
     (main_clone / "elsewhere.txt").write_text("moved on without you\n")
-    _git(main_clone, "add", "-A")
-    _git(main_clone, "commit", "-q", "-m", "main moved on")
-    _git(main_clone, "push", "-q", "origin", "main")
-    _git(repo, "fetch", "-q", "origin", "main")
-    _git(repo, "rebase", "-q", "origin/main")
+    commit_all(main_clone, "main moved on")
+    git(main_clone, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin", "main")
+    git(repo, "rebase", "-q", "origin/main")
 
     asyncio.run(forge.push(repo, BRANCH))
 
-    remote_head = _git(origin, "rev-parse", BRANCH).strip()
-    assert remote_head == _git(repo, "rev-parse", "HEAD").strip()
+    remote_head = git(origin, "rev-parse", BRANCH)
+    assert remote_head == git(repo, "rev-parse", "HEAD")
 
 
 def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatch):
@@ -203,15 +177,16 @@ def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatc
     run. A pinned `core.hooksPath` that survives into `forge.push` would
     silently drop those uploads."""
     repo = _repo_with_origin(tmp_path)
-    hooks_dir = _git(repo, "rev-parse", "--git-path", "hooks").strip()
+    # Unhardened: a suite run from inside a Kraft worker inherits the pinned
+    # `core.hooksPath=/dev/null`, and `--git-path hooks` would answer that.
+    hooks_dir = git(repo, "rev-parse", "--git-path", "hooks", env=sandbox.unhardened_git_env())
     marker = tmp_path / "pre-push-ran"
     pre_push = Path(repo) / hooks_dir / "pre-push"
     pre_push.write_text(f"#!/bin/sh\ntouch {marker}\n")
     pre_push.chmod(0o755)
     # A push with nothing new to send never invokes pre-push at all.
     (repo / "more-work.txt").write_text("more work\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "more work")
+    commit_all(repo, "more work")
 
     sandbox.harden_host_git_env(os.environ)
     try:
@@ -232,27 +207,27 @@ def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, fetched):
     repo = _repo_with_origin(tmp_path)
     theirs = _someone_else_pushes(tmp_path)
     if fetched:
-        _git(repo, "fetch", "-q", "origin")
+        git(repo, "fetch", "-q", "origin")
     (repo / "work.txt").write_text("rewritten locally\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "--amend", "-m", "rewritten")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--amend", "-m", "rewritten")
 
     with pytest.raises(forge.ForgeError, match="Kraft did not push"):
         asyncio.run(forge.push(repo, BRANCH))
 
-    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == theirs
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == theirs
 
 
 def test_push_refuses_to_recreate_a_branch_origin_deleted(tmp_path):
     """Kraft-7itv: origin dropping a branch Kraft pushed means it was merged
     or closed; a push must not quietly bring it back."""
     repo = _repo_with_origin(tmp_path)
-    _git(tmp_path / "origin.git", "branch", "-q", "-D", BRANCH)
+    git(tmp_path / "origin.git", "branch", "-q", "-D", BRANCH)
 
     with pytest.raises(forge.ForgeError, match="origin no longer has"):
         asyncio.run(forge.push(repo, BRANCH))
 
-    assert _git(tmp_path / "origin.git", "branch", "--list", BRANCH) == ""
+    assert git(tmp_path / "origin.git", "branch", "--list", BRANCH) == ""
 
 
 def test_push_reads_the_tip_where_it_pushes(tmp_path):
@@ -260,17 +235,16 @@ def test_push_reads_the_tip_where_it_pushes(tmp_path):
     from; the tip judged is the one the push would replace."""
     repo = _repo_with_origin(tmp_path)
     mirror = tmp_path / "mirror.git"
-    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
-    _git(repo, "remote", "set-url", "origin", str(mirror))
-    _git(repo, "remote", "set-url", "--push", "origin", str(tmp_path / "origin.git"))
+    git(tmp_path, "init", "--bare", "-q", str(mirror))
+    git(repo, "remote", "set-url", "origin", str(mirror))
+    git(repo, "remote", "set-url", "--push", "origin", str(tmp_path / "origin.git"))
     (repo / "fix.txt").write_text("a fix\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "a fix")
+    commit_all(repo, "a fix")
 
     asyncio.run(forge.push(repo, BRANCH))
 
-    head = _git(repo, "rev-parse", "HEAD").strip()
-    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == head
+    head = git(repo, "rev-parse", "HEAD")
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == head
 
 
 def test_push_publishes_once_someone_elses_commits_are_pulled_in(tmp_path):
@@ -278,16 +252,15 @@ def test_push_publishes_once_someone_elses_commits_are_pulled_in(tmp_path):
     and retry. Their tip is now in the branch, so the push fast-forwards."""
     repo = _repo_with_origin(tmp_path)
     theirs = _someone_else_pushes(tmp_path)
-    _git(repo, "pull", "-q", "--rebase", "origin", BRANCH)
+    git(repo, "pull", "-q", "--rebase", "origin", BRANCH)
     (repo / "fix.txt").write_text("a review fix\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "a review fix")
+    commit_all(repo, "a review fix")
 
     asyncio.run(forge.push(repo, BRANCH))
 
-    head = _git(repo, "rev-parse", "HEAD").strip()
-    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == head
-    assert _git(repo, "merge-base", "--is-ancestor", theirs, head) == ""
+    head = git(repo, "rev-parse", "HEAD")
+    assert git(tmp_path / "origin.git", "rev-parse", BRANCH) == head
+    assert git(repo, "merge-base", "--is-ancestor", theirs, head) == ""
 
 
 def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
@@ -303,9 +276,9 @@ def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
     )
 
     assert committed is True
-    assert _git(repo, "status", "--porcelain") == ""
-    assert "wip: implementation" in _git(repo, "log", "-1", "--format=%s")
-    assert set(_git(repo, "show", "--name-only", "--format=", "HEAD").split()) == {
+    assert git(repo, "status", "--porcelain") == ""
+    assert "wip: implementation" in git(repo, "log", "-1", "--format=%s")
+    assert set(git(repo, "show", "--name-only", "--format=", "HEAD").split()) == {
         "work.txt",
         "forgotten.py",
     }
@@ -315,14 +288,14 @@ def test_commit_stragglers_leaves_a_clean_worktree_alone(tmp_path):
     """No empty commit, and no lie in the log: a worker that committed its own
     work must not gain a second, empty commit on top of it."""
     repo = _repo_with_origin(tmp_path)
-    before = _git(repo, "rev-parse", "HEAD")
+    before = git(repo, "rev-parse", "HEAD")
 
     committed = asyncio.run(
         forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
     assert committed is False
-    assert _git(repo, "rev-parse", "HEAD") == before
+    assert git(repo, "rev-parse", "HEAD") == before
 
 
 def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
@@ -336,7 +309,7 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
     the index at gate approval (`Indexer.ingest_gate_artifact`) instead of
     being committed."""
     repo = _repo_with_origin(tmp_path)
-    before = _git(repo, "rev-parse", "HEAD")
+    before = git(repo, "rev-parse", "HEAD")
     (repo / ".engineering" / "sessions").mkdir(parents=True)
     (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
 
@@ -346,7 +319,7 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
         )
         is False
     )
-    assert _git(repo, "rev-parse", "HEAD") == before
+    assert git(repo, "rev-parse", "HEAD") == before
     # ... and open_mr is not blocked by it either
     asyncio.run(forge.assert_clean(repo, "main"))
 
@@ -359,9 +332,9 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
         )
         is False
     )
-    assert _git(repo, "rev-parse", "HEAD") == before
+    assert git(repo, "rev-parse", "HEAD") == before
     asyncio.run(forge.assert_clean(repo, "main"))
-    assert _git(repo, "ls-files", ".engineering").split() == []
+    assert git(repo, "ls-files", ".engineering").split() == []
 
 
 def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
@@ -376,9 +349,8 @@ def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
     doc = repo / ".engineering" / "specs" / "preexisting.md"
     doc.parent.mkdir(parents=True)
     doc.write_text("not Kraft's, already tracked\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "repo's own doc")
-    _git(repo, "push", "-q", "origin", BRANCH)
+    commit_all(repo, "repo's own doc")
+    git(repo, "push", "-q", "origin", BRANCH)
 
     doc.write_text("the agent's edit to it\n")
     (repo / ".engineering" / "sessions").mkdir(parents=True)
@@ -390,12 +362,12 @@ def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
         )
         is True
     )
-    assert "preexisting.md" in _git(repo, "show", "--name-only", "--format=", "HEAD")
+    assert "preexisting.md" in git(repo, "show", "--name-only", "--format=", "HEAD")
     # Kraft's own session note still stays out. A brand-new directory
     # collapses to one line in `git status --porcelain` rather than one line
     # per file inside it -- still the correct exclusion, just not per-path.
-    assert "sessions/abc.md" not in _git(repo, "show", "--name-only", "--format=", "HEAD")
-    assert _git(repo, "status", "--porcelain").strip() == "?? .engineering/sessions/"
+    assert "sessions/abc.md" not in git(repo, "show", "--name-only", "--format=", "HEAD")
+    assert git(repo, "status", "--porcelain") == "?? .engineering/sessions/"
 
 
 def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forked(tmp_path):
@@ -410,17 +382,11 @@ def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forke
     `test_kraft_session_notes_are_not_the_agents_work_product` above."""
     repo = _repo_with_origin(tmp_path)
     main_clone = tmp_path / "main-clone"
-    _git(tmp_path, "clone", "-q", str(tmp_path / "origin.git"), str(main_clone))
-    # A plain clone inherits no identity -- CI's container has no global
-    # `user.name`/`user.email` at all, unlike `make_repo`, which sets both on
-    # the repo it creates directly.
-    _git(main_clone, "config", "user.email", "t@t")
-    _git(main_clone, "config", "user.name", "t")
+    git(tmp_path, "clone", "-q", str(tmp_path / "origin.git"), str(main_clone))
     (main_clone / ".gitignore").write_text("docs/superpowers/\n")
-    _git(main_clone, "add", "-A")
-    _git(main_clone, "commit", "-q", "-m", "widen gitignore")
-    _git(main_clone, "push", "-q", "origin", "main")
-    _git(repo, "fetch", "-q", "origin", "main")
+    commit_all(main_clone, "widen gitignore")
+    git(main_clone, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin", "main")
     assert not (repo / ".gitignore").exists(), "repo's own checkout must stay unaware of the rule"
     doc = repo / "docs" / "superpowers" / "specs" / "s.md"
     doc.parent.mkdir(parents=True)
@@ -435,7 +401,7 @@ def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forke
     # Collapses to the first new directory level, `docs/` -- `docs` itself
     # did not exist on the branch before, same collapse `git status` does for
     # any new untracked directory.
-    assert _git(repo, "status", "--porcelain").strip() == "?? docs/"
+    assert git(repo, "status", "--porcelain") == "?? docs/"
 
 
 def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
@@ -443,9 +409,7 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
     is not work, and committing it would put junk in the merge request."""
     repo = _repo_with_origin(tmp_path)
     (repo / ".gitignore").write_text("junk/\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "ignore junk")
-    before = _git(repo, "rev-parse", "HEAD")
+    before = commit_all(repo, "ignore junk")
     (repo / "junk").mkdir()
     (repo / "junk" / "cache.txt").write_text("noise\n")
 
@@ -454,7 +418,7 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
     )
 
     assert committed is False
-    assert _git(repo, "rev-parse", "HEAD") == before
+    assert git(repo, "rev-parse", "HEAD") == before
 
 
 @pytest.mark.parametrize(
@@ -473,8 +437,7 @@ def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, marke
     repo = _repo_with_origin(tmp_path)
     (repo / "web").mkdir()
     (repo / "web" / "app.js").write_text("tracked\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "a web dir")
+    commit_all(repo, "a web dir")
     for marker in markers:
         (repo / made / marker).parent.mkdir(parents=True, exist_ok=True)
         (repo / made / marker).write_text("installed\n")
@@ -485,7 +448,7 @@ def test_commit_stragglers_leaves_an_unignored_install_out(tmp_path, made, marke
     )
 
     assert committed is True
-    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
+    assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
     asyncio.run(forge.assert_clean(repo, "main"))
 
 
@@ -494,7 +457,7 @@ def test_an_unignored_install_stays_out_when_git_lists_every_untracked_file(tmp_
     one, never `.venv/` whole, so no entry read as an install and the sweep
     committed the virtualenv again."""
     repo = _repo_with_origin(tmp_path)
-    _git(repo, "config", "status.showUntrackedFiles", "all")
+    git(repo, "config", "status.showUntrackedFiles", "all")
     for d in ("lib", "bin"):
         (repo / ".venv" / d).mkdir(parents=True)
     (repo / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
@@ -506,7 +469,7 @@ def test_an_unignored_install_stays_out_when_git_lists_every_untracked_file(tmp_
         forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
-    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
+    assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["forgotten.py"]
 
 
 def test_commit_stragglers_leaves_out_only_the_lockfile_the_setup_wrote(tmp_path):
@@ -519,8 +482,7 @@ def test_commit_stragglers_leaves_out_only_the_lockfile_the_setup_wrote(tmp_path
         (repo / d).mkdir()
         (repo / d / "pyproject.toml").write_text("[project]\n")
     (repo / "web" / "uv.lock").write_text("version = 1\n")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "two projects, web's locked")
+    commit_all(repo, "two projects, web's locked")
     before = asyncio.run(forge.lockfile_digests(repo))
     (repo / "uv.lock").write_text("by the setup\n")
     asyncio.run(forge.record_setup_writes(repo, before))
@@ -531,7 +493,7 @@ def test_commit_stragglers_leaves_out_only_the_lockfile_the_setup_wrote(tmp_path
         forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
-    swept = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    swept = git(repo, "show", "--name-only", "--format=", "HEAD").split()
     assert sorted(swept) == ["api/uv.lock", "web/uv.lock"]
     asyncio.run(forge.assert_clean(repo, "main"))
 
@@ -542,16 +504,11 @@ def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
     to a submodule commit that never left the worktree (the real failure on
     work item 9d0ab38ff3c9439b90506df0f6966660)."""
     root, _ = make_repo_with_submodule(tmp_path, submodule_path="pkg")
-    _git(root, "config", "submodule.pkg.ignore", "all")
-    # The submodule checkout's gitdir lives under root/.git/modules and has no
-    # identity of its own; a runner with no global git config (CI) needs one.
-    _git(root / "pkg", "config", "user.email", "t@t")
-    _git(root / "pkg", "config", "user.name", "t")
+    git(root, "config", "submodule.pkg.ignore", "all")
     # A new commit inside the submodule, root pointer left untouched -- what
     # "do not bump the workspace submodule pointer" produces.
     (root / "pkg" / "f.txt").write_text("2\n")
-    _git(root / "pkg", "add", "-A")
-    _git(root / "pkg", "commit", "-q", "-m", "metric change")
+    commit_all(root / "pkg", "metric change")
 
     with pytest.raises(forge.ForgeError, match="pkg"):
         asyncio.run(forge.assert_clean(root, "main"))
@@ -567,8 +524,6 @@ def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path)
 def test_a_hanging_cli_call_is_killed_and_raises(tmp_path):
     """A wait's deadline never reached the subprocess inside it: a stalled gh
     blocked forever and a 300s cap ran for 16 minutes."""
-    from kraft.adapters.forge import git as forge_git
-
     with pytest.raises(forge.ForgeError, match="timed out"):
         asyncio.run(forge_git.run_git(tmp_path, ["sleep", "30"], timeout=0.5))
 
@@ -591,10 +546,10 @@ async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, s
     operator's `main`, the straggler sweep's commit, or the root's pointer
     bump (and the push of `HEAD` after it), moved `main`."""
     repo = _repo_with_origin(tmp_path)
-    main = _git(repo, "rev-parse", "main").strip()
+    main = git(repo, "rev-parse", "main")
     (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     (repo / "left.txt").write_text("left behind\n")
-    _git(repo, "add", "left.txt")
+    git(repo, "add", "left.txt")
 
     try:
         await site(repo, database)
@@ -602,5 +557,5 @@ async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, s
     except forge.ForgeError as exc:
         stopped = str(exc)
 
-    assert _git(repo, "rev-parse", "main").strip() == main
+    assert git(repo, "rev-parse", "main") == main
     assert f"is not on {BRANCH}" in stopped

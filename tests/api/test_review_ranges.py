@@ -4,6 +4,8 @@ test_review.py, which is at its line budget."""
 # ruff: noqa: F811 -- `gated` is an imported fixture, taken by name.
 from __future__ import annotations
 
+import pytest
+
 from api.test_review import _REVIEW, _new_thread, gated  # noqa: F401
 
 
@@ -35,6 +37,13 @@ def test_a_range_across_sides_round_trips_and_takes_no_suggestion(client, gated)
     ]
     for kw in refused:
         assert _new_thread(client, gated, **kw).status_code == 422, kw
+    # A model's own sentence, without pydantic's "Value error, " ahead of it,
+    # for a raw HTTP caller too, not only the CLI and MCP (R11F-06).
+    backwards = _new_thread(client, gated, start_line=4, end_line=2)
+    assert backwards.status_code == 422
+    assert [e["msg"] for e in backwards.json()["detail"]] == [
+        "start_line must be >= 1 and <= end_line"
+    ]
     tid = across["id"]
     assert client.patch(f"/api/threads/{tid}", json={"suggestion": fix}).status_code == 422
     reply = {"body": "like this", "suggestion": fix}
@@ -52,20 +61,33 @@ def test_a_long_quote_is_clipped_and_never_blocks_the_comment(client, gated):
 
 
 @_REVIEW
-def test_a_thread_sent_with_no_quote_is_quoted_from_the_diff(client, gated):
+@pytest.mark.parametrize(
+    ("written", "read"),
+    [
+        (b"    return a + b\n", "    return a + b"),
+        (b"    return a + b  # caf\xe9\n", "    return a + b  # caf\ufffd"),
+    ],
+    ids=["utf-8", "latin-1"],
+)
+def test_a_thread_sent_with_no_quote_is_quoted_from_the_diff(client, gated, written, read):
     """The CLI and MCP draw no diff, so they send no quote: the server quotes
-    the range, and the agent reads the lines, as for one made on the page."""
+    the range, and the agent reads the lines, as for one made on the page.
+    R11s-01: a file that is not UTF-8 is read with a replacement character,
+    where its byte made git's output undecodable: the comment answered 500,
+    and so did the whole item's diff."""
     import subprocess
 
     from api.test_review import _worktree
 
     wt = _worktree(client, gated)
-    (wt / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (wt / "calc.py").write_bytes(b"def add(a, b):\n" + written)
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "commit", "-qam", "fix"], cwd=wt, check=True)
     r = _new_thread(client, gated, file_path="calc.py", start_line=1, end_line=2)
     assert r.status_code == 201, r.text
-    assert r.json()["quote"] == " def add(a, b):\n+    return a + b"
+    assert r.json()["quote"] == f" def add(a, b):\n+{read}"
+    diff = client.get(f"/api/work-items/{gated}/diff")
+    assert diff.status_code == 200 and f"+{read}\n" in diff.json()["landed"]["diff"]
     old = _new_thread(client, gated, file_path="calc.py", side="old", start_line=2, end_line=2)
     assert old.json()["quote"] == "-    return a - b  # bug: should be +"
     sent = _new_thread(client, gated, file_path="calc.py", start_line=2, end_line=2, quote="+x")

@@ -63,6 +63,32 @@ def test_a_moving_asset_url_is_pinned_to_the_tag(before, after):
     assert release_artifacts.pin_refs(before, "v1.5.0", "o/r") == (after or before)
 
 
+_NEXT = "[What's new](https://o.github.io/r/next/get-started/whats-new)"
+
+
+@pytest.mark.parametrize(
+    ("tag", "before", "after"),
+    [
+        ("v2.0.0", _NEXT, "[What's new](https://o.github.io/r/get-started/whats-new)"),
+        ("v2.0.0", "https://O.GitHub.io/r/next/", "https://O.GitHub.io/r/"),
+        # A pre-release's stable docs are still the last release's.
+        ("v2.0.0rc2", _NEXT, None),
+        ("v2.0.0b1", _NEXT, None),
+        # Already the release's, someone else's site, or a page named next.
+        ("v2.0.0", "https://o.github.io/r/get-started/whats-new", None),
+        ("v2.0.0", "https://other.github.io/r/next/x", None),
+        ("v2.0.0", "https://o.github.io/r2/next/x", None),
+        ("v2.0.0", "https://o.github.io/r/guides/next/x", None),
+    ],
+    ids=["stable", "case", "rc", "beta", "pinned", "other-owner", "other-repo", "deeper"],
+)
+def test_a_stable_tag_points_main_s_docs_at_the_release_s(tag, before, after):
+    """The README links What's new on `/next/` until the release that adds it
+    is out; frozen into that release's PyPI page, the link would drift to
+    whatever `main` says later (R11D-02)."""
+    assert release_artifacts.pin_docs(before, tag, "o/r") == (after or before)
+
+
 def test_the_repository_matches_however_github_spells_it():
     url = "https://raw.githubusercontent.com/ITSomidkarami/Kraft/main/a.png"
     assert release_artifacts.pin_refs(url, "v1.5.0") == url.replace("/main/", "/v1.5.0/")
@@ -128,6 +154,7 @@ def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
     wheel = tmp_path / "kraft_sdlc-1.5.0-py3-none-any.whl"
     image = "![board](https://raw.githubusercontent.com/o/r/main/.github/assets/board.png)\n"
     image += "![theirs](https://raw.githubusercontent.com/other/repo/main/a.png)\n"
+    image += "[new](https://o.github.io/r/next/get-started/whats-new)\n"
     before = _wheel(wheel, image)
     release_artifacts.pin_wheel(wheel, "v1.5.0", "o/r")
     with zipfile.ZipFile(wheel) as z:
@@ -141,6 +168,7 @@ def test_the_wheels_description_is_pinned_and_nothing_else_moves(tmp_path):
     assert b"/o/r/v1.5.0/.github/assets/board.png" in after[meta]
     assert b"/o/r/main/" not in after[meta]
     assert b"/other/repo/main/a.png" in after[meta]
+    assert b"(https://o.github.io/r/get-started/whats-new)" in after[meta]
     # The header's own github.com link is not an asset URL.
     assert b"Project-URL: Source, https://github.com/o/r\n" in after[meta]
     for name in before:
@@ -224,15 +252,25 @@ def _steps() -> list[str]:
     return re.findall(r"- (?:name: (.+)|uses: .+)", RELEASE_YML.read_text())
 
 
-def test_the_wheel_is_built_with_the_tagged_commits_time():
+@pytest.mark.parametrize(
+    ("name", "builds"),
+    [
+        ("tag locally, then build", ["just bundle", "uv build --wheel"]),
+        ("build the VS Code extension", ["npx vsce package"]),
+    ],
+    ids=["wheel", "vsix"],
+)
+def test_each_artifact_is_built_with_the_tagged_commits_time(name, builds):
     """Without `SOURCE_DATE_EPOCH`, two builds of one tag differed in the zip
     dates of every bundled file, so nobody could re-derive the published
-    sha256 from the tag."""
+    sha256 from the tag. A step's `export` ends with the step, so the
+    extension's build sets it again (R11h-02); vsce reads it."""
     text = RELEASE_YML.read_text()
-    start = text.index("- name: tag locally, then build")
+    start = text.index(f"- name: {name}")
     step = text[start : text.index("\n      - ", start + 1)]
     epoch = step.find('export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"')
-    assert -1 < epoch < step.index("just bundle") < step.index("uv build --wheel")
+    assert -1 < epoch < min(step.index(b) for b in builds)
+    assert [step.index(b) for b in builds] == sorted(step.index(b) for b in builds)
 
 
 def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():

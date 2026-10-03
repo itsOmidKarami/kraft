@@ -9,7 +9,7 @@ import { routesIn, type NgRoute } from "./routes";
 import { currentSidebar, writeSidebar, type SidebarMode } from "./sidebarPref";
 import { useDraftCounts } from "./useDraftCounts";
 import { useGroupCount } from "../board/counts";
-import { installedOlder, olderServer, restartPending, useHealth } from "./health";
+import { restartPending, restartWords, useHealth } from "./health";
 
 const connectionWord = (c: "connecting" | "open" | "reconnecting") =>
   c === "open" ? "live" : c === "connecting" ? "connecting…" : "reconnecting…";
@@ -142,7 +142,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
           </NavLink>
           {restartPending(health) && (
             <NavLink to="/settings/about" end className="ng-side-meta ng-side-label is-warn" onClick={went}>
-              {olderServer(health) ? "a newer Kraft is installed: restart to finish the update" : installedOlder(health) ? `v${health?.installed} installed, older than this server: see About` : `v${health?.installed} installed: restart to finish the update`}
+              {restartWords(health)}
             </NavLink>
           )}
           <button

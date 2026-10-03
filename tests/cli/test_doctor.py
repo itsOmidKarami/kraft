@@ -186,19 +186,19 @@ def test_a_missing_vector_extra_is_advice_not_a_failure():
     """Kraft-rj8cn: semantic search is an opt-in extra, so /health stays `ok`
     without it and doctor agrees -- an ok line carrying the advice, like shell
     completion's, not a FAIL that pins the exit code at 1."""
-    from kraft.index.embed import _MISSING
+    from kraft.index.embed import missing
 
     rows = doctor._health_checks(
         {
             "status": "ok",
-            "index": {"errors": [], "embeddings": {"available": False, "reason": _MISSING}},
+            "index": {"errors": [], "embeddings": {"available": False, "reason": missing()}},
             "reattach_summary": {"unknown": []},
         }
     )
 
     assert all(row["ok"] for row in rows)
     assert _by_name(rows, "health")["detail"] == "ok"
-    assert "kraft-sdlc[vector]" in _by_name(rows, "embeddings")["detail"]
+    assert missing() in _by_name(rows, "embeddings")["detail"]
 
 
 def test_an_installed_but_broken_embedder_fails():

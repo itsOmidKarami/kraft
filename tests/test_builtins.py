@@ -4,13 +4,15 @@ from pathlib import Path
 import pytest
 from support import worktree as wtree
 from support.harness import (
-    _git,
+    commit_all,
     entry_of,
+    git,
     isolated_bd,
     make_repo_with_engineering,
     make_repo_with_submodule,
     v1_chain,
     v1_resolved,
+    write,
 )
 from support.workspace import workspace_item, workspace_target
 
@@ -18,14 +20,6 @@ from kraft import builtins as kraft_builtins
 from kraft import store
 from kraft.adapters.forge import git as forge_git
 from kraft.config import git_read
-
-
-def _commit(cwd, name, text, message):
-    """Write `name` under `cwd` and commit everything; returns the new HEAD."""
-    (cwd / name).write_text(text)
-    _git(cwd, "add", "-A")
-    _git(cwd, "commit", "-m", message)
-    return git_read(cwd, "rev-parse", "HEAD")
 
 
 async def test_worktree_preparation_creates_the_worktree_and_branch(database, run_dirs, repo):
@@ -36,14 +30,7 @@ async def test_worktree_preparation_creates_the_worktree_and_branch(database, ru
     assert (worktree / "calc.py").is_file()
     branch = wtree.branch(database)
     assert branch == "kraft/t-w1"
-    branches = subprocess.run(
-        ["git", "branch", "--list", branch],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert branch in branches
+    assert branch in git(repo, "branch", "--list", branch)
     # No session row stands in for the deleted node: preparation is
     # runtime work the walk does, not a task a chain dispatches.
     assert (
@@ -96,12 +83,7 @@ async def test_an_attachment_from_another_worktree_is_copied_from_its_source(
     silently — a trimmed spec gate with no spec, which is worse than the 422
     this replaces."""
     other = tmp_path / "other-wt"
-    subprocess.run(
-        ["git", "worktree", "add", "-q", str(other), "-b", "other"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
+    git(repo, "worktree", "add", "-q", str(other), "-b", "other")
     spec = other / ".engineering" / "specs" / "s.md"
     spec.parent.mkdir(parents=True)
     spec.write_text("# from the other worktree\n")
@@ -146,9 +128,7 @@ async def test_a_missing_attachment_source_fails_loudly(tmp_path, database, run_
 
 
 def _porcelain(cwd):
-    return subprocess.run(
-        ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True, check=True
-    ).stdout.splitlines()
+    return git(cwd, "status", "--porcelain").splitlines()
 
 
 def test_commit_paths_stages_and_commits_only_the_named_paths(repo):
@@ -165,16 +145,11 @@ def test_commit_paths_stages_and_commits_only_the_named_paths(repo):
         ["git", "show", "HEAD:wanted.md"], cwd=repo, capture_output=True, text=True, check=True
     ).stdout
     assert committed == "attached\n"
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout
+    head = git(repo, "rev-parse", "HEAD")
 
     kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1", "main")
 
-    again = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout
-    assert again == head, "a second call made an empty commit"
+    assert git(repo, "rev-parse", "HEAD") == head, "a second call made an empty commit"
 
 
 async def test_an_attached_document_is_committed_in_the_worktree(database, run_dirs, repo):
@@ -229,8 +204,7 @@ async def test_worktree_preparation_does_not_write_through_a_symlinked_attachmen
     link = repo / ".engineering" / "plans" / "p.md"
     link.parent.mkdir(parents=True)
     link.symlink_to(outside)  # dangling: outside does not exist yet
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-m", "add symlinked plan"], cwd=repo, check=True)
+    commit_all(repo, "add symlinked plan")
     # the working tree now diverges from HEAD: a real, validated file sits
     # where HEAD has the symlink
     link.unlink()
@@ -248,9 +222,7 @@ async def test_worktree_preparation_does_not_write_through_a_symlinked_attachmen
 
 
 async def test_worktree_preparation_stamps_base_ref(database, run_dirs, repo):
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
-    ).stdout.strip()
+    head = git(repo, "rev-parse", "HEAD")
 
     await wtree.make_item(database, repo)
     await wtree.prepare(database, run_dirs, repo)
@@ -284,7 +256,8 @@ async def test_ensure_worktree_is_idempotent_and_pins_base_ref_once(database, ru
     # A second commit lands, then a second call: the pin must not move,
     # and the existing worktree must be reused rather than re-added
     # (git refuses to add a worktree at a path that already exists).
-    _commit(repo, "second.txt", "x", "second")
+    write(repo, "second.txt", "x")
+    commit_all(repo, "second")
     again = await wtree.ensure(database, run_dirs, repo)
     assert again == first
     assert wtree.base_ref(database) == pinned
@@ -296,7 +269,7 @@ async def test_ensure_worktree_reattaches_an_existing_branch(database, run_dirs,
     use."""
     await wtree.make_item(database, repo)
     wt = await wtree.ensure(database, run_dirs, repo)
-    _git(repo, "worktree", "remove", "--force", str(wt))
+    git(repo, "worktree", "remove", "--force", str(wt))
 
     again = await wtree.ensure(database, run_dirs, repo)
     assert again.is_dir()
@@ -326,14 +299,7 @@ async def test_ensure_worktree_branch_is_a_title_slug(database, run_dirs, repo):
     )
     expected = "kraft/readable-merge-records-branch-slugs-gfm-tables-b63d95be"
     assert git_read(wt, "rev-parse", "--abbrev-ref", "HEAD") == expected
-    branches = subprocess.run(
-        ["git", "branch", "--list", expected],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert expected in branches
+    assert expected in git(repo, "branch", "--list", expected)
 
 
 async def test_ensure_worktree_keeps_the_legacy_uuid_branch(database, run_dirs, repo):
@@ -575,17 +541,14 @@ async def test_the_worktree_and_the_forge_agree_on_the_branch(
     assert git_read(run_dirs.worktrees / wid, "rev-parse", "--abbrev-ref", "HEAD") == branch
     # what the forge adapter was handed
     assert captured["branch"] == branch
-    # and what abandon reclaims
+    # and what abandon reclaims, with what a server killed mid-rebase set aside
+    set_aside = kraft_builtins.set_aside_dir(run_dirs.worktrees / wid)
+    set_aside.mkdir(parents=True)
+    (set_aside / "uv.lock").write_text("left by a SIGKILL\n")
     removed = await lifecycle._remove_worktree(repo, run_dirs.worktrees / wid, branch, wid)
     assert removed["worktree_removed"]
-    listed = subprocess.run(
-        ["git", "branch", "--list", branch],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    assert listed.strip() == ""
+    assert not set_aside.exists()
+    assert git(repo, "branch", "--list", branch) == ""
 
 
 @pytest.mark.parametrize("unset", ["user.name", "user.email"], ids=["no-name", "no-email"])
@@ -599,7 +562,7 @@ async def test_ensure_worktree_raises_when_the_repo_has_no_commit_identity(
     Fail here instead, at worktree creation, naming the missing key."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty-gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    _git(repo, "config", "--unset", unset)
+    git(repo, "config", "--unset", unset)
     await wtree.make_item(database, repo)
     with pytest.raises(RuntimeError, match=unset):
         await wtree.ensure(database, run_dirs, repo)
@@ -650,11 +613,14 @@ def _refs(repo: Path) -> str:
 async def _item_behind_main(database, run_dirs, repo):
     """An item worktree with a commit of its own, behind a `main` that moved,
     so a refresh would rebase. Returns `(worktree, branch, gitdir)`."""
-    _commit(repo, "first.txt", "first\n", "first")
+    write(repo, "first.txt", "first\n")
+    commit_all(repo, "first")
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
-    _commit(worktree, "work.txt", "work\n", "worktree work")
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    write(worktree, "work.txt", "work\n")
+    commit_all(worktree, "worktree work")
+    write(repo, "moved.txt", "moved on\n")
+    commit_all(repo, "moved on")
     gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
     return worktree, wtree.branch(database), gitdir
 
@@ -667,7 +633,7 @@ async def _door(door: str, worktree: Path, repo: Path, branch: str, gitdir: Path
     # A stash of the worker's own making, which conflicts with the tree.
     (worktree / "work.txt").write_text("the worker's stash\n")
     stash = git_read(worktree, "stash", "create")
-    _git(worktree, "checkout", "--", "work.txt")
+    git(worktree, "checkout", "--", "work.txt")
     (gitdir / "MERGE_AUTOSTASH").write_text(f"{stash}\n")
     if door == "restore_branch":
         _plant_head(worktree, "refs/heads/side")
@@ -701,7 +667,7 @@ async def test_planted_operation_state_never_moves_an_operator_ref(
         main, orig = git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1")
         _plant(gitdir, kind, main, orig)
     if door == "restore_branch":
-        _git(repo, "branch", "side", branch)  # the operator's own
+        git(repo, "branch", "side", branch)  # the operator's own
     refs = _refs(repo)
 
     with pytest.raises(RuntimeError):
@@ -738,8 +704,9 @@ async def test_a_planted_head_never_rebases_another_branch(database, run_dirs, r
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
-    _git(repo, "branch", "side")
-    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    git(repo, "branch", "side")
+    write(repo, "moved.txt", "moved on\n")
+    commit_all(repo, "moved on")
     side = git_read(repo, "rev-parse", "side")
     gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
     (gitdir / "HEAD").write_text("ref: refs/heads/side\n")
@@ -765,11 +732,13 @@ async def test_a_planted_root_head_never_takes_the_members_repoint(database, run
     task = {"id": "t", "kind": "subprocess", "command": "true"}
     row, _, root = await workspace_item(database, run_dirs, tmp_path, [task])
     branch = store.branch_for(row)
-    _commit(root / "repos" / "pkg", "calc.py", "x = 1\n", "member change")
-    _git(root, "add", "repos/pkg")
-    _git(root, "commit", "-qm", "wip: uncommitted work from t")
-    _commit(tmp_path / "pkg", "moved.txt", "landed\n", "the member's main moves")
-    _git(Path(row["repo"]), "branch", "side", git_read(root, "rev-parse", "HEAD"))
+    write(root / "repos" / "pkg", "calc.py", "x = 1\n")
+    commit_all(root / "repos" / "pkg", "member change")
+    git(root, "add", "repos/pkg")
+    git(root, "commit", "-qm", "wip: uncommitted work from t")
+    write(tmp_path / "pkg", "moved.txt", "landed\n")
+    commit_all(tmp_path / "pkg", "the member's main moves")
+    git(Path(row["repo"]), "branch", "side", git_read(root, "rev-parse", "HEAD"))
     side = git_read(root, "rev-parse", "side")
     _plant_head(root, "refs/heads/side")
 

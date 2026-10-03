@@ -17,6 +17,7 @@ from fastapi import HTTPException
 
 from kraft import executor
 from kraft.api import deps as api_deps
+from kraft.executor.entry import one_line_title
 from kraft.policy import Trigger, cron_due
 
 logger = logging.getLogger(__name__)
@@ -82,12 +83,17 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
             # repo skips, not a whole tick over one bad `policy.yaml` entry.
             logger.warning("%s: %s, skipped", index, exc.detail)
             continue
+        title, description = one_line_title(trig.title, trig.description)
+        if not title.strip():
+            # A title is not blank, and there is no one here to ask for one.
+            logger.warning("%s: its title and description are blank, skipped", index)
+            continue
         try:
             wid = await executor.intake(
                 st.db,
                 st.run_dirs,
-                title=trig.title,
-                description=trig.description,
+                title=title,
+                description=description,
                 repo=trig.repo,
                 chain=chain,
                 effective_policy=api_deps.item_policy(st, trig.repo),

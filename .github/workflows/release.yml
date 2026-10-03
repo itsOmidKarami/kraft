@@ -188,8 +188,10 @@ jobs:
       - name: point the wheel's README at this tag
         # The README's images are hot-linked to `main`, and PyPI renders the
         # description baked into the wheel. Left alone, every version's PyPI
-        # page would show whatever UI `main` has today. On the built wheel, not
-        # README.md: editing the tree before the build would make setuptools-scm
+        # page would show whatever UI `main` has today. On a stable tag, its
+        # links to `main`'s docs (`/next/`) move to the release's docs too. On
+        # the built wheel, not README.md: editing the tree before the build
+        # would make setuptools-scm
         # call the version a dev build (`1.5.0rc100.dev0+g...`), not the tag.
         # The tag is pushed below, before the publish, so the URLs resolve by
         # the time PyPI shows them.
@@ -244,6 +246,10 @@ jobs:
           # stamp step below branches off a clean tree, and the wheel is already
           # built, so nothing may dirty the checkout here.
           cd vscode
+          # The .vsix's zip entries dated by the tagged commit too, as the
+          # wheel's are: vsce stamps every entry with it and sorts them, so a
+          # rebuild of the tag gives the published sha256.
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           npm ci
           # No `npm run build`: packing the .vsix below runs `vscode:prepublish`,
           # which builds the extension itself, without a source map.
