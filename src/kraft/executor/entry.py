@@ -12,6 +12,7 @@ from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.render import plain_text
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import ResolvedChain
 
@@ -24,6 +25,33 @@ logger = logging.getLogger(__name__)
 #: `template.id`, so a chain built straight from a `Template` still records
 #: which one without every internal caller having to say so.
 _UNSET = object()
+
+
+def one_line_title(title: str, description: str | None) -> tuple[str, str | None]:
+    """`title` folded to its first line, the rest put at the top of `description`.
+
+    A title is one line: a line break broke `kraft view list`'s table. The
+    doors a person types at refuse one (`api/routes/work_items._check_title`),
+    but a `policy.yaml` cron trigger has no one to refuse, and a YAML block
+    scalar (`title: >`, unless `>-`) ends in a line break. Duplicate copies a title 1.4
+    stored as it was. Those are folded here instead, so the item still files
+    with nothing of its text lost. Control characters are dropped and a tab
+    becomes a space. A title with no text takes the description's first line
+    that has some; with none there either, it comes back empty, for the
+    caller to refuse.
+    """
+    lines = [plain_text(line) for line in title.splitlines()]
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first is None:
+        fallback = next((ln for ln in (description or "").splitlines() if ln.strip()), "")
+        return (one_line_title(fallback, None)[0] if fallback else ""), description
+    if len(lines) == 1 and title.splitlines() == [title]:
+        return lines[0], description
+    head = lines[first].strip()
+    rest = "\n".join(lines[first + 1 :]).strip()
+    if not rest:
+        return head, description
+    return head, f"{rest}\n\n{description}" if description else rest
 
 
 def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItemTarget:
@@ -113,6 +141,7 @@ async def intake(
     #: launches read its repository's names against the live library.
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
+    title, description = one_line_title(title, description)
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
     # item, `kraft admin start` typed in $HOME — and nothing records it, so the work

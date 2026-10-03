@@ -5,7 +5,13 @@ reruns is tests/executor/test_retry_scopes.py."""
 from __future__ import annotations
 
 import pytest
-from support.api import _force_node, _poll_events, _post_default, _set_status
+from support.api import (
+    _budget_stopped_item,
+    _force_node,
+    _poll_events,
+    _post_default,
+    _set_status,
+)
 
 
 @pytest.fixture
@@ -293,16 +299,52 @@ def test_a_deferred_self_retry_refuses_an_override_out_of_bounds(client, repo, w
     assert _self_retry_requests(client, wid) == []
 
 
-def test_a_retry_on_a_paused_item_is_told_to_resume_instead(client, repo):
-    """R10b-01: retry claims only a stopped item. A paused one used to hear
-    only "work item is not stopped", which named no way on; Resume is it."""
+def _at_a_gate(client, repo, status: str) -> str:
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
-    _set_status(wid, "paused")
+    _set_status(wid, status)
+    return wid
 
-    r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+def _stopped(client, repo, status: str) -> str:
+    breach = {"scope": "work_item", "spent_usd": 5.0, "cap_usd": 5.0}
+    return _budget_stopped_item(client, repo, breach)
+
+
+@pytest.mark.parametrize(
+    ("item", "status", "verb", "detail"),
+    [
+        (
+            _at_a_gate,
+            "paused",
+            "retry",
+            "work item is paused, not stopped: resume it instead, or skip what it would run",
+        ),
+        (
+            _stopped,
+            "needs_human",
+            "resume",
+            "work item is needs_human, not paused: it stopped, so retry it instead "
+            "(kraft item retry {wid}, which takes --steer too)",
+        ),
+        (
+            _at_a_gate,
+            "needs_human",
+            "resume",
+            "work item is waiting at its spec_approval gate, not paused: approve or reject "
+            "it (kraft item approve {wid}, or kraft item reject {wid} --note ...)",
+        ),
+    ],
+    ids=["retry-on-paused", "resume-on-stopped", "resume-at-a-gate"],
+)
+def test_the_wrong_door_names_the_right_one(client, repo, item, status, verb, detail):
+    """R10b-01: retry claims only a stopped item. A paused one used to hear
+    only "work item is not stopped", which named no way on; Resume is it. And
+    the other way round: Resume on a stopped item said only "not paused",
+    where Retry is the way on, or at a gate, approve or reject (R11a)."""
+    wid = item(client, repo, status)
+
+    r = client.post(f"/api/work-items/{wid}/{verb}", json={})
 
     assert r.status_code == 409, r.text
-    assert r.json()["detail"] == (
-        "work item is paused, not stopped: resume it instead, or skip what it would run"
-    )
+    assert r.json()["detail"] == detail.format(wid=wid)

@@ -205,7 +205,8 @@ def test_a_highlight_lifts_one_real_entry_out_of_new():
 _PRE = "This is a pre-release. Install it with"
 _KEEP = (
     "using the Python you installed Kraft with and leaving out `[vector]` if you don't use "
-    "vector search, then run `kraft admin restart`. From 1.5.0rc14 on, "
+    "vector search, then run `kraft admin restart` (or `kraft admin start` if Kraft isn't "
+    "running). From 1.5.0rc14 on, "
 )
 _WHEEL = "https://github.com/itsOmidKarami/kraft/releases/download"
 _VSIX = "The VS Code extension on the Marketplace stays at the last release"

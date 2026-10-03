@@ -321,7 +321,11 @@ describe("FirstRun", () => {
     expect(screen.getByRole("link", { name: /New work item/ })).toHaveAttribute("href", "/?new=1");
     expect(screen.getByText(/Claude workers need Kraft's MCP server, or Kraft refuses to launch them/)).toBeInTheDocument();
     expect(screen.getByText(/without the plugin, run/)).toHaveTextContent("kraft admin init");
-    expect(screen.getByText(/open a Claude Code session in your repo and run/)).toHaveTextContent("/kraft:onboard");
+    // Step 1 connected the repo, so onboard checks it rather than connecting it.
+    const onboard = screen.getByText(/open a Claude Code session in your repo and run/);
+    expect(onboard).toHaveTextContent("/kraft:onboard");
+    expect(onboard).toHaveTextContent(/connected already: it checks the setup and test commands/);
+    expect(onboard).not.toHaveTextContent(/connects the repo/);
     await user.click(screen.getByRole("button", { name: /Copy commands/ }));
     expect(await screen.findByRole("button", { name: /Copied/ })).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe(

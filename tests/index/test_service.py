@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -317,49 +318,78 @@ async def test_documents_for_work_item_includes_intake_attachments(tmp_path, dat
     assert docs[0]["attachment_kind"] == "plan"
 
 
-async def test_documents_for_work_item_shows_unmerged_attachment_from_its_worktree(
-    tmp_path, database, conn, repo
+@pytest.mark.parametrize(
+    ("in_worktree", "stored", "title"),
+    [
+        ("# Attached plan\nbody\n", None, "Attached plan"),
+        (None, "# Attached plan\nbody\n", "Attached plan"),
+        ("# Attached plan\nbody\n", "# As filed\nbody\n", "Attached plan"),
+        ("", "# As filed\nbody\n", None),
+    ],
+    ids=["worktree", "stored-before-start", "worktree-over-stored", "gone-from-worktree"],
+)
+async def test_documents_for_work_item_shows_an_unindexed_attachment(
+    tmp_path, database, conn, repo, in_worktree, stored, title
 ):
     """The attachment is committed only on the item's own branch/worktree, not
     on the registered main checkout — `rescan_repo` never sees it, but the
-    worktree fallback should still surface it (Kraft-3sbq)."""
+    worktree fallback should still surface it (Kraft-3sbq). Before the item
+    starts there is no worktree, and the copy Kraft stored at intake is what
+    it was filed with: 1.4 listed it there, read from the main checkout
+    (R11F-02). Once the worktree exists, it alone is read: a stored copy must
+    not stand in for a file a worker removed. `in_worktree` "" is a worktree
+    without the file, None no worktree at all."""
     from kraft.paths import RunDirs
 
+    rd = RunDirs(tmp_path / "run").ensure()
+    attachment = {"kind": "plan", "path": ".engineering/plans/p.md"}
+    if stored is not None:
+        (rd.attachments / "w1").mkdir(parents=True)
+        (rd.attachments / "w1" / "plan.md").write_text(stored)
+        attachment["source"] = str(rd.attachments / "w1" / "plan.md")
     await database.write(
         lambda c: c.execute(
             "INSERT INTO work_items (id, bead_id, title, repo, chain_template, "
             "chain_definition, status, created_at, updated_at, attachments) VALUES "
             "(?, 'b1', 't', ?, 'default', '{}', 'active', 'now', 'now', ?)",
-            ("w1", str(repo), '[{"kind": "plan", "path": ".engineering/plans/p.md"}]'),
+            ("w1", str(repo), json.dumps([attachment])),
         )
     )
-    rd = RunDirs(tmp_path / "run").ensure()
-    wt = rd.worktrees / "w1" / ".engineering" / "plans"
-    wt.mkdir(parents=True)
-    (wt / "p.md").write_text("# Attached plan\nbody\n")
+    if in_worktree is not None:
+        wt = rd.worktrees / "w1" / ".engineering" / "plans"
+        wt.mkdir(parents=True)
+        if in_worktree:
+            (wt / "p.md").write_text(in_worktree)
 
     ix = Indexer(conn, database, repos_env=str(repo), run_dirs=rd)
     await ix.rescan_repo(str(repo))
     assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
 
     docs = ix.documents_for_work_item("w1")
+    doc = ix.get_document("attachment:w1:plan")
+    if title is None:
+        assert docs == [] and doc is None
+        return
     assert [d["path"] for d in docs] == [".engineering/plans/p.md"]
     assert docs[0]["attachment_kind"] == "plan"
-    assert docs[0]["title"] == "Attached plan"
+    assert docs[0]["title"] == title
     assert docs[0]["document_id"] == "attachment:w1:plan"
-
-    doc = ix.get_document("attachment:w1:plan")
     assert doc is not None
-    assert doc["content"] == "# Attached plan\nbody\n"
-    assert doc["title"] == "Attached plan"
+    assert doc["content"] == f"# {title}\nbody\n"
+    assert doc["title"] == title
 
 
+@pytest.mark.parametrize(
+    "worktree", ["with-the-file", "without-it", None], ids=["worktree", "file-gone", "not-started"]
+)
 async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo(
-    tmp_path, database, conn, repo
+    tmp_path, database, conn, repo, worktree
 ):
     """Kraft-2jy6: `open_document` needs the same worktree-first path
     `_synthesize_attachment_doc` already resolves content from — the file is
-    on the item's branch, not the registered repo's checkout."""
+    on the item's branch, not the registered repo's checkout. Only a file
+    that is there: before the item starts, an editor saving to the path
+    would create the worktree's directory as a plain one (R11F-02 review)."""
     from kraft.paths import RunDirs
 
     await database.write(
@@ -372,12 +402,14 @@ async def test_resolve_attachment_path_reads_from_the_worktree_not_the_main_repo
     )
     rd = RunDirs(tmp_path / "run").ensure()
     wt = rd.worktrees / "w1" / ".engineering" / "plans"
-    wt.mkdir(parents=True)
-    (wt / "p.md").write_text("# Attached plan\nbody\n")
+    if worktree is not None:
+        wt.mkdir(parents=True)
+    if worktree == "with-the-file":
+        (wt / "p.md").write_text("# Attached plan\nbody\n")
 
     ix = Indexer(conn, database, repos_env=str(repo), run_dirs=rd)
     resolved = ix.resolve_attachment_path("attachment:w1:plan")
-    assert resolved == (wt / "p.md").resolve()
+    assert resolved == ((wt / "p.md").resolve() if worktree == "with-the-file" else None)
     assert ix.resolve_attachment_path("attachment:w1:spec") is None
     assert ix.resolve_attachment_path("attachment:nope:plan") is None
 

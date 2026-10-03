@@ -402,12 +402,24 @@ def _render_comment(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _thread_state(done: str):
+    """`resolved thread T on calc.py:+9 to +11`: one line, as `comment` names a
+    new thread, not the whole thread as `key  value` lines (R11a)."""
+
+    def render_state(result: dict) -> str:
+        if "comments" not in result:
+            return common._render_action(result)
+        return f"{done} thread {result['id']} on {render.thread_where(result)}"
+
+    return render_state
+
+
 def _cmd_resolve(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.resolve_thread(ns.thread)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.resolve_thread(ns.thread)), _thread_state("resolved"), ns.json)
 
 
 def _cmd_reopen(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.reopen_thread(ns.thread)), common._render_action, ns.json)
+    common.emit(asyncio.run(client.reopen_thread(ns.thread)), _thread_state("reopened"), ns.json)
 
 
 def _cmd_review(ns: argparse.Namespace) -> None:

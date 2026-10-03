@@ -322,7 +322,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
               <p>Claude workers need Kraft's MCP server, or Kraft refuses to launch them. Install the Kraft plugin, which also adds the /kraft:* skills:</p>
               <pre className="fr-cmd">{PLUGIN_COMMANDS}</pre>
               <Button onClick={copy}><Copy size={14} aria-hidden />{copied ? "Copied" : "Copy commands"}</Button>
-              <p>Then open a Claude Code session in your repo and run <code>/kraft:onboard</code>. It connects the repo and checks its setup and test commands.</p>
+              <p>Then open a Claude Code session in your repo and run <code>/kraft:onboard</code>. The repo is connected already: it checks the setup and test commands against the repo's own docs and CI, offers to rehearse them with <code>kraft repo connect --verify</code>, and confirms <code>kraft admin doctor</code> passes.</p>
               <p>Or, without the plugin, run <code>kraft admin init</code>. Not both.</p>
             </>
           )}

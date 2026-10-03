@@ -713,11 +713,23 @@ def _not_stopped(row) -> str:
     return "work item is not stopped"
 
 
-def not_paused(row) -> str:
+def not_paused(row, gate: str | None = None) -> str:
     """The 409 a steer or resume on an item that is not paused gets. A running
-    one is told what to do (Ruling 183: a steer never reaches a running item)."""
+    one is told what to do (Ruling 183: a steer never reaches a running item),
+    and so is one waiting for a person: at a `gate`, approve or reject it;
+    stopped anywhere else, retry it, which takes a steer too (R11a)."""
     if row["status"] in ("active", "waiting"):
         return f"work item is {row['status']}: it is running, so pause it first"
+    if row["status"] == "needs_human" and gate is not None:
+        return (
+            f"work item is waiting at its {gate} gate, not paused: approve or reject it "
+            f"(kraft item approve {row['id']}, or kraft item reject {row['id']} --note ...)"
+        )
+    if row["status"] == "needs_human":
+        return (
+            "work item is needs_human, not paused: it stopped, so retry it instead "
+            f"(kraft item retry {row['id']}, which takes --steer too)"
+        )
     return f"work item is {row['status']}, not paused"
 
 
@@ -753,7 +765,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     if row["status"] != "paused" and not (
         row["status"] == "needs_human" and board._needs_context_stop(st, wid)
     ):
-        raise HTTPException(409, not_paused(row))
+        raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "steer text is required")
@@ -776,7 +788,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # Same reason as retry: claim_for_run below still decides, but an item
         # that was never paused should hear that, not a complaint about its
         # steer text or a busy slot.
-        raise HTTPException(409, not_paused(row))
+        raise HTTPException(409, not_paused(row, board._pending_gate(st, wid)))
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")

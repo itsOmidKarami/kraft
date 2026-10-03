@@ -594,13 +594,18 @@ async def duplicate_work_item(wid: str, request: Request):
         ).item_policy
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    duplicates = st.db.read(lambda c: store.open_duplicates(c, row["repo"], row["title"], []))
+    # A title 1.4 stored on several lines, or blank, is folded as a cron
+    # trigger's is (`entry.one_line_title`); one with no text anywhere is refused.
+    title, description = entry.one_line_title(row["title"], row["description"] or "")
+    if not title.strip():
+        raise HTTPException(422, "title cannot be empty: give the item a title first")
+    duplicates = st.db.read(lambda c: store.open_duplicates(c, row["repo"], title, []))
     try:
         new_id = await executor.intake(
             st.db,
             st.run_dirs,
-            title=row["title"],
-            description=row["description"] or "",
+            title=title,
+            description=description,
             repo=row["repo"],
             chain=chain,
             effective_policy=policy,
