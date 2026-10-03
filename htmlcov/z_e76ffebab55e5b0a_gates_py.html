@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_harnesses_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 23:09 +0000
+            created at 2026-10-03 00:07 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -370,7 +370,7 @@
     <p class="run run2"><span class="n"><a id="t288" href="#t288">288</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t289" href="#t289">289</a></span><span class="t">        <span class="key">except</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">AlreadyRunning</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t290" href="#t290">290</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;a walk is already running for this work item&quot;</span><span class="op">)</span> <span class="key">from</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t291" href="#t291">291</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="nam">k</span><span class="op">:</span> <span class="nam">v</span> <span class="key">for</span> <span class="nam">k</span><span class="op">,</span> <span class="nam">v</span> <span class="key">in</span> <span class="nam">dict</span><span class="op">(</span><span class="nam">deps</span><span class="op">.</span><span class="nam">_work_item_row</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span><span class="op">)</span><span class="op">.</span><span class="nam">items</span><span class="op">(</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t291" href="#t291">291</a></span><span class="t">        <span class="key">return</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">work_item_answer</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t292" href="#t292">292</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t293" href="#t293">293</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t294" href="#t294">294</a></span><span class="t"><span class="com"># Backward motion: 02 &#167;7.2. Every gate on this path: Kraft-ko7j.</span>&nbsp;</span><span class="r"></span></p>
@@ -449,7 +449,7 @@
     <p class="mis show_mis"><span class="n"><a id="t367" href="#t367">367</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">400</span><span class="op">,</span> <span class="nam">str</span><span class="op">(</span><span class="nam">exc</span><span class="op">)</span><span class="op">)</span> <span class="key">from</span> <span class="nam">exc</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t368" href="#t368">368</a></span><span class="t">        <span class="key">if</span> <span class="nam">target</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t369" href="#t369">369</a></span><span class="t">            <span class="com"># A spent reject loop goes to a human, not an agent (Ruling 176).</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t370" href="#t370">370</a></span><span class="t">            <span class="key">return</span> <span class="op">{</span><span class="nam">k</span><span class="op">:</span> <span class="nam">v</span> <span class="key">for</span> <span class="nam">k</span><span class="op">,</span> <span class="nam">v</span> <span class="key">in</span> <span class="nam">dict</span><span class="op">(</span><span class="nam">deps</span><span class="op">.</span><span class="nam">_work_item_row</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span><span class="op">)</span><span class="op">.</span><span class="nam">items</span><span class="op">(</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t370" href="#t370">370</a></span><span class="t">            <span class="key">return</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">work_item_answer</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t371" href="#t371">371</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t372" href="#t372">372</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t373" href="#t373">373</a></span><span class="t">            <span class="nam">deps</span><span class="op">.</span><span class="nam">spawn</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
@@ -473,7 +473,7 @@
     <p class="run run2"><span class="n"><a id="t391" href="#t391">391</a></span><span class="t">            <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t392" href="#t392">392</a></span><span class="t">        <span class="key">except</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">AlreadyRunning</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t393" href="#t393">393</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="str">&quot;a walk is already running for this work item&quot;</span><span class="op">)</span> <span class="key">from</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t394" href="#t394">394</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="nam">k</span><span class="op">:</span> <span class="nam">v</span> <span class="key">for</span> <span class="nam">k</span><span class="op">,</span> <span class="nam">v</span> <span class="key">in</span> <span class="nam">dict</span><span class="op">(</span><span class="nam">deps</span><span class="op">.</span><span class="nam">_work_item_row</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span><span class="op">)</span><span class="op">.</span><span class="nam">items</span><span class="op">(</span><span class="op">)</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t394" href="#t394">394</a></span><span class="t">        <span class="key">return</span> <span class="nam">deps</span><span class="op">.</span><span class="nam">work_item_answer</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -483,7 +483,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_harnesses_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-10-02 23:09 +0000
+            created at 2026-10-03 00:07 +0000
         </p>
     </div>
 </footer>
