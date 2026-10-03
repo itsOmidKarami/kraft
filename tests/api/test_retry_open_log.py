@@ -38,6 +38,16 @@ def _spy_on_launches(monkeypatch):
     return launched
 
 
+def _mac_apps(monkeypatch, tmp_path, apps):
+    """The macOS apps installed, by name, in a scratch Applications folder in
+    place of the real ones; any at all makes this a Mac."""
+    for app in apps:
+        (tmp_path / f"{app}.app").mkdir(parents=True)
+    monkeypatch.setattr("kraft.api.routes.search._MAC_APP_DIRS", (tmp_path,))
+    if apps:
+        monkeypatch.setattr("sys.platform", "darwin")
+
+
 def _as_git_scan_doc(client, monkeypatch, doc_id):
     """Force `origin='git_scan'` on an indexed document for a test that is
     about editor-launch mechanics, not about the index architecture.
@@ -321,16 +331,31 @@ def test_open_document_reports_501_when_no_editor_is_installed(client, repo, mon
     assert client.post(f"/api/documents/{doc_id}/open", json={"editor": "vi"}).status_code == 400
 
 
-def test_open_document_launches_the_named_editor(client, repo, monkeypatch):
+@pytest.mark.parametrize(
+    ("on_path", "apps", "argv"),
+    [
+        (None, set(), ["/usr/bin/code"]),
+        ({"open"}, {"Visual Studio Code"}, ["/usr/bin/open", "-a", "Visual Studio Code"]),
+    ],
+    ids=["its-cli-on-path", "a-mac-app-without-its-cli"],
+)
+def test_open_document_launches_the_named_editor(
+    client, repo, monkeypatch, tmp_path, on_path, apps, argv
+):
     wid = _completed_item(client, repo)
     doc_id = client.get(f"/api/work-items/{wid}/documents").json()["documents"][0]["document_id"]
     doc = _as_git_scan_doc(client, monkeypatch, doc_id)
 
     launched = _spy_on_launches(monkeypatch)
+    if on_path is not None:
+        monkeypatch.setattr(
+            "shutil.which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+        )
+    _mac_apps(monkeypatch, tmp_path / "Applications", apps)
     r = client.post(f"/api/documents/{doc_id}/open", json={"editor": "code"})
     assert r.status_code == 200
     assert r.json()["editor"] == "code"
-    assert launched == [["/usr/bin/code", str(Path(doc["repo"]) / doc["path"])]]
+    assert launched == [[*argv, str(Path(doc["repo"]) / doc["path"])]]
 
 
 @pytest.mark.parametrize("started", [True, False], ids=["worktree", "not-started"])
@@ -495,31 +520,47 @@ def test_bead_search_is_live_and_quiet_on_an_empty_query(client):
 
 
 @pytest.mark.parametrize(
-    ("on_path", "theme", "env", "expected"),
+    ("on_path", "apps", "theme", "env", "expected"),
     [
         (
             {"zed", "open", "xdg-open"},
+            set(),
             {},
             None,
             {"available": ["zed"], "system": True, "default": None},
         ),
-        (set(), {}, None, {"available": [], "system": False, "default": None}),
+        (set(), set(), {}, None, {"available": [], "system": False, "default": None}),
         (
             {"code", "cursor"},
+            set(),
             {"editor": "cursor"},
             "zed",
             {"available": ["code", "cursor"], "system": False, "default": "cursor"},
         ),
-        ({"code"}, {}, "zed", {"available": ["code"], "system": False, "default": "zed"}),
+        ({"code"}, set(), {}, "zed", {"available": ["code"], "system": False, "default": "zed"}),
+        (
+            {"code", "open"},
+            {"Zed", "Obsidian"},
+            {},
+            None,
+            {"available": ["code", "zed", "obsidian"], "system": True, "default": None},
+        ),
     ],
-    ids=["only-what-is-on-path", "nothing-found", "settings-default-over-env", "env-default"],
+    ids=[
+        "only-what-is-on-path",
+        "nothing-found",
+        "settings-default-over-env",
+        "env-default",
+        "mac-apps-without-their-cli",
+    ],
 )
 def test_editors_lists_only_what_this_machine_can_launch(
-    client, monkeypatch, on_path, theme, env, expected
+    client, monkeypatch, tmp_path, on_path, apps, theme, env, expected
 ):
     monkeypatch.setattr(
         "shutil.which", lambda name: f"/usr/bin/{name}" if name in on_path else None
     )
+    _mac_apps(monkeypatch, tmp_path / "Applications", apps)
     if env:
         monkeypatch.setenv("KRAFT_EDITOR", env)
     else:
