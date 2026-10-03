@@ -310,6 +310,17 @@ shape rules that don't — over both testpaths, `tests/` and
   "did not raise" is genuinely the only honest assertion are named in
   `EXPECTATION_ALLOWLIST` (same file), each with an inline reason; an entry
   for a test id that no longer exists fails the check.
+- **(e)** no helper body is copied across test files: a module-level
+  function (not `test_*`) with the same body as one in another test file, or
+  as a public function in `tests/support/`, fails the check, naming both and,
+  for a `tests/support` match, what to import. "The same body" ignores the
+  docstring, annotations and keyword order, but not the values of the module
+  constants the body names. Rule (c) is satisfied by splitting a file; this
+  is what makes a split safe, since a split that copies its helpers into
+  every half has only moved the bulk. The copies that existed when the rule
+  landed are in `DUPLICATE_HELPER_ALLOWLIST` with the same ratchet as (c):
+  a count may shrink, never grow, and an entry that has dropped to one copy
+  or sits well under its ceiling fails until it's removed or tightened.
 
 A parse failure in the checker is a failure, not a skip — a checker that
 can't read a file must not read as "passing" (this is the same bug class

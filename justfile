@@ -224,7 +224,8 @@ refresh-prices:
 
 # Check the test suite against docs/testing.md's mechanical rules: e2e markers
 # name a CLI, no unit test reaches a real bd, agent or forge CLI, the per-file line
-# budget, every test has an expectation. Both testpaths, kraft-lite's included.
+# budget, every test has an expectation, no helper body is copied across test
+# files. Both testpaths, kraft-lite's included.
 [doc("Check the test suite against docs/testing.md's mechanical rules")]
 check-tests:
     uv run python dev/check_tests.py
@@ -232,8 +233,8 @@ check-tests:
 # How big and how repetitive tests/ is: functions, collected cases, lines,
 # verbatim-repeat lines, duplicated helpers, densest modules. `--json` for tools.
 [doc("Print the shape of tests/: size, repeats, duplicated helpers, densest modules")]
-shape-report:
-    uv run python dev/test_shape_report.py
+shape-report *ARGS:
+    uv run python dev/test_shape_report.py {{ARGS}}
 
 # Frontend typecheck + unit tests. `npm test` is vitest, which does NOT typecheck;
 # CI's `npm run build` runs `tsc -b` and will fail on errors vitest sails past. Keep
