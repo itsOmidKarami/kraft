@@ -209,12 +209,20 @@ def test_the_ignore_rules_come_from_the_items_base_branch(origin, rule):
         assert args == []
 
 
+@pytest.mark.parametrize(
+    ("node", "rebased"),
+    [("spec", ["release"]), ("merge_request_feedback", [])],
+    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+)
 @pytest.mark.parametrize("door, stopped", [("retry", "needs_human"), ("resume", "paused")])
 def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
-    client, origin, monkeypatch, door, stopped
+    client, origin, monkeypatch, door, stopped, node, rebased
 ):
     """`/retry` and `/resume` rebase the worktree before the walk: onto the
-    item's base branch, like every other rebase."""
+    item's base branch, like every other rebase. Not when the item stands at
+    a node with `on_base_changed` (R11E-06): it rebases itself, and the
+    door's rebase took the move from it, so the span it restarts on a move
+    never ran on the new base."""
     from support.api import _force_node
 
     from kraft import executor
@@ -234,14 +242,28 @@ def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
         "/api/work-items",
         json={"title": "t", "repo": str(repo), "autostart": False, "base_branch": "release"},
     )
-    _force_node(r.json()["id"], "spec", stopped)
+    _force_node(r.json()["id"], node, stopped)
 
     assert client.post(f"/api/work-items/{r.json()['id']}/{door}", json={}).status_code == 200
-    assert bases == ["release"]
+    assert bases == rebased
 
 
+@pytest.mark.parametrize(
+    ("chain", "rebased"),
+    [
+        (_ONE_NODE, ["release"]),
+        (
+            [
+                {**_ONE_NODE[0], "id": "m"},
+                {**_ONE_NODE[0], "on_base_changed": {"restart_from": "m"}},
+            ],
+            [],
+        ),
+    ],
+    ids=["onto-the-base", "not-before-a-node-that-rebases-itself"],
+)
 async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
-    item_on, run_dirs, repo, monkeypatch
+    item_on, run_dirs, repo, monkeypatch, chain, rebased
 ):
     from kraft import events, store
     from kraft.executor import gates
@@ -259,7 +281,7 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     # the function.
     monkeypatch.setattr(sys.modules["kraft.executor.retry"], "retry", walk)
     target = WorkItemTarget.for_repository("target", base_branch="release")
-    it = await item_on(_ONE_NODE, "n", target=target)
+    it = await item_on(chain, "n", target=target)
     await it.database.write(
         lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True, kind="stuck")
     )
@@ -271,7 +293,7 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
 
     await gates.resume_after_escalation(it.database, run_dirs, work_item_id=it.id, cursor=cursor)
 
-    assert bases == ["release"]
+    assert bases == rebased
 
 
 async def test_an_escalations_self_retry_that_cannot_rebase_stops_infra(
