@@ -41,6 +41,13 @@ describe("ng CSS", () => {
     expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*\b180ms\b/);
   });
 
+  it("shades a revealed sidebar with a ring and a soft drop, fading in with the slide, and none when pinned", () => {
+    const css = readFileSync(join(here, "shell/shell.css"), "utf-8");
+    expect(css).toMatch(/\.ng-side:is\([^{]*\) \.ng-sidebar\s*{[^}]*box-shadow:\s*0 0 0 1px var\(--border\), 16px 0 40px var\(--side-shade\)/);
+    expect(css).toMatch(/:root\[data-sidebar="rail"\] \.ng-sidebar\s*{[^}]*transition:[^;}]*box-shadow 160ms/);
+    expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain('[data-mode="light"] { --side-shade: rgb(0 0 0 / 18%); }');
+  });
+
   it("lays the document drawer over the theme's scrim, black at 40%", () => {
     expect(readFileSync(join(here, "theme/theme.css"), "utf-8")).toContain(":root { --scrim: rgb(0 0 0 / 40%); }");
     expect(readFileSync(join(here, "item/item.css"), "utf-8")).toMatch(/\.dv-scrim\s*{[^}]*background:\s*var\(--scrim\)/);
