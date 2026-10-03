@@ -305,3 +305,7 @@ the docsite coverage check guards against: silent success is worse than a
 loud, wrong failure).
 
 Run it directly: `uv run python dev/check_tests.py`, or `just check-tests`.
+
+`just shape-report` (`dev/test_shape_report.py`) judges nothing, it measures
+`tests/`: test functions and collected cases, lines, verbatim-repeat lines,
+helpers copied across files, and the modules with the most tests per code line.
