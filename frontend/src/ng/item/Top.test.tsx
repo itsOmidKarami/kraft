@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acceptWrites, holdFetch, stubFetch } from "./testkit";
 import { MemoryRouter } from "react-router-dom";
-import { Brief, DiffLine, Title } from "./Top";
+import { Brief, DiffLine, Title, useDiffFiles } from "./Top";
 
 /** The writes these pages send; any other write is refused. */
 const WRITES = acceptWrites("PATCH /work-items/w1");
@@ -122,15 +122,18 @@ describe("Brief", () => {
   });
 });
 
+/** The line as the item page draws it: the diff read once, handed down. */
+const Line = ({ version, gone }: { version: string; gone?: boolean }) => <DiffLine id="w1" version={version} files={useDiffFiles("w1", version, gone)} />;
+
 describe("DiffLine", () => {
   it("counts each path once across landed and in-flight changes, and hides with no diff", async () => {
     stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }], landed: { commits: [], files: [{ path: "a.py", insertions: 10, deletions: 0 }, { path: "b.py", insertions: 3, deletions: 4 }] } }] });
-    const { unmount } = render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
+    const { unmount } = render(<MemoryRouter><Line version="v" /></MemoryRouter>);
     expect(await screen.findByText(/2 files/)).toHaveTextContent("2 files +15 −5");
     expect(screen.getByRole("link", { name: "Review changes" })).toHaveAttribute("href", "/work-items/w1/review");
     unmount();
     stubFetch({ "GET /work-items/w1/diff": [200, { files: [] }] });
-    const { container } = render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
+    const { container } = render(<MemoryRouter><Line version="v" /></MemoryRouter>);
     await new Promise((r) => setTimeout(r, 0));
     expect(container).toBeEmptyDOMElement();
   });
@@ -141,14 +144,14 @@ describe("DiffLine", () => {
     [[{ state: "open" }], "1 file +2 −1 · 1 open thread · Review changes"],
   ])("counts the open review threads between the diff and Review changes: %j", async (threads, text) => {
     stubFetch({ "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 2, deletions: 1 }] }], "GET /work-items/w1/threads": [200, threads] });
-    render(<MemoryRouter><DiffLine id="w1" version="v" /></MemoryRouter>);
+    render(<MemoryRouter><Line version="v" /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText(/1 file/)).toHaveTextContent(text));
   });
 
   // R12b-11: an archived item's page asked anyway, and the 404 went to the console on every load.
   it("asks for no diff once the worktree is gone", async () => {
     const calls = stubFetch({ "GET /work-items/w1/diff": [404, { detail: "this work item's worktree was removed from disk" }] });
-    const { container } = render(<MemoryRouter><DiffLine id="w1" version="v" gone /></MemoryRouter>);
+    const { container } = render(<MemoryRouter><Line version="v" gone /></MemoryRouter>);
     await new Promise((r) => setTimeout(r, 0));
     expect(container).toBeEmptyDOMElement();
     expect(calls.filter((c) => c.path.endsWith("/diff"))).toEqual([]);
@@ -156,8 +159,8 @@ describe("DiffLine", () => {
 
   it("reads the diff again on each read of the item, and an older read that answers late does not win", async () => {
     const reads = holdFetch(/\/work-items\/w1\/diff/);
-    const { rerender } = render(<MemoryRouter><DiffLine id="w1" version="1" /></MemoryRouter>);
-    rerender(<MemoryRouter><DiffLine id="w1" version="2" /></MemoryRouter>);
+    const { rerender } = render(<MemoryRouter><Line version="1" /></MemoryRouter>);
+    rerender(<MemoryRouter><Line version="2" /></MemoryRouter>);
     await waitFor(() => expect(reads).toHaveLength(2));
     await act(async () => reads[1]({ files: [{ path: "a.py", insertions: 2, deletions: 1 }, { path: "b.py", insertions: 1, deletions: 0 }] }));
     expect(await screen.findByText(/2 files/)).toHaveTextContent("2 files +3 −1");
