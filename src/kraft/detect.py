@@ -1046,7 +1046,7 @@ _TEST_VERBS = frozenset({"test", "t"})
 #: Words that make a runner run something else: a shell string, a program, a
 #: config that names one (`go test -exec`, `cargo test --config`).
 _RUNS_SOMETHING_ELSE = frozenset(
-    {"exec", "dlx", "--call", "-c", "--shell-mode", "--config", "-exec", "--exec"}
+    {"exec", "dlx", "--call", "-c", "--shell-mode", "--config", "-exec", "--exec", "-toolexec", "--toolexec"}
 )
 #: `uv run pytest`, `python -m pytest`, `npx jest`, `xvfb-run npm test`: what
 #: runs the runner, and the verb it takes first (None: the runner is next).
@@ -1093,7 +1093,8 @@ def _runner(command: str) -> bool:
             break
     if not words or posixpath.basename(words[0]) not in _TEST_RUNNERS:
         return False
-    if any(w in _RUNS_SOMETHING_ELSE or w.startswith(("--config=", "--call=")) for w in words):
+    # `-exec=…` as much as `-exec …`: go's flag parser takes either.
+    if any(w.split("=", 1)[0] in _RUNS_SOMETHING_ELSE for w in words):
         return False
     if posixpath.basename(words[0]) not in _MULTI_PURPOSE:
         return True
