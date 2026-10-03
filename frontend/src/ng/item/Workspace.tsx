@@ -173,7 +173,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
         {viewing?.kind === "gate" ? (
           <GateView {...gateView(item, viewing, events, now, sel, { doc: () => setArtifact(true), reject: (to) => dispatch({ type: "focus", node: to }) })} right={reserve}
             onGate={() => pick({ kind: "node", node: viewing.id })}
-            onReviewer={() => { const t = viewing.tasks[0]; if (t) pick({ kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) }); }}
+            onReviewer={() => { const t = viewing.tasks[0]; pick(t ? { kind: "task", node: viewing.id, step: t.split(".")[1], task: taskName(t) } : { kind: "node", node: viewing.id }); }}
             onBackground={() => dispatch({ type: "background" })}
           />
         ) : viewing && inside ? (

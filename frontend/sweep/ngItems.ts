@@ -43,8 +43,20 @@ export const NG_NODES: Node[] = [
 /** Each task's kind, as the API's `materialized_chain` carries it (its `chain_definition` lists bare ids):
  *  what the canvas draws a node's and a task's glyph by. */
 const KIND: Record<string, string> = { unit_tests: "builtin", rebase: "builtin", lint: "subprocess", typecheck: "subprocess", open_draft: "forge", mr_checks: "forge", release: "forge" };
+/** A gate's message, and its reviewer where `auto_escalate` says it has one: the gate view reads both from the frozen chain. */
+const MESSAGE: Record<string, string> = {
+  spec_approval: "Review and approve the specification.",
+  plan_approval: "Review and approve the implementation plan.",
+  chain_revision_approval: "Review the proposed change to the rest of this chain.",
+  local_review: "Approve creating a draft merge request.",
+  final_review: "Review the complete work item and merge-request summary.",
+};
 const FROZEN = JSON.stringify({
-  chain: { nodes: NG_NODES.map((n) => ({ id: n.id, kind: n.kind, steps: n.steps.map((st) => ({ id: st[0].split(".")[1], tasks: st.map((p) => { const task = p.split(".")[2]; return { id: task, kind: KIND[task] ?? "agent" }; }) })) })) },
+  chain: {
+    nodes: NG_NODES.map((n) => n.kind === "gate"
+      ? { id: n.id, kind: n.kind, message: MESSAGE[n.id] ?? null, auto_review: n.auto_escalate ? { id: "auto_review", kind: "agent" } : null }
+      : { id: n.id, kind: n.kind, steps: n.steps.map((st) => ({ id: st[0].split(".")[1], tasks: st.map((p) => { const task = p.split(".")[2]; return { id: task, kind: KIND[task] ?? "agent" }; }) })) }),
+  },
 });
 
 /** Where each scenario stands: the current node (index), and the step it is on there. */
