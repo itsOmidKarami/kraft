@@ -10,7 +10,7 @@ import { act, askStartUrl, draftWaits, type Done } from "../item/actions";
 import { Banner, QuestionCard } from "../item/Banner";
 import { age, eventLine } from "../item/events";
 import { CancelCard } from "../item/header/CancelCard";
-import { EscalateDialog, PauseConfirm } from "../item/header/Dialogs";
+import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
 import { useSelect } from "../item/draft/select";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
@@ -102,7 +102,7 @@ function Overview({ item, version, reload, onRaise }: { item: ItemDetail; versio
       </div>
       <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} />
       {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
-      {escalating && <EscalateDialog id={item.id} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
+      {escalating && <EscalateCard id={item.id} anchor={anchor} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
   );
 }
@@ -199,7 +199,7 @@ function Footer({ item, reload, offline, onOpen, onRaise, onAnswer }: { item: It
       </button>
       <button type="button" className="btn btn-secondary" onClick={onOpen}>Open item ↗</button>
       {error && !pausing && <span className="item-error peek-error" role="alert">{error}</span>}
-      <Popover anchor={btn} open={pausing} onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
+      <Popover anchor={btn} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
         <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
       </Popover>
     </>

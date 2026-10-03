@@ -1,6 +1,7 @@
 import type { BoardOpenIn, Theme } from "../../types";
 import { DEFAULT_PREFS, type DiffPrefs } from "../review/prefs";
 import { Segmented } from "../ui/Segmented";
+import { editorName, useEditors } from "../item/editors";
 import { Switch } from "../ui/Switch";
 import { onMac } from "../keys";
 
@@ -129,6 +130,24 @@ export function AppearanceMore({ theme, save }: { theme: Theme; save: (patch: Pa
           <span className="set-hint">What a row click does; {onMac() ? "⌘-click" : "Ctrl+click"} always opens the page.</span>
         </div>
       </section>
+
+      <DefaultEditor value={theme.editor ?? null} save={(editor) => save({ editor })} />
     </div>
+  );
+}
+
+/** The editor Open in editor uses: those this machine has, or the system's
+ *  default app. A choice the machine no longer has stays listed, so it shows. */
+function DefaultEditor({ value, save }: { value: string | null; save: (editor: string | null) => void }) {
+  const editors = useEditors();
+  const ids = typeof editors === "object" && editors ? editors.available : [];
+  const options = [...ids, ...(value && !ids.includes(value) ? [value] : []), ""].map((id) => ({ value: id, label: editorName(id || null) }));
+  return (
+    <section aria-labelledby="set-editor">
+      <h2 id="set-editor">Default editor</h2>
+      {typeof editors === "string" ? <p className="set-hint">{editors}</p> : (
+        <Segmented label="Default editor" options={options} value={value ?? ""} onChange={(v) => save(v || null)} />
+      )}
+    </section>
   );
 }

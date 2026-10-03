@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
+import * as http from "../http";
 import type { Theme } from "../../types";
 import { AppearancePage } from "./AppearancePage";
 import { WithHeader } from "./testkit";
@@ -42,6 +43,21 @@ describe("ng AppearancePage", () => {
     expect(put.mock.calls.map((c) => c[0])).toEqual([{ mode: "light" }, { colour_amount: "full" }, { surface: "moss" }, { accent: "rose" }]);
     expect(await screen.findByText("Moss · rose accent · light · full")).toBeInTheDocument();
     expect(document.documentElement.dataset).toMatchObject({ surface: "moss", accent: "rose", amount: "full", mode: "light" });
+  });
+
+  it.each([
+    ["a choice this machine has", "zed", ["VS Code", "Zed", "System default"], "Zed"],
+    ["the system's default app", null, ["VS Code", "Zed", "System default"], "System default"],
+    ["a choice this machine no longer has, still shown", "obsidian", ["VS Code", "Zed", "Obsidian", "System default"], "Obsidian"],
+  ])("lists the editors found on this machine for the default editor, with %s selected", async (_, editor, names, selected) => {
+    vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { available: ["code", "zed"], system: true, default: editor } });
+    const put = setup({ editor });
+    const group = await screen.findByRole("radiogroup", { name: "Default editor" });
+    expect(within(group).getAllByRole("radio").map((r) => r.textContent)).toEqual(names);
+    expect(within(group).getByRole("radio", { name: selected })).toBeChecked();
+    fireEvent.click(within(group).getByRole("radio", { name: "VS Code" }));
+    fireEvent.click(within(group).getByRole("radio", { name: "System default" }));
+    await waitFor(() => expect(put.mock.calls.map((c) => c[0])).toEqual([{ editor: "code" }, { editor: null }]));
   });
 
   it("names the preview's item by an id in the board's shortened form", async () => {

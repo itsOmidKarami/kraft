@@ -14,7 +14,7 @@ import { actionPath } from "../paths";
 import { archivable, headerState, menuDoors, type PanelItem } from "../status";
 import type { ItemDetail } from "../useItem";
 import { CancelCard } from "./CancelCard";
-import { CompleteDialog, EscalateDialog, PauseConfirm } from "./Dialogs";
+import { CompleteCard, EscalateCard, PauseConfirm } from "./Dialogs";
 import { MainButton } from "./MainButton";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
@@ -41,8 +41,6 @@ type Props = {
   onGate?: (gate: string) => void;
   /** Answer: the question card's answer box. The item page when absent. */
   onAnswer?: () => void;
-  /** Select the current node's latest task, Log tab. */
-  onRunLog: () => void;
   /** Outside triggers for the cancel card (the MR-closed state card's Cancel item…). */
   cancelOpen?: boolean;
   onCancelOpen?: (open: boolean) => void;
@@ -52,7 +50,7 @@ type Props = {
 
 /** The right side of the item page's header row (Decisions §1, §14): others
  *  need you, elapsed, the badge, the main button with its panel, and ⋮. */
-export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, onRunLog, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
+export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer, cancelOpen, onCancelOpen, escalateOpen, onEscalateOpen }: Props) {
   const group = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   // The board's Needs you count, this item left out.
@@ -154,7 +152,6 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },
-    { label: "View run log", onSelect: onRunLog },
     // Escalate… only where /escalate takes it: not on a running item, nor while a turn runs.
     ...menuDoors(item).map((d): MenuItem => (d === "duplicate" ? { label: "Duplicate as new item", onSelect: duplicate }
       : d === "escalate" ? { label: "Escalate…", onSelect: () => setEscalating(true) }
@@ -181,12 +178,12 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
         <Menu label="Item menu" trigger={<EllipsisVertical size={15} aria-hidden />} items={menu} />
       </div>
       {error && !pausing && <span className="item-error item-header-error" role="alert">{error}</span>}
-      <Popover anchor={group} open={pausing} onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
+      <Popover anchor={group} open={pausing} notch onClose={() => setPausing(false)} role="dialog" label="Pause this item?">
         <PauseConfirm busy={busy} error={error} onClose={() => setPausing(false)} onPause={async () => { if (await run(act.pause(item.id))) setPausing(false); }} />
       </Popover>
       {cancelling && <CancelCard id={item.id} anchor={group} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
-      {escalating && <EscalateDialog id={item.id} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
-      {completing && <CompleteDialog id={item.id} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); }} />}
+      {escalating && <EscalateCard id={item.id} anchor={group} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
+      {completing && <CompleteCard id={item.id} anchor={group} onClose={() => setCompleting(false)} onDone={() => { setCompleting(false); reload(); }} />}
     </HeaderActions>
     </>
   );

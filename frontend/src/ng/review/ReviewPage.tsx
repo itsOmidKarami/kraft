@@ -97,7 +97,6 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         onSettings={() => toItem({ sel: { kind: "chain" }, tab: "config" })}
         onRaise={() => { if (item.stop?.kind === "budget") openBudgetEditor(item.id); toItem({ sel: { kind: "chain" }, tab: "config" }); }}
         onGate={(gate) => setPlace({ gate, doc: true })}
-        onRunLog={() => toItem({ sel: { kind: "chain" } })}
       />
       <Toolbar
         item={item}

@@ -55,10 +55,11 @@ describe("Workspace", () => {
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens the document a shared ?doc= names, and closing it drops the param", async () => {
+  it("opens the document a shared ?doc= names, with the search that found it, and closing it drops both", async () => {
     stubFetch({ "GET /documents/d1": [200, { id: "d1", title: "Review notes", path: "/r/n.md", content: "# Review notes\n\nThe cache has **no size bound**." }] });
-    mount("/work-items/w1?doc=d1");
+    mount("/work-items/w1?doc=d1&q=bound");
     expect(await screen.findByText("no size bound")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Search matches" })).toHaveTextContent("bound1 of 1");
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(where()).toBe("/work-items/w1");

@@ -72,12 +72,12 @@ describe("SearchOverlay", () => {
     expect(await screen.findByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
-  it("shows Needs you, Recent and Go to chips with no query, and no counts or Filters", async () => {
+  it("shows Needs you, Recent and Go to chips with no query, no counts, and Filters at the right of the tab row", async () => {
     mount();
     await open();
     expect(headings()).toEqual(["Needs you", "Recent", "Go to"]);
     expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Filters" })).toBeNull();
+    expect(document.querySelector(".ng-search-tabrow")!.lastElementChild).toBe(screen.getByRole("button", { name: "Filters" }));
     expect(search).not.toHaveBeenCalled();
   });
 
@@ -93,8 +93,27 @@ describe("SearchOverlay", () => {
     expect(screen.getByRole("tab", { name: "Documents 2" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Beads 1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
-    expect(screen.getByText("Filters narrow Documents only")).toBeInTheDocument();
     expect(screen.queryByText("kraft-has", { exact: false })).toBeNull();
+  });
+
+  it("shows the filters as chips, label and value, under the tab row, and counts the ones on", async () => {
+    mount();
+    const { user, input } = await open();
+    await user.type(input, "cache");
+    await screen.findByTitle("Caching spec");
+    expect(document.querySelector(".ng-search-filters")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    const chips = [...document.querySelectorAll(".ng-search-fchip")];
+    expect(chips.map((c) => c.firstElementChild!.textContent)).toEqual(["source", "kind"]);
+    expect(screen.getByText("Filters narrow Documents only")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "source" }), "artifact");
+    await user.type(screen.getByRole("textbox", { name: "kind" }), "spec");
+    const button = screen.getByRole("button", { name: "Filters, 2 on" });
+    expect(button).toHaveTextContent("Filters2");
+    await waitFor(() => expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ source_kind: "artifact", kind: "spec" })));
+    // Folded, the chips of filters that are on stay in view.
+    await user.click(button);
+    expect(document.querySelectorAll(".ng-search-fchip")).toHaveLength(2);
   });
 
   it("says what the board says of an item, and puts a failed one under Needs you with the gates", async () => {
@@ -106,11 +125,58 @@ describe("SearchOverlay", () => {
     await user.type(input, "work");
     await screen.findByText("Caching spec");
     const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
-    expect(within(section("Needs you")).getByText("Gated work").closest("[role=option]")).toHaveTextContent("alpha · approve human review");
-    expect(within(section("Needs you")).getByText("Failed work").closest("[role=option]")).toHaveTextContent("beta · failed at plan");
-    expect(within(section("Work items")).getByText("Fresh work").closest("[role=option]")).toHaveTextContent("beta · not started");
-    expect(within(section("Work items")).getByText("Plain work").closest("[role=option]")).toHaveTextContent("beta · implementation");
+    // Waiting at a gate, it is an action: review that gate.
+    const gate = within(section("Needs you")).getByTitle("Review human_review").closest("[role=option]")!;
+    expect(gate).toHaveTextContent("Review human_reviewGated work · wi_gate · alpha");
+    // The item's title is the part of the sub that shortens.
+    expect(gate.querySelector(".ng-search-sublead")).toHaveTextContent(/^Gated work$/);
+    expect(gate.querySelector(".ng-search-sublead")).toHaveAttribute("data-allow-ellipsis");
+    expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
+    const says = (row: string) => {
+      const o = screen.getByTitle(row).closest("[role=option]")!;
+      return [o.querySelector(".ng-search-sub")?.textContent, o.querySelector(".ng-search-where")?.textContent];
+    };
+    expect(within(section("Needs you")).getByTitle("Failed work")).toBeInTheDocument();
+    expect(says("Failed work")).toEqual(["failed at plan", "beta"]);
+    expect(says("Fresh work")).toEqual(["not started", "beta"]);
+    expect(says("Plain work")).toEqual(["implementation", "beta"]);
     expect(screen.getByRole("listbox")).not.toHaveTextContent(/needs_human|· paused|· active/);
+  });
+
+  it("gives each kind of row its icon, a status tag and where it lives, and ⏎ on the active row only", async () => {
+    mount();
+    const { user, input } = await open();
+    await user.type(input, "r");
+    await screen.findByText("Caching spec");
+    const row = (name: string) => within(screen.getByRole("listbox")).getByText(name).closest("[role=option]")!;
+    const parts = (name: string) => {
+      const o = row(name);
+      return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".ng-search-tag")?.textContent, o.querySelector(".ng-search-where")?.textContent];
+    };
+    expect(parts("Review human_review")).toEqual(["lucide-diamond", undefined, undefined]);
+    expect(parts("Plain work")).toEqual(["lucide-box", undefined, "beta"]);
+    expect(parts("Caching spec")).toEqual(["lucide-file-text", "spec", "alpha"]);
+    expect(parts("New bead")).toEqual(["lucide-circle-dot", "open", undefined]);
+    expect(parts("Appearance")).toEqual(["lucide-palette", undefined, "Settings"]);
+    expect(parts("Library")).toEqual(["lucide-library-big", undefined, "Templates"]);
+    expect(screen.getAllByText("⏎", { selector: ".ng-search-key" })).toHaveLength(1);
+    expect(options()[0].querySelector(".ng-search-key")).not.toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(options()[0].querySelector(".ng-search-key")).toBeNull();
+    expect(options()[1].querySelector(".ng-search-key")).not.toBeNull();
+  });
+
+  it("marks the query in titles as well as in snippets", async () => {
+    mount();
+    const { user, input } = await open();
+    const marks = (name: string) => [...within(screen.getByRole("listbox")).getByTitle(name).querySelectorAll("mark")].map((m) => m.textContent);
+    await user.type(input, "plain");
+    expect(marks(await screen.findByTitle("Plain work").then((e) => e.title))).toEqual(["Plain"]);
+    await user.clear(input);
+    await user.type(input, "caching spec");
+    await screen.findByTitle("Caching spec");
+    expect(marks("Caching spec")).toEqual(["Caching", "spec"]);
+    expect(screen.getByTitle("Caching spec").closest("[role=option]")!.querySelector(".ng-search-snippet mark")).toHaveTextContent("cache");
   });
 
   it("moves with ↑/↓, clamped at both ends, with aria-activedescendant following", async () => {
@@ -137,8 +203,8 @@ describe("SearchOverlay", () => {
     const go = async (name: RegExp | string) => {
       await user.click(within(screen.getByRole("listbox")).getByText(name));
     };
-    await go("Gated work");
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
+    await go("Review human_review");
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate/review");
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await user.keyboard("{Meta>}k{/Meta}");
@@ -146,7 +212,7 @@ describe("SearchOverlay", () => {
     await screen.findByText("Caching spec");
     await go("Caching spec");
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_gate");
-    expect(screen.getByTestId("search")).toHaveTextContent("?doc=d1");
+    expect(screen.getByTestId("search")).toHaveTextContent("?doc=d1&q=work");
 
     await user.keyboard("{Meta>}k{/Meta}");
     await user.type(await screen.findByRole("combobox"), "work");
@@ -200,13 +266,16 @@ describe("SearchOverlay", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("opens the active row on Enter", async () => {
+  it.each([
+    ["plain", "Plain work", "/work-items/wi_plain"],
+    ["gated", "Review human_review", "/work-items/wi_gate/review"],
+  ])("opens the active row on Enter: %s", async (query, row, to) => {
     mount();
     const { user, input } = await open();
-    await user.type(input, "plain");
-    await screen.findByText("Plain work");
+    await user.type(input, query);
+    await screen.findByTitle(row);
     await user.keyboard("{Enter}");
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/wi_plain");
+    expect(screen.getByTestId("where")).toHaveTextContent(new RegExp(`^${to}$`));
   });
 
   it("keeps Items and Go to and says so inline when the document search fails", async () => {
@@ -216,8 +285,8 @@ describe("SearchOverlay", () => {
     await user.type(input, "work");
     expect(await screen.findByText("Documents could not be searched")).toBeInTheDocument();
     expect(headings()).toContain("Work items");
-    expect(screen.getByText("Plain work")).toBeInTheDocument();
-    expect(screen.getByText("Gated work")).toBeInTheDocument();
+    expect(screen.getByTitle("Plain work")).toBeInTheDocument();
+    expect(screen.getByTitle("Review human_review")).toBeInTheDocument();
   });
 
   it("sends one request for a burst of typing, not one per key", async () => {
