@@ -107,14 +107,14 @@ describe("SearchOverlay", () => {
     await screen.findByText("Caching spec");
     const section = (name: string) => [...document.querySelectorAll(".ng-search-head")].find((h) => h.textContent === name)!.parentElement!;
     // Waiting at a gate, it is an action: review that gate.
-    const gate = within(section("Needs you")).getByText("Review human_review").closest("[role=option]")!;
+    const gate = within(section("Needs you")).getByTitle("Review human_review").closest("[role=option]")!;
     expect(gate).toHaveTextContent("Review human_reviewwi_gate · alpha");
     expect(gate.querySelector(".lucide-diamond")).not.toBeNull();
     const says = (row: string) => {
-      const o = screen.getByText(row).closest("[role=option]")!;
+      const o = screen.getByTitle(row).closest("[role=option]")!;
       return [o.querySelector(".ng-search-sub")?.textContent, o.querySelector(".ng-search-where")?.textContent];
     };
-    expect(within(section("Needs you")).getByText("Failed work")).toBeInTheDocument();
+    expect(within(section("Needs you")).getByTitle("Failed work")).toBeInTheDocument();
     expect(says("Failed work")).toEqual(["failed at plan", "beta"]);
     expect(says("Fresh work")).toEqual(["not started", "beta"]);
     expect(says("Plain work")).toEqual(["implementation", "beta"]);
@@ -142,6 +142,19 @@ describe("SearchOverlay", () => {
     await user.keyboard("{ArrowDown}");
     expect(options()[0].querySelector(".ng-search-key")).toBeNull();
     expect(options()[1].querySelector(".ng-search-key")).not.toBeNull();
+  });
+
+  it("marks the query in titles as well as in snippets", async () => {
+    mount();
+    const { user, input } = await open();
+    const marks = (name: string) => [...within(screen.getByRole("listbox")).getByTitle(name).querySelectorAll("mark")].map((m) => m.textContent);
+    await user.type(input, "plain");
+    expect(marks(await screen.findByTitle("Plain work").then((e) => e.title))).toEqual(["Plain"]);
+    await user.clear(input);
+    await user.type(input, "caching spec");
+    await screen.findByTitle("Caching spec");
+    expect(marks("Caching spec")).toEqual(["Caching", "spec"]);
+    expect(screen.getByTitle("Caching spec").closest("[role=option]")!.querySelector(".ng-search-snippet mark")).toHaveTextContent("cache");
   });
 
   it("moves with ↑/↓, clamped at both ends, with aria-activedescendant following", async () => {
@@ -238,7 +251,7 @@ describe("SearchOverlay", () => {
     mount();
     const { user, input } = await open();
     await user.type(input, query);
-    await screen.findByText(row);
+    await screen.findByTitle(row);
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("where")).toHaveTextContent(new RegExp(`^${to}$`));
   });
@@ -250,8 +263,8 @@ describe("SearchOverlay", () => {
     await user.type(input, "work");
     expect(await screen.findByText("Documents could not be searched")).toBeInTheDocument();
     expect(headings()).toContain("Work items");
-    expect(screen.getByText("Plain work")).toBeInTheDocument();
-    expect(screen.getByText("Review human_review")).toBeInTheDocument();
+    expect(screen.getByTitle("Plain work")).toBeInTheDocument();
+    expect(screen.getByTitle("Review human_review")).toBeInTheDocument();
   });
 
   it("sends one request for a burst of typing, not one per key", async () => {

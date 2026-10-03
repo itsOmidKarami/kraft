@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import type { Bead, SearchResult, WorkItem } from "../../types";
 import { backdropProps, useModal } from "../../useModal";
 import { groupOf } from "../board/model";
+import { termsOf } from "../item/DocViewer";
 import { reasonTail } from "../board/rowText";
 import { Kbd } from "../ui/Kbd";
 import { Tabs } from "../ui/Tabs";
@@ -43,6 +44,14 @@ const SECTIONS: Record<Row["section"], string> = { needs: "Needs you", items: "W
 /** FTS brackets the matched terms: [like] this. */
 function Snippet({ text }: { text: string }) {
   return <>{text.split(/(\[[^\]]*\])/).map((p, i) => (p.startsWith("[") && p.endsWith("]") ? <mark key={i}>{p.slice(1, -1)}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
+}
+
+/** The query's terms marked in a title, as the snippet marks what FTS matched. */
+function Marked({ text, query }: { text: string; query: string }) {
+  const re = termsOf(query);
+  if (!re) return <>{text}</>;
+  // A capturing split: every odd part is a match.
+  return <>{text.split(new RegExp(`(${re.source})`, "gi")).map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
 }
 
 /** What the board's row says of an item, not its stored status: "not started", "approve spec", "failed at plan". */
@@ -214,7 +223,7 @@ export function SearchOverlay({ onClose, onDocument }: { onClose: () => void; on
                 <>
                   <r.icon size={14} aria-hidden className={`ng-search-ico${r.icon === Diamond ? " is-gate" : ""}`} />
                   <span className="ng-search-main">
-                    <span className="ng-search-title" title={r.label}>{r.label}</span>
+                    <span className="ng-search-title" title={r.label}><Marked text={r.label} query={query} /></span>
                     {r.sub && <span className="ng-search-sub">{r.sub}</span>}
                     {r.snippet && <span className="ng-search-snippet"><Snippet text={r.snippet} /></span>}
                   </span>
