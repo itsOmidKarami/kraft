@@ -1,3 +1,7 @@
+### Breaking changes
+
+- **This release is 2.0.0, not 1.5.0.** It changes some 1.4 behaviour that Kraft's stability policy covers, such as `--json` fields and exit codes, and moves the database to a schema 1.4 can't open, so it is a major release. Every change, and how to upgrade without ending a running agent, is under **Upgrading from 1.4** in the Highlights above and in [Upgrading from 1.4](https://itsomidkarami.github.io/kraft/get-started/install#upgrading-from-14). The 1.5.0 release candidates were 2.0's pre-releases: `kraft admin update` on one moves to 2.0's. (#489)
+
 ### New
 
 - Kraft's plugin now installs on Cursor (`agent plugin marketplace add https://github.com/itsOmidKarami/kraft`, then `/plugins`) and on Antigravity (`agy plugin import` from a clone), with its skills and the `kraft` MCP server. Amp can add the skills with `amp skill add`. (#342)

@@ -179,23 +179,25 @@ def test_a_highlighted_release_none_pr_fails_the_release_by_number():
 
 
 def test_no_highlight_leaves_real_notes_byte_identical(tmp_path, capsys):
-    """Ten 1.5.0 PRs in the shape release.yml's jq writes, their bodies abridged
-    around a verbatim `## Changelog`, and the notes the pre-highlight code writes
-    (since R10h-06, with the PR's number on every bullet of a group)."""
+    """Ten PRs of the 1.5.0 candidates and the one that made the release 2.0,
+    in the shape release.yml's jq writes, their bodies (as they stood then)
+    abridged around a verbatim `## Changelog`, and the notes the pre-highlight
+    code writes (since R10h-06, with the PR's number on every bullet of a
+    group). The one `release::major` makes v1.4.0's next release v2.0.0."""
     notes = tmp_path / "notes.md"
-    plan_release.main(["plan", "v1.4.0", str(_FIXTURES / "prs-1.5.0.json"), str(notes)])
-    assert capsys.readouterr().out == "v1.5.0\n"
-    assert notes.read_bytes() == (_FIXTURES / "notes-1.5.0.md").read_bytes()
+    plan_release.main(["plan", "v1.4.0", str(_FIXTURES / "prs-2.0.0.json"), str(notes)])
+    assert capsys.readouterr().out == "v2.0.0\n"
+    assert notes.read_bytes() == (_FIXTURES / "notes-2.0.0.md").read_bytes()
 
 
 def test_a_highlight_lifts_one_real_entry_out_of_new():
-    prs = json.loads((_FIXTURES / "prs-1.5.0.json").read_text())
+    prs = json.loads((_FIXTURES / "prs-2.0.0.json").read_text())
     before = plan_release.release_notes(prs)
     redesign = next(p for p in prs if p["number"] == 400)
     redesign["labels"].append("notes::highlight")
     entry = plan_release.changelog_entry(redesign)
     after = plan_release.release_notes(prs)
-    assert after.startswith(f"### Highlights\n\n{entry}\n\n### New\n\n")
+    assert after.startswith(f"### Highlights\n\n{entry}\n\n### Breaking changes\n\n")
     assert after.count(entry) == 1
     assert after.replace(f"### Highlights\n\n{entry}\n\n", "") == before.replace(f"\n\n{entry}", "")
 
@@ -240,10 +242,28 @@ def test_every_pre_release_channel_is_one_update_accepts():
 
 @pytest.mark.parametrize("tag", ["v1.5.0", "1.5.0", "", "v1.5.0rc", "v1.5.0.rc1"])
 def test_a_stable_release_body_is_its_notes_byte_for_byte(tmp_path, tag):
-    """The real 1.5.0 notes, through the command release.yml runs."""
-    notes, body = _FIXTURES / "notes-1.5.0.md", tmp_path / "body.md"
+    """The real 2.0.0 notes, through the command release.yml runs."""
+    notes, body = _FIXTURES / "notes-2.0.0.md", tmp_path / "body.md"
     plan_release.main(["body", tag, str(notes), str(body)])
     assert body.read_bytes() == notes.read_bytes()
+
+
+def test_the_2_0_layout_tells_the_story_once():
+    """2.0's notes: #400, a highlighted minor, carries the story and the
+    upgrade notes at the top; the major PR that makes the release 2.0 is not
+    highlighted, so its short entry sits alone under Breaking changes, and
+    neither is printed twice (a highlighted major would be)."""
+    prs = json.loads((_FIXTURES / "prs-2.0.0.json").read_text())
+    redesign = next(p for p in prs if p["number"] == 400)
+    redesign["labels"].append("notes::highlight")
+    major = next(p for p in prs if "release::major" in p["labels"])
+    story, breaking = map(plan_release.changelog_entry, (redesign, major))
+    notes = plan_release.release_notes(prs)
+    assert notes.startswith(
+        f"### Highlights\n\n{story}\n\n### Breaking changes\n\n{breaking}\n\n### New\n\n"
+    )
+    assert notes.count(story) == notes.count(breaking) == 1
+    assert plan_release.release_impact(prs) == "major"
 
 
 def test_the_release_is_created_from_the_body_and_the_changelogs_from_the_notes():

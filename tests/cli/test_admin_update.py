@@ -187,3 +187,30 @@ def test_update_follows_the_installed_versions_channel_unless_told_otherwise(
     cli.main(["admin", "update", *argv])
     assert asked == [channel]
     assert said in capsys.readouterr().out
+
+
+def test_a_1_5_candidate_install_updates_to_the_2_0_candidate(monkeypatch, tmp_path, capsys):
+    """The 1.5.0 candidates shipped as 2.0. An rc14 install, asked nothing
+    about channels, follows its own rc channel across the major to 2.0.0rc1,
+    from the real feed shape rather than a stubbed `latest`."""
+    feed = [
+        {
+            "tag_name": tag,
+            "prerelease": "rc" in tag,
+            "assets": [{"name": "k.whl", "browser_download_url": "u"}],
+        }
+        for tag in ["v2.0.0rc1", *(f"v1.5.0rc{n}" for n in range(14, 0, -1)), "v1.4.0"]
+    ]
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setattr(update, "_fetch", lambda *_: feed)
+    monkeypatch.setattr(update, "installed", lambda: "1.5.0rc14")
+    monkeypatch.setattr(update, "_is_homebrew_install", lambda: False)
+    monkeypatch.setattr(update, "shadowing_kraft", lambda: None)
+    installed = []
+    monkeypatch.setattr(
+        update, "perform", lambda release, *_a, **_k: installed.append(release.tag) or 0
+    )
+    cli.main(["admin", "update"])
+    assert installed == ["v2.0.0rc1"]
+    assert "kraft 1.5.0rc14 -> v2.0.0rc1" in capsys.readouterr().out
