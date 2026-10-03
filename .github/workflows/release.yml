@@ -246,6 +246,10 @@ jobs:
           # stamp step below branches off a clean tree, and the wheel is already
           # built, so nothing may dirty the checkout here.
           cd vscode
+          # The .vsix's zip entries dated by the tagged commit too, as the
+          # wheel's are: vsce stamps every entry with it and sorts them, so a
+          # rebuild of the tag gives the published sha256.
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           npm ci
           # No `npm run build`: packing the .vsix below runs `vscode:prepublish`,
           # which builds the extension itself, without a source map.

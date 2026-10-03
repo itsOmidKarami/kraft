@@ -252,15 +252,25 @@ def _steps() -> list[str]:
     return re.findall(r"- (?:name: (.+)|uses: .+)", RELEASE_YML.read_text())
 
 
-def test_the_wheel_is_built_with_the_tagged_commits_time():
+@pytest.mark.parametrize(
+    ("name", "builds"),
+    [
+        ("tag locally, then build", ["just bundle", "uv build --wheel"]),
+        ("build the VS Code extension", ["npx vsce package"]),
+    ],
+    ids=["wheel", "vsix"],
+)
+def test_each_artifact_is_built_with_the_tagged_commits_time(name, builds):
     """Without `SOURCE_DATE_EPOCH`, two builds of one tag differed in the zip
     dates of every bundled file, so nobody could re-derive the published
-    sha256 from the tag."""
+    sha256 from the tag. A step's `export` ends with the step, so the
+    extension's build sets it again (R11h-02); vsce reads it."""
     text = RELEASE_YML.read_text()
-    start = text.index("- name: tag locally, then build")
+    start = text.index(f"- name: {name}")
     step = text[start : text.index("\n      - ", start + 1)]
     epoch = step.find('export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"')
-    assert -1 < epoch < step.index("just bundle") < step.index("uv build --wheel")
+    assert -1 < epoch < min(step.index(b) for b in builds)
+    assert [step.index(b) for b in builds] == sorted(step.index(b) for b in builds)
 
 
 def test_the_wheel_is_pinned_after_it_is_built_and_before_it_is_smoke_tested():
