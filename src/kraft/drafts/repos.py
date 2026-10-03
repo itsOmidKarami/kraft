@@ -228,7 +228,10 @@ def resolve(st, key, raw, files, published) -> dict:
     gone = sorted(before - {e.path for e in entries})
     for path in gone:
         if running.get(path):
-            msg = f"{path} has {running[path]} open item(s); finish or cancel them first"
+            msg = (
+                f"{path} has {running[path]} open item(s), paused ones included; "
+                "complete, cancel or abandon them first"
+            )
             out["problems"].append(_problem(path, None, msg))
     out["resolved"] = {
         "repos": [v for v in views if v["managed"]],
