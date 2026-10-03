@@ -710,7 +710,7 @@ async def ensure_worktree(
     # deterministic failure ten times over (Kraft-s0w2l).
     try:
         # Before the members are checked out: there are none to mount yet.
-        await run_setup_command(
+        await _prepare(
             worktree,
             Path(repo),
             repo_entry,
@@ -826,9 +826,6 @@ async def run_setup_command(
         )
     if not cmd:
         return ""
-    # What is untracked before it runs, so the lockfile it writes (a `uv sync`
-    # with no `uv.lock`) can be told from one the agent made.
-    lockfiles = await git.untracked_lockfiles(worktree)
     client_env = worker_env(repo_entry)
     withheld: set[str] = set()
     if sandbox and checkout is None:
@@ -959,8 +956,30 @@ async def run_setup_command(
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")
-    await git.record_setup_writes(worktree, lockfiles)
     return f"$ {cmd}\n{done.stdout}{done.stderr}"
+
+
+async def _prepare(
+    worktree: Path,
+    repo: Path,
+    repo_entry: RepoEntry | None,
+    *,
+    sandbox: dict | None = None,
+    checkout: _sandbox.Checkout | None = None,
+) -> str:
+    """`run_setup_command`, recording the lockfiles it wrote (a `uv sync` with
+    no `uv.lock`) so the straggler sweep can tell them from one the agent made
+    (`forge.git.record_setup_writes`). Through the git adapter on the host's
+    worktree, before and after, and only for a command that will run: no
+    declared command runs nothing, and a refusal records nothing."""
+    if repo_entry is None or not repo_entry.setup_command:
+        return await run_setup_command(
+            worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout
+        )
+    before = await git.untracked_lockfiles(worktree)
+    said = await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout)
+    await git.record_setup_writes(worktree, before)
+    return said
 
 
 async def base_branch(db, work_item_id: str, repo: Path, *, member: bool = False) -> str:
@@ -1624,7 +1643,7 @@ async def prepare_runtime(
     # No entry, nothing declared to re-run: `ensure_worktree` already refused a
     # repo without a `setup_command` when it cut this worktree.
     setup_log = (
-        await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout)
+        await _prepare(worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout)
         if repo_entry is not None
         else ""
     )
