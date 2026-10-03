@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -134,8 +135,12 @@ def _usd(n: float) -> str:
     float's exact value, as JavaScript's `toFixed` does: Python's own format
     rounds an exact binary tie to even, so $0.0625 would read $0.062 here and
     $0.063 on the meter."""
+    if not math.isfinite(n):
+        return f"${n}"
     step = Decimal("0.01") if n >= 1 else Decimal("0.001")
-    return f"${Decimal(n).quantize(step, rounding=ROUND_HALF_UP)}"
+    # Enough digits for any finite float: the default 28 refuses a cap of 1e26 and up.
+    with localcontext(prec=400):
+        return f"${Decimal(n).quantize(step, rounding=ROUND_HALF_UP)}"
 
 
 def budget_reason(breach: Breach) -> str:

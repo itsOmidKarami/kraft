@@ -1,5 +1,5 @@
 import { EllipsisVertical } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
@@ -158,6 +158,8 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
 /** The sheets over the item: pause, ⋮, and the budget raise. */
 function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: string | null; sheet: ReturnType<typeof useSheet>; reload: () => void }) {
   const { busy, run } = useDo(reload);
+  // One start per sheet: a second tap while the first is in flight sends nothing.
+  const starting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [sheet.openId]);
   const cap = item.budget_cap?.cap_usd ?? 0;
@@ -172,15 +174,21 @@ function ItemSheets({ item, node, sheet, reload }: { item: ItemDetail; node: str
         text="This item's draft holds changes Start does not apply. Apply them now, or start without them and they stay in the draft."
         options={[{ value: "apply", label: "Apply and start" }, { value: "without", label: "Start without them" }]}
         onPick={async (v) => {
-          if (v === "apply") {
-            const a = await act.applyDraft(item.id);
-            if (!a.ok) return void showToast(a.error);
+          if (starting.current) return;
+          starting.current = true;
+          try {
+            if (v === "apply") {
+              const a = await act.applyDraft(item.id);
+              if (!a.ok) return void showToast(a.error);
+            }
+            const r = await act.resume(item.id);
+            if (!r.ok) return void showToast(r.error);
+            showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
+            sheet.close();
+            reload();
+          } finally {
+            starting.current = false;
           }
-          const r = await act.resume(item.id);
-          if (!r.ok) return void showToast(r.error);
-          showToast(v === "apply" ? "Applied the draft and started." : "Started. The draft is kept.");
-          sheet.close();
-          reload();
         }}
         onClose={sheet.close}
       />

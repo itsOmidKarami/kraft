@@ -494,3 +494,11 @@ def test_a_budget_stop_names_dollars_as_the_meter_prints_them(breach, said):
     """Under a dollar the web UI's meter prints a tenth of a cent ($0.035), so
     the stop's reason beside it does too, never a rounded $0.04."""
     assert said in stops.budget_reason(breach)
+
+
+def test_a_huge_cap_is_named_never_a_crash():
+    """`budget_usd` takes any positive number, and a launch with no reported
+    cost names the cap it could not check: 1e30 needs more digits than
+    Decimal's default 28 to print, and the stop must still say it."""
+    breach = UsdBreach(scope="usd", path="", spent_usd=0.5, cap_usd=1e30, unknown_launches=1)
+    assert "cap $1000000000000000019884624838656.00" in stops.budget_reason(breach)

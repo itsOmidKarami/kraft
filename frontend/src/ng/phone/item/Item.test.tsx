@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,16 @@ describe("the item screen (C)", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Start" }));
       await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Start without them" }));
       await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/resume"]));
+    });
+
+    it("a double tap on Apply and start applies and starts once", async () => {
+      const calls = mount(NEVER(), "/work-items/w1", DRAFT);
+      await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+      const apply = within(await screen.findByRole("dialog")).getByRole("button", { name: "Apply and start" });
+      // Two taps before the first apply answers.
+      fireEvent.click(apply);
+      fireEvent.click(apply);
+      await waitFor(() => expect(posts(calls)).toEqual(["POST /work-items/w1/draft/apply", "POST /work-items/w1/resume"]));
     });
   });
 
