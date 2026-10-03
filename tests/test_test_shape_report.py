@@ -13,6 +13,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -259,3 +260,223 @@ def test_a_file_that_does_not_parse_fails_the_report(report, tree, capsys):
     _write(tree, "tests/test_broken.py", "def test_x(:\n")
     assert report.main(["--root", str(tree)]) == 1
     assert "test_broken.py" in capsys.readouterr().out
+
+
+# -- `--diff BASE HEAD`: the delta a pull request makes to the tree ----------
+
+_COMMIT = '    return subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, check=True)'
+_REPEATED = "    result = compute_something(alpha, beta)"
+_PAIR = "    pair = compute_pair(alpha, beta)"
+
+
+def _plain(prefix: str, count: int, line: str = _REPEATED) -> str:
+    body = f"():\n{line}\n    assert result\n\n\n"
+    return "".join(f"def test_{prefix}{i}{body}" for i in range(count))
+
+
+def _commit_helper() -> str:
+    return f"def _commit(repo):\n{_COMMIT}\n\n\n"
+
+
+# BASE: `_REPEATED` sits in five tests (so it is a verbatim repeat there), thirty
+# other long lines are each seen once, and `_commit` has a copy in a test file
+# and the shared one under `tests/support`, and `_PAIR` is seen twice: 39 non-trivial
+# lines, 5 of them repeats.
+_BASE = {
+    "tests/test_a.py": (
+        "import pytest\nimport subprocess\n\n\n"
+        + _commit_helper()
+        + _plain("a", 5)
+        + f"def test_pair():\n{_PAIR}\n{_PAIR}\n    assert pair\n\n\n"
+        + "def test_unique():\n"
+        + "".join(f"    value_{i} = unique_lookup_{i}(argument_{i})\n" for i in range(30))
+        + "    assert value_0\n\n\n"
+        + '@pytest.mark.parametrize("n", [1, 2])\ndef test_rows(n):\n    assert n\n'
+    ),
+    "tests/support/__init__.py": "",
+    "tests/support/harness.py": "import subprocess\n\n\ndef commit_all(repo):\n" + _COMMIT + "\n",
+}
+
+
+def _git_repo(root: Path, files: dict[str, str | None]) -> str:
+    """Commit `files` over whatever `root` holds (`None` deletes one) and return
+    the new commit's sha."""
+    from support.harness import commit_all
+
+    if not (root / ".git").exists():
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    for rel, text in files.items():
+        if text is None:
+            (root / rel).unlink()
+        else:
+            _write(root, rel, text)
+    commit_all(root)
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    )
+    return out.stdout.strip()
+
+
+def _nudge(report, tmp_path, capsys, head_files: dict[str, str | None]) -> tuple[str, int]:
+    base = _git_repo(tmp_path, _BASE)
+    head = _git_repo(tmp_path, head_files)
+    code = report.main(["--diff", base, head, "--root", str(tmp_path)])
+    return capsys.readouterr().out, code
+
+
+def test_diff_mode_reports_the_delta_between_two_revisions(report, tmp_path, capsys):
+    new_file = "import subprocess\n\n\n" + _commit_helper() + _plain("b", 3)
+    out, code = _nudge(report, tmp_path, capsys, {"tests/test_b.py": new_file})
+    assert code == 0
+    assert out == (
+        "This PR changes the test tree:\n"
+        "```\n"
+        "  test functions     +3    (0 of them parametrized)\n"
+        "  collected cases    +3\n"
+        f"  lines in tests/    +{len(new_file.splitlines())}\n"
+        "  verbatim-repeat    +3 lines already present 5+ times elsewhere in tests/\n"
+        "  helpers            +1 copy of `_commit` (3 exist; "
+        "`support.harness.commit_all` is the shared one)\n"
+        "```\n"
+        "If the new tests are rows of one behavior, fold them into a table\n"
+        '(docs/testing.md, "One behaviour, one test"). If they are new behaviors, ignore this.\n'
+    )
+
+
+def test_diff_mode_is_quiet_when_there_is_nothing_to_nudge_about(report, tmp_path, capsys):
+    # one more row of the existing parametrized test: no new function, and the
+    # one added line is not a repeat of anything.
+    row = _BASE["tests/test_a.py"].replace("[1, 2]", "[1, 2, 3]")
+    out, code = _nudge(report, tmp_path, capsys, {"tests/test_a.py": row})
+    assert (out, code) == ("nothing to nudge about\n", 0)
+
+
+def _file(*parts: str) -> str:
+    return "import pytest\nimport subprocess\n\n\n" + "".join(parts)
+
+
+_ONE_PARAMETRIZED = '@pytest.mark.parametrize("n", [1])\ndef test_p(n):\n    assert n\n'
+
+
+@pytest.mark.parametrize(
+    ("where", "added", "says"),
+    [
+        pytest.param(
+            "tests/test_b.py",
+            _file(_plain("b", 3)),
+            "+3    (0 of them parametrized)",
+            id="three-plain",
+        ),
+        pytest.param("tests/test_b.py", _file(_plain("b", 2)), None, id="two-plain"),
+        pytest.param(
+            "tests/test_b.py",
+            _file(_plain("b", 2), _ONE_PARAMETRIZED),
+            None,
+            id="three-one-parametrized",
+        ),
+        pytest.param(
+            "tests/test_b.py",
+            _file(_commit_helper(), "def test_b():\n    assert _commit\n"),
+            "+1 copy of `_commit` (3 exist; `support.harness.commit_all` is the shared one)",
+            id="helper-copy",
+        ),
+        pytest.param(
+            "tests/support/more.py",
+            _file("def commit_all(repo):\n" + _COMMIT + "\n"),
+            None,
+            id="helper-copy-under-support",
+        ),
+        pytest.param(
+            "tests/test_b.py",
+            _file("def test_b():\n" + (_REPEATED + "\n") * 20 + "    assert 1\n"),
+            "+20 lines already present 5+ times",
+            id="repeat-share-over-the-trees",
+        ),
+        pytest.param(
+            "tests/test_b.py",
+            _file("def test_b():\n" + (_REPEATED + "\n") * 3 + "    assert 1\n"),
+            None,
+            id="a-handful-of-repeats-is-not-a-share",
+        ),
+        pytest.param(
+            "tests/test_b.py",
+            _file(
+                "def test_b():\n" + (_REPEATED + "\n") * 2,
+                "".join(f"    value_b{i} = unique_lookup_b{i}(argument_b{i})\n" for i in range(18)),
+                "    assert 1\n",
+            ),
+            None,
+            id="repeats-below-the-trees-own-share",
+        ),
+        pytest.param(
+            "tests/test_b.py",
+            _file("def test_b():\n" + (_PAIR + "\n") * 20 + "    assert 1\n"),
+            None,
+            id="a-line-seen-twice-in-base-is-not-a-repeat-however-often-the-pr-adds-it",
+        ),
+        pytest.param(
+            "tests/test_a.py",
+            _BASE["tests/test_a.py"]
+            .replace("_a0():", "_a0(x=1):")
+            .replace("_a1():", "_a1(x=1):")
+            .replace("_a2():", "_a2(x=1):"),
+            None,
+            id="three-edited-signatures-are-not-three-new-tests",
+        ),
+        pytest.param(
+            "tests/test_b.py",
+            _file(
+                '@pytest.mark.parametrize("n", [1, 2])\nclass TestRows:\n',
+                *(f"    def test_row{i}(self, n):\n        assert n\n\n" for i in range(3)),
+            ),
+            None,
+            id="three-methods-of-a-parametrized-class",
+        ),
+    ],
+)
+def test_diff_mode_nudges_only_on_one_of_its_three_signs(
+    report, tmp_path, capsys, where, added, says
+):
+    out, code = _nudge(report, tmp_path, capsys, {where: added})
+    assert code == 0
+    if says is None:
+        assert out == "nothing to nudge about\n"
+    else:
+        assert says in out
+
+
+def test_diff_mode_follows_a_moved_file_instead_of_calling_it_all_new(report, tmp_path, capsys):
+    moved = {"tests/test_a.py": None, "tests/test_c.py": _BASE["tests/test_a.py"]}
+    out, code = _nudge(report, tmp_path, capsys, moved)
+    assert (out, code) == ("nothing to nudge about\n", 0)
+
+
+def _worktrees(root: Path) -> int:
+    listed = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return listed.stdout.count("worktree ")
+
+
+def test_diff_mode_exits_0_and_leaves_no_worktree_behind_when_it_cannot_measure(
+    report, tmp_path, capsys, monkeypatch
+):
+    base = _git_repo(tmp_path, _BASE)
+    head = _git_repo(tmp_path, {"tests/test_b.py": _file(_plain("b", 3))})
+
+    assert report.main(["--diff", base, "no-such-rev", "--root", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "nothing to nudge about\n"
+    assert "tests nudge skipped" in captured.err
+
+    def boom(root):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(report, "measure", boom)
+    assert report.main(["--diff", base, head, "--root", str(tmp_path)]) == 0
+    assert "disk went away" in capsys.readouterr().err
+    assert _worktrees(tmp_path) == 1

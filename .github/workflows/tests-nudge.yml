@@ -1,0 +1,68 @@
+# A reminder, not a gate: dev/check_tests.py (run in test.yml) enforces what an
+# AST walk can decide about one test, but "these nine new functions are nine
+# rows of one behavior" is a judgment about the whole tree, and a reviewer
+# reading the diff sees nine small, reasonable tests. This shows them the
+# tree's side of it (dev/test_shape_report.py --diff): what the PR adds, how
+# much of it the tests/ tree already says five times over, and which helper it
+# copied. It is quiet on an ordinary PR -- one that adds a case to a table, a
+# couple of tests, or a few lines of setup says "nothing to nudge about" and
+# posts nothing -- because most test changes are right, and a comment that
+# fires on every PR trains everyone to ignore it (docs-nudge.yml's reason too).
+# It speaks only for three or more new test functions with no parametrize, a
+# helper copied that already exists elsewhere, or added lines that repeat the
+# tree more than the tree repeats itself. It never fails the PR.
+name: tests nudge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tests-nudge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  nudge:
+    # Skipped for forks: their GITHUB_TOKEN is read-only, so posting a
+    # comment would just fail -- same guard test.yml uses for the same reason.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: show the test tree the PR changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # The base branch may have moved on since the PR branched: compare
+          # against where it branched, or the PR gets credit for (and blame
+          # for) what landed on the base meanwhile.
+          FORK_POINT=$(git merge-base "$BASE" "$HEAD" || echo "$BASE")
+
+          # --diff exits 0 whatever happens, and says "nothing to nudge about"
+          # when it has nothing to say (or could not measure: that goes to stderr).
+          OUT=$(python3 dev/test_shape_report.py --diff "$FORK_POINT" "$HEAD")
+          if [ "$OUT" = "nothing to nudge about" ]; then
+            echo "nothing to nudge about"
+            exit 0
+          fi
+
+          MARKER="<!-- tests-nudge -->"
+          ALREADY=$(gh pr view "$PR" --json comments -q ".comments[].body" | grep -qF "$MARKER" && echo yes || echo no)
+          if [ "$ALREADY" = "yes" ]; then
+            echo "already nudged this PR once; not repeating on every push"
+            exit 0
+          fi
+
+          printf '%s\n%s\n' "$MARKER" "$OUT" > "$RUNNER_TEMP/tests-nudge.md"
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/tests-nudge.md" \
+            || echo "::warning::could not post the tests nudge; skipping"
