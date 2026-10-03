@@ -62,7 +62,7 @@ describe("ItemPage, live", () => {
     answers["GET /work-items/w1/events"] = [200, [msg(1, 1, "Why did lint fail?", "e1"), msg(2, 2, "sdas", "e2")]];
     live(2);
     expect(await within(pane("escalation")).findByText("sdas")).toBeInTheDocument();
-    expect(within(pane("escalation")).getByText(/turn 2 of 2/)).toBeInTheDocument();
+    expect(within(pane("escalation")).getByText("turn 1 of 1 · thread 2")).toBeInTheDocument();
     expect(within(pane("escalation")).getByRole("region", { name: "Thread 2" })).toHaveTextContent("thread 2 · 1 turn");
   });
 

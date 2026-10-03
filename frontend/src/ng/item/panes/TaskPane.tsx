@@ -35,10 +35,12 @@ export function AttemptSwitcher({ sessions, at, onAt, now, turns }: { sessions: 
   );
 }
 
-/** "turn 5 of 5": the escalation's sessions by the word its Thread tab uses, with "· thread 2" once there is more than one. */
+/** "turn 2 of 3": the escalation's session among its own thread's, as the Thread tab counts
+ *  them ("thread 2 · 1 turn"), with "· thread 2" once there is more than one. */
 function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
-  const many = sessions.some((s) => s.thread !== at.thread);
-  return `turn ${at.attempt} of ${sessions.at(-1)!.attempt}${many ? ` · thread ${at.thread}` : ""}`;
+  const mine = sessions.filter((s) => s.thread === at.thread);
+  const many = mine.length < sessions.length;
+  return `turn ${mine.indexOf(at) + 1} of ${mine.length}${many ? ` · thread ${at.thread}` : ""}`;
 }
 
 const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
