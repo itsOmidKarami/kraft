@@ -55,6 +55,30 @@
       "stop": "stuck",
       "reason": "stuck: 1 finding(s) unchanged across cycle 1"
     },
+    "cap": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "cap",
+      "reason": "running time hit its cap"
+    },
+    "conflict": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "conflict",
+      "reason": "rebase conflict"
+    },
+    "failed": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "failed",
+      "reason": "the forge refused"
+    },
+    "infra": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "infra",
+      "reason": "a session was lost"
+    },
     "budget_item_cap": {
       "status": "needs_human",
       "node": "implementation",
@@ -64,6 +88,18 @@
         "scope": "work_item",
         "spent_usd": 0.07,
         "cap_usd": 0.05,
+        "unknown_launches": 0
+      }
+    },
+    "budget_daily": {
+      "status": "needs_human",
+      "node": "implementation",
+      "stop": "budget",
+      "reason": "daily cap reached",
+      "budget": {
+        "scope": "daily",
+        "spent_usd": 50,
+        "cap_usd": 50,
         "unknown_launches": 0
       }
     },
@@ -88,6 +124,11 @@
     "abandoned": {
       "status": "abandoned",
       "node": "implementation"
+    },
+    "archived": {
+      "status": "completed",
+      "node": "implementation",
+      "archived": true
     }
   },
   "doors": {
@@ -117,7 +158,12 @@
         "gate_with_escalation",
         "question",
         "stuck",
+        "cap",
+        "conflict",
+        "failed",
+        "infra",
         "budget_item_cap",
+        "budget_daily",
         "mr_closed",
         "escalated"
       ]
@@ -132,7 +178,12 @@
         "gate",
         "question",
         "stuck",
+        "cap",
+        "conflict",
+        "failed",
+        "infra",
         "budget_item_cap",
+        "budget_daily",
         "mr_closed"
       ]
     },
@@ -146,7 +197,12 @@
         "gate",
         "question",
         "stuck",
+        "cap",
+        "conflict",
+        "failed",
+        "infra",
         "budget_item_cap",
+        "budget_daily",
         "mr_closed"
       ]
     },
@@ -183,7 +239,12 @@
         "gate_with_escalation",
         "question",
         "stuck",
+        "cap",
+        "conflict",
+        "failed",
+        "infra",
         "budget_item_cap",
+        "budget_daily",
         "mr_closed",
         "escalated"
       ]
@@ -193,7 +254,24 @@
       "body": {},
       "takes": [
         "completed",
-        "abandoned"
+        "abandoned",
+        "archived"
+      ]
+    },
+    "restore": {
+      "path": "restore",
+      "body": {},
+      "takes": [
+        "archived"
+      ]
+    },
+    "approve": {
+      "path": "gates/spec_approval/approve",
+      "body": {},
+      "takes": [
+        "gate",
+        "gate_under_review",
+        "gate_with_escalation"
       ]
     }
   }

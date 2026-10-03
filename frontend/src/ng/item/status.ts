@@ -52,11 +52,23 @@ export const NOT_RAISABLE = "The item can't raise this cap: the policy or the ch
  *  yet" that decides whether its config can still be edited. */
 export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_node_id">) => item.display_status === "paused" && !item.current_node_id;
 
+/** What `escalatable` reads: the detail's sessions and pending gate are optional, a board row has neither. */
+type EscalateFields = Pick<WorkItem, "display_status" | "current_node_id"> & Partial<Pick<WorkItem, "pending_gate">> & { worker_sessions?: { status: string; hook_point: string }[] };
+
+const live = (s: { status: string }) => s.status === "running" || s.status === "pending";
+
+/** A pending gate an agent is reviewing: its walk is live, and /retry, /skip and /escalate answer it
+ *  "a walk is already running". A human's escalation turn is not a walk: a retry outranks it. */
+const reviewingGate = (item: Omit<EscalateFields, "display_status" | "current_node_id">) =>
+  !!item.pending_gate && !!item.worker_sessions?.some((s) => live(s) && s.hook_point !== "escalation" && !s.hook_point.endsWith(".escalation"));
+
 /** Whether `/retry` would take this item. It claims only a stopped item
  *  (`needs_human`, which the server shows as failed, needs you or escalated)
  *  and answers 409 "work item is not stopped" to a paused, running or waiting
- *  one, so no surface offers Retry there (R10b-01): a paused item has Resume. */
-export const retryable = (item: Pick<WorkItem, "display_status">) => item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated";
+ *  one, so no surface offers Retry there (R10b-01): a paused item has Resume.
+ *  Nor a gate an agent is reviewing (`reviewingGate`, #504 review P2-1). */
+export const retryable = (item: Pick<WorkItem, "display_status"> & Omit<EscalateFields, "display_status" | "current_node_id">) =>
+  (item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated") && !reviewingGate(item);
 
 /** Whether `/pause` would take this item: it claims only a running or waiting
  *  one (`active`, `waiting`, `rate_limited`) and answers every stopped item 409
@@ -72,9 +84,14 @@ export const skippable = (item: Pick<WorkItem, "status" | "stop"> & Partial<Pick
 
 /** Whether `/escalate` would take this item: a stopped one (failed or needs
  *  you) or a paused one that has started, and not while an escalation turn
- *  already runs. A running or waiting item answers 409. */
-export const escalatable = (item: Pick<WorkItem, "display_status" | "current_node_id">) =>
-  item.display_status === "failed" || item.display_status === "needs_you" || (item.display_status === "paused" && !!item.current_node_id);
+ *  already runs. A running or waiting item answers 409. Nor does it take a
+ *  pending gate with a live session: an agent's review of the gate, or a
+ *  human's escalation turn, which the server shows as needs-you because the
+ *  gate wins (`board.display_status`), and either is "already running"
+ *  (#504 review P2-1). */
+export const escalatable = (item: EscalateFields) =>
+  (item.display_status === "failed" || item.display_status === "needs_you" || (item.display_status === "paused" && !!item.current_node_id))
+  && !(item.pending_gate && item.worker_sessions?.some(live));
 
 /** The way on from a `needs_you` stop, by its kind: the same table as the
  *  phone's bottom bar (`phone/item/model`'s `pairOf`), so the two layouts offer
@@ -97,7 +114,7 @@ function needsYouMain(item: Pick<WorkItem, "stop">): Main {
  *  (`budgetRaise`) has Retry instead. A never-started item (`neverStarted`) has
  *  Start, and nothing to escalate or mark complete. Pause only where `/pause`
  *  takes it (`pausable`); an escalated item has Retry, which outranks its turn. */
-export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id">): HeaderState {
+export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "current_node_id"> & Omit<EscalateFields, "display_status" | "current_node_id">): HeaderState {
   const status = item.display_status ?? "running";
   if (neverStarted(item)) return { badge: "NOT STARTED", tone: "muted", main: "start", panel: ["cancel"] };
   const main: Main =
@@ -110,7 +127,7 @@ export function headerState(item: Pick<WorkItem, "display_status" | "stop" | "cu
   const panel: PanelItem[] =
     status === "done" || status === "archived" ? []
     : status === "cancelled" ? ["archive"]
-    : FULL.filter((p) => p !== "escalate" || escalatable({ display_status: status, current_node_id: item.current_node_id }));
+    : FULL.filter((p) => p !== "escalate" || escalatable({ ...item, display_status: status }));
   return { badge: status.replace("_", " ").toUpperCase(), tone: TONE[status], main, panel };
 }
 
@@ -130,7 +147,7 @@ export const MAIN_LABEL: Record<Main, string> = {
 
 /** The header's ⋮ doors that act on the item: Duplicate once it has ended,
  *  else Escalate… where `/escalate` takes it (`escalatable`) and Cancel…. */
-export function menuDoors(item: Pick<WorkItem, "display_status" | "current_node_id">): ("duplicate" | "escalate" | "cancel")[] {
+export function menuDoors(item: EscalateFields): ("duplicate" | "escalate" | "cancel")[] {
   if (["done", "cancelled", "archived"].includes(item.display_status ?? "")) return ["duplicate"];
   return [...(escalatable(item) ? ["escalate" as const] : []), "cancel"];
 }

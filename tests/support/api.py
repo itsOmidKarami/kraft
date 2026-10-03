@@ -388,6 +388,8 @@ def _in_state(client, repo, state: dict) -> str:
             store.mark_needs_human(c, wid, state["node"], state["reason"], kind=state["stop"], **kw)
         if "gate" in state:
             events.append(c, wid, "gate_requested", {"gate": state["gate"]}, node_id=state["node"])
+        if state.get("archived"):
+            c.execute("UPDATE work_items SET archived_at = datetime('now') WHERE id = ?", (wid,))
         if state.get("mr"):
             events.append(c, wid, "mr_opened", {"number": 7, "url": "u"}, node_id=state["node"])
     if state.get("escalation"):

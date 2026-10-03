@@ -1,3 +1,5 @@
+// @vitest-environment node
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { DisplayStatus, StopKind, WorkItemStop } from "../../types";
 import { steerDoor } from "../phone/item/Composer";
@@ -71,62 +73,52 @@ describe("budgetRaise: only a budget stop the server would raise offers a raise"
   });
 });
 
-/** What the server's lifecycle routes take (`src/kraft/api/routes/lifecycle.py`), one row per
- *  door: the row an item has, and whether that door answers it, not 409. Read off each route's guard. */
-type Server = { status: "active" | "waiting" | "rate_limited" | "paused" | "needs_human" | "completed" | "abandoned"; started: boolean; escalation: boolean; question: boolean; gate: boolean; stop?: string; archived?: boolean; walk?: boolean };
-type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "end" | "archive" | "restore" | "reopen-mr" | "raise" | "decide" | "navigate";
-const TAKES: Record<Door, (r: Server) => boolean> = {
-  pause: (r) => ["active", "waiting", "rate_limited"].includes(r.status),
-  // resume and steer: a paused item, or a needs_context stop; never while an escalation turn runs.
-  resume: (r) => !r.escalation && (r.status === "paused" || (r.status === "needs_human" && r.question)),
-  // A human's retry outranks a live escalation turn (`_retry`'s `_stop_live_sessions`).
-  retry: (r) => r.status === "needs_human",
-  // A stopped item with a walk still live (a gate's auto-review) answers "a walk is already running".
-  skip: (r) => r.started && ["active", "waiting", "paused", "needs_human"].includes(r.status) && !r.escalation && !(r.status === "needs_human" && r.walk),
-  escalate: (r) => ["needs_human", "paused"].includes(r.status) && r.started && !r.escalation,
-  end: (r) => !["completed", "abandoned"].includes(r.status),
-  archive: (r) => ["completed", "abandoned"].includes(r.status) && !r.archived,
-  restore: (r) => !!r.archived,
-  "reopen-mr": (r) => r.stop === "mr_closed",
-  // /budget/raise and a raised policy's retry both claim only a stopped item.
-  raise: (r) => r.status === "needs_human",
-  decide: (r) => r.gate,
-  navigate: () => true,
-};
+/** Which lifecycle door takes which item state: `tests/api/lifecycle_doors.json`, the table the
+ *  backend's `test_a_door_takes_only_the_states_this_table_lists` drives every route against, so
+ *  this copy of the server's guards cannot drift from them (#504 review P2-2). `navigate` is a
+ *  surface's link to another page: it calls nothing. */
+const LIFECYCLE: { doors: Record<string, { takes: string[] }> } = JSON.parse(readFileSync(new URL("../../../../tests/api/lifecycle_doors.json", import.meta.url), "utf-8"));
+type Door = "pause" | "resume" | "retry" | "skip" | "escalate" | "cancel" | "archive" | "restore" | "reopen_mr" | "budget_raise" | "approve" | "navigate";
+const takes = (door: Door, state: string) => door === "navigate" || LIFECYCLE.doors[door].takes.includes(state);
 
 const S = (kind: StopKind, more: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", task: "verification.review.code_review", resume_at: null, reason: "r", ...more });
-const session = (status: string) => [{ id: "s1", node_id: "verification", hook_point: "verification.review.code_review", status, attempt: 1, round: 0, created_at: "t", started_at: "t" }] as never;
-const base: Server = { status: "active", started: true, escalation: false, question: false, gate: false };
-/** Every display status and stop kind the server sends, each with the row behind it. */
-const CASES: [string, Partial<ItemDetail>, Partial<Server>][] = [
-  ["running", { display_status: "running", status: "active", worker_sessions: session("running") }, {}],
-  ["waiting on CI", { display_status: "waiting", status: "waiting", stop: S("wait"), worker_sessions: session("running") }, { status: "waiting" }],
-  ["rate limited", { display_status: "waiting", status: "rate_limited", stop: S("rate_limit"), worker_sessions: session("failed") }, { status: "rate_limited" }],
-  ["paused", { display_status: "paused", status: "paused", worker_sessions: session("paused") }, { status: "paused" }],
-  ["not started", { display_status: "paused", status: "paused", current_node_id: null }, { status: "paused", started: false }],
-  ["gate", { display_status: "needs_you", status: "needs_human", stop: S("gate", { node: "plan_approval" }), pending_gate: "plan_approval", current_node_id: "plan_approval" }, { status: "needs_human", gate: true }],
+const session = (status: string, hook_point = "verification.review.code_review") => [{ id: "s1", node_id: "verification", hook_point, status, attempt: 1, round: 0, created_at: "t", started_at: "t" }] as never;
+const GATE = { display_status: "needs_you", status: "needs_human", stop: S("gate", { node: "plan_approval" }), pending_gate: "plan_approval", current_node_id: "plan_approval" } as const;
+/** Every display status and stop kind the server sends, each with its state in the table. */
+const CASES: [string, Partial<ItemDetail>, string][] = [
+  ["running", { display_status: "running", status: "active", worker_sessions: session("running") }, "running"],
+  ["waiting on CI", { display_status: "waiting", status: "waiting", stop: S("wait"), worker_sessions: session("running") }, "waiting_ci"],
+  ["rate limited", { display_status: "waiting", status: "rate_limited", stop: S("rate_limit"), worker_sessions: session("failed") }, "rate_limited"],
+  ["paused", { display_status: "paused", status: "paused", worker_sessions: session("paused") }, "paused"],
+  ["not started", { display_status: "paused", status: "paused", current_node_id: null }, "not_started"],
+  ["gate", GATE, "gate"],
   // An agent reviews the gate before you (auto_escalate): its task's pane footer saw a live session and offered Pause.
-  ["gate under an agent's review", { display_status: "needs_you", status: "needs_human", stop: S("gate", { node: "plan_approval" }), pending_gate: "plan_approval", current_node_id: "plan_approval", worker_sessions: session("running") }, { status: "needs_human", gate: true, walk: true }],
-  ["question", { display_status: "needs_you", status: "needs_human", stop: S("question"), needs_context_question: "Keep it?", worker_sessions: session("done") }, { status: "needs_human", question: true }],
-  ["cap", { display_status: "needs_you", status: "needs_human", stop: S("cap"), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["budget, the item's own cap", { display_status: "needs_you", status: "needs_human", stop: S("budget", { scope: "work_item" }), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["budget, the daily cap", { display_status: "needs_you", status: "needs_human", stop: S("budget", { scope: "daily" }), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["conflict", { display_status: "needs_you", status: "needs_human", stop: S("conflict"), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["mr closed", { display_status: "needs_you", status: "needs_human", stop: S("mr_closed"), worker_sessions: session("done") }, { status: "needs_human", stop: "mr_closed" }],
-  ["stuck", { display_status: "needs_you", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["escalated", { display_status: "escalated", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, { status: "needs_human", escalation: true }],
-  ["failed", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["infra", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed") }, { status: "needs_human" }],
-  ["done", { display_status: "done", status: "completed", worker_sessions: session("done") }, { status: "completed" }],
-  ["cancelled", { display_status: "cancelled", status: "abandoned", worker_sessions: session("cancelled") }, { status: "abandoned" }],
-  ["archived", { display_status: "archived", status: "completed", worker_sessions: session("done") }, { status: "completed", archived: true }],
+  ["gate under an agent's review", { ...GATE, worker_sessions: session("running") }, "gate_under_review"],
+  // A human escalated at the gate: the server shows needs-you, since the gate wins, and /escalate answers 409.
+  ["gate with an escalation turn running", { ...GATE, worker_sessions: session("running", "escalation") }, "gate_with_escalation"],
+  ["question", { display_status: "needs_you", status: "needs_human", stop: S("question"), needs_context_question: "Keep it?", worker_sessions: session("done") }, "question"],
+  ["cap", { display_status: "needs_you", status: "needs_human", stop: S("cap"), worker_sessions: session("failed") }, "cap"],
+  ["budget, the item's own cap", { display_status: "needs_you", status: "needs_human", stop: S("budget", { scope: "work_item" }), worker_sessions: session("failed") }, "budget_item_cap"],
+  ["budget, the daily cap", { display_status: "needs_you", status: "needs_human", stop: S("budget", { scope: "daily" }), worker_sessions: session("failed") }, "budget_daily"],
+  ["conflict", { display_status: "needs_you", status: "needs_human", stop: S("conflict"), worker_sessions: session("failed") }, "conflict"],
+  ["mr closed", { display_status: "needs_you", status: "needs_human", stop: S("mr_closed"), worker_sessions: session("done") }, "mr_closed"],
+  ["stuck", { display_status: "needs_you", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "stuck"],
+  ["escalated", { display_status: "escalated", status: "needs_human", stop: S("stuck"), worker_sessions: session("failed") }, "escalated"],
+  ["failed", { display_status: "failed", status: "needs_human", stop: S("failed"), worker_sessions: session("failed") }, "failed"],
+  ["infra", { display_status: "failed", status: "needs_human", stop: S("infra"), worker_sessions: session("failed") }, "infra"],
+  ["done", { display_status: "done", status: "completed", worker_sessions: session("done") }, "completed"],
+  ["cancelled", { display_status: "cancelled", status: "abandoned", worker_sessions: session("cancelled") }, "abandoned"],
+  ["archived", { display_status: "archived", status: "completed", worker_sessions: session("done") }, "archived"],
 ];
 
-const MAIN_DOOR: Record<Main, Door> = { pause: "pause", resume: "resume", start: "resume", raise: "raise", retry: "retry", archive: "archive", restore: "restore", gate: "decide", answer: "resume", conflicts: "navigate", reopen: "reopen-mr" };
-const PANEL_DOOR: Record<PanelItem, Door> = { escalate: "escalate", complete: "end", archive: "archive", cancel: "end" };
+/** Raise cap: /budget/raise on the item's own cap; a policy or node limit is PATCHed, then retried. */
+const raiseDoor = (item: ItemDetail): Door => (budgetRaise(item) === "item" ? "budget_raise" : "retry");
+const MAIN_DOOR = (item: ItemDetail): Record<Main, Door> => ({ pause: "pause", resume: "resume", start: "resume", raise: raiseDoor(item), retry: "retry", archive: "archive", restore: "restore", gate: "approve", answer: "resume", conflicts: "navigate", reopen: "reopen_mr" });
+// Mark complete and Cancel end the item through one guard (`_end_work_item`).
+const PANEL_DOOR: Record<PanelItem, Door> = { escalate: "escalate", complete: "cancel", archive: "archive", cancel: "cancel" };
 const PHONE_DOOR = (item: ItemDetail): Record<ActId, Door> => ({
-  pause: "pause", steer: steerDoor(item), resume: "resume", start: "resume", reject: "decide", review: "navigate", raise: "raise", retry: "retry", escalate: "escalate", answer: "resume",
-  cancel: "end", "reopen-mr": "reopen-mr", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "end",
+  pause: "pause", steer: steerDoor(item), resume: "resume", start: "resume", reject: "approve", review: "navigate", raise: raiseDoor(item), retry: "retry", escalate: "escalate", answer: "resume",
+  cancel: "cancel", "reopen-mr": "reopen_mr", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "cancel",
 });
 const NODE_DOOR: Record<NodeActId, Door> = { pause: "pause", resume: "resume", skip: "skip", "retry-node": "retry", "retry-from": "retry", review: "navigate" };
 
@@ -138,9 +130,9 @@ function offered(item: ItemDetail): [string, Door][] {
   const p = pairOf(item);
   const phone = PHONE_DOOR(item);
   return [
-    [`header main ${hs.main}`, MAIN_DOOR[hs.main]],
+    [`header main ${hs.main}`, MAIN_DOOR(item)[hs.main]],
     ...hs.panel.filter((x) => x !== "archive" || archivable(item.display_status)).map((x): [string, Door] => [`header panel ${x}`, PANEL_DOOR[x]]),
-    ...menuDoors(item).map((x): [string, Door] => [`header ⋮ ${x}`, x === "duplicate" ? "navigate" : x === "escalate" ? "escalate" : "end"]),
+    ...menuDoors(item).map((x): [string, Door] => [`header ⋮ ${x}`, x === "duplicate" ? "navigate" : x]),
     ...footerActs(item, footerState(item, item.worker_sessions)).map((x): [string, Door] => [`path footer ${x}`, x]),
     ...[p.secondary, p.primary].flatMap((x): [string, Door][] => (x ? [[`phone bar ${x.id}`, phone[x.id]]] : [])),
     ...kebabOf(item).map((x): [string, Door] => [`phone ⋮ ${x.id}`, phone[x.id]]),
@@ -152,10 +144,9 @@ function offered(item: ItemDetail): [string, Door][] {
 }
 
 describe("no surface offers a door the server refuses (R11b-01)", () => {
-  it.each(CASES)("%s", (_name, over, row) => {
-    const item = detail(over);
-    const server = { ...base, ...row };
-    const refused = offered(item).filter(([, door]) => !TAKES[door](server)).map(([where, door]) => `${where} → ${door}`);
+  it.each(CASES)("%s", (_name, over, state) => {
+    expect(Object.keys((LIFECYCLE as unknown as { states: object }).states)).toContain(state);
+    const refused = offered(detail(over)).filter(([, door]) => !takes(door, state)).map(([where, door]) => `${where} → ${door}`);
     expect(refused).toEqual([]);
   });
 
