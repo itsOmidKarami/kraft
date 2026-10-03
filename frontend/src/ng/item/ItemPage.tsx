@@ -71,7 +71,7 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
         {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
         <DiffLine id={item.id} version={runVersion(item)} gone={item.worktree_exists === false} />
       </div>
-      <Banner item={item} onOpenGate={openGate} onRaise={raise} reload={reload} />
+      <Banner item={item} onRaise={raise} reload={reload} />
       <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
       {cardError && <p className="item-error" role="alert">{cardError}</p>}
       <PausedCard item={item} reload={reload} />

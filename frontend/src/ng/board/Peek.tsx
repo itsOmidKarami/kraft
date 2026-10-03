@@ -105,11 +105,10 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
   const duplicate = useDuplicate(item.id, setError);
   const events = useEvents(item.id, version);
   const openNode = (node: string) => navigate(placeUrl(item.id, { sel: { kind: "node", node } }));
-  const openGate = useSelect(item.id);
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
-        <Banner item={item} onOpenGate={openGate} onRaise={onRaise} reload={reload} />
+        <Banner item={item} onRaise={onRaise} reload={reload} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />

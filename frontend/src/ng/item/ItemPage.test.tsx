@@ -22,6 +22,7 @@ const mount = (path = "/work-items/w1", shell = false) =>
           <Route path="/work-items/:id" element={<><ItemPage /><Where /></>} />
           <Route path="/work-items/:id/nodes/:node" element={<><ItemPage /><Where /></>} />
         </Route>
+        <Route path="*" element={<Where />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -33,15 +34,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ItemPage", () => {
-  it("opens a collapsed pane on the gate from the banner's Open gate", async () => {
+  it("opens the gate's review from the banner's Review changes", async () => {
     const gated = detail({ status: "needs_human", display_status: "needs_you", current_node_id: "plan_approval", pending_gate: "plan_approval", stop: { kind: "gate", node: "plan_approval", task: null, resume_at: null, reason: null } as never });
     stubFetch({ "GET /work-items/w1": [200, gated] });
-    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     mount();
-    await userEvent.click(await screen.findByRole("button", { name: "Open gate" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
-    expect(screen.getByRole("button", { name: "Collapse pane" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Expand pane" })).toBeNull();
+    await screen.findByText(/Waiting for your approval at/);
+    await userEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review changes" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });
 
   // R11a-05: Raise cap only opened Config; the editor stayed shut and the focus on the button.

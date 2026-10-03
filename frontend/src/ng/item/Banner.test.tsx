@@ -1,6 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { Banner, QuestionCard } from "./Banner";
 import { acceptWrites, detail, stubFetch } from "./testkit";
 
@@ -8,40 +10,42 @@ import { acceptWrites, detail, stubFetch } from "./testkit";
 const WRITES = acceptWrites("PATCH /work-items/w1", "POST /work-items/w1/resume", "POST /work-items/w1/retry");
 
 afterEach(() => vi.unstubAllGlobals());
+// The banner's Review changes navigates: every render is inside a router.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
+const Where = () => <span data-testid="where">{useLocation().pathname + useLocation().search}</span>;
 const stop = (kind: string, over = {}) => ({ kind, node: "verification", task: null, resume_at: null, reason: null, ...over }) as never;
 
 describe("Banner", () => {
-  it("shows a gate stop with Open gate, which opens that gate", async () => {
-    const onOpenGate = vi.fn();
-    render(<Banner item={detail({ display_status: "needs_you", stop: stop("gate", { node: "final_review" }), pending_gate: "final_review" })} onOpenGate={onOpenGate} onRaise={() => {}} reload={() => {}} />);
+  it("shows a gate stop with Review changes, which opens that gate's review with its brief (GR-5)", async () => {
+    render(<><Banner item={detail({ display_status: "needs_you", stop: stop("gate", { node: "final_review" }), pending_gate: "final_review" })} onRaise={() => {}} reload={() => {}} /><Where /></>);
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for your approval at final_review.");
-    await userEvent.click(screen.getByRole("button", { name: "Open gate" }));
-    expect(onOpenGate).toHaveBeenCalledWith("final_review");
+    await userEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=final_review&doc=1");
   });
 
   it("shows a budget stop with Raise cap, which opens the budget editor in Config", async () => {
     const onRaise = vi.fn();
-    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "Running time hit its 8h cap", scope: "work_item" }) })} onOpenGate={() => {}} onRaise={onRaise} reload={() => {}} />);
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "Running time hit its 8h cap", scope: "work_item" }) })} onRaise={onRaise} reload={() => {}} />);
     expect(screen.getByRole("status")).toHaveTextContent("Stopped at verification. Running time hit its 8h cap.");
     await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
     expect(onRaise).toHaveBeenCalled();
   });
 
   it("says where it stopped before a two-sentence reason, not tacked on after it", () => {
-    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { node: "plan", reason: "budget cap reached: $0.035 spent on this work item, cap $0.030. Nothing new was started; a running agent was not interrupted.", scope: "work_item" }) })} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { node: "plan", reason: "budget cap reached: $0.035 spent on this work item, cap $0.030. Nothing new was started; a running agent was not interrupted.", scope: "work_item" }) })} onRaise={() => {}} reload={() => {}} />);
     expect(screen.getByRole("status")).toHaveTextContent(/^✦Stopped at plan\. Budget cap reached: \$0\.035 spent on this work item, cap \$0\.030\. Nothing new was started; a running agent was not interrupted\.Raise cap$/);
   });
 
   it("offers no raise for a budget stop the item cannot raise, and says where it is raised", () => {
     // The daily cap, though the item is at its own $5 too: /budget/raise would answer 409.
-    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", scope: "daily" }), budget_cap: { cap_usd: 5, source: "item", spent_usd: 5 } })} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("budget", { reason: "budget cap reached: $50.00 spent on today, across every work item, cap $50.00.", scope: "daily" }), budget_cap: { cap_usd: 5, source: "item", spent_usd: 5 } })} onRaise={() => {}} reload={() => {}} />);
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("The item can't raise this cap: the policy or the chain sets it.");
   });
 
   it("opens Config, labelled so, for a cap stop that names no limit to raise", async () => {
     const onRaise = vi.fn();
-    render(<Banner item={detail({ display_status: "needs_you", stop: stop("cap", { reason: "gate review waited past its timeout" }) })} onOpenGate={() => {}} onRaise={onRaise} reload={() => {}} />);
+    render(<Banner item={detail({ display_status: "needs_you", stop: stop("cap", { reason: "gate review waited past its timeout" }) })} onRaise={onRaise} reload={() => {}} />);
     expect(screen.queryByRole("button", { name: "Raise cap" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Open config" }));
     expect(onRaise).toHaveBeenCalled();
@@ -53,7 +57,7 @@ describe("Banner", () => {
       const calls = stubFetch({ ...WRITES, ...answers });
       const reload = vi.fn();
       const onRaise = vi.fn();
-      render(<Banner item={capped(limit)} onOpenGate={() => {}} onRaise={onRaise} reload={reload} />);
+      render(<Banner item={capped(limit)} onRaise={onRaise} reload={reload} />);
       return { calls, reload, onRaise };
     };
     const writes = (calls: { method: string }[]) => calls.filter((c) => c.method !== "GET");
@@ -79,7 +83,7 @@ describe("Banner", () => {
     it("keeps the item's other policy overrides: a PATCH policy replaces the whole override", async () => {
       const calls = stubFetch(WRITES);
       const policy_override = { budget_usd: 5, max_attempts: 4, paths: { verification: { timeout_minutes: 30 }, review: { max_attempts: 2 } } };
-      render(<Banner item={{ ...capped({ path: "verification", key: "max_attempts", value: 3, maximum: 5 }), policy_override }} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+      render(<Banner item={{ ...capped({ path: "verification", key: "max_attempts", value: 3, maximum: 5 }), policy_override }} onRaise={() => {}} reload={() => {}} />);
       await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
       await userEvent.clear(screen.getByRole("spinbutton"));
       await userEvent.type(screen.getByRole("spinbutton"), "5");
@@ -126,7 +130,7 @@ describe("Banner", () => {
       const calls = stubFetch({ ...WRITES, ...answers });
       const reload = vi.fn();
       const onRaise = vi.fn();
-      render(<Banner item={budgeted(limit)} onOpenGate={() => {}} onRaise={onRaise} reload={reload} />);
+      render(<Banner item={budgeted(limit)} onRaise={onRaise} reload={reload} />);
       return { calls, reload, onRaise };
     };
 
@@ -166,7 +170,7 @@ describe("Banner", () => {
     ["failed", "failed"],
     ["waiting", "rate_limit"],
   ])("shows nothing for %s (%s)", (display_status, kind) => {
-    const { container } = render(<Banner item={detail({ display_status: display_status as never, stop: kind ? stop(kind) : null })} onOpenGate={() => {}} onRaise={() => {}} reload={() => {}} />);
+    const { container } = render(<Banner item={detail({ display_status: display_status as never, stop: kind ? stop(kind) : null })} onRaise={() => {}} reload={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

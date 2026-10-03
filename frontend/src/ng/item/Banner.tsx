@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { gateReviewUrl } from "../review/url";
 import { CircleHelp } from "../icons";
 import { Button } from "../ui/Button";
 import { act } from "./actions";
@@ -12,8 +14,9 @@ import { sendOnModEnter } from "../keys";
 const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replace(/\.*$/, "")}.`;
 
 /** The reason banner (Decisions §4): only when the item needs you at a gate
- *  or a cap; the action is the filled button. */
-export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail; onOpenGate: (gate: string) => void; onRaise: () => void; reload: () => void }) {
+ *  or a cap; the action is the filled button. A gate's is Review changes, its review (GR-5). */
+export function Banner({ item, onRaise, reload }: { item: ItemDetail; onRaise: () => void; reload: () => void }) {
+  const navigate = useNavigate();
   const [raising, setRaising] = useState(false);
   useLimitAsked(item.id, () => setRaising(true));
   const stop = item.stop;
@@ -24,7 +27,7 @@ export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
         <span className="item-banner-text">Waiting for your approval at <code>{gate}</code>.</span>
-        <Button variant="primary" onClick={() => onOpenGate(gate)}>Open gate</Button>
+        <Button variant="primary" onClick={() => navigate(gateReviewUrl(item.id, gate))}>Review changes</Button>
       </div>
     );
   }

@@ -7,7 +7,6 @@ import { useStore } from "../../store";
 import type { KraftEvent } from "../../types";
 import { useResizable } from "../graph/useResizable";
 import { acceptWrites, detail, stubFetch } from "../item/testkit";
-import { usePaneMemory } from "../item/Workspace";
 import type { ItemDetail } from "../item/useItem";
 import { answer, ov } from "../item/draft/testkit";
 import type { MarkedOp } from "../item/draft/types";
@@ -48,13 +47,10 @@ afterEach(() => {
 
 describe("Peek", () => {
   it("shows the card the item page would: the gate banner, a failure, a question, a pause", async () => {
-    usePaneMemory.setState({ pane: { open: false, userCollapsed: true } });
     mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" });
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
-    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Open gate" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1?sel=plan_approval");
-    // The item page's pane, collapsed there before, opens on the gate.
-    expect(usePaneMemory.getState().pane).toEqual({ open: true, userCollapsed: false });
+    fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review changes" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
   });
 
   // R11b-05: a waiting item's line said Running.

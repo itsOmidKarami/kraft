@@ -5,6 +5,7 @@ import { repoName } from "../../format";
 import { useStore } from "../../store";
 import type { WorkItem } from "../../types";
 import { act } from "../item/actions";
+import { gateReviewUrl } from "../review/url";
 import { HeaderActions, HeaderTail } from "../shell/HeaderActions";
 import { OLDER_SERVER, olderServer, useHealth } from "../shell/health";
 import { clearFirstRun, FirstRun, savedFirstRun } from "../shell/FirstRun";
@@ -152,14 +153,14 @@ export function BoardPage() {
   }), []);
   const onAction = useCallback(async (item: WorkItem, a: RowAction) => {
     // The gate's review, its brief open beside the diff (the review shows it when the gate has one).
-    if (a.kind === "gate") return open(item.id, `/review?gate=${encodeURIComponent(a.gate)}&doc=1`);
+    if (a.kind === "gate") return navigate(gateReviewUrl(item.id, a.gate));
     if (a.kind === "peek") return peek(item.id, a.tab, a.budget);
     const r = await act.resume(item.id);
     setRowErrors((e) => {
       const { [item.id]: _, ...rest } = e;
       return r.ok ? rest : { ...rest, [item.id]: r.error };
     });
-  }, [open, peek]);
+  }, [navigate, peek]);
 
   // Escape and the peek's own collapse button close it as an outside press
   // does, leaving no rail. Focus the peek held, or left on the
