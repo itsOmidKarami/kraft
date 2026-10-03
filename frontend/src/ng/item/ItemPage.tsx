@@ -50,7 +50,7 @@ function Item({ item, version, reload }: { item: ItemDetail; version: string; re
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
   // Raise cap (the banner's and the header's) opens the budget editor on a budget stop, as the peek's does (R11a-05).
   const raise = () => {
-    if (item.stop?.kind === "budget") openBudgetEditor();
+    if (item.stop?.kind === "budget") openBudgetEditor(item.id);
     settings();
   };
   const threadOf = () => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "task", node: item.stop.node, step: ESCALATION, task: ESCALATION } }));

@@ -95,7 +95,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
         item={item}
         reload={reload}
         onSettings={() => toItem({ sel: { kind: "chain" }, tab: "config" })}
-        onRaise={() => { if (item.stop?.kind === "budget") openBudgetEditor(); toItem({ sel: { kind: "chain" }, tab: "config" }); }}
+        onRaise={() => { if (item.stop?.kind === "budget") openBudgetEditor(item.id); toItem({ sel: { kind: "chain" }, tab: "config" }); }}
         onGate={(gate) => setPlace({ gate, doc: true })}
         onRunLog={() => toItem({ sel: { kind: "chain" } })}
       />

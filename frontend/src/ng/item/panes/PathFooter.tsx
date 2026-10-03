@@ -3,7 +3,7 @@ import { Button } from "../../ui/Button";
 import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
-import { holdsText, sendOnModEnter } from "../../keys";
+import { holdsText, isEscape, sendOnModEnter } from "../../keys";
 import { pausable, retryable, skippable } from "../status";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
@@ -61,7 +61,7 @@ export function PathFooter({ item, path, what, state, reload, extra }: { item: I
   const retry = () => run(act.retry(item.id, { path, ...(steer.trim() ? { steer: steer.trim() } : {}) }));
   // The confirm's own Escape: it closes the confirm, never the pane, and keeps a steer that has text.
   const onKey = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
+    if (!isEscape(e)) return;
     e.preventDefault();
     e.stopPropagation();
     if (!holdsText(e.target)) close();

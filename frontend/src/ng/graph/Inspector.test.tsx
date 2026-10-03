@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { createPortal } from "react-dom";
@@ -49,11 +49,14 @@ describe("Inspector", () => {
     ["a line with text in it", false, <input aria-label="field" defaultValue="0.03" />],
     ["an empty note", true, <textarea aria-label="field" />],
     ["a checkbox", true, <input type="checkbox" aria-label="field" />],
-  ])("Escape in %s: the pane collapses %s", async (_name, collapses, field) => {
+    // An Escape that ends an input method's composition is the field's (Safari sets isComposing).
+    ["an empty note, composing", false, <textarea aria-label="field" />, true],
+  ])("Escape in %s: the pane collapses %s", async (_name, collapses, field, composing = false) => {
     const onCollapse = vi.fn();
     render(<Inspector id="p" open size={docked} title="verification" crumbs={[]} onCollapse={onCollapse} onExpand={() => {}}>{field}</Inspector>);
     screen.getByLabelText("field").focus();
-    await userEvent.keyboard("{Escape}");
+    if (composing) fireEvent.keyDown(screen.getByLabelText("field"), { key: "Escape", isComposing: true });
+    else await userEvent.keyboard("{Escape}");
     expect(onCollapse).toHaveBeenCalledTimes(collapses ? 1 : 0);
     if (!collapses) expect(screen.getByLabelText("field")).toHaveFocus();
   });

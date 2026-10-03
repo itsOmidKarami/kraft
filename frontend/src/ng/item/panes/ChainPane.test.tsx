@@ -76,7 +76,8 @@ describe("ChainConfig", () => {
 
   // R11a-03: the field opened with the caret after the cap, so typing 0.03 saved $100.03.
   // R11b-03: the field that had the focus is gone after Escape, Cancel or a save; ✎ takes it back.
-  it.each(["{Escape}", "Cancel", "7{Enter}"])("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close) => {
+  // A decimal comma is a point: "0,03" left Save off and saved nothing (#504 review).
+  it.each([["{Escape}", null], ["Cancel", null], ["7{Enter}", 7], ["0,03{Enter}", 0.03]] as const)("selects the cap in force on ✎, and hands the focus back to ✎ after %s", async (close, saved) => {
     const calls = stubFetch(WRITES);
     function Editing() {
       const [on, setOn] = useState(false);
@@ -90,7 +91,21 @@ describe("ChainConfig", () => {
     if (close === "Cancel") await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     else await userEvent.keyboard(close);
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit budget" })).toHaveFocus());
-    expect(posts(calls)).toEqual(close === "7{Enter}" ? [{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: 7 } }] : []);
+    expect(posts(calls)).toEqual(saved === null ? [] : [{ method: "PATCH", path: "/work-items/w1", body: { budget_usd: saved } }]);
+  });
+
+  // An item with no budget meter has no ✎: the focus goes back to what opened the editor (Raise cap).
+  it("hands the focus back to what opened the editor when there is no ✎", async () => {
+    stubFetch(WRITES);
+    function Raising() {
+      const [on, setOn] = useState(false);
+      return <><button type="button" onClick={() => setOn(true)}>Raise cap</button><ChainConfig item={detail({ budget_cap: undefined })} policy={null} reload={() => {}} editBudget={on} onEditBudget={setOn} /></>;
+    }
+    render(<Raising />);
+    await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+    expect(screen.getByRole("textbox", { name: "Budget in dollars" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Raise cap" })).toHaveFocus();
   });
 
   it("turns a meter amber past 75% and red at the cap", () => {

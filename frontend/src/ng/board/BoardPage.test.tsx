@@ -112,6 +112,16 @@ describe("BoardPage", () => {
     expect(localStorage.getItem("kraft.firstRun")).toBeNull();
   });
 
+  // The board guide: the wizard shows while no repo is connected, items or not (#504 review).
+  it("keeps first-run while no repo is connected, though items exist", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    put(item("w1", "done"));
+    board();
+    expect(await screen.findByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+    await act(async () => {});
+    expect(screen.getByRole("heading", { name: "Nothing on the board yet" })).toBeInTheDocument();
+  });
+
   it("drops a kept first-run whose repo is no longer connected, and keeps the board", async () => {
     localStorage.setItem("kraft.firstRun", JSON.stringify({ step: 3, reached: 3, path: "/elsewhere/other", name: "other", disabled: false }));
     board();

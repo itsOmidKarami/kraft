@@ -120,6 +120,8 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
     : undefined;
   const cap = limit?.value ?? item.budget_cap?.cap_usd ?? 0;
   const [value, setValue] = useState(String(cap || ""));
+  // A decimal comma, as a comma-decimal locale or iOS's decimal keypad types it, is a point.
+  const amount = Number(value.trim().replace(",", "."));
   const [error, setError] = useState<string | null>(null);
   const send = async (usdCap: number | null) => {
     let r;
@@ -141,10 +143,10 @@ function BudgetEditor({ item, onDone, onCancel }: { item: ItemDetail; onDone: ()
       </div>
       {/* A form, focused on open: Enter saves the typed cap and Escape cancels, so the editor
           Raise cap and ✎ open needs no pointer (R10a-05). */}
-      <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (Number(value) > 0) void send(Number(value)); }}>
+      <form className="item-actions" onSubmit={(e) => { e.preventDefault(); if (amount > 0) void send(amount); }}>
         {/* The cap in force is selected on focus, so what is typed replaces it: typing 0.03 after the caret saved $100.03 (R11a-03). */}
         <label className="item-check">$ <input autoFocus aria-label="Budget in dollars" className="item-input meter-input" inputMode="decimal" value={value} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }} /></label>
-        <Button type="submit" variant="primary" disabled={!(Number(value) > 0)}>Save</Button>
+        <Button type="submit" variant="primary" disabled={!(amount > 0)}>Save</Button>
         <Button onClick={onCancel}>Cancel</Button>
       </form>
       {error && <p className="item-error" role="alert">{error}</p>}
@@ -175,8 +177,14 @@ export function ChainConfig({ item, policy, reload, editBudget, onEditBudget, ap
   // The editor's Escape, Cancel and save hand the focus back to ✎, as an override row's do: the field that had it is gone (R11b-03).
   const pencil = useRef<HTMLButtonElement>(null);
   const refocus = useRef(false);
+  // What had the focus when the editor opened (✎, or a Raise cap outside), read before the field takes it:
+  // with no budget meter there is no ✎ to come back to.
+  const opener = useRef<HTMLElement | null>(editBudget && typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null);
+  const wasEditing = useRef(editBudget);
+  if (editBudget && !wasEditing.current && typeof document !== "undefined") opener.current = document.activeElement as HTMLElement | null;
+  wasEditing.current = editBudget;
   useEffect(() => {
-    if (!editBudget && refocus.current) pencil.current?.focus();
+    if (!editBudget && refocus.current) (pencil.current ?? (opener.current?.isConnected ? opener.current : null))?.focus();
     refocus.current = false;
   }, [editBudget]);
   const closeBudget = () => {

@@ -8,7 +8,7 @@ import { act } from "../actions";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
-import { holdsText, sendOnModEnter } from "../../keys";
+import { holdsText, isEscape, sendOnModEnter } from "../../keys";
 
 type ThreadRow = { id: string; state: string; gate: string | null; node_id: string | null; file_path: string | null; comments?: { body: string }[] };
 
@@ -88,7 +88,7 @@ export function GateFooter({ item, gate, reload, onRead }: { item: ItemDetail; g
     return (
       // Escape closes the note, not the pane, and only when there is no text in it to lose (R11b-02).
       <div className="ip-confirm" role="group" aria-label={`Reject ${gate.id}`} onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
+        if (!isEscape(e)) return;
         e.preventDefault();
         e.stopPropagation();
         if (!holdsText(e.target)) { refocus.current = true; setRejecting(false); }

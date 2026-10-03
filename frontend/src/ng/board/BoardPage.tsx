@@ -102,19 +102,25 @@ export function BoardPage() {
       // or skipped; one whose repo is no longer connected starts over.
       const saved = savedFirstRun();
       if (saved && !r.repos.some((x) => x.path === saved.path)) clearFirstRun();
-      // Items already loaded: no first-run to flash up before the effect below takes it away.
-      if (Object.keys(useStore.getState().workItems).length > 0) return clearFirstRun();
+      // Items already loaded and a repo connected: no first-run to flash up before the effect below takes it away.
+      if (r.repos.length > 0 && Object.keys(useStore.getState().workItems).length > 0) return clearFirstRun();
       setFresh(r.repos.length === 0 || savedFirstRun() != null);
     }).catch(() => {});
     api.getPolicy().then((p) => setArchiveDays(p.archive?.after_days ?? null)).catch(() => {});
   }, []);
 
-  // Any item at all, archived too: the board has something to say, and the wizard's saved step is done with.
+  // Any item at all, archived too, once a repo is connected: the board has something to say, and the
+  // wizard's saved step is done with. With no repo connected the wizard stays, its first step undone.
   const anyItem = Object.keys(itemsById).length > 0;
   useEffect(() => {
     if (!fresh || !anyItem) return;
-    clearFirstRun();
-    setFresh(false);
+    let live = true;
+    api.getRepos().then((r) => {
+      if (!live || r.repos.length === 0) return;
+      clearFirstRun();
+      setFresh(false);
+    }).catch(() => {});
+    return () => void (live = false);
   }, [fresh, anyItem]);
 
   const groups = useMemo(
