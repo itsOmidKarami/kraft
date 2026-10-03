@@ -92,7 +92,10 @@ fixture refuses to answer a `param == "bd"` request against the fake).
     (`support.harness.make_repo`), never built from scratch.
   - `client` — a started `TestClient` on the Kraft app, hermetic under
     `tmp_path`. Options go on `@pytest.mark.api_client(...)`, not on the
-    fixture's own arguments. `client` pulls `tests/api/conftest.py`'s `dist`
+    fixture's own arguments; a table whose rows need different options
+    (a bind, a peer) passes the same dict per row with
+    `parametrize("client", [...], indirect=True)`, merged over the marks.
+    `client` pulls `tests/api/conftest.py`'s `dist`
     fixture itself (`request.getfixturevalue("dist")`) whenever a test also
     lists `dist`, so it works whichever order the two are listed in
     (below).
