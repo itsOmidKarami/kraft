@@ -272,15 +272,18 @@ def running_time(conn, row, *, now: str | None = None) -> dict | None:
     """The work item's running-time clock and cap, as its `time_cap_minutes`
     measures them: the seconds any of its sessions ran since the last human
     retry, and the item-wide cap in minutes (None: no cap). None for an item
-    with no frozen chain."""
+    with no frozen chain, or one whose sessions carry a timestamp the clock
+    can't read: this is for showing, and the item's read must not fail on it."""
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
         return None
-    line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
-    return {
-        "running_s": round(line.running("", line.since)),
-        "cap_minutes": snapshot.work_item_policy().time_cap_minutes,
-    }
+    try:
+        line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
+        running_s = round(line.running("", line.since))
+    except (TypeError, ValueError):
+        logger.debug("running_time: unreadable session timestamps on %s", row["id"], exc_info=True)
+        return None
+    return {"running_s": running_s, "cap_minutes": snapshot.work_item_policy().time_cap_minutes}
 
 
 def _levels(snapshot, path: str) -> list[tuple[str, str]]:
