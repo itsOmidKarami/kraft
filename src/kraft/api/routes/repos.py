@@ -494,8 +494,9 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
             )
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
-    # The whole entry, defaults included, as the answer always was: the
-    # Templates screen round-trips it. Only the file keeps to what was set.
+    # The whole entry, defaults included, as the answer always was:
+    # `kraft repo connect` reads the saved entry back from it, and a client
+    # of the API may read any field. Only the file keeps to what was set.
     full = config_mod.RepoEntry.model_validate(entry, context={"unrecognised_keys_reported": True})
     return full.model_dump_repo()
 
