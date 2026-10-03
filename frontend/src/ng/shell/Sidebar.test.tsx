@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -151,10 +151,8 @@ describe("ng Sidebar", () => {
   it.each<[string, () => Promise<void>, ("pinned" | "rail")?]>([
     ["unpinning with the pin", async () => void (await userEvent.click(screen.getByRole("button", { name: "Pin sidebar" }))), "pinned"],
     ["unpinning with Ctrl+\\", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Control>}\\{/Control}"); }, "pinned"],
-    ["Escape", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Escape}"); }],
     ["the window losing focus", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); act(() => void window.dispatchEvent(new Event("blur"))); }],
     ["choosing a row", async () => void (await userEvent.click(screen.getByRole("link", { name: "Analytics" })))],
-    ["choosing a row from the keyboard", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Enter}"); }],
   ])("leaves an unpinned sidebar open after %s, keeping focus in it", async (_, act_, from = "rail") => {
     localStorage.setItem(SIDEBAR_KEY, from);
     mount();
@@ -162,6 +160,18 @@ describe("ng Sidebar", () => {
     expect(screen.getByRole("button", { name: "Pin sidebar" })).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector(".ng-side")!.attributes).toHaveLength(1);
     expect(document.querySelector(".ng-sidebar")).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  // #502 review (WCAG 1.4.13): shown by focus, an unpinned sidebar could not be dismissed from the
+  // keyboard, and after Enter on a row it stayed over the new page.
+  it.each<[string, () => Promise<void>]>([
+    ["Escape", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Escape}"); }],
+    ["choosing a row from the keyboard", async () => { screen.getByRole("link", { name: "Analytics" }).focus(); await userEvent.keyboard("{Enter}"); }],
+  ])("hands focus to the page after %s on an unpinned sidebar, which hides it", async (_, act_) => {
+    localStorage.setItem(SIDEBAR_KEY, "rail");
+    mount();
+    await act_();
+    await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
   });
 
   it("does not move focus out of a pinned sidebar when a row is clicked", async () => {
@@ -215,16 +225,18 @@ describe("ng Sidebar", () => {
     expect(screen.queryByText(/127\.0\.0\.1|restart|installed/)).toBeNull();
   });
 
-  it.each<[string, object, boolean]>([
-    ["the feed has a newer release", HEALTH, true],
-    ["a newer release is installed and waits on a restart", { ...HEALTH, installed: "0.9.5" }, false],
-    ["the server is too old to report what is installed (R10c-01)", (({ installed: _, ...h }) => h)(HEALTH), false],
-    ["an older release is installed (R10c-03)", { ...HEALTH, installed: "0.9.3" }, false],
-  ])("marks an update in the footer when %s", async (_, health, behind) => {
+  // A restart is what an installed update waits on, and the name says so (#502 review).
+  const AVAILABLE = "Kraft v0.9.4, update available", RESTART = "Kraft v0.9.4, restart to finish the update";
+  it.each<[string, object, boolean, string]>([
+    ["the feed has a newer release", HEALTH, true, AVAILABLE],
+    ["a newer release is installed and waits on a restart", { ...HEALTH, installed: "0.9.5" }, false, RESTART],
+    ["the server is too old to report what is installed (R10c-01)", (({ installed: _, ...h }) => h)(HEALTH), false, RESTART],
+    ["an older release is installed (R10c-03)", { ...HEALTH, installed: "0.9.3" }, false, RESTART],
+  ])("marks an update in the footer when %s", async (_, health, behind, name) => {
     vi.mocked(api.getHealth).mockResolvedValue(health as never);
     vi.mocked(http.request).mockResolvedValue({ status: 200, body: { installed: "0.9.4", latest: "v0.9.9", channel: "stable", behind, checked_at: null } });
     mount("/templates/chains");
-    const foot = await screen.findByRole("link", { name: "Kraft v0.9.4, update available" });
+    const foot = await screen.findByRole("link", { name });
     expect(foot).toHaveAttribute("href", "/settings/about");
     expect(foot).toHaveTextContent(/^v0\.9\.4update$/);
   });

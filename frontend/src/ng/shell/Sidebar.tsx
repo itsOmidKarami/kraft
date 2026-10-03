@@ -29,11 +29,20 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   useEffect(() => {
     request<UpdateState>("/update").then((r) => setBehind(r.status === 200 && r.body.behind === true), () => {});
   }, []);
-  const update = behind || restartPending(health);
+  const restart = restartPending(health);
+  const update = behind || restart;
 
   // Unpinning only changes the mode: an unpinned sidebar is shown while the
   // pointer is over it (or keyboard focus is in it) and hides when it leaves,
-  // all in shell.css. Nothing here closes it.
+  // all in shell.css. Nothing here closes it for the pointer. From the
+  // keyboard, Escape and a row chosen with Enter hand focus to the page, which
+  // hides it: it stayed over the new page until every row was tabbed past (#502 review).
+  const toPage = () => document.getElementById("ng-main")?.focus();
+  const onSideKey = (e: React.KeyboardEvent) => {
+    if (mode !== "rail" || e.key !== "Escape" || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    toPage();
+  };
   const toggle = () => {
     const next = mode === "pinned" ? "rail" : "pinned";
     writeSidebar(next);
@@ -63,6 +72,8 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
         // A templates area has pages under its row (/templates/chains/default), and so has Policy (/settings/policy/loops).
         end={r.group !== "templates" && r.path !== "/settings/policy"}
         aria-label={label}
+        // `detail` 0: Enter, not a click; the pointer's row keeps focus (S4).
+        onClick={(e) => { if (mode === "rail" && e.detail === 0) requestAnimationFrame(toPage); }}
         className={({ isActive }) => `ng-side-row${isActive || (board && location.pathname === "/archived") ? " active" : ""}`}
       >
         <span className="ng-side-ico">
@@ -85,7 +96,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
   return (
     <div className="ng-side">
       <div className="ng-side-edge" aria-hidden />
-      <aside className="ng-sidebar" aria-label="Sidebar">
+      <aside className="ng-sidebar" aria-label="Sidebar" onKeyDown={onSideKey}>
         <div className="ng-side-head">
           <span className={`ng-side-live-dot ${connection === "open" ? "ok" : "warn"}`} role="img" aria-label={connectionWord(connection)} />
           <span className="ng-side-brand ng-side-label">Kraft</span>
@@ -116,7 +127,7 @@ export function Sidebar({ onSearch }: { onSearch?: () => void }) {
         </nav>
         <div className="ng-side-foot">
           {health?.version && (
-            <NavLink to="/settings/about" end className="ng-side-meta" aria-label={`Kraft v${health.version}${update ? ", update available" : ""}`}>
+            <NavLink to="/settings/about" end className="ng-side-meta" aria-label={`Kraft v${health.version}${restart ? ", restart to finish the update" : behind ? ", update available" : ""}`}>
               v{health.version}
               {update && <span className="ng-side-update"><span className="ng-side-dot" />update</span>}
             </NavLink>
