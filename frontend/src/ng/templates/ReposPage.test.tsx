@@ -240,6 +240,22 @@ describe("Repos page: connecting", () => {
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Connect" })).toBeEnabled());
     expect(vi.mocked(http.request).mock.calls.filter(([p]) => p === "/repos/probe")).toHaveLength(2);
     expect(within(dialog).queryByRole("button", { name: "Check again" })).toBeNull();
+    // Check again went with the re-probe: focus is on what comes next, not the page (review L1).
+    expect(within(dialog).getByRole("button", { name: "Connect" })).toHaveFocus();
+  });
+
+  it("re-probes a repo with no commit on Enter in the path field (review L2)", async () => {
+    let commits = 0;
+    vi.mocked(http.request).mockImplementation(((path: string) => (path === "/repos/probe" ? ok(probe(commits++ ? {} : { read_from: null })) : ok([{ id: "default" }]))) as never);
+    mount();
+    await screen.findByRole("listbox", { name: "Repos" });
+    await userEvent.click(screen.getByRole("button", { name: /Connect repo/ }));
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "/src/new{Enter}");
+    const dialog = screen.getByRole("dialog", { name: "Connect a repo" });
+    await within(dialog).findByRole("button", { name: "Check again" });
+    await userEvent.type(screen.getByLabelText("Path to a git repository"), "{Enter}");
+    await waitFor(() => expect(vi.mocked(http.request).mock.calls.filter(([p]) => p === "/repos/probe")).toHaveLength(2));
+    expect(d.postOps).not.toHaveBeenCalled();
   });
 
   it("shows a probe's refusal inline and sends nothing", async () => {

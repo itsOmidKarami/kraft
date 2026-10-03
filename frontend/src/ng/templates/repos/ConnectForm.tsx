@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { detailOf, jsonBody, request } from "../../http";
 import { Button } from "../../ui/Button";
 import type { ConfigDraft } from "../draft/useConfigDraft";
@@ -73,8 +73,14 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Check again goes as it re-probes: focus then lands on what comes next, not the page (review L1).
+  const field = useRef<HTMLInputElement>(null);
+  const again = useRef<HTMLButtonElement>(null);
+  const submit = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
   const check = async () => {
     if (!path.trim() || busy) return;
+    refocus.current = probe?.read_from === null;
     setBusy(true);
     setError(null);
     setProbe(null);
@@ -100,6 +106,12 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
   // A repo with no commit cannot connect yet: Connect stays off with the reason beside it,
   // and Check again (or Enter) reads it again once it has one, without editing the path (R10a-01).
   const noCommit = probe?.read_from === null;
+  useEffect(() => {
+    if (!refocus.current || busy) return;
+    refocus.current = false;
+    const to = noCommit ? again.current : submit.current && !submit.current.disabled ? submit.current : field.current;
+    to?.focus();
+  }, [probe, busy, noCommit]);
   const stopped = !!probe?.stopped?.length;
   const saved = probe ? [probe.test_command, probe.setup_command, ...(probe.test_scopes ?? []).map((s) => s.command)] : [];
   const alsoTest = probe ? others(probe.candidates, "test", saved) : null;
@@ -109,9 +121,11 @@ export function ConnectForm({ draft, known, entries = {}, onDone }: { draft: Con
     <form className="rp-connect" onSubmit={(e) => { e.preventDefault(); void (probe && !noCommit ? connect() : check()); }}>
       <label className="rp-connect-label" htmlFor="rp-connect-path">Path to a git repository</label>
       <div className="rp-connect-line">
-        <input id="rp-connect-path" className="rp-search" autoFocus spellCheck={false} placeholder="~/src/product" value={path} onChange={(e) => { setPath(e.target.value); setProbe(null); setError(null); }} />
-        {noCommit && <Button type="button" disabled={busy} onClick={() => void check()}>Check again</Button>}
-        <Button type="submit" disabled={busy || !path.trim() || noCommit || (!!gains && !Object.keys(gains).length)} aria-describedby={noCommit ? "rp-connect-why" : undefined}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
+        <input ref={field} id="rp-connect-path" className="rp-search" autoFocus spellCheck={false} placeholder="~/src/product" value={path} onChange={(e) => { setPath(e.target.value); setProbe(null); setError(null); }} />
+        {/* While the repo has no commit, Check again is the form's submit, so Enter in the
+            field re-probes: a disabled default button blocks implicit submission (review L2). */}
+        {noCommit && <Button ref={again} type="submit" disabled={busy}>Check again</Button>}
+        <Button ref={submit} type={noCommit ? "button" : "submit"} disabled={busy || !path.trim() || noCommit || (!!gains && !Object.keys(gains).length)} aria-describedby={noCommit ? "rp-connect-why" : undefined}>{gains ? "Update" : probe ? "Connect" : "Check"}</Button>
       </div>
       {noCommit && <p id="rp-connect-why" className="rp-err" role="status">{NO_COMMIT_WHY}</p>}
       {error && <p className="rp-err" role="alert">{error}</p>}

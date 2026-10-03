@@ -165,8 +165,18 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
     return () => clearTimeout(t);
   }, [probe, shown]);
 
+  // Check again goes as it re-probes: focus returns to the path field, where Enter
+  // adds the repo once its rows are read, not to the page (review L1).
+  const pathField = useRef<HTMLInputElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current || probing) return;
+    refocus.current = false;
+    pathField.current?.focus();
+  }, [probing]);
   const doProbe = async () => {
     if (!path.trim() || probing) return;
+    refocus.current = probe?.read_from === null;
     setProbing(true);
     setError(null);
     setProbe(null);
@@ -253,7 +263,7 @@ export function FirstRun({ onDone }: { onDone?: () => void }) {
             <>
               <h2>Connect a repo</h2>
               <Field label="Path to a local git checkout" error={error}>
-                <input value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={!!added}
+                <input ref={pathField} value={path} spellCheck={false} placeholder="/Users/you/code/project" disabled={!!added}
                   onChange={(e) => { setPath(e.target.value); setProbe(null); setShown(0); setError(null); }}
                   onKeyDown={(e) => e.key === "Enter" && (probe && !noCommit ? probed && !added && doAdd() : doProbe())} />
               </Field>

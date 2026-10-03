@@ -94,6 +94,8 @@ describe("FirstRun", () => {
     expect(api.probeRepo).toHaveBeenCalledTimes(2);
     expect(vi.mocked(api.probeRepo).mock.calls[1][0]).toBe("/code/acme");
     expect(screen.queryByText(/No commit yet/)).toBeNull();
+    // Check again went with the re-probe: focus is back in the path field, not on the page (review L1).
+    expect(screen.getByLabelText(/Path to a local git checkout/)).toHaveFocus();
   });
 
   it("reads a repo with no commit again on Enter in the field", async () => {
