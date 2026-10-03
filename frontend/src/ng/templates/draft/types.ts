@@ -30,7 +30,10 @@ export interface Problem {
 
 export interface Change {
   path: string;
-  kind: "add" | "change" | "remove";
+  /** `rename` is a chain the draft moved to a new id, at path `""`, with `from` and `to`. */
+  kind: "add" | "change" | "remove" | "rename";
+  from?: string;
+  to?: string;
   summary: string;
   fields?: string[];
   /** On the library draft: the ids of the chains that use the component. */

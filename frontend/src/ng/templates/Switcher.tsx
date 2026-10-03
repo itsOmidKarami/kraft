@@ -15,7 +15,7 @@ export type SwitchTo = { kind: "switch"; id: string } | { kind: "new"; id: strin
  *  search, every chain with its size and open items, ✓ on the current one,
  *  an amber dot on one with a draft; then New chain and Duplicate, which turn
  *  the menu into the id step. No Delete here. */
-export function Switcher({ chain, onGo, startDup }: { chain: string; onGo: (to: SwitchTo) => void; startDup?: number }) {
+export function Switcher({ chain, renamedTo, onGo, startDup }: { chain: string; renamedTo?: string; onGo: (to: SwitchTo) => void; startDup?: number }) {
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<"list" | "new" | "dup">("list");
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -66,8 +66,8 @@ export function Switcher({ chain, onGo, startDup }: { chain: string; onGo: (to: 
   };
   return (
     <>
-      <button ref={button} type="button" className={`tpl-switch${open ? " is-open" : ""}`} aria-haspopup="dialog" aria-expanded={open} aria-label={`Chain ${chain}, switch chain`} onClick={() => (open ? close() : show("list"))}>
-        {chain} <ChevronDown size={12} aria-hidden />
+      <button ref={button} type="button" className={`tpl-switch${open ? " is-open" : ""}`} aria-haspopup="dialog" aria-expanded={open} aria-label={`Chain ${chain}${renamedTo ? `, renamed to ${renamedTo} in the draft` : ""}, switch chain`} onClick={() => (open ? close() : show("list"))}>
+        {chain}{renamedTo && <> → {renamedTo}</>} <ChevronDown size={12} aria-hidden />
       </button>
       <Popover anchor={button} open={open} onClose={close} role="dialog" label={stage === "list" ? "Switch chain" : stage === "dup" ? `Duplicate ${chain} as` : "New chain id"}>
         {stage === "list" ? (

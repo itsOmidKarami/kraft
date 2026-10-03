@@ -271,8 +271,11 @@ async def publish_draft(area: str, key: str, request: Request):
             raise HTTPException(500, f"published, but applying it failed: {exc}") from exc
         await st.db.write(lambda c: store.delete(c, area, key))
     apply_mod.notify(request.app)
+    # What went out, as the review listed it: `result` is the state after the
+    # publish, which has no draft left to differ (R10b-02).
+    published_changes = result["changes"]
     _, _, result = _state(st, area, key, None, [])
-    return {"published": sorted(draft["files"]), "result": result}
+    return {"published": sorted(draft["files"]), "changes": published_changes, "result": result}
 
 
 @api_router.post("/drafts/{area}/{key}/rebase")

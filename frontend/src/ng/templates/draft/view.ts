@@ -19,6 +19,8 @@ export function liveChainFile(files: Record<string, unknown>, key: string): stri
 }
 
 /** The one file a draft's text edits: the library's, or the chain's (moved by a rename). */
+/** The chain's id as the draft holds it: its key, or the id a `rename` moved it to. */
+export const liveChainId = (files: Record<string, unknown>, key: string): string => liveChainFile(files, key).replace(/^chains\//, "").replace(/\.yaml$/, "");
 export const scopeFile = (files: Record<string, unknown>, scope: Scope): string => (scope.area === "library" ? LIBRARY_FILE : liveChainFile(files, scope.key));
 
 /** The draft's authored mapping: a chain's file, or `library.yaml`; the last that parsed. */

@@ -157,6 +157,26 @@ describe("Chains page: the chain canvas", () => {
     expect(screen.getByRole("button", { name: "Review & publish" })).toBeDisabled();
   });
 
+  it("shows a chain renamed in the draft by its new id, counts the rename and lists it in review (R10b-02)", async () => {
+    const model = DEFAULT_VIEW.result.model["chains/default.yaml"];
+    const renamed: DraftView = {
+      ...view({
+        model: { "chains/default.yaml": null, "chains/verify_tests.yaml": { ...(model as object), id: "verify_tests" } } as never,
+        changes: [{ path: "", kind: "rename", summary: "chain id default → verify_tests · publish moves chains/default.yaml to chains/verify_tests.yaml, and new items name it verify_tests", fields: ["id"], from: "default", to: "verify_tests" }],
+      }),
+      files: { "chains/default.yaml": null as never, "chains/verify_tests.yaml": DEFAULT_VIEW.files["chains/default.yaml"]!.replace("id: default", "id: verify_tests") },
+    };
+    vi.mocked(d.getDraft).mockImplementation(() => ok(renamed));
+    mount();
+    await screen.findByText("DRAFT · 1 CHANGE");
+    expect(screen.getByRole("button", { name: "Chain default, renamed to verify_tests in the draft, switch chain" })).toHaveTextContent("default → verify_tests");
+    expect(screen.getByRole("complementary", { name: "verify_tests pane" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review & publish" }));
+    const pane = await screen.findByRole("complementary", { name: "Draft · 1 change pane" });
+    expect(within(pane).queryByText("No changes.")).toBeNull();
+    expect(within(pane).getByText(/chain id default → verify_tests · publish moves chains\/default.yaml/)).toBeInTheDocument();
+  });
+
   it("reviews on the chain canvas: unchanged nodes fade, changed ones say what, removed ones are ghosts where they stood", async () => {
     vi.mocked(d.getDraft).mockImplementation(() => ok(view({
       changes: [{ path: "implementation.main.implement", kind: "change", summary: "model" }, { path: "plan", kind: "remove", summary: "removed" }],
