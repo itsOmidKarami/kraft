@@ -16,6 +16,8 @@ describe("parentOf", () => {
 
   it("puts a document or the YAML view over its own screen", () => {
     expect(parentOf("/work-items/a/nodes/n?sel=n.s.t&doc=spec")).toBe("/work-items/a/nodes/n?sel=n.s.t");
+    // R10b-10: an attachment read before start sits over its item, as a document does.
+    expect(parentOf("/work-items/a?attached=spec")).toBe("/work-items/a");
     expect(parentOf("/settings/access?yaml=1")).toBe("/settings/access");
   });
 
@@ -45,6 +47,7 @@ describe("backLabel", () => {
     expect(backLabel("/work-items/a/nodes/n?sel=n.s.t")).toBe("Node");
     expect(backLabel("/work-items/a/review")).toBe("Back");
     expect(backLabel("/work-items/a?doc=x")).toBe("Back");
+    expect(backLabel("/work-items/a?attached=spec")).toBe("Back");
     expect(backLabel("/templates/chains")).toBe("More");
     expect(backLabel("/templates/chains/default")).toBe("Chains");
   });
