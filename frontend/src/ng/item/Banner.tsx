@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { gateReviewUrl } from "../review/url";
 import { CircleHelp } from "../icons";
@@ -15,7 +15,7 @@ const sentence = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1).replac
 
 /** The reason banner (Decisions §4): only when the item needs you at a gate
  *  or a cap; the action is the filled button. A gate's is Review changes, its review (GR-5). */
-export function Banner({ item, onRaise, reload }: { item: ItemDetail; onRaise: () => void; reload: () => void }) {
+export function Banner({ item, onRaise, reload, note }: { item: ItemDetail; onRaise: () => void; reload: () => void; note?: ReactNode }) {
   const navigate = useNavigate();
   const [raising, setRaising] = useState(false);
   useLimitAsked(item.id, () => setRaising(true));
@@ -26,7 +26,7 @@ export function Banner({ item, onRaise, reload }: { item: ItemDetail; onRaise: (
     return (
       <div className="item-banner" role="status">
         <span aria-hidden className="item-banner-glyph">✦</span>
-        <span className="item-banner-text">Waiting for your approval at <code>{gate}</code>.</span>
+        <span className="item-banner-text">Waiting for your approval at <code>{gate}</code>.{note && <span className="item-banner-note">{note}</span>}</span>
         <Button variant="primary" onClick={() => navigate(gateReviewUrl(item.id, gate))}>Review changes</Button>
       </div>
     );

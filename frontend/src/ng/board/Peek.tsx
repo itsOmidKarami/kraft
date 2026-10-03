@@ -13,6 +13,7 @@ import { CancelCard } from "../item/header/CancelCard";
 import { EscalateCard, PauseConfirm } from "../item/header/Dialogs";
 import { useDuplicate } from "../item/header/ItemHeader";
 import { useSelect } from "../item/draft/select";
+import { totals, useDiffFiles, useOpenThreads } from "../item/Top";
 import { ChainConfig, ChainOverview } from "../item/panes/ChainPane";
 import { actionPath } from "../item/paths";
 import { openLimitEditor } from "../item/RaiseLimit";
@@ -108,17 +109,31 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
   return (
     <div className="peek-overview">
       <div ref={anchor} className="peek-cards">
-        <Banner item={item} onRaise={onRaise} reload={reload} />
+        <Banner item={item} onRaise={onRaise} reload={reload} note={<GateNote item={item} version={version} />} />
         <StateCard item={item} reload={reload} onCancel={() => setCancelling(true)} onEscalate={() => setEscalating(true)} onDuplicate={duplicate} onOpenNode={openNode} />
         <PausedCard item={item} reload={reload} />
         <QuestionCard item={item} compact={false} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
         {error && <p className="item-error" role="alert">{error}</p>}
       </div>
-      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} />
+      <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where />
       {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
       {escalating && <EscalateCard id={item.id} anchor={anchor} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
   );
+}
+
+/** What the waiting gate decides on, in a line (BD-4): its place among the gates, the change and its open threads. */
+function GateNote({ item, version }: { item: ItemDetail; version: string }) {
+  const files = useDiffFiles(item.id, version, item.worktree_exists === false);
+  const threads = useOpenThreads(item.id, version);
+  const gates = item.chain_definition.nodes.filter((n) => n.kind === "gate").map((n) => n.id);
+  const gate = item.pending_gate ?? item.stop?.node ?? "";
+  const k = gates.indexOf(gate);
+  const place = k < 0 ? "" : k === gates.length - 1 ? `${gate} is the last gate.` : `${gate} is gate ${k + 1} of ${gates.length}.`;
+  const { add, del } = totals(files ?? []);
+  const change = files?.length ? ` ${files.length} ${files.length === 1 ? "file" : "files"}, +${add} −${del}` : "";
+  const open = threads ? `${change ? "," : ""} ${threads} open ${threads === 1 ? "thread" : "threads"}` : "";
+  return <>{place}{change}{open}{change || open ? "." : ""}</>;
 }
 
 const PAGE = 50;

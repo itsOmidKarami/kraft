@@ -81,6 +81,7 @@
 .item-banner.is-question { max-width: 760px; }
 .item-banner-glyph { color: var(--warn); }
 .item-banner-text { flex: 1 1 auto; min-width: 0; }
+.item-banner-note { display: block; margin-top: 2px; font-size: 12px; color: var(--text-sub); }
 .item-banner .btn { flex: none; white-space: nowrap; }
 .item-banner code, .item-card code { font: 12.5px ui-monospace, Menlo, monospace; }
 .item-one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

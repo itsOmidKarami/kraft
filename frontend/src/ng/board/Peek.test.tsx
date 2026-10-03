@@ -26,8 +26,8 @@ function Harness({ start = "overview", budget = false }: { start?: PeekTab; budg
 
 const ev = (seq: number, type: string, node_id: string | null = null): KraftEvent => ({ seq, work_item_id: "w1", type, payload: { node_id }, node_id, created_at: "2026-09-13T09:00:00Z" }) as KraftEvent;
 
-const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[]; draft?: MarkedOp[] } = {}) => {
-  const calls = stubFetch({ ...WRITES, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}], "GET /work-items/w1/draft": answer(opts.draft ?? []) });
+const mount = (over: Partial<ItemDetail>, opts: { start?: PeekTab; budget?: boolean; events?: KraftEvent[]; draft?: MarkedOp[]; answers?: Record<string, [number, unknown]> } = {}) => {
+  const calls = stubFetch({ ...WRITES, ...opts.answers, "GET /work-items/w1": [200, detail(over)], "GET /work-items/w1/events": [200, opts.events ?? []], "GET /policy": [200, {}], "GET /work-items/w1/draft": answer(opts.draft ?? []) });
   render(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
@@ -51,6 +51,17 @@ describe("Peek", () => {
     expect(await screen.findByText(/Waiting for your approval at/)).toBeInTheDocument();
     fireEvent.click(within(document.querySelector<HTMLElement>(".item-banner")!).getByRole("button", { name: "Review changes" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/work-items/w1/review?gate=plan_approval&doc=1");
+  });
+
+  it("explains the waiting gate: its place among the gates, the change, its open threads; and names the chain and repo (BD-4)", async () => {
+    mount({ status: "needs_human", display_status: "needs_you", stop: stop("gate"), pending_gate: "plan_approval" }, { answers: {
+      "GET /work-items/w1/diff": [200, { files: [{ path: "a.py", insertions: 412, deletions: 88 }] }],
+      "GET /work-items/w1/threads": [200, [{ id: "t1", state: "open" }]],
+    } });
+    const banner = await screen.findByText(/Waiting for your approval at/);
+    await waitFor(() => expect(banner).toHaveTextContent("Waiting for your approval at plan_approval.plan_approval is the last gate. 1 file, +412 −88, 1 open thread."));
+    expect(screen.getByText("chain").nextElementSibling).toHaveTextContent(/^default · frozen at intake$/);
+    expect(screen.getByText("repo").nextElementSibling).toHaveTextContent(/^kraft-plugins$/);
   });
 
   // R11b-05: a waiting item's line said Running.

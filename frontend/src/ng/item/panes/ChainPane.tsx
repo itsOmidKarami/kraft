@@ -32,7 +32,7 @@ const RECENT = 5;
 /** The chain pane's Overview (Decisions §5 Chain pane): status, progress,
  *  current (a link), spend, the documents attached at intake (each opens when
  *  the caller can open it) and Recent, whose lines select their node. */
-export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void; onMore?: () => void }) {
+export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore, where }: { item: ItemDetail; events: KraftEvent[]; now: number; onSelect: (node: string) => void; docs?: WorkItemDocument[]; onDoc?: (d: WorkItemDocument) => void; onMore?: () => void; where?: boolean }) {
   const sum = item.summary;
   const cap = item.budget_cap;
   // The last few lines of the story (WI-2); the rest behind a link: the caller's (the peek's Activity) or in place.
@@ -70,6 +70,9 @@ export function ChainOverview({ item, events, now, onSelect, docs, onDoc, onMore
           </div>
         )}
         {cap && <div><dt>spent</dt><dd>{usd(cap.spent_usd)}{cap.cap_usd != null ? ` of ${usd(cap.cap_usd)}` : ""}</dd></div>}
+        {/* Off the item page (the board's peek), which chain and repo: the page's crumb says them there. */}
+        {where && <div><dt>chain</dt><dd>{chainName(item)} · frozen at intake</dd></div>}
+        {where && <div><dt>repo</dt><dd>{repoName(item.repo)}</dd></div>}
       </dl>
       <h3 className="ip-h">Recent</h3>
       {recent.length ? (
