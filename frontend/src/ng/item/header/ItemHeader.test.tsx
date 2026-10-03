@@ -147,6 +147,19 @@ describe("ItemHeader", () => {
       expect(screen.getByRole("button", { name: /^Start$/ })).toHaveFocus();
     });
 
+    it("reads the draft again at Start: one made in another tab since this page read it asks first (R10b-07)", async () => {
+      const answers: Record<string, [number, unknown]> = { ...DRAFT, "GET /work-items/w1/draft": answer([]) };
+      const calls = stubFetch(answers);
+      mount();
+      await waitFor(() => expect(calls.some((c) => c.path === "/work-items/w1/draft")).toBe(true));
+      expect(screen.queryByText(/DRAFT ·/)).toBeNull();
+      // Another tab saves a draft; this page has not read it.
+      answers["GET /work-items/w1/draft"] = answer([ov("implementation", undefined, { budget_usd: 2 })]);
+      await userEvent.click(screen.getByRole("button", { name: /^Start$/ }));
+      expect(await screen.findByRole("dialog", { name: "Start with 1 unapplied change?" })).toBeInTheDocument();
+      expect(sends(calls)).toEqual([]);
+    });
+
     it("Back to editing starts nothing", async () => {
       const calls = stubFetch(DRAFT);
       mount();
