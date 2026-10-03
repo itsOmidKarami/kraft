@@ -5,7 +5,7 @@ reruns is tests/executor/test_retry_scopes.py."""
 from __future__ import annotations
 
 import pytest
-from support.api import _force_node
+from support.api import _force_node, _poll_events, _post_default, _set_status
 
 
 @pytest.fixture
@@ -291,3 +291,18 @@ def test_a_deferred_self_retry_refuses_an_override_out_of_bounds(client, repo, w
 
     assert r.status_code == 422, r.text
     assert _self_retry_requests(client, wid) == []
+
+
+def test_a_retry_on_a_paused_item_is_told_to_resume_instead(client, repo):
+    """R10b-01: retry claims only a stopped item. A paused one used to hear
+    only "work item is not stopped", which named no way on; Resume is it."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
+
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == (
+        "work item is paused, not stopped: resume it instead, or skip what it would run"
+    )

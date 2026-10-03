@@ -664,21 +664,6 @@ def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(client, repo):
     ), "skip left the item claimed with nothing behind it"
 
 
-def test_a_retry_on_a_paused_item_is_told_to_resume_instead(client, repo):
-    """R10b-01: retry claims only a stopped item. A paused one used to hear
-    only "work item is not stopped", which named no way on; Resume is it."""
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
-    _set_status(wid, "paused")
-
-    r = client.post(f"/api/work-items/{wid}/retry", json={})
-
-    assert r.status_code == 409, r.text
-    assert r.json()["detail"] == (
-        "work item is paused, not stopped: resume it instead, or skip what it would run"
-    )
-
-
 def test_resume_of_an_item_that_never_reached_a_node_starts_at_the_chain_head(client, repo):
     """`store.node_index(..., default=0)`'s reason for existing: a paused item
     with a null `current_node_id` has no index to find, and the honest fallback

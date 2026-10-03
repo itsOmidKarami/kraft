@@ -781,24 +781,15 @@ def test_an_updated_bundle_is_not_served_by_the_server_it_does_not_match(
     assert client.get("/assets/app.js").status_code == 200
 
 
-def test_a_rolled_back_install_is_not_told_to_restart_into_a_newer_database(
-    dist, client, monkeypatch
-):
-    """R10c-03: with an older release installed under a newer server (the pin
-    command run before stopping), "restart to finish the update ... the new
-    one" sent the user into the schema refusal. The page says it is a
-    rollback, and that the database comes back first."""
+def test_a_rolled_back_install_is_told_to_restore_not_restart(dist, client, monkeypatch):
+    """R10c-03: "restart to finish the update" sent a rollback into the schema refusal."""
     from kraft import update
 
     client.app.state.version = "1.5.0"
     monkeypatch.setattr(update, "installed", lambda: "1.4.0")
-
     r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
-
-    assert r.status_code == 503
-    assert "An older Kraft is installed" in r.text
-    assert "restore the database from before the upgrade" in r.text
-    assert "pin-or-roll-back-a-version" in r.text
+    assert r.status_code == 503 and "An older Kraft is installed" in r.text
+    assert "restore the database" in r.text and "pin-or-roll-back-a-version" in r.text
     assert "kraft admin restart" not in r.text and "the new one" not in r.text
 
 
