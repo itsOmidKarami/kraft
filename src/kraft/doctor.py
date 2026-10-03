@@ -124,7 +124,8 @@ def _health_checks(payload: dict) -> list[dict]:
         reasons.append(f"invalid policy: {payload['invalid_policy']}")
     if payload.get("invalid_intake"):
         reasons.append(
-            f"invalid intake.yaml, auto-intake and schedules are off: {payload['invalid_intake']}"
+            f"invalid intake.yaml, auto-intake and its schedules are off (a trigger left in "
+            f"policy.yaml still fires): {payload['invalid_intake']}"
             if payload.get("intake_off")
             else f"invalid intake.yaml, not applied: the running auto-intake and schedules are "
             f"kept; fix the file and reload: {payload['invalid_intake']}"
@@ -304,29 +305,13 @@ def _why_it_stayed(key: str, data: dict) -> str:
     moving = len(triggers) - len(refused)
     out = f"; the next start moves {moving} of them" if moving else ""
     for index, why in refused.items():
-        skipped = (
-            " and is skipped, as 1.4 never ran it" if _cron_out_of_range(triggers[index]) else ""
-        )
+        note = policy_mod.skipped_trigger(triggers[index])
+        skipped = f" and is skipped, {note}" if note else ""
         out += (
             f"; triggers.{index} stays because intake.yaml's schedules refuse {why}{skipped}"
             ": fix it and restart"
         )
     return out
-
-
-def _cron_out_of_range(entry: object) -> bool:
-    """A 1.4 trigger whose cron names a value past its field: loaded, never run
-    (`policy._triggers`)."""
-    cron = entry.get("cron") if isinstance(entry, dict) else None
-    if not isinstance(cron, str):
-        return False
-    try:
-        policy_mod._cron_fields("cron", cron)
-    except policy_mod.CronRangeError:
-        return True
-    except policy_mod.PolicyError:
-        return False
-    return False
 
 
 def _moved_keys_check(templates: Path) -> dict:

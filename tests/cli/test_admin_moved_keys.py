@@ -24,6 +24,7 @@ OTHER = {**SCHEDULE, "title": "monthly"}
         "a-trigger-intake-would-refuse",
         "one-refused-the-rest-move",
         "a-1.4-cron-out-of-range-stays",
+        "a-1.4-cron-in-other-digits-stays",
         "an-intake-that-does-not-load",
         "symlinked-files",
         "nothing-to-move",
@@ -33,7 +34,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     """A schedule already carried is not added twice (a start interrupted
     between the two writes, or a home with both keys). A trigger 1.4 fired
     but 2.0's schedule refuses (an `enabled: false`), or an `intake.yaml`
-    that would not load, leaves the triggers where they are, still read: an
+    that would not load, leaves the triggers where they are, and the line
+    says which are still read and which skipped (a 1.4 cron): an
     `intake.yaml` that fails turns every schedule in it off. A symlinked file
     is written where it points. A home with nothing to move is not written.
     A schedule is compared as one (Settings writes `description: ''`), and
@@ -52,6 +54,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
         triggers = [{**SCHEDULE, "enabled": False}, OTHER]
     elif case == "a-1.4-cron-out-of-range-stays":
         triggers = [{**SCHEDULE, "cron": "0 24 * * *"}, OTHER]
+    elif case == "a-1.4-cron-in-other-digits-stays":
+        triggers = [{**SCHEDULE, "cron": "\u00b2 9 * * 1"}, OTHER]
     elif case == "an-intake-that-does-not-load":
         intake["interval_s"] = "often"
     elif case == "nothing-to-move":
@@ -75,15 +79,26 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     if case in ("a-trigger-intake-would-refuse", "an-intake-that-does-not-load"):
         assert after["policy.yaml"]["triggers"] == triggers
         assert "schedules" not in after["intake.yaml"]
-        assert lines and "left where they are" in lines[0]
+        assert lines and "left where they are" in lines[0] and "still read" in lines[0]
     elif case == "nothing-to-move":
         assert lines == []
         assert {n: (files / n).stat().st_ino for n in before} == before  # not replaced
-    elif case in ("one-refused-the-rest-move", "a-1.4-cron-out-of-range-stays"):
+    elif case.startswith(("one-refused", "a-1.4-cron")):
         assert after["policy.yaml"]["triggers"] == triggers[:1]
         assert after["intake.yaml"]["schedules"] == [OTHER]
-        why = "triggers.0.enabled" if case.startswith("one") else "hour 24 is outside 0-23"
-        assert why in lines[1] and "next start moves them" in lines[1]
+        why, read = {
+            "one-refused-the-rest-move": ("triggers.0.enabled", "triggers.0 still read"),
+            "a-1.4-cron-out-of-range-stays": (
+                "hour 24 is outside 0-23",
+                "triggers.0 skipped, as 1.4 never ran it",
+            ),
+            "a-1.4-cron-in-other-digits-stays": (
+                "is not the digits 0-9",
+                "triggers.0 skipped, as a cron number is the digits 0-9",
+            ),
+        }[case]
+        assert why in lines[1] and read in lines[1] and "next start moves them" in lines[1]
+        assert "still read" not in lines[1] or case.startswith("one")
     else:
         assert "triggers" not in after["policy.yaml"]
         schedules = [{"description": ""} if case.endswith("settings") else {}, {}]

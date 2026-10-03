@@ -316,6 +316,23 @@ def _merge_into(old: Path, home: Path) -> list[str]:
     return moved
 
 
+def _stayed(triggers: list) -> str:
+    """Which of the `policy.yaml` triggers a start left there are still read
+    and which `policy._triggers` skips, and why, numbered as the file then
+    holds them."""
+    from kraft.policy import skipped_trigger
+
+    read, skipped = [], {}
+    for index, trigger in enumerate(triggers):
+        if note := skipped_trigger(trigger):
+            skipped.setdefault(note, []).append(f"triggers.{index}")
+        else:
+            read.append(f"triggers.{index}")
+    parts = [f"{', '.join(read)} still read"] if read else []
+    parts += [f"{', '.join(names)} skipped, {note}" for note, names in skipped.items()]
+    return "; ".join(parts)
+
+
 def carry_moved_keys(config_dir: Path) -> list[str]:
     """Move what 2.0 reads from another file: `intake.yaml`'s `max_concurrent`
     into `policy.yaml` (unless it already sets one), and `policy.yaml`'s
@@ -327,8 +344,9 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
     comments stay, and through a symlink to wherever the file really is; a
     moved trigger takes its own comments with it. A trigger moves only if
     2.0's schedule takes it: 1.4 ignored a key it refuses (an `enabled:
-    false`), so that one stays, still read and fired, and the line says why;
-    the rest move. None move unless `intake.yaml` then still loads
+    false`), so that one stays, still read and fired; the line says why, and
+    which of those that stay are read and which skipped (`_stayed`). The
+    rest move. None move unless `intake.yaml` then still loads
     (`config.Intake`): one that fails turns auto-intake off with every
     schedule in it. Only the entries `schedules:` lacks are added, compared
     as schedules (a missing `description` is an empty one), and
@@ -396,8 +414,8 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
             why = e.errors()[0]
             where = ".".join(str(p) for p in why["loc"])
             moved.append(
-                f"policy.yaml: triggers left where they are, still read: intake.yaml "
-                f"would not load with them ({where}: {why['msg']})"
+                f"policy.yaml: triggers left where they are ({_stayed(triggers)}): "
+                f"intake.yaml would not load with them ({where}: {why['msg']})"
             )
         else:
             nodes = preserve.carried(policy_text, "triggers")
@@ -418,8 +436,8 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
                 )
             if stay:
                 moved.append(
-                    f"policy.yaml: {len(stay)} trigger(s) left where they are, still read: "
-                    f"intake.yaml's schedules refuse them "
+                    f"policy.yaml: {len(stay)} trigger(s) left where they are "
+                    f"({_stayed(stay)}): intake.yaml's schedules refuse them "
                     f"({schedule_refusal(stay, 'triggers')}); fix that and the next start "
                     "moves them"
                 )
