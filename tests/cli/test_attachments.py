@@ -67,7 +67,9 @@ def test_view_docs_lists_and_prints_what_an_unstarted_item_was_filed_with(
     app, capsys, monkeypatch, make_item, repo
 ):
     """Before it starts, nothing is indexed: `view docs` printed "(nothing)",
-    though the item had a spec, and no verb could print it (R10F-06)."""
+    though the item had a spec, and no verb could print it (R10F-06). It lists
+    the stored copy under 1.4's `attachment:<id>:spec` id, which `view doc`
+    reads again (R11F-02)."""
     wid = make_item(repo)
     (repo / "s.md").write_text("---\ntitle: My spec\n---\n# The spec\n")
     monkeypatch.chdir(repo)
@@ -76,9 +78,10 @@ def test_view_docs_lists_and_prints_what_an_unstarted_item_was_filed_with(
 
     cli.main(["view", "docs", wid])
     out = capsys.readouterr().out
-    assert "attached when it was filed:" in out and "spec  s.md" in out
-    assert f"read one: kraft view docs {wid} --attachment spec" in out
+    assert f"attachment:{wid}:spec" in out and "My spec" in out and "s.md" in out
     assert "(nothing)" not in out
+    cli.main(["view", "doc", f"attachment:{wid}:spec", "--no-pager"])
+    assert capsys.readouterr().out == "# The spec\n\n"
 
     cli.main(["view", "docs", wid, "--attachment", "spec", "--no-pager"])
     assert capsys.readouterr().out == "# The spec\n\n"
@@ -90,12 +93,21 @@ def test_view_docs_lists_and_prints_what_an_unstarted_item_was_filed_with(
     assert "no plan attached" in capsys.readouterr().err
 
 
-def test_view_docs_json_is_still_the_indexed_documents(app, capsys, monkeypatch, make_item, repo):
-    """`--json` prints the documents route's answer and nothing else."""
+def test_view_docs_json_lists_what_the_human_form_does(app, capsys, monkeypatch, make_item, repo):
+    """`--json` printed `[]` for an item not started yet while the human form
+    listed its spec, and 1.4 had listed it in both (R11F-02)."""
     wid = make_item(repo)
     (repo / "s.md").write_text("# The spec\n")
     monkeypatch.chdir(repo)
     cli.main(["item", "set-attachments", wid, "--spec", "s.md", "--json"])
     capsys.readouterr()
     cli.main(["view", "docs", wid, "--json"])
-    assert json.loads(capsys.readouterr().out) == []
+    (doc,) = json.loads(capsys.readouterr().out)
+    assert (doc["document_id"], doc["path"], doc["title"], doc["attachment_kind"]) == (
+        f"attachment:{wid}:spec",
+        "s.md",
+        "The spec",
+        "spec",
+    )
+    cli.main(["view", "doc", doc["document_id"], "--json"])
+    assert json.loads(capsys.readouterr().out)["content"] == "# The spec\n"
