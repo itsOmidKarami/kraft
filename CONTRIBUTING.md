@@ -96,7 +96,7 @@ see. Read one as "this was discussed"; the text beside it says what matters.
 Don't add new ones: cite a GitHub issue or pull request number instead.
 
 The frontend, its tests and its sweep carry a second set of references of the
-same kind. **UX V2** is the design programme behind the 1.5 interface;
+same kind. **UX V2** is the design programme behind the 2.0 interface;
 **ux2-W\<n>** (often written just `W<n>` in a comment) is one of its numbered
 waves of work; **spec §n**, **brief**, **Decided n**, **R\<n>** and
 **Ruling n** are a numbered section, decision or review finding in that

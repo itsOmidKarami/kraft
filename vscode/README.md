@@ -79,10 +79,11 @@ startup.
 
 ## Requirements
 
-- Kraft running on the same machine (`kraft`, or `kraft admin start`). The
-  extension and Kraft must be on the same release line: if Kraft's version does
-  not match, the extension turns read-only, and the board still updates while
-  every action is disabled.
+- Kraft running on the same machine (`kraft`, or `kraft admin start`), on the
+  extension's major release and at least its minor: the 2.0 extension needs
+  Kraft 2.0 or a later 2.x. Against any other Kraft the extension turns
+  read-only: the board still updates, every action is disabled, and the status
+  bar's tooltip says whether to update Kraft or the extension.
 - [Red Hat YAML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml)
   for completion in config files. The extension offers it once if it is missing.
 

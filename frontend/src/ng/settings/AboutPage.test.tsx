@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { AboutPage, updateVerdict, type UpdateState } from "./AboutPage";
 
-const UPDATE: UpdateState = { installed: "1.4.0", latest: "v1.5.0", channel: "stable", behind: true, checked_at: new Date(Date.now() - 3_600_000).toISOString() };
+const UPDATE: UpdateState = { installed: "1.4.0", latest: "v2.0.0", channel: "stable", behind: true, checked_at: new Date(Date.now() - 3_600_000).toISOString() };
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 let served: () => Response;
@@ -33,34 +33,34 @@ describe("updateVerdict", () => {
   it("says up to date only when the feed answered and nothing is newer", () => {
     expect(updateVerdict({ ...UPDATE, latest: "v1.4.0", behind: false }).text).toBe("up to date");
   });
-  it("names the newer release", () => expect(updateVerdict(UPDATE).text).toBe("v1.5.0 is available"));
+  it("names the newer release", () => expect(updateVerdict(UPDATE).text).toBe("v2.0.0 is available"));
 });
 
 describe("ng AboutPage", () => {
   it("shows the installed version, the newer one, and the command to run", async () => {
     render(<AboutPage />);
-    expect(await screen.findByText("v1.5.0 is available")).toBeInTheDocument();
+    expect(await screen.findByText("v2.0.0 is available")).toBeInTheDocument();
     expect(screen.getByText("1.4.0")).toBeInTheDocument();
     expect(screen.getByText("kraft admin update")).toBeInTheDocument();
     expect(screen.getByText("ok · all chains and policy valid")).toBeInTheDocument();
   });
 
   it("says to restart when an update was installed under this running server", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.4.0", installed: "1.5.0" });
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.4.0", installed: "2.0.0" });
     render(<AboutPage />);
-    expect(await screen.findByText(/This server is still running 1\.4\.0, and 1\.5\.0 is installed/)).toHaveTextContent("kraft admin restart");
+    expect(await screen.findByText(/This server is still running 1\.4\.0, and 2\.0\.0 is installed/)).toHaveTextContent("kraft admin restart");
   });
 
   it("says to restart when the server is too old to report what is installed (R10c-01)", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.5.0rc14" });
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.4.0" });
     render(<AboutPage />);
     expect(await screen.findByText(/This server runs a release older than the Kraft installed/)).toHaveTextContent("kraft admin restart");
   });
 
   it("says a rollback needs the database restored, not a restart (R10c-03)", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "1.5.0", installed: "1.4.0" });
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", invalid_templates: {}, invalid_policy: [], version: "2.0.0", installed: "1.4.0" });
     render(<AboutPage />);
-    const note = await screen.findByText(/An older Kraft, 1\.4\.0, is installed under this 1\.5\.0 server/);
+    const note = await screen.findByText(/An older Kraft, 1\.4\.0, is installed under this 2\.0\.0 server/);
     expect(note).toHaveTextContent("restore the database from before the upgrade");
     expect(note).not.toHaveTextContent("kraft admin restart");
   });
@@ -75,7 +75,7 @@ describe("ng AboutPage", () => {
 
   it("checks now with a POST, and says unknown with the reason when the server cannot ask", async () => {
     render(<AboutPage />);
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     served = () => reply(502, { detail: "feed unreachable" });
     await userEvent.click(screen.getByRole("button", { name: "Check now" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("feed unreachable");
@@ -85,7 +85,7 @@ describe("ng AboutPage", () => {
 
   it("asks a chosen channel and names it in the command", async () => {
     render(<AboutPage />);
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     served = () => reply(200, { ...UPDATE, channel: "beta", latest: "v1.6.0b1" });
     await userEvent.click(screen.getByRole("radio", { name: "beta" }));
     await waitFor(() => expect(calls).toContain("GET /update?channel=beta"));
@@ -96,11 +96,11 @@ describe("ng AboutPage", () => {
     const write = vi.fn(async (_text: string) => {});
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: write }, userAgent: "jsdom" });
     render(<AboutPage />);
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     screen.getByRole("button", { name: "Copy diagnostics" }).focus();
     await userEvent.keyboard("{Enter}");
     expect(write).toHaveBeenCalledWith(expect.stringContaining("kraft 1.4.0 (stable)"));
-    expect(write.mock.calls[0][0]).toContain("update: v1.5.0 is available");
+    expect(write.mock.calls[0][0]).toContain("update: v2.0.0 is available");
     await userEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(write).toHaveBeenLastCalledWith("kraft admin update");
   });
@@ -149,7 +149,7 @@ describe("ng AboutPage", () => {
     const version = await screen.findByRole("region", { name: "Version" });
     expect(version).toHaveClass("set-about-version");
     expect(version.querySelector(".set-version-channel")).toHaveTextContent("stable");
-    expect(within(version).getByRole("status")).toHaveTextContent("v1.5.0 is available");
+    expect(within(version).getByRole("status")).toHaveTextContent("v2.0.0 is available");
     expect(within(version).getByText("kraft admin update")).toBeInTheDocument();
     const rows = (await screen.findByText("Health")).closest("dl") as HTMLElement;
     expect([...rows.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Health", "Address", "Run directory", "Process", "Search index"]);

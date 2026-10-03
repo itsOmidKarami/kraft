@@ -546,7 +546,7 @@ def _duplicate_attachments(row) -> list[dict]:
                 409,
                 f"cannot duplicate: Kraft no longer has this item's {a['kind']} "
                 f"({src or a['path']}). Abandoning an item deletes its attachments, and "
-                "so did archiving one on an earlier 1.5 pre-release. "
+                "so did archiving one on a 1.5.0 release candidate. "
                 f"File a new item and attach the {a['kind']} again.",
             )
         out.append({"kind": a["kind"], "path": a["path"], "source": src})

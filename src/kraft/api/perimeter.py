@@ -71,7 +71,7 @@ def spa_shell(request: Request, dist, headers: dict[str, str] | None = None):
     `kraft admin update` replaces the installed package, `_bundled/web`
     included, under a server that keeps running until it is restarted. The new
     interface against the old API misreads it (a 1.4 server's board, drawn by
-    1.5's interface, put every item under RUNNING), so the shell is refused. A
+    2.0's interface, put every item under RUNNING), so the shell is refused. A
     hashed asset is still served as is: its name is its content, and a tab
     already open on this server's own interface keeps working."""
     headers = {"cache-control": "no-store", **(headers or {})}

@@ -78,5 +78,13 @@
   "labels": [
    "release::patch"
   ]
+ },
+ {
+  "number": 489,
+  "title": "Kraft 2.0: the major release, its notes and its name",
+  "body": "The next release is a major one, 2.0.0: the version, the notes layout and every place \"1.5\" meant it.\n\n## Changelog\n\n- This release is 2.0.0, not 1.5.0: see **Upgrading from 1.4** under Highlights.\n\n## Testing\n\nAbridged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "labels": [
+   "release::major"
+  ]
  }
 ]

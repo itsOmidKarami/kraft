@@ -57,7 +57,7 @@ afterEach(() => {
 
 describe("BoardPage, against a server older than its interface (R10c-01)", () => {
   it("says over the board to restart when /health has a version but no installed", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "1.5.0rc14" } as never);
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "1.4.0" } as never);
     put(item("w1", "running"));
     board();
     const banner = await screen.findByRole("alert");
@@ -66,7 +66,7 @@ describe("BoardPage, against a server older than its interface (R10c-01)", () =>
   });
 
   it("says nothing when the server reports what is installed", async () => {
-    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "1.5.0", installed: "1.5.0" } as never);
+    vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", version: "2.0.0", installed: "2.0.0" } as never);
     put(item("w1", "running"));
     board();
     await screen.findByText("Item w1");

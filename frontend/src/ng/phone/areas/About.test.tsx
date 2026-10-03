@@ -6,7 +6,7 @@ import * as api from "../../../api";
 import { Toaster } from "../nav/Toaster";
 import { AboutScreen, updateVerdict } from "./About";
 
-const UPDATE = { installed: "1.4.0", latest: "v1.5.0", channel: "stable", behind: true as boolean | null, checked_at: new Date(Date.now() - 3_600_000).toISOString() as string | null };
+const UPDATE = { installed: "1.4.0", latest: "v2.0.0", channel: "stable", behind: true as boolean | null, checked_at: new Date(Date.now() - 3_600_000).toISOString() as string | null };
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 let served: () => Response;
 let calls: string[];
@@ -33,13 +33,13 @@ describe("updateVerdict", () => {
   it("says up to date only when the feed answered and nothing is newer", () => {
     expect(updateVerdict({ ...UPDATE, latest: "v1.4.0", behind: false }).text).toBe("up to date");
   });
-  it("names the newer release", () => expect(updateVerdict(UPDATE).text).toBe("v1.5.0 is available"));
+  it("names the newer release", () => expect(updateVerdict(UPDATE).text).toBe("v2.0.0 is available"));
 });
 
 describe("About (O.5)", () => {
   it("shows the installed version and channel, the newer release, and the command to run", async () => {
     show();
-    expect(await screen.findByText("v1.5.0 is available")).toBeInTheDocument();
+    expect(await screen.findByText("v2.0.0 is available")).toBeInTheDocument();
     expect(screen.getByText("1.4.0")).toBeInTheDocument();
     expect(screen.getAllByText("stable").length).toBeGreaterThan(0);
     expect(screen.getByText("kraft admin update")).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("About (O.5)", () => {
 
   it("Check now posts, and says why when the server cannot ask", async () => {
     show();
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     served = () => reply(502, { detail: "feed unreachable" });
     await userEvent.click(screen.getByRole("button", { name: /^Check now/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("feed unreachable");
@@ -72,7 +72,7 @@ describe("About (O.5)", () => {
 
   it("asks the chosen channel's feed", async () => {
     show();
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     served = () => reply(200, { ...UPDATE, channel: "beta", latest: "v1.6.0b1" });
     await userEvent.click(screen.getByRole("button", { name: /^channel/ }));
     await userEvent.click(screen.getByRole("radio", { name: "beta" }));
@@ -84,7 +84,7 @@ describe("About (O.5)", () => {
     const write = vi.fn(async (_text: string) => {});
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: write }, userAgent: "jsdom" });
     show();
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     await userEvent.click(screen.getByRole("button", { name: /^Copy the command/ }));
     expect(write).toHaveBeenCalledWith("kraft admin update");
     vi.stubGlobal("navigator", { ...navigator, clipboard: undefined, userAgent: "jsdom" });
@@ -95,7 +95,7 @@ describe("About (O.5)", () => {
 
   it("has no install control", async () => {
     show();
-    await screen.findByText("v1.5.0 is available");
+    await screen.findByText("v2.0.0 is available");
     expect(screen.queryByRole("button", { name: /^(install|update now|upgrade)/i })).toBeNull();
   });
 });

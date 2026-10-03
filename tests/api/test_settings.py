@@ -125,7 +125,7 @@ def test_startup_converts_an_old_palette_and_keeps_the_look(tmp_path, monkeypatc
     )
     assert body["derived"] is False
     assert "palette" not in yaml.safe_load(theme.read_text())
-    assert (templates_dir / "theme.yaml.pre-1.5").read_text() == "palette: forest\nmode: light\n"
+    assert (templates_dir / "theme.yaml.pre-2.0").read_text() == "palette: forest\nmode: light\n"
 
 
 def test_put_theme_echo_of_a_derived_get_stays_derived(client, templates_dir):

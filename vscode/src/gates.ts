@@ -25,7 +25,7 @@ export function registerGates(
   const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const guard = () => {
-    if (readOnly()) void vscode.window.showWarningMessage("Kraft is read-only: the daemon's version does not match this extension.");
+    if (readOnly()) void vscode.window.showWarningMessage("Kraft is read-only: this server's version does not work with this extension. Hover Kraft in the status bar to see which one to update.");
     return !readOnly();
   };
 

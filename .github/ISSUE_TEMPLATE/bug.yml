@@ -23,7 +23,7 @@ body:
     attributes:
       label: Kraft version
       description: The output of `kraft --version`.
-      placeholder: kraft 1.5.0
+      placeholder: kraft 2.0.0
     validations:
       required: true
   - type: textarea

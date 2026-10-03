@@ -1,3 +1,7 @@
+### Breaking changes
+
+- This release is 2.0.0, not 1.5.0: see **Upgrading from 1.4** under Highlights. (#489)
+
 ### New
 
 - Kraft's plugin now installs on Cursor (`agent plugin marketplace add https://github.com/itsOmidKarami/kraft`, then `/plugins`) and on Antigravity (`agy plugin import` from a clone), with its skills and the `kraft` MCP server. Amp can add the skills with `amp skill add`. (#342)

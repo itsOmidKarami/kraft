@@ -179,28 +179,36 @@ def test_a_highlighted_release_none_pr_fails_the_release_by_number():
 
 
 def test_no_highlight_leaves_real_notes_byte_identical(tmp_path, capsys):
-    """Ten 1.5.0 PRs in the shape release.yml's jq writes, their bodies abridged
-    around a verbatim `## Changelog`, and the notes the pre-highlight code writes
-    (since R10h-06, with the PR's number on every bullet of a group)."""
+    """Ten PRs of the 1.5.0 candidates and the one that made the release 2.0,
+    in the shape release.yml's jq writes, their bodies (as they stood then)
+    abridged around a verbatim `## Changelog`, and the notes the pre-highlight
+    code writes (since R10h-06, with the PR's number on every bullet of a
+    group). The one `release::major` makes v1.4.0's next release v2.0.0."""
     notes = tmp_path / "notes.md"
-    plan_release.main(["plan", "v1.4.0", str(_FIXTURES / "prs-1.5.0.json"), str(notes)])
-    assert capsys.readouterr().out == "v1.5.0\n"
-    assert notes.read_bytes() == (_FIXTURES / "notes-1.5.0.md").read_bytes()
+    plan_release.main(["plan", "v1.4.0", str(_FIXTURES / "prs-2.0.0.json"), str(notes)])
+    assert capsys.readouterr().out == "v2.0.0\n"
+    assert notes.read_bytes() == (_FIXTURES / "notes-2.0.0.md").read_bytes()
 
 
 def test_a_highlight_lifts_one_real_entry_out_of_new():
-    prs = json.loads((_FIXTURES / "prs-1.5.0.json").read_text())
+    prs = json.loads((_FIXTURES / "prs-2.0.0.json").read_text())
     before = plan_release.release_notes(prs)
     redesign = next(p for p in prs if p["number"] == 400)
     redesign["labels"].append("notes::highlight")
     entry = plan_release.changelog_entry(redesign)
     after = plan_release.release_notes(prs)
-    assert after.startswith(f"### Highlights\n\n{entry}\n\n### New\n\n")
+    assert after.startswith(f"### Highlights\n\n{entry}\n\n### Breaking changes\n\n")
     assert after.count(entry) == 1
     assert after.replace(f"### Highlights\n\n{entry}\n\n", "") == before.replace(f"\n\n{entry}", "")
 
 
 _PRE = "This is a pre-release. Install it with"
+_KEEP = (
+    "using the Python you installed Kraft with and leaving out `[vector]` if you don't use "
+    "vector search, then run `kraft admin restart`. From 1.5.0rc14 on, "
+)
+_WHEEL = "https://github.com/itsOmidKarami/kraft/releases/download"
+_VSIX = "The VS Code extension on the Marketplace stays at the last release"
 
 
 @pytest.mark.parametrize(
@@ -208,18 +216,26 @@ _PRE = "This is a pre-release. Install it with"
     [
         (
             "v1.5.0rc2",
-            f"{_PRE} `kraft admin update --channel rc`, "
-            'or `uv tool install --force "kraft-sdlc==1.5.0rc2"`.',
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector]==1.5.0rc2"`, '
+            f"{_KEEP}`kraft admin update --channel rc` installs it too, keeping both. "
+            f"{_VSIX} until 1.5.0 ships: install the `kraft-1.5.0rc2.vsix` attached below with "
+            "`code --install-extension kraft-1.5.0rc2.vsix`.",
         ),
         (
             "v1.5.0b1",
-            f"{_PRE} `kraft admin update --channel beta`, "
-            "or `uv tool install --force` the wheel attached below.",
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
+            f'{_WHEEL}/v1.5.0b1/kraft_sdlc-1.5.0b1-py3-none-any.whl"`, '
+            f"{_KEEP}`kraft admin update --channel beta` installs it too, keeping both. "
+            f"{_VSIX} until 1.5.0 ships: install the `kraft-1.5.0b1.vsix` attached below with "
+            "`code --install-extension kraft-1.5.0b1.vsix`.",
         ),
         (
             "v1.5.0a3",
-            f"{_PRE} `kraft admin update --channel alpha`, "
-            "or `uv tool install --force` the wheel attached below.",
+            f'{_PRE} `uv tool install --force --python 3.13 "kraft-sdlc[vector] @ '
+            f'{_WHEEL}/v1.5.0a3/kraft_sdlc-1.5.0a3-py3-none-any.whl"`, '
+            f"{_KEEP}`kraft admin update --channel alpha` installs it too, keeping both. "
+            f"{_VSIX} until 1.5.0 ships: install the `kraft-1.5.0a3.vsix` attached below with "
+            "`code --install-extension kraft-1.5.0a3.vsix`.",
         ),
     ],
 )
@@ -227,6 +243,46 @@ def test_a_pre_release_says_how_to_install_it_above_its_notes(tag, line):
     """Only an rc is on PyPI; a beta or alpha points at its release's own wheel."""
     notes = "### Highlights\n\n- the headline (#1)\n\n### Fixes\n\n- a fix (#2)\n"
     assert plan_release.release_body(tag, notes) == f"{line}\n\n{notes}"
+
+
+@pytest.mark.parametrize("mark", ["rc", "b", "a"])
+def test_a_pre_release_leads_with_the_install_that_keeps_vector_and_the_python(mark):
+    """1.4's `kraft admin update` installs a new release without `[vector]` and
+    on uv's default Python, which the upgrade notes warn about, so it may not
+    be the first way the notes offer. The `uv` command that keeps both is, and
+    `kraft admin update` follows, for the installs whose update keeps them."""
+    body = plan_release.release_body(f"v2.0.0{mark}1", "- x (#1)\n")
+    uv, update = body.index("`uv tool install"), body.index("`kraft admin update")
+    assert uv < update
+    assert '"kraft-sdlc[vector]' in body[uv:update] and "--python 3.13" in body[uv:update]
+    assert "From 1.5.0rc14 on, `kraft admin update" in body
+
+
+def test_a_new_majors_pre_release_says_the_marketplace_extension_is_read_only():
+    """The extension needs the server's own major, so against 2.0.0rc1 the
+    Marketplace's 1.x one only reads; against a minor's pre-release it works,
+    and only the newer `.vsix` is offered."""
+    major = plan_release.release_body("v2.0.0rc1", "")
+    assert (
+        f"{_VSIX} until 2.0.0 ships and is read-only against this one: install the "
+        "`kraft-2.0.0rc1.vsix` attached below with `code --install-extension kraft-2.0.0rc1.vsix`."
+    ) in major
+    assert "read-only" not in plan_release.release_body("v2.1.0rc1", "")
+
+
+def test_the_vsix_a_pre_release_names_is_the_one_release_yml_attaches():
+    text = (_DEV.parent / ".github" / "workflows" / "release.yml").read_text()
+    assert '--out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"' in text
+    assert "`kraft-2.0.0rc1.vsix`" in plan_release.release_body("v2.0.0rc1", "")
+
+
+def test_the_wheel_a_pre_release_names_is_the_package_kraft_publishes():
+    """The URL is built, not read off the release, so it must spell the wheel
+    as `uv build` names `kraft-sdlc`'s: normalized, pure Python."""
+    from kraft.update import PACKAGE
+
+    body = plan_release.release_body("v2.0.0b1", "")
+    assert f"/{PACKAGE.replace('-', '_')}-2.0.0b1-py3-none-any.whl" in body
 
 
 def test_every_pre_release_channel_is_one_update_accepts():
@@ -240,10 +296,28 @@ def test_every_pre_release_channel_is_one_update_accepts():
 
 @pytest.mark.parametrize("tag", ["v1.5.0", "1.5.0", "", "v1.5.0rc", "v1.5.0.rc1"])
 def test_a_stable_release_body_is_its_notes_byte_for_byte(tmp_path, tag):
-    """The real 1.5.0 notes, through the command release.yml runs."""
-    notes, body = _FIXTURES / "notes-1.5.0.md", tmp_path / "body.md"
+    """The real 2.0.0 notes, through the command release.yml runs."""
+    notes, body = _FIXTURES / "notes-2.0.0.md", tmp_path / "body.md"
     plan_release.main(["body", tag, str(notes), str(body)])
     assert body.read_bytes() == notes.read_bytes()
+
+
+def test_the_2_0_layout_tells_the_story_once():
+    """2.0's notes: #400, a highlighted minor, carries the story and the
+    upgrade notes at the top; the major PR that makes the release 2.0 is not
+    highlighted, so its short entry sits alone under Breaking changes, and
+    neither is printed twice (a highlighted major would be)."""
+    prs = json.loads((_FIXTURES / "prs-2.0.0.json").read_text())
+    redesign = next(p for p in prs if p["number"] == 400)
+    redesign["labels"].append("notes::highlight")
+    major = next(p for p in prs if "release::major" in p["labels"])
+    story, breaking = map(plan_release.changelog_entry, (redesign, major))
+    notes = plan_release.release_notes(prs)
+    assert notes.startswith(
+        f"### Highlights\n\n{story}\n\n### Breaking changes\n\n{breaking}\n\n### New\n\n"
+    )
+    assert notes.count(story) == notes.count(breaking) == 1
+    assert plan_release.release_impact(prs) == "major"
 
 
 def test_the_release_is_created_from_the_body_and_the_changelogs_from_the_notes():

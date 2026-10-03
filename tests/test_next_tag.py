@@ -34,6 +34,7 @@ next_tag = next_tag_mod.next_tag
         ("v0.3.2", "minor", "v0.4.0"),
         ("v0.3.2", "major", "v1.0.0"),
         ("v1.9.9", "major", "v2.0.0"),
+        ("v1.4.0", "major", "v2.0.0"),
         (None, "patch", "v0.0.1"),
         (None, "minor", "v0.1.0"),
         (None, "major", "v1.0.0"),
@@ -111,6 +112,15 @@ def test_no_release_label_is_none():
 )
 def test_pre_tag_numbers_past_the_highest_of_its_kind(kind, existing, want):
     assert next_tag_mod.pre_tag("v1.3.0", kind, existing) == want
+
+
+def test_a_new_majors_first_rc_ignores_the_old_lines_candidates():
+    """The tags 2.0's first candidate is numbered against: fourteen v1.5.0
+    candidates, of what became 2.0, and no v1.5.0. They are another base's,
+    so 2.0's candidates start at rc1 and count only their own."""
+    existing = ["v1.4.0", *(f"v1.5.0rc{n}" for n in range(1, 15))]
+    assert next_tag_mod.pre_tag("v2.0.0", "rc", existing) == "v2.0.0rc1"
+    assert next_tag_mod.pre_tag("v2.0.0", "rc", [*existing, "v2.0.0rc1"]) == "v2.0.0rc2"
 
 
 def test_pre_tag_rejects_an_unknown_kind():

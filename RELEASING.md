@@ -19,9 +19,15 @@ the labels plan as `vX.Y.ZaN`, `bN` or `rcN`, numbered past the ones that
 exist. It is a GitHub pre-release: only `rc` also goes to PyPI, and none of
 them touch homebrew, the stamp PR, the Marketplace or Open VSX. Users pick one
 up with `kraft admin update --channel rc|beta|alpha`. The GitHub Release's notes
-open with that command for its own channel, and for an rc the
-`uv tool install --force "kraft-sdlc==X.Y.ZrcN"` that installs it from PyPI. The
-changelogs and a stable release's notes leave that line out. The next stable
+open with how to install it: first
+`uv tool install --force --python 3.13 "kraft-sdlc[vector]==X.Y.ZrcN"` (for a
+beta or alpha, `"kraft-sdlc[vector] @ <the wheel attached to its release>"`),
+which keeps the extra and the Python from any install, then
+`kraft admin update --channel` for its kind, which keeps both only from
+1.5.0rc14 on, then the `kraft-<version>.vsix` attached to the release for VS Code,
+since the Marketplace extension stays at the last release (and is read-only
+against a new major's pre-releases). The changelogs and a stable
+release's notes leave that line out. The next stable
 release's notes still cover everything since the last stable tag.
 
 A pre-release's `.vsix` is attached to its GitHub Release, stamped
@@ -100,6 +106,13 @@ you press the button:
   <https://open-vsx.org/user-settings/trusted-publishers> as an owner of the
   `kraft-sdlc` namespace. Check that it still lists this repository,
   `release.yml` and the `release` environment.
+- [ ] **README links to unreleased docs are switched to the release's.**
+  Before 2.0.0, the README's "What's new in 2.0" link points at
+  `/kraft/next/get-started/whats-new`, because the stable docs at `/kraft/`
+  have no such page until 2.0.0 is out. In the pull request that the release
+  is cut after, change it to `/kraft/get-started/whats-new`: the wheel and
+  PyPI carry the README as it is at the tag. `git grep kraft/next/ README.md`
+  finds any link like it.
 
 ## What a stable run publishes
 

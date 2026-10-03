@@ -15,7 +15,7 @@ import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
 import { registerFindings } from "./review/findings";
-import { compatible } from "./core/version";
+import { readOnlyReason } from "./core/version";
 
 export interface KraftApi {
   store: Store;
@@ -38,12 +38,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const store = new Store(api, wsSocket);
   const own = (context.extension.packageJSON as { version: string }).version;
   let readOnly = false;
+  let why: string | null = null;
   let runDir = loc.runDir;
 
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
   const setStatus = (connected: boolean) => {
     void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
     status.text = connected ? `$(check) Kraft${readOnly ? " (read-only)" : ""}` : "$(debug-disconnect) Kraft";
+    status.tooltip = connected && readOnly && why ? why : undefined;
     status.show();
   };
   store.onConnection(async (connected) => {
@@ -51,11 +53,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
       try {
         const health = await api.health();
         runDir = health.run_dir;
-        readOnly = !compatible(own, health.version);
-        if (readOnly) void vscode.window.showWarningMessage(`Kraft ${health.version} does not match this extension (${own}); actions are disabled until they match.`);
+        why = readOnlyReason(own, health);
+        if (why) void vscode.window.showWarningMessage(why);
       } catch {
-        readOnly = true;
+        why = readOnlyReason(own, null);
       }
+      readOnly = why !== null;
       void vscode.commands.executeCommand("setContext", "kraft.readOnly", readOnly);
     }
     setStatus(connected);

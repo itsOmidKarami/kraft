@@ -785,7 +785,7 @@ def test_a_rolled_back_install_is_told_to_restore_not_restart(dist, client, monk
     """R10c-03: "restart to finish the update" sent a rollback into the schema refusal."""
     from kraft import update
 
-    client.app.state.version = "1.5.0"
+    client.app.state.version = "2.0.0"
     monkeypatch.setattr(update, "installed", lambda: "1.4.0")
     r = client.get("/work-items", headers={"sec-fetch-dest": "document"})
     assert r.status_code == 503 and "An older Kraft is installed" in r.text
