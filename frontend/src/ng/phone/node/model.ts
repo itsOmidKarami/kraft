@@ -2,7 +2,7 @@ import type { ChainNode as ApiNode, KraftEvent } from "../../../types";
 import type { ChainNode } from "../../graph/layout";
 import { rejectTarget } from "../../item/graph";
 import type { ItemDetail } from "../../item/useItem";
-import { retryable } from "../../item/status";
+import { retryable, skippable } from "../../item/status";
 
 /** The node screen's decisions, pure (W17 brief D). */
 
@@ -18,7 +18,7 @@ const a = (id: NodeActId, label: string): NodeAct => ({ id, label });
  *  Retry while it runs**; a done node offers Retry from here; a waiting gate
  *  offers the decision; a node not reached, or an ended item, has no bar.
  *  Retry only on an item the server would retry (`retryable`): a paused one
- *  has Skip · Resume, and a waiting one Pause · Skip (R10b-01). */
+ *  has Skip · Resume, and a waiting one Pause · Skip, a rate-limited one Pause alone (R10b-01). */
 export function nodeBar(item: ItemDetail, node: ApiNode, graph: ChainNode): { secondary: NodeAct | null; primary: NodeAct | null } {
   const none = { secondary: null, primary: null };
   const status = item.display_status ?? "running";
@@ -26,7 +26,8 @@ export function nodeBar(item: ItemDetail, node: ApiNode, graph: ChainNode): { se
   if (node.kind === "gate") return item.pending_gate === node.id ? { secondary: null, primary: a("review", "Review and decide") } : none;
   if (graph.state === "done") return retryable(item) ? { secondary: null, primary: a("retry-from", "Retry from here") } : none;
   if (graph.state !== "current" && graph.state !== "failed") return none;
-  if (status === "running" || status === "escalated" || status === "waiting") return { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") };
+  // A rate-limited node takes Pause only: /skip refuses it until it is paused (R10b-01's follow-up).
+  if (status === "running" || status === "escalated" || status === "waiting") return skippable(item) ? { secondary: a("pause", "Pause"), primary: a("skip", "Skip node") } : { secondary: null, primary: a("pause", "Pause") };
   if (status === "paused") return { secondary: a("skip", "Skip node"), primary: a("resume", "Resume") };
   return { secondary: a("skip", "Skip node"), primary: a("retry-node", "Retry node") };
 }

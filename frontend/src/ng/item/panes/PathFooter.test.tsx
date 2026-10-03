@@ -32,6 +32,11 @@ describe("PathFooter", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
+  it("offers Pause and no Skip on a rate-limited item: /skip refuses it until it is paused", () => {
+    render(<PathFooter item={detail({ display_status: "waiting", status: "rate_limited", stop: { kind: "rate_limit", node: "verification", resume_at: null, reason: null } })} path="v.r.code_review" what="task" state="running" reload={() => {}} />);
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Pause"]);
+  });
+
   it.each(["failed", "needs_you", "escalated"] as const)("offers Retry on a stopped footer while the item is %s", (status) => {
     render(<PathFooter item={detail({ display_status: status })} path="v.r.code_review" what="task" state="stopped" reload={() => {}} />);
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();

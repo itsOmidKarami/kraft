@@ -50,7 +50,9 @@ describe("nodeBar (D.6): one pair by node state, never Retry while it runs", () 
     ["escalated node", item("escalated"), "verification", ["pause", "skip"]],
     // R10b-01: /retry answers 409 to an item that is not stopped, so a paused node resumes and a waiting one pauses.
     ["paused node", item("paused"), "verification", ["skip", "resume"]],
-    ["waiting node", item("waiting", stop("rate_limit")), "verification", ["pause", "skip"]],
+    ["node waiting on CI", item("waiting", stop("wait")), "verification", ["pause", "skip"]],
+    // /skip refuses a rate-limited item: Pause, which /pause takes, then Skip or Resume.
+    ["rate-limited node", item("waiting", stop("rate_limit"), { status: "rate_limited" }), "verification", [null, "pause"]],
     ["failed node", item("failed", stop("failed")), "verification", ["skip", "retry-node"]],
     ["capped node", item("needs_you", stop("cap")), "verification", ["skip", "retry-node"]],
     ["done node of a stopped item", item("failed", stop("failed")), "plan", [null, "retry-from"]],

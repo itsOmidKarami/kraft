@@ -4,7 +4,7 @@ import { act } from "../actions";
 import type { FooterState } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 import { sendOnModEnter } from "../../keys";
-import { retryable } from "../status";
+import { retryable, skippable } from "../status";
 
 const ENDED = new Set(["done", "cancelled", "archived"]);
 
@@ -62,7 +62,7 @@ export function PathFooter({ item, path, what, state: shown, reload, extra }: { 
       {extra}
       {state === "running" && <Button disabled={busy} onClick={() => run(act.pause(item.id))}>Pause</Button>}
       {state === "paused" && <Button disabled={busy} onClick={() => run(act.resume(item.id))}>Resume</Button>}
-      {(state === "running" || state === "paused") && <Button onClick={() => setConfirm("skip")}>Skip {what}</Button>}
+      {(state === "running" || state === "paused") && skippable(item) && <Button onClick={() => setConfirm("skip")}>Skip {what}</Button>}
       {offerRetry && <Button onClick={() => setConfirm("retry")}>Retry</Button>}
       {error && <span className="item-error" role="alert">{error}</span>}
     </div>

@@ -58,6 +58,11 @@ export const neverStarted = (item: Pick<WorkItem, "display_status" | "current_no
  *  one, so no surface offers Retry there (R10b-01): a paused item has Resume. */
 export const retryable = (item: Pick<WorkItem, "display_status">) => item.display_status === "failed" || item.display_status === "needs_you" || item.display_status === "escalated";
 
+/** Whether `/skip` would take this item: it refuses a rate-limited one (Kraft
+ *  relaunches it at its `retry_at`). Pause it first, which `/pause` takes, then
+ *  Skip or Resume. */
+export const skippable = (item: Pick<WorkItem, "status" | "stop">) => item.status !== "rate_limited" && item.stop?.kind !== "rate_limit";
+
 /** GAP §1.4a, Decisions §1 and §14. `raise` is the capped Resume: it opens the
  *  chain's Config at the limit that stopped the item. A budget stop the item
  *  cannot raise (`budgetRaise`) has Retry instead. A never-started item

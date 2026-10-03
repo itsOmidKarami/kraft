@@ -593,8 +593,10 @@ async def pause_work_item(wid: str, request: Request):
     # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
     # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
     # is no session to signal in that state -- the wait is a row now -- so the
-    # write below is the whole operation.
-    if row["status"] not in ("active", "waiting"):
+    # write below is the whole operation. 'rate_limited' too (R10b-01's
+    # follow-up): the board offers Pause there, and nothing else stops the
+    # poller relaunching it -- `store.pause_work_item` clears its `retry_at`.
+    if row["status"] not in ("active", "waiting", "rate_limited"):
         raise HTTPException(409, f"work item is {row['status']}, not running")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
