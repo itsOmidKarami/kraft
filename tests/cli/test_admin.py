@@ -233,11 +233,15 @@ def test_serve_writes_and_clears_the_pidfile(tmp_path, monkeypatch):
     assert not RunDirs(tmp_path / "run").pid.exists()
 
 
-def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("home", ["pointed-by-hand", "1.x-at-the-default"])
+def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys, home):
     """Two servers on one KRAFT_HOME share databases and worktrees with no port
-    conflict to reveal it."""
+    conflict to reveal it; a 1.x home a live 1.4 reads stays under its old name."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(fake_templates_dir(tmp_path, "true")))
+    old = fake_templates_dir(tmp_path, "true")  # found at the default by its old name
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+    monkeypatch.setenv("KRAFT_CONFIG_DIR", str(old) if home == "pointed-by-hand" else "")
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", "")
     pid_path = RunDirs(tmp_path / "run").pid
     held = hold_pidfile(pid_path)
     monkeypatch.setattr(
@@ -249,6 +253,7 @@ def test_a_second_serve_refuses_while_one_is_live(tmp_path, monkeypatch, capsys)
         cli.admin._serve()
     assert "already running" in capsys.readouterr().err
     assert pid_path.exists()
+    assert (old / "library.yaml").is_file() and not (tmp_path / "config").exists()
     held.release()
 
 

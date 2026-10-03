@@ -454,8 +454,15 @@ def test_the_detached_child_imports_kraft_not_the_shell_cwd(monkeypatch, tmp_pat
     assert (done.returncode, "usage: kraft admin start" in done.stdout) == (0, True), done.stderr
 
 
-def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, capsys):
-    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+@pytest.mark.parametrize("home", ["pointed-by-hand", "1.x-at-the-default"])
+def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, capsys, home):
+    """And leaves a 1.x home under its old name: the 2.0 rename comes after
+    the check, never under a live 1.4 server (`prepare_home`)."""
+    old = _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
+    if home == "1.x-at-the-default":
+        monkeypatch.setenv("KRAFT_HOME", str(tmp_path))
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", "")
+        monkeypatch.setenv("KRAFT_TEMPLATES_DIR", "")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
     held = hold_pidfile(paths.RunDirs(run_dir).pid)
@@ -463,6 +470,7 @@ def test_detach_refuses_while_one_is_already_running(monkeypatch, tmp_path, caps
     with pytest.raises(SystemExit):
         cli.main(["admin", "start", "--detach"])
     assert "already running" in capsys.readouterr().err
+    assert (old / "library.yaml").is_file() and not (tmp_path / "config").exists()
     held.release()
 
 
@@ -691,12 +699,16 @@ def test_seed_home_adopts_a_pre_2_templates_directory_instead_of_seeding(
     assert cli.admin.adopt_pre_2_home(home) is False
 
 
-def test_adopting_a_home_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_path):
+@pytest.mark.parametrize("where", ["renamed", "pointed-by-hand"])
+def test_the_start_carries_the_keys_2_0_moved_between_files(monkeypatch, tmp_path, where):
     """A 1.x `intake.yaml` `max_concurrent` and `policy.yaml` `triggers:` move
-    to the file 2.0 reads them from, once, at the rename, each file keeping
-    its comments."""
+    to the file 2.0 reads them from, once, at the first start, each file
+    keeping its comments: in the home the start renames, and just the same in
+    one an operator points `KRAFT_CONFIG_DIR` at, which is never renamed."""
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
-    old = tmp_path / "home" / "templates"
+    old = tmp_path / ("elsewhere" if where == "pointed-by-hand" else "home/templates")
+    if where == "pointed-by-hand":
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(old))
     old.mkdir(parents=True)
     (old / "library.yaml").write_text("tasks: {}\n")
     (old / "intake.yaml").write_text("# pickup\nenabled: false\nmax_concurrent: 1  # one\n")
@@ -704,10 +716,11 @@ def test_adopting_a_home_carries_the_keys_2_0_moved_between_files(monkeypatch, t
         "# caps\ndefault: {attempts: 1, wall_clock_s: 1}\n"
         "triggers:\n  - {cron: '0 9 * * 1', repo: /r, chain: default, title: t}\n"
     )
-    home = paths.default_config_dir()
 
-    assert cli.admin.adopt_pre_2_home(home) is True
+    home = cli.admin.prepare_home()
 
+    assert home == (old if where == "pointed-by-hand" else paths.default_config_dir())
+    assert old.exists() == (where == "pointed-by-hand")
     intake = yaml.safe_load((home / "intake.yaml").read_text())
     policy = yaml.safe_load((home / "policy.yaml").read_text())
     assert "max_concurrent" not in intake and policy["max_concurrent"] == 1

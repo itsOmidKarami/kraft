@@ -214,7 +214,7 @@ def adopt_pre_2_home(config_dir: Path) -> bool:
     which `kraft admin update` then replaces where it now is). A home pointed
     at by hand is the operator's to name. Nothing is copied: one rename, and
     the old name is gone, so no later start can read a stale copy. The keys
-    2.0 moved between files move with it (`carry_moved_keys`)."""
+    2.0 moved between files are `carry_moved_keys`'s, run by the same start."""
     if config_dir != default_config_dir() or config_dir.exists() or config_dir.is_symlink():
         return False
     old = pre_2_config_dir()
@@ -225,8 +225,6 @@ def adopt_pre_2_home(config_dir: Path) -> bool:
         f"kraft: moved {old} to {config_dir}: the config directory is config/ since 2.0",
         file=sys.stderr,
     )
-    for line in carry_moved_keys(config_dir):
-        print(f"kraft: {line}", file=sys.stderr)
     return True
 
 
@@ -700,15 +698,32 @@ class _SignalLoggingServer(uvicorn.Server):
         super().handle_exit(sig, frame)
 
 
-def _adopting_config_dir() -> Path:
-    """`config_dir()`, after the one-time rename of a 1.x home at its default
-    location: the start is where that happens, before anything reads it."""
+def prepare_home() -> Path:
+    """The config directory this server runs against, after the one-time 2.0
+    moves and the seed, in this order: the rename of a 1.x home at its
+    default location (`adopt_pre_2_home`), the packaged defaults into a home
+    that has none (`seed_home`), and the two keys 2.0 reads from another file
+    (`carry_moved_keys`), in whichever directory is in use, so a home an
+    operator points at by hand gets them too.
+
+    Called only once this process knows no server is running. A 1.4 server
+    still up re-reads `repos.yaml` per request, so a rename under it would
+    lose its repos and fail its running items, and the 2.0 start would then
+    exit "already running" anyway. Until that check every reader finds a 1.x
+    home under its old name (`paths.config_dir`), which is where `_bind` and
+    the address probe read it."""
     adopt_pre_2_home(default_config_dir())
-    return config_dir()
+    templates_dir = config_dir()
+    if seed_home(templates_dir):
+        print(f"kraft: seeded default config in {templates_dir}")
+    _warn_if_pre_v1(templates_dir)
+    for line in carry_moved_keys(templates_dir):
+        print(f"kraft: {line}", file=sys.stderr)
+    return templates_dir
 
 
 def _serve() -> None:
-    templates_dir = _adopting_config_dir()
+    templates_dir = config_dir()
     pid_path = _pid_path()
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = RunDirs(pid_path.parent).logs / "server.log"
@@ -722,9 +737,6 @@ def _serve() -> None:
         # ties fd 1/2 to this same file before spawning.
         _rotate_if_large(log_path)
         _redirect_output_to_log(log_path)
-    if seed_home(templates_dir):
-        print(f"kraft: seeded default config in {templates_dir}")
-    _warn_if_pre_v1(templates_dir)
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
@@ -738,6 +750,9 @@ def _serve() -> None:
         running = running or pidfile.read(pid_path).pid
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
+    # The lock is held: the home is this server's to rename, seed and move
+    # keys in.
+    prepare_home()
 
     def _exit_on_signal(sig, frame):
         # uvicorn re-raises the SIGTERM it drained on, with this handler put
@@ -841,15 +856,15 @@ def _start_detached() -> None:
     same pidfile `_serve` always has, so `admin stop`/`health`/`doctor` never
     need to know a server was started this way.
     """
-    templates_dir = _adopting_config_dir()
-    if seed_home(templates_dir):
-        print(f"kraft: seeded default config in {templates_dir}")
     run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())).ensure()
     pid_path = run_dirs.pid
     running = _read_pid(pid_path)
     if running is not None:
         print(f"kraft: already running (pid {running}) - kraft admin stop", file=sys.stderr)
         raise SystemExit(1)
+    # After the check, never before it: see `prepare_home`. The child's own
+    # `_serve` finds the home prepared and leaves it alone.
+    templates_dir = prepare_home()
     # Resolved (and validated — refuses a password-less LAN bind) here too, so
     # a bad access.yaml fails this shell instead of showing up only as a child
     # that exited before ever writing a pidfile.
