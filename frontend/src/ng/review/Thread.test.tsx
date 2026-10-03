@@ -1,4 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewComment, ReviewThread } from "../../types";
 import * as http from "../http";
@@ -142,5 +145,19 @@ describe("Thread", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("a draft thread has nothing to resolve yet");
     expect(onChanged).not.toHaveBeenCalled();
+  });
+});
+
+describe("a resolved thread's look", () => {
+  // jsdom computes no contrast: this reads the rule. Any opacity on the thread
+  // dims its 12px "Edit", "resolved" and reply text under 4.5:1 (R9b-14).
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "review.css"), "utf-8");
+  const rules = [...css.matchAll(/\n([^{}\n]*\.is-resolved[^{}\n]*)\{([^}]*)\}/g)].filter(([, sel]) => sel.includes("rv-thread"));
+  it("steps back by its frame, never by fading its text", () => {
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, sel, body] of rules) {
+      expect(body, sel).not.toMatch(/opacity|filter|(^|;)\s*color\s*:/);
+    }
+    expect(rules.map(([, , body]) => body).join(";")).toMatch(/border/);
   });
 });
