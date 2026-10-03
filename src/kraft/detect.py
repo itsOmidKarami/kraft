@@ -1019,16 +1019,77 @@ def _shell_syntax(command: str) -> bool:
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish", "csh", "tcsh"}
 _SHELL_FLAGS = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*")
 #: The flag an interpreter takes a script after: `python -c`, `python -Ic`,
-#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`, `php -r`.
+#: `node -e`, `node -p`, `node --eval=…`, `perl -e`, `ruby -e`.
 _SCRIPT_FLAGS = re.compile(r"-[a-zA-Z]*[ceEp][a-zA-Z]*|--(?:eval|print|command)=?")
-_PHP_SCRIPT_FLAG = re.compile(r"-[a-zA-Z]*r[a-zA-Z]*|--run=?")
-#: Programs that run the script a flag hands them (`_SCRIPT_FLAGS`): its
-#: text needs none of the characters `_shell_syntax` looks for to run a
-#: shell command (`perl -e 'eval qx!curl …!'`, `ruby -e 'eval %x!…!'`).
-_INTERPRETERS = re.compile(
-    r"(?:python|pypy)[\d.]*|node(?:js)?|perl[\d.]*|ruby[\d.]*|php[\d.]*|lua(?:jit|[\d.]*)"
-    r"|R(?:script)?|julia|tclsh[\d.]*|osascript|elixir|erl|groovy"
+#: Programs that run the script a flag hands them, each with its own flags:
+#: `script` the short letters that take the script, `long` the long options
+#: that do, `value` the short letters that take a value (attached, or the
+#: next word when the letter ends its cluster), `long_value` the long options
+#: that take the next word, `stop` the letters that end the interpreter's own
+#: options (`python -m pytest -p xdist` hands pytest the `-p`). A script needs
+#: none of the characters `_shell_syntax` looks for to run a shell command
+#: (`perl -e 'eval qx!curl …!'`, `ruby -e 'eval %x!…!'`), so its flag alone
+#: makes the line a script.
+_INTERPRETER_FLAGS: dict[str, dict] = {
+    "python": {"script": "c", "value": "WX", "stop": "m"},
+    "node": {
+        "script": "ep",
+        "long": {"--eval", "--print"},
+        "value": "rC",
+        "long_value": {"--require", "--import", "--loader", "--experimental-loader"},
+    },
+    "perl": {"script": "eE", "value": "I"},
+    "ruby": {"script": "e", "value": "IrCEF"},
+    "php": {"script": "r", "long": {"--run"}, "value": "dc"},
+    "lua": {"script": "e", "value": "l"},
+    "julia": {"script": "eE", "long": {"--eval", "--print"}},
+    "rscript": {"script": "e"},
+    "other": {"script": "e"},
+}
+_INTERPRETERS = (
+    (re.compile(r"(?:python|pypy)[\d.]*"), "python"),
+    (re.compile(r"node(?:js)?"), "node"),
+    (re.compile(r"perl[\d.]*"), "perl"),
+    (re.compile(r"ruby[\d.]*"), "ruby"),
+    (re.compile(r"php[\d.]*"), "php"),
+    (re.compile(r"lua(?:jit|[\d.]*)"), "lua"),
+    (re.compile(r"julia"), "julia"),
+    (re.compile(r"R(?:script)?"), "rscript"),
+    (re.compile(r"tclsh[\d.]*|osascript|elixir|groovy"), "other"),
 )
+
+
+def _interpreter_script(name: str, args: list[str]) -> bool:
+    """Whether interpreter `name`, given `args`, is handed a script by one of
+    its own options (`_INTERPRETER_FLAGS`). False for anything else."""
+    family = next((f for pattern, f in _INTERPRETERS if pattern.fullmatch(name)), None)
+    if family is None:
+        return False
+    flags = _INTERPRETER_FLAGS[family]
+    script, value, stop = flags["script"], flags.get("value", ""), flags.get("stop", "")
+    j = 0
+    while j < len(args):
+        word = args[j]
+        if not word.startswith("-") or word in ("-", "--"):
+            return False
+        if word.startswith("--"):
+            option = word.split("=", 1)[0]
+            if option in flags.get("long", ()):
+                return True
+            j += 2 if option in flags.get("long_value", ()) and "=" not in word else 1
+            continue
+        letters, skip = word[1:], False
+        for k, letter in enumerate(letters):
+            if letter in script:
+                return True
+            if letter in stop:
+                return False
+            if letter in value:
+                # The rest of the cluster is its value; none, and the next word is.
+                skip = k == len(letters) - 1
+                break
+        j += 2 if skip else 1
+    return False
 
 
 #: Programs a CI line may hand quoted shell syntax to as an argument they
@@ -1139,16 +1200,8 @@ def _a_script(command: str) -> bool:
         ):
             return True
         # An interpreter given a script by a flag: whatever the script holds.
-        # Only its own options, up to the first other word (`python -m
-        # pytest -p xdist` hands pytest the `-p`).
-        name = posixpath.basename(word)
-        if _INTERPRETERS.fullmatch(name):
-            flags = _PHP_SCRIPT_FLAG if name.startswith("php") else _SCRIPT_FLAGS
-            for option in words[i + 1 :]:
-                if not option.startswith("-") or option == "-m":
-                    break
-                if flags.fullmatch(option.split("=", 1)[0]):
-                    return True
+        if _interpreter_script(posixpath.basename(word), words[i + 1 :]):
+            return True
     for quoted in re.finditer(r"'[^']*'|\"[^\"]*\"", command):
         before = command[: quoted.start()].split()
         flag = before[-1] if before else ""

