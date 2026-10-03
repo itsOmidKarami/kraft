@@ -108,11 +108,17 @@ export function AboutPage() {
               Restart it to finish the update: <code>kraft admin restart</code>
             </p>
           )}
-          <p className="set-hint">Run this in a terminal, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
-          <div className="set-command">
-            <code>{command}</code>
-            <button type="button" className="set-btn is-bare" onClick={() => void copy(command, "Copied the command")}><Copy size={12} aria-hidden /> Copy</button>
-          </div>
+          {/* The command only where it is the advice: not beside a rollback's, which it contradicts, and said as for later
+              beside "up to date" (R11b-09). */}
+          {!installedOlder(health) && (
+            <>
+              <p className="set-hint">{update?.behind ? "Run this in a terminal" : "To update later, run this in a terminal"}, then restart Kraft. Read the release notes first: a minor release adds capabilities, a major release can change the CLI, the config schema or the state on disk.</p>
+              <div className="set-command">
+                <code>{command}</code>
+                <button type="button" className="set-btn is-bare" onClick={() => void copy(command, "Copied the command")}><Copy size={12} aria-hidden /> Copy</button>
+              </div>
+            </>
+          )}
           <div className="set-about-row">
             <a className="set-link" href={RELEASES} target="_blank" rel="noopener noreferrer">Release notes ↗</a>
             <span className="set-about-gap" />

@@ -32,6 +32,13 @@ export function installedOlder(health: Health | null | undefined): boolean {
   return at >= 0 && a[at] < b[at];
 }
 
+/** A pending restart in one line, as the sidebar's footer and the phone's board say it, or null. */
+export function restartWords(health: Health | null | undefined): string | null {
+  if (!restartPending(health)) return null;
+  if (olderServer(health)) return "a newer Kraft is installed: restart to finish the update";
+  return installedOlder(health) ? `v${health?.installed} installed, older than this server: see About` : `v${health?.installed} installed: restart to finish the update`;
+}
+
 /** The board's banner for `olderServer`: the footer line alone was easy to miss in the one window every 1.4 user goes through. */
 export const OLDER_SERVER = "This server is older than its web interface: an update installed a new Kraft, and the old one is still running. What the board shows may be wrong until you restart it.";
 
