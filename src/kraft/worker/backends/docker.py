@@ -194,6 +194,9 @@ class Runtime:
     #: until a launch under `network:` asks (`socket_channel`); doctor's
     #: refresh forgets it.
     socket_channel: bool | None = None
+    #: Why `info` gave no answer, when it failed at once rather than timing
+    #: out: its last line of stderr ("Cannot connect to the Docker daemon").
+    info_error: str | None = None
 
     def limit_args(self, resources: dict | None) -> list[str]:
         """`--cpus`, `--memory` and `--pids-limit` for a sandbox's
@@ -289,6 +292,13 @@ class Runtime:
         return self.identity_kept and self.rootless and not self.podman
 
     def refusal(self) -> str | None:
+        if not self.identity_known and self.info_error:
+            return (
+                f"could not tell whether {self.cli} runs rootless: `{self.cli} info` failed: "
+                f"{self.info_error.rstrip('.')}. Is its daemon running? A container run as "
+                "the wrong user cannot write the worktree, so nothing runs until it answers; "
+                "`kraft admin doctor` asks it again"
+            )
         if not self.identity_known:
             return (
                 f"could not tell whether {self.cli} runs rootless: `{self.cli} info` did not "
@@ -329,11 +339,28 @@ def _selinux_enforcing() -> bool:
         return False
 
 
+#: Each runtime CLI's last `info` that failed at once, by its last line of
+#: stderr (`Runtime.info_error`): a daemon that is down, not one that is slow.
+_INFO_FAILED: dict[str, str] = {}
+
+
 def _run(*argv: str, timeout: float = 10) -> str | None:
+    info = argv[1:2] == ("info",)
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        if info:
+            _INFO_FAILED.pop(argv[0], None)
         return None
+    except OSError as exc:
+        if info:
+            _INFO_FAILED[argv[0]] = exc.strerror or str(exc)
+        return None
+    if info and done.returncode != 0:
+        lines = done.stderr.strip().splitlines()
+        _INFO_FAILED[argv[0]] = lines[-1] if lines else f"exit {done.returncode}"
+    elif info:
+        _INFO_FAILED.pop(argv[0], None)
     return done.stdout if done.returncode == 0 else None
 
 
@@ -445,6 +472,7 @@ def detect_runtime() -> Runtime:
         engine=engine,
         rootless=bool(rootless),
         identity_known=rootless is not None,
+        info_error=None if rootless is not None else _INFO_FAILED.get(cli),
         selinux=selinux,
         limits=limits if limits is not None else frozenset(),
         limits_known=limits is not None,
@@ -619,8 +647,13 @@ def _launch_runtime() -> Runtime:
                     # The TTL counts from this answer: a hung daemon is not
                     # asked again on the next launch.
                     _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
+                    why = _INFO_FAILED.get(host.cli)
                     if host.kept_root:
-                        _RUNTIME = replace(host, identity_known=False, identity_kept=False)
+                        _RUNTIME = replace(
+                            host, identity_known=False, identity_kept=False, info_error=why
+                        )
+                    elif why != host.info_error:
+                        _RUNTIME = replace(host, info_error=why)
                 else:
                     _RUNTIME = replace(
                         host,

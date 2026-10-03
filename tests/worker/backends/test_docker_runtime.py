@@ -60,6 +60,27 @@ def test_a_runtime_that_does_not_answer_is_not_read_as_rootful(
     assert docker._ask(name)[1:] == (None, None)
 
 
+def test_a_daemon_that_is_down_is_named_not_reported_as_slow(tmp_path, monkeypatch):
+    """`docker info` failing at once, its daemon down, read as "did not answer
+    within 30 s" one second after the item resumed."""
+    down = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock."
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text(
+        f'#!/bin/sh\n[ "$1" = --version ] && {{ echo "Docker version 29"; exit 0; }}\n'
+        f'echo "{down}" >&2; exit 1\n'
+    )
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setattr(docker, "_INFO_FAILED", {})
+
+    refusal = docker.detect_runtime().refusal()
+
+    assert f"`docker info` failed: {down} Is its daemon running?" in refusal
+    assert "within" not in refusal
+
+
 @pytest.fixture
 def slow_podman(tmp_path, monkeypatch):
     """`slow_podman(*answers)`: a podman whose `info` answers each ask in
