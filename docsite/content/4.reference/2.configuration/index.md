@@ -57,7 +57,7 @@ them by hand, but nothing else in this section depends on them.
 | File | Fields |
 |---|---|
 | `notify.yaml` | `enabled`; `url`, the webhook Kraft posts to, which is a secret and is never shown back; `base_url`, the address links in a notification use; and `events`, the event types that send one. See [Notifications](/reference/events#notifications) for the payload and every event type. |
-| `theme.yaml` | The look: `surface`, `accent` and `colour_amount`; `mode` and `density`; `code_scheme`, `diff` and `board`. See [theme.yaml](#themeyaml). |
+| `theme.yaml` | The look: `surface`, `accent` and `colour_amount`; `mode` and `density`; `code_scheme`, `diff` and `board`; and the default `editor`. See [theme.yaml](#themeyaml). |
 
 ## theme.yaml
 
@@ -74,6 +74,7 @@ and a key the file leaves out takes its default.
 | `code_scheme` | `light`: `auto`, `none` or `solarized-light`; `dark`: `auto`, `none`, `solarized-dark`, `monokai` or `dracula`. The syntax colours in review diffs, chosen separately for light and dark. | `auto` for both |
 | `diff` | The review page's diff: `layout` (`unified` or `split`), `colours` (`theme`, `safe` or `plain`), and the switches `show_whitespace` (`true`), `word_highlight` (`true`), `wrap_lines` (`false`) and `one_file_at_a_time` (`true`). | as shown |
 | `board` | `group_by` (`status`, `repo` or `chain`; a file's pre-2.0 `template` reads as `chain`), `show_done` (the Done group's size, at least `1`; `5`) and `open_in` (`peek` or `full`: whether opening an item shows the side panel or the item page; `peek`). | as shown |
+| `editor` | `code`, `cursor`, `zed` or `obsidian`: the editor a document's **Open in editor** uses. Left out, it is `KRAFT_EDITOR`, else the system's default app. | unset |
 
 ### `palette` is legacy
 
