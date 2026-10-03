@@ -8,6 +8,7 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import time
 import uuid
 from collections.abc import Mapping
@@ -1241,14 +1242,30 @@ async def refresh_worktree_base(
     git.assert_on_branch(worktree, branch)
     lock_before = os.path.lexists(_index_lock(worktree))
     aside = await _set_aside_setup_lockfiles(worktree)
+    git_left_running = False
     try:
         try:
-            done = await asyncio.to_thread(
-                _run_git_group,
+            done = await _git_group(
                 ["git", "-C", str(worktree), "rebase", head],
                 timeout=timeout,
                 env=_committer_env(identity),
             )
+        except _GitCancelled as exc:
+            # A pause, cancel or shutdown mid-rebase: the git is stopped by
+            # now, so the abort and the put-back below cannot run beside it,
+            # and the branch is back as it was, never rebased after the stop
+            # (R12E-04). A git that would not die is left to a person: the
+            # next walk stops on its `rebase-merge` (`assert_no_operation`).
+            git_left_running = not exc.group_gone
+            if exc.group_gone:
+                note = await _uncancellable(
+                    _try_abort_rebase(
+                        worktree, stale_lock=None if lock_before else _lock_identity(worktree)
+                    )
+                )
+                if note:
+                    logger.warning("a stopped git rebase: %s", note)
+            raise
         except _GroupTimedOut as exc:
             # The whole `git rebase` group is killed by now, a hung filter or
             # hook included; the abort undoes what it left mid-operation, the
@@ -1279,6 +1296,8 @@ async def refresh_worktree_base(
                 ),
             )
     except BaseException:
+        if git_left_running:
+            raise
         # The rebase's own error is the one to report: a put-back that fails
         # too is logged, never raised in its place.
         try:
@@ -1438,14 +1457,54 @@ class _GroupTimedOut(subprocess.TimeoutExpired):
         self.group_gone = group_gone
 
 
+#: The process groups of the git commands `_run_git_group` is running now, by
+#: leader pid. Each is its own session (`start_new_session`), so neither a
+#: launchd job's group kill nor a terminal's Ctrl-C reaches it:
+#: `end_running_git_groups` ends what is left at shutdown (R12E-04).
+_RUNNING_GIT_GROUPS: set[int] = set()
+
+#: Seconds a stopped git group gets to end on SIGTERM (git removes its own
+#: `index.lock` on one) before it is sent SIGKILL, and again to be reaped.
+GIT_STOP_GRACE_S = 2.0
+
+
+class _GitGroup:
+    """What a coroutine keeps of the `_run_git_group` it runs in a thread, so
+    a cancel can stop the process group that thread is waiting on: the thread
+    reports its pid (`started`), the coroutine stops it (`stop`). A stop that
+    comes first ends the group as soon as it starts."""
+
+    def __init__(self, args: list[str]) -> None:
+        self.args = args
+        self._lock = threading.Lock()
+        self.pid: int | None = None
+        self._stopped = False
+
+    def started(self, pid: int) -> bool:
+        """Record the group's `pid`; False when it was stopped already."""
+        with self._lock:
+            self.pid = pid
+            return not self._stopped
+
+    def stop(self) -> int | None:
+        """Stop the group from starting; its pid when it already has."""
+        with self._lock:
+            self._stopped = True
+            return self.pid
+
+
 def _run_git_group(
-    args: list[str], *, timeout: float | None, env: Mapping[str, str] | None = None
+    args: list[str],
+    *,
+    timeout: float | None,
+    env: Mapping[str, str] | None = None,
+    handle: _GitGroup | None = None,
 ) -> subprocess.CompletedProcess:
     """`subprocess.run(args, capture_output=True, text=True)` as the leader of
     its own process group. Past `timeout` the whole group is killed, not git
     alone: a smudge filter or hook git started outlived it, holding the
     worker's slot's files and never ending (R11E-02). Raises `_GroupTimedOut`
-    once git is reaped."""
+    once git is reaped. `handle`: how `_git_group` stops it from outside."""
     with subprocess.Popen(
         args,
         stdin=subprocess.DEVNULL,
@@ -1455,7 +1514,10 @@ def _run_git_group(
         env=env,
         start_new_session=True,
     ) as proc:
+        _RUNNING_GIT_GROUPS.add(proc.pid)
         try:
+            if handle is not None and not handle.started(proc.pid):
+                _kill_group(proc.pid)
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             _kill_group(proc.pid)
@@ -1465,7 +1527,96 @@ def _run_git_group(
             _kill_group(proc.pid)
             proc.wait()
             raise
+        finally:
+            _RUNNING_GIT_GROUPS.discard(proc.pid)
     return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
+class _GitCancelled(asyncio.CancelledError):
+    """`_git_group` was cancelled, and stopped its git. `group_gone`: every
+    process that git started is dead, so nothing of it still writes the
+    worktree or holds its `index.lock`."""
+
+    def __init__(self, group_gone: bool):
+        super().__init__()
+        self.group_gone = group_gone
+
+
+async def _git_group(
+    args: list[str], *, timeout: float | None, env: Mapping[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """`_run_git_group` in a thread, which a cancel stops. A cancel used to
+    reach only the await: the thread, and the git it waited on, ran on, so a
+    paused or cancelled item's branch was rebased after the stop and the
+    caller's clean-up ran beside it (R12E-04). On a cancel the whole group
+    gets SIGTERM, then SIGKILL past `GIT_STOP_GRACE_S`, and `_GitCancelled`
+    is raised only once git is reaped (or could not be, which it says)."""
+    handle = _GitGroup(args)
+    running = asyncio.ensure_future(
+        asyncio.to_thread(_run_git_group, args, timeout=timeout, env=env, handle=handle)
+    )
+    try:
+        return await asyncio.shield(running)
+    except asyncio.CancelledError:
+        gone = await _uncancellable(_stop_git_group(handle, running))
+        raise _GitCancelled(gone) from None
+
+
+async def _stop_git_group(handle: _GitGroup, running: asyncio.Future) -> bool:
+    """End the group `running`'s thread waits on and wait for that thread.
+    Whether every process of the group is gone."""
+    pgid = handle.stop()
+    if pgid is not None:
+        await asyncio.to_thread(_end_group, pgid, GIT_STOP_GRACE_S)
+    await asyncio.wait({running}, timeout=GIT_STOP_GRACE_S)
+    if not running.done():
+        logger.warning("a stopped `%s` was still running", " ".join(handle.args))
+        return False
+    if not running.cancelled():
+        running.exception()  # its own outcome no longer matters: retrieved, not logged
+    return handle.pid is None or await asyncio.to_thread(_group_gone, handle.pid, 0.0)
+
+
+def _end_group(pgid: int, grace: float) -> bool:
+    """SIGTERM to process group `pgid`, SIGKILL to whatever of it outlives
+    `grace`. Whether it is gone."""
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return True
+    if _group_gone(pgid, grace):
+        return True
+    _kill_group(pgid)
+    return _group_gone(pgid, grace)
+
+
+def end_running_git_groups() -> None:
+    """End every git group still running, everything it started included: the
+    server is shutting down. Called once the walks are cancelled, which stop
+    their own (`_git_group`) and clean up after them; one left here would run
+    on past the server, rewriting a branch and holding its `index.lock`
+    against the next server's start (R12E-04)."""
+    for pgid in list(_RUNNING_GIT_GROUPS):
+        _end_group(pgid, GIT_STOP_GRACE_S)
+
+
+async def _uncancellable(awaitable):
+    """Await `awaitable` to its end through any cancel, then raise the cancel:
+    a clean-up cut short is the mid-operation state it was there to undo."""
+    task = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+        except BaseException:  # noqa: BLE001 - read from `task` below
+            pass
+    if cancelled:
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("clean-up after a cancel failed: %r", task.exception())
+        raise asyncio.CancelledError
+    return task.result()
 
 
 def _kill_group(pgid: int) -> None:
@@ -1534,41 +1685,56 @@ async def _abort_rebase(
     *,
     stale_lock: tuple[int, int] | None = None,
 ) -> NoReturn:
-    """`git rebase --abort` in `worktree`, then raise `error`. An abort that
-    fails, or runs past `REBASE_ABORT_TIMEOUT_S`, still raises `error`'s own
-    class, so the caller's handling is unchanged, but says the worktree was
-    left mid-rebase: the one case where `refresh_worktree_base` does not
-    leave it clean. Never silent: a failed abort the item walked past left
-    HEAD detached at the base without the item's commits (R11E-02).
+    """`git rebase --abort` in `worktree` (`_try_abort_rebase`), then raise
+    `error`. An abort that fails, or runs past `REBASE_ABORT_TIMEOUT_S`, still
+    raises `error`'s own class, so the caller's handling is unchanged, but
+    says the worktree was left mid-rebase: the one case where
+    `refresh_worktree_base` does not leave it clean. Never silent: a failed
+    abort the item walked past left HEAD detached at the base without the
+    item's commits (R11E-02)."""
+    note = await _try_abort_rebase(worktree, stale_lock=stale_lock)
+    if note:
+        raise _with_note(error, note)
+    raise error
 
-    A rebase that never started (a `pre-rebase` hook killed at the time
-    cap) left nothing to abort: `error` is raised as it is.
 
-    `stale_lock`: the identity of the timed-out rebase's `index.lock`, which
+async def _try_abort_rebase(
+    worktree: Path, *, stale_lock: tuple[int, int] | None = None
+) -> str | None:
+    """`git rebase --abort` in `worktree`. None when that left it clean, or
+    when no rebase had started (a `pre-rebase` hook killed at the time cap
+    left nothing to abort); otherwise why it is left mid-rebase.
+
+    The abort runs to its end through a cancel (`_uncancellable`): a pause
+    that only cut the await short put the setup's lockfiles back while the
+    abort was still checking the branch out.
+
+    `stale_lock`: the identity of the killed rebase's `index.lock`, which
     may be cleared and the abort tried once more (`_clear_stale_index_lock`)."""
     gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
     if gitdir is not None and not any(
         os.path.lexists(Path(gitdir, d)) for d in ("rebase-merge", "rebase-apply")
     ):
-        raise error
+        return None
     args = ["git", "-C", str(worktree), "rebase", "--abort"]
-    try:
+
+    async def abort() -> subprocess.CompletedProcess:
         done = await asyncio.to_thread(_run_git_group, args, timeout=REBASE_ABORT_TIMEOUT_S)
         if done.returncode != 0 and _clear_stale_index_lock(worktree, stale_lock):
             done = await asyncio.to_thread(_run_git_group, args, timeout=REBASE_ABORT_TIMEOUT_S)
+        return done
+
+    try:
+        done = await _uncancellable(abort())
     except subprocess.TimeoutExpired:
-        raise _with_note(
-            error,
+        return (
             f"`git rebase --abort` also timed out after {REBASE_ABORT_TIMEOUT_S:.0f}s; "
-            f"{worktree} was left mid-rebase for a human",
-        ) from None
+            f"{worktree} was left mid-rebase for a human"
+        )
     if done.returncode != 0:
         detail = (done.stderr.strip() or done.stdout.strip() or "no output").splitlines()[0]
-        raise _with_note(
-            error,
-            f"`git rebase --abort` failed ({detail}); {worktree} was left mid-rebase for a human",
-        ) from None
-    raise error
+        return f"`git rebase --abort` failed ({detail}); {worktree} was left mid-rebase for a human"
+    return None
 
 
 async def mr_rebase(

@@ -1,10 +1,13 @@
 """`refresh_worktree_base` where its worktree turns hostile or its git hangs:
 a link a worker planted is never followed out of the worktree, and a rebase
-cut short is aborted with everything it started, or said to be left
-mid-rebase. The ordinary rebase cases: test_builtins_rebase.py."""
+cut short (its time cap, a pause, cancel or shutdown) is stopped and aborted
+with everything it started, or said to be left mid-rebase. The ordinary
+rebase cases: test_builtins_rebase.py."""
 
+import asyncio
 import contextlib
 import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -69,11 +72,15 @@ async def test_a_planted_link_never_moves_a_lockfile_outside_the_worktree(
         assert (victim / "uv.lock").read_text() == "the host's own\n"
 
 
-def _hanging_smudge_filter(repo, pids, seconds: float) -> None:
+def _hanging_smudge_filter(repo, pids, seconds: float, *, deaf: bool = False) -> None:
     """The base adds `slow.txt` under a smudge filter that hangs, as an LFS
     filter can: the rebase's checkout of the base hangs in it, holding the
-    worktree's `index.lock`."""
-    git(repo, "config", "filter.slow.smudge", f"sh -c '{wtree.sleep_recorded(pids, seconds)}'")
+    worktree's `index.lock`. `deaf`: it ignores SIGTERM, so git dies of one
+    with the rebase started and the filter needs a SIGKILL."""
+    trap = 'trap "" TERM\n' if deaf else ""
+    git(
+        repo, "config", "filter.slow.smudge", f"sh -c '{trap}{wtree.sleep_recorded(pids, seconds)}'"
+    )
     (repo / ".gitattributes").write_text("slow.txt filter=slow\n")
     wtree.commit(repo, "slow.txt", "slow\n", "a filtered file")
 
@@ -124,3 +131,85 @@ async def test_a_rebase_killed_at_its_time_cap_is_aborted_with_everything_it_sta
         assert "--abort" not in str(raised.value)
     assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
     assert git_read(worktree, "rev-parse", "HEAD") == work
+
+
+#: What a rebase cut short leaves in the git dir.
+LEFT_MID_REBASE = {"rebase-merge", "rebase-apply", "index.lock"}
+
+
+async def _hung_pid(pids) -> int:
+    """The pid a hanging hook or filter wrote to `pids` (`sleep_recorded`),
+    once it has."""
+    for _ in range(200):
+        if pids.exists() and pids.read_text().strip():
+            return int(pids.read_text().split()[0])
+        await asyncio.sleep(0.05)
+    raise AssertionError("the hanging hook never started")
+
+
+@pytest.mark.parametrize("hang", ["smudge", "smudge-deaf-to-sigterm", "pre-rebase-hook"])
+async def test_a_cancelled_rebase_stops_its_git_before_it_cleans_up(
+    database, run_dirs, repo, hung, hang
+):
+    """R12E-04: a pause, cancel or shutdown cancelled only the await, so the
+    git in its thread rebased the branch after the stop, and the setup's
+    lockfile was put back while that git was still checking the base out.
+    The whole group is stopped first; then the rebase it started is aborted
+    and the lockfile goes back, so the branch is as it was before the stop."""
+    from kraft.adapters import forge
+
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    work = wtree.commit(worktree, "work.txt", "work\n", "worktree work")
+    before = await forge.lockfile_digests(worktree)
+    (worktree / "uv.lock").write_text("by the setup\n")
+    await forge.record_setup_writes(worktree, before)
+    if hang == "pre-rebase-hook":
+        hook = repo / ".git" / "hooks" / "pre-rebase"
+        hook.write_text("#!/bin/sh\n" + wtree.sleep_recorded(hung, 60))
+        hook.chmod(0o755)
+        wtree.commit(repo, "moved.txt", "moved on\n", "moved on")
+    else:
+        _hanging_smudge_filter(repo, hung, seconds=60, deaf=hang == "smudge-deaf-to-sigterm")
+    rebase = asyncio.create_task(
+        kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+    )
+    pid = await _hung_pid(hung)
+    assert not (worktree / "uv.lock").exists()  # set aside while git runs
+
+    rebase.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await rebase
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    assert not kraft_builtins._RUNNING_GIT_GROUPS
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    assert sorted(p.name for p in gitdir.glob("*") if p.name in LEFT_MID_REBASE) == []
+    assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+    assert git_read(worktree, "rev-parse", "HEAD") == work
+    assert (worktree / "uv.lock").read_text() == "by the setup\n"
+    assert not kraft_builtins.set_aside_dir(worktree).exists()
+
+
+async def test_a_shutdown_ends_a_running_git_group_and_everything_it_started(hung):
+    """A git a request (`/retry`'s rebase) still runs at shutdown is its own
+    session, so no signal to the server's group reaches it: it ran on after
+    `kraft admin stop`, holding the worktree's `index.lock` against the next
+    start. Shutdown ends it."""
+    running = asyncio.create_task(
+        asyncio.to_thread(
+            kraft_builtins._run_git_group,
+            ["sh", "-c", wtree.sleep_recorded(hung, 60)],
+            timeout=None,
+        )
+    )
+    pid = await _hung_pid(hung)
+
+    kraft_builtins.end_running_git_groups()
+
+    done = await asyncio.wait_for(running, 10)
+    assert done.returncode == -signal.SIGTERM
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
