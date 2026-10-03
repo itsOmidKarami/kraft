@@ -50,7 +50,7 @@ export type RecentLine = { e: KraftEvent; line: string };
 /** Recent's story, newest first (WI-2): a session's start and end fold into one line that
  *  leads with what changed. A live session reads "code_review is running on verification";
  *  one that ended well drops out, the node's next line tells it; one that failed says so at
- *  its end; an escalation's turn that ends reads "escalation answered". A node's start drops
+ *  its end; a gate's decision takes the place of its request; an escalation's turn that ends reads "escalation answered". A node's start drops
  *  once a session on it starts, and its finish takes the place of everything that ran in it. */
 export function recent(events: KraftEvent[]): RecentLine[] {
   const out: (RecentLine & { node?: string; session?: string })[] = [];
@@ -76,6 +76,8 @@ export function recent(events: KraftEvent[]): RecentLine[] {
       if (!line) continue;
       const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
       if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
+      // A decision answers the request: the wait is over and the line that said so goes (CG-3).
+      if (e.type === "gate_approved" || e.type === "gate_rejected") drop((x) => !(x.e.type === "gate_requested" && (s(x.e.payload?.gate) || x.node) === (s(p.gate) || node)));
       out.push({ e, node, line });
     }
   }
