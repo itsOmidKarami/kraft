@@ -26,7 +26,7 @@ carry the drift this skill exists to narrate:
 - `agent: <profile>` (doctor) - a harness profile some chain selects whose
   executable is not on PATH, or which `harnesses.yaml` does not declare.
 - `capabilities` (doctor) - capabilities this Kraft has that the operator's
-  seeded config predates. `templates/` is seeded once and never overwritten, so
+  seeded config predates. `config/` is seeded once and never overwritten, so
   an install keeps its original library and chains forever. Read the row's
   `-> ` lines out as the edit each one needs; they are adoption instructions,
   not drift to be "fixed". Never offer to copy the shipped defaults over: a
