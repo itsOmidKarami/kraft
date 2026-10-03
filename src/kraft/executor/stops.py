@@ -126,6 +126,13 @@ def budget_breach(
     return None
 
 
+def _usd(n: float) -> str:
+    """Dollars as the web UI's budget meter prints them (`format.ts` `usd`):
+    cents from $1 up, a tenth of a cent under it, so a stop under a dollar
+    names the same number as the meter beside it."""
+    return f"${n:.2f}" if n >= 1 else f"${n:.3f}"
+
+
 def budget_reason(breach: Breach) -> str:
     tail = " Nothing new was started; a running agent was not interrupted."
     if isinstance(breach, TokenBreach):
@@ -140,18 +147,18 @@ def budget_reason(breach: Breach) -> str:
             return (
                 f"budget_usd cannot be checked: {breach.unknown_launches} launch(es) in "
                 f"{where} reported no cost, and unknown spend is never counted as free "
-                f"(${breach.spent_usd:.2f} known, cap ${breach.cap_usd:.2f})." + tail
+                f"({_usd(breach.spent_usd)} known, cap {_usd(breach.cap_usd)})." + tail
             )
         return (
-            f"budget_usd reached: ${breach.spent_usd:.2f} spent in {where}, "
-            f"cap ${breach.cap_usd:.2f}." + tail
+            f"budget_usd reached: {_usd(breach.spent_usd)} spent in {where}, "
+            f"cap {_usd(breach.cap_usd)}." + tail
         )
     where = (
         "this work item" if isinstance(breach, WorkItemBreach) else "today, across every work item"
     )
     return (
-        f"budget cap reached: ${breach.spent_usd:.2f} spent on {where}, "
-        f"cap ${breach.cap_usd:.2f}." + tail
+        f"budget cap reached: {_usd(breach.spent_usd)} spent on {where}, "
+        f"cap {_usd(breach.cap_usd)}." + tail
     )
 
 

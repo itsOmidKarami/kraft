@@ -465,3 +465,27 @@ def test_no_other_budget_stop_names_a_limit(breach):
     """Each of these is raised somewhere else (or by no higher cap), so a
     `limit` would send the UI to an edit that does not move the stop."""
     assert stops.budget_limit(breach) is None
+
+
+@pytest.mark.parametrize(
+    "breach,said",
+    [
+        (
+            WorkItemBreach(scope="work_item", spent_usd=0.035, cap_usd=0.03),
+            "$0.035 spent on this work item, cap $0.030",
+        ),
+        (
+            UsdBreach(scope="usd", path="", spent_usd=0.0351, cap_usd=0.5, unknown_launches=0),
+            "$0.035 spent in the work item, cap $0.500",
+        ),
+        (
+            DailyBreach(scope="daily", spent_usd=12.5, cap_usd=10.0),
+            "$12.50 spent on today, across every work item, cap $10.00",
+        ),
+    ],
+    ids=["item-cap", "budget_usd", "daily"],
+)
+def test_a_budget_stop_names_dollars_as_the_meter_prints_them(breach, said):
+    """Under a dollar the web UI's meter prints a tenth of a cent ($0.035), so
+    the stop's reason beside it does too, never a rounded $0.04."""
+    assert said in stops.budget_reason(breach)
