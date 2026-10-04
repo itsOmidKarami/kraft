@@ -317,6 +317,9 @@ export interface WorkItem {
   head_sha?: string | null;
   /** why the item is stopped, from the `work_item_needs_human` it sits on */
   stop_reason?: string | null;
+  /** The latest changed-test-scope verification run, one entry per scope that
+   *  finished; null when there is no run. Only on the detail endpoint. */
+  test_result?: TestResult | null;
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
@@ -530,4 +533,9 @@ export interface FixTarget {
   round: { n: number; max: number } | null;
   /** Only on GET /work-items/:id/fix-target: `gate`, `requested`, `threads on <file>` or `current node`. */
   reason?: string;
+}
+
+export interface TestResult {
+  scopes: { command: string; scope: string | null; passed: boolean; exit_code: number | null; session_id: string }[];
+  passed: boolean;
 }

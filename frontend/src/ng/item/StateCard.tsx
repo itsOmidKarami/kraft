@@ -91,7 +91,7 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
   if (status === "failed" && stop) {
     const fs: [string, ReactNode][] = Object.entries(facts).flatMap(([k, v]) => (str(v) ? [[k, str(v)!] as [string, ReactNode]] : []));
     // "Do I lose anything?": the branch and what is on it stay.
-    const kept = [item.branch && `branch ${item.branch}`, h.files?.length && `${h.files.length} ${h.files.length === 1 ? "file" : "files"}`].filter(Boolean).join(" · ");
+    const kept = [item.branch && `branch ${item.branch}`, h.files?.length && `${h.files.length} ${h.files.length === 1 ? "file" : "files"}`, item.test_result?.passed && "tests passing"].filter(Boolean).join(" · ");
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     return {
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,

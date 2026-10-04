@@ -76,6 +76,17 @@ describe("StateCard", () => {
     expect(screen.getByRole("region", { name: "Failed" })).toHaveTextContent("work keptbranch kraft/design-the-cache-w1 · 2 files");
   });
 
+  it.each([
+    [true, "branch kraft/design-the-cache-w1 · 2 files · tests passing"],
+    [false, "branch kraft/design-the-cache-w1 · 2 files"],
+    [null, "branch kraft/design-the-cache-w1 · 2 files"],
+  ])("tests passing on the work-kept line only when the verification passed (test_result.passed %s)", (passed, kept) => {
+    const files = [{ path: "a.py", insertions: 2, deletions: 1 }, { path: "b.py", insertions: 1, deletions: 0 }] as DiffFile[];
+    const test_result = passed === null ? null : { passed, scopes: [] };
+    routed(<StateCard item={detail({ display_status: "failed", stop: stop("failed"), branch: "kraft/design-the-cache-w1", worktree_exists: true, test_result })} files={files} {...handlers()} />);
+    expect(screen.getByText("work kept").nextElementSibling?.textContent).toBe(kept);
+  });
+
   // R10b-01: /retry claims only a stopped item, so a waiting one offers no Retry now
   // and no harness switch (each answered 409); the fallback the policy allows is a fact.
   it("waiting on the provider: says Kraft retries by itself, names the allowed fallback, and offers no Retry the server would refuse", () => {

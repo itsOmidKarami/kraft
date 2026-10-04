@@ -1,5 +1,5 @@
-"""The board's `display_status` (B.1) and `stop` detail (B.3/B.4), including
-B6's rate-limit fallback facts. A sibling of test_board.py."""
+"""The board's `display_status` (B.1), `stop` detail (B.3/B.4) and `test_result`,
+including B6's rate-limit fallback facts. A sibling of test_board.py."""
 
 from __future__ import annotations
 
@@ -577,3 +577,157 @@ def test_a_budget_stop_names_the_cap_that_stopped_it(client, repo, budget):
         )
     )
     assert client.get(f"/api/work-items/{wid}").json()["stop"]["scope"] == budget["scope"]
+
+
+# ── test_result: the latest verification run's per-scope results ────────────
+
+_VERIFY = [
+    {
+        "id": "verify",
+        "kind": "exec",
+        "tasks": [{"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}],
+    }
+]
+_SCOPES = [
+    {"paths": ["frontend/**"], "command": "fe-cmd"},
+    {"paths": ["backend/**"], "command": "be-cmd"},
+    {"paths": ["docs/**"], "command": "docs-cmd"},
+]
+
+
+def _exit_session(wid, sid, result, command, status, code) -> None:
+    result.with_suffix(".exit").write_text(f"{code}\n")
+    _run(
+        lambda c: store.create_session(
+            c,
+            id=sid,
+            work_item_id=wid,
+            node_id="verify",
+            hook_point="verify.main.t",
+            log_path="/l",
+            result_path=str(result),
+            head_sha="abc",
+            command=command,
+        )
+    )
+    _run(lambda c: store.session_exited(c, sid, status))
+
+
+def _verified_item(client, repo, tmp_path, runs: list[tuple[str, str, int]], **fields) -> str:
+    """An item on the verify builtin whose latest run exited each `(command,
+    status, exit code)` as one session, as the builtin leaves them."""
+    from support.harness import connect_repo
+
+    connect_repo(repo, **({"test_scopes": _SCOPES} | fields))
+    wid = _paused_item(client, repo, materialized_chain=v1_chain(_VERIFY, repo=repo).to_json())
+    _run(lambda c: store.load_chain(c, wid, "verify"))
+    for i, run in enumerate(runs):
+        _exit_session(wid, f"s{i}", tmp_path / f"s{i}.json", *run)
+    return wid
+
+
+@pytest.mark.parametrize(
+    ("runs", "expected"),
+    [
+        pytest.param([], None, id="no-run"),
+        pytest.param(
+            [("fe-cmd", "done", 0), ("be-cmd", "done", 0), ("docs-cmd", "done", 0)],
+            {
+                "passed": True,
+                "scopes": [
+                    {"command": "fe-cmd", "scope": "frontend/**", "passed": True, "exit_code": 0},
+                    {"command": "be-cmd", "scope": "backend/**", "passed": True, "exit_code": 0},
+                    {"command": "docs-cmd", "scope": "docs/**", "passed": True, "exit_code": 0},
+                ],
+            },
+            id="every-scope-passed",
+        ),
+        pytest.param(
+            [("fe-cmd", "done", 0), ("be-cmd", "failed", 1), ("docs-cmd", "done", 0)],
+            {
+                "passed": False,
+                "scopes": [
+                    {"command": "fe-cmd", "scope": "frontend/**", "passed": True, "exit_code": 0},
+                    {"command": "be-cmd", "scope": "backend/**", "passed": False, "exit_code": 1},
+                    {"command": "docs-cmd", "scope": "docs/**", "passed": True, "exit_code": 0},
+                ],
+            },
+            id="one-scope-failed",
+        ),
+        pytest.param(
+            [("fe-cmd", "done", 0), ("be-cmd", "running", 0)],
+            {
+                "passed": True,
+                "scopes": [
+                    {"command": "fe-cmd", "scope": "frontend/**", "passed": True, "exit_code": 0}
+                ],
+            },
+            id="a-scope-still-running-is-not-reported",
+        ),
+    ],
+)
+def test_detail_test_result(client, repo, tmp_path, runs, expected):
+    wid = _verified_item(client, repo, tmp_path, runs)
+
+    result = client.get(f"/api/work-items/{wid}").json()["test_result"]
+
+    if expected is not None:
+        for i, scope in enumerate(expected["scopes"]):
+            scope["session_id"] = f"s{i}"
+    assert result == expected
+
+
+def test_detail_test_result_survives_an_unreadable_repos_yaml(client, repo, tmp_path):
+    """The scope names come off `repos.yaml`; without it the detail still
+    answers, with the results and no scope names."""
+    import os
+
+    wid = _verified_item(client, repo, tmp_path, [("fe-cmd", "failed", 2)])
+    (Path(os.environ["KRAFT_CONFIG_DIR"]) / "repos.yaml").write_text("repos: [not, a, mapping")
+
+    response = client.get(f"/api/work-items/{wid}")
+
+    assert response.status_code == 200
+    assert response.json()["test_result"] == {
+        "passed": False,
+        "scopes": [
+            {
+                "command": "fe-cmd",
+                "scope": None,
+                "passed": False,
+                "exit_code": 2,
+                "session_id": "s0",
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("setup_status", "scopes"),
+    [
+        pytest.param("done", [("web-test", True)], id="a-passed-setup-is-not-a-scope"),
+        pytest.param("failed", [("npm ci", False), ("web-test", True)], id="a-failed-setup-is"),
+    ],
+)
+def test_detail_test_result_counts_an_area_setup_only_when_it_failed(
+    client, repo, tmp_path, setup_status, scopes
+):
+    area = {
+        "web": {
+            "paths": ["web/**"],
+            "setup": "npm ci",
+            "verification": {"test_scopes": [{"paths": ["web/**"], "command": "web-test"}]},
+        }
+    }
+    wid = _verified_item(
+        client,
+        repo,
+        tmp_path,
+        [("npm ci", setup_status, 0), ("web-test", "done", 0)],
+        areas=area,
+        test_scopes=None,
+    )
+
+    result = client.get(f"/api/work-items/{wid}").json()["test_result"]
+
+    assert [(s["command"], s["passed"]) for s in result["scopes"]] == scopes

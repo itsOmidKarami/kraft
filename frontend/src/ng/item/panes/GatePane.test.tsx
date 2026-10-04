@@ -129,6 +129,20 @@ describe("GateBody", () => {
     expect(screen.getByText("p.md")).toBeInTheDocument();
   });
 
+  const scope = (n: number, passed: boolean, name = `s${n}/**`) => ({ command: `cmd${n}`, scope: name, passed, exit_code: passed ? 0 : 1, session_id: `sess${n}` });
+  it.each([
+    ["no run: no tests line", null, null],
+    ["every scope passed", { passed: true, scopes: [scope(1, true), scope(2, true), scope(3, true)] }, "✓ 3 scopes"],
+    ["one of three failed, named and linked to its log", { passed: false, scopes: [scope(1, true), scope(2, false, "backend/**"), scope(3, true)] }, "✗ 1 of 3 scopes · backend/**"],
+  ])("tests line: %s", async (_name, test_result, line) => {
+    stubFetch();
+    render(<GateBody item={{ ...pending, test_result }} version="1" gate={gate} events={[]} />);
+    if (line === null) return expect(screen.queryByText("tests")).toBeNull();
+    expect(screen.getByText("tests").nextElementSibling).toHaveTextContent(line);
+    if (line.startsWith("✗")) expect(screen.getByRole("link", { name: "backend/**" })).toHaveAttribute("href", "/api/worker-sessions/sess2/log");
+    else expect(screen.queryByRole("link", { name: /\*\*/ })).toBeNull();
+  });
+
   it("lists the open threads, not the resolved ones", async () => {
     stubFetch({ "GET /work-items/w1/threads": [200, [{ id: "a", state: "open", comments: [{ body: "no size bound" }] }, { id: "b", state: "resolved", comments: [{ body: "fixed already" }] }]] });
     render(<GateBody item={pending} version="1" gate={gate} events={[]} />);
