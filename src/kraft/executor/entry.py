@@ -344,6 +344,20 @@ def _implements_beads(work_item_row) -> list[str]:
     return json.loads(raw) if raw else []
 
 
+def named_beads(row, run_dirs, bead_id: str | None = None) -> list[str]:
+    """The beads `close_beads` closes for `row`, none twice: its own (`bead_id`,
+    which a late intake may have just filed, else the row's), those it
+    implements, then those a `Fixes`/`Closes` trailer on its own commits names.
+    The cancel preview reads it too, so Mark complete names every bead its box
+    would close."""
+    worktree = run_dirs.worktrees / row["id"]
+    base = row["base_ref"]
+    log = git_read(worktree, "log", "--format=%B%x00", f"{base}..HEAD") if base else None
+    own = bead_id or row["bead_id"]
+    ids = [b for b in (own, *_implements_beads(row)) if b]
+    return list(dict.fromkeys([*ids, *_trailer_beads(log.split("\0") if log else [])]))
+
+
 async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = False) -> None:
     """Close `row['bead_id']`, every id in `row['implements_beads']`, and every id
     a `Fixes`/`Closes` trailer on the item's own commits names -- but only when
@@ -380,14 +394,10 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = 
             await db.write(lambda c: store.set_bead_id(c, row["id"], bead_id))
     # `git_read` never raises, so a worktree already cleaned up, or a row with no
     # `base_ref`, reads as no change at all.
-    worktree = run_dirs.worktrees / row["id"]
     base = row["base_ref"]
-    log = git_read(worktree, "log", "--format=%B%x00", f"{base}..HEAD") if base else None
+    worktree = run_dirs.worktrees / row["id"]
     changed = git_read(worktree, "diff", "--name-only", base, "HEAD") if base else None
-    stated = _implements_beads(row)
-    trailers = _trailer_beads(log.split("\0") if log else [])
-    ids = [b for b in (bead_id, *stated) if b]
-    ids += [x for x in trailers if x not in ids]
+    ids = named_beads(row, run_dirs, bead_id)
     if not by_hand and not _carries_a_change(db, row, changed):
         if ids:
             reason = (
