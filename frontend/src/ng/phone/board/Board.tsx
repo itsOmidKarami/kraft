@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import * as api from "../../../api";
 import { repoName } from "../../../format";
 import { showToast } from "../../ui/Toast";
+import { tip } from "../../ui/Tooltip";
 import { useStore } from "../../../store";
 import type { WorkItem } from "../../../types";
 import { act } from "../../item/actions";
@@ -127,7 +128,7 @@ export function Board() {
           <ChevronDown size={14} aria-hidden="true" />
         </button>
         <span className="ph-spacer" />
-        <Link to="/work-items/new" className="ph-fab" aria-label="New work item"><Plus size={20} aria-hidden="true" /></Link>
+        <Link to="/work-items/new" className="ph-fab" {...tip("New work item")}><Plus size={20} aria-hidden="true" /></Link>
       </RootHeader>
       <div className="ph-chips" role="group" aria-label="Show">
         {CHIPS.map((c) => (
