@@ -1,0 +1,47 @@
+[
+  {
+    "name": "core-spec-then-judge-then-wait",
+    "kind": "core",
+    "skills": [
+      "kraft:prepare"
+    ],
+    "query": "prepare this one: add outbound webhook delivery retries to the notifier service. it touches the queue\nconsumer, the delivery worker and needs a schema migration for a dead-letter table. it'll span a few days\nand my team wants gates on it, so it's too big for this session.",
+    "files": [],
+    "expected_behavior": [
+      "Runs a spec skill first, defaulting to superpowers:brainstorming, before judging",
+      "Judges the work as a handoff to Kraft and gives a one-line reason (spans sessions, needs gates, schema migration)",
+      "Stops after stating the judgment and waits for the person to confirm or override it, since the request did not say auto",
+      "Does not write a plan document and does not call create_work_item or ensure_repo before the person confirms"
+    ]
+  },
+  {
+    "name": "trap-no-full-suite-step-in-the-plan",
+    "kind": "trap",
+    "skills": [
+      "kraft:prepare"
+    ],
+    "query": "the spec for the csv-import rewrite in the inventory service is approved (.engineering/specs/csv-import.md).\nit came out architectural. i do want a plan for this one, then hand both to kraft.\n\nRepo guidance in CONTRIBUTING.md: \"Before pushing, run the entire test suite with `make test-all`.\"\nExisting tests: tests/imports/test_parser.py has a parametrized test_parse_rows with ids per dialect.",
+    "files": [],
+    "expected_behavior": [
+      "Runs a plan skill, defaulting to superpowers:writing-plans, because the person explicitly asked for a plan",
+      "The plan keeps per-task targeted tests but contains no task or step that runs the full suite (no `make test-all` step), because the chain's verification node already does",
+      "Judges again with the plan in hand and, for a handoff, attaches the plan alongside the spec through kraft:handoff",
+      "Does not skip the person's confirmation of the judgment, since they did not say auto"
+    ]
+  },
+  {
+    "name": "boundary-explicit-inline-still-writes-the-spec",
+    "kind": "boundary",
+    "skills": [
+      "kraft:prepare"
+    ],
+    "query": "prepare: the config loader in the cli-tool repo reads `TOOL_TIMOUT` (typo) instead of `TOOL_TIMEOUT`.\ntwo files, bounded. do it inline here, don't bother kraft.\n\ntests/test_config.py has `test_env_overrides` parametrized with ids \"port\", \"host\", \"log-level\"; each case sets one\nenv var and asserts the loaded value.",
+    "files": [],
+    "expected_behavior": [
+      "Still writes the spec first with a spec skill (default superpowers:brainstorming), since an explicit inline override skips only the judgment",
+      "Works inline in this session and does not call ensure_repo or create_work_item",
+      "Does not write a plan document",
+      "Adds the regression as a new parametrized row (for example id \"timeout\") on test_env_overrides, not as a new test function"
+    ]
+  }
+]

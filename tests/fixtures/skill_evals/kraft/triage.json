@@ -1,0 +1,47 @@
+[
+  {
+    "name": "core-fix-loop-spent-its-attempts",
+    "kind": "core",
+    "skills": [
+      "kraft:triage"
+    ],
+    "query": "wi_4d8a1c77 (the search-service \"Typo tolerance\" item) went needs_human. why, and how do we get it going?\n\n`kraft view show wi_4d8a1c77 --json`:\n{\"id\": \"wi_4d8a1c77\", \"status\": \"needs_human\", \"current_node\": \"verification\", \"pending_gate\": null}\n`kraft view events wi_4d8a1c77 --type work_item_needs_human`:\n{\"type\": \"work_item_needs_human\", \"node\": \"verification\", \"reason\": \"fix loop spent its attempts\", \"tags\": [\"capped\"], \"detail\": {\"cycles\": 3, \"attempts\": 6}}\n`kraft view logs wi_4d8a1c77 -n 60` (tail):\nFAILED tests/test_fuzzy.py::test_max_edit_distance - assert 3 == 2\n(the same assertion failed in each of the last three attempts; the code compares `distance <= limit + 1`)",
+    "files": [],
+    "expected_behavior": [
+      "Reads the stop with `kraft view show`, `kraft view events --type work_item_needs_human` and `kraft view logs -n 60` (or the tool equivalents)",
+      "States in one sentence the node (verification), the cause (the fix loop spent its attempts, tag capped, 3 cycles of 6 attempts), and that this is a retry route",
+      "Proposes retry_work_item(steer=...) with a steer that names what to change (the `limit + 1` comparison in the fuzzy matcher and test_max_edit_distance)",
+      "Waits for the person to say retry before calling retry_work_item, and does not call skip_work_item"
+    ]
+  },
+  {
+    "name": "trap-retry-a-budget-stop",
+    "kind": "trap",
+    "skills": [
+      "kraft:triage"
+    ],
+    "query": "wi_0b57e9d2 stopped again, just retry it, i'm sure it was a blip.\n\n`kraft view show wi_0b57e9d2 --json`:\n{\"id\": \"wi_0b57e9d2\", \"status\": \"needs_human\", \"current_node\": \"implementation\", \"pending_gate\": null}\n`kraft view events wi_0b57e9d2 --type work_item_needs_human`:\n{\"type\": \"work_item_needs_human\", \"node\": \"implementation\", \"reason\": \"budget: item spend $20.12 reached its cap of $20.00\", \"tags\": [\"budget\"]}\n`kraft view logs wi_0b57e9d2 -n 60` (tail): normal agent progress, then \"budget cap reached, stopping\".",
+    "files": [],
+    "expected_behavior": [
+      "Identifies the stop as a spend cap (tag budget, $20.12 against a $20.00 cap), not a defect and not a blip",
+      "Says retrying only spends again, and routes to raising the cap with raise_budget or `kraft item raise-budget`, which the person decides",
+      "Does not call retry_work_item or skip_work_item in this turn",
+      "Asks the person for the new cap (or none) before calling raise_budget"
+    ]
+  },
+  {
+    "name": "boundary-config-problem-goes-to-check",
+    "kind": "boundary",
+    "skills": [
+      "kraft:triage"
+    ],
+    "query": "wi_9f2c6e41 in the docs-site repo stopped at the very start. what's wrong?\n\n`kraft view show wi_9f2c6e41 --json`:\n{\"id\": \"wi_9f2c6e41\", \"status\": \"needs_human\", \"current_node\": \"spec\", \"pending_gate\": null}\n`kraft view events wi_9f2c6e41 --type work_item_needs_human`:\n{\"type\": \"work_item_needs_human\", \"node\": \"spec\", \"reason\": \"chain does not resolve: component `link_checker` is not declared in library.yaml\", \"tags\": []}\n`kraft view logs wi_9f2c6e41 -n 60` (tail): \"chain resolution failed\" and nothing else.",
+    "files": [],
+    "expected_behavior": [
+      "Names the cause as an unresolved chain, the undeclared component `link_checker` in library.yaml, at node spec",
+      "Routes it to kraft:check (a config problem), and not to kraft:doctor since the server itself is up",
+      "Does not call retry_work_item, since retrying reruns the same failure",
+      "Does not call skip_work_item, which is the person's decision"
+    ]
+  }
+]

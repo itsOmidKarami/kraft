@@ -3,6 +3,7 @@ repository -- one of its beads, its label taxonomy, its source paths, its
 justfile recipes -- reads there as a rule of that repository, and an agent obeys
 it (Kraft-35u4m.2: `mr-metadata` told every repo it had `release::` labels)."""
 
+import json
 import re
 from pathlib import Path
 
@@ -40,3 +41,20 @@ def test_a_shipped_skill_names_nothing_of_this_repo(path):
     text = path.read_text()
     found = {what: m.group(0) for what, rx in LEAKS.items() if (m := re.search(rx, text))}
     assert not found, f"{path.relative_to(ROOT)} names {found}"
+
+
+#: Three scenarios a skill: the ordinary case, the mistake it warns about, and
+#: the case that is a sibling's or a stop. Data for an evaluation run, which
+#: nothing in the suite performs.
+EVALS = ROOT / "tests" / "fixtures" / "skill_evals"
+
+
+@pytest.mark.parametrize("path", SHIPPED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_shipped_skill_has_its_three_evaluations(path):
+    name = path.parent.name
+    plugin = path.parts[-4] if "plugins" in path.parts else None
+    scenarios = json.loads((EVALS / (plugin or "worker") / f"{name}.json").read_text())
+    assert sorted(s["kind"] for s in scenarios) == ["boundary", "core", "trap"]
+    for s in scenarios:
+        assert s["skills"] == [f"{plugin or 'kraft'}:{name}"], s["name"]
+        assert s["query"].strip() and len(s["expected_behavior"]) >= 3, s["name"]

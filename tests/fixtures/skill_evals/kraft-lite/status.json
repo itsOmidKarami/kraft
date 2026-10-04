@@ -1,0 +1,47 @@
+[
+  {
+    "name": "core-report-every-chain-in-the-directory",
+    "kind": "core",
+    "skills": [
+      "kraft-lite:status"
+    ],
+    "query": "Where are we at on things in the file-share repo? I think I've got a couple of Kraft Lite runs going.\n\n`python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" chains` prints:\n[\n  {\n    \"chain_id\": \"kl-a1b2c3d4\",\n    \"title\": \"Add rate limiting to /upload\",\n    \"status\": \"blocked\",\n    \"node\": \"plan\"\n  },\n  {\n    \"chain_id\": \"kl-e5f6a7b8\",\n    \"title\": \"Fix CSV export encoding\",\n    \"status\": \"open\",\n    \"node\": \"verify\"\n  }\n]\n\n`state --chain-id kl-a1b2c3d4` prints:\n{\n  \"chain_id\": \"kl-a1b2c3d4\",\n  \"node\": \"plan\",\n  \"hooks\": [\n    \"on.mr.rebase\",\n    \"on.plan.requested\"\n  ],\n  \"gate\": \"plan_approval\",\n  \"attempt\": 0,\n  \"cap\": null,\n  \"status\": \"blocked\",\n  \"note\": \"\",\n  \"backend\": \"jsonl\"\n}\n\n`state --chain-id kl-e5f6a7b8` prints:\n{\n  \"chain_id\": \"kl-e5f6a7b8\",\n  \"node\": \"verify\",\n  \"hooks\": [\n    \"on.mr.rebase\",\n    \"on.env.prepare\",\n    \"on.test.run\",\n    \"on.review.local.run\"\n  ],\n  \"gate\": null,\n  \"attempt\": 2,\n  \"cap\": 3,\n  \"status\": \"open\",\n  \"note\": \"\",\n  \"backend\": \"jsonl\"\n}",
+    "files": [],
+    "expected_behavior": [
+      "Runs kl.py chains first, then kl.py state --chain-id for each of the two chains",
+      "Reports both chains (kl-a1b2c3d4 and kl-e5f6a7b8), not only one",
+      "Says kl-a1b2c3d4 is blocked at the plan_approval gate on the plan node, waiting on the person",
+      "Says kl-e5f6a7b8 is running the verify node with 2 of 3 attempts spent, and names the jsonl backend",
+      "Does not run approve, close, gate, attempt or any other write verb"
+    ]
+  },
+  {
+    "name": "trap-unfinished-run-cost-and-token-figures",
+    "kind": "trap",
+    "skills": [
+      "kraft-lite:status"
+    ],
+    "query": "Chain kl-6a2d4f18 (dark mode for the settings page) has been going since this morning. How long did the run take in total, and roughly how many tokens and dollars has it burned so far?\n\n`python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" summary --chain-id kl-6a2d4f18` prints:\n{\n  \"chain_id\": \"kl-6a2d4f18\",\n  \"title\": \"Add dark mode to the settings page\",\n  \"status\": \"blocked\",\n  \"started\": \"2026-10-05T09:12:04Z\",\n  \"finished\": null,\n  \"duration_seconds\": null,\n  \"nodes\": [\n    {\n      \"node\": \"spec\",\n      \"status\": \"closed\",\n      \"seconds\": 412,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": \"spec_approval\",\n      \"blocked_seconds\": 380,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"plan\",\n      \"status\": \"blocked\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": \"plan_approval\",\n      \"blocked_seconds\": 95,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"chain_review\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": \"chain_finalized\",\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"implementation\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": null,\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"verify\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": 3,\n      \"gate\": null,\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"open_mr\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": null,\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"mr_checks\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": 3,\n      \"gate\": null,\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"human_review\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": \"human_review_approval\",\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"merge\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": null,\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    },\n    {\n      \"node\": \"post_merge_watch\",\n      \"status\": \"open\",\n      \"seconds\": null,\n      \"attempts\": 0,\n      \"cap\": null,\n      \"gate\": null,\n      \"blocked_seconds\": null,\n      \"rejected\": null,\n      \"rejections\": 0\n    }\n  ],\n  \"totals\": {\n    \"nodes\": 10,\n    \"closed\": 1,\n    \"attempts\": 0,\n    \"blocked_seconds\": 475,\n    \"gates\": 1,\n    \"rejections\": 0\n  }\n}",
+    "files": [],
+    "expected_behavior": [
+      "Runs kl.py summary --chain-id kl-6a2d4f18",
+      "Says the run's total duration is not known yet because duration_seconds is null until the chain is done, and does not call the run instant or zero seconds",
+      "Reports the nodes walked so far: spec took 412 seconds, 380 of them waiting on the human at spec_approval, and plan is blocked at plan_approval",
+      "Says Kraft Lite has no token or cost figures because it runs inside the session, and gives no estimate of them"
+    ]
+  },
+  {
+    "name": "boundary-status-is-read-only-do-not-approve",
+    "kind": "boundary",
+    "skills": [
+      "kraft-lite:status"
+    ],
+    "query": "Is chain kl-4c9e1a35 stuck? Nothing has moved in an hour. If it's just waiting on me, approve whatever it is so it moves, I'll read it later.\n\n`python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" chains` prints:\n[\n  {\n    \"chain_id\": \"kl-4c9e1a35\",\n    \"title\": \"Add pagination to the audit log API\",\n    \"status\": \"blocked\",\n    \"node\": \"plan\"\n  }\n]\n\n`python3 \"$CLAUDE_PLUGIN_ROOT/kl.py\" state --chain-id kl-4c9e1a35` prints:\n{\n  \"chain_id\": \"kl-4c9e1a35\",\n  \"node\": \"plan\",\n  \"hooks\": [\n    \"on.mr.rebase\",\n    \"on.plan.requested\"\n  ],\n  \"gate\": \"plan_approval\",\n  \"attempt\": 0,\n  \"cap\": null,\n  \"status\": \"blocked\",\n  \"note\": \"\",\n  \"backend\": \"jsonl\"\n}",
+    "files": [],
+    "expected_behavior": [
+      "Reports that the chain is not stuck: it is blocked at the plan_approval gate on the plan node, waiting on the person",
+      "Does not run kl.py approve, close, reject or gate from the status skill",
+      "Points the person to kraft-lite:gate to answer the gate, and notes the plan should be shown to them first"
+    ]
+  }
+]

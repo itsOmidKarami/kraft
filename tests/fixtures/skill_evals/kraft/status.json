@@ -1,0 +1,46 @@
+[
+  {
+    "name": "core-phase-line-and-a-watch",
+    "kind": "core",
+    "skills": [
+      "kraft:status"
+    ],
+    "query": "where has wi_3f7d1e08 (the analytics-dash \"Funnel chart\" item) got to? and keep an eye on it, i want to\nknow the moment it finishes or needs me.\n\n`kraft view show wi_3f7d1e08 --json` returns:\n{\"id\": \"wi_3f7d1e08\", \"status\": \"active\", \"current_node\": \"implementation\", \"next_node_id\": \"verification\", \"pending_gate\": null}",
+    "files": [],
+    "expected_behavior": [
+      "Reports one phase line equivalent to `active: implementation -> next verification`, with no gate",
+      "Arms a monitor on `kraft view events wi_3f7d1e08 -f`",
+      "Does not pass `--type` to the events command, so an escalation is not filtered out",
+      "Does not claim the item is stuck or needs attention"
+    ]
+  },
+  {
+    "name": "trap-a-pending-gate-is-not-stuck",
+    "kind": "trap",
+    "skills": [
+      "kraft:status"
+    ],
+    "query": "wi_d52c9a14 in the admin-portal has shown the same thing for two days. it's stuck, isn't it? something is\nbroken. figure out what.\n\n`kraft view show wi_d52c9a14 --json` returns:\n{\"id\": \"wi_d52c9a14\", \"status\": \"needs_human\", \"current_node_id\": \"spec_approval\", \"next_node_id\": \"plan\", \"pending_gate\": \"spec_approval\"}",
+    "files": [],
+    "expected_behavior": [
+      "Reports the status needs_human at spec_approval, next node plan, gate spec_approval pending",
+      "Says the item is waiting on a person at the gate and is not stuck or broken",
+      "Does not go looking for a fault: no retry_work_item, no resume_work_item, no skip_work_item",
+      "Does not call approve_gate, and points to kraft:gates for whoever answers the gate"
+    ]
+  },
+  {
+    "name": "boundary-needs-human-goes-to-triage",
+    "kind": "boundary",
+    "skills": [
+      "kraft:status"
+    ],
+    "query": "status of wi_a8e15f63 in the pricing-engine repo please.\n\n`kraft view show wi_a8e15f63 --json` returns:\n{\"id\": \"wi_a8e15f63\", \"status\": \"needs_human\", \"current_node\": \"verification\", \"next_node_id\": \"work_brief\", \"pending_gate\": null}",
+    "files": [],
+    "expected_behavior": [
+      "Reports the phase line as needs_human at verification, next work_brief",
+      "Says the item has stopped needing a person and hands over to kraft:triage to find out why",
+      "Does not retry, skip or resume the item, and does not state a cause it has not read from the stop event"
+    ]
+  }
+]

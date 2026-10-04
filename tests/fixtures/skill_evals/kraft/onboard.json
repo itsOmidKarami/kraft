@@ -1,0 +1,48 @@
+[
+  {
+    "name": "core-connect-and-confirm-the-commands",
+    "kind": "core",
+    "skills": [
+      "kraft:onboard"
+    ],
+    "query": "connect the ~/code/recipe-box repo to kraft please. it's a Rails-free Ruby gem with a Makefile.\n\nWhat the repo says: its README has \"Run `make test` before sending a PR\" and CONTRIBUTING says the\nsame. CI runs `make test`. There is a `make setup` target that runs bundle install.\n\n(ensure_repo() answers {\"repo\": \"recipe-box\", \"test_command\": \"make test\", \"test_source\": \"Makefile target test\",\n\"setup_command\": \"make setup\", \"setup_source\": \"Makefile target setup\", \"candidates\": [\"bundle exec rspec (Gemfile.lock)\"],\n\"enabled\": true}. The plugin is installed, so Kraft's MCP server is already registered.)",
+    "files": [],
+    "expected_behavior": [
+      "Reads the README, CONTRIBUTING and CI config for how to build and test before calling ensure_repo",
+      "Calls ensure_repo with no command overrides, since the probe's `make test` and `make setup` match the docs",
+      "Shows the person the saved commands with their sources and the candidate it passed over (bundle exec rspec), and asks them to confirm or correct before the first work item",
+      "Does not run `kraft admin init`, since the plugin has already registered the MCP server",
+      "Says what `kraft repo connect --verify` will run and asks whether to run it now, rather than running the suite unannounced"
+    ]
+  },
+  {
+    "name": "trap-verify-passes-but-the-pin-is-untracked",
+    "kind": "trap",
+    "skills": [
+      "kraft:onboard"
+    ],
+    "query": "i connected ~/code/ledger-sync last time. `kraft repo connect --verify` just went green, so we're done?\n\nContext: it is a Python service, test_command `uv run pytest`, setup_command `uv sync`, pyproject says\n`requires-python = \"~=3.11\"`. The verify output was:\n  setup: ok (14s)   tests: ok (212 passed, 41s)\nand the dev's own checkout has an untracked, gitignored `.python-version` pinning 3.11. Output of\n`git -C ~/code/ledger-sync ls-files --others --directory`:\n  .python-version\n  .env\n  node_modules/\n`.gitignore` already lists .python-version and .env.",
+    "files": [],
+    "expected_behavior": [
+      "Runs `git -C <repo> ls-files --others --directory` (or reads that list) even though --verify passed",
+      "Flags `.python-version` as a root-level file no worktree gets, and that with `~=3.11` a different interpreter can pass the tests without saying so",
+      "Proposes a `local_files:` entry for `.python-version` in this repo's entry in ~/.kraft/config/repos.yaml, as a literal file path, not a glob or directory",
+      "Re-runs `kraft repo connect --verify` after the edit and says whether it went green, rather than calling it done on the first green"
+    ]
+  },
+  {
+    "name": "boundary-server-down-stop-at-verify",
+    "kind": "boundary",
+    "skills": [
+      "kraft:onboard"
+    ],
+    "query": "steps 1 to 3 are done for ~/code/clinic-scheduler (connected, commands confirmed, --verify green). finish\nthe onboarding.\n\n$ kraft admin health\nerror: cannot reach the Kraft server at 127.0.0.1:7421 (connection refused)\n(exit 1)",
+    "files": [],
+    "expected_behavior": [
+      "Runs `kraft admin health` first as the opening of step 4",
+      "Reports that the health check failed because the server is not up, and stops there",
+      "Does not run `kraft admin doctor` and does not declare onboarding done",
+      "Says that starting the server (`kraft admin start`, or the service) comes first and leaves that to the person, and does not hand off into kraft:check"
+    ]
+  }
+]

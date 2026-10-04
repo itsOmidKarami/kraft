@@ -1,0 +1,46 @@
+[
+  {
+    "name": "core-plan-fixing-behaviour-an-existing-test-covers",
+    "kind": "core",
+    "skills": [
+      "kraft:plan"
+    ],
+    "query": "You are working on a Kraft work item.\nTitle: Round half-cent totals half-up\nTask: Produce an executable implementation plan from the approved spec.\nRepo: /work/ledgerlite\nWork item: wi_5a0f3b8c\nNode: plan\nHook point: plan.author.author\n\nRound half-cent totals half-up\n\nThe summary shows 2.67 for a total of 2.675 and 0.12 for 0.125.\n\nPrint the finished plan as your whole reply instead of writing it to a file (this run has no filesystem to write to). You cannot run commands here; the code you would have read, the approved spec you would have found in .engineering/specs/, and the repo's testing guidance are quoted below and are all there is.\n\n=== approved spec (.engineering/specs/wi_5a0f3b8c.md) ===\n# Spec: Round half-cent totals half-up\n\n## Problem\n`format_total` in `ledgerlite/summary.py` uses Python's `round()`, which rounds half to even on the binary float, so 2.675 prints 2.67 and 0.125 prints 0.12. Accountants expect half-up: 2.68 and 0.13.\n\n## Approach\nCompute with `decimal.Decimal(str(total)).quantize(Decimal(\"0.01\"), rounding=ROUND_HALF_UP)` inside `format_total`. Both callers (`summary()` and the TOTAL row in `export.py`) get the fix because they share the function.\n\n## Out of scope\nRounding of individual entries on input; negative half-cent totals keep their current behaviour of rounding away from zero (ROUND_HALF_UP does that).\n\n## Verification\nNew cases in the existing `test_summary_rounding`: `half_up_2_675` ([\"2.675\"] -> \"2.68\") and `half_up_0_125` ([\"0.125\"] -> \"0.13\").\n\nIf you must stop because only the requester can answer something, print a single JSON object {\"status\": \"needs_context\", \"question\": \"<what you need>\"} as your whole reply instead of the document.\n",
+    "files": [],
+    "expected_behavior": [
+      "Every task sits under a `### Task N: title` heading numbered from 1, and the plan has no more tasks than needed (the Decimal change and its two cases belong in one task)",
+      "The failing test is two new `pytest.param(..., id=\"half_up_2_675\")` and `id=\"half_up_0_125\"` rows added to the existing `test_summary_rounding` parametrize (lines 12-19), not a new test function, and it uses `make_ledger` from `tests/support.py`",
+      "Names the exact files with line numbers (`ledgerlite/summary.py` lines 18-20, `tests/test_summary.py`), writes the new `format_total` out in full, and gives the pytest command with what it prints before and after",
+      "Contains no vague step such as \"add appropriate error handling\", \"similar to task 1\" or \"write tests for the above\""
+    ]
+  },
+  {
+    "name": "trap-the-spec-names-a-function-that-does-not-do-what-it-says",
+    "kind": "trap",
+    "skills": [
+      "kraft:plan"
+    ],
+    "query": "You are working on a Kraft work item.\nTitle: Running balance in ledger history\nTask: Produce an executable implementation plan from the approved spec.\nRepo: /work/ledgerlite\nWork item: wi_7c11d94e\nNode: plan\nHook point: plan.author.author\n\nRunning balance in ledger history\n\nShow a running balance column in `ledger history`.\n\nPrint the finished plan as your whole reply instead of writing it to a file (this run has no filesystem to write to). You cannot run commands here; the code you would have read, the approved spec you would have found in .engineering/specs/, and the repo's testing guidance are quoted below and are all there is.\n\n=== approved spec (.engineering/specs/wi_7c11d94e.md) ===\n# Spec: Running balance in `ledger history`\n\n## Problem\n`ledger history` lists entries without a balance, so people add them up by hand.\n\n## Approach\nIn `ledgerlite/history.py`, walk `Ledger.entries_sorted()`, which returns entries ordered by date, and keep a running `Decimal` total, printing it as a new right-aligned `BALANCE` column. No change to `Ledger`.\n\n## Out of scope\nPer-account balances, export formats.\n\n## Verification\n`tests/test_history.py::test_history_shows_running_balance` with three entries on three different dates.\n\n=== repository: ledgerlite ===\nledgerlite/ledger.py:\n    40  class Ledger:\n    41      def entries_sorted(self):\n    42          \"\"\"Entries in insertion order (by id). Name kept for the importer.\"\"\"\n    43          return sorted(self.entries, key=lambda e: e.id)\n\nledgerlite/history.py:\n    12  def history(ledger):\n    13      for e in ledger.entries_sorted():\n    14          print(f\"{e.date}  {e.description:30}  {e.amount:>10}\")\n\nledgerlite/importer.py:\n    27      for e in ledger.entries_sorted():   # relies on id order to reproduce the file's line order\n\nEntries can be imported out of date order, so id order and date order differ for any ledger imported from an unsorted file.\ntests/support.py: def make_ledger(amounts): ... ; def make_dated_ledger(rows): ...  # (date, amount) pairs\n\nIf you must stop because only the requester can answer something, print a single JSON object {\"status\": \"needs_context\", \"question\": \"<what you need>\"} as your whole reply instead of the document.\n",
+    "files": [],
+    "expected_behavior": [
+      "States in the plan itself that it disagrees with the spec: `entries_sorted()` orders by id, not by date, and `importer.py` depends on that order",
+      "Does not quietly design something else: any step that differs from the spec (such as sorting by `(date, id)` inside `history.py` rather than using `entries_sorted()`) is labelled as a departure from the spec's approach, and `Ledger.entries_sorted` is not changed without saying so",
+      "Is still a plan: `### Task N:` headings from 1, each with exact files, the failing test written out (using `make_dated_ledger` with entries out of date order) and the run command",
+      "Does not stop with `needs_context`, since reading the code settled the question"
+    ]
+  },
+  {
+    "name": "boundary-spec-leaves-the-destination-undecidable",
+    "kind": "boundary",
+    "skills": [
+      "kraft:plan"
+    ],
+    "query": "You are working on a Kraft work item.\nTitle: Upload the nightly export\nTask: Produce an executable implementation plan from the approved spec.\nRepo: /work/ledgerlite\nWork item: wi_e8b24a60\nNode: plan\nHook point: plan.author.author\n\nUpload the nightly export\n\nFinance wants the nightly export copied somewhere they can reach it.\n\nPrint the finished plan as your whole reply instead of writing it to a file (this run has no filesystem to write to). You cannot run commands here; the code you would have read, the approved spec you would have found in .engineering/specs/, and the repo's testing guidance are quoted below and are all there is.\n\n=== approved spec (.engineering/specs/wi_e8b24a60.md) ===\n# Spec: Upload the nightly export\n\n## Problem\n`ledger export --nightly` writes `out/export-YYYY-MM-DD.csv` on the server only; finance cannot reach it.\n\n## Approach\nAfter the nightly export is written, upload the file to the finance team's bucket, retrying twice on failure, and log the destination URL. A failed upload exits non-zero but keeps the local file.\n\n## Out of scope\nPruning old files, a UI.\n\n## Verification\nA test with a fake uploader that fails once and then succeeds.\n\n=== repository: ledgerlite ===\nrequirements.txt: click, rich, python-dateutil   (no cloud SDK, no HTTP client)\nThere is no storage, bucket, credentials, endpoint or environment-variable setting anywhere in the repository, its docs, its CI config or its tests, and the spec does not say which provider, which bucket, or how credentials reach the job.\n\nIf you must stop because only the requester can answer something, print a single JSON object {\"status\": \"needs_context\", \"question\": \"<what you need>\"} as your whole reply instead of the document.\n",
+    "files": [],
+    "expected_behavior": [
+      "Replies with the `needs_context` stop: a JSON object with `status` `needs_context` and a `question`, not a plan",
+      "The question asks what the code cannot settle: which storage provider and bucket, and how the job gets its credentials",
+      "Does not choose a provider, add a dependency or invent a bucket name inside a plan, and does not leave a TBD step"
+    ]
+  }
+]
