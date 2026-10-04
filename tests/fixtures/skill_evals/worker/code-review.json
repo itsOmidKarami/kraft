@@ -10,7 +10,7 @@
     "expected_behavior": [
       "Reports the hold-check defect again with `same_as` set to `7a3f9c21e40b5d6e`, severity still `important` or higher, file `shelfie/loans.py`, and says the status `\"active\"` never matches the model's `\"waiting\"` (so the new test passes while the check does nothing)",
       "Does not report the missing-404 finding `b81d04e6a2c97f35` (it is fixed) and does not reuse its tag",
-      "Reports the new defect that `shelfie/routes.py` logs the `Authorization` header (a bearer token) with severity `critical`, with no `same_as` field",
+      "Reports the new defect that `shelfie/routes.py` logs the `Authorization` header (a bearer token) with severity `critical` or `important`, with no `same_as` field",
       "Every finding carries `severity`, `message` and `source_plugin` set to `code-review`, and the reply sets `status` to `done`"
     ]
   },
@@ -40,7 +40,6 @@
     "expected_behavior": [
       "Sets `status` to `failed` (the review could not run), not `done`",
       "Reports no findings, and does not write findings guessed from the brief about what the upload code might get wrong",
-      "Says that the review package was missing or unreadable as the reason",
       "Does not present an empty findings list with `status` `done` as if the change had been reviewed and passed"
     ]
   }

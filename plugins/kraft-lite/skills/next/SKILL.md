@@ -8,6 +8,9 @@ description: "Runs the next node of a Kraft Lite chain from its recorded state a
 This skill holds no state in the conversation. Everything comes from the chain
 artifact and the state records, which is what makes it survive a `/clear`.
 
+Contents: 1 read the state, 2 run the node's hooks, 3 handle the result, 4 report
+what a finished run cost, then the rule that `on.ci.poll` never blocks.
+
 ## 1. Read the state
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>

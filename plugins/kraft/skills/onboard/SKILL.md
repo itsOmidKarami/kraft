@@ -10,8 +10,9 @@ connection error.
 
 # Onboarding a repo
 
-Four steps, each followed by a check against the repo itself — a
-zero exit code says the command ran, not that what it did was right.
+Four steps (connect, register, rehearse, verify), each followed by a check
+against the repo itself — a zero exit code says the command ran, not that what
+it did was right. Then hand off to `kraft:check`.
 
 1. **Connect.** Read how the repo says to build and test itself before you
    connect it: its README, CONTRIBUTING, agent instructions (`CLAUDE.md`,

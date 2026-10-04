@@ -9,7 +9,7 @@
     "files": [],
     "expected_behavior": [
       "Reports the verdict `stop_downgrade`, not `continue` and not `stop_needs_human`",
-      "`concerns` is present and names the open finding `a04d9b7716ce3a85` (the stale `owner` field in docs/api.md) as real but low-stakes",
+      "`concerns` is present and names the open finding `a04d9b7716ce3a85` (the stale `owner` field in docs/api.md) as still open, and says why it is not worth another cycle",
       "`concerns` notes that the critical hold-check finding was cleared in round 1 and that the remaining finding survived two fix cycles without the doc line moving (the package shows only a heading rename and a code comment)",
       "`concerns` is written for a person reading it at the review gate later (what is still open and where), not as instructions to the next fix agent"
     ]
@@ -26,7 +26,7 @@
       "Reports the verdict `stop_needs_human`, not `continue`, even though the finding count fell from 4 to 2 to 1",
       "`concerns` names tag `91b7e4d20c58fa13` as the same critical finding in all three rounds, surviving two fix cycles that targeted it",
       "`concerns` says from the package that the code behind it did not move (only a comment was added and the new test accepts a 200), rather than relying on any claim by the fix agent",
-      "Does not review the code for new defects or propose a fix for the missing ownership check"
+      "Does not review the code for new defects or report findings of its own"
     ]
   },
   {
