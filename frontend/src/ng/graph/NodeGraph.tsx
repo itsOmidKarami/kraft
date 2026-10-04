@@ -83,8 +83,14 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
 
   // An open task's box hides behind its frame, and the frame goes again: the focus follows each, not left on what left.
   const inside = useRef(false);
+  // The hand-off must not pan the camera, which is still settling: a chip pressed just after would move under the pointer.
+  const quiet = useRef(false);
   useEffect(() => {
-    if (phase.layout && open && shown && document.activeElement?.classList.contains("is-away")) roving.go(taskKey(shown.step, shown.task));
+    if (phase.layout && open && shown && document.activeElement?.classList.contains("is-away")) {
+      quiet.current = true;
+      roving.go(taskKey(shown.step, shown.task));
+      quiet.current = false;
+    }
   }, [phase.layout]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const was = kept.current;
@@ -245,7 +251,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
             out={!expand && !phase.layout}
             selectedScope={expand?.scope}
             taskKey={taskKey(shown.step, shown.task)}
-            rove={{ ref: roving.ref, tabIndex: roving.tabIndex, go: roving.go, onFocus: (key) => { roving.go(key); const f = wide.cols[open.step].open!; camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); } }}
+            rove={{ ref: roving.ref, tabIndex: roving.tabIndex, go: roving.go, onFocus: (key) => { roving.go(key); if (quiet.current) return; const f = wide.cols[open.step].open!; camera.reveal({ x0: f.x, x1: f.x + f.w, y0: f.y, y1: f.y + f.h }); } }}
             onTask={() => onSelect?.({ step: shown.step, task: shown.task })}
             onScope={(key) => onScope?.(key)}
             onClose={() => onCollapse?.()}

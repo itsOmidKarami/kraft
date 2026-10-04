@@ -87,6 +87,8 @@ test("a verification that went three rounds: open the scopes, pick one, step bac
   await expect(frame(page)).toHaveCSS("width", "760px");
   await expect(page.locator(".canvas-world.is-glide")).toHaveCount(0);
   await expect(frame(page).locator(".scope-row")).toHaveCount(2);
+  // The box it replaced held the focus; the frame's title has it now.
+  await expect(frame(page).getByRole("button", { name: "test_changed_scopes" })).toBeFocused();
 
   // A chip opens its scope's pane, with the scope in the address.
   await frame(page).getByRole("button", { name: /^just test-c, done, new this round/ }).click();
