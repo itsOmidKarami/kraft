@@ -4,6 +4,7 @@ import { NodeGlyph } from "./NodeGlyph";
 import { accessibleName } from "./types";
 import { useRoving } from "./useRoving";
 import "./graph.css";
+import { tip } from "../ui/Tooltip";
 
 /** Strip geometry, from ChainStrip.dc.html `static G`. */
 export const S = { B: 30, CE: 50, CG: 34, CY: 22, PAD: 22, H: 64 } as const;
@@ -52,9 +53,8 @@ export function ChainStrip({ nodes, viewing, onOpen, onBack }: Props) {
                   type="button"
                   tabIndex={roving.tabIndex(n.id)}
                   className="strip-btn"
-                  aria-label={accessibleName(n, n.kind === "gate" ? "gate" : "node")}
+                  {...tip(accessibleName(n, n.kind === "gate" ? "gate" : "node"), n.id)}
                   aria-current={v ? "step" : undefined}
-                  title={n.id}
                   onFocus={() => roving.go(n.id)}
                   onClick={() => onOpen?.(n.id)}
                 >

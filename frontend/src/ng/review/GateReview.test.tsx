@@ -37,6 +37,25 @@ describe("GateReview", () => {
     expect(screen.getByText(/^written by/)).toHaveTextContent("written by work_item_summary.main.author");
   });
 
+  it("offers the document in an editor and its path to copy, as an indexed document does (DV-3)", async () => {
+    const calls: [string, string][] = [];
+    vi.spyOn(http, "request").mockImplementation((async (url: string, init?: RequestInit) => {
+      calls.push([init?.method ?? "GET", url]);
+      return url === "/editors" ? { status: 200, body: { available: ["code"], system: false, default: "code" } } : { status: 200, body: {} };
+    }) as typeof http.request);
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
+    render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    const open = await screen.findByRole("button", { name: "Open in editor" });
+    await vi.waitFor(() => expect(open).toHaveAttribute("title", "Open in VS Code"));
+    await act(async () => fireEvent.click(open));
+    expect(calls).toContainEqual(["POST", "/work-items/w1/artifact/open"]);
+    expect(await screen.findByText("Opened in VS Code.")).toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy path" })));
+    expect(writeText).toHaveBeenCalledWith("/runs/w1/.engineering/reviews/kraft-cb59.md");
+  });
+
   it("approves through the page's review submit", async () => {
     const p = overlay();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));

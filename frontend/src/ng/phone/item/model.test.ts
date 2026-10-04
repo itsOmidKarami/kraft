@@ -28,6 +28,7 @@ describe("pairOf (C.5): one pair, by status and stop kind", () => {
     ["budget, an item-wide policy budget_usd", mk("needs_you", stop("budget", POLICY_USD)), [null, "raise"]],
     ["budget, a cap the item cannot raise", mk("needs_you", stop("budget", { scope: "daily" }), OWN_CAP), [null, "retry"]],
     ["cap", mk("needs_you", stop("cap")), ["steer", "retry"]],
+    ["cap with its limit", mk("needs_you", { ...stop("cap"), limit: { path: "", key: "time_cap_minutes", value: 480, maximum: null } }), ["steer", "raise"]],
     ["question", mk("needs_you", stop("question")), ["escalate", "answer"]],
     ["conflict", mk("needs_you", stop("conflict")), ["cancel", "conflicts"]],
     ["mr closed", mk("needs_you", stop("mr_closed")), ["cancel", "reopen-mr"]],
@@ -128,5 +129,31 @@ describe("a budget stop's spent fact", () => {
   });
   it("names no cap for one the item cannot raise: the reason names it", () => {
     expect(spentOf(stop("budget", { scope: "daily" }), { cap_usd: 10, source: "policy", spent_usd: 2.5 })).toEqual([["spent", "$2.50"]]);
+  });
+});
+
+describe("a question card (PH-12)", () => {
+  const turn = (id: string, thread: number, created_at: string) => ({ id, node_id: "verification", hook_point: "verification.escalation", thread, created_at }) as never;
+  const q = (task: string, sessions: unknown[] = []) => mk("needs_you", stop("question", { task }), { needs_context_question: "Allow it?", worker_sessions: sessions as never });
+  it("has the speech bubble and names the thread and turn of an escalation's question", () => {
+    const c = cardOf(q("verification.escalation", [turn("a", 1, "2026-09-13T09:00:00Z"), turn("b", 1, "2026-09-13T09:05:00Z")]));
+    expect(c).toMatchObject({ icon: "message-square", where: "asked by escalation · thread 1, turn 2 · on verification" });
+  });
+  it("counts turns within the latest thread only", () => {
+    const c = cardOf(q("verification.escalation", [turn("a", 1, "2026-09-13T09:00:00Z"), turn("b", 2, "2026-09-13T09:05:00Z")]));
+    expect(c?.where).toBe("asked by escalation · thread 2, turn 1 · on verification");
+  });
+  it("leaves a task's own question as it was", () => {
+    expect(cardOf(q("verification.review.code_review"))?.where).toBe("asked by code_review · on verification");
+  });
+});
+
+describe("a cap stop's facts (PH-7)", () => {
+  it("say the running time against its cap beside the spend", () => {
+    const i = mk("needs_you", stop("cap"), { running_time: { running_s: 8 * 3600 + 120, cap_minutes: 480 }, budget_cap: { cap_usd: 5, source: "item", spent_usd: 3.72 } });
+    expect(cardOf(i)?.facts).toEqual([["running", "8h 2m of 8h"], ["spent", "$3.72 of $5.00"]]);
+  });
+  it("leave the clock out when no time cap is set", () => {
+    expect(cardOf(mk("needs_you", stop("cap"), { running_time: { running_s: 60, cap_minutes: null } }))?.facts).toEqual([]);
   });
 });

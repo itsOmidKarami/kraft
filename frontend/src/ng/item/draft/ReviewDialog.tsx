@@ -42,6 +42,9 @@ function Review() {
   const problems = d.issues.filter((i) => !i.passed);
   const passed = d.issues.filter((i) => i.passed);
   const blocked = d.issues.length > 0;
+  const overrides = d.ops.flatMap((o) => (o.op === "override" && !o.passed ? [o] : []));
+  // A refused override's message starts with the field (`policy.budget_usd: ...`): the line names it, and Apply is blocked by the problem.
+  const overrun = problems.filter((i) => d.ops[i.index]?.op === "override");
   const adds = d.ops.flatMap((o) => (o.op === "add_node" && !o.passed ? [o] : []));
   const budget = view.checks.budget;
   const close = () => d.setReviewing(false);
@@ -123,6 +126,14 @@ function Review() {
           {passed.length ? `✕ ${passed.length} ${plural(passed.length, "edit", "edits")} the run has passed, which can no longer apply` : "✓ only nodes that have not run"}
           {passed.length > 0 && <> <button type="button" className="item-link" disabled={busy} onClick={dropPassed}>Remove {passed.length === 1 ? "it" : "them"} from the draft</button></>}
         </li>
+        {overrides.length > 0 && (overrun.length
+          ? overrun.map((i) => <li key={i.index} className="is-bad">✕ {i.message}</li>)
+          : <li className="is-ok">✓ within policy maxima</li>)}
+        {(view.checks.added ?? []).map((a) => (
+          <li key={a.op} className="is-ok">
+            ✓ {a.node}: {a.harnesses.length === 0 ? "runs no agent" : `${plural(a.harnesses.length, "harness", "harnesses")} ${a.harnesses.join(", ")} ${plural(a.harnesses.length, "is", "are")} allowed`} · {a.estimate_usd == null ? "no estimate yet" : `≈ +${usd(a.estimate_usd)} (avg of ${a.estimate_runs ?? 1} ${plural(a.estimate_runs ?? 1, "run", "runs")})`}
+          </li>
+        ))}
         <li className="is-ok">{budget.cap_usd == null ? "✓ no dollar cap on this item" : `✓ spent ${usd(budget.spent_usd ?? 0)} of the ${usd(budget.cap_usd)} budget`}</li>
       </ul>
       {moved > 0 && <p className="idr-moved" role="alert">The run moved past {moved} {plural(moved, "edit", "edits")} while you were reviewing. {PASSED}</p>}

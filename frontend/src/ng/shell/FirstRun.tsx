@@ -8,6 +8,7 @@ import { Field } from "../ui/Field";
 import { onMac } from "../keys";
 import { missingLine, NO_COMMIT_WHY, others, readFrom, setupLine, stopLine, testsLine } from "../templates/repos/evidence";
 import "./first-run.css";
+import { tip } from "../ui/Tooltip";
 
 /** The gap between the probe rows appearing, so a person can read what Kraft found. */
 export const PROBE_STEP_MS = 450;
@@ -71,7 +72,7 @@ function StepCircle({ n, state, onClick }: { n: number; state: "done" | "current
   const label = `Step ${n}: ${STEPS[n - 1]}`;
   if (!onClick) return <span className={`fr-circle fr-${state}`} aria-label={label} role="img">{inner}</span>;
   return (
-    <button type="button" className={`fr-circle fr-${state}`} aria-label={label} aria-current={state === "current" ? "step" : undefined} onClick={onClick}>
+    <button type="button" className={`fr-circle fr-${state}`} {...tip(label)} aria-current={state === "current" ? "step" : undefined} onClick={onClick}>
       {inner}
     </button>
   );

@@ -1,11 +1,11 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { Compare, CompareFile, ReviewThread } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
-import { Composer, targetKey, type Draft, type StartOption, type Target } from "./Composer";
+import { Composer, targetKey, type Draft, type Target } from "./Composer";
 import { rangeOfPick, type Pick } from "./DiffView";
 import { unresolved } from "./model";
 import type { PatchFile } from "./patch";
-import { isMixed, isOneLine, lineIndex, placeOf as placeInIndex, quoteOf, rangeBetween, rangeName, type LineRange } from "./range";
+import { isMixed, isOneLine, lineIndex, quoteOf, rangeLabel, startSideOf, type LineRange } from "./range";
 import type { Anchor } from "./rows";
 import { Thread, threadRange } from "./Thread";
 
@@ -35,7 +35,7 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
   reload: () => void;
   /** The composer closed, sent or cancelled: the page drops the pick it was opened on. */
   onClose?: (t: Target) => void;
-  /** The composer's range changed (its start line): the page moves the pick with it. */
+  /** The composer's own × moved its range: the page moves the pick with it. */
   onRetarget?: (t: Target) => void;
 }) {
   const drafts = useRef(new Map<string, Draft>()).current;
@@ -105,40 +105,29 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     return null;
   };
 
-  /** The lines a range could start on instead: from the hunk its start is in down to its end. A
-   *  context line is read on the end's side; a line on the other side only starts a range across sides. */
-  const startsOf = (path: string, r: LineRange): StartOption[] => {
-    const ix = indexOf(path);
-    const end = placeInIndex(ix, { side: r.side, line: r.end });
-    const first = placeInIndex(ix, { side: r.startSide ?? r.side, line: r.start });
-    if (end === undefined || first === undefined) return [];
-    const from = ix.lines.findIndex((_, i) => ix.hunk[i] === ix.hunk[first]);
-    return ix.lines.slice(from, end + 1).map((l) => ({
-      at: l.kind === "-" ? { side: "old", line: l.old! } : l.kind === "+" ? { side: "new", line: l.new! } : { side: r.side, line: (r.side === "old" ? l.old : l.new)! },
-      text: l.text,
-    }));
-  };
-  const retarget = (o: NonNullable<typeof open>, start: Anchor) => {
+  /** The open composer moves to `range`, its text with it: a suggested change typed for the old lines is kept,
+   *  and the composer says so (it sets it aside on a range across sides) instead of dropping it unsaid (R10b-09). */
+  const moveTo = (o: NonNullable<typeof open>, range: LineRange) => {
     const r = o.target.range!;
-    const target = { path: o.target.path, range: rangeBetween(start, { side: r.side, line: r.end }, indexOf(o.target.path)) };
-    // The text so far goes with it, a typed suggested change too: it was written
-    // for the old lines, so the composer says so (and sets it aside on a range
-    // across sides) instead of dropping it unsaid (R10b-09).
+    const target = { path: o.target.path, range };
     const d = drafts.get(targetKey(o.target));
     drafts.delete(targetKey(o.target));
     // Moved back onto the lines it was written for, it is in place again: no note (R11b-06).
-    const wrote = d?.wrote ?? rangeName(r);
-    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: target.range && rangeName(target.range) === wrote ? undefined : wrote });
+    const wrote = d?.wrote ?? rangeLabel(r);
+    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: rangeLabel(range) === wrote ? undefined : wrote });
     setOpen({ ...o, target });
-    onRetarget?.(target);
+    return target;
   };
+  const sameRange = (a: LineRange, b: LineRange) => a.side === b.side && a.start === b.start && a.end === b.end && startSideOf(a) === startSideOf(b);
   const composer = (o: NonNullable<typeof open>) => (
     <Composer
       key={targetKey(o.target)}
       target={o.target}
       lines={o.target.range ? newLines(patch.get(o.target.path), o.target.range.start, o.target.range.end) : []}
-      starts={o.target.range && !o.editing ? startsOf(o.target.path, o.target.range) : undefined}
-      onStart={(a) => retarget(o, a)}
+      onCollapse={() => {
+        const r = o.target.range!;
+        onRetarget?.(moveTo(o, { side: r.side, start: r.end, end: r.end }));
+      }}
       drafts={drafts}
       editing={o.editing}
       onSubmit={(d) => submit(o.target, o.editing, d)}
@@ -176,6 +165,14 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     top: (path: string) => slot(`${path}|top`),
     whole: whole.length ? <section className="rv-elsewhere rv-whole" aria-label="On the whole change"><h2>On the whole change</h2>{whole.map(card)}</section> : null,
     elsewhere: elsewhere.length ? <section className="rv-elsewhere" aria-label="Threads on files not in this comparison"><h2>Threads on files not in this comparison</h2>{elsewhere.map(card)}</section> : null,
+    /** The pick the composer was opened on was edited (a handle, Shift-click, Shift+arrows): the composer follows, with its text. */
+    retargetTo: (p: Pick, from: Pick | null) => {
+      const r = open?.target.range;
+      if (!open || open.editing || !r || open.target.path !== p.path || !from || from.path !== p.path) return;
+      // Only the range the composer sits on: a pick made elsewhere since is not its to move.
+      if (!sameRange(rangeOfPick(from, indexOf(p.path)), r)) return;
+      moveTo(open, rangeOfPick(p, indexOf(p.path)));
+    },
     openPick: (p: Pick) => setOpen({ editing: null, target: { path: p.path, range: rangeOfPick(p, indexOf(p.path)) } }),
     /** The ranges of a file's open threads, for the diff to shade. */
     commented: (path: string): LineRange[] =>

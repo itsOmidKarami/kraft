@@ -3,6 +3,10 @@ import type { ChainNode } from "../../graph/layout";
 import { rejectTarget } from "../../item/graph";
 import type { ItemDetail } from "../../item/useItem";
 import { retryable, skippable } from "../../item/status";
+import { attemptsAt, capAt, materialized } from "../../item/chainValues";
+import { isEscalation } from "../../item/nodeGraph";
+import { taskName } from "../../item/paths";
+import { elapsed, nodeRunSpan } from "../../../format";
 
 /** The node screen's decisions, pure (W17 brief D). */
 
@@ -68,3 +72,26 @@ export function overrideWords(item: ItemDetail, node: string): string | null {
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 }
+
+/** "round 2 of 3": the round a looping node is in, of the attempts it is allowed; the item's own count (a node override, then its policy) outranks the chain's. */
+export function fixLoopWords(item: ItemDetail, node: ApiNode): string | null {
+  if (!node.fix_loop) return null;
+  const m = materialized(item);
+  const max = item.node_overrides?.[node.id]?.attempts ?? (m ? attemptsAt(m, node.id, item.policy_override)?.value : null);
+  const rounds = Math.max(0, ...item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)).map((s) => s.round));
+  return rounds ? `round ${rounds + 1}${max != null ? ` of ${max}` : ""}` : `not looped${max != null ? ` · up to ${max} attempts` : ""}`;
+}
+
+/** "about 12m of 45m": how long the node has been going against its wall-clock cap; null with no cap or before it started. */
+export function wallWords(item: ItemDetail, node: ApiNode, events: KraftEvent[], now: number): string | null {
+  const m = materialized(item);
+  const own = item.node_overrides?.[node.id]?.wall_clock_s;
+  const cap = own != null ? own / 60 : m ? capAt(m, node.id, "total_time_cap_minutes", item.policy_override).value : null;
+  const span = nodeRunSpan(node.id, events, item.worker_sessions);
+  if (cap == null || !span) return null;
+  // About: the node's run span, not the clock the server enforces the cap with (that one is not in the API).
+  return `about ${elapsed((span.to ? Date.parse(span.to) : now) - Date.parse(span.from))} of ${elapsed(cap * 60_000)}`;
+}
+
+/** A task id as a person says it: "repair pass", not repair_pass. */
+export const plainName = (path: string) => taskName(path).replace(/_/g, " ");

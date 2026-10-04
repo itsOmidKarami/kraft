@@ -9,6 +9,7 @@ import { IdCard } from "../templates/menus/IdCard";
 import { loadHidden, saveHidden } from "./kinds";
 import { shownRows, type Row } from "./rows";
 import { SECTIONS, SECTION_LABEL, type Section } from "./types";
+import { tip } from "../ui/Tooltip";
 
 /** What `+ New` can add: the section, and the node's or task's kind. */
 const NEW: { label: string; section: Section; kind?: string }[] = [
@@ -95,7 +96,7 @@ export function LibraryList({ rows, selected, onSelect, onAdd }: {
             }}
           />
         </div>
-        <button ref={filterBtn} type="button" className="icon-btn" aria-label="Filter kinds" title="Filter kinds" aria-haspopup="dialog" aria-expanded={filterOpen} onClick={() => setFilterOpen((o) => !o)}>
+        <button ref={filterBtn} type="button" className="icon-btn" {...tip("Filter kinds")} aria-haspopup="dialog" aria-expanded={filterOpen} onClick={() => setFilterOpen((o) => !o)}>
           <ListFilter size={14} aria-hidden />
           {hidden.size > 0 && <span className="lib-filter-dot" aria-label={`${hidden.size} kind${hidden.size === 1 ? "" : "s"} hidden`} />}
         </button>

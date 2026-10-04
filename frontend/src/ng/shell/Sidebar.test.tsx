@@ -102,10 +102,10 @@ describe("ng Sidebar", () => {
     mount();
     const pin = screen.getByRole("button", { name: "Pin sidebar" });
     expect(pin.closest(".ng-side-head")).not.toBeNull();
-    expect(pin).toHaveAttribute("title", "Collapse sidebar");
+    expect(pin).toHaveAttribute("data-tip", "Collapse sidebar");
     expect(pin.querySelector(".lucide-panel-left-close")).not.toBeNull();
     await userEvent.click(pin);
-    expect(pin).toHaveAttribute("title", "Pin sidebar");
+    expect(pin).toHaveAttribute("data-tip", "Pin sidebar");
     expect(pin.querySelector(".lucide-panel-left-open")).not.toBeNull();
   });
 

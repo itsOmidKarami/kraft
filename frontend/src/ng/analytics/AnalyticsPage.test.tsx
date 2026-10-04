@@ -5,6 +5,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { Analytics } from "../../types";
+import { HeaderTailHost } from "../shell/HeaderActions";
 import { AnalyticsPage } from "./AnalyticsPage";
 
 const REPORT: Analytics = {
@@ -23,6 +24,8 @@ const show = async (r: Analytics) => {
 };
 
 afterEach(() => vi.restoreAllMocks());
+
+const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "analytics.css"), "utf-8");
 
 // What the shipped views/Analytics.tsx shows that this page must too (GAP §2 #39).
 const SECTIONS = ["Overview", "Throughput by week", "By node", "By repo", "Why items stopped for a person"];
@@ -44,6 +47,29 @@ describe("ng AnalyticsPage", () => {
     expect(screen.getByText("+8 vs previous · $7.08 each")).toBeInTheDocument();
     expect(screen.getByText("median create → merge · 25% waiting on you")).toBeInTheDocument();
     expect(screen.getByText("1.5 fix cycles per verify · 6 capped · 9 rejected gates")).toBeInTheDocument();
+  });
+
+  it("says its scope once, in the header row, with no heading of its own (AN-1)", async () => {
+    vi.spyOn(api, "getAnalytics").mockResolvedValue(REPORT);
+    const tail = document.createElement("div");
+    document.body.append(tail);
+    const { container } = render(<HeaderTailHost.Provider value={tail}><AnalyticsPage /></HeaderTailHost.Provider>);
+    await screen.findByRole("heading", { name: "Overview" });
+    expect(tail).toHaveTextContent("· Last 8 weeks · completed work items");
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(container).not.toHaveTextContent("Last 8 weeks");
+    tail.remove();
+  });
+
+  it("puts the chart and each table in a bordered panel under a heading (AN-4)", async () => {
+    await show(REPORT);
+    for (const name of ["Throughput by week", "By node", "By repo", "Why items stopped for a person"]) {
+      const section = screen.getByRole("heading", { name }).closest("section")!;
+      expect(section.querySelector(":scope > .an-panel")).not.toBeNull();
+    }
+    expect(css).toMatch(/\.an-page\s*\{[^}]*max-width: 680px/);
+    expect(css).toMatch(/\.an-panel\s*\{[^}]*border: 1px solid[^}]*border-radius: 12px/);
+    expect(css).toMatch(/\.an-section h2\s*\{[^}]*font-size: 16px/);
   });
 
   it("asks for the last eight weeks, filtered by repo and chain only", async () => {

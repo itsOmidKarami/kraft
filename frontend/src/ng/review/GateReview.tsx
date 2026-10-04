@@ -6,6 +6,10 @@ import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { Markdown } from "../ui/Markdown";
 import { X } from "../icons";
+import { detailOf, request } from "../http";
+import { OpenInEditor } from "../item/DocViewer";
+import { editorName, useEditors } from "../item/editors";
+import { showToast } from "../ui/Toast";
 import { FileTree } from "./FileTree";
 import { approveBlock, drafts } from "./finish";
 import { codeBlock } from "./Thread";
@@ -35,6 +39,12 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
 }) {
   const ref = useModal<HTMLDivElement>(() => onReviewChanges());
   const [error, setError] = useState<string | null>(null);
+  const editors = useEditors(doc?.state === "ready");
+  const [note, setNote] = useState<string | null>(null);
+  const open = async (editor: string) => {
+    const r = await request(`/work-items/${encodeURIComponent(item.id)}/artifact/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
+    setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
+  };
   const block = approveBlock(item, gate, threads);
   const pending = drafts(threads).length;
   const add = files.reduce((n, f) => n + f.insertions, 0);
@@ -62,6 +72,11 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
                 <span className="rv-gate-doc-title">{doc.data.title}</span>
                 <span className="rv-mono rv-muted">{doc.data.path}</span>
                 {by && <span className="rv-muted">written by <span className="rv-mono">{by}</span></span>}
+                <div className="rv-gate-doc-actions">
+                  <OpenInEditor editors={editors} open={open} />
+                  <Button onClick={() => navigator.clipboard?.writeText(doc.data.absolute_path ?? doc.data.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+                </div>
+                {note && <span className="rv-muted" role="status">{note}</span>}
               </div>
               {/* Its own H1 repeats the title above, as the document viewer drops it. */}
               <Markdown text={docBody(doc.data.content, doc.data.title)} code={codeBlock} />

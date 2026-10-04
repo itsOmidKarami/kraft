@@ -12,6 +12,7 @@ import { Popover } from "../ui/Popover";
 import { showToast } from "../ui/Toast";
 import { Ticks } from "./Ticks";
 import { mod, sendOnModEnter } from "../keys";
+import { tip } from "../ui/Tooltip";
 
 type Kind = "spec" | "plan";
 /** B33's answer: the chain as it would be filed, and what the attachments and skips dropped. */
@@ -218,7 +219,7 @@ export function CreateSplit({ disabled, onCreate }: { disabled: boolean; onCreat
         ref={toggle}
         type="button"
         className="btn btn-secondary composer-toggle"
-        aria-label="More ways to create"
+        {...tip("More ways to create")}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
@@ -268,7 +269,7 @@ export function Attach({ kind, repo, path, onPath }: { kind: Kind; repo: string;
     return (
       <span className="composer-chip composer-mono composer-attached" title={path}>
         <span className="composer-path">{kind} · {path}</span>
-        <button type="button" className="composer-x" aria-label={`Remove the ${kind}`} onClick={() => onPath("")}>✕</button>
+        <button type="button" className="composer-x" {...tip(`Remove the ${kind}`)} onClick={() => onPath("")}>✕</button>
       </span>
     );
   return (

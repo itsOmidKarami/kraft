@@ -273,6 +273,9 @@ def render(blocks: dict, accents: dict, code: dict) -> str:
         '[data-mode="light"] { color-scheme: light; }',
         # A drawer's scrim: black at 40% under every surface and mode.
         ":root { --scrim: rgb(0 0 0 / 40%); }",
+        # The revealed sidebar's drop shadow: heavier on dark, lighter on light.
+        '[data-mode="dark"] { --side-shade: rgb(0 0 0 / 50%); }',
+        '[data-mode="light"] { --side-shade: rgb(0 0 0 / 18%); }',
     ]
     for (s, m, a), t in blocks.items():
         body = " ".join(f"--{k}: {v};" for k, v in t.items())

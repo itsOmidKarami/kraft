@@ -9,6 +9,7 @@ export type CardButton =
   | { kind: "reject"; label: string; gate: string }
   | { kind: "answer"; label: string }
   | { kind: "open"; label: string }
+  | { kind: "raise"; label: string }
   | { kind: "resume"; label: string };
 
 export function cardButtons(item: WorkItem): CardButton[] {
@@ -18,11 +19,11 @@ export function cardButtons(item: WorkItem): CardButton[] {
   if (a.kind === "resume") return [{ kind: "resume", label: "Resume" }];
   if (item.display_status === "failed") return [{ kind: "open", label: "Retry…" }];
   switch (item.stop?.kind) {
-    // A cap or budget stop opens the item, which offers the raise when the item can make one (`budgetRaise`, the limit on a cap)
-    // and Retry when it cannot: a list row carries neither the stop's limit nor the item's spend, so the card cannot tell a
-    // daily or token cap, which the server refuses to raise, from the item's own.
+    // As on the desktop row, which opens its peek on the editor: the item opens with the raise sheet over it when it can make
+    // one (`budgetRaise`, the limit on a cap) and on its card, which says why, when it cannot. A list row carries neither the
+    // stop's limit nor the item's spend, so the card cannot tell a daily or token cap, which the server refuses to raise, from the item's own.
     case "cap":
-    case "budget": return [{ kind: "open", label: "Open" }];
+    case "budget": return [{ kind: "raise", label: a.label }];
     case "question": return [{ kind: "answer", label: "Answer…" }];
     default: return [{ kind: "open", label: a.label }];
   }

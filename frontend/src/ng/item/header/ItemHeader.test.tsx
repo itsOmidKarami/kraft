@@ -201,12 +201,12 @@ describe("ItemHeader", () => {
 
   // R12b-08: a card's own button had the focus, and went with the card once its action was done.
   it.each([
-    ["Cancel…", "Cancel this item?", "Reason", "Cancel item", "POST /work-items/w1/cancel"],
-    ["Escalate…", "Escalate this item", "Message", "Escalate", "POST /work-items/w1/escalate"],
-  ])("hands the focus to the main button once %s is done", async (opener, card, field, send, route) => {
+    ["Cancel…", "More actions", "Cancel this item?", "Reason", "Cancel item", "POST /work-items/w1/cancel"],
+    ["Escalate…", "Item menu", "Escalate this item", "Message", "Escalate", "POST /work-items/w1/escalate"],
+  ])("hands the focus to the main button once %s is done", async (opener, door, card, field, send, route) => {
     stubFetch({ ...WRITES, ...acceptWrites(route), "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "b", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }] });
     show({ display_status: "failed", status: "needs_human", stop: { kind: "failed", node: "verification", task: null, resume_at: null, reason: null } });
-    await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    await userEvent.click(screen.getByRole("button", { name: door }));
     await userEvent.click(screen.getByRole("menuitem", { name: opener }));
     const dialog = await screen.findByRole("dialog", { name: card });
     await userEvent.type(within(dialog).getByRole("textbox", { name: new RegExp(field) }), "not needed");
@@ -236,7 +236,7 @@ describe("ItemHeader", () => {
     } else await waitFor(() => expect(writes(calls)).toEqual([want.write]));
   });
 
-  it("puts every ⋮ item on its route, the copied link on the shipped path, and Cancel… in ⋮ too", async () => {
+  it("puts every ⋮ item on its route, and the copied link on the shipped path; Cancel… is the main menu's only (WI-13)", async () => {
     const calls = stubFetch({ ...WRITES, "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "b", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }] });
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
@@ -247,7 +247,7 @@ describe("ItemHeader", () => {
       await userEvent.click(screen.getByRole("menuitem", { name }));
     };
     await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
-    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Review changes", "Item settings", "Open worktree in editor", "Copy ID", "Copy link", "Cancel…"]);
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Review changes", "Item settings", "Open worktree in editor", "Copy ID", "Copy link"]);
     await userEvent.keyboard("{Escape}");
     await menu(/Item settings/);
     expect(onSettings).toHaveBeenCalled();
@@ -256,9 +256,6 @@ describe("ItemHeader", () => {
     expect(writeText.mock.calls).toEqual([["w1"], [`${window.location.origin}/work-items/w1`]]);
     await menu(/Open worktree/);
     await waitFor(() => expect(calls).toContainEqual({ method: "POST", path: "/work-items/w1/open-worktree", body: { editor: null } }));
-    await menu(/Cancel…/);
-    expect(await screen.findByRole("dialog", { name: "Cancel this item?" })).toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
     // The review page (W8): the shell's crumbs end in it.
     await menu(/Review changes/);
     expect(await screen.findByText("Review changes", { selector: '[aria-current="page"]' })).toBeInTheDocument();

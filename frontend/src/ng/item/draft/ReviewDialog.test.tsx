@@ -44,6 +44,30 @@ describe("ReviewDialog", () => {
     expect(within(d).getByText("✓ no dollar cap on this item")).toBeInTheDocument();
   });
 
+  it("checks the overrides against the policy maxima, and an added node's harness and estimate", async () => {
+    open({ [DRAFT]: answer(ok, [], withScan, null, [{ op: 1, node: "scan", harnesses: ["claude"], estimate_usd: 0.75, estimate_runs: 3 }]) });
+    const d = await dialog();
+    expect(within(d).getByText("✓ within policy maxima")).toBeInTheDocument();
+    expect(within(d).getByText("✓ scan: harness claude is allowed · ≈ +$0.750 (avg of 3 runs)")).toBeInTheDocument();
+    // The estimate is information: with the checks green, Apply is live.
+    expect(within(d).getByRole("button", { name: "Apply" })).toBeEnabled();
+  });
+
+  it("says so when an added node has no history to estimate from, or runs no agent", async () => {
+    open({ [DRAFT]: answer([add("scan", "verification"), add("lint", "scan")], [], withScan, null, [{ op: 0, node: "scan", harnesses: ["claude", "codex"], estimate_usd: null, estimate_runs: null }, { op: 1, node: "lint", harnesses: [], estimate_usd: 0.1, estimate_runs: 1 }]) });
+    expect(await screen.findByText("✓ scan: harnesses claude, codex are allowed · no estimate yet")).toBeInTheDocument();
+    expect(screen.getByText("✓ lint: runs no agent · ≈ +$0.100 (avg of 1 run)")).toBeInTheDocument();
+    expect(screen.queryByText("✓ within policy maxima")).toBeNull();
+  });
+
+  it("names the field of an override past its ceiling, and blocks Apply", async () => {
+    open({ [DRAFT]: answer(ok, [{ op: 0, message: "policy.budget_usd: 99 exceeds the administrator maximum 25" }], withScan) });
+    const d = await dialog();
+    expect(within(d).getByText("✕ policy.budget_usd: 99 exceeds the administrator maximum 25")).toBeInTheDocument();
+    expect(within(d).queryByText("✓ within policy maxima")).toBeNull();
+    expect(within(d).getByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
   it("shows the budget against its cap", async () => {
     open({ [DRAFT]: answer(ok, [], withScan, 10) });
     expect(await screen.findByText(/spent \$1\.50 of the \$10\.00 budget/)).toBeInTheDocument();

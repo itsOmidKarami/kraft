@@ -79,7 +79,7 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
       setPicked(null);
       [...document.querySelectorAll<HTMLElement>(".rv-file")].find((f) => f.dataset.file === t.path)?.querySelector<HTMLElement>(".rv-lines")?.focus({ preventScroll: true });
     },
-    // A new start line from the composer's header: the pick follows, so the diff shades the new range.
+    // The composer's ×: the pick follows, so the diff shades the new range.
     onRetarget: (t) => t.range && setPicked(pickOf(t.path, { side: t.range.startSide ?? t.range.side, line: t.range.start }, { side: t.range.side, line: t.range.end })),
   });
   const artifact = useArtifact(item);
@@ -175,6 +175,10 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
               threadCount={(path) => threadList.filter((t) => t.file_path === path && unresolved(t)).length}
               picked={picked}
               onPick={setPicked}
+              onRange={(p) => {
+                setPicked(p);
+                comments.retargetTo(p, picked);
+              }}
               onCompose={comments.openPick}
               onFileComment={(path) => {
                 setCollapsed((s) => {

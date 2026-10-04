@@ -1,6 +1,6 @@
-import { EllipsisVertical } from "lucide-react";
+import { EllipsisVertical, MessageSquare } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
@@ -23,6 +23,7 @@ import { PauseSheet } from "./PauseSheet";
 import { cardOf, kebabOf, limitPatch, limitWords, pairOf, stopLimitOf, type Act, type ActId } from "./model";
 import { useDo } from "./useDo";
 import "./item.css";
+import { tip } from "../../ui/Tooltip";
 
 const TAG_TONE = { running: "info", waiting: "info", escalated: "warn", needs_you: "warn", failed: "bad", paused: "warn", done: "ok", cancelled: "muted", archived: "muted" } as const;
 
@@ -48,7 +49,6 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const hs = headerState(item);
   const card = cardOf(item, events);
   const bar = pairOf(item);
-  const limit = stopLimitOf(item);
   const ended = status === "done" || status === "cancelled" || status === "archived";
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
@@ -66,7 +66,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const go = (id: ActId) => {
     switch (id) {
       case "pause": return sheet.open("pause");
-      case "raise": return sheet.open("raise");
+      case "raise": return sheet.open(item.stop?.kind === "cap" ? "raise-cap" : "raise");
       case "steer": case "reject": case "answer": case "escalate": case "cancel": case "complete": return navigate(itemUrl(item.id, `?compose=${id}`));
       case "review": return navigate(reviewUrl(item.id, gate ? `?gate=${encodeURIComponent(gate)}` : ""));
       case "conflicts": return navigate(reviewUrl(item.id, item.stop?.node ? `?nodes=${encodeURIComponent(item.stop.node)}` : ""));
@@ -84,6 +84,21 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
       case "board": return navigate("/");
     }
   };
+  // `?raise=1`, from the board's Raise cap / Raise budget: the address is cleaned first, then the sheet opens over this screen,
+  // so Back from the sheet lands here. An item that cannot raise the stop just shows its card, which says why.
+  const [params, setParams] = useSearchParams();
+  const asked = useRef(false);
+  useEffect(() => {
+    if (params.get("raise") === "1") {
+      asked.current = true;
+      setParams((p) => { const n = new URLSearchParams(p); n.delete("raise"); return n; }, { replace: true });
+    } else if (asked.current) {
+      asked.current = false;
+      if (bar.primary?.id === "raise") go("raise");
+    }
+    // Once per arrival: the param is gone after this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
   const button = (a: Act | null, primary: boolean) =>
     a && (
       <Button key={a.id} className={`ph-btn${primary ? " ph-btn-primary" : ""}`} variant={a.danger ? "danger" : primary ? "primary" : "secondary"} disabled={busy} onClick={() => go(a.id)}>
@@ -95,7 +110,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
     <>
       <ScreenHeader
         id={item.bead_id || shortId(item.id)}
-        trailing={<button type="button" className="ph-icon-btn" aria-label="More actions" onClick={() => sheet.open("kebab")}><EllipsisVertical size={18} aria-hidden="true" /></button>}
+        trailing={<button type="button" className="ph-icon-btn" {...tip("More actions")} onClick={() => sheet.open("kebab")}><EllipsisVertical size={18} aria-hidden="true" /></button>}
       />
       <div className="ph-content">
         <div className="ph-item-top">
@@ -128,10 +143,9 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
         </div>
         {card && (
           <section className={`ph-statecard ph-tone-${card.tone}`} aria-label={card.title}>
-            <h2 className="ph-statecard-title">{card.title}</h2>
+            <h2 className="ph-statecard-title">{card.icon && <MessageSquare size={15} className="ph-statecard-icon" aria-hidden="true" />}{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
-            {limit && item.stop?.kind === "cap" && <button type="button" className="ph-linkbtn" onClick={() => sheet.open("raise-cap")}>Raise the {limitWords(limit).noun}…</button>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
                 {card.facts.map(([k, v]) => <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}

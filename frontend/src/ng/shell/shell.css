@@ -40,8 +40,8 @@
 .ng-side-edge { display: none; position: absolute; inset: 0 auto 0 0; width: 8px; }
 :root[data-sidebar="rail"] .ng-side-edge { display: block; }
 .ng-sidebar { position: absolute; inset: 0 auto 0 0; box-sizing: border-box; width: 210px; display: flex; flex-direction: column; overflow: hidden; background: var(--side); border-right: 1px solid var(--line); font-size: 12.5px; }
-:root[data-sidebar="rail"] .ng-sidebar { transform: translateX(-100%); transition: transform 120ms ease 180ms; }
-:root[data-sidebar="rail"] .ng-side:is(:hover, :has(:focus-visible)) .ng-sidebar { transform: none; transition-delay: 0s; box-shadow: 8px 0 18px -8px var(--line); }
+:root[data-sidebar="rail"] .ng-sidebar { transform: translateX(-100%); box-shadow: 0 0 0 1px transparent, 16px 0 40px transparent; transition: transform 120ms ease 180ms, box-shadow 160ms ease 180ms; }
+:root[data-sidebar="rail"] .ng-side:is(:hover, :has(:focus-visible)) .ng-sidebar { transform: none; transition-delay: 0s; box-shadow: 0 0 0 1px var(--border), 16px 0 40px var(--side-shade); }
 .ng-side-label { white-space: nowrap; }
 .ng-side-head { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; box-sizing: border-box; padding: 0 17px; border-bottom: 1px solid var(--line); }
 .ng-side-brand { font-weight: 600; font-size: 13px; }

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "../../../store";
 import type { DisplayStatus, WorkItemStop, WorkerSession } from "../../../types";
 import { chainGraph } from "../../item/graph";
-import { acceptWrites, detail, holdFetch, stubFetch, type Call } from "../../item/testkit";
+import { acceptWrites, detail, FROZEN, holdFetch, stubFetch, type Call } from "../../item/testkit";
 import { Toaster } from "../nav/Toaster";
 import { nodeBar } from "./model";
 import { NodeRoute } from "./NodeRoute";
@@ -114,6 +114,31 @@ describe("the node screen (D)", () => {
     mount(item("running"), "/work-items/w1/nodes/verification?tab=log", { "GET /worker-sessions/s1/log": [200, { lines }] });
     await screen.findByText(/loaded review_package|\ba\b/);
     expect(document.querySelector(".ph-count")!.textContent).toBe(count);
+  });
+
+  it("reads a looping node in words: the round of its attempts, the wall clock, and named recovery", async () => {
+    const V = detail().chain_definition.nodes.map((n) => (n.id === "verification" ? { ...n, fix_loop: "verification.fix_loop", on_failure: ["verification.repair.repair_pass"] } : n));
+    const sessions = [session({ id: "s1", status: "done", round: 1, exited_at: "2026-09-13T09:12:00Z" })];
+    mount(item("running", null, { materialized_chain: FROZEN, chain_definition: { template_id: "default", nodes: V }, node_overrides: { verification: { attempts: 3, wall_clock_s: 2700 } }, worker_sessions: sessions }), "/work-items/w1/nodes/verification");
+    await screen.findByRole("heading", { level: 1, name: "verification" });
+    const facts = document.querySelector(".ph-facts")!;
+    const row = (k: string) => within(facts as HTMLElement).getByText(k).nextElementSibling!.textContent;
+    expect(row("fix loop")).toBe("round 2 of 3");
+    expect(row("wall")).toBe("about 12m of 45m");
+    expect(row("on failure")).toBe("repair pass, once");
+  });
+
+  it("has a YAML tab with the node as the item froze it, and what was changed for this item", async () => {
+    mount(item("running", null, { materialized_chain: FROZEN, node_overrides: { verification: { attempts: 3 } } }), "/work-items/w1/nodes/verification");
+    await userEvent.click(await screen.findByRole("tab", { name: "YAML" }));
+    expect(where()).toBe("/work-items/w1/nodes/verification?tab=yaml");
+    const text = document.querySelector(".ph-yaml-text")!.textContent!;
+    expect(text).toContain("id: verification");
+    expect(text).toContain("fix_loop:\n  max_attempts: 2");
+    expect(text).toContain("steps:\n  - id: checks\n    tasks:\n      - id: lint");
+    expect(text).toContain("attempts: 3  # override");
+    expect(text.match(/# override/g)).toHaveLength(1);
+    expect(screen.getByText("As frozen at intake, with this item's overrides.")).toBeInTheDocument();
   });
 
   it("filters the node's log by source and says when nothing is left", async () => {

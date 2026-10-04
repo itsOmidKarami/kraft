@@ -149,10 +149,10 @@ export const MAIN_LABEL: Record<Main, string> = {
 };
 
 /** The header's ⋮ doors that act on the item: Duplicate once it has ended,
- *  else Escalate… where `/escalate` takes it (`escalatable`) and Cancel…. */
-export function menuDoors(item: EscalateFields): ("duplicate" | "escalate" | "cancel")[] {
+ *  else Escalate… where `/escalate` takes it (`escalatable`). Cancel… is the main menu's only (WI-13). */
+export function menuDoors(item: EscalateFields): ("duplicate" | "escalate")[] {
   if (["done", "cancelled", "archived"].includes(item.display_status ?? "")) return ["duplicate"];
-  return [...(escalatable(item) ? ["escalate" as const] : []), "cancel"];
+  return escalatable(item) ? ["escalate"] : [];
 }
 
 /** Archive in the panel is live only once there is nothing left to stop. */

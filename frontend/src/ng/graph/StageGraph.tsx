@@ -8,6 +8,7 @@ import { useCamera } from "./useCamera";
 import { useRoving } from "./useRoving";
 import { ZoomControls } from "./ZoomControls";
 import "./graph.css";
+import { tip } from "../ui/Tooltip";
 
 type Props = {
   /** The chain's name: the canvas group's accessible name. */
@@ -181,8 +182,7 @@ export function StageGraph({ name, nodes, selected, arcs = [], seams = [], openi
               ref={roving.ref(key)}
               type="button"
               tabIndex={roving.tabIndex(key)}
-              aria-label={s.title ?? "Add a node or gate here"}
-              title={s.title ?? "Add a node or gate here"}
+              {...tip(s.title ?? "Add a node or gate here")}
               className={`seam${s.open ? " is-open" : ""}${s.always ? " is-always" : ""}`}
               style={{ left: x - 10, top: L.CY - 10 }}
               onFocus={() => { roving.go(key); camera.reveal({ x0: x - 10, x1: x + 10, y0: L.CY - 10, y1: L.CY + 10 }); }}

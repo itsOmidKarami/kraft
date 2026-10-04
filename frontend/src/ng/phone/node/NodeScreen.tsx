@@ -19,13 +19,16 @@ import { nodeSub } from "../item/model";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
-import { nodeBar, overrideWords, reviewPath, type NodeAct } from "./model";
+import { fixLoopWords, nodeBar, overrideWords, plainName, reviewPath, wallWords, type NodeAct } from "./model";
 import { Strip } from "./Strip";
 import { chainName } from "../../item/chainName";
+import { materialized, nodeAt } from "../../item/chainValues";
+import "../areas/areas.css";
+import { yamlOf } from "../areas/yaml";
 import "./node.css";
 
-export type NodeTab = "overview" | "log" | "config";
-const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }];
+export type NodeTab = "overview" | "log" | "config" | "yaml";
+const TABS: { id: NodeTab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "log", label: "Log" }, { id: "config", label: "Config" }, { id: "yaml", label: "YAML" }];
 const SOURCES = ["all", "agent", "tool", "sys", "stdout"] as const;
 
 export interface PlaceProps {
@@ -58,6 +61,15 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
   const paths = stepsOf(api).steps;
   const escalations = escalationsOf(item, nodeId);
   const openTask = (step: string, task: string) => navigate(placeUrl(item.id, { node: nodeId, sel: { kind: "task", node: nodeId, step, task } }));
+  const wall = wallWords(item, api, events, now);
+  const m = materialized(item);
+  const frozen = m ? nodeAt(m, nodeId) : undefined;
+  // What will run: the frozen node with this item's overrides over it, as the server folds them; an overridden key says so.
+  const own = item.node_overrides?.[nodeId] ?? {};
+  const effectiveYaml = yamlOf({ ...(frozen ?? api) as unknown as Record<string, unknown>, ...own })
+    .split("\n")
+    .map((l) => (Object.keys(own).some((k) => l.startsWith(`${k}:`)) ? `${l}  # override` : l))
+    .join("\n");
   const doc = docs.find((d) => d.path === item.gate_artifact);
 
   const act1 = (a: NodeAct) => {
@@ -92,8 +104,9 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
                     ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
                   ] as [string, React.ReactNode][])
                 : ([
-                    ...(api.fix_loop ? [["fix loop", <span key="f" className="ph-mono">{api.fix_loop}</span>]] : []),
-                    ...(api.on_failure?.length ? [["on failure", <span key="o" className="ph-mono">{api.on_failure.map(taskName).join(", ")}</span>]] : []),
+                    ...(api.fix_loop ? [["fix loop", fixLoopWords(item, api)]] : []),
+                    ...(wall ? [["wall", wall]] : []),
+                    ...(api.on_failure?.length ? [["on failure", `${api.on_failure.map(plainName).join(", ")}, once`]] : []),
                   ] as [string, React.ReactNode][])),
               ...(next ? ([["then", <button key="n" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: next.id, sel: { kind: "node", node: next.id } })}>{next.id}</button>]] as [string, React.ReactNode][]) : []),
             ]} />
@@ -142,12 +155,18 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
           </>
         )}
         {tab === "log" && <NodeLog item={item} node={nodeId} />}
+        {tab === "yaml" && (
+          <div className="ph-yaml">
+            <p className="ph-yaml-file">As frozen at intake, with this item's overrides.</p>
+            <pre className="ph-yaml-text">{effectiveYaml}</pre>
+          </div>
+        )}
         {tab === "config" && (
           <>
             <Facts rows={[
               ["chain", `${chainName(item)} · frozen at intake`],
-              ...(api.fix_loop ? ([["fix loop", <span key="f" className="ph-mono">{api.fix_loop}</span>]] as [string, React.ReactNode][]) : []),
-              ["on failure", api.on_failure?.length ? api.on_failure.map(taskName).join(", ") : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
+              ...(api.fix_loop ? ([["fix loop", fixLoopWords(item, api)]] as [string, React.ReactNode][]) : []),
+              ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
               ["overrides", overrideWords(item, nodeId) ? `${overrideWords(item, nodeId)} · changed for this item` : "none"],
             ]} />
             <p className="ph-note">{overrideWords(item, nodeId) ? "An override applies to this item only. The chain file is unchanged." : "No item override on this node."}</p>

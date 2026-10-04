@@ -6,10 +6,10 @@ import { Menu } from "../ui/Menu";
 import { showToast } from "../ui/Toast";
 import type { PatchFile } from "./patch";
 import type { DiffPrefs } from "./prefs";
-import { inRange, lineIndex, rangeBetween, toward, type LineIndex, type LineRange } from "./range";
+import { inRange, lineIndex, rangeBetween, rangeLabel, startSideOf, toward, type LineIndex, type LineRange } from "./range";
 import { anchorsOf, buildRows, spans, type Anchor, type Cell, type Row, type Side } from "./rows";
-import { rangeName } from "./Thread";
 import { languageOf } from "./tokenize";
+import { tip } from "../ui/Tooltip";
 
 /** A picked range of one file's lines. `anchor` is where the pick started,
  *  `head` where it ends now; Shift moves only the head. Both are on `side`,
@@ -50,6 +50,8 @@ export interface DiffViewProps {
   threadCount: (path: string) => number;
   picked: Pick | null;
   onPick: (p: Pick | null) => void;
+  /** The pick's own range edited (a handle dragged, Shift-click, Shift+arrows): `onPick` when absent. The page moves an open composer with it. */
+  onRange?: (p: Pick) => void;
   /** Enter, or `c`, on a pick: open the composer on it. */
   onCompose: (p: Pick) => void;
   /** Comment on this file: the composer at the file's top. */
@@ -126,7 +128,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   const keys = (as: Anchor[], hit: (a: Anchor) => boolean) => as.filter(hit).map((a) => `|${a.side}${a.line}|`).join("");
   const commentedKeys = useMemo(() => anchors.map((as) => keys(as, (a) => commented.some((r) => inRange(r, a, index)))), [anchors, commented, index]);
 
-  const pick = (a: Anchor, extend: boolean) => !p.readOnly && p.onPick(extend && picked ? pickOf(file.path, anchorOf(picked), a) : pickOf(file.path, a, a));
+  const pick = (a: Anchor, extend: boolean) => !p.readOnly && (extend && picked ? (p.onRange ?? p.onPick)(pickOf(file.path, anchorOf(picked), a)) : p.onPick(pickOf(file.path, a, a)));
 
   // The gutter's handlers are made once per file and read the current render
   // through `live`, so a pick re-renders only the rows it touches (RowView is memoized).
@@ -158,7 +160,11 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
     const emit = () => {
       frame = 0;
       const d = drag.current;
-      if (d?.moved) live.current.p.onPick(pickOf(path, d.anchor, d.head));
+      if (!d?.moved) return;
+      const next = pickOf(path, d.anchor, d.head);
+      // A handle (or a Shift-press) edits the range it started from: the page moves an open composer with it.
+      if (d.edit) (live.current.p.onRange ?? live.current.p.onPick)(next);
+      else live.current.p.onPick(next);
     };
     const startDrag = (at: Anchor, isPlus: boolean) => (e: MouseEvent) => {
       const { p, picked, isPicked } = live.current;
@@ -171,8 +177,9 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       const keep = isPlus && isPicked(at) && !e.shiftKey;
       const anchor = e.shiftKey && picked ? anchorOf(picked) : a;
       const button = e.currentTarget;
-      drag.current = { anchor: keep ? a : anchor, head: a, from: a, hunk: rowOf(button)?.dataset.hunk, moved: false };
-      if (!keep) p.onPick(pickOf(path, anchor, a));
+      const edit = e.shiftKey && !!picked;
+      drag.current = { anchor: keep ? a : anchor, head: a, from: a, hunk: rowOf(button)?.dataset.hunk, moved: false, edit };
+      if (!keep) (edit ? p.onRange ?? p.onPick : p.onPick)(pickOf(path, anchor, a));
       window.addEventListener(
         "mouseup",
         (up) => {
@@ -184,6 +191,29 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           if (!same(d.head, d.from)) live.current.p.onCompose(pickOf(path, d.anchor, d.head));
           // Let go on the row it started on: the same as a click on its + (a release on the + itself is that click).
           else if (!(up.target instanceof Node && button.contains(up.target))) plus(at);
+        },
+        { once: true },
+      );
+    };
+    // A handle on the shaded range's first or last row: a press takes that end, the other stays, and the
+    // pointer moves it over the lines of its hunk like a drag does. Letting go leaves the range as it is.
+    const startGrip = (end: "start" | "last") => (e: MouseEvent) => {
+      const { p, picked, index } = live.current;
+      if (p.readOnly || e.button !== 0 || !picked) return;
+      e.preventDefault();
+      e.stopPropagation();
+      refocus(e);
+      const r = rangeOfPick(picked, index);
+      const first: Anchor = { side: startSideOf(r), line: r.start };
+      const last: Anchor = { side: r.side, line: r.end };
+      const [held, fixed] = end === "start" ? [first, last] : [last, first];
+      drag.current = { anchor: fixed, head: held, from: held, hunk: rowOf(e.currentTarget)?.dataset.hunk, moved: false, edit: true };
+      window.addEventListener(
+        "mouseup",
+        () => {
+          cancelAnimationFrame(frame);
+          emit();
+          drag.current = null;
         },
         { once: true },
       );
@@ -216,9 +246,9 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
       d.moved = true;
       if (!frame) frame = requestAnimationFrame(emit);
     };
-    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null) };
+    return { onClick: (a) => (e) => (live.current.pick(extendTo(a, e), e.shiftKey), refocus(e)), startDrag, startGrip, onPlus: (a) => () => plus(a), onOver, onLeave: () => hover(null) };
   }, [file.path]);
-  const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean } | null>(null);
+  const drag = useRef<{ anchor: Anchor; head: Anchor; from: Anchor; hunk: string | undefined; moved: boolean; edit: boolean } | null>(null);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     // Only the line area's own keys: a thread or the composer sits inside it, and its typing is its own.
@@ -251,7 +281,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
   return (
     <section className="rv-file" data-file={file.path} aria-label={file.path}>
       <header className="rv-file-head">
-        <button type="button" className="rv-fold" aria-expanded={!collapsed} aria-label={collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`} onClick={() => p.onCollapse(file.path, !collapsed)}>
+        <button type="button" className="rv-fold" aria-expanded={!collapsed} {...tip(collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`)} onClick={() => p.onCollapse(file.path, !collapsed)}>
           {collapsed ? "▸" : "▾"}
         </button>
         <span className="rv-file-path rv-mono" title={file.path} data-allow-ellipsis="">{file.path}</span>
@@ -283,7 +313,7 @@ function FileBlock({ file, pf, ...p }: DiffViewProps & { file: CompareFile; pf: 
           ) : !pf.hunks.length ? (
             <p className="rv-file-msg">{pf.status === "renamed" ? "Renamed with no changes" : "No changes to show"}</p>
           ) : (
-            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift extends on its side, Enter comments (its pencil starts the range on the other side), n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
+            <div className={`rv-lines is-${p.prefs.layout}`} tabIndex={0} role="group" aria-label={`Lines of ${file.path}: arrows pick a line, Shift and the arrows move the end of the range, Enter comments, n and p change file`} onKeyDown={onKey} onMouseOver={gutter.onOver} onMouseLeave={gutter.onLeave}>
               {rows.map((r, i) => (
                 <RowView
                   key={i}
@@ -323,6 +353,7 @@ function Code({ cell }: { cell: Cell }) {
 interface Gutter {
   onClick: (a: Anchor) => (e: MouseEvent) => void;
   startDrag: (a: Anchor, plus: boolean) => (e: MouseEvent) => void;
+  startGrip: (end: "start" | "last") => (e: MouseEvent) => void;
   onPlus: (a: Anchor) => () => void;
   onOver: (e: MouseEvent) => void;
   onLeave: () => void;
@@ -348,14 +379,25 @@ function Num({ shown, a, g }: { shown: number | null; a: Anchor; g: Gutter }) {
  *  on hover. Only the pick's last line keeps it in the tab order: one stop per file, not one per line. */
 function PlusButton({ a, pick, range, inPick, g }: { a: Anchor; pick: Pick | null; range: LineRange | null; inPick: boolean; g: Gutter }) {
   const head = !!pick && pick.side === a.side && pick.head === a.line;
-  const name = rangeName(range && inPick ? range : { side: a.side, start: a.line, end: a.line });
+  const name = rangeLabel(range && inPick ? range : { side: a.side, start: a.line, end: a.line });
   const what = `Comment on ${name[0].toLowerCase()}${name.slice(1)}`;
   return (
-    <button type="button" tabIndex={head ? 0 : -1} className={`rv-plus${head ? " is-head" : ""}`} aria-label={what} title={what} onMouseDown={g.startDrag(a, true)} onClick={g.onPlus(a)}>
+    <button type="button" tabIndex={head ? 0 : -1} className={`rv-plus${head ? " is-head" : ""}`} {...tip(what)} onMouseDown={g.startDrag(a, true)} onClick={g.onPlus(a)}>
       <Plus size={12} aria-hidden />
     </button>
   );
 }
+
+/** The small handle on the shaded range's first or last row, dragged to move that end. A mouse's: the keyboard has Shift and the arrows. */
+function Grip({ end, g }: { end: "start" | "last"; g: Gutter }) {
+  return <span className={`rv-grip is-${end}`} data-tip={end === "start" ? "Drag to change the first line" : "Drag to change the last line"} onMouseDown={g.startGrip(end)} />;
+}
+
+/** Whether the row holding `as` is where the range `r` starts (`first`) or ends (`last`). */
+const endsOf = (r: LineRange | null, as: Anchor[]) => ({
+  first: !!r && as.some((a) => same(a, { side: startSideOf(r), line: r.start })),
+  last: !!r && as.some((a) => same(a, { side: r.side, line: r.end })),
+});
 
 interface RowProps {
   row: Row;
@@ -382,12 +424,15 @@ const RowView = memo(function RowView({ row, hunk, pick, range, picked, commente
     const c = row.cell;
     // A context line is on both sides: each number picks its own, and + follows a pick on either.
     const plusAt = anchors.find((a) => has(picked, a)) ?? row.at;
+    const ends = endsOf(range, anchors);
     return (
       <>
         <div className={`rv-row${kind(c)}${marks(anchors)}`} data-hunk={hunk} data-old={c.old ?? undefined} data-new={c.new ?? undefined}>
           <Num shown={c.old} a={c.old === null ? row.at : { side: "old", line: c.old }} g={g} />
           <Num shown={c.new} a={c.new === null ? row.at : { side: "new", line: c.new }} g={g} />
           {!readOnly && <PlusButton a={plusAt} pick={pick} range={range} inPick={has(picked, plusAt)} g={g} />}
+          {!readOnly && ends.first && <Grip end="start" g={g} />}
+          {!readOnly && ends.last && <Grip end="last" g={g} />}
           <span className="rv-mark" aria-hidden="true">{MARK[c.kind]}</span>
           <Code cell={c} />
         </div>
@@ -397,10 +442,13 @@ const RowView = memo(function RowView({ row, hunk, pick, range, picked, commente
   }
   const half = (c: Cell | null, side: Side) => {
     const a: Anchor | null = c ? { side, line: side === "old" ? c.old! : c.new! } : null;
+    const ends = endsOf(range, a ? [a] : []);
     return (
       <div className={`rv-half${kind(c)}${a ? marks([a]) : ""}`} data-side={a?.side} data-line={a?.line}>
         {a ? <Num shown={a.line} a={a} g={g} /> : <span className="rv-num" />}
         {a && !readOnly && <PlusButton a={a} pick={pick} range={range} inPick={has(picked, a)} g={g} />}
+        {a && !readOnly && ends.first && <Grip end="start" g={g} />}
+        {a && !readOnly && ends.last && <Grip end="last" g={g} />}
         <span className="rv-mark" aria-hidden="true">{c ? MARK[c.kind] : ""}</span>
         {c ? <Code cell={c} /> : <code className="rv-code" />}
       </div>

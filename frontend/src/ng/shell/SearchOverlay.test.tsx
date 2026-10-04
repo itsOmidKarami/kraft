@@ -153,8 +153,8 @@ describe("SearchOverlay", () => {
       const o = row(name);
       return [o.querySelector("svg")!.getAttribute("class")!.match(/lucide-([a-z-]+)/g)!.at(-1), o.querySelector(".ng-search-tag")?.textContent, o.querySelector(".ng-search-where")?.textContent];
     };
-    expect(parts("Review human review")).toEqual(["lucide-diamond", undefined, undefined]);
-    expect(parts("Plain work")).toEqual(["lucide-box", undefined, "beta"]);
+    expect(parts("Review human review")).toEqual(["lucide-diamond", "NEEDS YOU", undefined]);
+    expect(parts("Plain work")).toEqual(["lucide-box", "RUNNING", "beta"]);
     expect(parts("Caching spec")).toEqual(["lucide-file-text", "spec", "alpha"]);
     expect(parts("New bead")).toEqual(["lucide-circle-dot", "open", undefined]);
     expect(parts("Appearance")).toEqual(["lucide-palette", undefined, "Settings"]);

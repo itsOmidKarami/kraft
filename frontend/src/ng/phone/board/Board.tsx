@@ -83,6 +83,7 @@ export function Board() {
     if (b.kind === "reject") return navigate(itemPath(item.id, "?compose=reject"));
     if (b.kind === "answer") return navigate(itemPath(item.id, "?compose=answer"));
     if (b.kind === "open") return navigate(itemPath(item.id));
+    if (b.kind === "raise") return navigate(itemPath(item.id, "?raise=1"));
     fail(item.id, null);
     if (b.kind === "approve") {
       setApproving({ item, gate: b.gate });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import { Archive, ArchiveRestore, ChevronDown, ChevronUp, CircleAlert, CircleCheck, MessageSquare, Pause, Play, RotateCcw, Siren, X } from "../../icons";
 import { Popover } from "../../ui/Popover";
 import { MAIN_LABEL, type Main, type PanelItem } from "../status";
+import { tip } from "../../ui/Tooltip";
 
 const MAIN_ICON: Record<Main, typeof Pause> = { pause: Pause, resume: Play, start: Play, raise: Play, retry: RotateCcw, archive: Archive, restore: ArchiveRestore, gate: CircleCheck, answer: MessageSquare, conflicts: CircleAlert, reopen: RotateCcw };
 const ITEM: Record<PanelItem, { label: string; icon: typeof Pause; tone?: string }> = {
@@ -104,7 +105,7 @@ export function MainButton({ main, panel: all, archivable, busy, onMain, onItem,
         </span>
       </button>
       {menu && (
-        <button ref={toggle} type="button" className="item-main-toggle" aria-label="More actions" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={onToggleKey}>
+        <button ref={toggle} type="button" className="item-main-toggle" {...tip("More actions")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={onToggleKey}>
           <ChevronDown size={12} aria-hidden />
         </button>
       )}

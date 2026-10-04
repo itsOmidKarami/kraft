@@ -13,6 +13,7 @@ import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
 import { nextStepId, uniq } from "./NodeView";
 import { problemWord } from "./problems";
 import { autoEscalates } from "./escalateWords";
+import { tip } from "../ui/Tooltip";
 
 export type BottomTab = "on_failure" | "fix_loop" | "escalation" | "on_conflict";
 const LABEL: Record<BottomTab, string> = { on_failure: "On failure", fix_loop: "Fix loop", escalation: "Escalation", on_conflict: "On conflict" };
@@ -218,7 +219,7 @@ export function BottomPane({ scope, node, draft, selPath, tab, open, canvasH, ri
         </div>
         <span className="bp-gap" />
         {open && hasRemove && <Button variant="danger" onClick={remove}>{shown === "escalation" ? "Remove escalation" : shown === "fix_loop" ? "Remove fix loop" : "Remove handler"}</Button>}
-        <button type="button" className="icon-btn" aria-label={open ? "Collapse the bottom pane" : "Expand the bottom pane"} title={open ? "Collapse" : "Expand"} aria-expanded={open} onClick={onToggle}>
+        <button type="button" className="icon-btn" {...tip(open ? "Collapse the bottom pane" : "Expand the bottom pane")} aria-expanded={open} onClick={onToggle}>
           {open ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
         </button>
       </div>

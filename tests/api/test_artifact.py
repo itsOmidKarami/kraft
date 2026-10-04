@@ -126,6 +126,35 @@ def test_gate_artifact_names_the_file_the_hook_wrote(client, item_at_spec_gate, 
     assert art["truncated"] is False
 
 
+def test_gate_artifact_carries_its_absolute_path_and_opens_in_an_editor(
+    client, item_at_spec_gate, worktree, monkeypatch
+):
+    wid = item_at_spec_gate
+    path = _write_artifact(worktree, wid, "# A spec\n")
+    art = client.get(f"/api/work-items/{wid}/artifact").json()
+    assert art["absolute_path"] == str(path)
+
+    launched = []
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
+    r = client.post(f"/api/work-items/{wid}/artifact/open", json={"editor": "code"})
+    assert r.status_code == 200, r.text
+    assert launched == [["/usr/bin/code", str(path)]]
+
+
+@pytest.mark.api_client(default_setup=False, peer=("10.0.0.5", 54321))
+def test_gate_artifact_open_is_refused_for_a_non_loopback_client(client, monkeypatch):
+    launched = []
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
+    st = client.app.state
+    monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
+    client.headers["authorization"] = f"Bearer {st.mcp_token}"
+    r = client.post("/api/work-items/unknown/artifact/open", json={"editor": "code"})
+    # 403 before 404: a remote caller learns nothing about which items exist.
+    assert r.status_code == 403, r.text
+    assert launched == []
+
+
 def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_spec_gate, worktree):
     """An agent can report done without honouring the contract. The gate stays
     answerable; there is just nothing to read.

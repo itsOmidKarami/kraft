@@ -7,8 +7,9 @@ from fastapi import HTTPException, Request
 
 from kraft import config as config_mod
 from kraft import events, review, store
-from kraft.api import api_router, deps
+from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
+from kraft.api.routes.search import OpenDocument, _launch_editor
 from kraft.executor import entry, stops
 from kraft.index import ingest as ingest_mod
 from kraft.templates import revision
@@ -370,6 +371,8 @@ async def get_work_item_artifact(wid: str, request: Request):
     return {
         "work_item_id": wid,
         "path": rel,
+        # Where the file is on this machine, for the viewer's Open in editor and Copy path.
+        "absolute_path": str(st.run_dirs.worktrees / wid / rel),
         # A chain revision's approval sends this back (Kraft-ec66w); absent
         # where approving applies nothing.
         **({"digest": shown} if shown else {}),
@@ -380,6 +383,28 @@ async def get_work_item_artifact(wid: str, request: Request):
         "truncated": truncated,
         "artifact_max_bytes": DIFF_MAX_BYTES,
     }
+
+
+@api_router.post("/work-items/{wid}/artifact/open")
+async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request):
+    """Launch an editor on the pending gate's document in the item's worktree.
+
+    The same loopback-only rule as `POST /documents/{id}/open`, checked first so a
+    remote caller learns nothing about the item. The gate's artifact has no index
+    row, so the path comes from the worktree the way `GET /artifact` reads it.
+    """
+    if not perimeter._client_is_local(request):
+        raise HTTPException(403, "this server only opens editors for a client on its own machine")
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    rel = board._gate_artifact(st, row, board._pending_gate(st, wid))
+    if rel is None:
+        raise HTTPException(404, "this work item's gate has no artifact")
+    worktree = st.run_dirs.worktrees / wid
+    path = worktree / rel
+    if not path.is_file() or not path.resolve().is_relative_to(worktree.resolve()):
+        raise HTTPException(404, "this work item's gate has no artifact")
+    return {"work_item_id": wid, **_launch_editor(request, body.editor, path)}
 
 
 async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:

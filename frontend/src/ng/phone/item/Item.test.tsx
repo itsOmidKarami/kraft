@@ -326,6 +326,14 @@ describe("Raise budget (C.6)", () => {
   });
 });
 
+describe("the question card (PH-12)", () => {
+  it("draws a speech bubble before its title", async () => {
+    mount(item("needs_you", stop("question"), { needs_context_question: "Allow the change?" }));
+    const card = await screen.findByRole("region", { name: "Needs you" });
+    expect(card.querySelector(".ph-statecard-title svg.lucide-message-square")).not.toBeNull();
+  });
+});
+
 describe("⋮ (C.5)", () => {
   it("lists what the bar does not and acts", async () => {
     const calls = mount(item("running", null, { mr_ref: { number: 142, url: "https://forge/142" } }), "/work-items/w1", { "POST /work-items/w1/duplicate": [200, { id: "w2", status: "paused" }], "GET /work-items/w2": [200, item("paused", null, { id: "w2" })] });
@@ -373,7 +381,7 @@ describe("raising the cap that stopped the item (R73)", () => {
   const capped = (l?: unknown) => item("needs_you", { ...stop("cap", { reason: "Running time hit its 8h cap" }), ...(l ? { limit: l } : {}) } as WorkItemStop);
   const sent = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
   const openSheet = async () => {
-    await userEvent.click(await screen.findByRole("button", { name: /^Raise the running time cap/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     return screen.findByRole("dialog");
   };
   const type = async (v: string) => {
@@ -382,6 +390,21 @@ describe("raising the cap that stopped the item (R73)", () => {
     await userEvent.type(box, `${v}{Enter}`);
   };
 
+  it("?raise=1, from the board's Raise cap, opens the sheet over the item, and Back lands on the item", async () => {
+    mount(capped(limit()), "/work-items/w1?raise=1");
+    expect(await screen.findByRole("dialog", { name: /Raise the running time cap/ })).toBeInTheDocument();
+    expect(where()).toBe("/work-items/w1");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByRole("button", { name: "Raise cap" })).toBeInTheDocument();
+  });
+
+  it("?raise=1 on a stop the item cannot raise shows its card and no sheet", async () => {
+    mount(capped(), "/work-items/w1?raise=1");
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("without stop.limit a cap stop keeps Steer and Retry and offers no raise", async () => {
     mount(capped());
     expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
@@ -389,10 +412,11 @@ describe("raising the cap that stopped the item (R73)", () => {
     expect(screen.queryByRole("button", { name: /^Raise/ })).toBeNull();
   });
 
-  it("with stop.limit the card offers the raise beside Steer and Retry, and the sheet shows the value and the maximum", async () => {
+  it("with stop.limit the bar is Steer and Raise cap, and the sheet shows the value and the maximum", async () => {
     mount(capped(limit()));
+    expect(await screen.findByRole("button", { name: "Steer" })).toBeInTheDocument();
     const dialog = await openSheet();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(dialog).toHaveTextContent("Now 480 minutes of running time. The policy maximum is 1440.");
     expect(screen.getByLabelText("Raise the running time cap", { selector: "input" })).toHaveValue("480");
     expect(within(dialog).getByRole("button", { name: "Save & retry" })).toBeInTheDocument();
@@ -414,7 +438,7 @@ describe("raising the cap that stopped the item (R73)", () => {
 
   it("a node's own limit goes under policy.paths", async () => {
     const calls = mount(capped(limit({ path: "verification", key: "max_attempts", value: 3 })));
-    await userEvent.click(await screen.findByRole("button", { name: /^Raise the attempts cap/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Raise cap" }));
     const box = screen.getByLabelText("Raise the attempts cap", { selector: "input" });
     await userEvent.clear(box);
     await userEvent.type(box, "5{Enter}");

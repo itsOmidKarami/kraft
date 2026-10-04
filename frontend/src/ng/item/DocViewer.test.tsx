@@ -6,7 +6,7 @@ import { DocViewer, type DocSource } from "./DocViewer";
 import { acceptWrites, stubFetch } from "./testkit";
 
 /** The writes these pages send; any other write is refused. */
-const WRITES = acceptWrites("POST /documents/d1/open");
+const WRITES = acceptWrites("POST /documents/d1/open", "POST /work-items/w1/artifact/open");
 
 afterEach(() => vi.unstubAllGlobals());
 const EDITORS = { available: ["code", "zed"], system: true, default: "zed" };
@@ -82,20 +82,36 @@ describe("DocViewer", () => {
     expect(calls.filter((c) => c.path === "/editors")).toEqual([]);
   });
 
-  it("shows a gate's artifact without editors or a path to copy (it has no index row)", async () => {
-    stubFetch({ "GET /work-items/w1/artifact": [200, { title: "Plan", path: ".engineering/plans/p.md", content: "# Plan\n\nStep one." }] });
-    render(<DocViewer source={{ kind: "artifact", workItemId: "w1" }} onClose={() => {}} />);
+  it("opens a gate's artifact in an editor and copies its absolute path, as an indexed document does (DV-3)", async () => {
+    const calls = stubFetch({ ...WRITES, "GET /editors": [200, EDITORS], "GET /work-items/w1/artifact": [200, { title: "Plan", path: ".engineering/plans/p.md", absolute_path: "/runs/w1/.engineering/plans/p.md", content: "# Plan\n\nStep one." }] });
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<DocViewer source={{ kind: "artifact", workItemId: "w1", by: "plan.main.author" }} onClose={() => {}} />);
+    expect(await screen.findByText("Step one.")).toBeInTheDocument();
+    expect(screen.getByText("written by plan.main.author")).toBeInTheDocument();
+    const button = await screen.findByRole("button", { name: "Open in editor" });
+    await waitFor(() => expect(button).toHaveAttribute("title", "Open in Zed"));
+    await userEvent.click(button);
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => [c.url, c.body])).toEqual([["/work-items/w1/artifact/open", { editor: "zed" }]]));
+    await userEvent.click(screen.getByRole("button", { name: "Copy path" }));
+    expect(writeText).toHaveBeenCalledWith("/runs/w1/.engineering/plans/p.md");
+  });
+
+  it("gives an attachment, which is only Kraft's copy, no editor or path to copy", async () => {
+    stubFetch({ "GET /work-items/w1/attachments/plan": [200, { title: "Plan", path: "plan.md", content: "# Plan\n\nStep one." }] });
+    render(<DocViewer source={{ kind: "attachment", workItemId: "w1", attachment: "plan" }} onClose={() => {}} />);
     expect(await screen.findByText("Step one.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy path" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
   });
 
-  it("has a Close button, in the editors' row for an indexed document and alone for an artifact", async () => {
+  it("has a Close button, ahead of the editors' row, on a document and on an artifact", async () => {
     const onClose = vi.fn();
     stubFetch({ "GET /documents/d1": [200, doc], "GET /editors": [200, EDITORS], "GET /work-items/w1/artifact": [200, { title: "Plan", path: "p.md", content: "# Plan\n\nStep one." }] });
     const { unmount } = render(<DocViewer source={{ kind: "artifact", workItemId: "w1" }} onClose={onClose} />);
     await screen.findByText("Step one.");
-    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["⤢ full screen", "Close"]);
+    await screen.findByRole("button", { name: "Other editors" });
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["⤢ full screen", "Close", "Open in editor", "Other editors", "Copy path"]);
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     unmount();

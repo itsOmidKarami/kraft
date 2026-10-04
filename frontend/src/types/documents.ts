@@ -54,6 +54,8 @@ export interface WorkItemDiff {
 export interface WorkItemArtifact {
   work_item_id: string;
   path: string;
+  /** Where the file is on the server's machine, for Open in editor and Copy path. */
+  absolute_path?: string;
   title: string;
   content: string;
   truncated: boolean;

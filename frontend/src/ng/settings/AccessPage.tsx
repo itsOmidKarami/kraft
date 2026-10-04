@@ -12,6 +12,7 @@ import { ACCESS_LEDE, EMPTY_HOSTS, hostSuggestion } from "./accessWords";
 import { Block, SetRow } from "./parts";
 import { YamlFrame } from "./YamlFrame";
 import "./settings.css";
+import { tip } from "../ui/Tooltip";
 
 const LOOPBACK = "127.0.0.1";
 const REMOTE_ACCESS = "https://itsomidkarami.github.io/kraft/guides/remote-access";
@@ -287,7 +288,7 @@ export function AccessPage() {
                   <span className="set-inline">
                     <span className={access.password_set ? "set-mono" : undefined}>{access.password_set ? "•••••••• set" : "not set"}</span>
                     {access.password_set
-                      ? <button type="button" className="set-pencil" aria-label="Change" title="Change the password" onClick={() => edit("password")}><Pencil size={12} aria-hidden /></button>
+                      ? <button type="button" className="set-pencil" {...tip("Change", "Change the password")} onClick={() => edit("password")}><Pencil size={12} aria-hidden /></button>
                       : <button type="button" className="set-btn" onClick={() => edit("password")}>Set a password</button>}
                   </span>
                 )}

@@ -26,6 +26,7 @@ const ALLOWED = [
   "item/paths",
   "item/limitPolicy", // the Raise cap PATCH body that keeps the rest of the override, one for both apps
   "item/chainName",
+  "item/chainValues", // the frozen chain and the caps it resolves to: a node's attempts, wall clock and YAML, read as the desktop reads them
   "item/nodeGraph",
   "item/graph",
   "item/draft/view", // lines(): the draft's changes as the desktop's Start dialog lists them (R10b-12)

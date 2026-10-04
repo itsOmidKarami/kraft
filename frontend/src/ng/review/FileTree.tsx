@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CompareFile, ReviewThread } from "../../types";
 import { folders, threadSummary, unresolved } from "./model";
+import { tip } from "../ui/Tooltip";
 
 /** The file list beside the diff (prototype 412–417): counts, threads and
  *  viewed per file, folders that fold, a filter (GAP §2 #3). */
@@ -54,7 +55,7 @@ export function FileTree(p: {
                 return (
                   <div key={f.path} className={`rv-file-row${dir ? " is-nested" : ""}${p.selected === f.path ? " is-on" : ""}`}>
                     {p.onViewed ? (
-                      <button type="button" className={`rv-viewed${v ? " is-on" : ""}`} aria-pressed={v} aria-label={`Viewed ${f.path}`} title={v ? "Viewed" : "Mark viewed"} onClick={() => p.onViewed!(f.path, !v)}>
+                      <button type="button" className={`rv-viewed${v ? " is-on" : ""}`} aria-pressed={v} {...tip(`Viewed ${f.path}`, v ? "Viewed" : "Mark viewed")} onClick={() => p.onViewed!(f.path, !v)}>
                         {v ? "✓" : "○"}
                       </button>
                     ) : (

@@ -9,6 +9,7 @@ import { backdropProps, useModal } from "../../useModal";
 import { groupOf } from "../board/model";
 import { termsOf } from "../item/DocViewer";
 import { gateWords, reasonTail } from "../board/rowText";
+import { headerState } from "../item/status";
 import { Kbd } from "../ui/Kbd";
 import { Tabs } from "../ui/Tabs";
 import { ROUTES } from "./routes";
@@ -70,6 +71,7 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         subLead: i.title,
         sub: [shortId(i.id), repoName(i.repo)].filter(Boolean).join(" · "),
         icon: Diamond,
+        tag: headerState(i).badge,
         note: `reviews ${i.title}`,
         open: () => go(`/work-items/${encodeURIComponent(i.id)}/review`),
       }
@@ -79,6 +81,7 @@ const itemRow = (i: WorkItem, section: "needs" | "items", go: (to: string) => vo
         label: i.title,
         sub: stateWords(i),
         icon: Box,
+        tag: headerState(i).badge,
         where: repoName(i.repo),
         note: "opens the work item",
         open: () => go(`/work-items/${encodeURIComponent(i.id)}`),

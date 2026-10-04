@@ -241,18 +241,17 @@ describe("a card's inline actions (B.4)", () => {
     mount();
     await screen.findByText("Item c1");
     const card = (id: string) => within(document.querySelector(`[data-row="${id}"]`) as HTMLElement);
-    expect(card("c1").getByRole("button", { name: "Open" })).toBeInTheDocument();
-    // A list row cannot tell the item's own cap from a daily or token one, which the server will not raise: the item screen can.
-    expect(card("b2").getByRole("button", { name: "Open" })).toBeInTheDocument();
-    expect(card("b2").queryByRole("button", { name: /Raise/ })).toBeNull();
+    // The desktop row's words for the same stops (PH-10); the item screen decides whether it can raise them.
+    expect(card("c1").getByRole("button", { name: "Raise cap" })).toBeInTheDocument();
+    expect(card("b2").getByRole("button", { name: "Raise budget" })).toBeInTheDocument();
     expect(card("q3").getByRole("button", { name: "Answer…" })).toBeInTheDocument();
     expect(card("f4").getByRole("button", { name: "Retry…" })).toBeInTheDocument();
     // A running card has its tap target and nothing inline.
     expect(card("r6").getAllByRole("button")).toHaveLength(1);
 
-    await userEvent.click(card("b2").getByRole("button", { name: "Open" }));
-    expect(where()).toContain("/work-items/b2");
-    // The board reads /health for the restart banner (R10c-01); Open itself sends nothing.
+    await userEvent.click(card("b2").getByRole("button", { name: "Raise budget" }));
+    expect(where()).toContain("/work-items/b2?raise=1");
+    // The board reads /health for the restart banner (R10c-01); Raise budget itself sends nothing.
     expect(calls.filter((c) => c.path !== "/health")).toEqual([]);
   });
 

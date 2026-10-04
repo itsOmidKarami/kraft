@@ -3,6 +3,10 @@ server-side, applied whole in one transaction or refused."""
 
 from __future__ import annotations
 
+import os
+import sqlite3
+from pathlib import Path
+
 from support.api import _set_status
 
 from kraft.templates.models import MaterializedChain
@@ -32,7 +36,10 @@ def test_put_replaces_the_op_list_get_reads_it_and_an_empty_list_deletes_it(clie
     empty = client.get(url).json()
     assert (empty["ops"], empty["base_seq"]) == ([], None)
     cap = client.get(f"/api/work-items/{wid}").json()["budget_cap"]
-    assert empty["checks"] == {"budget": {"spent_usd": cap["spent_usd"], "cap_usd": cap["cap_usd"]}}
+    assert empty["checks"] == {
+        "budget": {"spent_usd": cap["spent_usd"], "cap_usd": cap["cap_usd"]},
+        "added": [],
+    }
 
     put = client.put(url, json={"ops": [OVERRIDE, ADD]})
     assert put.status_code == 200, put.text
@@ -115,3 +122,36 @@ def test_an_ended_items_draft_is_refused(client, repo):
     _set_status(wid, "completed")
     assert client.get(f"/api/work-items/{wid}/draft").status_code == 409
     assert client.post(f"/api/work-items/{wid}/draft/apply").status_code == 409
+
+
+def test_checks_name_the_harness_and_the_estimate_of_each_node_the_draft_adds(client, repo):
+    wid, other = _filed(client, repo), _filed(client, repo)
+    url = f"/api/work-items/{wid}/draft"
+    [added] = client.put(url, json={"ops": [OVERRIDE, ADD]}).json()["checks"]["added"]
+    assert (added["op"], added["node"], added["harnesses"]) == (1, "again", ["claude"])
+    assert (added["estimate_usd"], added["estimate_runs"]) == (None, None)
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        # Per item, then averaged: this item spent 0.75 on the node, the other 0.25.
+        for sid, item_id, cost in (("e1", wid, 0.5), ("e2", wid, 0.25), ("e3", other, 0.25)):
+            conn.execute(
+                "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+                "result_path, status, cost_usd, created_at) VALUES "
+                "(?, ?, 'again', 'again.main.x', 'x', 'x', 'done', ?, datetime('now'))",
+                (sid, item_id, cost),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    [priced] = client.get(url).json()["checks"]["added"]
+    assert (priced["estimate_usd"], priced["estimate_runs"]) == (0.5, 2)
+
+
+def test_a_node_whose_op_cannot_apply_has_no_added_check(client, repo):
+    wid = _filed(client, repo)
+    # The id is taken: the op is a problem, though a node of that id is in the chain.
+    bad = {**ADD, "node": {"id": "verification", "extends": "verification"}}
+    view = client.put(f"/api/work-items/{wid}/draft", json={"ops": [bad]}).json()
+    assert [p["op"] for p in view["problems"]] == [0]
+    assert view["checks"]["added"] == []
