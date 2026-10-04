@@ -99,7 +99,8 @@ enforced-by: tests/api/test_diff.py::test_diff_truncates_at_a_file_boundary, tes
 
 ## REQ rework-run-shows-no-plan-progress
 WHEN a gate rejection sends the chain straight back to the implementing node,
-the system SHALL show no plan progress for that run and SHALL NOT tell its
-agent to report plan progress.
-enforced-by: tests/test_progress.py::test_a_rejection_straight_back_to_implementation_is_rework, tests/api/test_progress.py::test_progress_is_null_on_a_rework_run_after_a_gate_rejection, tests/api/test_progress.py::test_a_report_on_a_rework_run_is_a_409_and_writes_nothing, tests/api/test_gates.py::test_a_rework_run_is_not_told_to_report_plan_progress
+the system SHALL show no live plan position for that run (the board shows no
+task count, and the item's detail shows the plan as finished) and SHALL NOT
+tell its agent to report plan progress.
+enforced-by: tests/test_progress.py::test_a_rejection_straight_back_to_implementation_is_rework, tests/api/test_progress.py::test_the_detail_keeps_progress_the_board_drops[rework], tests/api/test_progress.py::test_a_report_on_a_rework_run_is_a_409_and_writes_nothing, tests/api/test_gates.py::test_a_rework_run_is_not_told_to_report_plan_progress
 origin: src/kraft/progress.py

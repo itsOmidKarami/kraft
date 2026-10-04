@@ -140,8 +140,9 @@ describe("ItemPage, live", () => {
     expect(await within(await screen.findByRole("complementary", { name: "code_review pane" })).findByText(/attempt 1 of 2/)).toBeInTheDocument();
     answers["GET /work-items/w1"] = [200, { ...two, worker_sessions: [...two.worker_sessions, sess("r3", path, 3, { status: "running" })] }];
     live(2);
-    expect(await within(pane("code_review")).findByText(/attempt 1 of 3/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Later attempt" })).toBeEnabled();
+    expect(await within(pane("code_review")).findByRole("button", { name: "attempt 1 of 3" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "attempt 1 of 3" }));
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
   });
 
   it("reads the diff line again when a new attempt starts", async () => {

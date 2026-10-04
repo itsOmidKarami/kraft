@@ -1,64 +1,98 @@
-import { useEffect, useRef } from "react";
 import { elapsed, tokens, usd } from "../../../format";
-import type { WorkerSession, WorkItemDocument } from "../../../types";
+import type { TaskProgress, WorkerSession, WorkItemDocument } from "../../../types";
+import { allDone } from "../../board/rowText";
 import { FileText } from "../../icons";
+import { Menu, type MenuItem } from "../../ui/Menu";
 import { lookWord, sessionLook } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
-import { tip } from "../../ui/Tooltip";
 
-/** ‹ attempt n of m › above every tab: which session the tabs show (Decisions §6 Attempts).
- *  On the escalation each session is a turn of its thread, so it reads ‹ turn n of m ›
- *  as the Thread tab counts them, not "attempt 5 of 5" beside "5 turns" (R10b-06). */
-export function AttemptSwitcher({ sessions, at, onAt, now, turns }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number; turns?: boolean }) {
-  const i = sessions.indexOf(at);
-  const look = sessionLook(at, now);
-  const earlier = useRef<HTMLButtonElement>(null);
-  const later = useRef<HTMLButtonElement>(null);
-  // An arrow that reaches the end disables itself: focus moves to the other one, not to the page.
-  const handoff = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    handoff.current?.focus();
-    handoff.current = null;
-  }, [at]);
-  const step = (to: number) => {
-    if (to <= 0 || to >= sessions.length - 1) handoff.current = to <= 0 ? later.current : earlier.current;
-    onAt(sessions[to].attempt);
-  };
-  return (
-    <div className="ip-attempts">
-      <span className="ip-attempt-box">
-        <button ref={earlier} type="button" className="ip-attempt-btn" {...tip(turns ? "Earlier turn" : "Earlier attempt")} disabled={i <= 0} onClick={() => step(i - 1)}>‹</button>
-        <span>{turns ? turnWords(sessions, at) : `attempt ${at.attempt} of ${sessions.at(-1)!.attempt}${at.round ? ` · round ${at.round + 1}` : ""}`}</span>
-        <button ref={later} type="button" className="ip-attempt-btn" {...tip(turns ? "Later turn" : "Later attempt")} disabled={i >= sessions.length - 1} onClick={() => step(i + 1)}>›</button>
-      </span>
-      <span className={`ip-attempt-state${look.running ? " is-live" : look.state === "failed" ? " is-bad" : ""}`}>{lookWord(look)}</span>
-    </div>
-  );
+/** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
+ *  reading "attempt n of m", one row per session, newest first. On the escalation each session is
+ *  a turn of its thread, so it reads "turn n of m" as the Thread tab counts them, not
+ *  "attempt 5 of 5" beside "5 turns" (R10b-06). */
+export function AttemptMenu({ sessions, at, onAt, now, turns }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number; turns?: boolean }) {
+  const threads = new Set(sessions.map((s) => s.thread)).size > 1;
+  const items = [...sessions].reverse().map((s): MenuItem => {
+    const look = sessionLook(s, now);
+    const tone = look.running ? "is-live" : look.state === "failed" ? "is-bad" : look.state === "done" ? "is-ok" : "";
+    return {
+      // `Menu` keys its rows by label: an attempt number is unique, a turn is unique within its thread.
+      label: turns ? `Turn ${turnOf(sessions, s).n}${threads ? ` · thread ${s.thread}` : ""}` : `Attempt ${s.attempt}`,
+      hint: s.status === "pending" ? "not run yet" : look.running ? look.meta : [lookWord(look), s.wall_ms != null ? elapsed(s.wall_ms) : null].filter(Boolean).join(" · "),
+      icon: <span className={`ip-pill-dot ${tone}`} />,
+      checked: s === at,
+      onSelect: () => onAt(s.attempt),
+    };
+  });
+  const text = turns ? turnWords(sessions, at) : `attempt ${at.attempt} of ${sessions.at(-1)!.attempt}${at.round ? ` · round ${at.round + 1}` : ""}`;
+  return <Menu label={turns ? "Turns" : "Attempts"} triggerClass="ip-pill" trigger={<>{text}<span className="ip-pill-caret" aria-hidden>▾</span></>} items={items} />;
+}
+
+/** A session's place among its own thread's sessions, as the Thread tab counts them. */
+function turnOf(sessions: WorkerSession[], at: WorkerSession) {
+  const mine = sessions.filter((s) => s.thread === at.thread);
+  return { n: mine.indexOf(at) + 1, of: mine.length, many: mine.length < sessions.length };
 }
 
 /** "turn 2 of 3": the escalation's session among its own thread's, as the Thread tab counts
  *  them ("thread 2 · 1 turn"), with "· thread 2" once there is more than one. */
 function turnWords(sessions: WorkerSession[], at: WorkerSession): string {
-  const mine = sessions.filter((s) => s.thread === at.thread);
-  const many = mine.length < sessions.length;
-  return `turn ${mine.indexOf(at) + 1} of ${mine.length}${many ? ` · thread ${at.thread}` : ""}`;
+  const { n, of, many } = turnOf(sessions, at);
+  return `turn ${n} of ${of}${many ? ` · thread ${at.thread}` : ""}`;
 }
 
 const fact = (k: string, v: React.ReactNode) => (v == null || v === "" ? null : <div key={k}><dt>{k}</dt><dd>{v}</dd></div>);
 
-/** Overview: what ran and its result, with the documents this attempt wrote (Decisions §6 Documents). */
-export function TaskOverview({ path, s, docs, onDoc }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void }) {
+const subTasks = (n: number) => `${n} sub-task${n === 1 ? "" : "s"}`;
+
+/** The plan task's place in its plan (`item.progress`), in a few words: what the fact row reads. */
+function progressWords(p: TaskProgress, running: boolean): string {
+  if (allDone(p)) return `${p.total} of ${subTasks(p.total)} · done`;
+  return running ? `${p.current} of ${p.total} · ${p.title}` : `${p.current} of ${subTasks(p.total)}`;
+}
+
+/** The plan's sub-tasks under the plan task's facts: a bar, then one row each with its state and commit. */
+function SubTasks({ tasks, docs, onDoc }: { tasks: NonNullable<TaskProgress["tasks"]>; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void }) {
+  const plan = docs.find((d) => d.attachment_kind === "plan") ?? docs.find((d) => d.kind === "plan");
+  const done = tasks.filter((t) => t.state === "done").length;
+  return (
+    <>
+      <div className="ip-progress-head">
+        <h3 className="ip-h">Progress · {subTasks(tasks.length)}</h3>
+        {plan && <button type="button" className="item-link" onClick={() => onDoc(plan)}>{plan.path.split("/").at(-1)} ↗</button>}
+      </div>
+      <div className="ip-progress-bar" aria-hidden><span style={{ width: `${(done / tasks.length) * 100}%` }} /></div>
+      <ol className="ip-subtasks" aria-label="Sub-tasks">
+        {tasks.map((t) => (
+          <li key={t.n} className={`ip-subtask is-${t.state}`} aria-current={t.state === "current" ? "step" : undefined}>
+            <span className="ip-subtask-dot" role="img" aria-label={t.state} />
+            <span className="ip-subtask-n is-mono">{t.n}</span>
+            <span className="ip-subtask-title">{t.title}</span>
+            <span className="ip-subtask-meta">{t.state === "current" ? "current" : t.state === "done" && t.sha ? <span className="is-mono">{t.sha}</span> : null}</span>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+/** Overview: what ran and its result, with the documents this attempt wrote (Decisions §6 Documents).
+ *  On the plan task, `progress` is the plan's sub-tasks, whichever attempt is shown: it describes
+ *  the plan, not a session; `running` is whether the task's newest session runs. */
+export function TaskOverview({ path, s, docs, onDoc, progress, running }: { path: string; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; progress?: TaskProgress | null; running?: boolean }) {
   const mine = docs.filter((d) => d.worker_session_id === s.id || (d.hook_point === path && d.attempt === s.attempt));
   return (
     <>
       <dl className="item-facts ip-facts">
         {fact("status", s.status.replaceAll("_", " "))}
+        {fact("progress", progress ? progressWords(progress, !!running) : null)}
         {fact("kind", s.model ? "agent" : null)}
         {fact("harness", s.harness && <span className="is-mono">{s.harness}</span>)}
         {fact("model", s.model && <span className="is-mono">{s.model}</span>)}
         {fact("path", <span className="is-mono">{path}</span>)}
         {fact("ran", s.wall_ms != null ? elapsed(s.wall_ms) : null)}
       </dl>
+      {progress?.tasks?.length ? <SubTasks tasks={progress.tasks} docs={docs} onDoc={onDoc} /> : null}
       <h3 className="ip-h">Result</h3>
       <dl className="item-facts ip-facts">
         {fact("tokens", s.tokens_in != null ? tokens((s.tokens_in ?? 0) + (s.tokens_out ?? 0)) : null)}

@@ -62,14 +62,17 @@ export type NodeOverrides = Record<
 /** Where the implementer is in its plan (Kraft-qqz8): "3 of 6 · title", derived
  *  server-side from the plan's `## Task N` headings, the latest
  *  `plan_progress` report and the highest task a commit subject names
- *  (`progress.combine`). `null`/absent off the implementation node or for a
- *  plan with no headings. The list endpoint (`_board_progress`) sends it too,
- *  without `tasks`, for the board row's "Task 3/6" line. */
+ *  (`progress.combine`). `null`/absent for a plan with no headings. The list
+ *  endpoint (`_board_progress`) sends it only while the implementation node
+ *  runs, without `tasks`, for the board row's "Task 3/6" line; the detail
+ *  (`progress.for_detail`) keeps it once the node stops or finishes, every
+ *  task `done` after it, each with the short `sha` of the newest commit
+ *  naming it. */
 export interface TaskProgress {
   current: number;
   total: number;
   title: string;
-  tasks?: { n: number; title: string; state: "done" | "current" | "pending" }[];
+  tasks?: { n: number; title: string; state: "done" | "current" | "pending"; sha?: string | null }[];
 }
 
 /** The Config tab's "$5.00 · $2.41 used" line and its `policy default` /

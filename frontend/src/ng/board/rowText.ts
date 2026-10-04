@@ -1,5 +1,5 @@
 import { until } from "../../format";
-import type { ChainNode, WorkItem } from "../../types";
+import type { ChainNode, TaskProgress, WorkItem } from "../../types";
 import type { GlyphKind, GlyphState } from "../graph/types";
 import { groupOf } from "./model";
 
@@ -15,6 +15,9 @@ export const nodeWords = (id: string) => id.replace(/[_-]+/g, " ");
 
 /** A gate id as what it decides: `spec_approval` reads "spec", so the row says "approve spec". */
 export const gateWords = (id: string) => nodeWords(id.replace(/[_-]approval$/, ""));
+
+/** Every sub-task of the plan done: a list with nothing left on it, not an empty or a board-only one. */
+export const allDone = (p: Pick<TaskProgress, "tasks">) => !!p.tasks?.length && p.tasks.every((t) => t.state === "done");
 
 /** Up to the first full stop that ends a sentence, not one inside "$0.04". */
 const firstSentence = (s: string) => s.split(/\.(?:\s|$)/)[0];
@@ -37,7 +40,8 @@ export function reasonTail(i: Row, now = Date.now()): string {
       case "paused": return i.current_node_id ? `paused at ${node}` : "created paused";
       case "running":
         if (i.step) return i.step.name && i.step.task ? `${i.step.index} of ${i.step.count} · ${i.step.name} › ${i.step.task}` : `${node} · step ${i.step.index} of ${i.step.count}`;
-        return i.progress ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
+        // A finished plan (the detail keeps it past the node) has no task left to count.
+        return i.progress && !allDone(i.progress) ? `${node} · task ${i.progress.current} of ${i.progress.total}` : node;
       case "waiting": {
         const at = i.stop?.resume_at ?? i.retry_at;
         // A CI wait checks again; only a rate limit retries (R11b-05).

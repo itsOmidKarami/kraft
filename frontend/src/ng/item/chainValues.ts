@@ -7,7 +7,7 @@ import type { ItemDetail } from "./useItem";
  *  parts those rows show are typed. */
 type Caps = Record<string, number | null | undefined>;
 type Pol = Record<string, unknown> | null | undefined;
-export type MTask = { id: string; kind: string; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
+export type MTask = { id: string; kind: string; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
 type MStep = { id: string; tasks: MTask[]; policy?: Pol };
 type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
 export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
@@ -51,6 +51,17 @@ function scopes(m: Materialized, path: string) {
 }
 
 export const taskAt = (m: Materialized, path: string) => scopes(m, path).task;
+
+/** The plan task's path: the one agent task with no `skill` in the first node whose own steps hold
+ *  one (`progress.implementing_nodes`; a fix loop, `on_failure` or escalation task does not count).
+ *  None when that node holds more than one, or the chain has none. */
+export function planTaskPath(m: Materialized | null): string | null {
+  for (const n of m?.chain.nodes ?? []) {
+    const found = stepsOfNode(n).flatMap((st) => st.tasks.filter((t) => t.kind === "agent" && t.skill == null).map((t) => `${n.id}.${st.id}.${t.id}`));
+    if (found.length) return found.length === 1 ? found[0] : null;
+  }
+  return null;
+}
 
 const glyphKind = (k: string | undefined): TaskKind | undefined => (k && k in KIND_ICON ? (k as TaskKind) : undefined);
 

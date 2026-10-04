@@ -27,6 +27,9 @@ class TaskProgress(BaseModel):
     n: int
     title: str
     state: Literal["done", "current", "pending"]
+    # The short hash of the newest commit on the item's branch naming this
+    # task; only the detail read (`for_detail`) fills it.
+    sha: str | None = None
 
 
 class ProgressReport(BaseModel):
@@ -81,18 +84,15 @@ def parse_tasks(text: str) -> list[tuple[str, bool]]:
     return result
 
 
+def _named_tasks(subject: str) -> list[int]:
+    """Every task number one commit subject names."""
+    return [int(n) for m in _COMMIT_TASK.finditer(subject) for n in re.findall(r"\d+", m[1])]
+
+
 def committed_task(subjects: list[str]) -> int:
     """The highest task number any commit subject names -- `Task 7: ...`,
     `(task 6, X)`, `Task 5+6: ...` -- or 0."""
-    return max(
-        (
-            int(n)
-            for subject in subjects
-            for m in _COMMIT_TASK.finditer(subject)
-            for n in re.findall(r"\d+", m[1])
-        ),
-        default=0,
-    )
+    return max((n for subject in subjects for n in _named_tasks(subject)), default=0)
 
 
 def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> ProgressReport | None:
@@ -283,10 +283,73 @@ def for_item(db, row, worktree: Path) -> ProgressReport | None:
     if not tasks:
         return None
     reported = run_state(evs, node_id)
-    # The item's branch base, not this run's dispatch HEAD. `base_ref` is set at
-    # worktree creation and re-set after every rebase, so this range is exactly
-    # the commits this item has made -- across a reject bounce, which is when
-    # the per-run range was empty by construction and floored `current` at 1.
+    return combine(tasks, reported, committed_task([s for _, s in branch_log(row, worktree)]))
+
+
+def branch_log(row, worktree: Path) -> list[tuple[str, str]]:
+    """`(short sha, subject)` of every commit this item has made, newest first.
+
+    The item's branch base, not a run's dispatch HEAD. `base_ref` is set at
+    worktree creation and re-set after every rebase, so this range is exactly
+    the commits this item has made -- across a reject bounce, which is when
+    the per-run range was empty by construction and floored `current` at 1."""
     base = row["base_ref"]
-    log = git_read(worktree, "log", "--format=%s", f"{base}..HEAD") if base else None
-    return combine(tasks, reported, committed_task(log.splitlines() if log else []))
+    log = git_read(worktree, "log", "--format=%h %s", f"{base}..HEAD") if base else None
+    return [(line.partition(" ")[0], line.partition(" ")[2]) for line in (log or "").splitlines()]
+
+
+def for_detail(db, row, worktree: Path) -> ProgressReport | None:
+    """The detail read's `progress`: `for_item`'s, kept once the item stops on
+    the implementing node or moves past it, with each task's commit.
+
+    None until the node has started, while the item stands before it (the plan
+    is not being followed yet, or is being rewritten after a rejection), and
+    for a plan with no `## Task N` headings. A completed node, or a rework run
+    after a gate rejection, reads as every task done."""
+    node_id = chain_implementation_node(row)
+    if node_id is None:
+        return None
+    order = [n["id"] for n in _store.chain_view(row).get("nodes", [])]
+    here = row["current_node_id"]
+    if here in order and node_id in order and order.index(here) < order.index(node_id):
+        return None
+    evs = db.read(lambda c: events.read_after(c, 0, row["id"]))
+
+    def last(kind: str) -> int:
+        return max(
+            (
+                i
+                for i, e in enumerate(evs)
+                if e["type"] == kind and e["payload"].get("node_id") == node_id
+            ),
+            default=-1,
+        )
+
+    started = last("node_started")
+    if started < 0:
+        return None
+    tasks = tasks_for(row, worktree)
+    if not tasks:
+        return None
+    log = branch_log(row, worktree)
+    if last("node_completed") > started or is_rework(evs, node_id):
+        report = ProgressReport(
+            current=len(tasks),
+            total=len(tasks),
+            title=tasks[-1][0],
+            tasks=[
+                TaskProgress(n=n, title=title, state="done")
+                for n, (title, _) in enumerate(tasks, 1)
+            ],
+        )
+    else:
+        report = combine(tasks, run_state(evs, node_id), committed_task([s for _, s in log]))
+    if report is None:
+        return None
+    shas: dict[int, str] = {}
+    for sha, subject in log:
+        for n in _named_tasks(subject):
+            shas.setdefault(n, sha)
+    for t in report.tasks:
+        t.sha = shas.get(t.n)
+    return report
