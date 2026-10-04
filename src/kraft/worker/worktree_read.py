@@ -69,9 +69,20 @@ def open_no_symlinks(root: Path, rel: str) -> int:
     # worktree is fine (and necessary on macOS, where /tmp is a symlink).
     dir_fd = open_dir_no_symlinks(root, parts[:-1])
     try:
-        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        # O_NONBLOCK: a FIFO the agent planted at the path would otherwise
+        # block this open until something writes to it, and with it the
+        # server. A regular file ignores the flag.
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     finally:
         os.close(dir_fd)
+    # Only a regular file is read: not a FIFO, a device or a socket.
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, f"not a regular file: {rel}")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 def worktree_file_path(root: Path, rel: str) -> Path | None:

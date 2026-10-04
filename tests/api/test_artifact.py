@@ -7,7 +7,10 @@ indexer has caught up.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -283,6 +286,50 @@ def test_read_worktree_file_refuses_a_bad_ref_instead_of_raising(tmp_path, rel, 
     from kraft.worker.worktree_read import read_worktree_file
 
     assert read_worktree_file(tmp_path, rel, max_bytes=1024) == (None, reason)
+
+
+@pytest.mark.parametrize("reader", ["read_worktree_file", "worktree_file_path", "open_no_symlinks"])
+def test_a_fifo_planted_at_the_path_is_refused_not_waited_on(tmp_path, reader):
+    """The worker owns its worktree and can swap the artifact for a FIFO after
+    the route found a file there: a plain `open` would wait for a writer for
+    ever, with the server's event loop behind it. Every reader refuses a
+    non-regular file. The call runs on a thread, and a writer opened after a
+    few seconds frees one that waits, so a missing guard fails here instead of
+    hanging the run."""
+    from kraft.worker import worktree_read
+
+    os.mkfifo(tmp_path / "doc.md")
+    outcome = []
+
+    def call():
+        if reader == "read_worktree_file":
+            outcome.append(worktree_read.read_worktree_file(tmp_path, "doc.md", 1024))
+        elif reader == "worktree_file_path":
+            outcome.append(worktree_read.worktree_file_path(tmp_path, "doc.md"))
+        else:
+            try:
+                os.close(worktree_read.open_no_symlinks(tmp_path, "doc.md"))
+                outcome.append("opened")
+            except OSError:
+                outcome.append("refused")
+
+    caller = threading.Thread(target=call, daemon=True)
+    caller.start()
+    caller.join(3)
+    waited = caller.is_alive()
+    if waited:
+        with contextlib.suppress(OSError):
+            os.close(os.open(tmp_path / "doc.md", os.O_WRONLY | os.O_NONBLOCK))
+        caller.join(3)
+
+    assert not waited, "the open waited for a writer"
+    assert outcome == [
+        {
+            "read_worktree_file": (None, "unreadable"),
+            "worktree_file_path": None,
+            "open_no_symlinks": "refused",
+        }[reader]
+    ]
 
 
 def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
