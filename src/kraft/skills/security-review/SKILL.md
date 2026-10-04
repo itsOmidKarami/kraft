@@ -32,19 +32,22 @@ Look for, in rough order of what actually bites:
   common real hole is not a wrong check — it is a missing one on the second
   route to the same resource.
 - **Trust drawn from the wrong place.** A caller's identity taken from a request
-  body, a header the client controls, or a work item's own record rather than
-  the session, so an actor can vouch for itself by asserting who it is.
+  body, a header the client controls, or a field on the object being acted on
+  rather than the session, so an actor can vouch for itself by asserting who it
+  is.
 - **Secrets crossing a boundary.** Tokens or password hashes reaching a log, an
-  event payload, an error message, an unauthenticated endpoint, or the frontend.
-  Anything added to a deliberately public endpoint is public too.
+  event payload, an error message, an unauthenticated endpoint, or a response
+  sent to the browser. Anything added to a deliberately public endpoint is
+  public too.
 - **Session and cookie semantics.** Expiry, renewal, revocation, `HttpOnly` /
   `SameSite` / `Secure`, and what happens to an in-flight session when the
-  password or bind address changes.
+  password or the user's role changes.
 - **A widened perimeter.** A new route outside the authenticated set, a
   loosened host allowlist, a bind address moving off loopback, or a CORS or
   proxy rule that lets an origin in. A LAN bind without a password is `critical`.
 - **Injection into something that executes.** A shell command, a SQL string, a
-  path joined from caller input, or a file written outside the worktree.
+  path joined from caller input, or a file written outside the directory it is
+  meant for.
 
 Out of scope: the general correctness review the sibling task already does, and
 advice that does not bind to this diff ("add rate limiting everywhere"). If the
@@ -84,8 +87,10 @@ Write your findings into the JSON result file at `$KRAFT_RESULT_PATH`, as a
 ```
 
 `severity`, `message` and `source_plugin` are required — a finding missing any
-of the three is dropped by the parser without a word, so a review that writes
-them wrong reads downstream as a review that found nothing.
+of the three, or with a `severity` outside the three values, is dropped by the
+parser without a word, so a review that writes them wrong reads downstream as a
+review that found nothing. `file` and `line` are optional, but name them when
+you know them; `line` is not part of a finding's identity.
 `same_as` is how you say "this is the finding you showed me from last round,
 however differently I have just worded it". If your task instruction listed
 findings from a previous round with tags in brackets, and one of them is still

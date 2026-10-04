@@ -42,6 +42,17 @@ Each task names:
 - the implementation, written out in full;
 - the command that runs the test, and what it prints when it passes.
 
+A shape to follow, with invented names:
+
+```
+### Task 2: Reject expired tokens at login
+Files: modify `app/auth.py:40-62`; test `tests/test_auth.py`
+Consumes: `Token.expires_at: datetime` (task 1). Produces: `is_expired(token: Token) -> bool`
+Failing test: <the test, in full>
+Implementation: <the code, in full>
+Run: `pytest tests/test_auth.py -k expired` prints `1 passed`
+```
+
 Shape each failing test by what the tree already has. A task that fixes
 behaviour an existing test covers adds a parametrized case with a readable id to
 that test, not a new test function; a new function is for a new behaviour. Name
@@ -62,4 +73,7 @@ to, each test seen to fail for the stated reason before the code makes it pass.
 
 Walk the spec section by section and point at the task that implements each
 one. A section with no task is a gap: add the task. Then check that a name you
-used in a late task is spelled the same way as where you defined it.
+used in a late task is spelled the same way as where you defined it. Last,
+check that every task has its `### Task N: title` heading and a failing test of
+its own: Kraft does not count a task without the heading, and a task without a
+test gives its reviewer nothing to run.

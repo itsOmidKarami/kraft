@@ -74,6 +74,13 @@ one, its gate, and any rejection note - then a line of totals: nodes walked,
 wall-clock duration, time spent waiting on a human, attempts spent, gates
 answered, rejections.
 
+The shape to follow, with the field names from `summary`:
+
+    node    seconds  blocked_seconds  attempts/cap  gate           rejected
+    spec         41              300  -             spec_approval  -
+    verify      120                -  1/3           -              -
+    total   nodes 2, duration_seconds 161, blocked_seconds 300, attempts 1, gates 1, rejections 0
+
 `blocked_seconds` is normally part of the node's `seconds`, not extra to it. Say
 which of the two the run actually went on - in a gated chain the waiting is usually
 the larger, and reporting the total alone bills the agent for the human's hours.
@@ -111,3 +118,5 @@ hand is the fallback, not the design.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
+Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
+human and stop, because Lite has no other runner.

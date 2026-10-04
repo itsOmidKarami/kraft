@@ -55,5 +55,8 @@ is what tells you which question below is yours.
 Report your verdict and `concerns` exactly as your task instruction lays out.
 Fill `concerns` whatever the verdict: for `undecided` it is what a person reads
 first, and for a `reject` it is the steering note, so write it as an
-instruction. After a `fixed`, the node re-runs and is measured again, so commit
+instruction. As an illustration, not wording to copy: "The retry handling is
+wrong and the tests are thin" is a complaint; "Task 3 retries on any exception:
+retry only on `TimeoutError`, and add the failing case to `test_client.py`" is
+an instruction. After a `fixed`, the node re-runs and is measured again, so commit
 the fix and do not approve your own edit.

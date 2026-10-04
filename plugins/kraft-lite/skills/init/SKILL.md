@@ -7,6 +7,8 @@ description: "Writes `.kraft-lite/registry.yaml`, which binds each hook of a Kra
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
+Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
+human and stop, because Lite has no other runner.
 
 If `.kraft-lite/registry.yaml` already exists, build the new one, show the human a
 diff against it, and ask; do not overwrite one they have edited.
@@ -46,6 +48,10 @@ Rules for filling it in:
   instruction to report the pipeline's state once, by whatever means this repo
   has. Never write a command detect did not report — a binding that cannot run
   here reads as finished until the node fails.
+
+  When an existing registry already holds a different `test_command` or `ci_command`
+  than detect printed, the person's edit wins: leave it, let the diff show the
+  difference, and let the human choose.
 
 Every `skill` entry gets a `prompt` sibling. A renamed or uninstalled skill then
 degrades to an instruction instead of stopping the chain.

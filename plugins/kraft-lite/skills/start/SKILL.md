@@ -10,10 +10,16 @@ not invent bindings, and do not start without it: `start` only warns when the
 registry is missing. If `start` exits with "hooks with no registry binding",
 rerun `kraft-lite:init` or edit the registry.
 
+Before starting, run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" chains`. `start` never checks
+for an existing chain and will create a second one beside it, so if one is not
+`done`, ask the human whether they mean to continue it (`kraft-lite:next`).
+
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --title "<the work>"
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
+Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
+human and stop, because Lite has no other runner.
 
 To run a chain other than the packaged default, add `--chain <path-to-chain.json>`.
 The template is frozen against this run, so editing that file later does not

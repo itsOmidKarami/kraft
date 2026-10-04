@@ -7,6 +7,8 @@ description: "Reports where a Kraft Lite chain has got to (its node, running or 
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
+Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
+human and stop, because Lite has no other runner.
 
 List every chain in the directory first:
 
@@ -24,6 +26,10 @@ Report, in a sentence or two: the node, whether it is running or blocked at a
 gate, attempts spent against the cap if there is one, and which backend holds the
 state. `status: unstarted` means no chain exists here yet - say that, rather than
 that nothing is running.
+
+An illustration, not a template: "`Add export` is at `plan`, blocked at
+`plan_approval`, no fix loop so no cap, state in `jsonl`. It needs your answer
+before anything runs."
 
 For a chain that has finished - or when the human asks what a run has cost so far:
 

@@ -6,8 +6,8 @@ description: "Writes the title, labels, reviewers and description of the merge r
 # Authoring the merge request's metadata
 
 Kraft is about to open a merge request from your branch. Everything you write
-here becomes the MR itself: its title, its labels, who it asks to review, and
-the description a reviewer reads before they read anything else. Nobody
+here becomes the merge request itself: its title, its labels, who it asks to
+review, and the description a reviewer reads before they read anything else. Nobody
 rewrites the title or description after you: write it for the reviewer, not for Kraft.
 
 ## Read the repo's conventions first, and obey them over anything here
@@ -25,7 +25,7 @@ rewrites the title or description after you: write it for the reviewer, not for 
 - `CODEOWNERS` for who reviews the paths this diff touches.
 - What the project already does: `git log --oneline -30` for the title
   pattern (Conventional Commits or not), `glab mr list --merged` / `gh
-  pr list --state merged` for how merged MRs are titled and labelled, and the
+  pr list --state merged` for how merged ones are titled and labelled, and the
   project's existing label set (`glab label list` / `gh label list`).
 
 ## Then read the change, not the plan
@@ -64,3 +64,9 @@ describes the change that was planned, not the one that was made.
   paragraph as one unwrapped line (or let it wrap in your editor without
   inserting real newlines); use a blank line only where you mean an actual
   paragraph break.
+
+## Before you finish
+
+Check that every label the project's rules require is in `labels` and exists in
+its label list, and that the description describes `git diff <base>...HEAD`, the
+change that was made, not the plan.

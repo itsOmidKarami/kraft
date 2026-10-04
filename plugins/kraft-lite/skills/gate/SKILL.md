@@ -17,6 +17,10 @@ Then show the human what the gate is actually about - the spec, the plan, the di
 the findings. A gate answered without the artefact in front of the person is a gate
 that has stopped meaning anything.
 
+A good presentation names the artefact, says where it lives, and puts the one question
+the gate asks, for example: "`plan_approval`: the plan is `docs/plan.md` (read it, or I
+can summarise). Approve it as the way to build this, or send it back with a reason?"
+
 Never call `approve` because the answer seemed obvious. If the human has not
 answered this gate, it is not answered - "looks fine" about something else, or
 an earlier "just do it", is not an answer.
@@ -54,3 +58,5 @@ the retry.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
+Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
+human and stop, because Lite has no other runner.

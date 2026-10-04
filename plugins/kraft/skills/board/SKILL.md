@@ -10,10 +10,11 @@ connection error.
 
 # Reading Kraft
 
-- `list_work_items(status)` - the board. `status="paused"` is what is waiting on
-  a person at a gate or was paused by hand; `status="active"` is what is running
-  now; `status="needs_human"` is what stopped and needs a person (hand it to
-  `kraft:triage`). Without `status` it lists every item except abandoned ones.
+- `list_work_items(status)` - the board. `status="needs_human"` is what is
+  waiting on a person: an item with a pending gate needs an answer
+  (`kraft:gates`), one without has stopped (`kraft:triage`). `status="paused"`
+  is filed but not started, or paused by hand; `status="active"` is running now.
+  Without `status` it lists every item except abandoned ones.
 - `get_work_item()` - one item in full: its chain, its current node, any gate it
   is waiting on. With no argument it resolves the item this session is standing
   in, which is correct when the cwd is a Kraft worktree.

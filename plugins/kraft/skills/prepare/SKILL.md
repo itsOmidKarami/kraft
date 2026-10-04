@@ -17,7 +17,9 @@ don't add a second review pass on top of it.
 
 ## 2. Judge
 
-Right after the spec, before touching a plan:
+Right after the spec, before touching a plan. Read the class (spike, bounded or
+architectural) off the spec. If the spec skill gave it no such classification,
+judge it yourself by those three classes and say that you did:
 
 - **Inline** - the spec came out spike- or bounded-classified. Go straight to
   the normal dev workflow (TDD, etc.) in this session. No plan doc needed:
@@ -37,6 +39,8 @@ Right after the spec, before touching a plan:
 **Explicit user override wins outright.** If the user already said "do this
 inline" or "hand this to Kraft," skip judgment and honor that instead - still
 write the spec first.
+
+Whether to confirm the judgment before executing it is step 4's rule.
 
 ## 3. Plan - only if the user explicitly asked for one
 

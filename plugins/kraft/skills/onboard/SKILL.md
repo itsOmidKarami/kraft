@@ -28,24 +28,27 @@ zero exit code says the command ran, not that what it did was right.
    - what CI runs, where neither of those has a test command
 
    It returns each command's source and every other candidate it saw. Compare
-   them with what the repo's docs say. When the docs say something else (a
-   wrapper the probe cannot know, such as `./ci/run-tests`), connect with the
-   repo's own commands rather than correcting afterwards:
-   `ensure_repo(test_command=..., setup_command=...)`, or
-   `kraft repo connect --test-command ... --setup-command ...`.
+   them with what the repo's docs say:
+   - They agree: keep what it proposed.
+   - The docs say something else (a wrapper the probe cannot know, such as
+     `./ci/run-tests`): connect with the repo's own commands rather than
+     correcting afterwards:
+     `ensure_repo(test_command=..., setup_command=...)`, or
+     `kraft repo connect --test-command ... --setup-command ...`.
 
    `ensure_repo` saves as soon as it is called, so the person sees the
    commands only through you. Show them what was saved, each command with
    its source, and the candidates it passed over, then ask them to confirm
    or correct it before the first work item. Say which you chose and why.
 
-   A repo with nothing to prepare declares `setup_command: ""`, and a repo
-   with no tests declares `test_command: ""` (`--no-tests`). Both mean
-   "deliberately nothing", not an oversight. Without a `setup_command`, the
-   repo's next work item stops rather than guessing. Declare no tests only
-   when the person says the repo has none: every work item on it passes
-   verification without running a test. `ensure_repo(test_command="")`
-   saves the repo disabled for that reason, and the person enables it.
+   An empty command means "deliberately nothing", not an oversight:
+   - A repo with nothing to prepare declares `setup_command: ""`. A repo with no
+     `setup_command` key at all is a different case: its next work item stops
+     rather than guessing.
+   - A repo with no tests declares `test_command: ""` (`--no-tests`). Declare
+     no tests only when the person says the repo has none: every work item on
+     it passes verification without running a test. `ensure_repo(test_command="")`
+     saves the repo disabled for that reason, and the person enables it.
 
    The setup command prepares every worktree for this repo, so check it as
    hard as the test command. A repo with more than one project in it gets a

@@ -21,7 +21,10 @@ Read these first:
   work item). The ones that matter are `findings_measured` (what the tests and
   the review found, each round), `fix_cycle_started` and `judge_verdict` (the
   repair attempts, and what the fix-loop judge said about them), and
-  `node_recovery_started`.
+  `node_recovery_started`. If `kraft` refuses the verb or cannot be run (a
+  sandboxed worker's `kraft` has fewer verbs), work from what your instructions
+  carry and say in the brief which events you could not read; do not
+  reconstruct them from memory.
 - The size of the change: `git diff --stat origin/<base>...HEAD`, where
   `<base>` is the branch the work goes into (the repository's default unless
   the work item names another). Read files where you need to, but do not

@@ -24,6 +24,14 @@ it is waiting on if there is one. `next_node_id` is null on the last node of the
 chain, which renders as `done`; on an item nobody has started yet it is node
 zero, because that is what starting it will run.
 
+Two illustrations of what it prints (the node names are your chain's own). A gate's
+node is the gate itself, so the second item is waiting on a person, not running:
+
+```text
+active: implementation → next verification
+needs_human: plan_approval → next chain_revision · gate plan_approval
+```
+
 Drop the id to ask about the work item you are standing in: `kraft view show --json`
 resolves it from the worktree. Without `jq`, the `get_work_item()` tool returns the
 same fields.

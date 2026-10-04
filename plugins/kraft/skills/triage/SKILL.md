@@ -31,7 +31,9 @@ stop: hand it to `kraft:gates`.
 
 ## 2. Say what you found
 
-One sentence naming the node, the cause, and which of these it is:
+One sentence naming the node, the cause, and which of these it is. An illustration,
+not wording to copy: "`verification` stopped because its fix loop spent 3 of 3
+attempts on the same failing test, so it is a failed task: retry with a steer."
 
 | Cause | Route |
 |---|---|
