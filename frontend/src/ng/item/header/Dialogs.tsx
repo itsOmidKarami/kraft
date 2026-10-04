@@ -42,7 +42,6 @@ export function EscalateCard({ id, anchor, threads, onClose, onDone }: CardProps
         </Field>
         <label className="item-check"><input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> Start a new thread</label>
         {threadHint && <p className="item-muted">{threadHint}</p>}
-
         <div className="item-actions">
           <Button variant="primary" disabled={busy || !message.trim()} onClick={go}>Escalate</Button>
           <Button onClick={onClose}>Cancel</Button>

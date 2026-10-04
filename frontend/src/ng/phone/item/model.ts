@@ -1,6 +1,7 @@
 import { ago, elapsed, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
 import { budgetRaise, headerState, archivable, NOT_RAISABLE } from "../../item/status";
+import { gateMessage, materialized } from "../../item/chainValues";
 import { taskName } from "../../item/paths";
 import { FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
 import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
@@ -100,7 +101,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: n
     case "needs_you": {
       if (!stop) return null;
       switch (stop.kind) {
-        case "gate": return { tone: "warn", title: "Waiting for your approval", where: `at ${item.pending_gate ?? stop.node ?? ""}`, facts: spent(item) };
+        case "gate": return { tone: "warn", title: "Waiting for your approval", where: `at ${item.pending_gate ?? stop.node ?? ""}`, text: gateMessage(materialized(item), item.pending_gate ?? stop.node ?? ""), facts: spent(item) };
         case "budget": return {
           tone: "bad", title: (stop.reason ?? "The budget ran out").replace(/\.$/, ""), where: stop.node ? `at ${stop.node}` : undefined,
           text: budgetRaise(item) ? "Raising the budget resumes the item at once." : NOT_RAISABLE,

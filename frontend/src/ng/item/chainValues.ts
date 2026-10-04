@@ -75,6 +75,9 @@ export function producerOf(m: Materialized | null, gateId: string): string | nul
 export const taskKindAt = (m: Materialized | null, path: string) => glyphKind(m ? taskAt(m, path)?.kind : undefined);
 export const nodeAt = (m: Materialized, id: string) => m.chain.nodes.find((n) => n.id === id);
 
+/** What a gate says when it waits (its `message:`), from the frozen chain; the API's chain listing carries none. */
+export const gateMessage = (m: Materialized | null, id: string): string | undefined => (m && nodeAt(m, id)?.message) || undefined;
+
 /** Every task a node launches: its steps', and its fix loop's repair and judge. */
 const nodeTasks = (n: MNode): MTask[] => [
   ...stepsOfNode(n).flatMap((s) => s.tasks),

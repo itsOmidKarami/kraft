@@ -75,6 +75,15 @@ describe("kebabOf", () => {
   });
 });
 
+describe("cardOf: a gate's message (PH-14)", () => {
+  const frozen = (message?: string) => JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", ...(message && { message }) }] } });
+  const at = (chain: string) => cardOf(mk("needs_you", stop("gate", { node: "plan_approval" }), { pending_gate: "plan_approval", materialized_chain: chain }));
+  it("repeats the frozen chain's gate message on the card, and has none when the gate says nothing", () => {
+    expect(at(frozen("Approve the plan."))?.text).toBe("Approve the plan.");
+    expect(at(frozen())?.text).toBeUndefined();
+  });
+});
+
 describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
   it("has none for a plain running item and one for each stop", () => {
     expect(cardOf(mk("running"))).toBeNull();

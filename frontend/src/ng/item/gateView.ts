@@ -6,7 +6,7 @@ import { rejectTarget } from "./graph";
 import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
 import { gateSkipped } from "./events";
 import { gateDecision } from "./panes/GatePane";
-import { ENDED, materialized, nodeAt } from "./chainValues";
+import { ENDED, gateMessage, materialized, nodeAt } from "./chainValues";
 import { taskName } from "./paths";
 import type { ItemDetail } from "./useItem";
 
@@ -40,7 +40,7 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
     reviewer: path
       ? { id: taskName(path), state: sessionLook(last, now).state, sel: sel.kind === "task" && sel.task === taskName(path), ...(verdict ? (verdict.type === "gate_approved" ? { chip: "approve", chipTone: "green" as const } : { chip: "reject", chipTone: "red" as const }) : ahead ? { chip: "runs first when reached" } : {}) }
       : undefined,
-    message: own?.message ?? undefined,
+    message: gateMessage(frozen, gate.id),
     doc: pending && item.gate_artifact ? { label: item.gate_artifact.split("/").pop()!, onClick: on.doc } : undefined,
     reject: to ? { id: to, onClick: () => on.reject(to) } : undefined,
     youSub: pending ? "waiting" : decided ? decided.by : gateSkipped(events, gate.id) ? "skipped" : undefined,
