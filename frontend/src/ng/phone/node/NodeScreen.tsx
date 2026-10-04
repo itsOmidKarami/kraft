@@ -22,7 +22,7 @@ import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
 import { fixLoopWords, nodeBar, overrideWords, plainName, reviewPath, wallWords, type NodeAct } from "./model";
 import { Strip } from "./Strip";
 import { chainName } from "../../item/chainName";
-import { appliedRows } from "../../item/draft/AppliedRows";
+import { appliedRows } from "../../item/draft/applied";
 import { useApplied } from "../../item/draft/useApplied";
 import { materialized, nodeAt } from "../../item/chainValues";
 import "../areas/areas.css";

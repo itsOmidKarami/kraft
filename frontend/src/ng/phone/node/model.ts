@@ -1,7 +1,7 @@
 import type { ChainNode as ApiNode, KraftEvent } from "../../../types";
 import type { ChainNode } from "../../graph/layout";
 import { rejectTarget } from "../../item/graph";
-import { gateSkipped } from "../../item/panes/GatePane";
+import { gateSkipped } from "../../item/events";
 import type { ItemDetail } from "../../item/useItem";
 import { retryable, skippable } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";

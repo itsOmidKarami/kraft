@@ -90,6 +90,12 @@ export function recent(events: KraftEvent[]): RecentLine[] {
   return out.reverse().map(({ e, line }) => ({ e, line }));
 }
 
+/** Whether the gate was skipped rather than decided: its last skip with no request or decision after it (R14b-05). */
+export function gateSkipped(events: KraftEvent[], gate: string): boolean {
+  const at = (type: string) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
+  return at("node_skipped") > Math.max(at("gate_requested"), at("gate_approved"));
+}
+
 /** "now", "6m", "1h 10m": the Recent column's age. */
 export function age(iso: string, now = Date.now()): string {
   const m = Math.floor((now - Date.parse(iso)) / 60_000);

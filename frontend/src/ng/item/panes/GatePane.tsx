@@ -5,6 +5,7 @@ import { FileText } from "../../icons";
 import { Button } from "../../ui/Button";
 import { request } from "../../http";
 import { act } from "../actions";
+import { gateSkipped } from "../events";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
 import { runVersion, type ItemDetail } from "../useItem";
@@ -16,12 +17,6 @@ type ThreadRow = { id: string; state: string; gate: string | null; node_id: stri
 export function gateDecision(events: KraftEvent[], gate: string) {
   const e = [...events].reverse().find((x) => x.type === "gate_approved" && (x.payload.gate ?? x.node_id) === gate);
   return e ? { by: e.payload.by === "agent" || e.payload.by === "kraft" ? "auto" : "you", at: e.created_at } : null;
-}
-
-/** Whether the gate was skipped rather than decided: its last skip with no request or decision after it (R14b-05). */
-export function gateSkipped(events: KraftEvent[], gate: string): boolean {
-  const at = (type: string) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
-  return at("node_skipped") > Math.max(at("gate_requested"), at("gate_approved"));
 }
 
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides

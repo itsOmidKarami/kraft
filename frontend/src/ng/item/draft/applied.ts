@@ -24,3 +24,9 @@ export function appliedOverrides(events: KraftEvent[]): Record<string, Applied> 
 /** The paths at or under `path` that an applied draft set (a node's rows, a task's row). */
 export const appliedAt = (all: Record<string, Applied>, path: string): [string, Applied][] =>
   Object.entries(all).filter(([p]) => p === path || p.startsWith(`${path}.`));
+
+const fieldText = (a: Applied) => [...Object.entries(a.task_config ?? {}), ...Object.entries(a.policy ?? {}).map(([k, v]) => [`policy.${k}`, v] as const)].map(([k, v]) => `${k} ${Array.isArray(v) ? v.join(", ") : String(v)}`);
+
+/** One line per path (Decided 11). They have no reset: the draft can only set. */
+export const appliedRows = (applied: Record<string, Applied> | undefined, path?: string) =>
+  (path === undefined ? Object.entries(applied ?? {}) : appliedAt(applied ?? {}, path)).map(([p, a]) => ({ path: p, text: fieldText(a).join(", ") }));
