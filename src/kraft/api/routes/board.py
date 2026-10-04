@@ -841,13 +841,24 @@ def _scope_runs(st, row) -> list[dict]:
         # A member repository's own table; the item's own for the root and a lone repo.
         return (launch.repositories.get(repository) if repository else None) or launch.repo_entry
 
+    def live(node) -> bool:
+        # Whether the walk is still on this node, so a command it picked can still start.
+        return row["current_node_id"] == node.id and row["status"] in (
+            "active",
+            "paused",
+            "waiting",
+            "rate_limited",
+        )
+
     runs = []
     for node, t in verifies:
         try:
-            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, entry)
+            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, entry, live=live(node))
         except config_mod.ConfigError:
             # An unreadable repos.yaml costs the scope names, not the detail.
-            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, lambda _: None)
+            found = dispatch.scope_runs(
+                st.db, row["id"], node.id, t.path, lambda _: None, live=live(node)
+            )
         runs += [{**r, "node_id": node.id, "hook_point": t.path} for r in found]
     return runs
 

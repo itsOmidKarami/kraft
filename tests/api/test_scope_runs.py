@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from kraft import events
 
-from .test_board_stop import _paused_item, _run, _verified_item
+from .test_board_stop import _exit_session, _paused_item, _run, _verified_item
 
 
 def test_detail_scope_runs_lists_every_round_with_its_repository_and_scope(client, repo, tmp_path):
@@ -68,31 +68,45 @@ def test_detail_scope_runs_is_empty_without_a_changed_test_scope_task(client, re
     assert client.get(f"/api/work-items/{wid}").json()["scope_runs"] == []
 
 
+def _picks(wid, repository, rnd, commands) -> None:
+    """A dispatch's picks, as the builtin records them before it runs any scope."""
+    _run(
+        lambda c: events.append(
+            c,
+            wid,
+            "test_scopes_selected",
+            {
+                "node_id": "verify",
+                "hook_point": "verify.main.t",
+                "repository": repository,
+                "round": rnd,
+                "commands": commands,
+            },
+        )
+    )
+
+
+def _runs(client, wid) -> list[tuple]:
+    got = client.get(f"/api/work-items/{wid}").json()["scope_runs"]
+    return [
+        (r["session_id"], r["repository"], r["round"], r["command"], r["passed"], r.get("pending"))
+        for r in got
+    ]
+
+
+def _session(tmp_path, wid, sid, command, status, rnd=0, repository="ws") -> None:
+    _exit_session(wid, sid, tmp_path / f"{sid}.json", command, status, 0, rnd, repository)
+
+
 def test_detail_scope_runs_lists_what_a_round_picked_and_has_not_started(client, repo, tmp_path):
     """`test_scopes_selected` names the commands a round will run in a repository before it runs
     any: the ones with no session yet come last as `pending`, with no session, and every entry of
     a round that recorded its picks is `selected`, so what it dropped is known before it ends."""
-    wid = _verified_item(
-        client, repo, tmp_path, [("fe-cmd", "done", 0, 1, "ws"), ("be-cmd", "running", 0, 1, "ws")]
-    )
-    for repository, rnd, commands in (
-        ("ws", 1, ["fe-cmd", "be-cmd", "docs-cmd"]),
-        ("pkg", 1, ["be-cmd"]),
-    ):
-        _run(
-            lambda c, r=repository, n=rnd, cmds=commands: events.append(
-                c,
-                wid,
-                "test_scopes_selected",
-                {
-                    "node_id": "verify",
-                    "hook_point": "verify.main.t",
-                    "repository": r,
-                    "round": n,
-                    "commands": cmds,
-                },
-            )
-        )
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 1, ["fe-cmd", "be-cmd", "docs-cmd"])
+    _picks(wid, "pkg", 1, ["be-cmd"])
+    _session(tmp_path, wid, "s0", "fe-cmd", "done", 1)
+    _session(tmp_path, wid, "s1", "be-cmd", "running", 1)
 
     got = client.get(f"/api/work-items/{wid}").json()["scope_runs"]
 
@@ -117,4 +131,71 @@ def test_detail_scope_runs_lists_what_a_round_picked_and_has_not_started(client,
         ("docs-cmd", "docs/**", 2),
         ("be-cmd", "backend/**", 1),
     ]
-    assert {r["session_id"] for r in got} - {None} == {"s0", "s1"}
+
+
+def test_detail_scope_runs_leaves_no_command_pending_once_the_walk_has_moved_on(
+    client, repo, tmp_path
+):
+    """An area's setup that fails, or a stop, ends the loop with commands picked and never started:
+    once the walk is no longer on the node they are not pending, or they read "waiting" for good."""
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
+    _session(tmp_path, wid, "s0", "fe-cmd", "failed")
+    assert _runs(client, wid) == [
+        ("s0", "ws", 0, "fe-cmd", False, None),
+        (None, "ws", 0, "be-cmd", None, True),
+    ]
+
+    _run(
+        lambda c: c.execute(
+            "UPDATE work_items SET current_node_id = 'elsewhere' WHERE id = ?", (wid,)
+        )
+    )
+
+    assert _runs(client, wid) == [("s0", "ws", 0, "fe-cmd", False, None)]
+
+
+def test_detail_scope_runs_calls_every_way_of_not_finishing_a_pass_a_fail(client, repo, tmp_path):
+    """`passed` is None only while a command has not finished: a capped or refused one has."""
+    wid = _verified_item(client, repo, tmp_path, [])
+    for i, status in enumerate(
+        ["done", "failed", "capped_out", "config_error", "unknown", "running", "pending"]
+    ):
+        _session(tmp_path, wid, f"s{i}", "fe-cmd", status, i)
+
+    assert [r[4] for r in _runs(client, wid)] == [True, False, False, False, False, None, None]
+
+
+def test_detail_scope_runs_counts_only_the_latest_dispatch_of_a_repository_and_round(
+    client, repo, tmp_path
+):
+    """A retry re-runs round 0: its picks replace the first pass's, and a command the first pass ran
+    that the retry did not pick is not part of it (nor is the one it ran and the retry picked
+    again shown as that pass's result)."""
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
+    _session(tmp_path, wid, "s0", "fe-cmd", "failed")
+    _session(tmp_path, wid, "s1", "be-cmd", "done")
+    _picks(wid, "ws", 0, ["fe-cmd", "docs-cmd"])
+    _session(tmp_path, wid, "s2", "fe-cmd", "running")
+
+    assert _runs(client, wid) == [
+        ("s2", "ws", 0, "fe-cmd", None, None),
+        (None, "ws", 0, "docs-cmd", None, True),
+    ]
+
+
+def test_detail_scope_runs_forgets_the_rounds_of_a_pass_a_retry_left_behind(client, repo, tmp_path):
+    """Rounds count up from 0 within a pass and restart at 0 after a retry or a base-change restart:
+    the rounds the first pass reached past it are not rounds of the new one."""
+    wid = _verified_item(client, repo, tmp_path, [])
+    for rnd in (0, 1, 2):
+        _picks(wid, "ws", rnd, ["fe-cmd"])
+        _session(tmp_path, wid, f"old{rnd}", "fe-cmd", "failed", rnd)
+    _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
+    _session(tmp_path, wid, "new0", "fe-cmd", "running")
+
+    assert _runs(client, wid) == [
+        ("new0", "ws", 0, "fe-cmd", None, None),
+        (None, "ws", 0, "be-cmd", None, True),
+    ]

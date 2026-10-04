@@ -712,48 +712,97 @@ def _scope_order(table: list[dict], command: str) -> float | None:
     return None
 
 
+#: Session statuses that say a command has not finished; any other has.
+_UNFINISHED = frozenset(
+    {"pending", "running", "paused", "waiting", "rate_limited", "needs_context"}
+)
+
+
+def _scope_passed(status: str) -> bool | None:
+    """Whether a command passed: None until it finishes, False for every way of not passing."""
+    if status in ("done", "done_with_concerns"):
+        return True
+    return None if status in _UNFINISHED else False
+
+
+def _current_pass_start(marks: list[tuple[int, int]]) -> int:
+    """Where a node's current pass begins, from `(seq, round)` marks in order: a pass counts its
+    rounds up from 0 (`round` only grows within one), so the mark that drops below the highest seen
+    starts a new one -- a retry or a base-change restart clears the loop counters. The
+    `_REPAIR_ROUND` pass is no round of its own and does not count."""
+    start, top = 0, -1
+    for seq, rnd in marks:
+        if rnd < 0:
+            continue
+        if rnd < top:
+            start = seq
+        top = rnd
+    return start
+
+
 def scope_runs(
     db,
     work_item_id: str,
     node_id: str,
     task_hook: str,
     entries: Callable[[str | None], RepoEntry | None],
+    *,
+    live: bool = True,
 ) -> list[dict]:
-    """Every command the changed-test-scope builtin ran for `task_hook`, in the
-    order it started, across every round, repository and entry into the node:
-    `{session_id, repository, round, command, passed, exit_code?, scope?, area?,
-    setup?, order?, selected?}`. `passed` is None while the command is not finished;
+    """Every command the changed-test-scope builtin ran for `task_hook` in the node's current
+    pass, in the order it started, across its rounds and repositories:
+    `{session_id, repository, round, command, passed, exit_code?, scope?, area?, setup?,
+    order?, selected?}`. `passed` is None while the command is not finished.
     `order` is where the table lists it, so a round's scopes draw in its order.
-    A command its round picked (`test_scopes_selected`) and has not started comes
-    last, `pending` and with no session; `selected` marks every entry of a round
-    that recorded its picks, so what it dropped is known before it ends.
 
-    `scope_results` says the same for the latest run only. This is what a
-    node's view reads to draw each round's scopes beside the one before it:
-    which repository ran which scope, and which scope a round picked that the
-    round before did not. `entries` maps a session's repository (None: the
-    item's own) to the entry whose table names its commands, read as today's
-    table, as `scope_results` reads it."""
+    A command its round picked (`test_scopes_selected`) and has not started comes last, `pending`
+    with no session, while the run `live`s on; `selected` marks every entry of a round that recorded
+    its picks, so what it dropped is known before it ends. Only the latest dispatch of a repository
+    and round counts: its picks, and the sessions after them. A command it picked that never started
+    (an area's setup failed, a stop ended the loop) is not pending once the run has moved on.
+
+    `scope_results` says the same for the latest run only. This is what a node's view reads to draw
+    each round's scopes beside the one before it: which repository ran which scope, and which scope
+    a round picked that the round before did not. `entries` maps a session's repository (None: the
+    item's own) to the entry whose table names its commands, read as today's table, as
+    `scope_results` reads it."""
     rows = db.read(
         lambda c: c.execute(
-            "SELECT id, status, round, command, repository, result_path FROM worker_sessions "
-            "WHERE work_item_id = ? AND node_id = ? AND hook_point = ? AND command IS NOT NULL "
-            "ORDER BY rowid",
+            "SELECT ws.id, ws.status, ws.round, ws.command, ws.repository, ws.result_path, e.seq "
+            "FROM worker_sessions ws JOIN events e ON e.work_item_id = ws.work_item_id "
+            "AND e.type = 'worker_session_created' "
+            "AND json_extract(e.payload, '$.session_id') = ws.id "
+            "WHERE ws.work_item_id = ? AND ws.node_id = ? AND ws.hook_point = ? "
+            "AND ws.command IS NOT NULL ORDER BY e.seq",
             (work_item_id, node_id, task_hook),
         ).fetchall()
     )
-    # What each round picked (`test_scopes_selected`), the latest per repository and round.
-    picked: dict[tuple[str | None, int], list[str]] = {}
-    for (payload,) in db.read(
-        lambda c: c.execute(
-            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'test_scopes_selected' "
-            "AND node_id = ? ORDER BY seq",
-            (work_item_id, node_id),
-        ).fetchall()
-    ):
-        p = json.loads(payload)
-        if p.get("hook_point") == task_hook:
-            picked[(p.get("repository"), p["round"])] = p["commands"]
+    selections = [
+        (seq, json.loads(payload))
+        for seq, payload in db.read(
+            lambda c: c.execute(
+                "SELECT seq, payload FROM events WHERE work_item_id = ? "
+                "AND type = 'test_scopes_selected' AND node_id = ? ORDER BY seq",
+                (work_item_id, node_id),
+            ).fetchall()
+        )
+    ]
+    selections = [(seq, p) for seq, p in selections if p.get("hook_point") == task_hook]
+    start = _current_pass_start(
+        sorted(
+            [(r["seq"], r["round"]) for r in rows] + [(seq, p["round"]) for seq, p in selections]
+        )
+    )
+    # What each round picked in a repository, from its latest dispatch.
+    picked: dict[tuple[str | None, int], tuple[int, list[str]]] = {}
+    for seq, p in selections:
+        if seq >= start:
+            picked[(p.get("repository"), p["round"])] = (seq, p["commands"])
+    rows = [
+        r
+        for r in rows
+        if r["seq"] >= start and r["seq"] > picked.get((r["repository"], r["round"]), (0,))[0]
+    ]
     tables: dict[str | None, list[dict]] = {}
     out = []
 
@@ -767,14 +816,12 @@ def scope_runs(
 
     for row in rows:
         repo = row["repository"]
-        if repo not in tables:
-            tables[repo] = _scope_table(entries(repo))
         entry: dict = {
             "session_id": row["id"],
             "repository": repo,
             "round": row["round"],
             "command": row["command"],
-            "passed": {"done": True, "failed": False}.get(row["status"]),
+            "passed": _scope_passed(row["status"]),
             **facts(repo, row["command"]),
         }
         if (repo, row["round"]) in picked:
@@ -784,9 +831,9 @@ def scope_runs(
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
     started = {(r["repository"], r["round"], r["command"]) for r in rows}
-    for (repo, rnd), commands in picked.items():
+    for (repo, rnd), (_, commands) in picked.items():
         for command in commands:
-            if (repo, rnd, command) not in started:
+            if live and (repo, rnd, command) not in started:
                 out.append(
                     {
                         "session_id": None,
