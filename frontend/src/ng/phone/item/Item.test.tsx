@@ -355,6 +355,45 @@ describe("⋮ (C.5)", () => {
   });
 });
 
+describe("a skipped gate in the chain (R15b-03)", () => {
+  it("reads skipped in its row, not approved", async () => {
+    const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
+    mount(item("running"), "/work-items/w1", { "GET /work-items/w1/events": [200, [skipped]] });
+    await userEvent.click(await screen.findByRole("button", { name: "2 done" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /plan_approval/ })).toHaveTextContent("skipped"));
+    expect(screen.getByRole("button", { name: /plan_approval/ })).not.toHaveTextContent("approved");
+  });
+});
+
+describe("the failed card's cause (R15b-01)", () => {
+  const green = { passed: true, scopes: [{ command: "just test", scope: "**", passed: true, exit_code: 0, session_id: "s1" }] };
+  const sheetLabels = async () => {
+    await userEvent.click(await screen.findByRole("button", { name: "More actions" }));
+    return within(screen.getByRole("dialog")).getAllByRole("button").map((b) => b.textContent);
+  };
+
+  it("a refused forge credential says what to run and where, with the work kept, and no cause token or settings detour", async () => {
+    mount(item("failed", stop("failed", { facts: { cause: "forge_auth" } }), { branch: "kraft/x-w1", test_result: green }), "/work-items/w1", { "GET /work-items/w1/compare": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0, touched_by: [], viewed: false }] }] });
+    const card = await screen.findByRole("region", { name: "Failed" });
+    await waitFor(() => expect(card).toHaveTextContent("work keptbranch kraft/x-w1 · 1 file · tests passing"));
+    expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. Then Retry.");
+    expect(within(card).getByText("gh auth login").tagName).toBe("CODE");
+    expect(card).not.toHaveTextContent("forge_auth");
+    expect(card).not.toHaveTextContent("cause");
+    expect(await sheetLabels()).not.toContain("Check the repo settings");
+  });
+
+  it("any other infrastructure stop offers the repo settings from the ⋮ sheet, and no forge login words", async () => {
+    mount(item("failed", stop("infra", { facts: { cause: "git" } })));
+    const card = await screen.findByRole("region", { name: "Failed" });
+    expect(card).not.toHaveTextContent("gh auth login");
+    expect(card).not.toHaveTextContent("git");
+    expect(await sheetLabels()).toContain("Check the repo settings");
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Check the repo settings" }));
+    await waitFor(() => expect(where()).toBe("/settings/repos/%2Fcode%2Fkraft-plugins"));
+  });
+});
+
 describe("pair actions that call straight through", () => {
   it.each([
     ["paused mid-chain → Resume", item("paused"), "Resume", "POST /work-items/w1/resume"],

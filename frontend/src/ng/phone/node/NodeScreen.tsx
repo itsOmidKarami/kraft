@@ -8,6 +8,7 @@ import { act } from "../../item/actions";
 import { chainGraph, rejectTarget } from "../../item/graph";
 import { escalationsOf, ESCALATION, nodeGraph, stateWord } from "../../item/nodeGraph";
 import { stepsOf, taskName } from "../../item/paths";
+import { TestsLine } from "../../item/TestsLine";
 import { placeUrl, type Place } from "../../item/url";
 import type { ItemDetail } from "../../item/useItem";
 import { Button } from "../../ui/Button";
@@ -15,6 +16,7 @@ import { LogLines } from "../log/LogLines";
 import { useLogs } from "../log/useLogs";
 import { PauseSheet } from "../item/PauseSheet";
 import { useDo } from "../item/useDo";
+import { gateSkipped } from "../../item/events";
 import { nodeSub } from "../item/model";
 import { ConfirmSheet, useSheet } from "../nav/Sheet";
 import { ScreenHeader } from "../nav/ScreenHeader";
@@ -55,7 +57,7 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
   const { nodes } = useMemo(() => chainGraph(item, events, now), [item, events, now]);
   const graph = nodes.find((n) => n.id === nodeId)!;
   const gate = api.kind === "gate";
-  const sub = nodeSub(graph);
+  const sub = nodeSub(graph, gate && gateSkipped(events, nodeId));
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
   const bar = nodeBar(item, api, graph);
   // An applied draft edits the frozen chain, so `node_overrides` never shows it: read it from the events, as the desktop's Config does.
@@ -106,6 +108,7 @@ export function NodeScreen({ item, version, events, docs, place, node: nodeId, n
               ["status", `${gate ? "gate" : "exec node"} · ${sub.text}`],
               ...(gate
                 ? ([
+                    ...(item.test_result ? [["tests", <TestsLine key="t" result={item.test_result} linkClass="ph-linkbtn ph-mono" />]] as [string, React.ReactNode][] : []),
                     ...(doc ? [["document", <button key="d" type="button" className="ph-linkbtn ph-mono" onClick={() => navigate(`${placeUrl(item.id, { node: nodeId, sel: { kind: "node", node: nodeId } })}?doc=${encodeURIComponent(doc.document_id)}`)}>{doc.path.split("/").at(-1)}</button>]] as [string, React.ReactNode][] : []),
                     ["reject to", rejectTarget(item.chain_definition.nodes, nodeId) ? <button key="r" type="button" className="ph-linkbtn ph-mono" onClick={() => setPlace({ node: rejectTarget(item.chain_definition.nodes, nodeId)!, sel: { kind: "node", node: rejectTarget(item.chain_definition.nodes, nodeId)! } })}>{rejectTarget(item.chain_definition.nodes, nodeId)}</button> : "reopens the gate"],
                   ] as [string, React.ReactNode][])

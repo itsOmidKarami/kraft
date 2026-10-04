@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DisplayStatus, WorkItemStop } from "../../../types";
 import { chainGraph } from "../../item/graph";
 import { detail } from "../../item/testkit";
+import { FORGE_LOGIN_HINT } from "../../item/cause";
 import { cardOf, kebabOf, nodeSub, pairOf } from "./model";
 
 const stop = (kind: WorkItemStop["kind"], over: Partial<WorkItemStop> = {}): WorkItemStop => ({ kind, node: "verification", resume_at: null, reason: null, ...over });
@@ -101,8 +102,49 @@ describe("cardOf: the words of the desktop's cards, from `stop` only", () => {
   });
 });
 
+describe("the failed card's cause (R15b-01)", () => {
+  const failedBy = (kind: WorkItemStop["kind"], cause?: string, over = {}) => mk("failed", stop(kind, { facts: cause ? { cause, command: "gh pr create" } : { command: "gh pr create" } }), over);
+  const TESTS = { test_result: { passed: true, scopes: [{ command: "just test", scope: "**", passed: true, exit_code: 0, session_id: "s1" }] } };
+
+  it.each([
+    ["forge_auth on a failed stop", failedBy("failed", "forge_auth"), true],
+    ["forge_auth on an infra stop", failedBy("infra", "forge_auth"), true],
+    ["git", failedBy("infra", "git"), false],
+    ["no cause", failedBy("failed"), false],
+  ] as const)("%s: never prints the cause token, hints at the forge login only for a refused credential", (_name, item, hint) => {
+    const card = cardOf(item);
+    expect(card?.facts).toEqual([["command", "gh pr create"]]);
+    expect(card?.hint).toBe(hint ? FORGE_LOGIN_HINT : undefined);
+  });
+
+  it("says what the run kept, as the desktop's card does: branch, files, passing tests", () => {
+    expect(cardOf(failedBy("failed", "forge_auth", { branch: "kraft/x-w1", ...TESTS }), [], 2)?.facts).toEqual([["work kept", "branch kraft/x-w1 · 2 files · tests passing"], ["command", "gh pr create"]]);
+    expect(cardOf(failedBy("failed", undefined, { branch: null }), [], 1)?.facts[0]).toEqual(["work kept", "1 file"]);
+    expect(cardOf(failedBy("failed", undefined, { branch: null, test_result: { passed: false, scopes: [] } }), [], 0)?.facts).toEqual([["command", "gh pr create"]]);
+  });
+
+  it.each([
+    ["an infra stop naming git: offered", failedBy("infra", "git"), true],
+    ["an infra stop naming no cause: offered", failedBy("infra"), true],
+    ["a refused credential (words on the card, no settings to open): not offered", failedBy("infra", "forge_auth"), false],
+    ["a stranded claim (a retry is all it needs): not offered", failedBy("infra", "stranded"), false],
+    ["a plain failed stop: not offered", failedBy("failed"), false],
+    ["a running item: not offered", mk("running"), false],
+  ] as const)("the ⋮ sheet's repo settings for %s", (_name, item, offers) => {
+    expect(kebabOf(item).map((a) => a.id).includes("repo")).toBe(offers);
+  });
+});
+
 describe("nodeSub: a chain row's words", () => {
   const graph = (i: ReturnType<typeof detail>) => chainGraph(i, [], Date.parse("2026-09-13T10:00:00Z")).nodes;
+  // R15b-03: a gate skipped with `kraft item skip` was never approved, here as in its review path.
+  it.each([
+    ["approved by you reads approved", false, "approved"],
+    ["skipped reads skipped", true, "skipped"],
+  ])("a passed gate that was %s", (_name, skipped, text) => {
+    const g = graph(mk("running", null, { current_node_id: "verification" })).find((n) => n.id === "plan_approval")!;
+    expect(nodeSub(g, skipped).text).toBe(text);
+  });
   it("reads each node's state", () => {
     const g = graph(mk("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval" }));
     expect(nodeSub(g.find((n) => n.id === "plan")!).tone).toBe("muted");

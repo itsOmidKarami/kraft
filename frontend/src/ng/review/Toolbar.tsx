@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
+import { plural } from "../../format";
 import type { CompareFile, CompareTarget, WorkItem } from "../../types";
 import { ChevronDown, ChevronsDownUp, ChevronsUpDown, List, PanelLeftClose, PanelLeftOpen } from "../icons";
 import { IconButton } from "../ui/IconButton";
@@ -101,14 +102,14 @@ export function NodesFilter({ files, chainOrder, nodes, onChange }: { files: Com
       <button type="button" role="menuitemcheckbox" aria-checked={all} tabIndex={-1} className="rv-check" onClick={() => onChange(all === true ? [] : null)}>
         <Box on={all} />
         <span className="rv-check-label">All nodes</span>
-        <span className="rv-check-count">{kept} of {files.length} files</span>
+        <span className="rv-check-count">{kept} of {plural(files.length, "file")}</span>
       </button>
       <span className="rv-check-rule" role="separator" />
       {rows.map((r) => (
         <button key={r.id} type="button" role="menuitemcheckbox" aria-checked={on(r.id)} tabIndex={-1} className="rv-check" onClick={() => toggle(r.id)}>
           <Box on={on(r.id)} />
           <span className="rv-check-label rv-mono">{r.id}</span>
-          <span className="rv-check-count">{r.files} {r.files === 1 ? "file" : "files"}</span>
+          <span className="rv-check-count">{plural(r.files, "file")}</span>
         </button>
       ))}
     </Pop>

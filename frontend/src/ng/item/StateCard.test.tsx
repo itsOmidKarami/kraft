@@ -65,7 +65,7 @@ describe("StateCard", () => {
 
   // The infra stop's `facts.cause` picks what the card offers (Kraft-9d8b2.67); every other cause, or none, says where to look.
   it.each([
-    ["forge_auth", ["Fix the token in Repos", "Retry from open_draft", "Escalate…", "Open merge_request →"]],
+    ["forge_auth", ["Retry from open_draft", "Escalate…", "Open merge_request →"]],
     ["stranded", ["Retry from open_draft", "Escalate…", "Open merge_request →"]],
     ["git", ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"]],
     [undefined, ["Retry from open_draft", "Check the repo settings", "Escalate…", "Open merge_request →"]],
@@ -76,7 +76,10 @@ describe("StateCard", () => {
     const card = screen.getByRole("region", { name: "Failed" });
     expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
     expect(card).not.toHaveTextContent("cause");
-    const repos = within(card).queryByRole("button", { name: /Fix the token in Repos|Check the repo settings/ });
+    // A refused credential is fixed on the server's machine, so its words are on the card and no button leads to settings.
+    if (cause === "forge_auth") expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. Then Retry.");
+    else expect(card).not.toHaveTextContent("gh auth login");
+    const repos = within(card).queryByRole("button", { name: /Check the repo settings/ });
     if (repos) {
       await userEvent.click(repos);
       expect(where).toBe("/settings/repos/%2Fcode%2Fkraft-plugins");
@@ -84,13 +87,15 @@ describe("StateCard", () => {
   });
 
   // A forge task's failure is a failed stop, not an infra one, and still names the credential as its cause.
-  it("a failed (not infra) stop with cause forge_auth offers the token fix; any other failed stop has no settings button", () => {
+  it("a failed (not infra) stop with cause forge_auth says to sign the forge CLI in; any other failed stop has no settings button", () => {
     stubFetch();
     const { unmount } = show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_auth" } }) });
-    expect(within(screen.getByRole("region", { name: "Failed" })).getAllByRole("button").map((b) => b.textContent)).toContain("Fix the token in Repos");
+    const card = screen.getByRole("region", { name: "Failed" });
+    expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine");
+    expect(within(card).queryByRole("button", { name: /Repos|repo settings/ })).toBeNull();
     unmount();
     show({ display_status: "failed", stop: stop("failed", { facts: { cause: "forge_unreachable" } }) });
-    expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings|Fix the token/ })).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Failed" })).queryByRole("button", { name: /Check the repo settings/ })).toBeNull();
   });
 
   it("says what a failed run kept: its branch and the files changed on it (WI-4)", async () => {

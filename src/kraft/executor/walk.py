@@ -368,6 +368,21 @@ def _task_cause(
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
 
 
+#: The end of an infra stop's reason for a failed in-process task, by the
+#: `facts.cause` `_forge_cause` found in its log (the card's own action is
+#: chosen from the same cause, `frontend/src/ng/item/cause.tsx`).
+_IN_PROCESS_FIX_DEFAULT = "Reinstall and restart, or skip the node."
+_IN_PROCESS_FIX = {
+    "forge_auth": (
+        "Sign the forge CLI in on the machine the Kraft server runs on "
+        "(`gh auth login`, or `glab auth login` for GitLab), then retry."
+    ),
+    "forge_unreachable": (
+        "Check that the machine the Kraft server runs on can reach the forge, then retry."
+    ),
+}
+
+
 def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dict | None:
     """`{"cause": ...}` when a failed forge task's log says the forge refused
     the credential or could not be reached (`forge.failure_cause`): a forge
@@ -1403,13 +1418,16 @@ async def _walk_node_once(
             named = ", ".join(
                 sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
             )
+            cause = _forge_cause(db, work_item_id, node, blind_failures)
+            # What to do depends on why it failed: a refused credential or an
+            # unreachable forge is the machine's to fix, not a reinstall.
+            fix = _IN_PROCESS_FIX.get(cause["cause"] if cause else "", _IN_PROCESS_FIX_DEFAULT)
             reason = (
                 f"{named} failed in node {node.id}"
                 f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "
                 "tasks are executed by the running Kraft daemon — a worker commit cannot "
-                "change them. Reinstall and restart, or skip the node."
+                f"change them. {fix}"
             )
-            cause = _forge_cause(db, work_item_id, node, blind_failures)
             await db.write(
                 lambda c, reason=reason, cause=cause: store.mark_needs_human(
                     c, work_item_id, node.id, reason, kind="infra", facts=cause

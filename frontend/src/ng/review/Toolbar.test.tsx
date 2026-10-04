@@ -71,6 +71,13 @@ describe("nodes filter", () => {
     ]);
   });
 
+  it("a one-file comparison reads 1 of 1 file, not 1 files", () => {
+    render(<NodesFilter files={FILES.slice(0, 1)} chainOrder={["implementation"]} nodes={["implementation"]} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Nodes:/ }));
+    expect(screen.getByText("1 of 1 file")).toBeInTheDocument();
+    expect(screen.getAllByText("1 file")).toHaveLength(1);
+  });
+
   it("goes mixed with some off, and writes the node list; All then turns them all back on", () => {
     const { rows, onChange } = filter(["verification"]);
     expect(screen.getByRole("button", { name: "Nodes: 1 of 2 nodes" })).toBeInTheDocument();

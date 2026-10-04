@@ -7,6 +7,7 @@ import { chainGraph } from "../../item/graph";
 import { placeUrl } from "../../item/url";
 import type { ItemDetail } from "../../item/useItem";
 import { Block } from "../ui/Rows";
+import { gateSkipped } from "../../item/events";
 import { nodeSub } from "./model";
 
 /** The vertical chain (W17 brief C.3): `N of M nodes`, a tick strip, the done
@@ -30,7 +31,7 @@ export function ChainList({ item, events, now }: { item: ItemDetail; events: Kra
           </button>
         )}
         {shown.map((n) => {
-          const sub = nodeSub(n);
+          const sub = nodeSub(n, n.kind === "gate" && gateSkipped(events, n.id));
           return (
             <button key={n.id} type="button" className="ph-row ph-node-row" onClick={() => navigate(placeUrl(item.id, { node: n.id, sel: { kind: "node", node: n.id } }))}>
               <NodeGlyph kind={n.kind} size="sm" state={n.state} icon={n.icon} running={n.running} paused={n.paused} capped={n.capped} attempt={n.attempt} attemptStopped={n.attemptStopped} esc={n.esc} />

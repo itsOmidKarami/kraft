@@ -25,12 +25,24 @@ class _RaisingWith(_RaisingForge):
 
 
 @pytest.mark.parametrize(
-    ("message", "cause"),
+    ("message", "cause", "reason_ends"),
     [
-        ("gh pr create failed: HTTP 401: Bad credentials", "forge_auth"),
-        ("git push failed: fatal: Authentication failed for 'https://x'", "forge_auth"),
-        ("gh pr create failed: dial tcp: Could not resolve host: github.com", "forge_unreachable"),
-        ("boom: no capacity", None),
+        (
+            "gh pr create failed: HTTP 401: Bad credentials",
+            "forge_auth",
+            "`glab auth login` for GitLab), then retry.",
+        ),
+        (
+            "git push failed: fatal: Authentication failed for 'https://x'",
+            "forge_auth",
+            "then retry.",
+        ),
+        (
+            "gh pr create failed: dial tcp: Could not resolve host: github.com",
+            "forge_unreachable",
+            "can reach the forge, then retry.",
+        ),
+        ("boom: no capacity", None, "Reinstall and restart, or skip the node."),
     ],
     ids=["gh-401", "git-push-auth", "unreachable", "neither"],
 )
@@ -38,12 +50,14 @@ class _RaisingWith(_RaisingForge):
     ("fix_loop", "stop_kind"), [(True, "infra"), (False, "failed")], ids=["fix-loop", "no-loop"]
 )
 async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
-    item_on, tmp_path, fake_agent, monkeypatch, message, cause, fix_loop, stop_kind
+    item_on, tmp_path, fake_agent, monkeypatch, message, cause, reason_ends, fix_loop, stop_kind
 ):
     """Kraft-9d8b2.67: a forge CLI failure is a failed task, not a stop of its
     own -- an `infra` one when its node has a fix loop (a worker commit cannot
     change it), else `failed`. Either way `facts.cause` carries what its log
-    says, which is what the card's action is chosen from."""
+    says, which is what the card's action is chosen from. An `infra` stop's
+    reason ends with what to do about that cause, never with "Reinstall and
+    restart" beside a credential the forge refused."""
     monkeypatch.setattr(_forge.run, "resolve", lambda name: _RaisingWith(message))
     extra = {"fix_loop": {"tasks": [_agent("repair")]}} if fix_loop else {}
     it = await item_on([_exec("checks", _forge_task("open", "mr.open_draft"), **extra)])
@@ -52,3 +66,6 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
 
     stop = it.events("work_item_needs_human")[-1]["payload"]
     assert (stop["kind"], stop.get("facts", {}).get("cause")) == (stop_kind, cause)
+    if stop_kind == "infra":
+        assert stop["reason"].endswith(reason_ends)
+        assert ("Reinstall" in stop["reason"]) == (cause is None)

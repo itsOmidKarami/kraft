@@ -32,6 +32,11 @@ const tree = (o: Partial<Parameters<typeof FileTree>[0]> = {}) => {
 };
 
 describe("FileTree", () => {
+  it("a one-file diff counts 1 file, not 1 files", () => {
+    tree({ files: [FILES[0]] });
+    expect(screen.getByText("1 file")).toBeInTheDocument();
+  });
+
   it("groups by folder, top level last; counts, open threads, viewed, the cut and untracked files", () => {
     tree();
     expect(screen.getAllByRole("button", { expanded: true }).map((b) => b.textContent)).toEqual(["▾search/", "▾tests/"]);
