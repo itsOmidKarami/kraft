@@ -13,7 +13,7 @@ from kraft.api.routes.search import OpenDocument, _launch_editor
 from kraft.executor import entry, stops
 from kraft.index import ingest as ingest_mod
 from kraft.templates import revision
-from kraft.worker.worktree_read import read_worktree_file
+from kraft.worker.worktree_read import read_worktree_file, worktree_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -401,8 +401,10 @@ async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request
     if rel is None:
         raise HTTPException(404, "this work item's gate has no artifact")
     worktree = st.run_dirs.worktrees / wid
-    path = worktree / rel
-    if not path.is_file() or not path.resolve().is_relative_to(worktree.resolve()):
+    # The walk `GET /artifact` reads through: a symlink anywhere on the path
+    # is refused there, so it is refused here (R14e-03).
+    path = worktree_file_path(worktree, rel)
+    if path is None:
         raise HTTPException(404, "this work item's gate has no artifact")
     return {"work_item_id": wid, **_launch_editor(request, body.editor, path)}
 

@@ -52,6 +52,43 @@ def test_lists_the_servers_own_checkout_as_the_suggested_repo(
     assert len(toplevel_reads) == 1
 
 
+@pytest.mark.api_client(default_setup=False)
+def test_listing_repos_survives_the_servers_directory_being_deleted(tmp_path, client, monkeypatch):
+    """A throwaway checkout the server was started in gets removed: `Path.cwd()`
+    raises, and the listing answered 500 (R14e-02)."""
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+
+    r = client.get("/api/repos")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["suggested"] is None
+
+
+@pytest.mark.api_client(default_setup=False)
+def test_a_git_init_in_the_servers_directory_is_suggested_after_the_cache_expires(
+    tmp_path, client, monkeypatch
+):
+    """The answer is held a few seconds, not for the life of the process
+    (R14e-04): `git init` after the first read shows up without a restart."""
+    from kraft.api.routes import repos
+
+    here = tmp_path / "later"
+    here.mkdir()
+    monkeypatch.chdir(here)
+    now = [1000.0]
+    monkeypatch.setattr(repos.time, "monotonic", lambda: now[0])
+    assert client.get("/api/repos").json()["suggested"] is None
+
+    subprocess.run(["git", "init", "-q", str(here)], check=True)
+    assert client.get("/api/repos").json()["suggested"] is None  # still held
+    now[0] += repos.CHECKOUT_TTL_S + 1
+
+    assert Path(client.get("/api/repos").json()["suggested"]).resolve() == here.resolve()
+
+
 def test_a_repo_that_declares_no_tests_connects_enabled(tmp_path, client, templates_dir):
     """`test_command: ""` is the decision "this repo has no tests", not an
     absence: it is stored as written and the repo connects enabled."""
