@@ -56,6 +56,20 @@ describe("GateReview", () => {
     expect(writeText).toHaveBeenCalledWith("/runs/w1/.engineering/reviews/kraft-cb59.md");
   });
 
+  it("says the path to copy by hand when there is no clipboard (R14b-01)", async () => {
+    vi.spyOn(http, "request").mockImplementation((async (url: string) => (url === "/editors" ? { status: 200, body: { available: ["code"], system: false, default: "code" } } : { status: 200, body: {} })) as typeof http.request);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    const toasts: string[] = [];
+    const on = (e: Event) => toasts.push((e as CustomEvent<{ message: string }>).detail.message);
+    window.addEventListener("kraft:toast", on);
+    const p = { approve: vi.fn(async () => null), onReviewChanges: vi.fn(), onRequestChanges: vi.fn(), onClose: vi.fn() };
+    render(<GateReview item={{ id: "w1", pending_gate: "final_review" }} gate="final_review" doc={{ state: "ready", data: { ...DOC, absolute_path: "/runs/w1/.engineering/reviews/kraft-cb59.md" } }} files={FILES} threads={[]} isViewed={() => true} {...p} />);
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Copy path" })));
+    window.removeEventListener("kraft:toast", on);
+    vi.unstubAllGlobals();
+    expect(toasts).toEqual(["Couldn't copy. The path is /runs/w1/.engineering/reviews/kraft-cb59.md"]);
+  });
+
   it("approves through the page's review submit", async () => {
     const p = overlay();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Approve" })));
