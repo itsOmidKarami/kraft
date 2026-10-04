@@ -102,9 +102,16 @@ describe("the node screen (D)", () => {
     expect(where()).toBe("/work-items/w1/nodes/verification");
   });
 
-  it("shows the node's own overrides as changed for this item", async () => {
-    mount(item("running", null, { node_overrides: { verification: { attempts: 3, wall_clock_s: 2700 } } }), "/work-items/w1/nodes/verification?tab=config");
-    expect(await screen.findByText("fix attempts 3 · wall clock 45m · changed for this item")).toBeInTheDocument();
+  // R14b-04: an applied draft edits the frozen chain, so `node_overrides` stays empty; the desktop reads the events.
+  const drafted = { seq: 2, work_item_id: "w1", type: "chain_revised", node_id: null, payload: { gate: null, source: "draft", changes: [{ op: "override", path: "verification", policy: { budget_usd: 5 } }], diff: [] }, created_at: "2026-09-13T09:00:00Z" };
+  it.each([
+    ["a node override", { node_overrides: { verification: { attempts: 3, wall_clock_s: 2700 } } }, [], "fix attempts 3 · wall clock 45m · changed for this item"],
+    ["a draft applied by Review & apply", {}, [drafted], "verification policy.budget_usd 5 · applied by the draft"],
+    ["both", { node_overrides: { verification: { attempts: 3 } } }, [drafted], "fix attempts 3 · changed for this item · verification policy.budget_usd 5 · applied by the draft"],
+  ])("shows %s as changed for this item", async (_n, over, events, words) => {
+    mount(item("running", null, over), "/work-items/w1/nodes/verification?tab=config", { "GET /work-items/w1/events": [200, events] });
+    expect(await screen.findByText(words)).toBeInTheDocument();
+    expect(screen.queryByText("No item override on this node.")).toBeNull();
   });
 
   it.each([
