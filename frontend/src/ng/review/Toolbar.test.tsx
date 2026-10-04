@@ -22,6 +22,15 @@ const options = (name: RegExp) => {
 };
 
 describe("compare pickers", () => {
+  // GR-12: they wrap as one group, so Diff settings is never alone on a second row.
+  it("keeps collapse, expand and Diff settings in one group", () => {
+    bar();
+    const group = screen.getByRole("button", { name: "Diff settings" }).parentElement!;
+    expect(group).toHaveClass("rv-tools");
+    expect(group).toContainElement(screen.getByRole("button", { name: "Collapse all files" }));
+    expect(group).toContainElement(screen.getByRole("button", { name: "Expand all files" }));
+  });
+
   it("offers base, each superseded attempt and the last review; latest, then earlier attempts", () => {
     bar();
     expect(options(/^Compare from base/).map((o) => o.textContent)).toEqual([

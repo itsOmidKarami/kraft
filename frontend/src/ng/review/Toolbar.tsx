@@ -38,10 +38,11 @@ export function Toolbar(p: {
         <TargetPicker heading="Compare to" value={p.place.to} options={toOptions(p.item)} item={p.item} onPick={(to) => p.setPlace({ to })} />
       </span>
       <NodesFilter files={p.files} chainOrder={p.item.chain_definition.nodes.map((n) => n.id)} nodes={p.place.nodes} onChange={(nodes) => p.setPlace({ nodes })} />
-      <span className="rv-spacer" />
-      <IconButton label="Collapse all files" onClick={p.onCollapseAll}><ChevronsDownUp size={16} aria-hidden /></IconButton>
-      <IconButton label="Expand all files" onClick={p.onExpandAll}><ChevronsUpDown size={16} aria-hidden /></IconButton>
-      <DiffSettings prefs={p.prefs} set={p.setPrefs} />
+      <span className="rv-tools">
+        <IconButton label="Collapse all files" onClick={p.onCollapseAll}><ChevronsDownUp size={16} aria-hidden /></IconButton>
+        <IconButton label="Expand all files" onClick={p.onExpandAll}><ChevronsUpDown size={16} aria-hidden /></IconButton>
+        <DiffSettings prefs={p.prefs} set={p.setPrefs} />
+      </span>
     </div>
   );
 }
