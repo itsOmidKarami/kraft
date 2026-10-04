@@ -374,11 +374,10 @@ def _task_cause(
 _IN_PROCESS_FIX_DEFAULT = "Reinstall and restart, or skip the node."
 _IN_PROCESS_FIX = {
     "forge_auth": (
-        "Sign the forge CLI in on the machine the Kraft server runs on "
-        "(`gh auth login`, or `glab auth login` for GitLab), then retry."
+        "The forge refused the credentials on the Kraft server's machine. Fix them, then retry."
     ),
     "forge_unreachable": (
-        "Check that the machine the Kraft server runs on can reach the forge, then retry."
+        "The Kraft server's machine could not reach the forge. Check its network, then retry."
     ),
 }
 

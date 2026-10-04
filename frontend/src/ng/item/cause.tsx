@@ -19,7 +19,8 @@ export function failedFix(item: ItemDetail): FailedFix {
 
 /** The fix for `forge_login`: Kraft runs the forge CLI, so the CLI has to be signed in where the server runs. `gh` is
  *  GitHub's, `glab` GitLab's (`kraft.adapters.forge`); the repo's settings hold no token. Backticks mark the commands. */
-export const FORGE_LOGIN_HINT = "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. Then Retry.";
+export const FORGE_LOGIN_HINT =
+  "Sign the forge CLI in on the server's machine: `gh auth login`, or `glab auth login` for GitLab. If git itself can't authenticate, check its credentials there too (`gh auth setup-git`, your SSH key or credential helper). Then Retry.";
 
 /** The words of `text` with each `backticked` run as <code>. */
 export function withCode(text: string): ReactNode {

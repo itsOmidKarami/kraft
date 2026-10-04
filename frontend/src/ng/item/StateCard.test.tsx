@@ -77,7 +77,7 @@ describe("StateCard", () => {
     expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual(labels);
     expect(card).not.toHaveTextContent("cause");
     // A refused credential is fixed on the server's machine, so its words are on the card and no button leads to settings.
-    if (cause === "forge_auth") expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. Then Retry.");
+    if (cause === "forge_auth") expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. If git itself can't authenticate, check its credentials there too (gh auth setup-git, your SSH key or credential helper). Then Retry.");
     else expect(card).not.toHaveTextContent("gh auth login");
     const repos = within(card).queryByRole("button", { name: /Check the repo settings/ });
     if (repos) {

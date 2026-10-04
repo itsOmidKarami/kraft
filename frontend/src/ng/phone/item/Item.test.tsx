@@ -376,7 +376,7 @@ describe("the failed card's cause (R15b-01)", () => {
     mount(item("failed", stop("failed", { facts: { cause: "forge_auth" } }), { branch: "kraft/x-w1", test_result: green }), "/work-items/w1", { "GET /work-items/w1/compare": [200, { files: [{ path: "a.py", insertions: 1, deletions: 0, touched_by: [], viewed: false }] }] });
     const card = await screen.findByRole("region", { name: "Failed" });
     await waitFor(() => expect(card).toHaveTextContent("work keptbranch kraft/x-w1 · 1 file · tests passing"));
-    expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. Then Retry.");
+    expect(card).toHaveTextContent("Sign the forge CLI in on the server's machine: gh auth login, or glab auth login for GitLab. If git itself can't authenticate, check its credentials there too (gh auth setup-git, your SSH key or credential helper). Then Retry.");
     expect(within(card).getByText("gh auth login").tagName).toBe("CODE");
     expect(card).not.toHaveTextContent("forge_auth");
     expect(card).not.toHaveTextContent("cause");

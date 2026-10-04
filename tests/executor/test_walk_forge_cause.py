@@ -30,17 +30,17 @@ class _RaisingWith(_RaisingForge):
         (
             "gh pr create failed: HTTP 401: Bad credentials",
             "forge_auth",
-            "`glab auth login` for GitLab), then retry.",
+            "Fix them, then retry.",
         ),
         (
             "git push failed: fatal: Authentication failed for 'https://x'",
             "forge_auth",
-            "then retry.",
+            "Fix them, then retry.",
         ),
         (
             "gh pr create failed: dial tcp: Could not resolve host: github.com",
             "forge_unreachable",
-            "can reach the forge, then retry.",
+            "Check its network, then retry.",
         ),
         ("boom: no capacity", None, "Reinstall and restart, or skip the node."),
     ],
@@ -69,3 +69,5 @@ async def test_a_forge_task_failure_names_its_cause_in_the_stops_facts(
     if stop_kind == "infra":
         assert stop["reason"].endswith(reason_ends)
         assert ("Reinstall" in stop["reason"]) == (cause is None)
+        # Plain text on the card: a backtick would show literally.
+        assert "`" not in stop["reason"]

@@ -48,7 +48,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const [startLines, setStartLines] = useState<string[]>([]);
   const status = item.display_status ?? "running";
   const hs = headerState(item);
-    const bar = pairOf(item);
+  const bar = pairOf(item);
   const ended = status === "done" || status === "cancelled" || status === "archived";
   const session = currentSession(item);
   const live = session?.status === "running" || session?.status === "pending";
