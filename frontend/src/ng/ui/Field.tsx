@@ -3,7 +3,7 @@ import "./ui.css";
 
 /** A form row whose label is always visible (no placeholder-as-label). The
  *  control goes in `children`; the label element wraps it, so it is named. */
-export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode; error?: string | null; children: ReactNode }) {
+export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode; error?: ReactNode; children: ReactNode }) {
   return (
     <label className="field">
       <span className="field-label">{label}</span>
