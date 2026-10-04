@@ -22,6 +22,8 @@ import { Thread } from "./Thread";
 import { chainName } from "../chainName";
 import { materialized, notStarted, planTaskPath, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
+import { scopePane, ScopeOverview } from "./ScopePane";
+import { isScopeTask, scopesView } from "../scopeView";
 
 export type PaneArgs = {
   item: ItemDetail;
@@ -42,6 +44,8 @@ export type PaneArgs = {
   setEditBudget: (on: boolean) => void;
   /** The fix-loop round the canvas shows, 1-based, when the node has a loop that ran. */
   round?: number;
+  /** The scope of an open changed-test-scope task that is picked: its chip's key. */
+  scope?: string;
   attempt?: number;
   /** Pin the tabs to one attempt; undefined follows the newest. */
   setAttempt: (attempt: number | undefined) => void;
@@ -207,6 +211,10 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   // A gate's reviewer is no step of the chain: its sessions run at `<gate>.auto_review`, and the server addresses nothing under it.
   const rev = node.kind === "gate" && stepId === AUTO_REVIEW;
   const path = esc ? ESCALATION : rev ? `${node.id}.${AUTO_REVIEW}` : `${node.id}.${stepId}.${task}`;
+  // One of an open changed-test-scope task's scopes has its own pane.
+  if (a.scope && !esc && !rev && stepId !== FIX_LOOP) {
+    return scopePane({ item, node, step: stepId, task, scope: a.scope, round: a.round ?? 1, now: a.now, crumbs, tab: a.tab, toTask: () => a.pick({ kind: "task", node: node.id, step: stepId, task }) });
+  }
   // In a fix-loop node a task's pane is one round's: the step tasks and the judge as the round measured
   // (the judge after it), the repair as it went on to the next.
   const loop = !esc && !rev && stepId === FIX_LOOP ? (task === JUDGE ? "judge" : "repair") : null;
@@ -252,6 +260,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     };
   }
   const current = item.current_node_id === node.id;
+  // A changed-test-scope task runs one session per scope: they are its scopes, not attempts at it.
+  const scopes = !esc && !rev && !loop && isScopeTask(item, path);
   // Picking the newest attempt drops the pin, so the pane follows the next one that starts;
   // an older attempt stays put while newer ones arrive, and the menu's count shows them.
   const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} inRound={!!r} />;
@@ -259,7 +269,13 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const progress = planTaskPath(frozen) === path ? item.progress : null;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
-    overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />,
+    overview: (
+      <>
+        {/* The changed-test-scope task says how its round went, and what its canvas frame means, above the usual facts. */}
+        {scopes && <ScopeOverview view={scopesView(item, path, a.round ?? 1, a.now)} />}
+        <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />
+      </>
+    ),
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
     log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} />,
@@ -269,7 +285,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   return {
     ...head,
     // One attempt has nothing to pick between: the subtitle stays the words it was.
-    sub: sessions.length > 1 ? <>{lead} · {menu} · {state}</> : head.sub,
+    sub: sessions.length > 1 && !scopes ? <>{lead} · {menu} · {state}</> : head.sub,
     tabs,
     body: bodies[tab],
     footer: esc

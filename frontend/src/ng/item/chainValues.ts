@@ -7,12 +7,15 @@ import type { ItemDetail } from "./useItem";
  *  parts those rows show are typed. */
 type Caps = Record<string, number | null | undefined>;
 type Pol = Record<string, unknown> | null | undefined;
-export type MTask = { id: string; kind: string; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
+export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
 type MStep = { id: string; tasks: MTask[]; policy?: Pol };
 type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
 export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
+/** What the item runs against, frozen at intake: a workspace's root and its members, in the order a fanned-out task visits them. */
+export type MTarget = { kind: string; root?: string | null; mounts?: Record<string, { repository: string; path: string }> };
 export type Materialized = {
   chain: { nodes: MNode[]; policy?: Pol };
+  target?: MTarget | null;
   policy?: Record<string, unknown> & { cap_defaults?: Record<string, Caps>; maxima?: Record<string, unknown> };
 };
 /** The item's own policy override (`policy_override`): item-wide fields, and `paths` by canonical path. */

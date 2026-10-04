@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainNode, WorkerSession } from "../../types";
 import type { KraftEvent } from "../../types";
 import { footerState, nodeGraph } from "./nodeGraph";
-import { detail, FROZEN, LOOPED } from "./testkit";
+import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const node: ChainNode = {
@@ -130,6 +130,17 @@ describe("nodeGraph rounds", () => {
   it("marks the newest round stopped, in red, when the item stopped on the node", () => {
     const g = nodeGraph(looped({ worker_sessions: LOOP_RUN.slice(0, 6), display_status: "needs_you", stop: { kind: "stuck", node: "verification", resume_at: null, reason: null } }), node, NOW, []);
     expect(g.rounds!.rows.at(-1)).toMatchObject({ n: 2, tone: "bad", outcome: "stopped · needs you" });
+  });
+});
+
+describe("nodeGraph scope task", () => {
+  it("puts no ×N on a changed-test-scope task: its sessions are scopes, not attempts", () => {
+    const solo: ChainNode = { id: "verification", kind: "exec", gate_after: null, tasks: [SCOPE_PATH], steps: [[SCOPE_PATH]] };
+    const item = scoped([scopeRun(null, "just test-a", 0, "done"), scopeRun(null, "just test-b", 0, "done"), scopeRun(null, "just test-c", 0, "done")]);
+    // Three sessions at one hook point: the column says attempt 3, the box must not.
+    expect(item.worker_sessions.map((x) => x.attempt)).toEqual([1, 1, 1]);
+    const counted = { ...item, worker_sessions: item.worker_sessions.map((x, i) => ({ ...x, attempt: i + 1 })) };
+    expect(nodeGraph(counted, solo, NOW).steps[0].tasks[0].attempt).toBeUndefined();
   });
 });
 

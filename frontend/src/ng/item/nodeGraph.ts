@@ -4,6 +4,7 @@ import type { NodeStep } from "../graph/nodeLayout";
 import type { GlyphState, GraphItem } from "../graph/types";
 import { attemptsAt, loopPaths, materialized, taskKindAt } from "./chainValues";
 import { stepsOf, taskName } from "./paths";
+import { isScopeTask } from "./scopeView";
 import type { ItemDetail } from "./useItem";
 
 export const ESCALATION = "escalation";
@@ -87,7 +88,8 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
       const ss = sessionsOf(item, path);
       // In a fix-loop node the round says which run this is; a count of runs across rounds would badge every task.
       const last = shown ? ss.filter((s) => s.round === shown - 1).at(-1) : ss.at(-1);
-      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown ? undefined : last?.attempt, ...sessionLook(last, now) };
+      // The scopes of a changed-test-scope task are sessions of it too, but not attempts: no count on its box.
+      return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...sessionLook(last, now) };
     }),
   }));
   const esc = escalationsOf(item, node.id);

@@ -19,8 +19,9 @@ import { chainGraph } from "./graph";
 import { DocViewer, docBy } from "./DocViewer";
 import { gateView, reviewerSel } from "./gateView";
 import { nodeGraph, roundShown } from "./nodeGraph";
+import { isScopeTask, scopesView } from "./scopeView";
 import { paneContent } from "./panes/paneContent";
-import { pushes, placeUrl, readPlace, type Place } from "./url";
+import { pushes, placeUrl, readPlace, selPath, type Place } from "./url";
 import { useDocuments } from "./useDocuments";
 import { useEvents } from "./useEvents";
 import { runVersion, type ItemDetail } from "./useItem";
@@ -79,6 +80,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   }, [asked]);
   // The fix-loop round the canvas shows: one picked in this node view (undefined: the newest). Leaving the node drops it.
   const [picked, setPicked] = useState<{ node: string; round: number } | null>(null);
+  // The selection (its path) whose open frame the person closed: it opens again once they pick anything.
+  const [shut, setShut] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // Every second while an agent or a check runs, so "running 12s" counts; every
@@ -107,7 +110,6 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   // view goes back to the chain. The pane and the canvases handle it themselves when focus is in
   // them; this is every other place on the page. A text field or an open menu keeps its own.
   const escape = useRef(() => {});
-  escape.current = () => dispatch({ type: "escape" });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || isTextField(e.target)) return;
@@ -134,6 +136,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     if (lastNode.current === place.node) return;
     lastNode.current = place.node;
     setPicked(null);
+    setShut(null);
     const f = requestAnimationFrame(() => areaRef.current?.querySelector<HTMLElement>('[role="group"] [tabindex="0"]')?.focus());
     return () => cancelAnimationFrame(f);
   }, [place.node]);
@@ -151,12 +154,28 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const sel = place.sel;
   // A step or task picked from the chain canvas's pane opens its node's view, as
   // Focus does, so the canvas shows where it sits and not only the pane.
-  const pick = (to: Sel) => dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
+  const pick = (to: Sel) => {
+    setShut(null);
+    dispatch(state.level === "chain" && (to.kind === "step" || to.kind === "task") ? { type: "focus", node: to.node, sel: to } : { type: "pick", sel: to });
+  };
   const tab = place.tab ?? "";
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
   const round = viewing ? roundShown(item, viewing, picked?.node === viewing.id ? picked.round : undefined) : undefined;
+  // A changed-test-scope task opens as a frame of its repositories and scopes while it, or one of its scopes, is the selection.
+  const here = place.sel.kind === "task" ? place.sel : null;
+  const herePath = selPath(place.sel);
+  const scopeTask = viewing && here && here.node === viewing.id && herePath && isScopeTask(item, herePath) ? here : null;
+  const open = !!scopeTask && shut !== herePath;
+  const expand = open && herePath ? { step: scopeTask.step, task: scopeTask.task, view: scopesView(item, herePath, round ?? 1, now), scope: place.scope } : undefined;
+  // Esc steps back one: from a scope to its task, from the open task to its box, then the page's own (the pane, the node view).
+  const back = () => {
+    if (place.scope) go({ ...place, scope: undefined });
+    else if (open) setShut(herePath);
+    else dispatch({ type: "escape" });
+  };
+  escape.current = back;
   const pane = paneContent({
-    item, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round,
+    item, version, events, now, policy, graph: graph.nodes, sel, level: state.level, tab, reload, pick, editBudget, setEditBudget, docs, round, scope: place.scope,
     focus: (node) => dispatch({ type: "focus", node }),
     attempt: place.attempt,
     setAttempt: (attempt) => go({ ...place, attempt }),
@@ -190,10 +209,13 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             onFailure={inside.onFailure}
             reserve={reserve}
             selected={sel.kind === "task" || sel.kind === "step" ? { step: sel.step, task: sel.kind === "task" ? sel.task : undefined } : undefined}
+            expand={expand}
+            onScope={(key) => { setShut(null); dispatch({ type: "pick", sel: place.sel }, { scope: key }); }}
+            onCollapse={() => { setShut(herePath); if (place.scope) go({ ...place, scope: undefined }); }}
             onSelect={(x) => pick(nodeSel(x))}
-            onOpen={(x) => dispatch({ type: "expand", sel: nodeSel(x) })}
-            onExpand={(x) => dispatch({ type: "expand", sel: nodeSel(x) })}
-            onEscape={() => dispatch({ type: "escape" })}
+            onOpen={(x) => { setShut(null); dispatch({ type: "expand", sel: nodeSel(x) }); }}
+            onExpand={(x) => { setShut(null); dispatch({ type: "expand", sel: nodeSel(x) }); }}
+            onEscape={back}
             onBackground={() => dispatch({ type: "background" })}
           />
         ) : (

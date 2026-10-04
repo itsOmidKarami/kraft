@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
-import type { ChainNode, WorkItem, WorkerSession } from "../../types";
+import type { ChainNode, ScopeRun, WorkItem, WorkerSession } from "../../types";
 import { Shell } from "../shell/Shell";
 import type { ItemDetail } from "./useItem";
 
@@ -38,6 +38,32 @@ export const LOOPED = JSON.stringify((() => {
   m.chain.nodes[2].fix_loop = { max_attempts: 2, tasks: [{ id: "repair", kind: "agent" }], judge: { id: "judge", kind: "agent" } };
   return m;
 })());
+/** The changed-test-scope task of the `verification` node's `tests` step, and the frozen chain that holds it. */
+export const SCOPE_PATH = "verification.tests.test_changed_scopes";
+export const scopeChain = (execution?: string, target?: unknown) =>
+  JSON.stringify({
+    chain: { nodes: [{ id: "verification", kind: "exec", fix_loop: { max_attempts: 2 }, steps: [{ id: "checks", tasks: [{ id: "lint", kind: "subprocess" }] }, { id: "tests", tasks: [{ id: "test_changed_scopes", kind: "builtin", ref: "kraft.verify_changed_test_scopes", ...(execution && { execution }) }] }] }] },
+    ...(target ? { target } : {}),
+  });
+/** A workspace's root and two members: the order a fanned-out task visits them. */
+export const WORKSPACE = { kind: "workspace", root: "ws", mounts: { pkg: { repository: "pkg", path: "repos/pkg" }, web: { repository: "web", path: "repos/web" } } };
+let runs = 0;
+/** One command a scope task ran: its `scope_runs` entry and its session, as the API lists them. */
+export const scopeRun = (repository: string | null, command: string, round: number, status: string, over: Partial<ScopeRun> = {}, wall_ms: number | null = 24_000): [ScopeRun, WorkerSession] => {
+  const id = `r${runs++}`;
+  return [
+    { session_id: id, node_id: "verification", hook_point: SCOPE_PATH, repository, round, command, passed: status === "done" ? true : status === "running" ? null : false, scope: command.replace("just test-", "") + "/**", ...over },
+    { id, node_id: "verification", hook_point: SCOPE_PATH, status, attempt: 1, round, repository, command, wall_ms, started_at: "2026-09-13T10:09:00Z", created_at: "2026-09-13T10:09:00Z", model: null, thread: 1 } as unknown as WorkerSession,
+  ];
+};
+/** A command a round picked and has not started: its `scope_runs` entry, and no session. */
+export const pendingRun = (repository: string | null, command: string, round: number, over: Partial<ScopeRun> = {}): [ScopeRun, undefined] => [
+  { session_id: null, node_id: "verification", hook_point: SCOPE_PATH, repository, round, command, passed: null, pending: true, selected: true, scope: command.replace("just test-", "") + "/**", ...over },
+  undefined,
+];
+/** An item whose verification ran these scopes (`scopeRun`, `pendingRun`), on `scopeChain`. */
+export const scoped = (runs: [ScopeRun, WorkerSession | undefined][], over: Partial<ItemDetail> = {}) =>
+  detail({ materialized_chain: scopeChain(), repo: "/code/kraft-web", scope_runs: runs.map((r) => r[0]), worker_sessions: runs.flatMap((r) => (r[1] ? [r[1]] : [])), display_status: "needs_you", ...over });
 /** An item filed with `FROZEN` and not started. */
 export const fresh = (over: Partial<ItemDetail> = {}) => detail({ current_node_id: null, display_status: "paused", materialized_chain: FROZEN, ...over });
 

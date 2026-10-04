@@ -325,6 +325,9 @@ export interface WorkItem {
   /** The latest changed-test-scope verification run, one entry per scope that
    *  finished; null when there is no run. Only on the detail endpoint. */
   test_result?: TestResult | null;
+  /** Every command a changed-test-scope task ran, over every round and repository, in the order it
+   *  started (detail only). `test_result` is the latest run alone. */
+  scope_runs?: ScopeRun[];
   /** Minor findings that never entered the fix loop; only on the detail endpoint. */
   deferred_findings?: Finding[];
   /** Findings a judge chose to stop chasing (`stop_downgrade`) -- distinct
@@ -432,6 +435,29 @@ export type SessionStatus =
   // wait scheduler re-enters it when retry_at comes due (Kraft-ru98).
   | "waiting";
 
+/** One command a changed-test-scope task ran: the session that ran it, and what the repo's table says
+ *  it is. `passed` is null until it finishes; `order` is where the table lists it (an area's setup
+ *  half a place before its first scope), absent for a command the table no longer declares. */
+export interface ScopeRun {
+  /** Null for a command its round picked and has not started (`pending`). */
+  session_id: string | null;
+  node_id: string;
+  hook_point: string;
+  repository: string | null;
+  round: number;
+  command: string;
+  passed: boolean | null;
+  exit_code?: number;
+  scope?: string;
+  area?: string;
+  setup?: true;
+  order?: number;
+  /** Picked by its round (`test_scopes_selected`) and not started: no session yet. */
+  pending?: true;
+  /** Its round recorded what it picked, so what it dropped is known before the round ends. */
+  selected?: true;
+}
+
 export interface WorkerSession {
   id: string;
   work_item_id: string;
@@ -464,6 +490,10 @@ export interface WorkerSession {
    *  for a subprocess or builtin task and on a row from before the column.
    *  Optional so fixture/test literals that predate it keep typechecking. */
   harness?: string | null;
+  /** The exact command a subprocess session ran; null for any other kind. Optional so fixture literals that predate it typecheck. */
+  command?: string | null;
+  /** The repository a fanned-out run (`scope: each_repository`) was for; null for a task that does not fan out. */
+  repository?: string | null;
   /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
    *  for a builtin/agent task that stamps nothing, and for a historical row. */
   head_sha: string | null;

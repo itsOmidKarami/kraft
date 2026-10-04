@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { NodeGraph } from "./NodeGraph";
+import { fitCam } from "./camera";
+import { nodeLayout } from "./nodeLayout";
 import type { Rounds } from "../item/nodeGraph";
 import type { NodeStep } from "./nodeLayout";
 
@@ -60,6 +62,20 @@ describe("NodeGraph", () => {
     await user.dblClick(btn("fix, step"));
     expect(cb.onSelect).toHaveBeenCalledWith({ step: "fix" });
     expect(cb.onExpand).toHaveBeenLastCalledWith({ step: "fix" });
+  });
+
+  it("fits the node with 56px kept clear at the foot, for the zoom and round controls", () => {
+    const sized = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1040);
+    const high = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(440);
+    try {
+      render(<NodeGraph name="v" steps={steps} />);
+      const lay = nodeLayout(steps);
+      const cam = fitCam({ W: lay.W, H: lay.H }, { w: 1040, h: 440 - 56 }, "node");
+      expect(document.querySelector<HTMLElement>(".canvas-world")!.style.transform).toBe(`translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})`);
+    } finally {
+      sized.mockRestore();
+      high.mockRestore();
+    }
   });
 
   describe("fix loop", () => {
