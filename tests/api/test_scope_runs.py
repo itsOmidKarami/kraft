@@ -174,6 +174,30 @@ def test_detail_scope_runs_leaves_nothing_pending_in_a_round_the_loop_went_on_pa
     assert _runs(client, wid) == [("s0", "ws", 0, "fe-cmd", False, None)]
 
 
+def test_detail_scope_runs_pends_nothing_in_a_repository_a_later_round_never_reached(
+    client, repo, tmp_path
+):
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd"])
+    _picks(wid, "pkg", 0, ["be-cmd"])
+    _picks(wid, "ws", 1, ["fe-cmd"])
+    # Round 1 reached `ws` and stopped there: `pkg`'s round 0 has moved on with it.
+    assert [r[1:4] for r in _runs(client, wid)] == [("ws", 1, "fe-cmd")]
+
+
+def test_detail_scope_runs_pends_nothing_a_recovery_re_measure_ran_past(client, repo, tmp_path):
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
+    _session(tmp_path, wid, "s0", "fe-cmd", "failed")
+    # The re-measure after `on_failure` picks at round -1 (`walk._REPAIR_ROUND`).
+    _picks(wid, "ws", -1, ["be-cmd"])
+    _session(tmp_path, wid, "s1", "be-cmd", "done", rnd=-1)
+    assert _runs(client, wid) == [
+        ("s0", "ws", 0, "fe-cmd", False, None),
+        ("s1", "ws", -1, "be-cmd", True, None),
+    ]
+
+
 def test_detail_scope_runs_calls_every_way_of_not_finishing_a_pass_a_fail(client, repo, tmp_path):
     """`passed` is None only while a command has not finished: a capped or refused one has."""
     wid = _verified_item(client, repo, tmp_path, [])

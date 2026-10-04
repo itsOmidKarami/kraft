@@ -832,11 +832,11 @@ def scope_runs(
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
     started = {(r["repository"], r["round"], r["command"]) for r in rows}
-    # Only a repository's newest round can still start what it picked.
-    newest = {repo: max(n for r, n in picked if r == repo) for repo, _ in picked}
+    # Only the round of the node's latest pick can still start what it picked.
+    newest = max(((seq, rnd) for (_, rnd), (seq, _) in picked.items()), default=(0, None))[1]
     for (repo, rnd), (_, commands) in picked.items():
         for command in commands:
-            if live and rnd == newest[repo] and (repo, rnd, command) not in started:
+            if live and rnd == newest and (repo, rnd, command) not in started:
                 out.append(
                     {
                         "session_id": None,
