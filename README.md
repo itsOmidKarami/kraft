@@ -123,7 +123,7 @@
 | src/kraft/permission\_rules.py               |       40 |        0 |    100% |           |
 | src/kraft/pidfile.py                         |      125 |       19 |     85% |51-52, 57-58, 80-81, 117, 134, 145-146, 160-161, 169-170, 172, 196-197, 199-200 |
 | src/kraft/policy.py                          |      734 |       23 |     97% |238-239, 523, 528-529, 1159, 1346, 1580-1589, 1669, 1676, 1690, 1694-1698, 1703 |
-| src/kraft/progress.py                        |      113 |        0 |    100% |           |
+| src/kraft/progress.py                        |      147 |        0 |    100% |           |
 | src/kraft/rate\_limit\_retry.py              |       58 |        7 |     88% |159-161, 171-174 |
 | src/kraft/registration.py                    |       59 |        0 |    100% |           |
 | src/kraft/render.py                          |      249 |       24 |     90% |47-48, 77, 84, 362, 373, 388, 401, 407-411, 449-456, 497, 509, 535 |
@@ -174,7 +174,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       82 |        9 |     89% |45, 96, 142-144, 147-151, 159-160 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **30705** | **1450** | **95%** |           |
+| **TOTAL**                                    | **30739** | **1450** | **95%** |           |
 
 
 ## Setup coverage badge
