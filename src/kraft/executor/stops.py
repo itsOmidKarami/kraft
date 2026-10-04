@@ -95,7 +95,9 @@ async def claimed_or_stopped(
             if row is not None and row["status"] == "active":
                 stop = reason + cause
                 await db.write(
-                    lambda c: store.mark_needs_human(c, work_item_id, node_id, stop, kind="infra")
+                    lambda c: store.mark_needs_human(
+                        c, work_item_id, node_id, stop, kind="infra", facts={"cause": "stranded"}
+                    )
                 )
 
 
@@ -289,7 +291,13 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
     )
     await db.write(
         lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, suggested=RETRY_LATER, kind="infra"
+            c,
+            work_item_id,
+            node.id,
+            reason,
+            suggested=RETRY_LATER,
+            kind="infra",
+            facts={"cause": "ci_infra"},
         )
     )
     return "needs_human"

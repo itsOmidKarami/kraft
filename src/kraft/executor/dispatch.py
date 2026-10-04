@@ -584,9 +584,22 @@ async def _run_changed_test_scopes(
 def failed_test_scopes(
     db, work_item_id: str, node_id: str, task_hook: str, repo_entry: RepoEntry | None
 ) -> list[dict]:
-    """What the changed-test-scope builtin's latest run of `task_hook` failed
-    on, in the order it ran: `{command, scope?, exit_code?, area?, setup?,
-    session_id}` per failed command, `setup` marking an area's setup.
+    """What `scope_results` reports as failed, without its `passed` key: the
+    stop's facts."""
+    return [
+        {k: v for k, v in entry.items() if k != "passed"}
+        for entry in scope_results(db, work_item_id, node_id, task_hook, repo_entry)
+        if not entry["passed"]
+    ]
+
+
+def scope_results(
+    db, work_item_id: str, node_id: str, task_hook: str, repo_entry: RepoEntry | None
+) -> list[dict]:
+    """The changed-test-scope builtin's latest run of `task_hook`, in the order
+    it ran: `{command, scope?, exit_code?, area?, setup?, passed, session_id}`
+    per command that finished, `setup` marking an area's setup. A command
+    still running or paused is neither passed nor failed and is left out.
 
     A stop names these so a person reads the command that went red, not the
     builtin's own id (R12a-03). The latest run is the rows created since the
@@ -627,9 +640,9 @@ def failed_test_scopes(
             latest.pop(row["command"], None)
             latest[row["command"]] = row
     table = _scope_table(repo_entry)
-    failed = []
+    results = []
     for command, row in latest.items():
-        if row["status"] != "failed":
+        if row["status"] not in ("done", "failed"):
             continue
         entry: dict = {"command": command}
         scopes = [s for s in table if shlex.join(s["cmd"]) == command]
@@ -643,9 +656,10 @@ def failed_test_scopes(
             entry["area"] = area
         if setups and not scopes:
             entry["setup"] = True
+        entry["passed"] = row["status"] == "done"
         entry["session_id"] = row["id"]
-        failed.append(entry)
-    return failed
+        results.append(entry)
+    return results
 
 
 def _exit_code(result_path: str | None) -> int | None:
