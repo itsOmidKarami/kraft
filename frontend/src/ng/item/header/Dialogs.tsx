@@ -31,7 +31,8 @@ export function EscalateCard({ id, anchor, threads, onClose, onDone }: CardProps
   const [message, setMessage] = useState("");
   const [fresh, setFresh] = useState(false);
   const { busy, error, go } = useSubmit(() => act.escalate(id, message.trim(), fresh), onDone);
-  // What the checkbox changes, from the threads the item already has; none known, nothing to say.
+  // What the checkbox changes, from the threads the item already has. With none there is no
+  // thread to continue, so no box either, as the phone's composer has it.
   const last = threads?.at(-1);
   const threadHint = !last ? null : fresh ? `starts thread ${last.thread + 1}, a fresh session that does not see thread ${last.thread}` : `continues thread ${last.thread} (turn ${last.turns + 1}), so it remembers the earlier turns`;
   return (
@@ -42,7 +43,7 @@ export function EscalateCard({ id, anchor, threads, onClose, onDone }: CardProps
         <Field label="Message" error={error}>
           <textarea className="item-input" rows={3} placeholder={`What should it look at? (required) e.g. "the review keeps flagging the same race; decide if it's real"`} value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!message.trim())} />
         </Field>
-        <label className="item-check"><input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> Start a new thread</label>
+        {last && <label className="item-check"><input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> Start a new thread</label>}
         {threadHint && <p className="item-muted">{threadHint}</p>}
         <div className="item-actions">
           <Button variant="primary" disabled={busy || !message.trim()} onClick={go}>Escalate</Button>

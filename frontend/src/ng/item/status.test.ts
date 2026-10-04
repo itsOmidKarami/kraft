@@ -133,7 +133,7 @@ function offered(item: ItemDetail): [string, Door][] {
   return [
     [`header main ${hs.main}`, MAIN_DOOR(item)[hs.main]],
     ...hs.panel.filter((x) => x !== "archive" || archivable(item.display_status)).map((x): [string, Door] => [`header panel ${x}`, PANEL_DOOR[x]]),
-    ...menuDoors(item).map((x): [string, Door] => [`header ⋮ ${x}`, x === "duplicate" ? "navigate" : x]),
+    ...menuDoors(item).map((x): [string, Door] => [`header ⋮ ${x}`, "navigate"]),
     ...footerActs(item, footerState(item, item.worker_sessions)).map((x): [string, Door] => [`path footer ${x}`, x]),
     ...[p.secondary, p.primary].flatMap((x): [string, Door][] => (x ? [[`phone bar ${x.id}`, phone[x.id]]] : [])),
     ...kebabOf(item).map((x): [string, Door] => [`phone ⋮ ${x.id}`, phone[x.id]]),
