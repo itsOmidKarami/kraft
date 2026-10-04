@@ -5,7 +5,7 @@ import { Composer, targetKey, type Draft, type Target } from "./Composer";
 import { rangeOfPick, type Pick } from "./DiffView";
 import { unresolved } from "./model";
 import type { PatchFile } from "./patch";
-import { isMixed, isOneLine, lineIndex, quoteOf, rangeLabel, startSideOf, type LineRange } from "./range";
+import { isMixed, isOneLine, lineIndex, quoteOf, rangeName, startSideOf, type LineRange } from "./range";
 import type { Anchor } from "./rows";
 import { Thread, threadRange } from "./Thread";
 
@@ -113,8 +113,8 @@ export function useComments({ itemId, compare, files, patch, threads, reload, on
     const d = drafts.get(targetKey(o.target));
     drafts.delete(targetKey(o.target));
     // Moved back onto the lines it was written for, it is in place again: no note (R11b-06).
-    const wrote = d?.wrote ?? rangeLabel(r);
-    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: rangeLabel(range) === wrote ? undefined : wrote });
+    const wrote = d?.wrote ?? rangeName(r);
+    if (d) drafts.set(targetKey(target), d.suggest === null ? d : { ...d, wrote: rangeName(range) === wrote ? undefined : wrote });
     setOpen({ ...o, target });
     return target;
   };

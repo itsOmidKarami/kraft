@@ -126,7 +126,7 @@ describe("commenting on lines", () => {
   it("comments on one line from its +, and Ctrl+Enter adds it to the review", async () => {
     await open();
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
-    expect(screen.getByRole("group", { name: "Comment: Line 3" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line +3" })).toBeInTheDocument();
     type("why z?");
     await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Enter", ctrlKey: true }));
     expect(posts()).toEqual([{ body: "why z?", file_path: "a.py", label: null, side: "new", start_line: 3, end_line: 3, quote: "+z = 4" }]);
@@ -142,7 +142,7 @@ describe("commenting on lines", () => {
     await act(async () => fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Enter", metaKey: true }));
     expect(document.querySelector(".is-picked")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
-    expect(screen.getByRole("group", { name: "Comment: Line 3" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line +3" })).toBeInTheDocument();
   });
 
   it("comments on a range dragged from +", async () => {
@@ -150,7 +150,7 @@ describe("commenting on lines", () => {
     fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on line 2" }));
     fireEvent.mouseOver(row("w = 5"));
     fireEvent.mouseUp(window);
-    expect(screen.getByRole("group", { name: "Comment: Lines 2–4" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines +2 to +4" })).toBeInTheDocument();
     type("one change, three lines");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
     expect(posts()).toEqual([{ body: "one change, three lines", file_path: "a.py", label: null, side: "new", start_line: 2, end_line: 4, quote: "+y = 3\n+z = 4\n w = 5" }]);
@@ -159,7 +159,7 @@ describe("commenting on lines", () => {
   it("comments on the old side: a removed line, or a context line's old number", async () => {
     await open();
     fireEvent.click(screen.getByRole("button", { name: "Comment on old line 2" }));
-    expect(screen.getByRole("group", { name: "Comment: Old line 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line −2" })).toBeInTheDocument();
     type("was 2 on purpose?");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
     fireEvent.click(screen.getByRole("button", { name: "Pick old line 3" }));
@@ -174,7 +174,7 @@ describe("commenting on lines", () => {
     fireEvent.mouseDown(screen.getByRole("button", { name: "Comment on old line 2" }));
     fireEvent.mouseOver(row("y = 3"));
     fireEvent.mouseUp(window);
-    expect(screen.getByRole("group", { name: "Comment: Old 2 – new 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines −2 to +2" })).toBeInTheDocument();
     expect(row("y = 2")).toHaveClass("is-picked");
     expect(row("y = 3")).toHaveClass("is-picked");
     type("3, not 2");
@@ -193,7 +193,7 @@ describe("commenting on lines", () => {
     fireEvent.mouseOver(row("w = 5"));
     await frame();
     fireEvent.mouseUp(window);
-    expect(screen.getByRole("group", { name: "Comment: Lines 3–4" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines +3 to +4" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("keep this text");
     expect(picked()).toEqual(["z = 4", "w = 5"]);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to review" })));
@@ -205,11 +205,11 @@ describe("commenting on lines", () => {
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
     type("keep this text");
     fireEvent.click(screen.getByRole("button", { name: "Pick new line 2" }), { shiftKey: true });
-    expect(screen.getByRole("group", { name: "Comment: Lines 2–3" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines +2 to +3" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("keep this text");
     expect(picked()).toEqual(["y = 3", "z = 4"]);
     fireEvent.click(screen.getByRole("button", { name: "Back to the last line" }));
-    expect(screen.getByRole("group", { name: "Comment: Line 3" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line +3" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("keep this text");
     expect(picked()).toEqual(["z = 4"]);
   });
@@ -219,7 +219,7 @@ describe("commenting on lines", () => {
     fireEvent.click(screen.getByRole("button", { name: "Comment on line 3" }));
     fireEvent.click(screen.getByRole("button", { name: "Pick new line 4" }));
     fireEvent.click(screen.getByRole("button", { name: "Pick new line 2" }), { shiftKey: true });
-    expect(screen.getByRole("group", { name: "Comment: Line 3" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line +3" })).toBeInTheDocument();
   });
 
   it("shades a saved range across sides and quotes its lines when the page loads", async () => {

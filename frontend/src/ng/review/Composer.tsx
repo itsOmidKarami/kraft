@@ -4,7 +4,7 @@ import { Button } from "../ui/Button";
 import { Markdown } from "../ui/Markdown";
 import { IconButton } from "../ui/IconButton";
 import { X } from "../icons";
-import { isMixed, isOneLine, rangeLabel, startSideOf, type LineRange } from "./range";
+import { isMixed, isOneLine, rangeName, startSideOf, type LineRange } from "./range";
 import { LABELS, codeBlock } from "./Thread";
 import { mod, sendOnModEnter } from "../keys";
 
@@ -57,7 +57,7 @@ export function Composer({ target, lines, onCollapse, drafts, editing, onSubmit,
     drafts.set(key, next);
   };
   const r = target.range;
-  const where = r ? rangeLabel(r) : "Comment on this file";
+  const where = r ? rangeName(r) : "Comment on this file";
   // A range picked across a gap between hunks holds lines the diff doesn't show, so there is nothing to edit them from.
   const gap = !!r && lines.length < r.end - r.start + 1;
   // A suggestion replaces new-side lines, so a range across sides takes none.
