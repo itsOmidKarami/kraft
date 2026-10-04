@@ -21,8 +21,6 @@ export interface Health {
   /** The directory holding this instance's databases, logs and worktrees. */
   run_dir?: string;
   pid?: number;
-  /** The Python this server runs on, "3.14" (About's footer); absent on an older server. */
-  python?: string;
   /** Seconds this server process has been up (UX V2 About); absent on an older server. */
   uptime_s?: number;
   /** The search index: how many documents, when the repos were last scanned, and what failed. */

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import time
 
 import pytest
@@ -151,12 +150,9 @@ def test_health_reports_how_long_the_process_has_been_up(client):
     assert 3725 <= client.get("/api/health").json()["uptime_s"] < 3735
 
 
-def test_health_names_the_python_it_runs_on(client):
-    """About's footer says which interpreter, as major.minor."""
-    assert (
-        client.get("/api/health").json()["python"]
-        == f"{sys.version_info.major}.{sys.version_info.minor}"
-    )
+def test_health_does_not_name_the_python(client):
+    """/api/health needs no login: the interpreter is About's, read behind it from /api/update."""
+    assert "python" not in client.get("/api/health").json()
 
 
 @pytest.mark.api_client(host="localhost", env={"KRAFT_PORT": "18772"})

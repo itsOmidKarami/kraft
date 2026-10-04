@@ -174,12 +174,12 @@ describe("ng AboutPage", () => {
     await waitFor(() => expect(dd).toHaveTextContent(text));
   });
 
-  it("names the Python in the footer, and leaves it out for a server that does not say", async () => {
-    vi.spyOn(api, "getHealth").mockResolvedValue({ ...instance, python: "3.14" });
+  it("names the Python in the footer, from the update state, and leaves it out for a server that does not say", async () => {
+    served = () => reply(200, { ...UPDATE, python: "3.14" });
     render(<AboutPage />);
     expect(await screen.findByText("macOS and Linux · Python 3.14 · Only the latest release gets fixes.")).toBeInTheDocument();
     document.body.innerHTML = "";
-    vi.spyOn(api, "getHealth").mockResolvedValue(instance);
+    served = () => reply(200, UPDATE);
     render(<AboutPage />);
     expect(await screen.findByText("macOS and Linux · Only the latest release gets fixes.")).toBeInTheDocument();
   });

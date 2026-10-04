@@ -15,6 +15,8 @@ export interface UpdateState {
   channel: string;
   behind: boolean | null;
   checked_at: string | null;
+  /** The Python this server runs on, "3.14"; absent on an older server. */
+  python?: string;
 }
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
@@ -150,7 +152,7 @@ export function AboutPage() {
           <a className="set-linkrow" href={DOCS} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden /><span>Documentation</span><ExternalLink size={14} aria-hidden /></a>
           <a className="set-linkrow" href={SUPPORT} target="_blank" rel="noopener noreferrer"><LifeBuoy size={16} aria-hidden /><span>Status and support</span><ExternalLink size={14} aria-hidden /></a>
         </div>
-        <span className="set-hint">macOS and Linux{health?.python && ` · Python ${health.python}`} · Only the latest release gets fixes.</span>
+        <span className="set-hint">macOS and Linux{update?.python && ` · Python ${update.python}`} · Only the latest release gets fixes.</span>
       </div>
     </div>
   );
