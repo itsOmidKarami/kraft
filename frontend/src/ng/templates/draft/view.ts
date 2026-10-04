@@ -1,3 +1,4 @@
+import { stepsGlyph } from "../../item/chainValues";
 import type { Authored, Change, Problem, Result, Scope } from "./types";
 
 /** What the pages read off a resolve result. Pure; nothing here edits a draft (R18). */
@@ -45,6 +46,9 @@ export function resolvedNode(r: Result, id: string): NodeA | null {
   const n = (r.resolved?.chain?.nodes as NodeA[] | undefined)?.find((x) => x.id === id);
   return n ? (normalise(n) as NodeA) : null;
 }
+
+/** The glyph an exec node draws from its resolved steps (CG-5): the one the item page draws for it. */
+export const nodeGlyph = (r: Result, id: string) => stepsGlyph(resolvedNode(r, id)?.steps ?? []);
 
 /** A node's kind: written, else what the resolved chain says, else exec. */
 export function kindOf(r: Result, n: NodeA): "exec" | "gate" {

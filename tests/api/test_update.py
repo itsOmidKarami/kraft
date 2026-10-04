@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import httpx
 import pytest
@@ -53,6 +54,7 @@ def test_a_newer_feed_is_behind_and_the_same_version_is_not(client, feed, monkey
         True,
     )
     assert body["checked_at"]
+    assert body["python"] == f"{sys.version_info.major}.{sys.version_info.minor}"
     monkeypatch.setattr(update, "installed", lambda: "0.4.0")
     assert client.get("/api/update").json()["behind"] is False
 

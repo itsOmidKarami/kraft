@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkerSession } from "../../types";
+import { layout } from "../graph/layout";
 import { detail, fresh, stubFetch } from "./testkit";
 import { openBudgetEditor, usePaneMemory, Workspace } from "./Workspace";
 
@@ -51,6 +52,22 @@ describe("Workspace", () => {
     render(<MemoryRouter initialEntries={["/work-items/w1"]}><Workspace item={fresh()} version="1" reload={() => {}} /></MemoryRouter>);
     // jsdom has no layout, so a plain fit would floor at 30%.
     expect((document.querySelector(".canvas-world") as HTMLElement).style.transform).toContain("scale(0.8)");
+  });
+
+  // WI-16: jsdom has no layout (a 0px view), so every chain is "too wide": the camera must then stand on the node that matters.
+  it.each([
+    ["failed", { display_status: "failed", current_node_id: "verification" }, "verification"],
+    ["done", { display_status: "done", current_node_id: null }, "summary"],
+  ] as const)("opens a %s item's long chain at no less than 45%%, centred on the stopped or last node", (_, over, id) => {
+    const nodes = ["spec", "plan", "implementation", "verification", "work_brief", "local_review", "merge_request", "summary"].map((n) => ({ id: n, tasks: [], gate_after: null }));
+    render(<MemoryRouter initialEntries={["/work-items/w1"]}><Workspace item={detail({ ...over, chain_definition: { template_id: "default", nodes } } as never)} version="1" reload={() => {}} /></MemoryRouter>);
+    const world = document.querySelector(".canvas-world") as HTMLElement;
+    const [, tx, s] = /translate\((-?[\d.]+)px.*scale\(([\d.]+)\)/.exec(world.style.transform)!;
+    expect(Number(s)).toBe(0.45);
+    // The view is 0px wide: the node's centre goes to x = 0, unless that would pull the chain's end past its right edge.
+    const cx = layout(nodes.map((n) => ({ id: n.id, kind: "exec" as const }))).items.find((it) => it.node.id === id)!.cx;
+    const W = Number(world.style.width.replace("px", ""));
+    expect(Number(tx)).toBeCloseTo(Math.max(-W * 0.45 - 12, -cx * 0.45));
   });
 
   it("names the chain of an item filed with no chain by the chain it runs (Kraft-9d8b2.52)", () => {

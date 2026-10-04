@@ -5,7 +5,7 @@ import type { CancelPreview } from "../../../types";
 import { Button } from "../../ui/Button";
 import { Popover } from "../../ui/Popover";
 import { act, cancelPreview } from "../actions";
-import { taskName } from "../paths";
+import { EndFacts, stopsNow } from "./EndFacts";
 import { sendOnModEnter } from "../../keys";
 
 /** Cancel… (Decisions §14, prototype lines 43–48): what stops, what is kept,
@@ -34,10 +34,9 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
     onDone();
   };
 
-  const run = preview?.running;
   const rows: [string, string][] = preview
     ? [
-        ["stops now", run ? `${run.task ? taskName(run.task) : run.node}${run.attempt ? `, attempt ${run.attempt}` : ""}. That attempt's work is lost.` : "Nothing is running."],
+        ["stops now", stopsNow(preview.running)],
         ["keeps", `branch ${preview.kept.branch}, the worktree until it is archived${preview.kept.findings ? `, ${preview.kept.findings} findings` : ", findings"}${preview.kept.threads ? `, ${preview.kept.threads} threads` : ", threads"} and the run log`],
         ["spend", `${usd(preview.spend.spent_usd)} stays on the ledger and in today's total`],
         ["afterwards", "Status CANCELLED. Archive it, or duplicate it as a new item. Archiving keeps the branch if it has commits that were never pushed."],
@@ -49,11 +48,7 @@ export function CancelCard({ id, anchor, onClose, onDone }: { id: string; anchor
       <div className="item-card-pop">
         <h2 className="item-pop-title">Cancel this item?</h2>
         {preview ? (
-          <dl className="item-facts">
-            {rows.map(([k, v]) => (
-              <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
-            ))}
-          </dl>
+          <EndFacts rows={rows} />
         ) : !error && <p className="item-muted">Reading what cancelling would do…</p>}
         {preview?.mr?.state === "open" && (
           <label className="item-check">

@@ -17,6 +17,8 @@ describe("iconOnlyProblem: the check every rendered button passes at the end of 
     ["an icon named but without a tooltip", '<button aria-label="Close"><svg></svg></button>', "has no tooltip"],
     ["a title is not a tooltip", '<button aria-label="Close" title="Close">×</button>', "has no tooltip"],
     ["an icon with a name and a tooltip", '<button aria-label="Close" data-tip="Close"><svg></svg></button>', null],
+    ["a link is held to the same rule", '<a href="/x" aria-label="New"><svg></svg></a>', "has no tooltip"],
+    ["a link with a name and a tooltip", '<a href="/x" aria-label="New" data-tip="New"><svg></svg></a>', null],
     ["a button with text", "<button>Save</button>", null],
     ["text beside an icon", "<button><svg></svg> Save</button>", null],
     ["a number", "<button>3</button>", null],

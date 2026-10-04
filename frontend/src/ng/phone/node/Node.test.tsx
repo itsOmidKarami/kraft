@@ -169,6 +169,18 @@ describe("the node screen (D)", () => {
     expect(where()).toBe("/work-items/w1/review?gate=plan_approval");
   });
 
+  it.each([
+    ["shows the gate's message from the frozen chain", "Approve the plan. It marks the MR ready.", true],
+    ["has no message row when the gate says nothing", undefined, false],
+  ])("PH-14: a gate's Overview %s", async (_, message, shown) => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "plan", kind: "exec" }, { id: "plan_approval", kind: "gate", ...(message && { message }) }] } });
+    mount(item("needs_you", stop("gate", { node: "plan_approval" }), { current_node_id: "plan_approval", pending_gate: "plan_approval", worker_sessions: [], materialized_chain: frozen }), "/work-items/w1/nodes/plan_approval");
+    await screen.findAllByText("gate · waiting for you", { exact: false });
+    const keys = [...document.querySelectorAll("dt")].map((d) => d.textContent);
+    expect(keys.includes("message")).toBe(shown);
+    if (message) expect(screen.getByText(message)).toBeInTheDocument();
+  });
+
   it("a skipped gate says it was skipped, not that it decides when reached (R14b-05)", async () => {
     const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
     mount(item("done"), "/work-items/w1/nodes/plan_approval", { "GET /work-items/w1/events": [200, [skipped]] });

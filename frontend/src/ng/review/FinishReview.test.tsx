@@ -67,8 +67,11 @@ describe("FinishDialog", () => {
     vi.spyOn(http, "request").mockResolvedValue({ status: 200, body: { status: "active" } });
     routed(<Finish />);
     expect(screen.getByRole("radio", { name: /Request changes/ })).toBeChecked();
+    // GR-11: at the gate, Request changes says it is a rejection, and where it goes.
+    expect(screen.getByText(/goes back to/).closest("p")).toHaveTextContent("Reject final_review · goes back to implementation");
+    expect(screen.queryByRole("button", { name: "Submit review" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Overall note" }), { target: { value: " Bound it. " } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reject to implementation" })));
     expect(vi.mocked(http.request).mock.calls.at(-1)![0]).toBe("/work-items/w1/gates/final_review/review");
     expect(body()).toEqual({ outcome: "request_changes", summary: "Bound it." });
     expect(where).toBe("/work-items/w1?sel=implementation");
@@ -114,9 +117,10 @@ describe("FinishDialog", () => {
   it("will not send request changes or a comment with nothing to send", () => {
     routed(<Finish threads={[]} />);
     expect(screen.getByText("No threads yet. Add a comment on a line or a file first.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Submit review" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject to implementation" })).toBeDisabled();
     fireEvent.click(screen.getByRole("radio", { name: /Approve/ }));
     expect(screen.getByRole("button", { name: "Submit review" })).toBeEnabled();
+    expect(screen.queryByText(/goes back to/)).toBeNull();
   });
 
   it("carries a chain revision's digest on Approve only", async () => {
@@ -127,7 +131,7 @@ describe("FinishDialog", () => {
     expect(body()).toEqual({ outcome: "approve", digest: "d1" });
     unmount();
     routed(<Finish digest="d1" />);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Submit review" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reject to implementation" })));
     expect(body()).toEqual({ outcome: "request_changes" });
   });
 

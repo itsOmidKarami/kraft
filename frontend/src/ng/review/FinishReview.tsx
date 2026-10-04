@@ -109,6 +109,8 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
   const [busy, setBusy] = useState(false);
   const toSend = drafts(threads);
   const canSend = outcome === "approve" || toSend.length > 0 || !!note.trim();
+  // At the gate, Request changes is a rejection (the review route calls reject_gate): the dialog says so, and where it goes (GR-11).
+  const rejectTo = atGate && outcome === "request_changes" ? fix?.node ?? null : null;
   const go = async () => {
     setBusy(true);
     const e = await submit(outcome, note);
@@ -124,7 +126,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
       footer={
         <>
           <Button onClick={onClose}>Keep reviewing</Button>
-          <Button variant="primary" disabled={!canSend || busy} title={canSend ? undefined : "Add a comment or a note first"} onClick={go}>Submit review</Button>
+          <Button variant="primary" disabled={!canSend || busy} title={canSend ? undefined : "Add a comment or a note first"} onClick={go}>{rejectTo ? `Reject to ${rejectTo}` : "Submit review"}</Button>
         </>
       }
     >
@@ -153,6 +155,7 @@ export function FinishDialog({ item, gate, threads, initial, submit, onClose }: 
             </label>
           ))}
         </fieldset>
+        {rejectTo && <p className="rv-muted">Reject <code>{gate}</code> · goes back to <code>{rejectTo}</code></p>}
         {error && <p className="rv-error" role="alert">{error}</p>}
       </div>
     </Dialog>

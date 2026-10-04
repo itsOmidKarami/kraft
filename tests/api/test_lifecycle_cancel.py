@@ -77,6 +77,8 @@ def test_cancel_preview_of_a_running_item_names_its_session(client, repo, monkey
 
     assert r.status_code == 200, r.text
     body = r.json()
+    started_at = body["running"].pop("started_at")
+    assert started_at, "the card says how long the attempt it would stop has run"
     assert body["running"] == {
         "node": "verification",
         "task": "verification.implement",
@@ -105,6 +107,19 @@ def test_cancel_preview_of_a_stopped_item_names_its_mr_and_what_cancel_would_kee
     assert body["kept"]["branch"] == store.branch_for(row)
     assert body["mr"] == {"ref": 1, "url": "http://fake.forge/1", "state": "open"}
     assert body["spend"]["spent_usd"] == 0.0
+
+    client.portal.call(
+        client.app.state.db.write,
+        lambda c: c.execute(
+            "UPDATE work_items SET bead_id = ?, implements_beads = ? WHERE id = ?",
+            ("kraft-own", '["kraft-impl", "kraft-own"]', wid),
+        ),
+    )
+    # The beads a hand completion would close: its own, then those it implements, none twice.
+    assert client.get(f"/api/work-items/{wid}/cancel-preview").json()["beads"] == [
+        "kraft-own",
+        "kraft-impl",
+    ]
 
 
 def test_cancel_preview_survives_a_forge_that_cannot_answer(client, repo, monkeypatch):

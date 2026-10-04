@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import * as api from "../../api";
 import type { Health } from "../../types/system";
+import { CircleAlert } from "../icons";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { Segmented } from "../ui/Segmented";
@@ -91,7 +92,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
         <div className="ng-signin-brand"><span>Kraft</span>{where && <span className="ng-signin-where">{where}</span>}</div>
         <h1>Sign in</h1>
         <p className="ng-signin-lead">Kraft listens on the network, so every browser signs in, this machine's too.</p>
-        <Field label="Password" error={locked ? null : error}>
+        <Field label="Password" error={!locked && error ? <><CircleAlert size={12} aria-hidden />{error}</> : null}>
           <input
             ref={input}
             type="password"
@@ -106,16 +107,19 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
             }}
           />
         </Field>
-        <Segmented
-          label="Stay signed in"
-          value={stay}
-          onChange={setStay}
-          disabled={locked || busy}
-          options={[
-            { value: "days", label: days != null ? `${days} days` : "Stay signed in" },
-            { value: "visit", label: "This visit only" },
-          ]}
-        />
+        <div className="ng-signin-stay">
+          <span className="field-label" aria-hidden>Stay signed in</span>
+          <Segmented
+            label="Stay signed in"
+            value={stay}
+            onChange={setStay}
+            disabled={locked || busy}
+            options={[
+              { value: "days", label: days != null ? `${days} days` : "Stay signed in" },
+              { value: "visit", label: "This visit only" },
+            ]}
+          />
+        </div>
         {locked && (
           <>
             <p className="field-error" role="timer" aria-live="off">{lockText}</p>

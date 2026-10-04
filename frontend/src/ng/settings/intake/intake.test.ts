@@ -55,6 +55,9 @@ describe("nextCheck", () => {
   const at = (m: number) => Date.parse(last) + m * 60_000;
   it.each([
     ["three minutes off", last, at(2), "next check in 3 min"],
+    ["an hour or more off", last, at(-120), "next check in 2 h"],
+    ["a day off", last, at(5 - 1440), "next check in 1 day"],
+    ["days off, not thousands of minutes", last, at(5 - 3 * 1440), "next check in 3 days"],
     ["inside the last minute", last, at(4.5), "next check in under a minute"],
     ["just past due", last, at(5.5), "next check due now"],
     ["long past due: the poller restarted since", last, at(9), null],

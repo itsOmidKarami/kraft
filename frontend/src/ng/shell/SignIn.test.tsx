@@ -62,6 +62,12 @@ describe("SignIn", () => {
     expect(sent().stay_signed_in).toBe(false);
   });
 
+  it("labels the sign-in length toggle before it", () => {
+    render(<SignIn onSignedIn={async () => {}} />);
+    const label = screen.getByText("Stay signed in", { selector: ".field-label" });
+    expect(label.compareDocumentPosition(screen.getByRole("radiogroup", { name: "Stay signed in" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("sends nothing for an empty password", async () => {
     render(<SignIn onSignedIn={async () => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -87,6 +93,7 @@ describe("SignIn", () => {
     render(<SignIn onSignedIn={async () => {}} />);
     await userEvent.type(field(), "nope{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Wrong password.");
+    expect(screen.getByRole("alert").querySelector("svg")).not.toBeNull();
     expect(field()).toHaveAttribute("aria-invalid", "true");
     expect(field().selectionStart).toBe(0);
     expect(field().selectionEnd).toBe(4);

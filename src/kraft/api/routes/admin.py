@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, Request
@@ -55,6 +56,8 @@ async def _update_state(channel: str | None, *, force: bool) -> dict:
         "installed": update.installed(),
         "latest": release.tag if release else None,
         "channel": channel,
+        # About's footer names the interpreter; here, behind the login, not on /health.
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         # An unreachable feed is not "up to date": unknown is null, not false.
         "behind": update.is_behind(release) if release else None,
         "checked_at": datetime.fromtimestamp(checked, UTC).isoformat() if checked else None,

@@ -4,7 +4,7 @@ import type { useResizable } from "../../graph/useResizable";
 import { Button } from "../../ui/Button";
 import type { Scope } from "../draft/types";
 import type { ConfigDraft } from "../draft/useConfigDraft";
-import { authoredAt, authoredNodes, liveChainId, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
+import { authoredAt, authoredNodes, liveChainId, nodeGlyph, normalise, problemsAt, resolvedAt, valueAt, type NodeA } from "../draft/view";
 import { problemText } from "../problems";
 import { Config } from "./Config";
 import { ItemYaml } from "./ItemYaml";
@@ -113,7 +113,8 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
   const tabs = d.kind === "fixloop" ? undefined : d.kind === "chain" ? TABS : TABS_YAML;
   const shownTab = tabs?.some((x) => x.value === tab) ? tab : "overview";
   const node = d.node ? (authoredNodes(r, scope).find((n) => n.id === d.node) as NodeA | undefined) : undefined;
-  const icon = FIXED_ICON[d.kind] ?? (typeof res?.icon === "string" ? res.icon : undefined);
+  const glyph = d.kind === "node" ? nodeGlyph(r, path) : undefined;
+  const icon = FIXED_ICON[d.kind] ?? (typeof res?.icon === "string" ? res.icon : glyph?.icon);
   const repos = r.impact.repos ?? [];
   const at = (el: HTMLElement) => void (anchor.current = el);
   const closeCard = () => {
@@ -211,7 +212,7 @@ export function ChainPane({ draft, scope, path, open, size, onCollapse, onExpand
       crumbs={crumbs}
       gate={d.kind === "gate"}
       icon={icon}
-      taskKind={["agent", "builtin", "subprocess", "forge"].includes(taskKind) ? (taskKind as "agent") : undefined}
+      taskKind={glyph?.taskKind ?? (["agent", "builtin", "subprocess", "forge"].includes(taskKind) ? (taskKind as "agent") : undefined)}
       title={d.kind === "chain" ? chain : d.kind === "judge" ? "judge" : d.id}
       sub={sub}
       prob={probs.length ? { msg: problemText(probs[0]) + (probs.length > 1 ? ` (+${probs.length - 1} more)` : ""), fix: probs[0].field ? `at ${probs[0].field}${probs[0].line ? `, line ${probs[0].line}` : ""}` : probs[0].line ? `line ${probs[0].line}` : undefined } : undefined}

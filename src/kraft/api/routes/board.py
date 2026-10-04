@@ -564,7 +564,7 @@ def _running_session(st, wid: str) -> dict | None:
     shows rather than the ones a signal needs."""
     s = st.db.read(
         lambda c: c.execute(
-            "SELECT s.node_id, s.hook_point, s.attempt FROM worker_sessions s "
+            "SELECT s.node_id, s.hook_point, s.attempt, s.started_at FROM worker_sessions s "
             "JOIN work_items w ON w.id = s.work_item_id "
             "WHERE s.work_item_id = ? AND s.status IN ('running', 'pending') "
             "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation') "
@@ -572,7 +572,16 @@ def _running_session(st, wid: str) -> dict | None:
             (wid,),
         ).fetchone()
     )
-    return {"node": s["node_id"], "task": s["hook_point"], "attempt": s["attempt"]} if s else None
+    return (
+        {
+            "node": s["node_id"],
+            "task": s["hook_point"],
+            "attempt": s["attempt"],
+            "started_at": s["started_at"],
+        }
+        if s
+        else None
+    )
 
 
 def _open_thread_count(st, wid: str) -> int:
@@ -611,6 +620,12 @@ async def cancel_preview(wid: str, request: Request):
         },
         "mr": mr,
         "spend": {"spent_usd": spent_usd, "cap_usd": cap_usd},
+        # The beads a hand completion closes when asked: the item's own and those it implements.
+        "beads": list(
+            dict.fromkeys(
+                b for b in (row["bead_id"], *json.loads(row["implements_beads"] or "[]")) if b
+            )
+        ),
     }
 
 

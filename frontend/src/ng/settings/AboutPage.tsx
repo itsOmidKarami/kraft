@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { BookOpen, Copy, ExternalLink, LifeBuoy } from "lucide-react";
 import * as api from "../../api";
 import { ago, elapsed } from "../../format";
-import type { Health } from "../../types";
+import type { Access, Health } from "../../types";
 import { detailOf, jsonBody, request } from "../http";
 import { Segmented } from "../ui/Segmented";
 import { showToast } from "../ui/Toast";
@@ -15,6 +15,8 @@ export interface UpdateState {
   channel: string;
   behind: boolean | null;
   checked_at: string | null;
+  /** The Python this server runs on, "3.14"; absent on an older server. */
+  python?: string;
 }
 const CHANNELS = ["stable", "rc", "beta", "alpha"].map((c) => ({ value: c, label: c }));
 const RELEASES = "https://github.com/itsOmidKarami/kraft/releases";
@@ -34,6 +36,7 @@ export function updateVerdict(u: UpdateState | null): { tone: "ok" | "warn" | "m
  *  the command to run in a terminal. */
 export function AboutPage() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [access, setAccess] = useState<Access | null>(null);
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [channel, setChannel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +58,7 @@ export function AboutPage() {
   }, []);
   useEffect(() => {
     api.getHealth().then(setHealth, () => {});
+    api.getAccess().then(setAccess, () => {});
     void load(false, null);
   }, [load]);
 
@@ -138,7 +142,7 @@ export function AboutPage() {
         <dl className="set-about-kv">
           {row("Health", <span className="set-dotted"><span className={`set-dot ${healthDot}`} aria-hidden /><span>{health ? (health.status === "ok" ? "ok · all chains and policy valid" : `degraded · ${problems} problem${problems === 1 ? "" : "s"}`) : "…"}</span></span>)}
           {problems > 0 && row("", <span className="set-hint">Open the Chains and Policy pages for the details.</span>)}
-          {row("Address", <span className="set-mono">{address || "…"}</span>)}
+          {row("Address", <><span className="set-mono">{address || "…"}</span>{access && (access.auth_required ? " · sign-in on" : " · sign-in off on localhost")}</>)}
           {health?.run_dir && row("Run directory", <span className="set-mono">{health.run_dir}</span>)}
           {process && row("Process", <span className="set-mono">{process}</span>)}
           {index && row("Search index", <span className="set-dotted"><span className={`set-dot ${indexDot}`} aria-hidden /><span className={health?.index?.errors.length ? "set-warn" : undefined}>{index}</span></span>)}
@@ -148,7 +152,7 @@ export function AboutPage() {
           <a className="set-linkrow" href={DOCS} target="_blank" rel="noopener noreferrer"><BookOpen size={16} aria-hidden /><span>Documentation</span><ExternalLink size={14} aria-hidden /></a>
           <a className="set-linkrow" href={SUPPORT} target="_blank" rel="noopener noreferrer"><LifeBuoy size={16} aria-hidden /><span>Status and support</span><ExternalLink size={14} aria-hidden /></a>
         </div>
-        <span className="set-hint">macOS and Linux. Only the latest release gets fixes.</span>
+        <span className="set-hint">macOS and Linux{update?.python && ` · Python ${update.python}`} · Only the latest release gets fixes.</span>
       </div>
     </div>
   );

@@ -128,6 +128,21 @@ describe("Chains page: the chain canvas", () => {
     expect(screen.getByRole("complementary", { name: "spec_approval pane" })).toBeInTheDocument();
   });
 
+  // CG-5: the glyph is the one the item page draws from the tasks (agent ✦, several steps layers), never the cube.
+  it("draws each node's glyph from its tasks' kinds on the canvas, in the strip and in the pane", async () => {
+    const glyph = (el: HTMLElement | null) => el?.querySelector("svg")?.getAttribute("class") ?? "";
+    mount();
+    const g = await canvas();
+    expect(glyph(within(g).getByRole("button", { name: "spec, node" }))).toContain("lucide-sparkles");
+    expect(glyph(within(g).getByRole("button", { name: "verification, node" }))).toContain("lucide-layers");
+    await userEvent.dblClick(within(g).getByRole("button", { name: "implementation, node" }));
+    const strip = await screen.findByRole("button", { name: "Back to the chain" });
+    const node = (name: string) => strip.closest(".strip")!.querySelector<HTMLElement>(`[aria-label="${name}, node"]`);
+    expect(glyph(node("spec"))).toContain("lucide-sparkles");
+    expect(glyph(node("verification"))).toContain("lucide-layers");
+    expect(glyph(screen.getByRole("complementary", { name: "implementation pane" }).querySelector<HTMLElement>(".pane-glyph"))).toContain("lucide-sparkles");
+  });
+
   it("goes into the node view on a double-click, and back on Escape", async () => {
     mount();
     const g = await canvas();

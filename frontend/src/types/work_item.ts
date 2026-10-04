@@ -187,10 +187,11 @@ export interface WorkItemStop {
 /** `GET /work-items/{id}/cancel-preview` (B4): what `POST .../cancel` would
  *  do, read-only. Additive: not read by the shipped UI yet. */
 export interface CancelPreview {
-  running: { node: string | null; task: string | null; attempt: number | null } | null;
+  running: { node: string | null; task: string | null; attempt: number | null; started_at: string | null } | null;
   kept: { branch: string; worktree: string; findings: number; threads: number };
   mr: { ref: number; url: string; state: "open" | "merged" | "closed" } | null;
   spend: { spent_usd: number; cap_usd: number | null };
+  beads: string[];
 }
 
 /** `POST /work-items/{id}/duplicate` (B3): a fresh, paused item from this

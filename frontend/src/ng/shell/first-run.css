@@ -42,7 +42,7 @@ button.fr-circle:focus-visible { outline: 2px solid var(--focus); outline-offset
 .fr-probes { align-self: stretch; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 6px; }
 .fr-probes li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; font-size: 12px; }
 .fr-probes li + li { border-top: 1px solid var(--line); }
-.fr-probes li > span:first-child { color: var(--text-sub); }
+.fr-probes li > span:first-child { color: var(--text-sub); font-family: ui-monospace, Menlo, monospace; }
 .fr-probes li > span:last-child { font-family: ui-monospace, Menlo, monospace; text-align: right; overflow-wrap: anywhere; }
 .fr-pending { color: var(--text-muted); font-style: italic; }
 .fr-cmd { align-self: stretch; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); font: 11.5px/1.5 ui-monospace, Menlo, monospace; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -1,4 +1,5 @@
 import type { KraftEvent } from "../../types";
+import { elapsed } from "../../format";
 import { taskName } from "./paths";
 
 const s = (v: unknown) => (v == null ? "" : String(v));
@@ -53,10 +54,12 @@ export type RecentLine = { e: KraftEvent; line: string };
  *  leads with what changed. A live session reads "code_review is running on verification";
  *  one that ended well drops out, the node's next line tells it; one that failed says so at
  *  its end; a gate's decision takes the place of its request; a fix round's outcome joins its start line; an escalation's turn that ends reads "escalation answered". A node's start drops
- *  once a session on it starts, and its finish takes the place of everything that ran in it. */
+ *  once a session on it starts, and its finish takes the place of everything that ran in it, with how long it ran.
+ *  A gate reads once, by its decision (CG-4), and an item's end reads once, in its last node's line. */
 export function recent(events: KraftEvent[]): RecentLine[] {
   const out: (RecentLine & { node?: string; session?: string })[] = [];
   const started = new Map<string, { node: string; task: string }>();
+  const nodeStart = new Map<string, number>();
   const drop = (keep: (x: (typeof out)[number]) => boolean) => out.splice(0, out.length, ...out.filter(keep));
   for (const e of events) {
     const p = e.payload ?? {};
@@ -74,13 +77,22 @@ export function recent(events: KraftEvent[]): RecentLine[] {
       if (at.task === "escalation") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: ok ? "escalation answered" : `escalation ${s(p.status).replaceAll("_", " ")}` });
       else if (!ok && p.status !== "paused") out.push({ e: { ...e, node_id: at.node || null }, node: at.node, line: `${at.task} ${s(p.status).replaceAll("_", " ")} on ${at.node}` });
     } else {
-      const line = eventLine(e);
+      let line = eventLine(e);
       if (!line) continue;
+      if (e.type === "node_started") nodeStart.set(node, Date.parse(e.created_at));
       // A round's outcome joins its start line; with no start left to join, it stands alone.
       const round = e.type === "fix_cycle_finished" && [...out].reverse().find((x) => x.e.type === "fix_cycle_started" && x.node === node && x.e.payload?.cycle === p.cycle);
       if (round) { round.line = line; continue; }
       const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
       if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
+      if (e.type === "node_completed") {
+        // A gate that was decided says so once: its own finish repeats the decision (CG-4).
+        if (out.some((x) => (x.e.type === "gate_approved" || x.e.type === "gate_rejected") && (s(x.e.payload?.gate) || x.node) === node)) continue;
+        const ms = Date.parse(e.created_at) - (nodeStart.get(node) ?? NaN);
+        if (ms >= 1000) line += ` · ${elapsed(ms)}`;
+      }
+      // The item's end, when its last node just finished, is that node's line.
+      if (e.type === "work_item_completed" && out.at(-1)?.e.type === "node_completed") continue;
       // A decision answers the request: the wait is over and the line that said so goes (CG-3).
       // A skip answers it too (R14b-05): the gate was passed without a decision.
       if (e.type === "gate_approved" || e.type === "gate_rejected" || e.type === "node_skipped") drop((x) => !(x.e.type === "gate_requested" && (s(x.e.payload?.gate) || x.node) === (s(p.gate) || node)));
