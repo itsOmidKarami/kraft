@@ -718,7 +718,6 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
         return real_docker_argv(cmd, cwd, sandbox, results_dir, **kw)
 
     monkeypatch.setattr(docker_backend, "docker_argv", fake_docker_argv)
-
     for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Daemon")
