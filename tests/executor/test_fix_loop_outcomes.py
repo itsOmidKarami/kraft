@@ -8,7 +8,7 @@ import shlex
 import sys
 
 import pytest
-from support.harness import entry_of, v1_node
+from support.harness import entry_of, git, v1_node
 
 from kraft import executor, store
 from kraft import policy as _policy
@@ -154,3 +154,63 @@ async def test_a_retried_node_dispatches_its_recovery_again_rather_than_reusing_
     assert await _walk_node(it) == "needs_human"
 
     assert script.calls.count("repair") == 2, script.calls
+
+
+def _commits_a_file(name):
+    code = (
+        "import subprocess; "
+        f"open({name!r}, 'w').write('x'); "
+        f"subprocess.run(['git', 'add', {name!r}], check=True); "
+        "subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', "
+        "'commit', '-qm', 'fix'], check=True)"
+    )
+    return {"id": "fix", "kind": "subprocess", "command": shlex.join([sys.executable, "-c", code])}
+
+
+@pytest.mark.parametrize(
+    ("fix_task", "committed"),
+    [
+        pytest.param(_commits_a_file("fixed.txt"), True, id="fix-commits"),
+        pytest.param(_sub("fix"), False, id="fix-changes-nothing"),
+    ],
+)
+async def test_a_finished_fix_round_records_whether_it_committed(
+    item_on, script, tmp_path, fix_task, committed
+):
+    script.real = {"check", "fix"}
+    check = _sub("check", _fails_until(tmp_path / "n", passes_on=2))
+    it = await item_on(_node(check, [{"id": "repair", "tasks": [fix_task]}]))
+
+    assert await _walk_node(it) == "ok"
+    [finished] = [e["payload"] for e in it.events("fix_cycle_finished")]
+    head = git(it.repo, "rev-parse", "HEAD")
+    assert finished == {"node_id": "build", "cycle": 1, "committed": committed, "head_sha": head}
+
+
+async def test_a_fix_round_whose_head_cannot_be_read_records_null_and_the_walk_continues(
+    item_on, script, tmp_path, monkeypatch
+):
+    script.real = {"check", "fix"}
+    gone = tmp_path / "gone"
+    fix = _sub("fix", [sys.executable, "-c", f"open({str(gone)!r}, 'w')"])
+    check = _sub("check", _fails_until(tmp_path / "n", passes_on=2))
+    it = await item_on(_node(check, [{"id": "repair", "tasks": [fix]}]))
+    real = walk._config.git_read
+
+    def git_read(cwd, *args, **kw):
+        return None if gone.exists() and args == ("rev-parse", "HEAD") else real(cwd, *args, **kw)
+
+    monkeypatch.setattr(walk._config, "git_read", git_read)
+
+    assert await _walk_node(it) == "ok"
+    [finished] = [e["payload"] for e in it.events("fix_cycle_finished")]
+    assert finished["committed"] is None and finished["head_sha"] is None
+
+
+async def test_a_refunded_fix_round_has_no_finish(item_on, script):
+    script.real = {"check"}
+    script.plan = {"fix": ["rate_limited"]}
+    it = await item_on(_node(_sub("check", ["false"]), [{"id": "repair", "tasks": [_sub("fix")]}]))
+
+    await _walk_node(it)
+    assert it.events("fix_cycle_refunded") and not it.events("fix_cycle_finished")

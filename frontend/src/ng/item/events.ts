@@ -24,6 +24,8 @@ export function eventLine(e: KraftEvent): string | null {
     case "gate_approved": return `${s(p.gate) || node} · ${p.by === "agent" || p.by === "kraft" ? "passed on its own" : "approved by you"}`;
     case "gate_rejected": return `${s(p.gate) || node} · rejected${p.note ? `: ${cut(s(p.note), 50)}` : ""}`;
     case "fix_cycle_started": return `${node} · fix loop round ${Number(p.cycle ?? 0) + 1}`;
+    // What the round did, said once it ended; recent() folds it into the round's start line. null: git could not say.
+    case "fix_cycle_finished": return `${node} · fix loop round ${Number(p.cycle ?? 0) + 1}${p.committed === true ? " · the fix committed a change" : p.committed === false ? " · the fix changed nothing" : ""}`;
     case "work_item_needs_human": return `stopped${node ? ` at ${node}` : ""}: ${cut(s(p.reason).replace(/^needs_context:\s*/, ""))}`;
     case "escalation_message": return `escalation${node ? ` on ${node}` : ""}: ${cut(s(p.message), 60)}`;
     case "pause_requested": return "paused";
@@ -50,7 +52,7 @@ export type RecentLine = { e: KraftEvent; line: string };
 /** Recent's story, newest first (WI-2): a session's start and end fold into one line that
  *  leads with what changed. A live session reads "code_review is running on verification";
  *  one that ended well drops out, the node's next line tells it; one that failed says so at
- *  its end; a gate's decision takes the place of its request; an escalation's turn that ends reads "escalation answered". A node's start drops
+ *  its end; a gate's decision takes the place of its request; a fix round's outcome joins its start line; an escalation's turn that ends reads "escalation answered". A node's start drops
  *  once a session on it starts, and its finish takes the place of everything that ran in it. */
 export function recent(events: KraftEvent[]): RecentLine[] {
   const out: (RecentLine & { node?: string; session?: string })[] = [];
@@ -74,6 +76,9 @@ export function recent(events: KraftEvent[]): RecentLine[] {
     } else {
       const line = eventLine(e);
       if (!line) continue;
+      // A round's outcome joins its start line; with no start left to join, it stands alone.
+      const round = e.type === "fix_cycle_finished" && out.find((x) => x.e.type === "fix_cycle_started" && x.node === node && x.e.payload?.cycle === p.cycle);
+      if (round) { round.line = line; continue; }
       const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
       if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
       // A decision answers the request: the wait is over and the line that said so goes (CG-3).

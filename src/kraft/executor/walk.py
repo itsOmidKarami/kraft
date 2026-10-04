@@ -1573,6 +1573,7 @@ async def _walk_node_once(
         )
         instruction += prompts.round_history_note(history, dispatch.regressed_fingerprints(history))
         instruction += prompts.previous_attempt_note(previous_fix)
+        head_before = _config.git_read(Path(worktree), "rev-parse", "HEAD")
         # The fix loop is an ordered shape of its own (`fix-loop-supports-one-
         # ordered-repair-shape`), so the repair runs through the same steps
         # walk every other group does rather than one hardcoded task.
@@ -1620,6 +1621,22 @@ async def _walk_node_once(
                 )
             )
             return "needs_human"
+        # After the refund check: a refunded round's number is reused by the
+        # next one, so only a genuine attempt gets a finish to pair with its start.
+        head_after = _config.git_read(Path(worktree), "rev-parse", "HEAD")
+        finished = {
+            "node_id": node.id,
+            "cycle": count,
+            "committed": None
+            if head_before is None or head_after is None
+            else head_after != head_before,
+            "head_sha": head_after,
+        }
+        await db.write(
+            lambda c, finished=finished: events.append(
+                c, work_item_id, "fix_cycle_finished", finished
+            )
+        )
         round = count
         _first_iteration = False
 
