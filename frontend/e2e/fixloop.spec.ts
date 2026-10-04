@@ -43,7 +43,11 @@ function sessions() {
     session("verification.fix_loop.main.repair", 2, "done", { wall_ms: 290_000, model: "sonnet" }),
     session("verification.fix_loop.judge", 1, "done", { wall_ms: 31_000, model: "sonnet" }),
   ];
-  return { worker_sessions: [...rest, ...scopes.map((x) => x.s)], scope_runs: scopes.map((x) => x.r) };
+  // In the order a round really goes: the repair into it, its lint, its scopes, then the judge after it.
+  const all = [...rest, ...scopes.map((x) => x.s)];
+  const step = (h: string) => (h.includes("repair") ? 0 : h.includes("lint") ? 1 : h.includes("judge") ? 3 : 2);
+  for (const x of all) x.created_at = `2026-09-13T09:${String(10 + x.round * 5 + step(x.hook_point)).padStart(2, "0")}:00Z`;
+  return { worker_sessions: all, scope_runs: scopes.map((x) => x.r) };
 }
 
 /** One finished item serves both tests: the server runs one at a time, and a second item is only a second wait. */

@@ -177,9 +177,21 @@ describe("a fix loop that started over", () => {
     expect(loopRounds(escalated, node)).toEqual({ latest: 2, total: 3 });
   });
 
-  it("shows the re-measure after on_failure (round -1) in round 1, the latest run of the task", () => {
-    const recovered = looped({ worker_sessions: [s("verification.checks.lint", { round: 0, status: "failed" }), s("verification.checks.lint", { round: -1, attempt: 2 })] });
-    expect(loopRounds(recovered, node)).toEqual({ latest: 1, total: 3 });
-    expect(states(nodeGraph(recovered, node, NOW))[0]).toBe("lint:done");
+  it("shows the re-measure after on_failure (round -1) in the round it followed, the latest run of the task", () => {
+    const at = (round: number) => [s("verification.checks.lint", { round, status: "failed" }), s("verification.checks.lint", { round: -1, attempt: 2 })];
+    // The first round's, on a fresh entry; a later round's when the node was entered again with the counter at 2.
+    const first = looped({ worker_sessions: at(0) });
+    expect(loopRounds(first, node)).toEqual({ latest: 1, total: 3 });
+    expect(states(nodeGraph(first, node, NOW))[0]).toBe("lint:done");
+    const again = looped({ worker_sessions: [...LOOP_RUN.slice(0, 5), ...at(2)] });
+    expect(loopRounds(again, node)).toEqual({ latest: 3, total: 3 });
+    expect(states(nodeGraph(again, node, NOW, undefined, 2))[0]).toBe("lint:failed");
+    expect(states(nodeGraph(again, node, NOW))[0]).toBe("lint:done");
+  });
+
+  it("keeps the rounds before a fix cycle that was paused and refunded, which measures a round it had already measured", () => {
+    const resumed = looped({ worker_sessions: [...LOOP_RUN, s("verification.checks.lint", { round: 1, attempt: 3, status: "running", wall_ms: null })] });
+    expect(loopRounds(resumed, node)).toEqual({ latest: 2, total: 3 });
+    expect(passOf(resumed, "verification")).toHaveLength(LOOP_RUN.length + 1);
   });
 });

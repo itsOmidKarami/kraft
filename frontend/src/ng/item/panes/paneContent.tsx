@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, roundOf, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -221,7 +221,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const rounds = !esc && !rev ? loopRounds(item, node) : undefined;
   const r = rounds && a.round;
   const all = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
-  const sessions = r ? all.filter((s) => roundOf(s) === (loop === "repair" ? r : r - 1)) : all;
+  const sessions = r ? all.filter((s) => s.round === (loop === "repair" ? r : r - 1)) : all;
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
   const frozen = materialized(item);

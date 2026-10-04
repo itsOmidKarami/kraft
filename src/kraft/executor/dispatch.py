@@ -759,7 +759,8 @@ def scope_runs(
     with no session, while the run `live`s on; `selected` marks every entry of a round that recorded
     its picks, so what it dropped is known before it ends. Only the latest dispatch of a repository
     and round counts: its picks, and the sessions after them. A command it picked that never started
-    (an area's setup failed, a stop ended the loop) is not pending once the run has moved on.
+    (an area's setup failed, a stop ended the loop) is not pending once the run has moved on, to the
+    node's next round or past the node.
 
     `scope_results` says the same for the latest run only. This is what a node's view reads to draw
     each round's scopes beside the one before it: which repository ran which scope, and which scope
@@ -831,9 +832,11 @@ def scope_runs(
         out.append(entry)
     # What a round picked and has not started: no session yet, so nothing but the command.
     started = {(r["repository"], r["round"], r["command"]) for r in rows}
+    # Only a repository's newest round can still start what it picked; the loop went on past the rest.
+    newest = {repo: max(n for r, n in picked if r == repo) for repo, _ in picked}
     for (repo, rnd), (_, commands) in picked.items():
         for command in commands:
-            if live and (repo, rnd, command) not in started:
+            if live and rnd == newest[repo] and (repo, rnd, command) not in started:
                 out.append(
                     {
                         "session_id": None,

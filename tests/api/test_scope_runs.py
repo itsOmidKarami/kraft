@@ -155,6 +155,25 @@ def test_detail_scope_runs_leaves_no_command_pending_once_the_walk_has_moved_on(
     assert _runs(client, wid) == [("s0", "ws", 0, "fe-cmd", False, None)]
 
 
+def test_detail_scope_runs_leaves_nothing_pending_in_a_round_the_loop_went_on_past_or_a_stop_ended(
+    client, repo, tmp_path
+):
+    wid = _verified_item(client, repo, tmp_path, [])
+    _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
+    _session(tmp_path, wid, "s0", "fe-cmd", "failed")
+    _picks(wid, "ws", 1, ["fe-cmd"])
+    # Round 1 is the newest, so it alone can still start what it picked; round 0's failure is history.
+    assert _runs(client, wid) == [
+        ("s0", "ws", 0, "fe-cmd", False, None),
+        (None, "ws", 1, "fe-cmd", None, True),
+    ]
+
+    # A stop leaves the walk's place on the node but ends the loop.
+    _run(lambda c: c.execute("UPDATE work_items SET status = 'needs_human' WHERE id = ?", (wid,)))
+
+    assert _runs(client, wid) == [("s0", "ws", 0, "fe-cmd", False, None)]
+
+
 def test_detail_scope_runs_calls_every_way_of_not_finishing_a_pass_a_fail(client, repo, tmp_path):
     """`passed` is None only while a command has not finished: a capped or refused one has."""
     wid = _verified_item(client, repo, tmp_path, [])

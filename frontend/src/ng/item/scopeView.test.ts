@@ -24,6 +24,14 @@ describe("scopesView", () => {
     expect(scopesView(it, PATH, 1, NOW).rows.map((r) => [r.id, r.name, r.state, r.chips.length])).toEqual([["ws", "ws", "done", 1]]);
   });
 
+  it("reads a re-measure after on_failure (round -1) as the round it followed, and lists a workspace's repositories before anything has run", () => {
+    const first = run(null, "just test-a", 0, "failed", { order: 0 });
+    const again = run(null, "just test-a", -1, "done", { order: 0 });
+    again[1].created_at = "2026-09-13T10:09:30Z";
+    expect(names(scopesView(item([first, again]), PATH, 1, NOW))).toEqual([["just test-a", "done", "24s", false]]);
+    expect(scopesView(item([], { materialized_chain: chain("sequential", WORKSPACE) }), PATH, 1, NOW).rows.map((r) => r.id)).toEqual(["ws", "pkg", "web"]);
+  });
+
   it("lists repositories in fan-out order, root first, and a repository after a failure is not reached", () => {
     const it = item([run("ws", "just test-api", 0, "done", { order: 0 }), run("pkg", "just test-pkg", 0, "failed", { order: 0 })], { materialized_chain: chain("sequential", WORKSPACE) });
     const v = scopesView(it, PATH, 1, NOW);

@@ -13,28 +13,34 @@ export const AUTO_REVIEW = "auto_review";
 export const isEscalation = (s: WorkerSession) => s.hook_point === ESCALATION || s.hook_point.endsWith(`.${ESCALATION}`);
 const LIVE = new Set(["running", "pending", "rate_limited", "waiting", "needs_context"]);
 
-/** The round a session reads in, 0-based. A re-measure after `on_failure` is stamped -1 (`walk._REPAIR_ROUND`): it is the first round's. */
-export const roundOf = (s: WorkerSession) => Math.max(s.round, 0);
-
-/** A node's sessions in the pass it is on, oldest first. A retry or a base change restarts a fix loop at round 0, so a
- *  round below the highest seen starts a new pass (`node_started` fires per measurement and cannot tell). A -1 round starts nothing. */
+/** A node's sessions in the pass it is on, oldest first, each with the round it reads in. A retry or a base change
+ *  restarts a fix loop at round 0, so a measurement below the highest one seen starts a new pass (`node_started` fires
+ *  per measurement and cannot tell). The loop's own repair and judge never count: a fix cycle that was paused and
+ *  refunded is measured again at a round below the repair it follows. A negative round (the re-measure after `on_failure`,
+ *  `walk._REPAIR_ROUND`) starts nothing and reads in the round of the session before it. */
 export function passOf(item: ItemDetail, node: string): WorkerSession[] {
   const all = item.worker_sessions.filter((s) => s.node_id === node && !isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
   let from = 0;
   let top = 0;
-  all.forEach((s, i) => {
-    if (s.round < 0) return;
-    if (s.round < top) from = i;
-    top = s.round;
+  let last = 0;
+  const read = all.map((s, i) => {
+    if (s.round >= 0) {
+      last = s.round;
+      if (!s.hook_point.startsWith(`${node}.${FIX_LOOP}.`)) {
+        if (s.round < top) from = i;
+        top = s.round;
+      }
+    }
+    return s.round < 0 ? { ...s, round: last } : s;
   });
-  return all.slice(from);
+  return read.slice(from);
 }
 
 /** A task path's sessions in the node's current pass, attempt order (the attempt switcher's list). */
 export function sessionsOf(item: ItemDetail, path: string): WorkerSession[] {
   const all = item.worker_sessions.filter((s) => s.hook_point === path);
-  const pass = all[0] && !isEscalation(all[0]) ? new Set(passOf(item, all[0].node_id)) : undefined;
-  return all.filter((s) => !pass || pass.has(s)).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
+  const pass = all[0] && !isEscalation(all[0]) ? new Map(passOf(item, all[0].node_id).map((s) => [s.id, s])) : undefined;
+  return all.flatMap((s) => (pass ? (pass.get(s.id) ?? []) : s)).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
 }
 /** The node's escalation turns, oldest first. */
 export const escalationsOf = (item: ItemDetail, node: string) => item.worker_sessions.filter((s) => s.node_id === node && isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -76,7 +82,7 @@ export const JUDGE = "judge";
 export function loopRounds(item: ItemDetail, node: ApiNode): { latest: number; total?: number } | undefined {
   if (!node.fix_loop) return;
   const own = new Set(stepsOf(node).steps.flatMap((st) => st.tasks));
-  const ran = passOf(item, node.id).filter((s) => own.has(s.hook_point)).map((s) => roundOf(s) + 1);
+  const ran = passOf(item, node.id).filter((s) => own.has(s.hook_point)).map((s) => s.round + 1);
   if (!ran.length) return;
   const m = materialized(item);
   const max = m ? Number(attemptsAt(m, node.id, item.policy_override)?.value) : NaN;
@@ -106,7 +112,7 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
     tasks: st.tasks.map((path): GraphItem => {
       const ss = sessionsOf(item, path);
       // In a fix-loop node the round says which run this is; a count of runs across rounds would badge every task.
-      const last = shown ? ss.filter((s) => roundOf(s) === shown - 1).at(-1) : ss.at(-1);
+      const last = shown ? ss.filter((s) => s.round === shown - 1).at(-1) : ss.at(-1);
       // The scopes of a changed-test-scope task are sessions of it too, but not attempts: no count on its box.
       return { id: taskName(path), taskKind: taskKindAt(frozen, path) ?? (ss.some((s) => s.model) ? "agent" : undefined), attempt: shown || isScopeTask(item, path) ? undefined : last?.attempt, ...sessionLook(last, now) };
     }),
@@ -146,14 +152,14 @@ function loopOf(item: ItemDetail, node: ApiNode, own: ReturnType<typeof loopPath
   });
   // The repair that went between this round and the next, stamped with the next one's index.
   const repair = own.repair.map((path) => {
-    const run = sessionsOf(item, path).filter((s) => roundOf(s) === round).at(-1);
+    const run = sessionsOf(item, path).filter((s) => s.round === round).at(-1);
     const g = task(path, run, repairIdle(round, rounds.total, judgeStop));
     // The prototype says what became of it: "done · 5m".
     return run?.status === "done" && g.meta ? { ...g, meta: `done · ${g.meta}` } : g;
   });
   const tasks = [...repair];
   if (own.judge) {
-    const run = sessionsOf(item, own.judge).filter((s) => roundOf(s) === round - 1).at(-1);
+    const run = sessionsOf(item, own.judge).filter((s) => s.round === round - 1).at(-1);
     const done = run?.status === "done";
     // The judge draws as the scales, as the prototype has it; the repair keeps its task kind's.
     tasks.push(task(own.judge, run, round === 1 ? "skipped · first repair" : "not yet", { icon: "scale", ...(done && verdict ? { meta: judgeStop ? "stop" : verdict.split("_")[0], ...(judgeStop && { state: "failed" as const }) } : {}) }));
