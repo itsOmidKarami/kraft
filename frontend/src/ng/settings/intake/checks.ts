@@ -27,7 +27,12 @@ export function nextCheck(last: string | undefined, interval_s: number, now: num
   const ms = at + interval_s * 1000 - now;
   if (ms <= -60_000) return null;
   if (ms <= 60_000) return ms <= 0 ? "next check due now" : "next check in under a minute";
-  return `next check in ${Math.ceil(ms / 60_000)} min`;
+  const min = Math.ceil(ms / 60_000);
+  const h = Math.round(min / 60);
+  if (min < 60) return `next check in ${min} min`;
+  if (h < 24) return `next check in ${h} h`;
+  const d = Math.round(min / 1440);
+  return `next check in ${d} day${d === 1 ? "" : "s"}`;
 }
 
 export const hhmm = (at: string) => {
