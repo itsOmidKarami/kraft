@@ -130,7 +130,8 @@ describe("the node screen (D)", () => {
     await screen.findByRole("heading", { level: 1, name: "verification" });
     const facts = document.querySelector(".ph-facts")!;
     const row = (k: string) => within(facts as HTMLElement).getByText(k).nextElementSibling!.textContent;
-    expect(row("fix loop")).toBe("round 2 of 3");
+    // Three fix attempts after the first pass: four rounds, as the desktop counts them (R17b-01).
+    expect(row("fix loop")).toBe("round 2 of 4");
     expect(row("wall")).toBe("about 12m of 45m");
     expect(row("on failure")).toBe("repair pass, once");
   });
