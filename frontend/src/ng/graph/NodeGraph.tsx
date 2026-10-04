@@ -141,7 +141,13 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
     const key = roving.active;
     if (!key || !(e.target as Element).closest(".graph-node, .step-label, .scope-chip, .scope-task")) return;
     if (e.key.startsWith("Arrow")) { e.preventDefault(); roving.go(move(key, e.key)); }
-    else if (e.key === "Enter") { e.preventDefault(); (e.metaKey || e.ctrlKey ? onExpand : onOpen)?.(parse(key)); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      // A scope chip opens its scope, as Space and a click do.
+      const at = parse(key);
+      if (at.scope && !(e.metaKey || e.ctrlKey)) onScope?.(at.scope);
+      else (e.metaKey || e.ctrlKey ? onExpand : onOpen)?.(at);
+    }
   };
   const onClick = (e: MouseEvent) => {
     if (!(e.target as Element).closest("button, .step-frame, .scope-frame")) onBackground?.();

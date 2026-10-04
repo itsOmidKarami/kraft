@@ -74,13 +74,13 @@ export function overrideWords(item: ItemDetail, node: string): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
-/** "round 2 of 3": the round a looping node is in, of the attempts it is allowed; the item's own count (a node override, then its policy) outranks the chain's. */
+/** "round 2 of 4": the round a looping node is in, of the rounds it is allowed (its fix attempts plus the first pass, as the desktop counts them); the item's own count (a node override, then its policy) outranks the chain's. */
 export function fixLoopWords(item: ItemDetail, node: ApiNode): string | null {
   if (!node.fix_loop) return null;
   const m = materialized(item);
   const max = item.node_overrides?.[node.id]?.attempts ?? (m ? attemptsAt(m, node.id, item.policy_override)?.value : null);
   const rounds = Math.max(0, ...passOf(item, node.id).map((s) => s.round));
-  return rounds ? `round ${rounds + 1}${max != null ? ` of ${max}` : ""}` : `not looped${max != null ? ` · up to ${max} attempts` : ""}`;
+  return rounds ? `round ${rounds + 1}${max != null ? ` of ${Number(max) + 1}` : ""}` : `not looped${max != null ? ` · up to ${max} attempts` : ""}`;
 }
 
 /** "about 12m of 45m": how long the node has been going against its wall-clock cap; null with no cap or before it started. */

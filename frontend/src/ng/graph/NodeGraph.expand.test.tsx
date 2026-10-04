@@ -89,6 +89,10 @@ describe("NodeGraph with a task open", () => {
     const f = frame()!;
     await user.click(within(f).getByRole("button", { name: "b/**, done" }));
     expect(cb.onScope).toHaveBeenCalledWith("ws:b/**");
+    // Enter on the focused chip opens its scope too, not the task (R17b-02).
+    cb.onScope.mockClear();
+    await user.keyboard("{Enter}");
+    expect(cb.onScope).toHaveBeenCalledWith("ws:b/**");
     await user.click(within(f).getByRole("button", { name: "test_changed_scopes" }));
     expect(cb.onSelect).toHaveBeenCalledWith({ step: "tests", task: "test_changed_scopes" });
     await user.click(within(f).getByRole("button", { name: /close/ }));
@@ -119,6 +123,7 @@ describe("NodeGraph with a task open", () => {
       render(<NodeGraph name="v" steps={steps} expand={expand} />);
       const row = frame()!.querySelector<HTMLElement>(".scope-chips")!;
       expect(row).toHaveClass("is-more");
+      expect(row).toHaveAttribute("tabindex", "-1");
       row.scrollLeft = 400;
       row.dispatchEvent(new Event("scroll"));
       return waitFor(() => expect(row).not.toHaveClass("is-more"));

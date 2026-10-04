@@ -45,7 +45,8 @@ function ChipRow({ fork, children }: { fork: boolean; children: ReactNode }) {
     ro?.observe(node);
     return () => { node.removeEventListener("scroll", look); ro?.disconnect(); };
   });
-  return <div ref={el} className={`scope-chips${fork ? " is-fork" : ""}${more ? " is-more" : ""}`}>{children}</div>;
+  // tabIndex -1: the chips rove with the arrows, so the scrolling row is no Tab stop of its own (R17b-03).
+  return <div ref={el} tabIndex={-1} className={`scope-chips${fork ? " is-fork" : ""}${more ? " is-more" : ""}`}>{children}</div>;
 }
 
 /** The changed-test-scope task open: a frame with one row per repository, in the order the task visits them, and
