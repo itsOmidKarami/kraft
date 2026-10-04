@@ -1,8 +1,6 @@
 ---
 name: handoff
-description: Use when work agreed in this session should be handed to Kraft instead of
-  done here - after a spec and plan are settled, when the task is too big for this
-  session, or when the current repo needs connecting to Kraft first.
+description: "Files work with Kraft as a paused work item, with any agreed spec and plan attached. Use when work settled in this session should be handed to Kraft instead of done here, or the task is too big for this session. Connecting a new repo belongs to kraft:onboard, the inline-or-Kraft decision to kraft:prepare."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -16,7 +14,9 @@ Kraft runs semi-autonomous work items as chains, with human gates. Hand work off
 rather than doing it inline when it is large enough to want that structure.
 
 1. `ensure_repo()` - connects the current repo if Kraft has not seen it.
-   Idempotent, so call it every time rather than checking first.
+   Idempotent, so call it every time rather than checking first. For a repo
+   that is new to Kraft, `kraft:onboard` covers confirming the test and setup
+   commands it proposes.
 2. `create_work_item(title, description=...)` - files the work. The title is a
    label; the description is the brief, and it is what the spec node writes its
    design from. Put the intent in the description rather than packing it into
@@ -51,12 +51,14 @@ changes nothing. If the spec or plan changes before the item starts, revise it
 in place with `set_attachments(spec=..., work_item_id=...)` (or `kraft item
 set-attachments`) instead of filing the item again. If `create_work_item`
 answers with a `duplicate_warning`, an open item already has that title or
-implements the same bead (an issue in the optional beads tracker): tell the user, and don't file a third.
+implements the same bead (an issue in the optional beads tracker): tell the
+user, and don't file a third. A `repo_warning` in the answer means the repo
+will stop the item once started: pass it on to the user.
 
 Before attaching a plan, skim it for a full-test-suite step (e.g. "run the
 full test suite" / "run all tests" as a task, not a task's own targeted test).
-The chain's `verify` node already runs the suite after every task with its own
-fix loop, so a plan step doing the same is redundant. If you see one, mention
+The chain's verification node already runs the suite after implementation,
+with its own fix loop, so a plan step doing the same is redundant. If you see one, mention
 to the user that it's not advised and offer to strip it before attaching.
 
 ## Confirm it landed

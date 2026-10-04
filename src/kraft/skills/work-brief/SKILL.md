@@ -1,6 +1,6 @@
 ---
 name: work-brief
-description: "Use when the pre-draft gate needs a page for the human."
+description: "Writes the work brief a human reads at the pre-draft gate to decide whether the locally finished work becomes a draft merge request. Use when a chain task produces the work_brief, after implementation, tests and local review and before any merge request is opened."
 ---
 
 # The work brief
@@ -35,7 +35,7 @@ line; do not drop it.
 1. **What was asked.** The title, plus the spec and plan by path. Do not
    restate them.
 2. **What changed.** The files and the scale (files touched, lines added and
-   removed), and in a sentence or two what the change does. Not the diff.
+   removed), and in a sentence or two what the change does.
 3. **What was verified.** Which test scopes ran and what they reported on the
    last round. If a round was red and a repair turned it green, say so.
 4. **What the review found, and what was done about it.** Each finding the

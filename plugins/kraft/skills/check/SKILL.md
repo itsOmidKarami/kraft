@@ -1,6 +1,6 @@
 ---
 name: check
-description: "Use when a repo's Kraft config may have drifted from what this Kraft version ships, or after a Kraft upgrade."
+description: "Reports where a repo's Kraft config has drifted from what this Kraft version ships: chains that no longer resolve, nodes and capabilities the live config lacks, a missing setup command, skills a chain names that are not installed. Use after a Kraft upgrade or when chains or the library look stale; a server that is unhealthy is kraft:doctor."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -11,9 +11,10 @@ connection error.
 # Checking a repo's Kraft config
 
 Run `kraft admin templates lint` and `kraft admin doctor`. Between them they
-carry the drift this skill exists to narrate:
+carry the drift this skill exists to narrate. Doctor rows not listed here (the
+server, the MCP token) are `kraft:doctor`'s; say so rather than diagnosing them.
 
-- **lint** - every chain in `~/.kraft/config/chains/` that does not resolve
+- `lint` - every chain in `~/.kraft/config/chains/` that does not resolve
   against `library.yaml`, each with its reason: a reference to a component that
   isn't declared, a component extending one of another kind, a policy a chain
   widens past `policy.yaml`. It exits 1 on any error. A chain that does not

@@ -1,6 +1,6 @@
 ---
 name: start
-description: "Use when the human asks to begin new work under Kraft Lite."
+description: "Creates a new Kraft Lite chain for the work and hands it to the first node. Use when the human asks to begin new work under Kraft Lite; continuing an existing chain is `kraft-lite:next`."
 ---
 
 # Starting a chain
@@ -12,23 +12,25 @@ rerun `kraft-lite:init` or edit the registry.
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --title "<the work>"
 
+`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
+is two directories above this file - use that path instead of an empty one.
+
 To run a chain other than the packaged default, add `--chain <path-to-chain.json>`.
 The template is frozen against this run, so editing that file later does not
 retarget a chain already in flight.
 
-It prints the chain id and which backend holds the state (`bd`, or a JSONL file
-under `.kraft-lite/`). Say both, so the human knows where their state lives and
-which chain is theirs.
+It prints the chain id and which backend holds the state, for example
+`{"chain_id": "<id>", "backend": "jsonl"}`. The backend is `bd`, or `jsonl` for a
+file under `.kraft-lite/`. Say both, so the human knows where their state lives
+and which chain is theirs.
 
 Carry that id. Every later verb in this chain takes `--chain-id <id>`, and a
 directory holding two unfinished chains refuses to guess between them.
 
 Confirm the chain exists: `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>`
 should report the first node (`spec`, in the packaged chain) as `open`, not
-`unstarted`.
+`unstarted`. If it reports `unstarted` or refuses the id, the id or the directory
+is wrong; do not start a second chain to compensate.
 
 Then invoke `kraft-lite:next`. Starting a chain and stopping before the first node
 leaves the human with a state file and nothing running.
-
-`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
-is two directories above this file - use that path instead of an empty one.

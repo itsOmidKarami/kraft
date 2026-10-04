@@ -1,6 +1,6 @@
 ---
 name: mr-metadata-repair
-description: "Use when a merge request's CI wait failed and the trace names a label."
+description: "Repairs a merge request's metadata, such as a missing or wrong label, so its checks can pass. Kraft runs it as the on_failure repair of the merge request's CI wait, when the failed job's trace names a label."
 ---
 
 # Repairing a merge request's metadata
@@ -8,11 +8,9 @@ description: "Use when a merge request's CI wait failed and the trace names a la
 The merge request's CI wait just failed. Its diagnosis — the failed job's name
 and the tail of its trace — is already in the prompt above.
 
-**How many passes you get is the chain's decision, not this skill's**, and the
-prompt tells you which attempt this is. Fix what you can see and exit; the CI
-wait runs again and decides whether it worked. Do not guess twice inside one
-pass on the strength of having only one — the seeded chain's repair loop allows
-three.
+**Whether another pass follows is the chain's decision, not this skill's.** Fix
+what you can see and exit; the CI wait runs again after you and decides whether
+it worked. Do not apply a second guess in the same pass to hedge the first.
 
 ## When the trace names a missing or wrong label
 
@@ -26,11 +24,11 @@ worse than stopping to ask. If the diff does not make the choice obvious,
 leave it: reporting "I could not tell which of these labels this change
 takes" is correct output; a guess is not.
 
-Apply your choice with the `set_mr_labels` tool (`kraft item mr-label
-<label>...` from the shell works the same way) — not `glab`/`gh` directly. It
-re-creates the pipeline too: `CI_MERGE_REQUEST_LABELS` is fixed when a
-pipeline starts, so a label applied after the fact needs a new pipeline to be
-seen at all, and this is what makes that happen.
+Apply your choice with the `set_mr_labels` tool of the `kraft` MCP server
+(`kraft item mr-label <label>...` from the shell works the same way) — not
+`glab`/`gh` directly. It re-creates the pipeline too: `CI_MERGE_REQUEST_LABELS`
+is fixed when a pipeline starts, so a label applied after the fact needs a new
+pipeline to be seen at all, and this is what makes that happen.
 
 ## When the trace names something else
 
@@ -40,7 +38,7 @@ fix, do nothing: the CI wait runs again after you, fails the same way, and once
 the chain's repair attempts are spent the item stops for a human with the same
 diagnosis you would only be repeating.
 
-## Diagnosing a merge conflict
+## When the pipeline reports a merge conflict
 
 The CI wait already asks the forge itself whether this branch can merge and
 puts the answer in its own log line (`merge request is not mergeable:
@@ -48,8 +46,8 @@ conflict`, or similar) — you do not need to re-derive that by hand. Do not
 check out another branch or attempt a local `git merge` to look for
 conflicts yourself: this worktree is the item's own, the next task after you
 resolves the merge request from whatever branch is checked out, and a merge
-left mid-conflict when your pass ends strands it there. If
-you need more than the log line gives you, use a read-only command that does
+left mid-conflict when your pass ends strands it there. If you need more than
+the log line gives you, use a read-only command that does
 not change what is checked out (`git merge-tree`, `git log`, `glab mr
 diff`) — and in any case there is nothing this task can do about a real
 conflict; say so and stop, the same as any other non-label failure.

@@ -1,6 +1,6 @@
 ---
 name: plan
-description: "Use when a work item's spec is approved and the chain needs its implementation plan."
+description: "Writes the implementation plan for a work item from its human-approved spec, as small independently reviewable tasks. Kraft runs it at the plan_author task, after the spec gate and before implementation. Use when a chain needs that plan written or revised."
 ---
 
 # Writing a plan, headless
@@ -26,7 +26,9 @@ than rewriting the whole thing to look new.
 
 ## What the plan contains
 
-A list of tasks. A task is the smallest unit that carries its own test cycle
+A list of tasks, each under a `### Task N: title` heading numbered from 1: Kraft
+counts those headings to report progress and to tell the implementer how many
+tasks there are. A task is the smallest unit that carries its own test cycle
 and is worth a fresh reviewer's gate. Fold setup, configuration and
 documentation into the task whose deliverable needs them. Split only where a
 reviewer could reject one task and approve its neighbour.

@@ -1,16 +1,21 @@
 ---
 name: init
-description: "Use when `.kraft-lite/registry.yaml` is missing or stale in a repo about to run a Kraft Lite chain."
+description: "Writes `.kraft-lite/registry.yaml`, which binds each hook of a Kraft Lite chain to an installed skill, an instruction, or the repo's own test and CI commands. Use when that file is missing or stale (a hook has no binding) in a repo about to run a chain; `kraft-lite:start` sends you here when it is missing."
 ---
 
 # Setting up Kraft Lite in this repo
 
-If `.kraft-lite/registry.yaml` already exists, show the human a diff and ask; do
-not overwrite one they have edited.
+`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
+is two directories above this file - use that path instead of an empty one.
+
+If `.kraft-lite/registry.yaml` already exists, build the new one, show the human a
+diff against it, and ask; do not overwrite one they have edited.
 
 Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" detect` from the repo root. It prints the
 test command (`test_command`) and CI status command (`ci_command`) it found and,
-for each hook, every installed skill that plausibly serves it.
+for each hook, every installed skill that plausibly serves it. For a chain other
+than the packaged default, add `--chain <path-to-chain.json>` so the hooks listed
+are that chain's.
 
 Write `.kraft-lite/registry.yaml` from that output. Fill every hook in. For each
 one, add a comment listing the other candidates detect returned, so the human can
@@ -30,11 +35,17 @@ Rules for filling it in:
 - None: write `kind: prompt` with a one-line instruction describing the node's
   job. The chain still runs.
 - `on.test.run` and `on.ci.poll` are `kind: subprocess` — but only when detect
-  found a command for them. Use `test_command` and `ci_command` verbatim. Either
-  one being `null` means `kind: prompt` instead: for `on.ci.poll`, an instruction
-  to report the pipeline's state once, by whatever means this repo has. Never
-  write a command detect did not report — a binding that cannot run here reads as
-  finished until the node fails.
+  found a command for them. Use `test_command` and `ci_command` verbatim as the
+  entry's `command`:
+
+      on.test.run:
+        kind: subprocess
+        command: [just, test]
+
+  Either one being `null` means `kind: prompt` instead: for `on.ci.poll`, an
+  instruction to report the pipeline's state once, by whatever means this repo
+  has. Never write a command detect did not report — a binding that cannot run
+  here reads as finished until the node fails.
 
 Every `skill` entry gets a `prompt` sibling. A renamed or uninstalled skill then
 degrades to an instruction instead of stopping the chain.
@@ -44,6 +55,3 @@ the file with an indented body under it. `kraft-lite:start` refuses a chain whos
 hooks lack a binding, so a gap surfaces there, but catching it now is cheaper.
 
 Then print the path and say it is meant to be edited and committed.
-
-`$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
-is two directories above this file - use that path instead of an empty one.

@@ -1,14 +1,14 @@
 ---
 name: fix-loop-judge
-description: "Use when a fix loop has run at least one cycle and Kraft asks whether another is worth spending."
+description: "Judges whether a fix loop's next cycle is still worth spending, from the trend of findings across rounds and the budget used, and reports continue, stop_needs_human or stop_downgrade. Use when Kraft asks it after a fix loop's first cycle, before each further one; it neither reviews nor fixes code."
 ---
 
 # Judging a fix loop mid-run
 
 You are not reviewing code and you are not fixing anything. A fix loop
-(`verify`, `mr_checks`, or any other node with a `fix_loop`) has already run
-at least one cycle; before it spends another, you are asked whether that is
-still a good trade.
+(a node with a `fix_loop`, such as `verification` or `merge_request_feedback`
+in the seeded chain) has already run at least one cycle; before it spends
+another, you are asked whether that is still a good trade.
 
 Your task instruction already carries what you judge from: every round's
 eligible findings (with a fingerprint stable across rounds -- the same tag
@@ -32,8 +32,8 @@ reasoning; it is not evidence about whether the code moved.
   fixed. A loop that cleared every `critical` finding and has one
   `important` naming nit left recurring is a different call than one still
   chasing a `critical` security hole.
-- **Cost already spent vs cap remaining.** A loop three cycles into a
-  two-attempt-remaining budget that is still finding new things each round
+- **Cost already spent vs cap remaining.** A loop three cycles in with
+  two attempts remaining that is still finding new things each round
   is close to where the cap would stop it anyway -- `stop_needs_human` there
   costs nothing the cap would not have cost a cycle later, and saves the
   wasted cycle.

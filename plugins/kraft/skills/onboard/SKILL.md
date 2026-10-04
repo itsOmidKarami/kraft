@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: "Use when a repo is not yet connected to Kraft, or a newly connected repo has not been verified."
+description: "Connects a repository to Kraft and verifies that its test and setup commands work in a fresh worktree. Use when a repo is not yet connected to Kraft, or a newly connected repo has not been verified. Config drift in an onboarded repo belongs to kraft:check, an unhealthy server to kraft:doctor."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -64,8 +64,8 @@ zero exit code says the command ran, not that what it did was right.
    (they're `managed: false` until touched, so plain `kraft repo list` won't
    show them) and say how many landed. Each is a real, disabled repo of its
    own: it needs its own probed `test_command` checked the same way as the
-   parent's, and its own `enabled: true` (set in its `repos.yaml` entry, as with `test_command`) before any item can
-   be scoped to it — connecting the parent does not turn any of them on.
+   parent's, and its own `enabled: true` in its `repos.yaml` entry before any
+   item can be scoped to it — connecting the parent does not turn any of them on.
 
 2. **Register.** Nothing to run when this skill came with the Kraft plugin:
    the plugin registers Kraft's MCP server itself, and workers find it there
@@ -122,6 +122,6 @@ zero exit code says the command ran, not that what it did was right.
    `ok`. If either doesn't, stop and report the exact line rather than
    declaring onboarding done with a known problem still open.
 
-Finish by handing off into `kraft:check` for the full drift report
-against this install's library and chains — that skill already owns the diff, no need to
-repeat it here.
+Finish by handing off into `kraft:check` for the full drift report against
+this install's library and chains — that skill already owns the diff, no need
+to repeat it here.

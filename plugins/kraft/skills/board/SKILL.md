@@ -1,8 +1,6 @@
 ---
 name: board
-description: Use when you need to know what Kraft is doing - what work is running, what
-  is blocked or waiting on a person, the state of one work item, or whether a decision
-  was already made in a spec or plan somewhere across the repos.
+description: "Reads what Kraft is doing: the board of work items, the state of one item, and a cross-repo search of specs, plans and session summaries. Use when asked what work is running, blocked or waiting on a person, or whether a decision was already made in a spec or plan in another repo. A single item's progress or a watch belongs to kraft:status, and a stopped item to kraft:triage."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -13,7 +11,9 @@ connection error.
 # Reading Kraft
 
 - `list_work_items(status)` - the board. `status="paused"` is what is waiting on
-  a person; `status="active"` is what is running now.
+  a person at a gate or was paused by hand; `status="active"` is what is running
+  now; `status="needs_human"` is what stopped and needs a person (hand it to
+  `kraft:triage`). Without `status` it lists every item except abandoned ones.
 - `get_work_item()` - one item in full: its chain, its current node, any gate it
   is waiting on. With no argument it resolves the item this session is standing
   in, which is correct when the cwd is a Kraft worktree.

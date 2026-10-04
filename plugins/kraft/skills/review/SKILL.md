@@ -1,6 +1,6 @@
 ---
 name: review
-description: "Use when a Kraft work item is waiting at a review gate and someone wants help deciding whether to approve or reject it."
+description: "Reads the spec, plan or diff a Kraft work item's pending gate is about and recommends approving or rejecting it, with reasons, for the person to confirm. Use when an item is waiting at a gate and someone asks for a review or help deciding; kraft:gates owns the approve, reject and thread calls themselves."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -50,13 +50,13 @@ resolved on its own, and a later review can check which ones held up. See
 ## 3. Ask, then act
 
 Before `approve_gate`, `reject_gate` or `submit_review`, the person has to have
-answered this gate. Your recommendation is not their answer, and neither is a general "go
-ahead" that predates the gate. An instruction that names this gate does count,
-even a conditional one ("approve it if it looks fine"): review first, act only
-if your own review meets the condition, and otherwise leave the gate pending and
-report what you found. A gate answered on your say-so has stopped meaning
-anything. A chain revision gate also
-needs the `digest` from `get_gate_artifact()`: see `kraft:gates`.
+answered this gate. Your recommendation is not their answer, and neither is a
+general "go ahead" that predates the gate. An instruction that names this gate
+does count, even a conditional one ("approve it if it looks fine"): review
+first, act only if your own review meets the condition, and otherwise leave the
+gate pending and report what you found. A gate answered on your say-so has
+stopped meaning anything. A chain revision gate also needs the `digest` from
+`get_gate_artifact()`: see `kraft:gates`.
 
 ## If you are a Kraft worker session
 

@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: "Use when a verification node asks for a security review of a change that touches authentication, sessions, tokens, secrets, or permission checks."
+description: "Reviews the diff a work item has produced for authentication, session, token, secret and permission-check defects, and writes severity-ranked findings to the result file. Kraft runs it as an extra review task beside the general code review in a verification node, only when an operator adds it to a chain; use it for a change that touches those areas."
 ---
 
 # Reviewing this work item's diff for security
@@ -8,15 +8,15 @@ description: "Use when a verification node asks for a security review of a chang
 This task is in the chain because the work touches something that decides
 *who may do what* — authentication, session handling, tokens, secrets, or a
 permission check. You are not repeating the general code review beside you;
-you are reading the same diff with one question in mind, and you are allowed to
-find nothing.
+you are reading the same diff with one question in mind, and finding nothing is
+a valid result.
 
 ## What you are looking at
 
 The diff for this work item is handed to you by path, as a review package. Read
-the files it touches around the change, not just the changed lines. Almost every
-real finding here lives in the interaction between new code and an assumption
-the old code was already making.
+the code around the change, not just the changed lines. Almost every real
+finding here lives in the interaction between new code and an assumption the old
+code was already making.
 
 ## What earns a finding
 
@@ -41,7 +41,7 @@ Look for, in rough order of what actually bites:
   password or bind address changes.
 - **A widened perimeter.** A new route outside the authenticated set, a
   loosened host allowlist, a bind address moving off loopback, or a CORS or
-  proxy rule that lets an origin in. A LAN bind without a password is a stop.
+  proxy rule that lets an origin in. A LAN bind without a password is `critical`.
 - **Injection into something that executes.** A shell command, a SQL string, a
   path joined from caller input, or a file written outside the worktree.
 
@@ -51,8 +51,8 @@ change is security-relevant but sound, say so and emit no findings.
 
 ## Severity
 
-Severity decides whether the fix loop re-runs implementation — by default
-`critical` and `important` reopen it, `minor` does not.
+Severity decides whether a repair cycle opens — by default `critical` and
+`important` open one, `minor` does not.
 
 - **`critical`** — exploitable as written, or a secret is already leaking. An
   unauthenticated path to authenticated data, a permission check that can be
@@ -64,8 +64,9 @@ Severity decides whether the fix loop re-runs implementation — by default
 - **`minor`** — worth a human's attention, not worth a paid re-run. Defence in
   depth, a comment that misstates the guarantee.
 
-Do not inflate. An `important` costs a full implementation re-run; spending one
-on a theoretical concern teaches the loop that this review is noise.
+Do not inflate. An `important` costs a repair cycle and a second review;
+spending one on a theoretical concern teaches the loop that this review is
+noise.
 
 ## Output
 

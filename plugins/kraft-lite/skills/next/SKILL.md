@@ -1,6 +1,6 @@
 ---
 name: next
-description: "Use when continuing a Kraft Lite chain: after start, after a gate answer, or in a new or cleared session."
+description: "Runs the next node of a Kraft Lite chain from its recorded state and reports what the finished run cost. Use when continuing a chain: right after `kraft-lite:start`, after a gate answer, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`."
 ---
 
 # Running the next node
@@ -40,8 +40,8 @@ For each hook in `hooks`, look it up in `.kraft-lite/registry.yaml` and dispatch
   every dispatch, so rebinding the hook there is how a live chain is corrected.
 
 The node records which hooks it has, not which have run, so resuming replays them
-from the first. Keep hooks idempotent, and treat a hook that is not as a reason to
-stop rather than to run it twice.
+from the first. Keep hooks idempotent; a hook that is not idempotent is a reason to
+stop and ask, not to run it twice.
 
 ## 3. Handle the result
 
@@ -88,8 +88,8 @@ the `cap`, which is the budget the node has now. That is the report working: the
 retries a rewind cleared are the ones the run paid for.
 
 Times are stamped a second apart at the coarsest, so a fast chain reporting about
-a second a node is the clock's floor, not a measurement. A node redone after a
-rejection is timed from the redo. Say so rather than presenting the number flat.
+a second a node is the clock's floor, not a measurement. Say so rather than
+presenting the number flat.
 
 This covers the chain, not the conversation: it has no token count, cost, or turn
 count, because Lite runs inside your session and never sees them. Do not estimate

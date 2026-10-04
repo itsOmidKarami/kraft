@@ -1,6 +1,6 @@
 ---
 name: review-brief
-description: "Use when the final review gate needs a page for the human."
+description: "Writes the review brief a human reads at the final review gate before merge: what changed, what CI said, what the local review flagged, what was left out, what is uncertain. Use for the task that produces the review brief, which Kraft runs once the merge request is open and before that gate."
 ---
 
 # The human review brief
@@ -15,7 +15,8 @@ is not in their decision.
 Read, in this order:
 
 - The chain's events for this work item: the merge request that was opened, and
-  what the pipeline said about it.
+  what the pipeline said about it. If CI was not configured or never ran, the
+  brief says that instead.
 - The local review findings, including the ones ruled minor.
 - The diff itself. A brief written from the spec rather than from the diff
   describes the change that was planned, not the one that was made.
