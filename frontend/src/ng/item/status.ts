@@ -148,11 +148,10 @@ export const MAIN_LABEL: Record<Main, string> = {
   reopen: "Reopen MR",
 };
 
-/** The header's ⋮ doors that act on the item: Duplicate once it has ended,
- *  else Escalate… where `/escalate` takes it (`escalatable`). Cancel… is the main menu's only (WI-13). */
-export function menuDoors(item: EscalateFields): ("duplicate" | "escalate")[] {
-  if (["done", "cancelled", "archived"].includes(item.display_status ?? "")) return ["duplicate"];
-  return escalatable(item) ? ["escalate"] : [];
+/** The header's ⋮ doors that act on the item: Duplicate once it has ended. Escalate… and
+ *  Cancel… are the main button's menu's only, so the ⋮ never repeats them (WI-13). */
+export function menuDoors(item: Pick<WorkItem, "display_status">): "duplicate"[] {
+  return ["done", "cancelled", "archived"].includes(item.display_status ?? "") ? ["duplicate"] : [];
 }
 
 /** Archive in the panel is live only once there is nothing left to stop. */

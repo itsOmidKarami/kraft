@@ -42,8 +42,12 @@ describe("item cards", () => {
     expect(screen.getByText(hint)).toBeInTheDocument();
   });
 
-  it("says nothing about threads when it does not know them", () => {
-    render(<EscalateCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
+  it.each([
+    ["it does not know them", undefined],
+    ["the item has none yet", []],
+  ])("offers no new thread and says nothing about threads when %s", (_, threads) => {
+    render(<EscalateCard id="w1" anchor={anchor()} threads={threads} onClose={() => {}} onDone={() => {}} />);
+    expect(screen.queryByRole("checkbox", { name: "Start a new thread" })).toBeNull();
     expect(screen.queryByText(/thread \d/)).toBeNull();
   });
 

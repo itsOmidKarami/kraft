@@ -129,25 +129,27 @@ def test_gate_artifact_names_the_file_the_hook_wrote(client, item_at_spec_gate, 
     assert art["truncated"] is False
 
 
+@pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
 def test_gate_artifact_carries_its_absolute_path_and_opens_in_an_editor(
-    client, item_at_spec_gate, worktree, monkeypatch
+    client, item_at_spec_gate, worktree, monkeypatch, route
 ):
     wid = item_at_spec_gate
     path = _write_artifact(worktree, wid, "# A spec\n")
-    art = client.get(f"/api/work-items/{wid}/artifact").json()
+    art = client.get(f"/api/work-items/{wid}/{route}").json()
     assert art["absolute_path"] == str(path)
 
     launched = []
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
-    r = client.post(f"/api/work-items/{wid}/artifact/open", json={"editor": "code"})
+    r = client.post(f"/api/work-items/{wid}/{route}/open", json={"editor": "code"})
     assert r.status_code == 200, r.text
     assert launched == [["/usr/bin/code", str(path)]]
 
 
+@pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
 @pytest.mark.parametrize("link", ["file", "parent-dir"])
 def test_gate_artifact_open_refuses_what_the_read_refuses(
-    client, item_at_spec_gate, worktree, monkeypatch, link
+    client, item_at_spec_gate, worktree, monkeypatch, link, route
 ):
     """`GET /artifact` walks the path with no symlink followed, so a link
     inside the worktree is a 404 there; the editor launch refuses it too, not
@@ -166,23 +168,75 @@ def test_gate_artifact_open_refuses_what_the_read_refuses(
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
 
-    assert client.get(f"/api/work-items/{wid}/artifact").status_code == 404
-    r = client.post(f"/api/work-items/{wid}/artifact/open", json={"editor": "code"})
+    assert client.get(f"/api/work-items/{wid}/{route}").status_code == 404
+    r = client.post(f"/api/work-items/{wid}/{route}/open", json={"editor": "code"})
     assert r.status_code == 404, r.text
     assert launched == []
 
 
 @pytest.mark.api_client(default_setup=False, peer=("10.0.0.5", 54321))
-def test_gate_artifact_open_is_refused_for_a_non_loopback_client(client, monkeypatch):
+@pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
+def test_gate_artifact_open_is_refused_for_a_non_loopback_client(client, monkeypatch, route):
     launched = []
     monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
     st = client.app.state
     monkeypatch.setattr(st, "access", {**st.access, "password_hash": "x"}, raising=False)
     client.headers["authorization"] = f"Bearer {st.mcp_token}"
-    r = client.post("/api/work-items/unknown/artifact/open", json={"editor": "code"})
+    r = client.post(f"/api/work-items/unknown/{route}/open", json={"editor": "code"})
     # 403 before 404: a remote caller learns nothing about which items exist.
     assert r.status_code == 403, r.text
     assert launched == []
+
+
+def test_a_tasks_produced_document_reads_off_the_worktree_then_from_the_index(
+    client, item_at_spec_gate, worktree
+):
+    """A task's Output is the document it produced, not the session note that says
+    where it is: read off the worktree while it is there, and from the copy the
+    gate's approval indexed once the worktree is gone."""
+    wid = item_at_spec_gate
+    _write_artifact(worktree, wid, "---\ntitle: A spec\n---\n\nthe body\n")
+    art = client.get(f"/api/work-items/{wid}/artifacts/spec").json()
+    assert (art["kind"], art["path"], art["title"]) == (
+        "spec",
+        f".engineering/specs/{wid}.md",
+        "A spec",
+    )
+    assert art["content"].strip() == "the body"
+
+    assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+    shutil.rmtree(worktree)
+    art = client.get(f"/api/work-items/{wid}/artifacts/spec").json()
+    assert (art["path"], art["title"], art["origin"]) == (
+        f".engineering/specs/{wid}.md",
+        "A spec",
+        "event_ingest",
+    )
+    assert art["content"].strip() == "the body"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["work_brief", "spec_approval", "..%2F..%2Fsecrets"],
+    ids=["a-kind-the-chain-does-not-produce", "a-gate-id", "a-path"],
+)
+def test_a_produced_document_is_only_a_kind_the_chain_produces(
+    client, item_at_spec_gate, worktree, kind
+):
+    """A file at the kind's path is not enough: the chain must name the kind."""
+    wid = item_at_spec_gate
+    for written in ("spec", "work_brief"):
+        path = worktree / ".engineering" / f"{written}s" / f"{wid}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# A {written}\n")
+    r = client.get(f"/api/work-items/{wid}/artifacts/{kind}")
+    assert r.status_code == 404, r.text
+
+
+def test_a_produced_document_nobody_wrote_or_indexed_is_a_404(client, item_at_spec_gate, worktree):
+    (worktree / ".engineering" / "specs" / f"{item_at_spec_gate}.md").unlink(missing_ok=True)
+    r = client.get(f"/api/work-items/{item_at_spec_gate}/artifacts/spec")
+    assert r.status_code == 404, r.text
 
 
 def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_spec_gate, worktree):
@@ -205,8 +259,9 @@ def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_sp
     assert not [e for e in events if e["type"] == "artifact_refused"]
 
 
+@pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
 def test_a_symlink_out_of_the_worktree_is_a_404(
-    client, item_at_spec_gate, worktree, tmp_path, caplog
+    client, item_at_spec_gate, worktree, tmp_path, caplog, route
 ):
     outside = tmp_path / "secret.md"
     outside.write_text("not yours")
@@ -215,7 +270,7 @@ def test_a_symlink_out_of_the_worktree_is_a_404(
     path.symlink_to(outside)
 
     with caplog.at_level("WARNING", logger="kraft.api"):
-        resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
+        resp = client.get(f"/api/work-items/{item_at_spec_gate}/{route}")
     assert resp.status_code == 404
     # Pins the escape branch specifically, not merely "some 404 happened": a
     # regression that made the containment check a no-op would still 404 (the

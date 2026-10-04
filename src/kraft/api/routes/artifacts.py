@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 
 from kraft import config as config_mod
 from kraft import events, review, store
+from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -293,13 +294,18 @@ async def _read_worktree_artifact(st, wid: str, rel: str) -> tuple[str, bool] | 
     worktree = st.run_dirs.worktrees / wid
     result, reason = read_worktree_file(worktree, rel, DIFF_MAX_BYTES)
     if result is None:
-        if reason == "escaped_containment":
-            # A reviewer's browser learns nothing about the server's disk;
-            # this warning is for whoever is watching the server's own log.
-            logger.warning("artifact for %s resolves outside its worktree: %s", wid, rel)
-        await _refuse_artifact(st, wid, rel, reason)
+        await _refused(st, wid, rel, reason)
         return None
     return result.text, result.truncated
+
+
+async def _refused(st, wid: str, rel: str, reason: str) -> None:
+    """A refused read, recorded on the item's timeline (`_refuse_artifact`)."""
+    if reason == "escaped_containment":
+        # A reviewer's browser learns nothing about the server's disk;
+        # this warning is for whoever is watching the server's own log.
+        logger.warning("artifact for %s resolves outside its worktree: %s", wid, rel)
+    await _refuse_artifact(st, wid, rel, reason)
 
 
 @api_router.get("/work-items/{wid}/attachments/{kind}")
@@ -355,9 +361,9 @@ async def get_work_item_artifact(wid: str, request: Request):
     if result is None:
         raise HTTPException(404, "this work item's gate has no artifact")
     text, truncated = result
-    fm, body = ingest_mod.split_front_matter(text)
     chain = store.materialized_chain_of(row)
     shown = None
+    body = None
     if chain is not None and any(
         n.id == gate and n.node.artifact == revision.CHAIN_REVISION for n in chain.chain.nodes
     ):
@@ -369,44 +375,135 @@ async def get_work_item_artifact(wid: str, request: Request):
             shown = revision.digest(revised)
             await st.db.write(lambda c: store.show_revision(c, wid, gate, shown))
     return {
+        **_worktree_document(st, wid, rel, text, truncated, body),
+        # A chain revision's approval sends this back (Kraft-ec66w); absent
+        # where approving applies nothing.
+        **({"digest": shown} if shown else {}),
+        "artifact_max_bytes": DIFF_MAX_BYTES,
+    }
+
+
+def _worktree_document(st, wid: str, rel: str, text: str, truncated: bool, body=None) -> dict:
+    """A document read off `wid`'s worktree as the viewer takes it. `body`: what
+    to show in place of the file's own, as a rendered chain revision."""
+    fm, own = ingest_mod.split_front_matter(text)
+    body = own if body is None else body
+    return {
         "work_item_id": wid,
         "path": rel,
         # Where the file is on this machine, for the viewer's Open in editor and Copy path.
         "absolute_path": str(st.run_dirs.worktrees / wid / rel),
-        # A chain revision's approval sends this back (Kraft-ec66w); absent
-        # where approving applies nothing.
-        **({"digest": shown} if shown else {}),
         "title": ingest_mod.derive_title(rel, fm, body),
         # Front matter stripped: it is the contract's plumbing, not the
         # document, and a reviewer reading a spec should not have to skip it.
         "content": body,
         "truncated": truncated,
-        "artifact_max_bytes": DIFF_MAX_BYTES,
     }
 
 
-@api_router.post("/work-items/{wid}/artifact/open")
-async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request):
-    """Launch an editor on the pending gate's document in the item's worktree.
+def _open_in_worktree(request: Request, wid: str, editor: str | None, rel_of, missing: str) -> dict:
+    """Launch an editor on the file `rel_of(st, row)` names in `wid`'s worktree.
 
     The same loopback-only rule as `POST /documents/{id}/open`, checked first so a
-    remote caller learns nothing about the item. The gate's artifact has no index
-    row, so the path comes from the worktree the way `GET /artifact` reads it.
-    """
+    remote caller learns nothing about the item, and the walk the reads go
+    through: a symlink anywhere on the path is refused there, so it is refused
+    here (R14e-03)."""
     if not perimeter._client_is_local(request):
         raise HTTPException(403, "this server only opens editors for a client on its own machine")
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    rel = board._gate_artifact(st, row, board._pending_gate(st, wid))
-    if rel is None:
-        raise HTTPException(404, "this work item's gate has no artifact")
-    worktree = st.run_dirs.worktrees / wid
-    # The walk `GET /artifact` reads through: a symlink anywhere on the path
-    # is refused there, so it is refused here (R14e-03).
-    path = worktree_file_path(worktree, rel)
+    rel = rel_of(st, row)
+    path = worktree_file_path(st.run_dirs.worktrees / wid, rel) if rel else None
     if path is None:
-        raise HTTPException(404, "this work item's gate has no artifact")
-    return {"work_item_id": wid, **_launch_editor(request, body.editor, path)}
+        raise HTTPException(404, missing)
+    return {"work_item_id": wid, **_launch_editor(request, editor, path)}
+
+
+@api_router.post("/work-items/{wid}/artifact/open")
+async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request):
+    """Launch an editor on the pending gate's document in the item's worktree. The
+    gate's artifact has no index row, so the path comes from the worktree the
+    way `GET /artifact` reads it."""
+    return _open_in_worktree(
+        request,
+        wid,
+        body.editor,
+        lambda st, row: board._gate_artifact(st, row, board._pending_gate(st, wid)),
+        "this work item's gate has no artifact",
+    )
+
+
+def _produced_path(row, kind: str) -> str:
+    """Where a task with `produces: <kind>` wrote its document, or a 404 when the
+    item's chain names no such kind: no node produces it and no gate decides it
+    (its `artifact`). Checked against the chain rather than the kind's spelling:
+    only a kind the chain names reaches `artifact_path`, so nothing a caller
+    types becomes part of a path."""
+    chain = store.materialized_chain_of(row)
+    nodes = chain.chain.nodes if chain else ()
+    kinds = {k for n in nodes for k in n.produces() if k}
+    kinds |= {n.node.artifact for n in nodes if getattr(n.node, "artifact", None)}
+    if kind not in kinds:
+        raise HTTPException(404, f"no task of this work item produces {kind!r}")
+    return agent_mod.artifact_path(kind, row["id"])
+
+
+@api_router.get("/work-items/{wid}/artifacts/{kind}")
+async def get_produced_artifact(wid: str, kind: str, request: Request):
+    """The document a task produced (its `produces: <kind>`), whether or not a gate
+    is pending on it: what that task's Output shows, rather than the session
+    note that only says where the document is.
+
+    Read off the worktree as `GET /artifact` reads the pending gate's, so a task
+    that has just written it shows what it wrote, and a chain revision rendered
+    as its gate shows it. A file that is there and refused is refused here too,
+    with why on the item's timeline. Once the worktree no longer has it, the copy
+    the gate's approval indexed (`_ingest_approved_gate_artifact`) is the only
+    one left, so that is read instead; with neither, a 404.
+    """
+    st = request.app.state
+    row = deps._work_item_row(st, wid)  # 404s on an unknown work item
+    rel = _produced_path(row, kind)
+    result, reason = read_worktree_file(st.run_dirs.worktrees / wid, rel, DIFF_MAX_BYTES)
+    if result is not None:
+        body = None
+        if kind == revision.CHAIN_REVISION:
+            chain = store.materialized_chain_of(row)
+            gates = (n.id for n in chain.chain.nodes if getattr(n.node, "artifact", None) == kind)
+            gate = next(gates, None)
+            if gate is not None:
+                body = revision.render(result.text, chain, gate, st.library)[0]
+        shown = _worktree_document(st, wid, rel, result.text, result.truncated, body)
+        return {"kind": kind, **shown}
+    if reason != "absent":
+        await _refused(st, wid, rel, reason)
+        raise HTTPException(404, f"this work item's {kind} could not be read: {reason}")
+    indexed = next((d for d in st.indexer.documents_for_work_item(wid) if d["path"] == rel), None)
+    doc = indexed and st.indexer.get_document(indexed["document_id"])
+    if not doc:
+        raise HTTPException(404, f"this work item has no {kind}")
+    return {
+        "work_item_id": wid,
+        "kind": kind,
+        "path": rel,
+        "title": doc["title"],
+        "content": doc["content"],
+        "truncated": False,
+        # Kraft's own copy: the viewer offers no editor for it (as for a session note).
+        "origin": doc.get("origin"),
+    }
+
+
+@api_router.post("/work-items/{wid}/artifacts/{kind}/open")
+async def open_produced_artifact(wid: str, kind: str, body: OpenDocument, request: Request):
+    """Launch an editor on a task's produced document in the item's worktree."""
+    return _open_in_worktree(
+        request,
+        wid,
+        body.editor,
+        lambda _st, row: _produced_path(row, kind),
+        f"this work item has no {kind} in its worktree",
+    )
 
 
 async def _ingest_approved_gate_artifact(st, row, gate: str) -> None:

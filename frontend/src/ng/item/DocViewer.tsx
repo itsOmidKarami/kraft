@@ -13,11 +13,13 @@ import { editorChoices, editorName, SYSTEM_EDITOR, useEditors } from "./editors"
 import { copyPath } from "../ui/copyPath";
 import { detailOf, request } from "../http";
 
-export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string; by?: string } | { kind: "attachment"; workItemId: string; attachment: string };
+/** `produced`: the document a task wrote (its `produces: <kind>`), whether or not a gate is pending on it. */
+export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string; by?: string } | { kind: "produced"; workItemId: string; produces: string; by?: string } | { kind: "attachment"; workItemId: string; attachment: string };
 
 const urlOf = (s: DocSource) =>
   s.kind === "document" ? `/documents/${encodeURIComponent(s.id)}`
   : s.kind === "artifact" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifact`
+  : s.kind === "produced" ? `/work-items/${encodeURIComponent(s.workItemId)}/artifacts/${encodeURIComponent(s.produces)}`
   // A spec or plan attached at intake, read from Kraft's copy: before start nothing has indexed it.
   : `/work-items/${encodeURIComponent(s.workItemId)}/attachments/${encodeURIComponent(s.attachment)}`;
 type Viewed = { title: string; path: string; content: string; truncated?: boolean; repo?: string; origin?: DocumentDetail["origin"]; absolute_path?: string };
@@ -79,7 +81,7 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
   }, [urlOf(source)]);
   const open = async (editor: string) => {
     if (source.kind === "attachment") return;
-    const r = await request(source.kind === "document" ? `/documents/${encodeURIComponent(source.id)}/open` : `/work-items/${encodeURIComponent(source.workItemId)}/artifact/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
+    const r = await request(source.kind === "document" ? `/documents/${encodeURIComponent(source.id)}/open` : `${urlOf(source)}/open`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ editor }) });
     setNote(r.status === 200 ? `Opened in ${editorName(editor)}.` : detailOf(r.body));
   };
   // The matches of the search that opened it, found once the text is on the page.

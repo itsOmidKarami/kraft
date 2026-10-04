@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KraftEvent, WorkerSession } from "../../types";
 import { accessibleName } from "../graph/types";
 import { chainGraph, rejectTarget } from "./graph";
-import { detail, FROZEN, V1 } from "./testkit";
+import { detail, FROZEN, SCOPE_PATH, scopeChain, V1 } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
 const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, created_at: over.started_at ?? "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
@@ -26,6 +26,17 @@ describe("chainGraph", () => {
     expect(nodes[2]).toMatchObject({ running: true, attempt: 2, kind: "exec" });
     expect(nodes[1].kind).toBe("gate");
     expect(chainGraph(item, [approved("plan_approval", "agent")], NOW).nodes[1].meta).toBe("auto");
+  });
+
+  // The changed-test-scope task's sessions are its scopes: four rounds of several scopes each ran it four times, not 26.
+  it.each([
+    ["one task's highest attempt", "verification.review.code_review", 4],
+    ["the scope task's rounds, not its sessions", SCOPE_PATH, 3],
+  ])("badges a node with %s", (_, path, times) => {
+    const at = (round: number, k: number, attempt: number) => sess("verification", { id: `s${round}-${k}`, hook_point: path, round, attempt, started_at: `2026-09-13T09:${10 + round * 3 + k}:00Z` } as never);
+    const runs = [at(0, 0, 1), at(0, 1, 2), at(0, 2, 3), at(1, 0, 4), at(-1, 1, 5), at(2, 0, 6), at(2, 1, 7)];
+    const item = detail({ materialized_chain: scopeChain(), worker_sessions: path === SCOPE_PATH ? runs : [1, 2, 3, 4].map((a) => at(a - 1, 0, a)) });
+    expect(chainGraph(item, [], NOW).nodes[2].attempt).toBe(times);
   });
 
   // R12b-09: the accessible name said "running" for every one of these but the running row.

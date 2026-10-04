@@ -123,6 +123,15 @@ def test_an_approval_applies_what_its_approver_saw_not_a_later_render(client, re
     assert _chain_ids(client, wid) == ["revise", "revision_approval", "build", "checked"]
 
 
+def test_a_revision_read_by_its_kind_is_rendered_as_its_gate_shows_it(client, repo):
+    """A task's Output reads its document by kind (`GET /artifacts/{kind}`): a
+    chain revision is the change set rendered, not the JSON Kraft applies."""
+    wid = _filed(client, repo)
+    by_kind = client.get(f"/api/work-items/{wid}/artifacts/chain_revision").json()
+    assert by_kind["content"].startswith("# Chain revision")
+    assert by_kind["content"] == client.get(f"/api/work-items/{wid}/artifact").json()["content"]
+
+
 def test_a_revision_approval_that_carries_no_digest_is_refused(client, repo):
     """Nobody's view is bound by an approval that says nothing about what it
     saw, so it applies nothing, and says where the digest comes from."""

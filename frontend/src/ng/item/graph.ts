@@ -1,11 +1,26 @@
 import { elapsed, elapsedBetween } from "../../format";
-import type { ChainNode as ApiNode, KraftEvent } from "../../types";
+import type { ChainNode as ApiNode, KraftEvent, WorkerSession } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
 import { isEscalation, passOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
+import { isScopeTask } from "./scopeView";
 import type { ItemDetail } from "./useItem";
 
 const kindOf = (n: ApiNode) => n.kind ?? "exec";
+
+/** How many times a node ran, its ×N badge: the highest attempt of any of its tasks. A task's `attempt` counts its
+ *  sessions, and the changed-test-scope task runs one per scope, so it would count every scope of every round: it
+ *  ran once per round instead, a run being its sessions while the round stays the same, in the order they started
+ *  (a re-measure after `on_failure`, round -1, belongs to the run before it). */
+function timesRun(item: ItemDetail, work: WorkerSession[]): number {
+  const byPath = new Map<string, WorkerSession[]>();
+  for (const s of work) byPath.set(s.hook_point, [...(byPath.get(s.hook_point) ?? []), s]);
+  return Math.max(0, ...[...byPath].map(([path, ss]) => {
+    if (!isScopeTask(item, path)) return Math.max(...ss.map((s) => s.attempt));
+    const rounds = [...ss].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((s) => s.round).filter((r) => r >= 0);
+    return rounds.filter((r, i) => i === 0 || r !== rounds[i - 1]).length;
+  }));
+}
 
 /** The node a gate rejects to: its own `reject_to`, else the nearest earlier exec node (R23). */
 export function rejectTarget(nodes: ApiNode[], gate: string): string | null {
@@ -39,7 +54,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   const nodes = api.map((n, i): ChainNode => {
     const ss = item.worker_sessions.filter((s) => s.node_id === n.id);
     const work = ss.filter((s) => !isEscalation(s));
-    const attempt = Math.max(0, ...work.map((s) => s.attempt));
+    const attempt = timesRun(item, work);
     const out: ChainNode = { id: n.id, kind: kindOf(n), icon: (n.steps?.length ?? 0) > 1 ? "layers" : undefined, taskKind: nodeTaskKind(frozen, n.id), esc: ss.some(isEscalation) && capped !== n.id, attempt: attempt || undefined };
     if (cur < 0 || i > cur) return { ...out, state: "todo" };
     if (i < cur) {

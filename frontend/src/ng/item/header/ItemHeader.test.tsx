@@ -202,7 +202,7 @@ describe("ItemHeader", () => {
   // R12b-08: a card's own button had the focus, and went with the card once its action was done.
   it.each([
     ["Cancel…", "More actions", "Cancel this item?", "Reason", "Cancel item", "POST /work-items/w1/cancel"],
-    ["Escalate…", "Item menu", "Escalate this item", "Message", "Escalate", "POST /work-items/w1/escalate"],
+    ["Escalate…", "More actions", "Escalate this item", "Message", "Escalate", "POST /work-items/w1/escalate"],
   ])("hands the focus to the main button once %s is done", async (opener, door, card, field, send, route) => {
     stubFetch({ ...WRITES, ...acceptWrites(route), "GET /work-items/w1/cancel-preview": [200, { running: null, kept: { branch: "b", worktree: "/w", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } }] });
     show({ display_status: "failed", status: "needs_human", stop: { kind: "failed", node: "verification", task: null, resume_at: null, reason: null } });
@@ -218,7 +218,11 @@ describe("ItemHeader", () => {
   it("tells the Escalate card the item's escalation threads (WI-15)", async () => {
     stubFetch(WRITES);
     show({ display_status: "failed", status: "needs_human", stop: { kind: "failed", node: "verification", task: null, resume_at: null, reason: null }, escalation_threads: [{ thread: 1, session_id: "s", turns: 2, started_at: "t", ended_at: null, status: "done" }] });
+    // Escalate… is the main button's menu's only: the ⋮ beside it does not repeat it.
     await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    expect(screen.queryByRole("menuitem", { name: /Escalate/ })).toBeNull();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Escalate…" }));
     expect(await screen.findByText("continues thread 1 (turn 3), so it remembers the earlier turns")).toBeInTheDocument();
   });

@@ -155,8 +155,7 @@ export function ItemHeader({ item, reload, onSettings, onRaise, onGate, onAnswer
     { label: "Copy ID", onSelect: () => copy(item.id, "ID") },
     // R21: copied links stay on the shipped path until cutover.
     { label: "Copy link", onSelect: () => copy(`${window.location.origin}/work-items/${item.id}`, "link") },
-    // Escalate… only where /escalate takes it: not on a running item, nor while a turn runs.
-    ...menuDoors(item).map((d): MenuItem => (d === "duplicate" ? { label: "Duplicate as new item", onSelect: duplicate } : { label: "Escalate…", onSelect: () => setEscalating(true) })),
+    ...menuDoors(item).map((): MenuItem => ({ label: "Duplicate as new item", onSelect: duplicate })),
   ];
 
   const endedAt = ended ? item.updated_at : null;

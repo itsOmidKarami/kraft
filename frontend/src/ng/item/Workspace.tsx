@@ -69,6 +69,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const events = useEvents(item.id, version);
   const docs = useDocuments(item.id, runVersion(raw));
   const [artifact, setArtifact] = useState(false);
+  const [produced, setProduced] = useState<{ kind: string; path: string } | null>(null);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
@@ -198,6 +199,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
     setAttempt: (attempt) => go({ ...place, attempt }),
     onDoc: (d: WorkItemDocument) => go({ ...place, doc: d.document_id, q: undefined }),
     onArtifact: () => setArtifact(true),
+    onProduced: (kind, path) => setProduced({ kind, path }),
     canEdit: draft?.editable,
     applied,
   });
@@ -280,6 +282,7 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
       </div>
       {adding && draft && <AddNodeMenu at={adding.at} seam={adding.seam} onClose={() => setAdding(null)} />}
       {place.doc && <DocViewer source={{ kind: "document", id: place.doc, by: docBy(docs.find((d) => d.document_id === place.doc)) }} query={place.q} onClose={() => go({ ...place, doc: undefined, q: undefined })} />}
+      {produced && <DocViewer source={{ kind: "produced", workItemId: item.id, produces: produced.kind, by: produced.path }} onClose={() => setProduced(null)} />}
       {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id, by: producerOf(materialized(item), item.pending_gate ?? "") ?? undefined }} onClose={() => setArtifact(false)} />}
     </div>
   );
