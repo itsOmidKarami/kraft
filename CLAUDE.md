@@ -7,7 +7,7 @@ Everything goes through `just` — run `just` for the list.
 ```bash
 just setup      # uv sync + npm ci
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
-just test-ui    # frontend unit tests
+just test-ui    # frontend typecheck + unit tests
 just test-py 3.12  # the unit tier on another Python (CI runs 3.12, 3.13, 3.14); `requires-python` is the floor
 just lint       # ruff check + format check
 ```
@@ -45,7 +45,8 @@ Every MCP tool but `permission_request` is also a subcommand, so a hook or a
 non-MCP agent gets the same surface; `item abandon` is the one `item` verb with
 no tool. `--json` prints the raw API payload on every verb except `view watch`,
 `repo path`, and the `admin` ones that manage the server process (`start`,
-`stop`, `restart`, the service verbs, `update`, `mcp`, `permission-hook`).
+`stop`, `restart`, the service verbs, `update`, `mcp`, `permission-hook`) and
+`admin init` (it accepts `--json` and ignores it).
 
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
@@ -67,7 +68,7 @@ kraft item mr-label LABEL...                # label this item's merge request
 kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked
-kraft view compare [ID] --from T --to T [--nodes a,b] [--stat|--name-only] [-w]  # T: base|attempt:N|last_review|latest
+kraft view compare [ID] [--from T] [--to T] [--nodes a,b] [--stat|--name-only] [-w]  # T: base|attempt:N|last_review|latest, default base to latest
 kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new] [--start-side old|new]] [--label must-fix|question|nit] [--suggest "..."]
 kraft item comment --reply THREAD --body "..."
 kraft item resolve THREAD / kraft item reopen THREAD
@@ -228,7 +229,7 @@ shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy
 vars, the nine `KRAFT_*` that locate the instance (`KRAFT_HOME`, `KRAFT_RUN_DIR`,
 `KRAFT_CONFIG_DIR` and its 1.x name `KRAFT_TEMPLATES_DIR`, `KRAFT_SKILLS_DIR`, `KRAFT_HOST`, `KRAFT_PORT`,
 `KRAFT_DAEMON_PID`, `KRAFT_DAEMON_PORT`) plus the ones Kraft sets per session, and
-the agent's credential var. Any other `KRAFT_*` var, and anything else a
+Claude Code's credential vars (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`; another agent's key needs `env_passthrough`). Any other `KRAFT_*` var, and anything else a
 repo needs, is declared in its `repos.yaml` entry — `env:` for literal values,
 `env_passthrough:` to name a var the daemon already has. Do not assume a
 variable from your own shell is present in a worktree.

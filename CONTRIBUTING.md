@@ -115,7 +115,7 @@ new ones.
 
 ```text
 src/kraft/        the orchestrator: api/, executor/, store/, adapters/, worker/, cli/, index/, ...
-frontend/         the React SPA (vite), see frontend/README.md; e2e/ is Playwright, sweep/ is a screenshot harness
+frontend/         the React SPA (vite), see frontend/README.md; e2e/ is Playwright, sweep/ is a screenshot harness, and sweep/contract/ is the UI contract suite CI runs
 config/           the packaged configuration: the default library, chains, harness profiles and policy, an install's seed
 tests/            backend tests, mirroring src/kraft/ (CLAUDE.md says why that matters)
 dev/              the dev-instance seeder, CI check scripts, release and codegen helpers
@@ -183,7 +183,7 @@ its `enforced-by:` pins, which break when you rename a pinned test.
 
 ### What CI checks
 
-Every pull request runs these, except that a docs-only one skips the five
+Every pull request runs these, except that a docs-only one skips the six
 marked *(code)*. A pull request is docs-only when every file it changes is a
 root-level `*.md`, `docsite/**`, `.github/assets/**`, or `docs/*.md` (not
 `docs/intent/`). In their place, `docs tests` runs every unit test file that
@@ -205,7 +205,7 @@ CI's order, on the full suite.
 | `ui contract` *(code)* | the UI contract and icon-only audit: the built SPA in a browser on a mocked API, no Kraft server (`frontend/sweep/contract/`) | `just ui-contract` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
-| `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
+| `docs` (only when `docsite/`, `.github/assets/`, `frontend/public/icon.svg` or the docs build scripts change) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |
 | `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
 | `tests nudge` | the PR's test-tree delta as a comment (`dev/test_shape_report.py --diff`), only on one of the three signs its `worth_saying` states; never fails | `uv run python dev/test_shape_report.py --diff origin/main HEAD` |
 | `codeql` | GitHub's static analysis | nothing to run |
@@ -327,13 +327,13 @@ Page rules:
 | Source | Docs page |
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/4.reference/1.cli/` |
-| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/4.reference/2.configuration/` |
+| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `src/kraft/templates/library.py`, `src/kraft/config.py`, `src/kraft/policy.py`) | `docsite/content/4.reference/2.configuration/` |
 | A chain template's node fields | `docsite/content/4.reference/3.chain-nodes/index.md` |
 | How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `src/kraft/findings.py`, `src/kraft/usage.py`) | `docsite/content/4.reference/3.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
 | The fix loop or its judge (`src/kraft/executor/walk.py`, `dispatch.py`) | `docsite/content/4.reference/3.chain-nodes/3.fix-loop.md` |
 | A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/1.vocabulary.md` |
 | Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/4.reference/6.triggers.md` |
-| The permission gate (`src/kraft/harnesses/*.yaml`, `permissions`) | `docsite/content/4.reference/4.permissions.md` |
+| The permission gate (`src/kraft/harnesses/*.yaml`, `permission_rules.py`, `permission_hooks.py`, `grants.py`) | `docsite/content/4.reference/4.permissions.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/4.reference/5.harnesses/` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/content/4.reference/8.mcp-tools.md` |
 | A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/01.agent-integration.md` |

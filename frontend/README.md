@@ -170,7 +170,7 @@ Any other query fails.
 |---|---|
 | ≤ 767px | the phone app replaces the desktop one (`usePhone`) |
 | ≤ 1023px | panes that dock beside a canvas overlay it instead (`useOverlay`); the board row drops columns |
-| ≤ 1279px | the sidebar defaults to its 40px rail (it is pinned from 1280, and a stored choice wins: `shell/sidebarPref.ts`) |
+| ≤ 1279px | the item header gives its draft chip up for the count on the Review button, and shortens its badge (`item/draft/draft.css`); the sidebar has no rule here, it is pinned at every width until a stored choice says otherwise (`shell/sidebarPref.ts`) |
 | height ≤ 719px | the item page's facts card scrolls at 64px instead of growing |
 
 ## CSS rules that tests enforce
@@ -205,7 +205,7 @@ area that needs one has a helper module beside its tests, named `testkit.tsx`,
 | `ng/library/fixture.ts`, `testSupport.tsx` | a library draft and the page mounted on it |
 | `ng/harnesses/testkit.tsx` | the harnesses draft's tasks, problems and a fake server |
 | `ng/phone/areas/testkit.tsx` | draft views and `mountAt()` for the phone's area screens |
-| `ng/settings/policy/fixture.ts`, `ng/settings/intake/fixture.ts`, `ng/settings/repos/fixture.ts`, `ng/templates/draft/fixture.default.ts`, `ng/item/draft/fixtures.ts` and `testkit.tsx` | per-screen fixtures |
+| `ng/settings/policy/fixture.ts`, `ng/settings/intake/fixture.ts`, `ng/templates/repos/fixture.ts`, `ng/templates/draft/fixture.default.ts`, `ng/item/draft/fixtures.ts` and `testkit.tsx` | per-screen fixtures |
 
 Reach for the nearest testkit first, and add a factory there the second time a
 setup recurs. `src/testFixtures.ts` is the older shared set (`item()`,
@@ -214,7 +214,7 @@ create a new top-level fixtures file. The general rules (the mutation check that
 proves a test pins something, one behaviour pinned once, declaring a removed
 test in the PR) are in [`docs/testing.md`](../docs/testing.md).
 
-### Three layers, and when each is required
+### Four layers, and when each is required
 
 | Layer | What it is | Required when | Run |
 |---|---|---|---|
@@ -231,23 +231,28 @@ your branch. A new screen or state adds a cases file under `sweep/cases/`.
 
 ## Retaking the screenshots in `.github/assets/`
 
-Five images are shown, in two places: the root README uses `board`, `gate`,
-`mobile` and `analytics`; the docs home uses `board`, `gate`, `search` and
-`analytics`, and the first-work-item page `board` and `gate`
-(`docsite/public/assets` is a link to this folder). Retake the ones whose
-screen changed, and all of them when a release is cut:
+Seven images are shown, in four places: the root README uses `board`, `gate`,
+`mobile` and `analytics`; the docs home uses `board`, `gate`, `search`,
+`analytics` and `mobile`; the first-work-item page `board` and `gate`; and the
+board tour (`docsite/content/3.guides/00.the-board.md`) `board`, `item`,
+`review` and `mobile` (`docsite/public/assets` is a link to this folder).
+Retake the ones whose screen changed, and all of them when a release is cut:
 
 | File | Size | Shows |
 |---|---|---|
 | `board.png` | 1440×700 | the board, grouped by status |
 | `gate.png` | 1440×700 | a work item at `spec_approval`: the review page with the gate's spec rendered |
 | `search.png` | 1440×700 | Ctrl/⌘K with `caching` typed: an item and two documents, over the board |
+| `item.png` | 1440×700 | the same item's page, with the `spec_approval` gate selected: the chain as a graph, and the inspector with the gate's files, open thread and Approve and Reject… |
+| `review.png` | 1440×700 | the review page of that item on `calc.py`, with a comment being written on lines −2 to +2 (the removed line and its replacement), Must fix selected |
 | `analytics.png` | 1440×660 | the Analytics page |
 | `mobile.png` | 390×844 | the board in the phone layout |
 
 All are the default look (graphite, dark, no accent), of a repo named `repo`
 and the items `just dev-seed` files (the committed ones have a dozen or so;
-file more through the composer). To retake them:
+file more through the composer). `item` and `review` are of the same item as
+`gate`, the one at `spec_approval`; its worktree's `calc.py` is `a - b` changed
+to `a + b` by the fake agent, which is the diff `review` shows. To retake them:
 
 1. Start a clean, seeded instance:
 
@@ -274,7 +279,10 @@ file more through the composer). To retake them:
    `.dev/run/worktrees/<id>/.engineering/specs/<id>.md` and commit the change
    with `git -C .dev/run/worktrees/<id> commit -am "spec"`; `-a` rather than
    `add -A`, which would also stage the agent's `.engineering/sessions/` file.
-   The item's id is in its address on the board.
+   The item's id is in its address on the board. For `item`, which lists an
+   open thread, add one with `kraft item comment <id> --body "why is this here?"`
+   (a comment on no file is a thread on the whole change), against the same dev
+   home: `KRAFT_HOME=$PWD/.dev KRAFT_PORT=8766 uv run kraft item comment ...`.
 4. Save this as `frontend/e2e-shots/shot.mjs` (that folder is gitignored) and,
    with `npx playwright install chromium` done once, run it from `frontend/`
    as `GATED_ID=<id> node e2e-shots/shot.mjs`:
@@ -305,6 +313,19 @@ file more through the composer). To retake them:
      await p.waitForTimeout(1000); // the results are debounced
    });
    await shoot("gate", desktop, (p) => p.goto(`${base}/work-items/${process.env.GATED_ID}/review?doc=1`));
+   await shoot("item", desktop, (p) => p.goto(`${base}/work-items/${process.env.GATED_ID}?sel=spec_approval`));
+   await shoot("review", desktop, async (p) => {
+     await p.goto(`${base}/work-items/${process.env.GATED_ID}/review?file=calc.py`);
+     await p.locator(".review-page").waitFor();
+     const f = p.locator('[data-file="calc.py"]');
+     const pick = (side, n) => f.getByRole("button", { name: `Pick ${side} line ${n}`, exact: true }).first();
+     await pick("old", 2).click(); // the removed line ...
+     await pick("new", 2).click({ modifiers: ["Shift"] }); // ... to the line that replaced it
+     await pick("new", 2).hover();
+     await p.locator(".rv-plus:visible").first().click(); // opens the composer: "Comment on lines -2 to +2"
+     await p.getByRole("button", { name: "Must fix", exact: true }).click();
+     await p.getByRole("textbox", { name: "Comment" }).fill("Good catch. Add a test that pins it: add(2, 3) == 5.");
+   });
    await shoot("mobile", phone, () => {});
    await browser.close();
    ```
@@ -312,10 +333,19 @@ file more through the composer). To retake them:
 5. Look at each PNG before committing it: that nothing in the frame is a path
    or a name of yours, and that its size is the table's.
 
-The footer under the sidebar prints the instance's address and its version. A
-checkout prints a dev version (`1.5.0rc11.dev1+g…` on a tagged clone, `0.1.devN`
-in one without tags), while the committed set was taken from an
-installed release (its footer reads `v1.5.0rc6`). For the set that goes out
+   The `review` steps are the contract suite's range pick
+   (`sweep/contract/review.spec.ts`) pointed at `calc.py`; they have not been
+   run against the dev seed, so check the composer header reads "Comment on
+   lines −2 to +2" before you save the frame. The committed `review.png` shows
+   `calc.py` inline and alone; if your frame lists both files or shows two
+   columns, change the diff settings (Inline, one file at a time) before the
+   shot.
+
+The footer under the sidebar prints the instance's version. A checkout prints a
+dev version (`2.0.0rc9.dev1+g…` on a tagged clone, `0.1.devN` in one without
+tags; `uv run kraft --version` shows it), while the committed set was taken
+from installed 1.5 release candidates (their footers read `v1.5.0rc10`, and
+also showed the instance's address, which the footer no longer does). For the set that goes out
 with a release, run that release's `kraft` against the seeded dev home rather
 than the checkout; `dev_env` in the root `justfile` lists the variables a dev
 instance sets, and `fixtures/bin` has to be first on `PATH` so the agents stay

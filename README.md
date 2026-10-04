@@ -151,8 +151,8 @@ and Cursor (publisher `kraft-sdlc` on both). You can also download
 [GitHub release](https://github.com/itsOmidKarami/kraft/releases/latest) and run
 `code --install-extension kraft-<version>.vsix`.
 
-Every install path, connecting your agent, and updating with
-`kraft admin update` are in the
+Every install path, connecting your agent, and updating (from 1.4 with
+`uv tool install`, not `kraft admin update`; see Upgrading from 1.4) are in the
 [install guide](https://itsomidkarami.github.io/kraft/get-started/install).
 
 ## First run

@@ -23,8 +23,13 @@ when you run the command from inside that item's worktree.
 
 ## Output format
 
-Every read and action verb accepts `--json`, which prints the raw API payload,
-the same value `kraft admin mcp` hands an agent. These verbs do not:
+Every read and action verb accepts `--json`, which prints the raw API payload.
+It is the same call the matching [MCP tool](/reference/mcp-tools) makes, but not
+always the same value: `kraft view show --json` prints the item's full detail
+(its effective chain, worker sessions and stop), where the `get_work_item` tool
+hands an agent a trimmed item. `kraft view list --json` is scoped to the repo
+you are in unless you pass `--all` or `--repo`; `list_work_items` is never
+scoped. These verbs do not print the payload:
 
 | Verb | Use instead |
 |---|---|
@@ -33,6 +38,7 @@ the same value `kraft admin mcp` hands an agent. These verbs do not:
 | `admin start`, `stop`, `restart`, `update` | None; these print status lines. |
 | `admin install-service`, `uninstall-service` | None. |
 | `admin mcp`, `admin permission-hook` | None; these speak a protocol on stdio. |
+| `admin init` | None. It accepts `--json` and ignores it; it prints one `kraft: wrote PATH` line per file. |
 
 Without `--json`, `kraft item approve`, `reject`, `pause`, `resume`, `retry`,
 `raise-budget`, `skip`, `complete`, `cancel` and `escalate` print one line
