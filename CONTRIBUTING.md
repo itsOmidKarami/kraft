@@ -153,6 +153,7 @@ covers the harness itself.
 ```bash
 just test       # backend tests affected by your change (testmon); --no-testmon for all
 just e2e        # Playwright (see frontend/e2e/README.md)
+just ui-contract # the SPA's behaviours and icon-only audit in a browser on a mocked API (frontend/sweep/README.md)
 just test-ui    # frontend typecheck and unit tests (see frontend/README.md for when the sweep is required too)
 just test-vscode # VS Code extension: schemas current, typecheck, unit tests
 just intent     # check that every enforced-by pin in docs/intent/ still resolves
@@ -195,12 +196,13 @@ CI's order, on the full suite.
 | `changes` | decides whether the pull request is docs-only | nothing to run |
 | `test (python 3.12 / 3.13 / 3.14)` *(code)* | the unit tier (`-m "not e2e"`), then `python -m kraft.intent`, on each supported Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `docs tests` (docs-only pull requests) | the unit test files that name a docs path, on Python 3.14 | `just test` on the files the `git grep` in `test.yml`'s `docs-tests` job lists |
-| `test` | passes only when `lint`, every `test (python …)` leg, `e2e (real CLIs)`, `frontend`, `vscode` and `playwright` all pass; on a docs-only pull request those *(code)* jobs skip, which counts as passing, and `docs tests` must pass instead. Branch protection requires it alongside those jobs by name; once the ruleset names only `test` (with the kraft-lite checks, `removals declared` and `release impact declared`), the supported range and the job list can change without editing repo settings | nothing to run |
+| `test` | passes only when `lint`, every `test (python …)` leg, `e2e (real CLIs)`, `frontend`, `vscode`, `playwright` and `ui contract` all pass; on a docs-only pull request those *(code)* jobs skip, which counts as passing, and `docs tests` must pass instead. Branch protection requires it alongside those jobs by name; once the ruleset names only `test` (with the kraft-lite checks, `removals declared` and `release impact declared`), the supported range and the job list can change without editing repo settings | nothing to run |
 | `e2e (real CLIs)` *(code)* | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
 | `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
 | `frontend` *(code)* | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
 | `vscode` *(code)* | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
 | `playwright` *(code)* | the browser e2e suite against a fixture server | `just e2e-ci` |
+| `ui contract` *(code)* | the UI contract and icon-only audit: the built SPA in a browser on a mocked API, no Kraft server (`frontend/sweep/contract/`) | `just ui-contract` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label; it lives in `pr-labels.yml`, not `test.yml`, so labelling a pull request never starts or cancels the test run | see [Pull requests and release labels](#pull-requests-and-release-labels) |
 | `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code; then `dev/check_llm_docs.py` (no root-relative links in `raw/*.md`, no landing-page anchors in `llms-full.txt`) and, on a PR, a link check | `just docs-site` |

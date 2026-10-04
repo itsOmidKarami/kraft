@@ -51,6 +51,32 @@ Per shot: `pageOverflowX`, `offscreenRight`, `clippedEllipsis`, `clippedVertical
 
 The element must carry its full text in `title`. Anything else that ellipsizes still fails the check; a new use needs a decision first.
 
+## The UI contract
+
+`contract/` is the one part of this folder that asserts, and that CI runs. It drives the built SPA in a
+browser on the same mocked `/api/**` as the sweep (`fixtures.ts`, `mockApi.ts`), with no Kraft server and
+no Python:
+
+```bash
+just ui-contract                       # builds the SPA, serves it with `vite preview` on :4327, ~1.5 min
+just ui-contract -g "sidebar"          # Playwright flags after it
+CONTRACT_PORT=4400 just ui-contract    # another port, when 4327 is taken
+```
+
+- **Rows** (`shell.spec.ts`, `item.spec.ts`, `review.spec.ts`): one plain-language claim per test, named for
+  the behaviour (`sidebar: unpinned, it takes no width (no icon rail) [decided]`). `[decided]` marks a
+  behaviour that was chosen, so a change to it is a decision to revisit, not a fix. A row that fails is a
+  regression, or a behaviour that changed on purpose: change the row in the same pull request and say why.
+- **Icon-only audit** (`icons.spec.ts`, `screens.ts`): on every screen in `screens.ts`, each visible
+  button, link or summary with no letter or digit in it needs an accessible name and a `data-tip`. A new
+  screen or state that can hold an icon-only control belongs in `screens.ts`.
+- **Seeds** (`fixtures.ts`, after `buildScenario`): what the base scenario lacks, added by mutating the
+  built scenario (`app(page, url, { tweak: withReviewer })`): a gate's reviewer and producer, a fix round's
+  outcome, a test result, a stop's cause and limit, beads, an escalation thread, light mode. Add one there
+  when a row needs data the scenario does not have, not in the spec.
+
+Prove a new row before trusting it: break the code it covers, confirm that row fails, restore the code.
+
 ## Axes
 
 - Widths: 390, 768, 1024, 1100, 1280, 1440, 1920 (+1280×700).

@@ -275,6 +275,17 @@ smoke-models-hook:
     fi
     exec just smoke-models
 
+# The UI contract: ~90 behaviours of the built SPA (the sidebar's pin, Esc and focus,
+# the item header's cards, review, the document viewer, tooltips) and the icon-only
+# audit (every icon-only control has a name and a tooltip), in a real browser on a
+# mocked /api. No Kraft server; it builds the SPA and serves it with `vite preview`.
+# CONTRACT_PORT moves it off 4327. Pass Playwright flags after it: -g "sidebar".
+[doc("UI contract and icon audit: the SPA's behaviours in a browser on a mocked API")]
+ui-contract *args:
+    cd frontend && [ -d node_modules ] || npm ci
+    cd frontend && npx playwright install chromium
+    cd frontend && npx playwright test -c sweep/contract/playwright.config.ts {{args}}
+
 # Playwright e2e against a fixture server you started (frontend/e2e/README.md)
 e2e:
     cd frontend && npm run e2e

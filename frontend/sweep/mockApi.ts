@@ -444,6 +444,7 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
         kept: { branch: `kraft/${it.id}`, worktree: `/tmp/kraft/worktrees/${it.id}`, findings: (it.deferred_findings ?? []).length, threads: 0 },
         mr: it.mr_ref ? { ref: it.mr_ref.number, url: it.mr_ref.url, state: "open" } : null,
         spend: { spent_usd: it.budget_cap?.spent_usd ?? 0, cap_usd: it.budget_cap?.cap_usd ?? null },
+        beads: b.beads ?? [],
       });
     }
     if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)\/duplicate$/))) {
@@ -714,8 +715,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       const at = new Date(Date.now() - 3_600_000).toISOString();
       const u = opts.update ?? "available";
       return json(route, u === "unknown"
-        ? { installed: "1.4.0", latest: null, channel: "stable", behind: null, checked_at: null }
-        : { installed: "1.4.0", latest: u === "current" ? "v1.4.0" : "v1.5.0", channel: "stable", behind: u === "available", checked_at: at });
+        ? { installed: "1.4.0", latest: null, channel: "stable", python: "3.14", behind: null, checked_at: null }
+        : { installed: "1.4.0", latest: u === "current" ? "v1.4.0" : "v1.5.0", channel: "stable", python: "3.14", behind: u === "available", checked_at: at });
     }
     if (p === "/intake") return json(route, st.intake);
     if (p === "/access") return json(route, st.access);
