@@ -56,7 +56,8 @@ _UNREACHABLE_MARKERS = (
 
 def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | None:
     """Why a forge or git failure's message says it failed, when it says: a
-    credential the forge refused (`forge_auth`, fixed in the repo's settings)
+    credential the forge refused (`forge_auth`, fixed by signing the forge CLI in
+    on the server's machine, not in the repo's settings)
     or a forge that could not be reached (`forge_unreachable`). None when the
     text names neither."""
     low = text.lower()

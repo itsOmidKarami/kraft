@@ -119,7 +119,7 @@ const MAIN_DOOR = (item: ItemDetail): Record<Main, Door> => ({ pause: "pause", r
 const PANEL_DOOR: Record<PanelItem, Door> = { escalate: "escalate", complete: "cancel", archive: "archive", cancel: "cancel" };
 const PHONE_DOOR = (item: ItemDetail): Record<ActId, Door> => ({
   pause: "pause", steer: steerDoor(item), resume: "resume", start: "resume", reject: "approve", review: "navigate", raise: raiseDoor(item), retry: "retry", escalate: "escalate", answer: "resume",
-  cancel: "cancel", "reopen-mr": "reopen_mr", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "cancel",
+  cancel: "cancel", "reopen-mr": "reopen_mr", conflicts: "navigate", board: "navigate", restore: "restore", settings: "navigate", repo: "navigate", "open-mr": "navigate", duplicate: "navigate", archive: "archive", complete: "cancel",
 });
 const NODE_DOOR: Record<NodeActId, Door> = { pause: "pause", resume: "resume", skip: "skip", "retry-node": "retry", "retry-from": "retry", review: "navigate" };
 

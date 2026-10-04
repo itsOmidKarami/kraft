@@ -5,6 +5,7 @@ import { FileText } from "../../icons";
 import { Button } from "../../ui/Button";
 import { request } from "../../http";
 import { act } from "../actions";
+import { TestsLine } from "../TestsLine";
 import { gateSkipped } from "../events";
 import { rejectTarget } from "../graph";
 import { totals, useDiffFiles } from "../Top";
@@ -57,19 +58,6 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
         {to && <div><dt>reject to</dt><dd className="is-mono">{to}</dd></div>}
         <div><dt>status</dt><dd>{pending ? "waiting for you" : decided ? `passed · ${decided.by}` : gateSkipped(events, gate.id) ? "skipped" : item.chain_definition.nodes.findIndex((n) => n.id === gate.id) < item.chain_definition.nodes.findIndex((n) => n.id === item.current_node_id) ? "passed" : "not reached"}</dd></div>
       </dl>
-    </>
-  );
-}
-
-/** "✓ 3 scopes", or "✗ 1 of 3 scopes" with each red scope linked to its session's log. */
-function TestsLine({ result }: { result: NonNullable<ItemDetail["test_result"]> }) {
-  const n = result.scopes.length;
-  if (result.passed) return <>✓ {n} {n === 1 ? "scope" : "scopes"}</>;
-  const red = result.scopes.filter((s) => !s.passed);
-  return (
-    <>
-      ✗ {red.length} of {n} {n === 1 ? "scope" : "scopes"}
-      {red.map((s) => <span key={s.session_id}> · <a className="item-link is-mono" href={`/api/worker-sessions/${encodeURIComponent(s.session_id)}/log`} target="_blank" rel="noreferrer">{s.scope ?? s.command}</a></span>)}
     </>
   );
 }

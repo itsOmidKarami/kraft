@@ -8,6 +8,7 @@ import { Button } from "../ui/Button";
 import { act } from "./actions";
 import { neverStarted, spentLine } from "./status";
 import { actionPath, taskName } from "./paths";
+import { FORGE_LOGIN_HINT, failedFix, keptLine, withCode } from "./cause";
 import type { ItemDetail } from "./useItem";
 import { sendOnModEnter } from "../keys";
 
@@ -80,14 +81,11 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
   return { label, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
 }
 
-/** What the failed card offers besides Escalate, by the stop's `facts.cause`: a refused forge credential is fixed
- *  in the repo's settings (a forge task's failure carries it on a `failed` stop too), a stranded claim just needs a
- *  retry, and any other infrastructure stop, or one naming no cause, says where to look. */
+/** What the failed card offers besides Escalate, by `failedFix`: a refused forge credential gets words, not a button
+ *  (`FORGE_LOGIN_HINT`; the repo's settings hold no token), a stranded claim just a retry, and any other
+ *  infrastructure stop, or one naming no cause, a way to the repo's settings. */
 function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }) {
-  const cause = (item.stop?.facts as Record<string, unknown> | undefined)?.cause;
-  if (cause === "forge_auth") return [{ label: "Fix the token in Repos", primary: true, run: h.onRepos }, { ...retry, primary: false }];
-  if (item.stop?.kind !== "infra" || cause === "stranded") return [retry];
-  return [retry, { label: "Check the repo settings", run: h.onRepos }];
+  return failedFix(item) === "repo" ? [retry, { label: "Check the repo settings", run: h.onRepos }] : [retry];
 }
 
 function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
@@ -101,10 +99,11 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
   if (status === "failed" && stop) {
     const fs: [string, ReactNode][] = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && str(v) ? [[k, str(v)!] as [string, ReactNode]] : []));
     // "Do I lose anything?": the branch and what is on it stay.
-    const kept = [item.branch && `branch ${item.branch}`, h.files?.length && `${h.files.length} ${h.files.length === 1 ? "file" : "files"}`, item.test_result?.passed && "tests passing"].filter(Boolean).join(" · ");
+    const kept = keptLine(item, h.files?.length);
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     return {
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,
+      body: failedFix(item) === "forge_login" ? <p className="item-card-text item-card-fix">{withCode(FORGE_LOGIN_HINT)}</p> : undefined,
       facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
       actions: [...failedActions(item, retryFrom(item, node, run), h), { label: "Escalate…", run: h.onEscalate }],
     };

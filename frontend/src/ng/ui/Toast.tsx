@@ -16,7 +16,7 @@ export function showToast(message: string, opts: number | { ms?: number; action?
   window.dispatchEvent(new CustomEvent<Detail>("kraft:toast", { detail: { message, ms, action } }));
 }
 
-/** Top-right on desktop, at most three at once. A toast holding focus stays
+/** Top-right on desktop (bottom-right while the document drawer is open, see ui.css), at most three at once. A toast holding focus stays
  *  until focus leaves it, so its action is never pulled from under a keyboard. */
 export function Toaster() {
   const [toasts, setToasts] = useState<{ id: number; message: string; action?: ToastAction }[]>([]);

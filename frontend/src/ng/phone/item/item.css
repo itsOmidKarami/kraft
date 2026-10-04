@@ -26,6 +26,7 @@
 .ph-statecard-title { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .ph-statecard-where { margin: 0; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
 .ph-statecard-text { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text-sub); overflow-wrap: anywhere; }
+.ph-statecard-fix code { font: 12.5px ui-monospace, Menlo, monospace; }
 
 .ph-ticks-flush { padding-left: 0; }
 .ph-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }

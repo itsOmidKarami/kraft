@@ -26,6 +26,7 @@ describe("GateReview", () => {
     expect(await screen.findByText("Review brief")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Summary" })).toBeInTheDocument();
     expect(screen.getByText("WAITING FOR YOU")).toBeInTheDocument();
+    expect(screen.getAllByText("1 file")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /^Viewed / })).toBeNull();
   });
 

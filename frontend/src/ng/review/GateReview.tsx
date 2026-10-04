@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CompareFile, ReviewThread, WorkItem, WorkItemArtifact } from "../../types";
-import { docBody } from "../../format";
+import { docBody, plural } from "../../format";
 import { useModal } from "../../useModal";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -87,7 +87,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
         <aside className="rv-gate-side" aria-label="Changes">
           <div className="rv-gate-side-head">
             <span>CHANGES</span>
-            <span>{files.length} files <span className="rv-add">+{add}</span> <span className="rv-del">−{del}</span></span>
+            <span>{plural(files.length, "file")} <span className="rv-add">+{add}</span> <span className="rv-del">−{del}</span></span>
           </div>
           <FileTree files={files} untracked={[]} notShown={new Set()} threads={threads} selected={null} isViewed={isViewed} onSelect={(f) => onReviewChanges(f)} error={null} />
           <div className="rv-gate-side-foot">

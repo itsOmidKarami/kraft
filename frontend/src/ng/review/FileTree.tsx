@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { plural } from "../../format";
 import type { CompareFile, ReviewThread } from "../../types";
 import { folders, threadSummary, unresolved } from "./model";
 import { tip } from "../ui/Tooltip";
@@ -34,7 +35,7 @@ export function FileTree(p: {
   return (
     <nav className="rv-tree" aria-label="Changed files">
       <div className="rv-tree-head">
-        <span className="rv-tree-count">{p.files.length} files</span>
+        <span className="rv-tree-count">{plural(p.files.length, "file")}</span>
         <span className="rv-add">+{add}</span>
         <span className="rv-del">−{del}</span>
       </div>

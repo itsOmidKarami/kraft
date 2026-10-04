@@ -2,6 +2,7 @@ import { ago, elapsed, until, usd } from "../../../format";
 import type { KraftEvent, StopLimit } from "../../../types";
 import { budgetRaise, headerState, archivable, NOT_RAISABLE } from "../../item/status";
 import { taskName } from "../../item/paths";
+import { FORGE_LOGIN_HINT, failedFix, keptLine } from "../../item/cause";
 import { escalationsOf, ESCALATION } from "../../item/nodeGraph";
 import { limitPolicy } from "../../item/limitPolicy";
 import type { ItemDetail } from "../../item/useItem";
@@ -20,6 +21,8 @@ export interface Card {
   title: string;
   where?: string;
   text?: string;
+  /** What to do about it, when it is not a button: the forge CLI to sign in (`FORGE_LOGIN_HINT`; `backticks` mark commands). */
+  hint?: string;
   facts: [string, string][];
 }
 
@@ -58,15 +61,22 @@ const budgetSpent = (item: ItemDetail): [string, string][] => {
 };
 
 /** The words come from the desktop's StateCard, Banner and QuestionCard, so the two shapes say the same thing about the same stop. */
-export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null {
+export function cardOf(item: ItemDetail, events: KraftEvent[] = [], fileCount: number | null = null): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
   const where = stop ? [pathOf(stop.task) || stop.node, stop.attempt ? `attempt ${stop.attempt}` : ""].filter(Boolean).join(" · ") : undefined;
   switch (item.display_status) {
     case "failed": {
       if (!stop) return null;
-      const fs = Object.entries(facts).flatMap(([k, v]) => (str(v) ? [[k, str(v)!] as [string, string]] : []));
-      return { tone: "bad", title: "Failed", where, text: stop.reason ?? undefined, facts: [...fs.slice(0, 3), ...spent(item)] };
+      // The desktop's card, fact for fact: what the run kept, then the stop's own facts, and never `cause`, which picks the hint.
+      const fs = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && str(v) ? [[k, str(v)!] as [string, string]] : []));
+      const kept = keptLine(item, fileCount);
+      const keptFact: [string, string][] = kept ? [["work kept", kept]] : [];
+      return {
+        tone: "bad", title: "Failed", where, text: stop.reason ?? undefined,
+        ...(failedFix(item) === "forge_login" && { hint: FORGE_LOGIN_HINT }),
+        facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...spent(item)],
+      };
     }
     case "waiting": {
       if (stop?.kind === "rate_limit") {
@@ -135,7 +145,7 @@ export function cardOf(item: ItemDetail, events: KraftEvent[] = []): Card | null
 export type ActId =
   | "pause" | "steer" | "resume" | "start" | "reject" | "review" | "raise" | "retry" | "escalate" | "answer"
   | "cancel" | "reopen-mr" | "conflicts" | "board" | "restore"
-  | "settings" | "open-mr" | "duplicate" | "archive" | "complete";
+  | "repo" | "settings" | "open-mr" | "duplicate" | "archive" | "complete";
 export interface Act {
   id: ActId;
   label: string;
@@ -189,6 +199,8 @@ export function kebabOf(item: ItemDetail): Act[] {
   const inBar = new Set([bar.secondary?.id, bar.primary?.id]);
   const out: Act[] = [];
   if (hs.panel.includes("escalate") && !inBar.has("escalate") && status !== "paused") out.push(a("escalate", "Escalate"));
+  // The desktop's "Check the repo settings": a failed card whose cause the repo's settings can answer (`failedFix`).
+  if (status === "failed" && failedFix(item) === "repo") out.push(a("repo", "Check the repo settings"));
   if (item.current_node_id) out.push(a("settings", "Item settings"));
   if (item.mr_ref) out.push(a("open-mr", `Open MR !${item.mr_ref.number}`));
   out.push(a("duplicate", "Duplicate"));
@@ -198,11 +210,11 @@ export function kebabOf(item: ItemDetail): Act[] {
   return out;
 }
 
-/** A chain row's words under its id (the prototype's `sub`). */
-export function nodeSub(n: ChainNode): { text: string; tone: "warn" | "info" | "bad" | "muted" } {
+/** A chain row's words under its id (the prototype's `sub`). `skipped`: a gate that was skipped, not decided (`gateSkipped`), which no one approved. */
+export function nodeSub(n: ChainNode, skipped = false): { text: string; tone: "warn" | "info" | "bad" | "muted" } {
   const gate = n.kind === "gate";
   switch (n.state) {
-    case "done": return { text: gate ? (n.meta === "auto" ? "approved by an agent" : "approved") : (n.meta ?? "done"), tone: "muted" };
+    case "done": return { text: gate ? (skipped ? "skipped" : n.meta === "auto" ? "approved by an agent" : "approved") : (n.meta ?? "done"), tone: "muted" };
     case "failed": return { text: n.capped ? "stopped at the cap" : "failed", tone: "bad" };
     case "current":
       if (n.capped) return { text: "stopped at the cap", tone: "bad" };

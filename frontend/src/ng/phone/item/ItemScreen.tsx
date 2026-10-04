@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
+import { withCode } from "../../item/cause";
 import { actionPath } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
 import { lines as draftLines } from "../../item/draft/view";
@@ -47,7 +48,6 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   const [startLines, setStartLines] = useState<string[]>([]);
   const status = item.display_status ?? "running";
   const hs = headerState(item);
-  const card = cardOf(item, events);
   const bar = pairOf(item);
   const ended = status === "done" || status === "cancelled" || status === "archived";
   const session = currentSession(item);
@@ -56,6 +56,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
   // Nothing to compare before a start, or once the worktree is gone (archived: R12b-11); the server answers 409 or 404.
   const compare = useCompare(item.id, "base", "latest", false, item.head_sha, neverStarted(item) || item.worktree_exists === false);
   const files = compare.state === "ready" ? (compare.data.files ?? []) : [];
+  const card = cardOf(item, events, files.length);
   const adds = files.reduce((n, f) => n + f.insertions, 0);
   const dels = files.reduce((n, f) => n + f.deletions, 0);
   const node = item.chain_definition.nodes.find((n) => n.id === (item.stop?.node ?? item.current_node_id));
@@ -133,7 +134,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
           )}
           {files.length > 0 && (
             <button type="button" className="ph-linkbtn ph-diff-link" onClick={() => navigate(reviewUrl(item.id, gate && item.pending_gate ? `?gate=${encodeURIComponent(gate)}` : ""))}>
-              <span>{files.length} {files.length === 1 ? "file" : "files"}</span>
+              <span>{plural(files.length, "file")}</span>
               <span className="ph-add">+{adds}</span>
               <span className="ph-del">−{dels}</span>
               <span aria-hidden="true">·</span>
@@ -146,6 +147,7 @@ export function ItemScreen({ item, events, reload, now }: { item: ItemDetail; ev
             <h2 className="ph-statecard-title">{card.icon && <MessageSquare size={15} className="ph-statecard-icon" aria-hidden="true" />}{card.title}</h2>
             {card.where && <p className="ph-statecard-where">{card.where}</p>}
             {card.text && <p className="ph-statecard-text">{card.text}</p>}
+            {card.hint && <p className="ph-statecard-text ph-statecard-fix">{withCode(card.hint)}</p>}
             {card.facts.length > 0 && (
               <dl className="ph-facts">
                 {card.facts.map(([k, v]) => <div key={k} className="ph-fact"><dt>{k}</dt><dd>{v}</dd></div>)}
@@ -219,6 +221,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
         options={kebab.map((k) => ({ value: k.id, label: k.label, danger: k.danger }))}
         onPick={async (id) => {
           switch (id) {
+            case "repo": return sheet.goTo(`/settings/repos/${encodeURIComponent(item.repo)}`);
             case "settings": return node ? sheet.goTo(placeUrl(item.id, { node, sel: { kind: "node", node }, tab: "config" })) : sheet.close();
             case "open-mr": sheet.close(); return void window.open(item.mr_ref?.url, "_blank", "noopener");
             case "duplicate": {
