@@ -185,7 +185,8 @@ export interface WorkItemStop {
 }
 
 /** `GET /work-items/{id}/cancel-preview` (B4): what `POST .../cancel` would
- *  do, read-only. Additive: not read by the shipped UI yet. */
+ *  do, read-only. The Cancel and Mark complete cards read it; `beads` is
+ *  every bead Mark complete's box would close. */
 export interface CancelPreview {
   running: { node: string | null; task: string | null; attempt: number | null; started_at: string | null } | null;
   kept: { branch: string; worktree: string; findings: number; threads: number };

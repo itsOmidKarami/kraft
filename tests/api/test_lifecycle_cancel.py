@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from support.api import _force_node, _set_status
+from support.harness import commit_all, git, write
 
 # --- D: cancel preview and close the MR on cancel (B4) ----------------------
 
@@ -119,6 +120,22 @@ def test_cancel_preview_of_a_stopped_item_names_its_mr_and_what_cancel_would_kee
     assert client.get(f"/api/work-items/{wid}/cancel-preview").json()["beads"] == [
         "kraft-own",
         "kraft-impl",
+    ]
+
+    # ...then those a `Closes` trailer on the item's own commits names, which the box closes too.
+    worktree = client.app.state.run_dirs.worktrees / wid
+    git(repo.parent, "clone", "-q", str(repo), str(worktree))
+    base = git(worktree, "rev-parse", "HEAD")
+    write(worktree, "fix.txt", "x\n")
+    commit_all(worktree, "fix\n\nCloses Kraft-trl\nCloses kraft-own")
+    client.portal.call(
+        client.app.state.db.write,
+        lambda c: c.execute("UPDATE work_items SET base_ref = ? WHERE id = ?", (base, wid)),
+    )
+    assert client.get(f"/api/work-items/{wid}/cancel-preview").json()["beads"] == [
+        "kraft-own",
+        "kraft-impl",
+        "Kraft-trl",
     ]
 
 

@@ -620,12 +620,9 @@ async def cancel_preview(wid: str, request: Request):
         },
         "mr": mr,
         "spend": {"spent_usd": spent_usd, "cap_usd": cap_usd},
-        # The beads a hand completion closes when asked: the item's own and those it implements.
-        "beads": list(
-            dict.fromkeys(
-                b for b in (row["bead_id"], *json.loads(row["implements_beads"] or "[]")) if b
-            )
-        ),
+        # The beads a hand completion closes when asked: the item's own, those it
+        # implements, and those its commits' `Fixes`/`Closes` trailers name.
+        "beads": executor.named_beads(row, st.run_dirs),
     }
 
 
