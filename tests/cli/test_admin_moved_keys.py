@@ -319,6 +319,8 @@ def test_the_first_start_binds_the_address_of_the_home_it_finishes_moving(monkey
     monkeypatch.setattr(
         cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: bound.append(self.config.port)
     )
+    # The default port may have a real server on it; the probe is not under test.
+    monkeypatch.setattr(cli.admin, "_refuse_if_addr_taken", lambda *a, **k: None)
 
     cli.admin._serve()
 

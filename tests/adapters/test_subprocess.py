@@ -719,7 +719,8 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
 
     monkeypatch.setattr(docker_backend, "docker_argv", fake_docker_argv)
 
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Daemon")
     # Done only if the fake docker, run in the client's own env (what a bare
     # `-e MY_REPO` copies from), handed the value on.
