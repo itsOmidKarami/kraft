@@ -1,3 +1,4 @@
+import { plural } from "../../../format";
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 // Schedules fire on the server's clock in UTC (triggers.tick: `datetime.now(UTC)`), so a time says so.
 const at = (h: string, m: string) => `${h.padStart(2, "0")}:${m.padStart(2, "0")} UTC`;
@@ -10,7 +11,7 @@ export function describeCron(cron: string): string {
   const f = cron.trim().split(/\s+/);
   if (f.length !== 5) return cron;
   const [m, h, dom, mon, dow] = f;
-  if (/^\*\/\d+$/.test(m) && within(m.slice(2), 1, 59) && h === "*" && dom === "*" && mon === "*" && dow === "*") return `every ${Number(m.slice(2))} minutes`;
+  if (/^\*\/\d+$/.test(m) && within(m.slice(2), 1, 59) && h === "*" && dom === "*" && mon === "*" && dow === "*") return `every ${plural(Number(m.slice(2)), "minute")}`;
   if (!within(m, 0, 59) || !within(h, 0, 23) || dom !== "*" || mon !== "*") return cron;
   if (dow === "*") return `daily ${at(h, m)}`;
   if (dow === "1-5") return `weekdays ${at(h, m)}`;

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, shortId, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, dollars, dollarsText, elapsed, elapsedBetween, logLineText, nodeRunSpan, plural, shortId, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -243,4 +243,16 @@ describe("docTitle (W11 · H)", () => {
     expect(docTitle({ title: "8cbfe6e27c1044b3e445c0f0d726357d", hook_point: "on.mr.describe" })).toBe("Session · on.mr.describe");
     expect(docTitle({ title: "Session 8cbfe6e27c1044b3e445c0f0d726357d", kind: "sessions" })).toBe("Session · sessions");
   });
+});
+
+describe("plural", () => {
+  it.each([
+    [1, "minute", undefined, "1 minute"],
+    [0, "minute", undefined, "0 minutes"],
+    [2, "minute", undefined, "2 minutes"],
+    [1, "attempt", "attempts", "1 attempt"],
+    [3, "dollar", "dollars", "3 dollars"],
+    [1, "box", "boxes", "1 box"],
+    [2, "box", "boxes", "2 boxes"],
+  ])("%s %s", (n, one, many, out) => expect(plural(n, one, many)).toBe(out));
 });

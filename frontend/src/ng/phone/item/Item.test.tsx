@@ -304,6 +304,7 @@ describe("Raise budget (C.6)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
     await userEvent.click(screen.getByRole("button", { name: "Set an amount…" }));
     const input = screen.getByLabelText("Budget in dollars", { selector: "input" });
+    expect(input).toHaveAttribute("inputmode", "decimal");
     await userEvent.clear(input);
     await userEvent.type(input, "0{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("above 0");
@@ -412,13 +413,19 @@ describe("raising the cap that stopped the item (R73)", () => {
     expect(screen.queryByRole("button", { name: /^Raise/ })).toBeNull();
   });
 
-  it("with stop.limit the bar is Steer and Raise cap, and the sheet shows the value and the maximum", async () => {
-    mount(capped(limit()));
+  // R14b-08: "Now 1 minutes"; R14b-06: a phone shows the digit keyboard for an amount.
+  it.each([
+    ["minutes", limit(), "Now 480 minutes of running time.", "numeric"],
+    ["one minute", limit({ value: 1 }), "Now 1 minute of running time.", "numeric"],
+    ["one attempt", limit({ path: "verification", key: "max_attempts", value: 1 }), "Now 1 attempt on verification.", "numeric"],
+  ])("with stop.limit the bar is Steer and Raise cap, and the sheet shows the value and the maximum: %s", async (_n, l, now, mode) => {
+    mount(capped(l));
     expect(await screen.findByRole("button", { name: "Steer" })).toBeInTheDocument();
     const dialog = await openSheet();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(dialog).toHaveTextContent("Now 480 minutes of running time. The policy maximum is 1440.");
-    expect(screen.getByLabelText("Raise the running time cap", { selector: "input" })).toHaveValue("480");
+    expect(dialog).toHaveTextContent(`${now} The policy maximum is 1440.`);
+    expect(within(dialog).getByRole("textbox")).toHaveAttribute("inputmode", mode);
+    expect(within(dialog).getByRole("textbox")).toHaveValue(String(l.value));
     expect(within(dialog).getByRole("button", { name: "Save & retry" })).toBeInTheDocument();
   });
 
@@ -479,6 +486,7 @@ describe("raising the cap that stopped the item (R73)", () => {
     const typeCap = async (v: string) => {
       await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
       const box = screen.getByLabelText("Raise the budget cap", { selector: "input" });
+      expect(box).toHaveAttribute("inputmode", "decimal");
       await userEvent.clear(box);
       await userEvent.type(box, `${v}{Enter}`);
     };

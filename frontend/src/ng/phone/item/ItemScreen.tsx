@@ -1,7 +1,7 @@
 import { EllipsisVertical, MessageSquare } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, shortId } from "../../../format";
+import { DOLLARS_HINT, dollars, dollarsText, elapsedBetween, plural, shortId } from "../../../format";
 import type { KraftEvent, WorkerSession } from "../../../types";
 import { actionPath } from "../../item/paths";
 import { act, draftToStart } from "../../item/actions";
@@ -270,6 +270,7 @@ function ItemSheets({ item, node, sheet, reload, startLines = [] }: { item: Item
     return (
       <EditSheet
         title="Budget in dollars"
+        inputMode="decimal"
         text="The item's new spend cap. It can't go above the policy maximum."
         initial={cap ? String(cap) : ""}
         submitLabel="Raise and resume"
@@ -319,7 +320,8 @@ function RaiseCapSheet({ item, sheet, reload }: { item: ItemDetail; sheet: Retur
   return (
     <EditSheet
       title={`Raise the ${words.noun}`}
-      text={`Now ${money ? show(limit.value) : `${limit.value} ${words.unit}`}${where}. ${limit.maximum != null ? `The policy maximum is ${show(limit.maximum)}.` : "The policy sets no maximum."} Applies to this item only, then retries.`}
+      inputMode={money ? "decimal" : "numeric"}
+      text={`Now ${money ? show(limit.value) : plural(limit.value, words.one, words.unit)}${where}. ${limit.maximum != null ? `The policy maximum is ${show(limit.maximum)}.` : "The policy sets no maximum."} Applies to this item only, then retries.`}
       initial={money ? dollarsText(limit.value) : String(limit.value)}
       submitLabel="Save & retry"
       error={error}
