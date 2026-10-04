@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { NodeGlyph } from "./NodeGlyph";
-import { EXPAND_W, G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
+import { G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 import { RoundPicker } from "./RoundPicker";
 import { chipKey, ScopeFrame } from "./ScopeFrame";
-import { frameHeight, type ScopesView } from "../item/scopeView";
+import { frameHeight, frameWidth, type ScopesView } from "../item/scopeView";
 import type { Rounds } from "../item/nodeGraph";
 import { accessibleName, breakable, type GraphItem } from "./types";
 import { useCamera } from "./useCamera";
@@ -68,10 +68,10 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const shown = expand ?? (phase.mounted ? kept.current : undefined);
   const openStep = shown ? steps.findIndex((st) => st.id === shown.step) : -1;
   const openRow = shown && openStep >= 0 ? steps[openStep].tasks.findIndex((t) => t.id === shown.task) : -1;
-  const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: EXPAND_W, h: frameHeight(shown.view) } : undefined;
+  const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: frameWidth(shown.view), h: frameHeight(shown.view) } : undefined;
   const laid = { side: !!side, loop: !!loop, loopTasks: loopTasks.length > 0, footer: !!onFailure };
   const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, loopTasks.length, onFailure]); // eslint-disable-line react-hooks/exhaustive-deps
-  const wide = useMemo(() => (open ? nodeLayout(steps, { ...laid, expand: open }) : closed), [closed, open?.step, open?.row, open?.h]); // eslint-disable-line react-hooks/exhaustive-deps
+  const wide = useMemo(() => (open ? nodeLayout(steps, { ...laid, expand: open }) : closed), [closed, open?.step, open?.row, open?.w, open?.h]); // eslint-disable-line react-hooks/exhaustive-deps
   const lay = phase.layout && open ? wide : closed;
   const { edges, dots } = useMemo(() => nodeEdges(steps, lay), [steps, lay]);
   // The camera measures the world after it has moved, and keeps clear of the zoom and round controls at the foot.

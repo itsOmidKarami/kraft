@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isScopeTask, otherRounds, reposOf, scopesView } from "./scopeView";
+import { frameWidth, isScopeTask, otherRounds, reposOf, scopesView, type Chip, type ScopesView } from "./scopeView";
 import { detail, FROZEN, pendingRun, SCOPE_PATH, scopeChain, scopeRun, scoped, WORKSPACE } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -117,6 +117,23 @@ describe("scopesView", () => {
   it("draws an area's setup as a chip ahead of the area's first scope", () => {
     const it = item([run(null, "just test-web", 0, "done", { order: 3, area: "web" }), run(null, "npm ci", 0, "done", { order: 2.5, area: "web", setup: true, scope: undefined })]);
     expect(names(scopesView(it, PATH, 1, NOW)).map((c) => c[0])).toEqual(["setup · web", "just test-web"]);
+  });
+});
+
+describe("frameWidth", () => {
+  const chip = (name: string, meta: string, state: Chip["state"] = "done"): Chip => ({ key: name, name, command: name, state, meta });
+  const of = (chips: Chip[], execution: ScopesView["execution"] = "sequential"): ScopesView => ({ path: "p", round: 1, execution, rows: [{ id: null, name: "r", state: "running", note: "", chips }] });
+  const long = [chip("pnpm --dir docsite '&&' npm…", "0s"), chip("just test-vscode", "2s"), chip("just ci-test", "running · 5s", "running")];
+
+  it.each([
+    ["a short row keeps the least width", of([chip("a/**", "1s")]), (w: number) => w === 760],
+    ["a row of chips longer than that widens it", of(long), (w: number) => w > 760],
+    ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w === 760],
+  ])("%s", (_, view, ok) => expect(ok(frameWidth(view))).toBe(true));
+
+  it("does not widen as a running chip's clock ticks", () => {
+    const at = (meta: string) => frameWidth(of([...long.slice(0, 2), chip("just ci-test", meta, "running")]));
+    expect(at("running · 5s")).toBe(at("running · 59m 59s"));
   });
 });
 

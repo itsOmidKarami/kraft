@@ -1,4 +1,5 @@
 import { elapsed, elapsedBetween } from "../../format";
+import { EXPAND_W } from "../graph/nodeLayout";
 import type { ScopeRun, WorkerSession } from "../../types";
 import { materialized, taskAt } from "./chainValues";
 import { passOf } from "./nodeGraph";
@@ -32,6 +33,28 @@ export type ScopesView = { path: string; round: number; execution: "sequential" 
 export const rowHeight = (row: RepoRow, execution: ScopesView["execution"]) => (execution === "parallel" ? Math.max(40, row.chips.length * 30 + 6) : 40);
 /** The frame's height: its 40px header, 14px of padding, the rows and 8px between them. */
 export const frameHeight = (v: ScopesView) => 40 + 14 + v.rows.reduce((t, r) => t + rowHeight(r, v.execution), 0) + 8 * (v.rows.length - 1);
+
+/** About how wide a chip draws: 11.5px type, its command in monospace (~7px a character), its meta in the UI face
+ *  (~6.5px), inside 8px of padding a side, a running chip's 1.5px border, the dot and 6px gaps. A running chip's
+ *  clock is counted at its widest, `running · 59m 59s`, so the frame does not widen as the seconds tick. */
+const chipWidth = (c: Chip) => {
+  const meta = c.state === "running" ? Math.max(c.meta.length, 17) : c.meta.length;
+  return 19 + 7 + 6 + c.name.length * 7 + (meta ? 6 + meta * 6.5 : 0) + (c.fresh ? 6 + 28 : 0);
+};
+/** A row's chips: in a line, each after the first behind a 6px gap, an arrow and another 6px; forked, the widest
+ *  beside its 10px tick. */
+const chipsWidth = (row: RepoRow, execution: ScopesView["execution"]) => {
+  const w = row.chips.map(chipWidth);
+  if (!w.length) return 0;
+  return execution === "parallel" ? 2 + 10 + 6 + Math.max(...w) : w.reduce((t, x) => t + x, 0) + (w.length - 1) * (6 + 12 + 6) + 4;
+};
+/** The frame's width: wide enough for its longest row of chips, as it is tall enough for its rows, so nothing in it
+ *  scrolls under a canvas whose wheel pans; never narrower than `EXPAND_W`. A row is 14px of padding a side, the
+ *  20px ring, the 112px repository column and the 10px gaps between them; rounded up to 20px, with 16 to spare. */
+export const frameWidth = (v: ScopesView) => {
+  const widest = Math.max(0, ...v.rows.map((r) => chipsWidth(r, v.execution)));
+  return Math.max(EXPAND_W, Math.ceil((28 + 20 + 10 + 112 + 10 + widest + 16) / 20) * 20);
+};
 
 /** Whether the frozen chain's task at `path` is the changed-test-scope builtin. */
 export const isScopeTask = (item: ItemDetail, path: string) => {

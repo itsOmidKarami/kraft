@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { rowHeight, type Chip, type ScopesView } from "../item/scopeView";
-import { EXPAND_W } from "./nodeLayout";
+import { frameWidth, rowHeight, type Chip, type ScopesView } from "../item/scopeView";
 import "./graph.css";
 
 type Rove = { ref: (key: string) => (el: HTMLElement | null) => void; tabIndex: (key: string) => number; go: (key: string | undefined) => void; onFocus: (key: string, el: HTMLElement) => void };
@@ -31,7 +30,8 @@ type Props = {
 /** What a chip's tooltip says: the whole command and the paths it covers, then why it is dashed or tagged. */
 const tooltip = (c: Chip) => [c.command, c.paths && `covers ${c.paths}`, c.state === "skipped" ? "Ran last round; no changed path reaches it this round" : c.fresh ? "Picked for the first time this round" : ""].filter(Boolean).join("\n");
 
-/** A repository's chips in one row: when they run past the frame the row scrolls, and its right edge fades over 24px to say there is more. */
+/** A repository's chips in one row. The frame is as wide as its longest row (`frameWidth`); should a row still run
+ *  past it, the row scrolls, and its right edge fades over 24px to say there is more. */
 function ChipRow({ fork, children }: { fork: boolean; children: ReactNode }) {
   const el = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState(false);
@@ -59,7 +59,7 @@ export function ScopeFrame({ view, step, task, rect, on, full, out, selectedScop
   return (
     <div role="group" aria-label={`${task}, repositories and scopes`} className={`scope-frame${full ? " is-full" : ""}${out ? " is-out" : ""}${on ? " is-on" : ""}`} style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onClick={background}>
       {/* The contents keep the frame's full width while it grows from the box, so nothing reflows on the way. */}
-      <div className="scope-inner" style={{ width: EXPAND_W }}>
+      <div className="scope-inner" style={{ width: frameWidth(view) }}>
         <div className="scope-head">
           <button ref={rove.ref(taskKey)} type="button" tabIndex={rove.tabIndex(taskKey)} className="scope-task" aria-pressed={!selectedScope} onFocus={(e) => rove.onFocus(taskKey, e.currentTarget)} onClick={onTask}>{task}</button>
           <span className="scope-sub">round {view.round} · repos in order · scopes {parallel ? "in parallel" : "in order"}</span>

@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { frameHeight, type ScopesView } from "../item/scopeView";
+import { frameHeight, frameWidth, type ScopesView } from "../item/scopeView";
 import { NodeGraph } from "./NodeGraph";
 import type { NodeStep } from "./nodeLayout";
 
@@ -43,6 +43,17 @@ describe("NodeGraph with a task open", () => {
     expect(px(screen.getByRole("button", { name: /^code_review/ }), "left")).toBe(before.review + 668);
     expect(world()).toHaveClass("is-glide");
     await waitFor(() => expect(world()).not.toHaveClass("is-glide"));
+  });
+
+  // A row of chips wider than the frame would scroll under a wheel that pans the canvas: the frame takes the row's width.
+  it("widens the frame to its longest row of chips, and moves the later steps by as much", async () => {
+    const wide = { ...view, rows: [{ ...view.rows[0], chips: ["a", "b", "c", "d", "e"].map((x) => chip(`just test-${x}-with-a-long-name`)) }, view.rows[1]] };
+    const before = px(render(<NodeGraph name="v" steps={steps} />).container.querySelector<HTMLElement>(".canvas-world")!, "width");
+    document.body.innerHTML = "";
+    render(<NodeGraph name="v" steps={steps} expand={{ ...expand, view: wide }} />);
+    expect(frameWidth(wide)).toBeGreaterThan(760);
+    expect(px(frame()!, "width")).toBe(frameWidth(wide));
+    expect(px(world(), "width")).toBe(before + frameWidth(wide) - 92);
   });
 
   it("fits the camera to the new world once the move is over, not while the world is still moving", async () => {
