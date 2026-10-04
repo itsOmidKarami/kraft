@@ -207,11 +207,11 @@ test-py version *ARGS:
     shift
     UV_PROJECT_ENVIRONMENT=".venv-$v" uv run --python "$v" pytest -m "not e2e" -n auto "$@"
 
-# Check the intent tree: every enforced-by pin resolves, and list what nothing pins.
+# Check the intent tree: every enforced-by pin resolves, and list what nothing pins
 intent:
     uv run python -m kraft.intent
 
-# Move every enforced-by pin on OLD (or OLD[case]) to NEW; refuses when NEW does not collect.
+# Move every enforced-by pin on OLD (or OLD[case]) to NEW; refuses when NEW does not collect
 intent-repoint OLD NEW:
     uv run python -m kraft.intent --repoint "{{OLD}}" "{{NEW}}"
 

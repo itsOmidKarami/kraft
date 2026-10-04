@@ -10,8 +10,9 @@ Kraft's configuration is a set of YAML files under `$KRAFT_HOME/config/` (defaul
 Kraft seeds the directory from the packaged defaults on first run and never
 overwrites it afterwards, so an upgrade cannot clobber an edited policy. The
 UI edits these same files: the two templates, `library.yaml` and `chains/`,
-under **Templates**, and the rest under **Settings**. Editing them by hand is
-equally supported.
+under **Templates**, and the rest under **Settings**, except `sandbox.yaml` and
+`detectors.yaml`, which no screen edits. Editing them by hand is equally
+supported.
 
 Before 2.0 the directory was `templates/`. The first start of 2.0 renames it;
 `KRAFT_TEMPLATES_DIR` still points at it when `KRAFT_CONFIG_DIR` is unset.
@@ -47,6 +48,7 @@ template format. Kraft refuses a home that still holds them until you run
 | `intake.yaml` | Autonomous pickup of issues, and schedules. | [Intake](/reference/configuration/intake) |
 | `access.yaml` | Bind address, password, remote access. | [Access](/reference/configuration/access) |
 | `sandbox.yaml` | Which container CLI runs sandboxed tasks, SELinux, and an extra CA. | [Sandbox host](/reference/configuration/sandbox) |
+| `detectors.yaml` | Optional: your own conventions for the setup and test commands `kraft repo connect` proposes, layered on the packaged table. Not seeded. | [Detectors](/reference/configuration/repos/detectors) |
 | `notify.yaml`, `theme.yaml` | Notification webhook and UI appearance. | [Settings-only files](#settings-only-files) |
 
 ## Settings-only files

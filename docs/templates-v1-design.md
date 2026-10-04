@@ -12,14 +12,15 @@ draft, not an implementation plan.
 ## Configuration layout
 
 ```text
-templates/
+config/
   policy.yaml       # instance defaults and administrator maxima
+  intake.yaml       # auto-intake and schedules
   harnesses.yaml    # installed agent-runtime profiles
   repos.yaml        # repositories, workspaces, and monorepo areas
   library.yaml      # reusable steering, tasks, steps, and nodes
   chains/
     default.yaml    # one selectable chain per file
-    quick-change.yaml
+    quick-task.yaml
 ```
 
 `registry.yaml`, hook names, and `gate_after` do not exist in V1.

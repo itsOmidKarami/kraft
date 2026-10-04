@@ -73,6 +73,7 @@ async function copyPage() {
     >
       <UButton
         icon="i-lucide-chevron-down"
+        aria-label="More ways to copy or open this page"
         color="neutral"
         variant="soft"
         class="border-l border-muted"

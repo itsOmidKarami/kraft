@@ -71,7 +71,7 @@ Env it sets for the child `python -m kraft`:
 | --- | --- |
 | `KRAFT_PORT` | ephemeral by default; pin one explicitly via `KRAFT_PORT` |
 | `KRAFT_RUN_DIR` | `<tmp>/run` |
-| `KRAFT_CONFIG_DIR` | fake templates dir (the V1 library, its chains, harness profiles and policy) |
+| `KRAFT_CONFIG_DIR`, `KRAFT_TEMPLATES_DIR` | blank, so the daemon reads `$KRAFT_HOME/config`, where `serve.py` writes the fake V1 config (the library, its chains, harness profiles and policy) |
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |
