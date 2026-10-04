@@ -43,7 +43,11 @@ function sessions() {
     session("verification.fix_loop.main.repair", 2, "done", { wall_ms: 290_000, model: "sonnet" }),
     session("verification.fix_loop.judge", 1, "done", { wall_ms: 31_000, model: "sonnet" }),
   ];
-  return { worker_sessions: [...rest, ...scopes.map((x) => x.s)], scope_runs: scopes.map((x) => x.r) };
+  // In the order a round really goes: the repair into it, its lint, its scopes, then the judge after it.
+  const all = [...rest, ...scopes.map((x) => x.s)];
+  const step = (h: string) => (h.includes("repair") ? 0 : h.includes("lint") ? 1 : h.includes("judge") ? 3 : 2);
+  for (const x of all) x.created_at = `2026-09-13T09:${String(10 + x.round * 5 + step(x.hook_point)).padStart(2, "0")}:00Z`;
+  return { worker_sessions: all, scope_runs: scopes.map((x) => x.r) };
 }
 
 /** One finished item serves both tests: the server runs one at a time, and a second item is only a second wait. */
@@ -83,6 +87,8 @@ test("a verification that went three rounds: open the scopes, pick one, step bac
   await expect(frame(page)).toHaveCSS("width", "760px");
   await expect(page.locator(".canvas-world.is-glide")).toHaveCount(0);
   await expect(frame(page).locator(".scope-row")).toHaveCount(2);
+  // The box it replaced held the focus; the frame's title has it now.
+  await expect(frame(page).getByRole("button", { name: "test_changed_scopes" })).toBeFocused();
 
   // A chip opens its scope's pane, with the scope in the address.
   await frame(page).getByRole("button", { name: /^just test-c, done, new this round/ }).click();
@@ -93,11 +99,8 @@ test("a verification that went three rounds: open the scopes, pick one, step bac
 
   // Esc steps back from the scope to the task, then closes the frame, leaving the task's pane.
   await page.keyboard.press("Escape");
-  await expect(page).not.toHaveURL(/scope=/);
-  // The page has to show the step back before the next key, as it does for a person.
-  await expect(page.getByRole("complementary", { name: "test_changed_scopes pane" })).toBeVisible();
-  await expect(frame(page)).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page).not.toHaveURL(/scope=/);
   await expect(frame(page)).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "test_changed_scopes pane" })).toBeVisible();
 

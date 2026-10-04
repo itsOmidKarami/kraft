@@ -1,6 +1,7 @@
 import { elapsed, elapsedBetween } from "../../format";
 import type { ScopeRun, WorkerSession } from "../../types";
 import { materialized, taskAt } from "./chainValues";
+import { passOf } from "./nodeGraph";
 import type { ItemDetail } from "./useItem";
 
 /** The builtin whose task draws as a frame of repositories and scopes once selected. */
@@ -43,6 +44,13 @@ export const scopeKey = (repository: string | null | undefined, command: string)
 export const trim = (c: string, n = 28) => (c.length > n ? `${c.slice(0, n - 1)}…` : c);
 const basename = (p: string) => p.replace(/\/+$/, "").split("/").at(-1) || p;
 
+/** The runs of the changed-test-scope task at `path`. A run's round is its session's as the node's pass reads it: a
+ *  re-measure after `on_failure` (stamped -1) is the round's own. */
+const runsOf = (item: ItemDetail, path: string): ScopeRun[] => {
+  const read = new Map(passOf(item, path.split(".")[0]).map((s) => [s.id, s.round]));
+  return (item.scope_runs ?? []).filter((r) => r.hook_point === path).map((r) => ({ ...r, round: (r.session_id ? read.get(r.session_id) : undefined) ?? r.round }));
+};
+
 /** The repositories a fanned-out task visits, in the order it does (`dispatch._fan_out`): a workspace's root, then
  *  its members; one repository, or none selected, is one run in the item's own checkout, named for it. */
 export function reposOf(item: ItemDetail): { id: string | null; name: string }[] {
@@ -77,12 +85,13 @@ const byOrder = (a: Chip & { order?: number }, b: Chip & { order?: number }) => 
  *  each beside what the round before it picked. The task, by `scope_runs`: the latest run of a command in a
  *  repository is the one a round shows (a retry runs it again in the same round). */
 export function scopesView(item: ItemDetail, path: string, round: number, now: number): ScopesView {
-  const runs = (item.scope_runs ?? []).filter((r) => r.hook_point === path);
+  const runs = runsOf(item, path);
   const sessions = new Map(item.worker_sessions.map((s) => [s.id, s]));
   const sessionOf = (r: ScopeRun) => (r.session_id ? sessions.get(r.session_id) : undefined);
   const m = materialized(item);
   const execution = taskAt(m ?? { chain: { nodes: [] } }, path)?.execution === "parallel" ? "parallel" : "sequential";
-  const repos = reposOf(item);
+  // Runs fanned out over a workspace carry their repository, even a workspace of one; otherwise there is one run, in the item's own checkout.
+  const repos = runs.some((r) => r.repository) || !runs.length ? reposOf(item) : [{ id: null, name: basename(item.repo) }];
   const last = (rs: ScopeRun[]) => [...new Map(rs.map((r) => [scopeKey(r.repository, r.command), r])).values()];
   const inRound = (n: number, repo: string | null) => last(runs.filter((r) => r.round === n - 1 && r.repository === repo));
   // The round is still going while one of its commands runs, or the node it belongs to is the one running.
@@ -93,8 +102,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
   const rows: RepoRow[] = [];
   let failedBefore: string | null = null;
   for (const repo of repos) {
-    // A single repository's runs name none.
-    const id = repos.length === 1 ? null : repo.id;
+    const id = repo.id;
     const picked = inRound(round, id);
     const before = round > 1 ? inRound(round - 1, id) : [];
     const sameAs = (a: ScopeRun, b: ScopeRun) => scopeKey(a.repository, a.command) === scopeKey(b.repository, b.command);
@@ -144,7 +152,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
  *  one its repository ran in without it says "not picked"; one that never reached the repository says so. `round` itself
  *  is left out, as are rounds the node has not got to. */
 export function otherRounds(item: ItemDetail, path: string, key: string, round: number): string[] {
-  const all = (item.scope_runs ?? []).filter((r) => r.hook_point === path);
+  const all = runsOf(item, path);
   const [repo, ...rest] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
   const command = rest.join(":");
   const latest = Math.max(0, ...all.map((r) => r.round + 1));

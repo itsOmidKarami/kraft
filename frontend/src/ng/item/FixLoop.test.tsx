@@ -14,13 +14,12 @@ let n = 0;
 const sess = (hook_point: string, over: Partial<WorkerSession> = {}) =>
   ({ id: `s${n++}`, node_id: "verification", hook_point, status: "done", attempt: 1, round: 0, thread: 1, created_at: `2026-09-13T09:${String(n).padStart(2, "0")}:00Z`, started_at: "2026-09-13T10:07:00Z", exited_at: null, wall_ms: 240_000, model: "sonnet", tokens_in: 1, tokens_out: 1, cost_usd: 0.1, head_sha: "abc", ...over }) as WorkerSession;
 /** Round 1 failed, a repair (310s), round 2 failed, the judge after it, and the second repair running. */
-const run = (extra: WorkerSession[] = []) => [
+const run = () => [
   sess("verification.checks.lint", { round: 0, status: "failed" }), sess("verification.review.code_review", { round: 0 }),
   sess("verification.fix_loop.main.repair", { round: 1, wall_ms: 310_000 }),
   sess("verification.checks.lint", { round: 1, status: "failed", attempt: 2 }), sess("verification.review.code_review", { round: 1, attempt: 2, wall_ms: 90_000 }),
   sess("verification.fix_loop.judge", { round: 1, wall_ms: 31_000 }),
   sess("verification.fix_loop.main.repair", { round: 2, status: "running", wall_ms: null, attempt: 2, started_at: new Date(Date.now() - 41_000).toISOString() }),
-  ...extra,
 ];
 const item = (sessions = run()) => detail({ chain_definition: { template_id: "default", nodes }, materialized_chain: LOOPED, worker_sessions: sessions });
 const mount = (path: string, it = item()) => {
@@ -88,7 +87,10 @@ describe("a fix-loop node", () => {
   });
 
   it("shows the attempt pill only when the round itself ran the task more than once", async () => {
-    mount("/work-items/w1/nodes/verification?sel=verification.checks.lint", item(run([sess("verification.checks.lint", { round: 1, attempt: 3, status: "failed", wall_ms: 5_000 })])));
+    // The third run of the lint belongs to round 2, so it happened before that round's repair.
+    const all = run();
+    all.push(sess("verification.checks.lint", { round: 1, attempt: 3, status: "failed", wall_ms: 5_000, created_at: all[3].created_at }));
+    mount("/work-items/w1/nodes/verification?sel=verification.checks.lint", item(all));
     const pill = within(pane("lint")).getByRole("button", { name: "attempt 2 of 2" });
     expect(pill.closest(".pane-sub")).toHaveTextContent(/^subprocess task · round 2 of 3 · attempt 2 of 2▾ · failed$/);
     await userEvent.click(pill);

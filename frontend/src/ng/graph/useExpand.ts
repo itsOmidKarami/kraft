@@ -12,10 +12,13 @@ export type Phase = { mounted: boolean; layout: boolean; content: boolean; glide
 export function useExpand(open: boolean, reduced: boolean): Phase {
   const [phase, set] = useState<Phase>({ mounted: open, layout: open, content: open, glide: false });
   const was = useRef(open);
+  // Read live, not a dependency: a change of preference mid-move would re-run the effect and drop the timers that end the glide.
+  const calm = useRef(reduced);
+  calm.current = reduced;
   useEffect(() => {
     if (was.current === open) return;
     was.current = open;
-    if (reduced) return set({ mounted: open, layout: open, content: open, glide: false });
+    if (calm.current) return set({ mounted: open, layout: open, content: open, glide: false });
     const timers: number[] = [];
     const at = (ms: number, fn: () => void) => void timers.push(window.setTimeout(fn, ms));
     let frames = 0;
@@ -33,7 +36,7 @@ export function useExpand(open: boolean, reduced: boolean): Phase {
       cancelAnimationFrame(frames);
       timers.forEach(clearTimeout);
     };
-  }, [open, reduced]);
+  }, [open]);
   return phase;
 }
 

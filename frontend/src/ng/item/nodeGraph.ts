@@ -13,9 +13,34 @@ export const AUTO_REVIEW = "auto_review";
 export const isEscalation = (s: WorkerSession) => s.hook_point === ESCALATION || s.hook_point.endsWith(`.${ESCALATION}`);
 const LIVE = new Set(["running", "pending", "rate_limited", "waiting", "needs_context"]);
 
-/** A task path's sessions, attempt order (the attempt switcher's list). */
+/** A node's sessions in the pass it is on, oldest first, each with the round it reads in. A retry or a base change
+ *  restarts a fix loop at round 0, so a measurement below the highest one seen starts a new pass (`node_started` fires
+ *  per measurement and cannot tell). The loop's own repair and judge never count: a fix cycle that was paused and
+ *  refunded is measured again at a round below the repair it follows. A negative round (the re-measure after `on_failure`,
+ *  `walk._REPAIR_ROUND`) starts nothing and reads in the round of the session before it. */
+export function passOf(item: ItemDetail, node: string): WorkerSession[] {
+  const all = item.worker_sessions.filter((s) => s.node_id === node && !isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  let from = 0;
+  let top = 0;
+  let last = 0;
+  const read = all.map((s, i) => {
+    if (s.round >= 0) {
+      last = s.round;
+      if (!s.hook_point.startsWith(`${node}.${FIX_LOOP}.`)) {
+        if (s.round < top) from = i;
+        top = s.round;
+      }
+    }
+    return s.round < 0 ? { ...s, round: last } : s;
+  });
+  return read.slice(from);
+}
+
+/** A task path's sessions in the node's current pass, attempt order (the attempt switcher's list). */
 export function sessionsOf(item: ItemDetail, path: string): WorkerSession[] {
-  return item.worker_sessions.filter((s) => s.hook_point === path).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
+  const all = item.worker_sessions.filter((s) => s.hook_point === path);
+  const pass = all[0] && !isEscalation(all[0]) ? new Map(passOf(item, all[0].node_id).map((s) => [s.id, s])) : undefined;
+  return all.flatMap((s) => (pass ? (pass.get(s.id) ?? []) : s)).sort((a, b) => a.attempt - b.attempt || a.created_at.localeCompare(b.created_at));
 }
 /** The node's escalation turns, oldest first. */
 export const escalationsOf = (item: ItemDetail, node: string) => item.worker_sessions.filter((s) => s.node_id === node && isEscalation(s)).sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -57,7 +82,7 @@ export const JUDGE = "judge";
 export function loopRounds(item: ItemDetail, node: ApiNode): { latest: number; total?: number } | undefined {
   if (!node.fix_loop) return;
   const own = new Set(stepsOf(node).steps.flatMap((st) => st.tasks));
-  const ran = item.worker_sessions.filter((s) => own.has(s.hook_point)).map((s) => s.round + 1);
+  const ran = passOf(item, node.id).filter((s) => own.has(s.hook_point)).map((s) => s.round + 1);
   if (!ran.length) return;
   const m = materialized(item);
   const max = m ? Number(attemptsAt(m, node.id, item.policy_override)?.value) : NaN;
@@ -97,7 +122,7 @@ export function nodeGraph(item: ItemDetail, node: ApiNode, now = Date.now(), eve
   const side: GraphItem | undefined = lastEsc && { id: ESCALATION, icon: "siren", ...sessionLook(lastEsc, now), meta: `thread ${lastEsc.thread} · turn ${esc.filter((s) => s.thread === lastEsc.thread).length}` };
   const stopped = item.stop?.node === node.id && (item.stop.kind === "cap" || item.stop.kind === "budget");
   const own = loopPaths(frozen, node.id);
-  const inLoop = item.worker_sessions.some((s) => s.node_id === node.id && s.hook_point.startsWith(`${node.id}.${FIX_LOOP}.`));
+  const inLoop = passOf(item, node.id).some((s) => s.hook_point.startsWith(`${node.id}.${FIX_LOOP}.`));
   // The arc is drawn once the loop did something: a second round, or a repair or judge that ran.
   // Red while the newest round is shown and the loop stopped; amber while it runs on past its first round.
   const tone = stopped && shown === rounds?.latest ? "red" : rounds && rounds.latest > 1 && item.current_node_id === node.id ? "active" : "idle";
