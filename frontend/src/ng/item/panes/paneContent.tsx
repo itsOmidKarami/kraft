@@ -20,7 +20,7 @@ import { PathFooter } from "./PathFooter";
 import { AttemptMenu, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
 import { chainName } from "../chainName";
-import { materialized, notStarted, planTaskPath, taskKindAt } from "../chainValues";
+import { materialized, notStarted, planTaskPath, taskAt, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
 import { scopePane, ScopeOverview } from "./ScopePane";
 import { isScopeTask, scopesView } from "../scopeView";
@@ -53,6 +53,8 @@ export type PaneArgs = {
   onDoc: (d: WorkItemDocument) => void;
   /** Open the pending gate's document (GET /artifact). */
   onArtifact: () => void;
+  /** Open the document the task at `path` produced, by its kind (GET /artifacts/{kind}). */
+  onProduced: (kind: string, path: string) => void;
   /** Whether the item draft may override this node (W11): true only after the node the run stands on. */
   canEdit?: (node: string) => boolean;
   /** What applied drafts set, by path (W11): shown in Config as "changed for this item". */
@@ -267,6 +269,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} inRound={!!r} />;
   // The plan's sub-tasks, on the one task that works through it, whichever attempt is picked.
   const progress = planTaskPath(frozen) === path ? item.progress : null;
+  // The document the task writes is its output. One file, rewritten by each attempt: offered on the newest only.
+  const produces = (!esc && at === sessions.at(-1) && frozen && taskAt(frozen, path)?.produces) || undefined;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: (
@@ -277,7 +281,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       </>
     ),
     input: <TaskInput item={item} s={at} current={current} />,
-    output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
+    output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} produces={produces} onProduced={() => produces && a.onProduced(produces, path)} />,
     log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} />,
     config: <><TaskConfig path={path} s={at} /><AppliedRows applied={a.applied} path={path} /></>,
   };

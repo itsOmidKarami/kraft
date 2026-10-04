@@ -124,8 +124,9 @@ export function TaskInput({ item, s, current }: { item: ItemDetail; s: WorkerSes
   );
 }
 
-/** Output: the attempt's result, its summary document, the node's concerns. */
-export function TaskOutput({ item, s, docs, onDoc }: { item: ItemDetail; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void }) {
+/** Output: the attempt's result, the document it produced (a task's `produces`, its real output: the
+ *  session note only says where it is), its summary document, the node's concerns. */
+export function TaskOutput({ item, s, docs, onDoc, produces, onProduced }: { item: ItemDetail; s: WorkerSession; docs: WorkItemDocument[]; onDoc: (d: WorkItemDocument) => void; produces?: string; onProduced?: () => void }) {
   if (["running", "pending"].includes(s.status)) return <p className="item-muted">Still running. Output is written when the task finishes.</p>;
   const summary = s.session_summary_ref && docs.find((d) => d.path === s.session_summary_ref);
   const judged = item.judge_stop_note?.filter((j) => j.node_id === s.node_id) ?? [];
@@ -133,7 +134,8 @@ export function TaskOutput({ item, s, docs, onDoc }: { item: ItemDetail; s: Work
     <>
       <dl className="item-facts ip-facts">
         {fact("result", s.status.replaceAll("_", " "))}
-        {fact("summary", summary ? <button type="button" className="item-link is-strong" onClick={() => onDoc(summary)}>{summary.title}</button> : s.session_summary_ref && <span className="is-mono">{s.session_summary_ref}</span>)}
+        {fact("wrote", produces && <button type="button" className="item-link is-strong" onClick={onProduced}>{produces.replaceAll("_", " ")}</button>)}
+        {fact("summary", summary ? <button type="button" className={`item-link${produces ? "" : " is-strong"}`} onClick={() => onDoc(summary)}>{summary.title}</button> : s.session_summary_ref && <span className="is-mono">{s.session_summary_ref}</span>)}
       </dl>
       {judged.map((j, i) => (
         <section key={i}>

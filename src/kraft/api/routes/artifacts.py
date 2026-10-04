@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 
 from kraft import config as config_mod
 from kraft import events, review, store
+from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps, perimeter
 from kraft.api.routes import board
 from kraft.api.routes.search import OpenDocument, _launch_editor
@@ -406,6 +407,79 @@ async def open_work_item_artifact(wid: str, body: OpenDocument, request: Request
     path = worktree_file_path(worktree, rel)
     if path is None:
         raise HTTPException(404, "this work item's gate has no artifact")
+    return {"work_item_id": wid, **_launch_editor(request, body.editor, path)}
+
+
+def _produced_path(row, kind: str) -> str:
+    """Where a task with `produces: <kind>` wrote its document, or a 404 when no
+    node of this item's chain produces that kind. Checked against the chain
+    rather than the kind's spelling: only a kind the chain names reaches
+    `artifact_path`, so nothing a caller types becomes part of a path."""
+    chain = store.materialized_chain_of(row)
+    kinds = {k for n in chain.chain.nodes for k in n.produces() if k} if chain else set()
+    if kind not in kinds:
+        raise HTTPException(404, f"no task of this work item produces {kind!r}")
+    return agent_mod.artifact_path(kind, row["id"])
+
+
+@api_router.get("/work-items/{wid}/artifacts/{kind}")
+async def get_produced_artifact(wid: str, kind: str, request: Request):
+    """The document a task produced (its `produces: <kind>`), whether or not a gate
+    is pending on it: what that task's Output shows, rather than the session
+    note that only says where the document is.
+
+    Read off the worktree as `GET /artifact` reads the pending gate's, so a task
+    that has just written it shows what it wrote. Once the worktree is gone the
+    copy the gate's approval indexed (`_ingest_approved_gate_artifact`) is the
+    only one left, so that is read instead; with neither, a 404.
+    """
+    st = request.app.state
+    row = deps._work_item_row(st, wid)  # 404s on an unknown work item
+    rel = _produced_path(row, kind)
+    worktree = st.run_dirs.worktrees / wid
+    result, reason = read_worktree_file(worktree, rel, DIFF_MAX_BYTES)
+    if result is not None:
+        fm, body = ingest_mod.split_front_matter(result.text)
+        return {
+            "work_item_id": wid,
+            "kind": kind,
+            "path": rel,
+            "absolute_path": str(worktree / rel),
+            "title": ingest_mod.derive_title(rel, fm, body),
+            "content": body,
+            "truncated": result.truncated,
+        }
+    if reason == "escaped_containment":
+        logger.warning("artifact for %s resolves outside its worktree: %s", wid, rel)
+        raise HTTPException(404, f"this work item has no {kind}")
+    indexed = next((d for d in st.indexer.documents_for_work_item(wid) if d["path"] == rel), None)
+    doc = indexed and st.indexer.get_document(indexed["document_id"])
+    if not doc:
+        raise HTTPException(404, f"this work item has no {kind}")
+    return {
+        "work_item_id": wid,
+        "kind": kind,
+        "path": rel,
+        "title": doc["title"],
+        "content": doc["content"],
+        "truncated": False,
+        # Kraft's own copy: the viewer offers no editor for it (as for a session note).
+        "origin": doc.get("origin"),
+    }
+
+
+@api_router.post("/work-items/{wid}/artifacts/{kind}/open")
+async def open_produced_artifact(wid: str, kind: str, body: OpenDocument, request: Request):
+    """Launch an editor on a task's produced document in the item's worktree, under
+    the same loopback-only rule and symlink walk as `POST /artifact/open`."""
+    if not perimeter._client_is_local(request):
+        raise HTTPException(403, "this server only opens editors for a client on its own machine")
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    rel = _produced_path(row, kind)
+    path = worktree_file_path(st.run_dirs.worktrees / wid, rel)
+    if path is None:
+        raise HTTPException(404, f"this work item has no {kind} in its worktree")
     return {"work_item_id": wid, **_launch_editor(request, body.editor, path)}
 
 

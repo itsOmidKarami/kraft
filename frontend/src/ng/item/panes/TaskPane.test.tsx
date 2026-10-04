@@ -13,8 +13,8 @@ const sess = (hook_point: string, attempt: number, over: Partial<WorkerSession> 
   ({ id: `${hook_point}-${attempt}`, node_id: hook_point.split(".")[0] === "escalation" ? "verification" : hook_point.split(".")[0], hook_point, status: "done", attempt, round: attempt - 1, thread: 1, created_at: `2026-09-13T09:0${attempt}:00Z`, started_at: null, exited_at: null, wall_ms: 60_000, model: "sonnet", tokens_in: 1, tokens_out: 1, cost_usd: 0.1, head_sha: "abc1234567890", ...over }) as WorkerSession;
 const item = detail({ worker_sessions: [sess("verification.review.code_review", 1), sess("verification.review.code_review", 2, { status: "failed", harness: "codex" }), sess("escalation", 1, { node_id: "verification", status: "needs_context" })] });
 function Where() { const l = useLocation(); return <output data-testid="where">{l.pathname + l.search}</output>; }
-const mount = (path: string, it = item, events: unknown[] = []) => {
-  stubFetch({ "GET /work-items/w1/events": [200, events], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [
+const mount = (path: string, it = item, events: unknown[] = [], routes: Parameters<typeof stubFetch>[0] = {}) => {
+  stubFetch({ ...routes, "GET /work-items/w1/events": [200, events], "GET /work-items/w1/documents": [200, { work_item_id: "w1", documents: [
     { document_id: "d1", title: "Review notes", path: "a.md", kind: "reviews", worker_session_id: "verification.review.code_review-1", hook_point: "verification.review.code_review", attempt: 1 },
     { document_id: "d2", title: "Other", path: "b.md", kind: "plans", worker_session_id: "x", hook_point: "plan.write.plan", attempt: 1 },
   ] }] });
@@ -74,6 +74,27 @@ describe("task pane", () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
     expect(await within(pane("code_review")).findByRole("button", { name: /Review notes/ })).toBeInTheDocument();
     expect(within(pane("code_review")).queryByRole("button", { name: /Other/ })).toBeNull();
+  });
+
+  // The work brief's session note only says where the brief is: Output opens the brief itself.
+  describe("a task that produces a document", () => {
+    const frozen = JSON.stringify({ chain: { nodes: [{ id: "work_brief", kind: "exec", steps: [{ id: "main", tasks: [{ id: "author", kind: "agent", produces: "work_brief" }] }] }] } });
+    const briefed = detail({ chain_definition: { template_id: "default", nodes: [{ id: "work_brief", kind: "exec", gate_after: null, tasks: ["work_brief.main.author"], steps: [["work_brief.main.author"]] }] }, materialized_chain: frozen, worker_sessions: [sess("work_brief.main.author", 1), sess("work_brief.main.author", 2)] });
+    const url = "/work-items/w1/nodes/work_brief?sel=work_brief.main.author&tab=output";
+    const brief = { "GET /work-items/w1/artifacts/work_brief": [200, { path: ".engineering/work_briefs/w1.md", title: "Work brief", content: "# Work brief\n\nWhat changed and why." }] as [number, unknown] };
+
+    it("offers the document on Output, and opens it rather than the session note", async () => {
+      mount(url, briefed, [], brief);
+      await userEvent.click(within(screen.getByRole("tabpanel")).getByRole("button", { name: "work brief" }));
+      const viewer = await screen.findByRole("dialog", { name: "Work brief" });
+      expect(await within(viewer).findByText("What changed and why.")).toBeInTheDocument();
+      expect(within(viewer).getByText("written by work_brief.main.author")).toBeInTheDocument();
+    });
+
+    it("offers it on the newest attempt only: every attempt rewrites the one file", () => {
+      mount(`${url}&attempt=1`, briefed, [], brief);
+      expect(within(screen.getByRole("tabpanel")).queryByText("wrote")).toBeNull();
+    });
   });
 
   it("puts Thread first on the escalation task and opens on it", () => {
