@@ -5,7 +5,7 @@ import { chainGraph, rejectTarget } from "./graph";
 import { detail, FROZEN, V1 } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
-const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
+const sess = (node_id: string, over: Partial<WorkerSession> = {}) => ({ id: `${node_id}${over.attempt ?? 1}${over.hook_point ?? ""}`, node_id, hook_point: `${node_id}.x.y`, status: "done", attempt: 1, round: 0, created_at: over.started_at ?? "2026-09-13T09:00:00Z", started_at: "2026-09-13T09:00:00Z", ...over }) as WorkerSession;
 const approved = (gate: string, by: string): KraftEvent => ({ seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate, by }, node_id: gate, created_at: "t" });
 
 describe("chainGraph", () => {

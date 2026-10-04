@@ -1,7 +1,7 @@
 import { elapsed, elapsedBetween } from "../../format";
 import type { ChainNode as ApiNode, KraftEvent } from "../../types";
 import type { ChainArc, ChainNode } from "../graph/layout";
-import { isEscalation } from "./nodeGraph";
+import { isEscalation, passOf, roundOf } from "./nodeGraph";
 import { materialized, nodeTaskKind } from "./chainValues";
 import type { ItemDetail } from "./useItem";
 
@@ -62,7 +62,7 @@ export function chainGraph(item: ItemDetail, events: KraftEvent[], now = Date.no
   });
 
   const loops: ChainArc[] = api.flatMap((n, i) => {
-    const rounds = Math.max(0, ...item.worker_sessions.filter((s) => s.node_id === n.id).map((s) => s.round));
+    const rounds = Math.max(0, ...passOf(item, n.id).map(roundOf));
     if (!n.fix_loop || rounds < 1 || i > cur) return [];
     return [{ kind: "loop", node: n.id, tone: capped === n.id ? "red" : i === cur ? "active" : "idle", label: `round ${rounds + 1}` }];
   });

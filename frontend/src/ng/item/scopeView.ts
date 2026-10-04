@@ -82,7 +82,8 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
   const sessionOf = (r: ScopeRun) => (r.session_id ? sessions.get(r.session_id) : undefined);
   const m = materialized(item);
   const execution = taskAt(m ?? { chain: { nodes: [] } }, path)?.execution === "parallel" ? "parallel" : "sequential";
-  const repos = reposOf(item);
+  // Runs fanned out over a workspace carry their repository, even a workspace of one; otherwise there is one run, in the item's own checkout.
+  const repos = runs.some((r) => r.repository) ? reposOf(item) : [{ id: null, name: basename(item.repo) }];
   const last = (rs: ScopeRun[]) => [...new Map(rs.map((r) => [scopeKey(r.repository, r.command), r])).values()];
   const inRound = (n: number, repo: string | null) => last(runs.filter((r) => r.round === n - 1 && r.repository === repo));
   // The round is still going while one of its commands runs, or the node it belongs to is the one running.
@@ -93,8 +94,7 @@ export function scopesView(item: ItemDetail, path: string, round: number, now: n
   const rows: RepoRow[] = [];
   let failedBefore: string | null = null;
   for (const repo of repos) {
-    // A single repository's runs name none.
-    const id = repos.length === 1 ? null : repo.id;
+    const id = repo.id;
     const picked = inRound(round, id);
     const before = round > 1 ? inRound(round - 1, id) : [];
     const sameAs = (a: ScopeRun, b: ScopeRun) => scopeKey(a.repository, a.command) === scopeKey(b.repository, b.command);

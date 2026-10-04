@@ -81,7 +81,16 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   // The fix-loop round the canvas shows: one picked in this node view (undefined: the newest). Leaving the node drops it.
   const [picked, setPicked] = useState<{ node: string; round: number } | null>(null);
   // The selection (its path) whose open frame the person closed: it opens again once they pick anything.
-  const [shut, setShut] = useState<string | null>(null);
+  const [shut, setShutState] = useState<string | null>(null);
+  // Esc can come twice before the router renders the first one's move (it navigates in a transition): `back` reads
+  // where the last one left the page, not the closure of the render it was bound in.
+  const url = placeUrl(item.id, place);
+  const live = useRef({ url, place, shut: null as string | null });
+  if (live.current.url !== url) live.current = { ...live.current, url, place };
+  const setShut = (to: string | null) => {
+    live.current.shut = to;
+    setShutState(to);
+  };
   const [adding, setAdding] = useState<{ at: number; seam: HTMLElement } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // Every second while an agent or a check runs, so "running 12s" counts; every
@@ -95,8 +104,10 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
 
   const state: PaneState = { level: place.node ? "node" : "chain", node: place.node, sel: place.sel, open: pane_.open, userCollapsed: pane_.userCollapsed };
   const go = (to: Place) => {
-    const url = placeUrl(item.id, to);
-    if (url !== placeUrl(item.id, place)) navigate(url, { replace: !pushes(place, to) });
+    const from = live.current.place;
+    const next = placeUrl(item.id, to);
+    if (next !== placeUrl(item.id, from)) navigate(next, { replace: !pushes(from, to) });
+    live.current.place = to;
   };
   const dispatch = (a: PaneAction, extra: Partial<Place> = {}) => {
     const next = paneReducer(state, a);
@@ -162,15 +173,21 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
   const viewing = place.node ? nodes.find((n) => n.id === place.node) : undefined;
   const round = viewing ? roundShown(item, viewing, picked?.node === viewing.id ? picked.round : undefined) : undefined;
   // A changed-test-scope task opens as a frame of its repositories and scopes while it, or one of its scopes, is the selection.
-  const here = place.sel.kind === "task" ? place.sel : null;
+  const scopeAt = (p: Place) => {
+    const task = p.sel.kind === "task" ? p.sel : null;
+    const path = selPath(p.sel);
+    return viewing && task && task.node === viewing.id && path && isScopeTask(item, path) ? { task, path } : null;
+  };
   const herePath = selPath(place.sel);
-  const scopeTask = viewing && here && here.node === viewing.id && herePath && isScopeTask(item, herePath) ? here : null;
+  const scopeTask = scopeAt(place)?.task ?? null;
   const open = !!scopeTask && shut !== herePath;
   const expand = open && herePath ? { step: scopeTask.step, task: scopeTask.task, view: scopesView(item, herePath, round ?? 1, now), scope: place.scope } : undefined;
   // Esc steps back one: from a scope to its task, from the open task to its box, then the page's own (the pane, the node view).
   const back = () => {
-    if (place.scope) go({ ...place, scope: undefined });
-    else if (open) setShut(herePath);
+    const { place: p, shut: s } = live.current;
+    const at = scopeAt(p);
+    if (p.scope) go({ ...p, scope: undefined });
+    else if (at && s !== at.path) setShut(at.path);
     else dispatch({ type: "escape" });
   };
   escape.current = back;

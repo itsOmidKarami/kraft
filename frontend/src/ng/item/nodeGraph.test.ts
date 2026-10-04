@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChainNode, WorkerSession } from "../../types";
 import type { KraftEvent } from "../../types";
-import { footerState, nodeGraph } from "./nodeGraph";
+import { footerState, loopRounds, nodeGraph, passOf } from "./nodeGraph";
 import { detail, FROZEN, LOOPED, SCOPE_PATH, scopeRun, scoped } from "./testkit";
 
 const NOW = Date.parse("2026-09-13T10:10:00Z");
@@ -11,7 +11,7 @@ const node: ChainNode = {
   steps: [["verification.checks.lint", "verification.checks.typecheck"], ["verification.review.code_review"]],
 };
 let n = 0;
-const s = (hook_point: string, over: Partial<WorkerSession> = {}) => ({ id: `s${n++}`, node_id: "verification", hook_point, status: "done", attempt: 1, round: 0, thread: 1, wall_ms: 240_000, model: null, created_at: `2026-09-13T09:0${n % 10}:00Z`, started_at: "2026-09-13T10:07:00Z", ...over }) as WorkerSession;
+const s = (hook_point: string, over: Partial<WorkerSession> = {}) => ({ id: `s${n++}`, node_id: "verification", hook_point, status: "done", attempt: 1, round: 0, thread: 1, wall_ms: 240_000, model: null, created_at: `2026-09-13T09:${String(n).padStart(2, "0")}:00Z`, started_at: "2026-09-13T10:07:00Z", ...over }) as WorkerSession;
 
 describe("nodeGraph", () => {
   it("draws each task's latest attempt: done with its duration, running with its elapsed, not started", () => {
@@ -155,5 +155,31 @@ describe("footerState", () => {
     ["cancelled", [{ status: "done" }], null],
   ] as const)("%s with %j → %s", (display_status, sessions, want) => {
     expect(footerState(detail({ display_status }), sessions.map((x) => s("verification.checks.lint", x as never)))).toBe(want);
+  });
+});
+
+describe("a fix loop that started over", () => {
+  // A retry (or a base change) restarts the loop at round 0: the node's earlier pass is history.
+  const retried = () => looped({ worker_sessions: [...LOOP_RUN, s("verification.checks.lint", { round: 0, status: "running", wall_ms: null }), s("verification.escalation", { round: 0 })] });
+
+  it("counts rounds from the pass the node is on, and draws that pass alone", () => {
+    expect(loopRounds(retried(), node)).toEqual({ latest: 1, total: 3 });
+    expect(passOf(retried(), "verification")).toHaveLength(1);
+    const g = nodeGraph(retried(), node, NOW);
+    expect(states(g)).toEqual(["lint:current", "typecheck:todo", "code_review:todo"]);
+    // One round and nothing run of the loop: no arc yet.
+    expect(g.loop).toBeUndefined();
+    expect(g.rounds).toMatchObject({ latest: 1, rows: [{ n: 1, tone: "warn" }] });
+  });
+
+  it("is not told apart by an escalation turn, which carries round 0 whenever it comes", () => {
+    const escalated = looped({ worker_sessions: [...LOOP_RUN, s("verification.escalation", { round: 0 })] });
+    expect(loopRounds(escalated, node)).toEqual({ latest: 2, total: 3 });
+  });
+
+  it("shows the re-measure after on_failure (round -1) in round 1, the latest run of the task", () => {
+    const recovered = looped({ worker_sessions: [s("verification.checks.lint", { round: 0, status: "failed" }), s("verification.checks.lint", { round: -1, attempt: 2 })] });
+    expect(loopRounds(recovered, node)).toEqual({ latest: 1, total: 3 });
+    expect(states(nodeGraph(recovered, node, NOW))[0]).toBe("lint:done");
   });
 });

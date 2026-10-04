@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -140,6 +140,28 @@ describe("an open changed-test-scope task", () => {
     // The task is its box again, and picking it opens the frame again.
     await userEvent.click(within(canvas()).getByRole("button", { name: /^test_changed_scopes/ }));
     expect(await screen.findByRole("group", { name: /repositories and scopes/ })).toBeInTheDocument();
+  });
+
+  it("keeps the keyboard focus on the task through its frame opening, and back on its box when the frame is gone", async () => {
+    mount(AT + "?sel=verification.checks.lint");
+    const box = within(canvas()).getByRole("button", { name: /^test_changed_scopes/ });
+    box.focus();
+    await userEvent.keyboard("{Enter}");
+    const title = await screen.findByRole("button", { name: "test_changed_scopes" });
+    await waitFor(() => expect(title).toHaveFocus());
+    await userEvent.keyboard("{Escape}");
+    await gone();
+    expect(within(canvas()).getByRole("button", { name: /^test_changed_scopes/ })).toHaveFocus();
+  });
+
+  it("takes two Escapes that come before the page has rendered the first: the scope, then the task's frame", async () => {
+    mount(`${AT}?sel=${SCOPE_PATH}&${new URLSearchParams({ scope: "ws:just test-a" })}`);
+    await screen.findByRole("group", { name: /repositories and scopes/ });
+    const esc = () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    // One act: nothing renders between the two, as when the router moves in a transition.
+    act(() => { esc(); esc(); });
+    await gone();
+    expect(where()).toBe(`${AT}?sel=${SCOPE_PATH}`);
   });
 
   it("closes on its close button, on picking anything else, and on the canvas's background", async () => {

@@ -93,11 +93,8 @@ test("a verification that went three rounds: open the scopes, pick one, step bac
 
   // Esc steps back from the scope to the task, then closes the frame, leaving the task's pane.
   await page.keyboard.press("Escape");
-  await expect(page).not.toHaveURL(/scope=/);
-  // The page has to show the step back before the next key, as it does for a person.
-  await expect(page.getByRole("complementary", { name: "test_changed_scopes pane" })).toBeVisible();
-  await expect(frame(page)).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page).not.toHaveURL(/scope=/);
   await expect(frame(page)).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "test_changed_scopes pane" })).toBeVisible();
 

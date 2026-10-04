@@ -5,7 +5,7 @@ import { gateSkipped } from "../../item/events";
 import type { ItemDetail } from "../../item/useItem";
 import { retryable, skippable } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";
-import { isEscalation } from "../../item/nodeGraph";
+import { passOf, roundOf } from "../../item/nodeGraph";
 import { taskName } from "../../item/paths";
 import { elapsed, nodeRunSpan } from "../../../format";
 
@@ -79,7 +79,7 @@ export function fixLoopWords(item: ItemDetail, node: ApiNode): string | null {
   if (!node.fix_loop) return null;
   const m = materialized(item);
   const max = item.node_overrides?.[node.id]?.attempts ?? (m ? attemptsAt(m, node.id, item.policy_override)?.value : null);
-  const rounds = Math.max(0, ...item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)).map((s) => s.round));
+  const rounds = Math.max(0, ...passOf(item, node.id).map(roundOf));
   return rounds ? `round ${rounds + 1}${max != null ? ` of ${max}` : ""}` : `not looped${max != null ? ` · up to ${max} attempts` : ""}`;
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { NodeGlyph } from "./NodeGlyph";
 import { EXPAND_W, G, loopArc, loopSlots, nodeEdges, nodeLayout, sideBranch, type NodeStep } from "./nodeLayout";
 import { RoundPicker } from "./RoundPicker";
@@ -80,6 +80,16 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const selKey = selected && (selected.scope && selected.task ? chipKey(selected.step, selected.task, selected.scope) : selected.task ? taskKey(selected.step, selected.task) : labelKey(selected.step));
   const firstStep = steps[0];
   const roving = useRoving(selKey, firstStep && (firstStep.tasks[0] ? taskKey(firstStep.id, firstStep.tasks[0].id) : labelKey(firstStep.id)));
+
+  // An open task's box hides behind its frame, and the frame goes again: the focus follows each, not left on what left.
+  const inside = useRef(false);
+  useEffect(() => {
+    if (phase.layout && open && shown && document.activeElement?.classList.contains("is-away")) roving.go(taskKey(shown.step, shown.task));
+  }, [phase.layout]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const was = kept.current;
+    if (!phase.mounted && inside.current && document.activeElement === document.body && was) roving.go(taskKey(was.step, was.task));
+  }, [phase.mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ←/→ to the neighbouring step at the same row (clamped), ↑/↓ within a step, ↑ from the top task to the step's label.
   const loopKeys = loopTasks.map((t) => taskKey("fix_loop", t.id));
@@ -170,7 +180,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   };
 
   return (
-    <div role="group" aria-label={name} className={`canvas${calm ? " is-calm" : ""}`} data-pan {...camera.bind} onClick={onClick} onKeyDown={onKeyDown}>
+    <div role="group" aria-label={name} className={`canvas${calm ? " is-calm" : ""}`} data-pan {...camera.bind} onClick={onClick} onKeyDown={onKeyDown} onFocus={() => (inside.current = true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) inside.current = false; }}>
       <div className={`canvas-world${phase.glide ? " is-glide" : ""}`} style={{ width: lay.W, height: lay.H, transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
         {steps.map((st, k) => {
           const f = lay.cols[k].frame;

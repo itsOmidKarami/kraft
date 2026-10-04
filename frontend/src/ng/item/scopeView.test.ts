@@ -19,6 +19,11 @@ describe("scopesView", () => {
     expect(scopesView(it, PATH, 1, NOW).rows.map((r) => [r.id, r.name, r.state, r.note])).toEqual([[null, "kraft-web", "done", "done · 24s"]]);
   });
 
+  it("keeps a workspace of only a root as its one row, because its runs name the root", () => {
+    const it = item([run("ws", "just test-api", 0, "done", { order: 0 })], { materialized_chain: chain("sequential", { kind: "workspace", root: "ws" }) });
+    expect(scopesView(it, PATH, 1, NOW).rows.map((r) => [r.id, r.name, r.state, r.chips.length])).toEqual([["ws", "ws", "done", 1]]);
+  });
+
   it("lists repositories in fan-out order, root first, and a repository after a failure is not reached", () => {
     const it = item([run("ws", "just test-api", 0, "done", { order: 0 }), run("pkg", "just test-pkg", 0, "failed", { order: 0 })], { materialized_chain: chain("sequential", WORKSPACE) });
     const v = scopesView(it, PATH, 1, NOW);
