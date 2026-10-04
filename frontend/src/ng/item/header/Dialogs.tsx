@@ -67,6 +67,8 @@ export function CompleteCard({ id, anchor, onClose, onDone }: CardProps) {
     ...(preview?.running ? [["stops now", stopsNow(preview.running)] as [string, string]] : []),
     ["keeps", `branch${preview ? ` ${preview.kept.branch}` : ""}, the worktree, findings and the run log`],
     ["afterwards", "Status COMPLETED. Archive it when you are done."],
+    // Last, right above the box it is about: the default is stated before the choice. (`?.`: a server not yet restarted sends no beads.)
+    ...(preview?.beads?.length ? [["beads", `${preview.beads.length} stay${preview.beads.length === 1 ? "s" : ""} open unless you tick below.`] as [string, string]] : []),
   ];
   return (
     <Popover anchor={anchor} open notch onClose={onClose} role="dialog" label="Mark this item complete?" dirty={!!reason.trim()}>

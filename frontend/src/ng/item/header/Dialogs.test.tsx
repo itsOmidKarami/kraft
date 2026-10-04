@@ -8,7 +8,7 @@ import { CompleteCard, EscalateCard } from "./Dialogs";
 
 /** The writes these pages send; any other write is refused. */
 const WRITES = acceptWrites("POST /work-items/w1/complete", "POST /work-items/w1/escalate");
-const preview = (running: object | null) => ({ running, kept: { branch: "kraft/cb59", worktree: "/wt", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } });
+const preview = (running: object | null, beads: string[] = []) => ({ running, beads, kept: { branch: "kraft/cb59", worktree: "/wt", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } });
 const ANSWERS = { ...WRITES, "GET /work-items/w1/cancel-preview": [200, preview(null)] as [number, unknown] };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -55,10 +55,24 @@ describe("item cards", () => {
     expect(await screen.findByText("code_review, attempt 2 (41s). That attempt's work is lost.")).toBeInTheDocument();
     const card = screen.getByRole("dialog", { name: "Mark this item complete?" });
     expect([...card.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["stops now", "keeps", "afterwards"]);
+    expect(screen.queryByText(/unless you tick below/)).toBeNull();
     expect(card).toHaveTextContent("keeps" + "branch kraft/cb59, the worktree, findings and the run log");
     expect(card).toHaveTextContent("Status COMPLETED. Archive it when you are done.");
     const order = [card.querySelector(".item-facts"), screen.getByRole("checkbox", { name: "Also close its beads" }), screen.getByRole("textbox", { name: /Reason/ })];
     order.slice(1).forEach((el, i) => expect(order[i]!.compareDocumentPosition(el!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy());
+  });
+
+  it.each([
+    [["kraft-ab1"], "1 stays open unless you tick below."],
+    [["kraft-ab1", "kraft-cd2"], "2 stay open unless you tick below."],
+  ])("states what happens to the beads %j before the box that changes it", async (beads, text) => {
+    stubFetch({ ...WRITES, "GET /work-items/w1/cancel-preview": [200, preview(null, beads)] });
+    render(<CompleteCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
+    const row = (await screen.findByText(text)).closest("div")!;
+    expect(row).toHaveTextContent("beads");
+    const box = screen.getByRole("checkbox", { name: "Also close its beads" });
+    expect(row.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(box.closest("label")!.previousElementSibling).toBe(row.closest("dl"));
   });
 
   it("leaves 'stops now' out when nothing is running", async () => {

@@ -191,6 +191,7 @@ export interface CancelPreview {
   kept: { branch: string; worktree: string; findings: number; threads: number };
   mr: { ref: number; url: string; state: "open" | "merged" | "closed" } | null;
   spend: { spent_usd: number; cap_usd: number | null };
+  beads: string[];
 }
 
 /** `POST /work-items/{id}/duplicate` (B3): a fresh, paused item from this
