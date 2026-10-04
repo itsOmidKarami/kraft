@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "Use when a work item's brief needs a design before planning."
+description: "Writes the design spec for one work item from its brief, headless, for a human to approve or reject. Kraft runs it as the library's spec_author task, before the plan is written; use when a work item's brief needs a design before planning."
 ---
 
 # Writing a spec, headless
@@ -53,6 +53,6 @@ that is a `needs_context` stop, not a placeholder.
 
 ## If you are revising
 
-A human read the existing document and asked for changes; their note leads your
-task instruction. Change what they objected to and leave the rest alone, rather
-than rewriting the whole thing to look new.
+The human's note on the existing document leads your task instruction. Change
+what they objected to and leave the rest alone, rather than rewriting the whole
+thing to look new.

@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: "Use when a repo is not yet connected to Kraft, or a newly connected repo has not been verified."
+description: "Connects a repository to Kraft and verifies that its test and setup commands work in a fresh worktree. Use when a repo is not yet connected to Kraft, or a newly connected repo has not been verified. Config drift in an onboarded repo belongs to kraft:check, an unhealthy server to kraft:doctor."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -10,8 +10,9 @@ connection error.
 
 # Onboarding a repo
 
-Four steps, each followed by a check against the repo itself — a
-zero exit code says the command ran, not that what it did was right.
+Four steps (connect, register, rehearse, verify), each followed by a check
+against the repo itself — a zero exit code says the command ran, not that what
+it did was right. Then hand off to `kraft:check`.
 
 1. **Connect.** Read how the repo says to build and test itself before you
    connect it: its README, CONTRIBUTING, agent instructions (`CLAUDE.md`,
@@ -28,24 +29,27 @@ zero exit code says the command ran, not that what it did was right.
    - what CI runs, where neither of those has a test command
 
    It returns each command's source and every other candidate it saw. Compare
-   them with what the repo's docs say. When the docs say something else (a
-   wrapper the probe cannot know, such as `./ci/run-tests`), connect with the
-   repo's own commands rather than correcting afterwards:
-   `ensure_repo(test_command=..., setup_command=...)`, or
-   `kraft repo connect --test-command ... --setup-command ...`.
+   them with what the repo's docs say:
+   - They agree: keep what it proposed.
+   - The docs say something else (a wrapper the probe cannot know, such as
+     `./ci/run-tests`): connect with the repo's own commands rather than
+     correcting afterwards:
+     `ensure_repo(test_command=..., setup_command=...)`, or
+     `kraft repo connect --test-command ... --setup-command ...`.
 
    `ensure_repo` saves as soon as it is called, so the person sees the
    commands only through you. Show them what was saved, each command with
    its source, and the candidates it passed over, then ask them to confirm
    or correct it before the first work item. Say which you chose and why.
 
-   A repo with nothing to prepare declares `setup_command: ""`, and a repo
-   with no tests declares `test_command: ""` (`--no-tests`). Both mean
-   "deliberately nothing", not an oversight. Without a `setup_command`, the
-   repo's next work item stops rather than guessing. Declare no tests only
-   when the person says the repo has none: every work item on it passes
-   verification without running a test. `ensure_repo(test_command="")`
-   saves the repo disabled for that reason, and the person enables it.
+   An empty command means "deliberately nothing", not an oversight:
+   - A repo with nothing to prepare declares `setup_command: ""`. A repo with no
+     `setup_command` key at all is a different case: its next work item stops
+     rather than guessing.
+   - A repo with no tests declares `test_command: ""` (`--no-tests`). Declare
+     no tests only when the person says the repo has none: every work item on
+     it passes verification without running a test. `ensure_repo(test_command="")`
+     saves the repo disabled for that reason, and the person enables it.
 
    The setup command prepares every worktree for this repo, so check it as
    hard as the test command. A repo with more than one project in it gets a
@@ -64,8 +68,8 @@ zero exit code says the command ran, not that what it did was right.
    (they're `managed: false` until touched, so plain `kraft repo list` won't
    show them) and say how many landed. Each is a real, disabled repo of its
    own: it needs its own probed `test_command` checked the same way as the
-   parent's, and its own `enabled: true` (set in its `repos.yaml` entry, as with `test_command`) before any item can
-   be scoped to it — connecting the parent does not turn any of them on.
+   parent's, and its own `enabled: true` in its `repos.yaml` entry before any
+   item can be scoped to it — connecting the parent does not turn any of them on.
 
 2. **Register.** Nothing to run when this skill came with the Kraft plugin:
    the plugin registers Kraft's MCP server itself, and workers find it there
@@ -122,6 +126,6 @@ zero exit code says the command ran, not that what it did was right.
    `ok`. If either doesn't, stop and report the exact line rather than
    declaring onboarding done with a known problem still open.
 
-Finish by handing off into `kraft:check` for the full drift report
-against this install's library and chains — that skill already owns the diff, no need to
-repeat it here.
+Finish by handing off into `kraft:check` for the full drift report against
+this install's library and chains — that skill already owns the diff, no need
+to repeat it here.

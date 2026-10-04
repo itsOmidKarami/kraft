@@ -1,6 +1,6 @@
 ---
 name: plan
-description: "Use when a work item's spec is approved and the chain needs its implementation plan."
+description: "Writes the implementation plan for a work item from its human-approved spec, as small independently reviewable tasks. Kraft runs it as the library's plan_author task, after the spec gate and before implementation. Use when a chain needs that plan written or revised."
 ---
 
 # Writing a plan, headless
@@ -26,7 +26,9 @@ than rewriting the whole thing to look new.
 
 ## What the plan contains
 
-A list of tasks. A task is the smallest unit that carries its own test cycle
+A list of tasks, each under a `### Task N: title` heading numbered from 1: Kraft
+counts those headings to report progress and to tell the implementer how many
+tasks there are. A task is the smallest unit that carries its own test cycle
 and is worth a fresh reviewer's gate. Fold setup, configuration and
 documentation into the task whose deliverable needs them. Split only where a
 reviewer could reject one task and approve its neighbour.
@@ -39,6 +41,17 @@ Each task names:
 - the failing test, written out in full;
 - the implementation, written out in full;
 - the command that runs the test, and what it prints when it passes.
+
+A shape to follow, with invented names:
+
+```
+### Task 2: Reject expired tokens at login
+Files: modify `app/auth.py:40-62`; test `tests/test_auth.py`
+Consumes: `Token.expires_at: datetime` (task 1). Produces: `is_expired(token: Token) -> bool`
+Failing test: <the test, in full>
+Implementation: <the code, in full>
+Run: `pytest tests/test_auth.py -k expired` prints `1 passed`
+```
 
 Shape each failing test by what the tree already has. A task that fixes
 behaviour an existing test covers adds a parametrized case with a readable id to
@@ -60,4 +73,7 @@ to, each test seen to fail for the stated reason before the code makes it pass.
 
 Walk the spec section by section and point at the task that implements each
 one. A section with no task is a gap: add the task. Then check that a name you
-used in a late task is spelled the same way as where you defined it.
+used in a late task is spelled the same way as where you defined it. Last,
+check that every task has its `### Task N: title` heading and a failing test of
+its own: Kraft does not count a task without the heading, and a task without a
+test gives its reviewer nothing to run.

@@ -1,6 +1,6 @@
 ---
 name: steer
-description: "Use when a Kraft work item is heading the wrong way, or its spec or plan needs revising, and someone wants to redirect it."
+description: "Redirects a Kraft work item by revising its spec or plan before it starts, or by pausing and resuming it with a steer once it has. Use when a work item is heading the wrong way or its spec or plan needs revising; to find out why one stopped, use kraft:triage."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -22,13 +22,15 @@ kraft item set-attachments [ID] --drop spec     # removes it, puts its gate back
 ```
 
 Filing snapshots the spec and plan into Kraft's storage, so editing the
-original file changes nothing until it is re-attached. Check the plan for the
-same wording, then confirm the stored copy with `kraft view docs ID --attachment spec`
-(or `plan`; `get_attachment` over MCP). Once the item has
-started the call answers 409: its worktree already holds the documents,
-committed on its branch, and steering is the only route.
+original file changes nothing until it is re-attached. If the spec changed,
+check whether the plan repeats the old wording, then confirm the stored copy
+with `kraft view docs ID --attachment spec` (or `plan`; `get_attachment` over
+MCP). Once the item has started the call answers 409: its worktree already
+holds the documents, committed on its branch, and steering is the only route.
 
 ## Started: stop, then restart with a steer
+
+Ask the person before pausing: it discards the running attempt.
 
 - Running and going wrong: `pause_work_item()`, then `resume_work_item(steer="...")`.
 - Already stopped: `retry_work_item(steer="...")`, see `kraft:triage`.
@@ -44,9 +46,9 @@ nothing to act on; "the retry in `sync.py` swallows the timeout, let it
 propagate and update the test" does. Say what was wrong about the last
 attempt only when the agent would otherwise repeat it.
 
-Ask the person before pausing: it discards the running attempt. Afterwards,
-check `kraft view show ID` reads active again and `kraft view events ID` shows
-the resume; a steer that never reached a new attempt did nothing.
+After resuming or retrying, check that `kraft view show ID` reads active again
+and `kraft view events ID` shows the resume; a steer that never reached a new
+attempt did nothing.
 
 ## If you are a Kraft worker session
 

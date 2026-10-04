@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: "Use when the Kraft server seems unhealthy or unresponsive, work items are not being picked up, or an upgrade or config change needs applying."
+description: "Diagnoses an unhealthy Kraft server and applies the reload, restart or update its health check calls for. Use when the server seems unhealthy or unresponsive, work items are not being picked up, or an upgrade or config change needs applying. A repo that will not connect is kraft:onboard; a stopped work item is kraft:triage."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -31,7 +31,8 @@ paused unless they were created with `--autostart`. If both checks pass, run
 
 | Situation | Action |
 |---|---|
-| Edited the template library or `policy.yaml` | `kraft admin reload`: rereads from disk, no restart |
+| Edited the template library, `policy.yaml` or `intake.yaml` | `kraft admin reload`: rereads from disk, no restart |
+| Server not running | `kraft admin start`: `restart` refuses when there is nothing to restart |
 | Server wedged or running old code | `kraft admin restart`: stops, then starts it the way it was running |
 | Install is out of date | `kraft admin update [--restart]` |
 | `mcp server` not `ok` | Install the Kraft plugin, or `kraft admin init` for a terminal-only setup; then doctor again |

@@ -1,8 +1,6 @@
 ---
 name: gates
-description: Use when a Kraft work item needs a human decision or has gone wrong -
-  approving or rejecting the gate it is waiting on, or pausing and resuming work that
-  is heading in the wrong direction.
+description: "Approves or rejects the gate a Kraft work item is waiting on, files and submits review threads, and pauses or resumes work. Use when a person has made the call at a gate, wants line comments sent, or wants running work stopped and restarted; kraft:review helps decide first, kraft:steer and kraft:triage cover redirecting and stopped items."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -18,9 +16,10 @@ connection error.
   A chain revision gate also needs `approve_gate(digest=...)`, with the
   `digest` that `get_gate_artifact()` returned alongside the revision the person
   read. If the revision changed since, the approval is refused: show it again.
-- `reject_gate(note="...")` - send it back to be re-planned. The note is
-  required, because a rejection with no reason strands whoever picks the work up
-  next.
+- `reject_gate(note="...")` - send the chain back to the node that can address
+  the note; `node=` overrides where it re-enters, at or before the gate's own. The
+  note is required, because a rejection with no reason strands whoever picks the
+  work up next.
 
 **Ask the person before calling either.** A gate exists precisely because this is
 a decision a human makes. Read them the diff or the plan, get an answer, then act
@@ -59,7 +58,8 @@ and starting it again with new context:
 
 - `pause_work_item()` - stop the current attempt.
 - `resume_work_item(steer="...")` - start again, with the steer leading the next
-  attempt's prompt.
+  attempt's prompt. `kraft:steer` covers writing it, and an item that has already
+  stopped needs `retry_work_item()` (`kraft:triage`).
 
 `resume_work_item()` is also how a freshly filed work item is started for the
 first time.

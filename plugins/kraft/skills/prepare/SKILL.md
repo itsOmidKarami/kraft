@@ -1,23 +1,25 @@
 ---
 name: prepare
-description: "Use before starting non-trivial work that needs a spec, or when unsure whether work belongs inline in this session or in Kraft."
+description: "Writes the spec for non-trivial work, then judges whether it runs inline in this session or is handed to Kraft. Use before starting work that needs a spec, or when unsure whether work belongs inline or in Kraft; kraft:handoff does the filing once that is decided."
 ---
 
 # Preparing work
 
 This is the layer above `kraft:handoff`: it defines the work first, then decides where
-it should run. **REQUIRED SUB-SKILL:** use `kraft:handoff` at the handoff step below if you
-haven't already.
+it should run.
 
 ## 1. Spec
 
 Run a spec skill - default `superpowers:brainstorming` - unless the user named a
-different one. Its own self-review and user-review gate cover "review the spec";
+different one. If the skill isn't installed, say so and ask which to use instead.
+Its own self-review and user-review gate cover "review the spec";
 don't add a second review pass on top of it.
 
 ## 2. Judge
 
-Right after the spec, before touching a plan:
+Right after the spec, before touching a plan. Read the class (spike, bounded or
+architectural) off the spec. If the spec skill gave it no such classification,
+judge it yourself by those three classes and say that you did:
 
 - **Inline** - the spec came out spike- or bounded-classified. Go straight to
   the normal dev workflow (TDD, etc.) in this session. No plan doc needed:
@@ -38,6 +40,8 @@ Right after the spec, before touching a plan:
 inline" or "hand this to Kraft," skip judgment and honor that instead - still
 write the spec first.
 
+Whether to confirm the judgment before executing it is step 4's rule.
+
 ## 3. Plan - only if the user explicitly asked for one
 
 A plan is bound to the code as it is right now; a spec isn't. A spec written
@@ -51,8 +55,8 @@ downgrade an architectural spec to inline), and attach the plan alongside the
 spec if handing off.
 
 **Do not put a full-test-suite run in the plan.** A plan headed for Kraft runs
-under a chain whose `verify` node already runs the suite (and local review)
-after every task, with its own fix loop - a task step that re-runs it is
+under a chain whose verification node already runs the suite (and local review)
+after implementation, with its own fix loop - a task step that re-runs it is
 redundant work the chain repeats anyway. Per-task targeted tests (the test the
 task itself is about) stay in the plan; only the suite-wide run is out.
 

@@ -1,12 +1,15 @@
 ---
 name: next
-description: "Use when continuing a Kraft Lite chain: after start, after a gate answer, or in a new or cleared session."
+description: "Runs the next node of a Kraft Lite chain from its recorded state and reports the finished run's time and attempts per node. Use when continuing a chain: right after `kraft-lite:start`, after a gate answer, or in a new or cleared session. A chain blocked at a gate belongs to `kraft-lite:gate`; a read-only progress question belongs to `kraft-lite:status`."
 ---
 
 # Running the next node
 
 This skill holds no state in the conversation. Everything comes from the chain
 artifact and the state records, which is what makes it survive a `/clear`.
+
+Contents: 1 read the state, 2 run the node's hooks, 3 handle the result, 4 report
+what a finished run cost, then the rule that `on.ci.poll` never blocks.
 
 ## 1. Read the state
 
@@ -40,8 +43,8 @@ For each hook in `hooks`, look it up in `.kraft-lite/registry.yaml` and dispatch
   every dispatch, so rebinding the hook there is how a live chain is corrected.
 
 The node records which hooks it has, not which have run, so resuming replays them
-from the first. Keep hooks idempotent, and treat a hook that is not as a reason to
-stop rather than to run it twice.
+from the first. Keep hooks idempotent; a hook that is not idempotent is a reason to
+stop and ask, not to run it twice.
 
 ## 3. Handle the result
 
@@ -74,6 +77,13 @@ one, its gate, and any rejection note - then a line of totals: nodes walked,
 wall-clock duration, time spent waiting on a human, attempts spent, gates
 answered, rejections.
 
+The shape to follow, with the field names from `summary`:
+
+    node    seconds  blocked_seconds  attempts/cap  gate           rejected
+    spec         41              300  -             spec_approval  -
+    verify      120                -  1/3           -              -
+    total   nodes 2, duration_seconds 161, blocked_seconds 300, attempts 1, gates 1, rejections 0
+
 `blocked_seconds` is normally part of the node's `seconds`, not extra to it. Say
 which of the two the run actually went on - in a gated chain the waiting is usually
 the larger, and reporting the total alone bills the agent for the human's hours.
@@ -88,8 +98,8 @@ the `cap`, which is the budget the node has now. That is the report working: the
 retries a rewind cleared are the ones the run paid for.
 
 Times are stamped a second apart at the coarsest, so a fast chain reporting about
-a second a node is the clock's floor, not a measurement. A node redone after a
-rejection is timed from the redo. Say so rather than presenting the number flat.
+a second a node is the clock's floor, not a measurement. Say so rather than
+presenting the number flat.
 
 This covers the chain, not the conversation: it has no token count, cost, or turn
 count, because Lite runs inside your session and never sees them. Do not estimate
@@ -111,3 +121,5 @@ hand is the fallback, not the design.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.
+Every command here runs on `python3` 3.10 or newer; if it is missing or older, tell the
+human and stop, because Lite has no other runner.

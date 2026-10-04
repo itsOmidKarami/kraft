@@ -1,6 +1,6 @@
 ---
 name: work-brief
-description: "Use when the pre-draft gate needs a page for the human."
+description: "Writes the work brief a human reads at the pre-draft gate to decide whether the locally finished work becomes a draft merge request. Use when a chain task produces the work_brief, after implementation, tests and local review and before any merge request is opened."
 ---
 
 # The work brief
@@ -21,7 +21,10 @@ Read these first:
   work item). The ones that matter are `findings_measured` (what the tests and
   the review found, each round), `fix_cycle_started` and `judge_verdict` (the
   repair attempts, and what the fix-loop judge said about them), and
-  `node_recovery_started`.
+  `node_recovery_started`. If `kraft` refuses the verb or cannot be run (a
+  sandboxed worker's `kraft` has fewer verbs), work from what your instructions
+  carry and say in the brief which events you could not read; do not
+  reconstruct them from memory.
 - The size of the change: `git diff --stat origin/<base>...HEAD`, where
   `<base>` is the branch the work goes into (the repository's default unless
   the work item names another). Read files where you need to, but do not
@@ -35,7 +38,7 @@ line; do not drop it.
 1. **What was asked.** The title, plus the spec and plan by path. Do not
    restate them.
 2. **What changed.** The files and the scale (files touched, lines added and
-   removed), and in a sentence or two what the change does. Not the diff.
+   removed), and in a sentence or two what the change does.
 3. **What was verified.** Which test scopes ran and what they reported on the
    last round. If a round was red and a repair turned it green, say so.
 4. **What the review found, and what was done about it.** Each finding the

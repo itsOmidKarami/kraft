@@ -1,6 +1,6 @@
 ---
 name: triage
-description: "Use when a Kraft work item has stopped, failed or is stuck needing a person, and someone asks why or how to get it going again."
+description: "Diagnoses why a Kraft work item stopped, failed or is stuck needing a person, and routes it to a retry, a raised cap or the right sibling skill. Use when someone asks why an item stopped or how to get it going again; a pending gate alone belongs to kraft:gates."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -31,13 +31,15 @@ stop: hand it to `kraft:gates`.
 
 ## 2. Say what you found
 
-One sentence naming the node, the cause, and which of these it is:
+One sentence naming the node, the cause, and which of these it is. An illustration,
+not wording to copy: "`verification` stopped because its fix loop spent 3 of 3
+attempts on the same failing test, so it is a failed task: retry with a steer."
 
 | Cause | Route |
 |---|---|
 | Task failed, or a fix loop spent its attempts | `retry`, with a steer naming what to change |
 | An agent asked a question | `retry` with the answer as the steer |
-| Budget, time cap, rate limit | a person raises the cap or waits; retrying only spends again |
+| Budget, time cap, rate limit | a person raises the cap (`raise_budget`, CLI `kraft item raise-budget`) or waits; retrying only spends again |
 | Config or install problem (missing skill, unresolved chain) | `kraft:check`, or `kraft:doctor` if the server itself is unwell |
 | The work is heading the wrong way | `kraft:steer` |
 
@@ -50,8 +52,11 @@ the node it stopped on. `path="node.step.task"` reruns from a named point, and
 further back than the stopped node. Write the steer as an instruction: it leads
 the retry's prompt and nothing else reaches the agent.
 
-`skip_work_item` advances past a node without running it. That is the person's
-decision every time: offer it, do not take it.
+After a retry, check `kraft view show ID`. A stop with the same reason means the
+steer did not reach the cause: report it rather than retrying again.
+
+`skip_work_item` (CLI `kraft item skip`) advances past a node without running it.
+That is the person's decision every time: offer it, do not take it.
 
 Report what you found even when you do not retry.
 

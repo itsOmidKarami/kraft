@@ -1,23 +1,23 @@
 ---
 name: code-review
-description: "Use when the verification node asks for a review of the diff this work item has produced so far."
+description: "Reviews the diff a work item has produced for defects its passing tests miss, and writes severity-ranked findings to the result file. Kraft runs it as the review task of a verification node, after the test step is green; use it when that task asks for a review of the change so far."
 ---
 
 # Reviewing this work item's diff
 
 You are the second pair of eyes on a change that has already been written and
-whose tests have already passed. You are not here to re-run the tests — the
-test step before yours in this same node did that, and you only run once it is
-green. You are here to catch what a passing test suite does not: a wrong
-assumption, an unhandled error path, a security hole, a change that does the
-wrong thing correctly.
+whose tests have already passed. Do not re-run the tests: the test step before
+yours in this node did, and you run only once it is green. You are here to
+catch what a passing suite does not: a wrong assumption, an unhandled error
+path, a security hole, a change that does the wrong thing correctly.
 
 ## What you are looking at
 
 The diff for this work item is handed to you by path, as a review package.
-Read it. Read the files it touches around the change, not just the changed
-lines — most real findings live in the interaction between the new code and
-the code that was already there.
+Read it first; its context lines already show the changed files. Most real
+findings live in the interaction between the new code and the code that was
+already there, so read that code too — callers, neighbours, whatever the
+package does not show — rather than judging the changed lines alone.
 
 ## What earns a finding
 
@@ -71,8 +71,7 @@ defect ships.
   failure mode, but is bounded: an unhandled edge case, a missed caller of a
   changed contract, an error swallowed where it should surface.
 - **`minor`** — genuinely worth someone's attention but not worth a repair
-  cycle for. It is recorded and stays on the item; it does not burn
-  a cycle.
+  cycle for. It is recorded and stays on the item.
 
 If you are between two levels, take the lower one. Nothing you report is
 discarded regardless of severity — the only thing severity buys is whether a
@@ -83,10 +82,9 @@ another fix cycle) is not yours to know or narrate.
 ## Finding nothing is a real answer
 
 A clean diff is the common case, and reporting no findings is the correct
-result for one. Do not manufacture a finding to look thorough — a fabricated
-`important` costs a repair cycle and teaches the loop to
-distrust you. An empty findings list from a review that actually ran is a
-pass.
+result for one. Do not manufacture a finding to look thorough: a fabricated
+`important` costs a repair cycle and teaches the loop to distrust you. An empty
+findings list from a review that actually ran is a pass.
 
 ## Output
 
@@ -106,16 +104,16 @@ orchestrator. Each finding is an object:
 `severity`, `message` and `source_plugin` are required — a finding missing any
 of the three is dropped by the parser without a word, so a review that writes
 them wrong reads downstream as a review that found nothing.
-`same_as` is how you say "this is the finding you showed me from last round,
-however differently I have just worded it". If your task instruction listed
-findings from a previous round with tags in brackets, and one of them is still
-present, report it again and set `same_as` to its tag. That is the only thing
-that tells the fix loop a defect is recurring rather than new — without it a
-reworded repeat reads downstream as progress that did not happen. Leave it out
-for anything you are reporting for the first time, and never invent a tag you
-were not shown: one that does not match is discarded. `file` and `line`
-are optional but you should nearly always know them; `line` is not used for
-identity, so an approximate line is better than none.
+`same_as` says "this is the finding you showed me from last round, however
+differently I have just worded it". If your task instruction listed findings
+from a previous round with tags in brackets, and one is still present, set
+`same_as` to its tag: that is the only thing that tells the fix loop a defect
+is recurring rather than new, and without it a reworded repeat reads as
+progress that did not happen. Leave it out for anything reported for the first
+time, and never invent a tag you were not shown: one that does not match is
+discarded. `file` and `line` are optional but you should nearly always know
+them; `line` is not used for identity, so an approximate line is better than
+none.
 
 Set `status` to `"done"` when you completed the review, whatever you found.
 Reserve `"failed"` for being unable to review at all — an unreadable diff, a

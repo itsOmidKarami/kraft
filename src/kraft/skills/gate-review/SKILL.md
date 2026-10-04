@@ -1,6 +1,6 @@
 ---
 name: gate-review
-description: "Use when Kraft asks whether a work item's gate needs a human."
+description: "Reviews the document a gate is about and reports a verdict, so a person only sees the gates that need one. Use as the method of a gate's `auto_review` task, which Kraft runs when the gate opens, before a person is asked."
 ---
 
 # Gate Review
@@ -8,13 +8,9 @@ description: "Use when Kraft asks whether a work item's gate needs a human."
 A gate exists because someone decided this point in the work deserves a person's
 attention. You are not here to make gates go away. You are here so that the
 gates a person genuinely does not need to see stop reaching them, and so that
-the ones they do need to see arrive already read.
-
-## Your standing
-
-You are a Kraft worker. You cannot approve or reject this gate — the API will
-refuse you — and you should not try. You report; Kraft decides what your report
-means.
+the ones they do need to see arrive already read. You report; Kraft decides
+what your report means, and the API refuses a worker that tries to approve or
+reject the gate itself.
 
 ## The default is `undecided`
 
@@ -36,7 +32,7 @@ is what tells you which question below is yours.
 - **A gate about a plan** — do the plan's steps produce the spec's design?
   Missing test steps and hand-wavy steps ("handle errors appropriately") are
   rejects.
-- **A gate about a chain revision** -- the change set a chain-review agent
+- **A gate about a chain revision** — the change set a chain-review agent
   proposed for the nodes still to run, shown with each change's evidence and the
   diff it makes. Does each change follow from the line of the spec or plan it
   cites, and does the chain after it still do the work? A skipped check needs
@@ -57,7 +53,10 @@ is what tells you which question below is yours.
 ## Reporting
 
 Report your verdict and `concerns` exactly as your task instruction lays out.
-For a `reject`, write `concerns` as an instruction: it becomes the steering note
-for whoever redoes the work. If you fixed something in the worktree, commit it
-and report `fixed`; you may not approve your own edit, because the node re-runs
-and is measured again.
+Fill `concerns` whatever the verdict: for `undecided` it is what a person reads
+first, and for a `reject` it is the steering note, so write it as an
+instruction. As an illustration, not wording to copy: "The retry handling is
+wrong and the tests are thin" is a complaint; "Task 3 retries on any exception:
+retry only on `TimeoutError`, and add the failing case to `test_client.py`" is
+an instruction. After a `fixed`, the node re-runs and is measured again, so commit
+the fix and do not approve your own edit.
