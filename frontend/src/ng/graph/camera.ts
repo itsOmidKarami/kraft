@@ -23,12 +23,13 @@ export function zoomAt(cam: Cam, px: number, py: number, f: number, canvas: Canv
 
 /** How an editor fits (the Templates prototype's `fit1`): never under `floor`,
  *  and a world wider than the view starts `left` px from the left edge, or centred on `focus` when it has one. */
-export type FitRule = { floor: number; left: number; focus?: number };
+/** `initial`: the floor is for the opening view only; the Fit button then shows the whole chain. */
+export type FitRule = { floor: number; left: number; focus?: number; initial?: boolean };
 /** The editors' fit (Templates prototype `fit1`): no smaller than 80%, a chain wider than the view starting 12px in. */
 export const EDITOR_FIT: FitRule = { floor: 0.8, left: 12 };
 /** A failed or finished item's fit (WI-16): labels stay legible, and a chain too wide for it opens on the node
  *  that matters (`focus`, a world x) instead of at a 30% fit nobody can read. */
-export const ENDED_FIT: FitRule = { floor: 0.45, left: 12 };
+export const ENDED_FIT: FitRule = { floor: 0.45, left: 12, initial: true };
 
 /** The whole world in view, never above 100% or below 30%, centred; the chain
  *  sits 10px above centre, and the node canvas keeps 20px off the left edge. */

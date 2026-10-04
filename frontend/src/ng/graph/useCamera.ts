@@ -24,6 +24,8 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [cam, setCam] = useState<Cam>({ tx: 0, ty: 0, s: 1 });
+  // Fit pressed by hand: a rule that is only for the opening view lets go.
+  const [asked, setAsked] = useState(false);
   const [mode, setMode] = useState<CameraMode>(opening === "current" && current ? "current" : "fit");
   const view: Size | null = size && { w: Math.max(0, size.w - reserve), h: size.h };
   const dragged = useRef(false);
@@ -44,8 +46,8 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
   const cx = current?.cx, cy = current?.cy;
   useEffect(() => {
     if (!view || mode === "free") return;
-    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, view, canvas, fit));
-  }, [mode, view?.w, view?.h, world.W, world.H, cx, cy, canvas, cover]); // eslint-disable-line react-hooks/exhaustive-deps
+    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, view, canvas, asked && fit?.initial ? undefined : fit));
+  }, [mode, asked, view?.w, view?.h, world.W, world.H, cx, cy, canvas, cover]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Non-passive, on the viewport only: preventDefault stops the page zooming or scrolling.
   useEffect(() => {
@@ -94,7 +96,7 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
     zoomIn: () => zoomCentre(STEP_IN),
     zoomOut: () => zoomCentre(STEP_OUT),
     reset: () => zoomCentre(1 / cam.s),
-    fit: () => setMode("fit"),
+    fit: () => { setAsked(true); setMode("fit"); },
     toCurrent: current ? () => setMode("current") : undefined,
     /** Pan just enough to show a world box, e.g. the node keyboard focus moved to. */
     reveal: (box: { x0: number; x1: number; y0: number; y1: number }) => {

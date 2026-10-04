@@ -103,6 +103,19 @@ describe("useCamera", () => {
     expect(covered).toEqual(plain.result.current.cam);
   });
 
+  it("opens at an initial-only floor, and Fit then shows the whole chain (WI-16)", () => {
+    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit", fit: { floor: 0.45, left: 12, initial: true } });
+    expect(h.result.current.cam.s).toBe(0.45);
+    act(() => h.result.current.fit());
+    expect(h.result.current.cam.s).toBe(0.3); // the camera's own minimum: the whole chain, as far as it goes
+  });
+
+  it("keeps an editor's floor on Fit", () => {
+    const { h } = mount({ canvas: "chain", world: { W: 4000, H: 250 }, opening: "fit", fit: { floor: 0.8, left: 12 } });
+    act(() => h.result.current.fit());
+    expect(h.result.current.cam.s).toBe(0.8);
+  });
+
   it("opens on the current node, and the reserve narrows the view", () => {
     const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "current", current: { cx: 500, cy: 96 }, reserve: 440 });
     expect(h.result.current.cam).toEqual({ s: 1, tx: 300 - 500, ty: 132 - 96 });
