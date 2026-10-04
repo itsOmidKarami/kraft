@@ -80,6 +80,16 @@ function retryFrom(item: ItemDetail, node: ChainNode | undefined, run: Run) {
   return { label, primary: true, run: () => run(act.retry(item.id, path ? { path } : {})) };
 }
 
+/** What the failed card offers besides Escalate, by the stop's `facts.cause`: a refused forge credential is fixed
+ *  in the repo's settings (a forge task's failure carries it on a `failed` stop too), a stranded claim just needs a
+ *  retry, and any other infrastructure stop, or one naming no cause, says where to look. */
+function failedActions(item: ItemDetail, retry: ReturnType<typeof retryFrom>, h: { onRepos: () => void }) {
+  const cause = (item.stop?.facts as Record<string, unknown> | undefined)?.cause;
+  if (cause === "forge_auth") return [{ label: "Fix the token in Repos", primary: true, run: h.onRepos }, { ...retry, primary: false }];
+  if (item.stop?.kind !== "infra" || cause === "stranded") return [retry];
+  return [retry, { label: "Check the repo settings", run: h.onRepos }];
+}
+
 function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onRepos: () => void; onReview: (nodes?: string) => void }, events: KraftEvent[], run: Run): Card | null {
   const stop = item.stop;
   const facts = (stop?.facts ?? {}) as Record<string, unknown>;
@@ -89,20 +99,14 @@ function cardFor(item: ItemDetail, h: Handlers & { files: DiffFile[] | null; onR
   const status = item.display_status;
 
   if (status === "failed" && stop) {
-    const fs: [string, ReactNode][] = Object.entries(facts).flatMap(([k, v]) => (str(v) ? [[k, str(v)!] as [string, ReactNode]] : []));
+    const fs: [string, ReactNode][] = Object.entries(facts).flatMap(([k, v]) => (k !== "cause" && str(v) ? [[k, str(v)!] as [string, ReactNode]] : []));
     // "Do I lose anything?": the branch and what is on it stay.
     const kept = [item.branch && `branch ${item.branch}`, h.files?.length && `${h.files.length} ${h.files.length === 1 ? "file" : "files"}`, item.test_result?.passed && "tests passing"].filter(Boolean).join(" · ");
     const keptFact: [string, ReactNode][] = kept ? [["work kept", kept]] : [];
     return {
       tone: "bad", glyph: <X size={14} aria-hidden />, title: "Failed", where, text: stop.reason ?? undefined, node: stop.node,
       facts: [...keptFact, ...fs.slice(0, 3 - keptFact.length), ...(spent ? [spent] : [])],
-      actions: [
-        retryFrom(item, node, run),
-        // An infrastructure stop (a token, a forge, a remote) is fixed in the repo's settings. The stop names no
-        // cause the label could name ("Fix the token in Repos"), so it says where to look.
-        ...(stop.kind === "infra" ? [{ label: "Check the repo settings", run: h.onRepos }] : []),
-        { label: "Escalate…", run: h.onEscalate },
-      ],
+      actions: [...failedActions(item, retryFrom(item, node, run), h), { label: "Escalate…", run: h.onEscalate }],
     };
   }
   if (status === "waiting" && stop?.kind === "rate_limit") {

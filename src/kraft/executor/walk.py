@@ -10,6 +10,7 @@ from kraft import events, node_runs, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
+from kraft.adapters import forge as forge_mod
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
 from kraft.executor import read_only as _read_only
@@ -331,14 +332,11 @@ def _node_handler_applies(node: ResolvedNode, failed: list[ResolvedTask]) -> boo
 _STOP_CAUSE_MAX = 300
 
 
-def _task_cause(
+def _task_log(
     db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
 ) -> str:
-    """The first line of the newest `status` session log for `task` -- the
-    task's own account of why it stopped, unless Kraft appended the line
-    naming the sandbox's memory limit after it -- or "" when there is none or it
-    cannot be read. Never raises: a stop must not become less legible than the
-    generic pointer to the log, and must never escape the walk."""
+    """The newest `status` session log for `task`, or "" when there is none or
+    it cannot be read. Never raises."""
     row = db.read(
         lambda c: c.execute(
             "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
@@ -348,15 +346,39 @@ def _task_cause(
         ).fetchone()
     )
     try:
-        text = Path(row["log_path"]).read_text() if row else ""
+        return Path(row["log_path"]).read_text() if row else ""
     except (OSError, ValueError):  # ValueError: UnicodeDecodeError
         return ""
+
+
+def _task_cause(
+    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
+) -> str:
+    """The first line of the newest `status` session log for `task` -- the
+    task's own account of why it stopped, unless Kraft appended the line
+    naming the sandbox's memory limit after it -- or "" when there is none or it
+    cannot be read. Never raises: a stop must not become less legible than the
+    generic pointer to the log, and must never escape the walk."""
+    text = _task_log(db, work_item_id, node, task, status)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     # The line Kraft appends after the task's own output when the sandbox's
     # memory limit killed it is the cause; the task's first line is not.
     own = [ln for ln in lines[1:] if ln.startswith(_subprocess.OOM_LINE)]
     line = own[-1] if own else next(iter(lines), "")
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+
+
+def _forge_cause(db, work_item_id: str, node: ResolvedNode, failed: list) -> dict | None:
+    """`{"cause": ...}` when a failed forge task's log says the forge refused
+    the credential or could not be reached (`forge.failure_cause`): a forge
+    CLI's failure is a failed task (an infra stop only in a fix-loop node), so the
+    card reads the cause from the stop's facts."""
+    for t in failed:
+        if _in_process(t) and (
+            c := forge_mod.failure_cause(_task_log(db, work_item_id, node, t, "failed"))
+        ):
+            return {"cause": c}
+    return None
 
 
 def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) -> str:
@@ -1067,7 +1089,11 @@ async def _walk_node_once(
                     reason += f" ({', '.join(repr(e) for e in excs)})"
                 if repaired:
                     reason += " (after on_failure)"
-                return _Stuck(reason, kind="failed", facts=_scope_facts(scopes))
+                facts = {
+                    **(_scope_facts(scopes) or {}),
+                    **(_forge_cause(db, work_item_id, node, failed) or {}),
+                }
+                return _Stuck(reason, kind="failed", facts=facts or None)
         await node_runs.completed(db, Path(worktree) if worktree else None, work_item_id, node.id)
         return "ok"
 
@@ -1383,9 +1409,10 @@ async def _walk_node_once(
                 "tasks are executed by the running Kraft daemon — a worker commit cannot "
                 "change them. Reinstall and restart, or skip the node."
             )
+            cause = _forge_cause(db, work_item_id, node, blind_failures)
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(
-                    c, work_item_id, node.id, reason, kind="infra"
+                lambda c, reason=reason, cause=cause: store.mark_needs_human(
+                    c, work_item_id, node.id, reason, kind="infra", facts=cause
                 )
             )
             return "needs_human"

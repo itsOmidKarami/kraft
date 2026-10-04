@@ -24,6 +24,49 @@ class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
 
 
+#: What a forge or git failure's own text says about why, lower-cased and
+#: matched as substrings: a rejected credential first (it is also what an
+#: unreachable-looking retry would not fix), then a host that could not be
+#: reached. The CLIs print no code for either, so the words are the only handle.
+_AUTH_MARKERS = (
+    "authentication failed",
+    "could not read username",
+    "permission denied (publickey)",
+    "bad credentials",
+    "http 401",
+    "http 403",
+    "401 unauthorized",
+    "403 forbidden",
+    "gh auth login",
+    "glab auth login",
+    "invalid token",
+)
+_UNREACHABLE_MARKERS = (
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "connection timed out",
+    "operation timed out",
+    "connection refused",
+    "network is unreachable",
+    "failed to connect",
+    "could not connect",
+    "timed out after",
+)
+
+
+def failure_cause(text: str) -> Literal["forge_auth", "forge_unreachable"] | None:
+    """Why a forge or git failure's message says it failed, when it says: a
+    credential the forge refused (`forge_auth`, fixed in the repo's settings)
+    or a forge that could not be reached (`forge_unreachable`). None when the
+    text names neither."""
+    low = text.lower()
+    if any(m in low for m in _AUTH_MARKERS):
+        return "forge_auth"
+    if any(m in low for m in _UNREACHABLE_MARKERS):
+        return "forge_unreachable"
+    return None
+
+
 ApprovalState = Literal["pending", "approved"]
 
 
