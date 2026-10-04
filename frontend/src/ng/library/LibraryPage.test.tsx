@@ -141,6 +141,8 @@ describe("Library page: header and YAML", () => {
     }, true);
     mount();
     expect(await screen.findByText("DRAFT · 1 CHANGE")).toBeInTheDocument();
+    // TP-6: YAML, then Review & publish, as on Chains, Harnesses and Repos.
+    expect(screen.getAllByRole("button", { name: /^(YAML|Review & publish)$/ }).map((b) => b.textContent)).toEqual(["YAML", "Review & publish"]);
     await u.click(screen.getByRole("button", { name: "1 PROBLEM" }));
     expect(where()).toBe("/templates/library/tasks.verify");
   });
