@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { create } from "zustand";
 import * as api from "../../api";
 import type { Policy, WorkItemDocument } from "../../types";
-import { EDITOR_FIT, openingView } from "../graph/camera";
+import { EDITOR_FIT, ENDED_FIT, openingView } from "../graph/camera";
 import { Inspector } from "../graph/Inspector";
 import { StageGraph } from "../graph/StageGraph";
 import { ChainStrip } from "../graph/ChainStrip";
@@ -200,7 +200,8 @@ export function Workspace({ item: raw, version, reload }: { item: ItemDetail; ve
             selected={selectedNode}
             opening={openingView(item.display_status ?? "", hasCurrent)}
             // Not started, it opens readable, as its draft page and the Chains editor do: no smaller than 80%, not a 30% fit.
-            fit={notStarted(item) ? EDITOR_FIT : undefined}
+            fit={notStarted(item) ? EDITOR_FIT : item.display_status === "failed" || item.display_status === "done" ? ENDED_FIT : undefined}
+            focus={item.display_status === "failed" ? "stopped" : item.display_status === "done" ? "last" : undefined}
             reserve={reserve}
             cover={cover}
             onSelect={(node) => pick({ kind: "node", node })}

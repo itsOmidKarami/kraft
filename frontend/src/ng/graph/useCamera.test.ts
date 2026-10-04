@@ -21,6 +21,18 @@ describe("camera maths", () => {
     expect(fitCam({ W: 2600, H: 250 }, { w: 690, h: 700 }, "chain", { floor: 0.8, left: 12 })).toEqual({ s: 0.8, tx: 12, ty: (700 - 200) / 2 - 10 });
     expect(fitCam({ W: 400, H: 250 }, { w: 1000, h: 700 }, "chain", { floor: 0.8, left: 12 }).tx).toBe(300);
   });
+  // WI-16: a failed or finished chain too wide for its floor opens on the node that matters, never past either end.
+  it.each([
+    ["on the focus", { floor: 0.45, left: 12, focus: 1000 }, { W: 2600, H: 250 }, -105],
+    ["clamped at the right end", { floor: 0.45, left: 12, focus: 2500 }, { W: 2600, H: 250 }, 690 - 2600 * 0.45 - 12],
+    ["clamped at the left end", { floor: 0.45, left: 12, focus: 100 }, { W: 2600, H: 250 }, 12],
+    ["with no focus, from the left as before", { floor: 0.45, left: 12 }, { W: 2600, H: 250 }, 12],
+    ["whole at the floor: centred, the focus ignored", { floor: 0.45, left: 12, focus: 100 }, { W: 1000, H: 250 }, (690 - 650) / 2],
+  ])("fits to a floor %s", (_, rule, world, tx) => {
+    const cam = fitCam(world, { w: 690, h: 700 }, "chain", rule);
+    expect(cam.s).toBeGreaterThanOrEqual(0.45);
+    expect(cam.tx).toBeCloseTo(tx);
+  });
   it("centres the current node across and 30% down at 100%", () => {
     expect(currentCam(500, 96, { w: 800, h: 401 })).toEqual({ s: 1, tx: -100, ty: 120 - 96 });
   });
