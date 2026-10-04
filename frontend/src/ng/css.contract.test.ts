@@ -132,6 +132,7 @@ describe("round 4 layout pins", () => {
   // [id, css file, a rule that must hold]: each row fails when its rule is taken out.
   const rules: [string, string, RegExp][] = [
     ["BD-13: a probe's name keeps the mono face once it has a result", "shell/first-run.css", /\.fr-probes li > span:first-child\s*{[^}]*font-family:\s*ui-monospace/],
+    ["ST-6: two hints in one block read as two lines", "settings/settings.css", /(?:^|\n)\.set-hint\s*{[^}]*display:\s*block/],
   ];
   it.each(rules)("%s", (_, file, rule) => {
     expect(readFileSync(join(here, file), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "")).toMatch(rule);
