@@ -269,6 +269,7 @@ def test_a_plan_without_task_headings_is_a_400_and_no_progress(client, repo):
 
     assert client.post(f"/api/work-items/{wid}/progress", json={"task": 1}).status_code == 400
     assert client.get(f"/api/work-items/{wid}").json()["progress"] is None
+    assert _board_row(client, wid)["progress"] is None
 
 
 @pytest.mark.parametrize("rework", [False, True], ids=["paused", "rework"])

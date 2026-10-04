@@ -344,8 +344,7 @@ def for_detail(db, row, worktree: Path) -> ProgressReport | None:
         )
     else:
         report = combine(tasks, run_state(evs, node_id), committed_task([s for _, s in log]))
-    if report is None:
-        return None
+        assert report is not None  # `tasks` is not empty
     shas: dict[int, str] = {}
     for sha, subject in log:
         for n in _named_tasks(subject):
