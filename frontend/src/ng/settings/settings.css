@@ -166,6 +166,8 @@
 .set-chip.is-add { display: inline-flex; align-items: center; gap: 4px; border-style: dashed; color: var(--text-sub); }
 .set-chip { border-radius: 12px; }
 .set-modes.is-cards { gap: 10px; }
+/* The line under the Reach cards would touch the selected card's ring. */
+.set-modes.is-cards + .set-hint, .set-modes.is-cards + .set-error { margin-top: 6px; }
 .set-mode.is-card { flex-direction: row; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--bg); }
 .set-mode.is-card:hover { background: var(--surface); }
 .set-mode.is-card[aria-checked="true"] { background: var(--bg); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-sub); border-color: var(--border); }
