@@ -98,7 +98,7 @@
 | src/kraft/executor/resuming.py               |       82 |        1 |     99% |       168 |
 | src/kraft/executor/retry.py                  |       25 |        0 |    100% |           |
 | src/kraft/executor/stops.py                  |      146 |        0 |    100% |           |
-| src/kraft/executor/walk.py                   |      605 |       13 |     98% |622, 739, 1040, 1067, 1075, 1148-1163, 1208, 1436, 1608, 1743, 1800, 1846 |
+| src/kraft/executor/walk.py                   |      609 |       13 |     98% |622, 739, 1040, 1067, 1075, 1148-1163, 1208, 1436, 1609, 1760, 1817, 1863 |
 | src/kraft/findings.py                        |      111 |        0 |    100% |           |
 | src/kraft/gate\_review.py                    |       74 |        4 |     95% |103-106, 111, 187 |
 | src/kraft/grants.py                          |       64 |        0 |    100% |           |
@@ -174,7 +174,7 @@
 | src/kraft/worker/steering.py                 |       37 |        0 |    100% |           |
 | src/kraft/worker/worktree\_read.py           |       63 |        9 |     86% |44, 108, 112-114, 117-121, 129-130 |
 | src/kraft/ws.py                              |       72 |        3 |     96% |     77-79 |
-| **TOTAL**                                    | **30599** | **1462** | **95%** |           |
+| **TOTAL**                                    | **30603** | **1462** | **95%** |           |
 
 
 ## Setup coverage badge
