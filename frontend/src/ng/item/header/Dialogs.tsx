@@ -1,11 +1,13 @@
-import { useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import type { EscalationThread } from "../../../types";
 import { Button } from "../../ui/Button";
 import { Field } from "../../ui/Field";
 import { Popover } from "../../ui/Popover";
-import { act, type Done } from "../actions";
+import { act, cancelPreview, type Done } from "../actions";
 import { useFocusSoon } from "../useFocusSoon";
 import { sendOnModEnter } from "../../keys";
+import type { CancelPreview } from "../../../types";
+import { EndFacts, stopsNow } from "./EndFacts";
 
 function useSubmit(send: () => Promise<Done>, onDone: () => void) {
   const [busy, setBusy] = useState(false);
@@ -56,15 +58,26 @@ export function CompleteCard({ id, anchor, onClose, onDone }: CardProps) {
   const [reason, setReason] = useState("");
   const [beads, setBeads] = useState(false);
   const { busy, error, go } = useSubmit(() => act.complete(id, reason.trim(), beads), onDone);
+  // The same read Cancel makes: Mark complete stops the same attempt and keeps the same things.
+  const [preview, setPreview] = useState<CancelPreview | null>(null);
+  useEffect(() => {
+    void cancelPreview(id).then((r) => r.ok && setPreview(r.body));
+  }, [id]);
+  const rows: [string, string][] = [
+    ...(preview?.running ? [["stops now", stopsNow(preview.running)] as [string, string]] : []),
+    ["keeps", `branch${preview ? ` ${preview.kept.branch}` : ""}, the worktree, findings and the run log`],
+    ["afterwards", "Status COMPLETED. Archive it when you are done."],
+  ];
   return (
     <Popover anchor={anchor} open notch onClose={onClose} role="dialog" label="Mark this item complete?" dirty={!!reason.trim()}>
       <div className="item-card-pop">
         <h2 className="item-pop-title">Mark this item complete?</h2>
         <p className="item-muted">For work that landed somewhere else, or no longer needs the chain. It stops whatever is running and skips the remaining nodes.</p>
+        <EndFacts rows={rows} />
+        <label className="item-check"><input type="checkbox" checked={beads} onChange={(e) => setBeads(e.target.checked)} /> Also close its beads</label>
         <Field label="Reason" hint="Goes in the run log." error={error}>
           <textarea className="item-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} onKeyDown={sendOnModEnter(go, !busy && !!reason.trim())} />
         </Field>
-        <label className="item-check"><input type="checkbox" checked={beads} onChange={(e) => setBeads(e.target.checked)} /> Also close its beads</label>
         <div className="item-actions">
           <Button variant="primary" disabled={busy || !reason.trim()} onClick={go}>Mark complete</Button>
           <Button onClick={onClose}>Keep it going</Button>

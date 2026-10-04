@@ -8,6 +8,8 @@ import { CompleteCard, EscalateCard } from "./Dialogs";
 
 /** The writes these pages send; any other write is refused. */
 const WRITES = acceptWrites("POST /work-items/w1/complete", "POST /work-items/w1/escalate");
+const preview = (running: object | null) => ({ running, kept: { branch: "kraft/cb59", worktree: "/wt", findings: 0, threads: 0 }, mr: null, spend: { spent_usd: 0, cap_usd: null } });
+const ANSWERS = { ...WRITES, "GET /work-items/w1/cancel-preview": [200, preview(null)] as [number, unknown] };
 
 afterEach(() => vi.unstubAllGlobals());
 const anchor = () => {
@@ -18,7 +20,7 @@ const anchor = () => {
 
 describe("item cards", () => {
   it("sends an escalation on ⌘↵ from its message, a plain ↵ staying a newline", async () => {
-    const calls = stubFetch(WRITES);
+    const calls = stubFetch(ANSWERS);
     const onDone = vi.fn();
     render(<EscalateCard id="w1" anchor={anchor()} onClose={() => {}} onDone={onDone} />);
     await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "Look at{Enter}the lint step");
@@ -45,8 +47,29 @@ describe("item cards", () => {
     expect(screen.queryByText(/thread \d/)).toBeNull();
   });
 
+  // WI-14: the card says what ending does, as Cancel does, then the beads box, then the reason.
+  it("says what Mark complete stops and keeps, then asks for the beads and the reason", async () => {
+    const started = new Date(Date.now() - 41_000).toISOString();
+    stubFetch({ ...WRITES, "GET /work-items/w1/cancel-preview": [200, preview({ node: "verification", task: "verification.review.code_review", attempt: 2, started_at: started })] });
+    render(<CompleteCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
+    expect(await screen.findByText("code_review, attempt 2 (41s). That attempt's work is lost.")).toBeInTheDocument();
+    const card = screen.getByRole("dialog", { name: "Mark this item complete?" });
+    expect([...card.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["stops now", "keeps", "afterwards"]);
+    expect(card).toHaveTextContent("keeps" + "branch kraft/cb59, the worktree, findings and the run log");
+    expect(card).toHaveTextContent("Status COMPLETED. Archive it when you are done.");
+    const order = [card.querySelector(".item-facts"), screen.getByRole("checkbox", { name: "Also close its beads" }), screen.getByRole("textbox", { name: /Reason/ })];
+    order.slice(1).forEach((el, i) => expect(order[i]!.compareDocumentPosition(el!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy());
+  });
+
+  it("leaves 'stops now' out when nothing is running", async () => {
+    stubFetch(ANSWERS);
+    render(<CompleteCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
+    expect(await screen.findByText(/^branch kraft\/cb59/)).toBeInTheDocument();
+    expect(screen.queryByText("stops now")).toBeNull();
+  });
+
   it("marks complete on Ctrl+↵ from its reason, and not while the reason is blank", async () => {
-    const calls = stubFetch(WRITES);
+    const calls = stubFetch(ANSWERS);
     render(<CompleteCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
     const reason = screen.getByRole("textbox", { name: /Reason/ });
     await userEvent.click(reason);
@@ -61,7 +84,7 @@ describe("item cards", () => {
     ["Escalate", EscalateCard, "Escalate this item", "Message"],
     ["Mark complete", CompleteCard, "Mark this item complete?", "Reason"],
   ])("opens %s as a card, not a modal, that a stray press closes only while nothing is typed", async (_, Card, name, field) => {
-    stubFetch(WRITES);
+    stubFetch(ANSWERS);
     const onClose = vi.fn();
     render(<Card id="w1" anchor={anchor()} onClose={onClose} onDone={() => {}} />);
     const card = screen.getByRole("dialog", { name });
@@ -80,7 +103,7 @@ describe("item cards", () => {
     ["Escalate", EscalateCard, "Message"],
     ["Mark complete", CompleteCard, "Reason"],
   ])("%s keeps its typed text on Escape, and closes on one while empty", async (_, Card, field) => {
-    stubFetch(WRITES);
+    stubFetch(ANSWERS);
     const onClose = vi.fn();
     render(<Card id="w1" anchor={anchor()} onClose={onClose} onDone={() => {}} />);
     const box = screen.getByRole("textbox", { name: new RegExp(field) });

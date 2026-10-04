@@ -11,7 +11,7 @@ const WRITES = acceptWrites("POST /work-items/w1/cancel");
 afterEach(() => vi.unstubAllGlobals());
 
 const preview = (mr: "open" | "merged" | null) => ({
-  running: { node: "verification", task: "verification.review.code_review", attempt: 2 },
+  running: { node: "verification", task: "verification.review.code_review", attempt: 2, started_at: new Date(Date.now() - 41_000).toISOString() },
   kept: { branch: "kraft/cb59", worktree: "/wt", findings: 0, threads: 1 },
   mr: mr ? { ref: 142, url: "https://forge/142", state: mr } : null,
   spend: { spent_usd: 2.41, cap_usd: 5 },
@@ -26,6 +26,11 @@ const open = (answers: Parameters<typeof stubFetch>[0]) => {
 };
 
 describe("CancelCard", () => {
+  it("names how long the attempt it would stop has run, in the words Mark complete uses (WI-14)", async () => {
+    open({ "GET /work-items/w1/cancel-preview": [200, preview(null)] });
+    expect(await screen.findByText("code_review, attempt 2 (41s). That attempt's work is lost.")).toBeInTheDocument();
+  });
+
   it.each([true, false])("sends POST /cancel with the reason and close_mr=%s, and never the deleting route", async (close) => {
     const { calls, onDone } = open({ "GET /work-items/w1/cancel-preview": [200, preview("open")] });
     await screen.findByText(/code_review, attempt 2/);

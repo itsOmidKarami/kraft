@@ -77,6 +77,8 @@ def test_cancel_preview_of_a_running_item_names_its_session(client, repo, monkey
 
     assert r.status_code == 200, r.text
     body = r.json()
+    started_at = body["running"].pop("started_at")
+    assert started_at, "the card says how long the attempt it would stop has run"
     assert body["running"] == {
         "node": "verification",
         "task": "verification.implement",
