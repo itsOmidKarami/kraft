@@ -127,3 +127,13 @@ describe("landmarks", () => {
     expect(bad.map((f) => relative(here, f))).toEqual([]);
   });
 });
+
+describe("round 4 layout pins", () => {
+  // [id, css file, a rule that must hold]: each row fails when its rule is taken out.
+  const rules: [string, string, RegExp][] = [
+    ["BD-13: a probe's name keeps the mono face once it has a result", "shell/first-run.css", /\.fr-probes li > span:first-child\s*{[^}]*font-family:\s*ui-monospace/],
+  ];
+  it.each(rules)("%s", (_, file, rule) => {
+    expect(readFileSync(join(here, file), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "")).toMatch(rule);
+  });
+});
