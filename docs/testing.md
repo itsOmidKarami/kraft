@@ -148,9 +148,11 @@ fixture refuses to answer a `param == "bd"` request against the fake).
 - **Frontend:** `it.each` / `describe.each`, and the render helpers and
   factories in the area's testkit. Playwright proves the UI↔server contract;
   vitest covers component behaviour. Don't duplicate between them. The
-  screenshot sweep (`frontend/sweep/`) is a third layer, run by the author
-  for a change to how a screen looks and not by CI; `frontend/README.md` says
-  when each of the three is required.
+  UI contract (`frontend/sweep/contract/`) runs the built SPA in a browser on
+  a mocked API and is run by CI's `ui contract` job. The screenshot sweep
+  (`frontend/sweep/`) is a fourth layer, run by the author for a change to how
+  a screen looks and not by CI; `frontend/README.md` says when each of the
+  four is required.
 
 ## What counts as coverage
 
