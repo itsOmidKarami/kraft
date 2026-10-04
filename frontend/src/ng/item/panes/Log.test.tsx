@@ -18,6 +18,10 @@ describe("Log", () => {
     render(<Log sessionId="s1" running={false} title="t" />);
     expect(await screen.findByText(/reading cache\.py/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download the whole log" })).toHaveAttribute("href", "/api/worker-sessions/s1/log");
+    // LV-10: copy wraps with follow, never alone; full screen is the one that drops a row.
+    const group = screen.getByRole("button", { name: "copy" }).parentElement!;
+    expect(group).toContainElement(screen.getByRole("checkbox", { name: "follow" }));
+    expect(group).not.toContainElement(screen.getByRole("button", { name: "full screen" }));
     await userEvent.click(screen.getByRole("button", { name: "agent" }));
     expect(screen.queryByText(/reading cache\.py/)).toBeNull();
     expect(screen.getByText(/dispatch/)).toBeInTheDocument();

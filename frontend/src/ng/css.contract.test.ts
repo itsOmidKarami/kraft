@@ -134,6 +134,7 @@ describe("round 4 layout pins", () => {
     ["BD-13: a probe's name keeps the mono face once it has a result", "shell/first-run.css", /\.fr-probes li > span:first-child\s*{[^}]*font-family:\s*ui-monospace/],
     ["ST-6: two hints in one block read as two lines", "settings/settings.css", /(?:^|\n)\.set-hint\s*{[^}]*display:\s*block/],
     ["GR-12: the review toolbar wraps rather than clip Diff settings", "review/review.css", /\.rv-toolbar\s*{[^}]*flex-wrap:\s*wrap/],
+    ["LV-10: follow and copy move as one unit", "item/item.css", /\.ip-follow-copy\s*{[^}]*white-space:\s*nowrap/],
   ];
   it.each(rules)("%s", (_, file, rule) => {
     expect(readFileSync(join(here, file), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "")).toMatch(rule);

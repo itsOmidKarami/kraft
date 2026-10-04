@@ -41,8 +41,10 @@ export function Log({ sessionId, running, title, crumb }: { sessionId: string; r
       <span className="ip-chips" role="group" aria-label="Sources">
         {SOURCES.map((s) => <button key={s} type="button" className="ip-chip" aria-pressed={!off.has(s)} onClick={() => toggle(s)}>{s}</button>)}
       </span>
-      <label className="item-check ip-follow"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
-      <button type="button" className="item-link" onClick={() => navigator.clipboard?.writeText(shown.map(logLineText).join("\n"))}>copy</button>
+      <span className="ip-follow-copy">
+        <label className="item-check ip-follow"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
+        <button type="button" className="item-link" onClick={() => navigator.clipboard?.writeText(shown.map(logLineText).join("\n"))}>copy</button>
+      </span>
     </>
   );
   const count = lines ? lineCount(shown.length) : "Reading…";
