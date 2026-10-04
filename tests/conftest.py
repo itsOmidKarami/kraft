@@ -357,6 +357,16 @@ def _no_host_proxy(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_host_git_identity(monkeypatch):
+    """No test inherits this machine's `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
+    identity: those outrank the `-c user.email=t@t` the `git` helper commits
+    with, so every commit would carry the developer's name instead of `t`."""
+    for name in [k for k in os.environ if k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))]:
+        if not name.endswith("_DATE"):
+            monkeypatch.delenv(name)
+
+
+@pytest.fixture(autouse=True)
 def _per_test_tempdir(tmp_path_factory, monkeypatch):
     """`tempfile`'s default directory is one of this test's own, so what code
     under test leaves there on purpose (a failed `verify` keeps its logs for

@@ -6,6 +6,10 @@ handling, which controls a state offers, keyboard paths) is vitest's. Shared
 helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
 `publish`, `agentRunning`, `eventCount`) live in `fixtures.ts`.
 
+`contract/` is a different suite: the UI contract, on a mocked API with its
+own config and no fixture server. This suite ignores it; see
+[`contract/README.md`](contract/README.md).
+
 | spec | what it drives |
 | --- | --- |
 | `chain.spec.ts` | create a `quick-task` item from the board's composer, watch the header reach DONE, open the implement task's log and its session summary, find the item in the board's Done group |

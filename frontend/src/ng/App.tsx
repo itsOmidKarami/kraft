@@ -30,8 +30,8 @@ import { Toaster } from "./ui/Toast";
 import { Tooltip } from "./ui/Tooltip";
 
 /** `/_gallery` and `/_tokens`, the component and token sheets, are for building
- *  the UI: the dev server has them, and so does a build the screenshot sweep
- *  makes with `VITE_DEV_PAGES=1` (sweep/playwright.sweep.config.ts). A release
+ *  the UI: the dev server has them, and so does a build made with
+ *  `VITE_DEV_PAGES=1`. A release
  *  build has neither, nor their code: the constant is false there, so the
  *  bundler drops the imports. */
 const DEV_PAGES = import.meta.env.DEV || import.meta.env.VITE_DEV_PAGES === "1";

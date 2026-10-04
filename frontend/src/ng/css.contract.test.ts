@@ -107,7 +107,7 @@ const sources = (dir: string): string[] =>
   );
 
 describe("data-pan", () => {
-  // The sweep's offscreen check exempts what a data-pan canvas clips (R41): only
+  // A data-pan canvas clips what it pans on purpose (R41): only
   // the graph components may claim it, so it can't become a blanket mute.
   it("appears in no source file outside ng/graph", () => {
     const src = join(here, "..");

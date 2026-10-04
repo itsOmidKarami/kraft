@@ -440,7 +440,7 @@ jobs:
         run: cat e2e-server.log || true
 
   ui-contract:
-    # The UI contract (frontend/sweep/contract/): what the SPA does in a real
+    # The UI contract (frontend/e2e/contract/): what the SPA does in a real
     # browser, on a mocked /api. The sidebar's pin and reveal, Esc and focus
     # order, the item header's cards, review, the document viewer, tooltips,
     # and the icon-only audit, which fails an icon-only control with no name
@@ -457,7 +457,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: npm ci
         working-directory: frontend
-      - run: npx playwright test -c sweep/contract/playwright.config.ts
+      - run: npx playwright test -c e2e/contract/playwright.config.ts
         working-directory: frontend
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

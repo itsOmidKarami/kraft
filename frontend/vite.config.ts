@@ -66,7 +66,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
     unstubGlobals: true,
-    exclude: ["e2e/**", "sweep/**", "node_modules/**"],
+    exclude: ["e2e/**", "node_modules/**"],
     execArgv,
   },
 });
