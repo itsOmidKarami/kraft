@@ -215,6 +215,14 @@ describe("ItemHeader", () => {
     await waitFor(() => expect(document.querySelector(".item-main-action")).toHaveFocus());
   });
 
+  it("tells the Escalate card the item's escalation threads (WI-15)", async () => {
+    stubFetch(WRITES);
+    show({ display_status: "failed", status: "needs_human", stop: { kind: "failed", node: "verification", task: null, resume_at: null, reason: null }, escalation_threads: [{ thread: 1, session_id: "s", turns: 2, started_at: "t", ended_at: null, status: "done" }] });
+    await userEvent.click(screen.getByRole("button", { name: "Item menu" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Escalate…" }));
+    expect(await screen.findByText("continues thread 1 (turn 3), so it remembers the earlier turns")).toBeInTheDocument();
+  });
+
   // R11b-01: /pause answers every stopped item 409, so a needs-you stop's main button is its way on, never Pause.
   it.each([
     ["cap", /Raise cap/, { handler: "onRaise" as const }],

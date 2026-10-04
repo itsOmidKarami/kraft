@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { EscalationThread } from "../../../types";
 import { acceptWrites, stubFetch } from "../testkit";
 import { CompleteCard, EscalateCard } from "./Dialogs";
 
@@ -25,6 +26,23 @@ describe("item cards", () => {
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     expect(calls.find((c) => c.path === "/work-items/w1/escalate")).toMatchObject({ method: "POST", body: { message: "Look at\nthe lint step", new_thread: false } });
     expect(onDone).toHaveBeenCalled();
+  });
+
+  // WI-15
+  it.each([
+    ["continues the last thread", false, 'continues thread 2 (turn 4), so it remembers the earlier turns'],
+    ["starts the next one when asked", true, "starts thread 3, a fresh session that does not see thread 2"],
+  ])("gives the message an example, and says what the thread box does: %s", async (_, fresh, hint) => {
+    const threads = [{ thread: 1, turns: 2 }, { thread: 2, turns: 3 }] as EscalationThread[];
+    render(<EscalateCard id="w1" anchor={anchor()} threads={threads} onClose={() => {}} onDone={() => {}} />);
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", expect.stringMatching(/^What should it look at\? \(required\) e\.g\. "/));
+    if (fresh) await userEvent.click(screen.getByRole("checkbox", { name: "Start a new thread" }));
+    expect(screen.getByText(hint)).toBeInTheDocument();
+  });
+
+  it("says nothing about threads when it does not know them", () => {
+    render(<EscalateCard id="w1" anchor={anchor()} onClose={() => {}} onDone={() => {}} />);
+    expect(screen.queryByText(/thread \d/)).toBeNull();
   });
 
   it("marks complete on Ctrl+↵ from its reason, and not while the reason is blank", async () => {
