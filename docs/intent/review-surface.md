@@ -97,7 +97,7 @@ IF the diff body exceeds the size cap, THEN the system SHALL cut the returned bo
 at a file boundary.
 enforced-by: tests/api/test_diff.py::test_diff_truncates_at_a_file_boundary, tests/api/test_diff.py::test_truncate_bounds_a_single_file_bigger_than_the_cap
 
-## REQ rework-run-shows-no-plan-progress
+## REQ rework-run-shows-no-live-plan-position
 WHEN a gate rejection sends the chain straight back to the implementing node,
 the system SHALL show no live plan position for that run (the board shows no
 task count, and the item's detail shows the plan as finished) and SHALL NOT

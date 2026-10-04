@@ -208,7 +208,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
-  const kind = esc ? "agent" : taskKindAt(materialized(item), path) ?? (at?.model ? "agent" : undefined);
+  const frozen = materialized(item);
+  const kind = esc ? "agent" : taskKindAt(frozen, path) ?? (at?.model ? "agent" : undefined);
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
   const lead = `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task`;
@@ -241,7 +242,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   // an older attempt stays put while newer ones arrive, and the menu's count shows them.
   const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} />;
   // The plan's sub-tasks, on the one task that works through it, whichever attempt is picked.
-  const progress = planTaskPath(materialized(item)) === path ? item.progress : null;
+  const progress = planTaskPath(frozen) === path ? item.progress : null;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />,
