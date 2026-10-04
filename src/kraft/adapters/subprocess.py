@@ -591,6 +591,8 @@ async def run_task(
     round: int = 0,
     head_sha: str | None = None,
     thread: int = 1,
+    #: The repository a fanned-out run is for (`worker_sessions.repository`).
+    repository: str | None = None,
     sandbox: dict | None = None,
     #: Names a log schema in `usage.READERS`, or `None` when the harness
     #: declared no log-based reading (`source: result_file`, no
@@ -668,6 +670,7 @@ async def run_task(
             harness=harness,
             sandbox=backend.kind if backend is not None else None,
             model=model,
+            repository=repository,
         )
     )
 

@@ -703,3 +703,27 @@ def test_blind_failure_findings_are_labeled_by_source_in_judge_history(tmp_path,
     history = asyncio.run(read_history())
     assert history, "no rounds recorded"
     assert any(f.source_plugin == "verify.main.check" for h in history for f in h["findings"])
+
+
+def test_each_loop_session_is_stamped_with_the_round_a_node_view_reads_it_in(tmp_path, monkeypatch):
+    """A node's view shows a round as: the measuring tasks stamped with its index (0-based), the
+    judge that came after it with the same index, and the repair that led out of it with the next.
+    The judge only runs ahead of the second repair, so it follows round 2 (index 1)."""
+    out = _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {"status": "failed", "findings": [_finding("one")]},
+            {"status": "failed", "findings": [_finding("two")]},
+            {"status": "done", "findings": []},
+        ],
+    )
+    assert out["result"] == "completed"
+    assert [(s["hook_point"], s["round"]) for s in out["sessions"]] == [
+        ("review.main.review", 0),
+        ("review.fix_loop.main.fix", 1),
+        ("review.main.review", 1),
+        ("review.fix_loop.judge", 1),
+        ("review.fix_loop.main.fix", 2),
+        ("review.main.review", 2),
+    ]

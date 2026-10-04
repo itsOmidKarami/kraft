@@ -815,6 +815,43 @@ def _test_result(st, row) -> dict | None:
     return None
 
 
+def _scope_runs(st, row) -> list[dict]:
+    """`scope_runs` on the detail response: every command each changed-test-scope
+    task ran, over every round and repository (`dispatch.scope_runs`), for the
+    node's view to draw a round's scopes beside the round before it. Empty for
+    a chain with no such task."""
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        return []
+    from kraft.executor import dispatch  # deferred, as `_test_result` defers it
+    from kraft.templates.models import BuiltinAction, BuiltinTask
+
+    verifies = [
+        (node, t)
+        for node in chain.chain.nodes
+        for t in node.tasks()
+        if isinstance(t.task, BuiltinTask)
+        and t.task.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
+    ]
+    if not verifies:
+        return []
+    launch = deps.launch(st, row["repo"])
+
+    def entry(repository: str | None):
+        # A member repository's own table; the item's own for the root and a lone repo.
+        return (launch.repositories.get(repository) if repository else None) or launch.repo_entry
+
+    runs = []
+    for node, t in verifies:
+        try:
+            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, entry)
+        except config_mod.ConfigError:
+            # An unreadable repos.yaml costs the scope names, not the detail.
+            found = dispatch.scope_runs(st.db, row["id"], node.id, t.path, lambda _: None)
+        runs += [{**r, "node_id": node.id, "hook_point": t.path} for r in found]
+    return runs
+
+
 def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None) -> dict | None:
     """`stop` on the detail response (B.3): `None` unless the item is
     currently `needs_human`, `waiting` or `rate_limited`."""
@@ -1052,6 +1089,7 @@ async def get_work_item(wid: str, request: Request):
         ),
         "stop": _stop(st, row, sessions, pending, stop_payload),
         "test_result": _test_result(st, row),
+        "scope_runs": _scope_runs(st, row),
         # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
         # the frozen chain's total, how many were gates, and the current
         # node's step when it declares more than one.

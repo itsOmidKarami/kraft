@@ -783,6 +783,7 @@ async def run_agent_task(
     identify_as_worker: bool = True,
     head_sha: str | None = None,
     thread: int = 1,
+    repository: str | None = None,
     repo_entry: RepoEntry | None = None,
     time_cap=None,
     files: str | None = None,  # result and summary name, else session_id (Kraft-s7c04.54)
@@ -1047,6 +1048,7 @@ async def run_agent_task(
         round=round,
         head_sha=head_sha,
         thread=thread,
+        repository=repository,
         sandbox=sandbox,
         checkout=checkout,
         require_result_file=True,

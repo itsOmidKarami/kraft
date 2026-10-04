@@ -97,3 +97,28 @@ async def test_a_sandboxed_launch_not_given_its_members_checkout_never_starts(
     )
     assert status == "config_error"
     assert "repos/pkg" in (run_dirs.logs / "s1.log").read_text()
+
+
+async def test_run_task_records_the_repository_a_fanned_out_run_is_for(
+    run_dirs, database, tmp_path
+):
+    """The session row names the repository it ran for, so a node's view can
+    say where each run happened; a run that is not fanned out names none."""
+    await make_item(database, tmp_path / "unused")
+    for sid, kw in (("s1", {"repository": "pkg"}), ("s2", {})):
+        await sp.run_task(
+            database,
+            run_dirs,
+            session_id=sid,
+            work_item_id="w1",
+            cmd=["true"],
+            node_id="n",
+            hook_point="on.test.run",
+            cwd=tmp_path,
+            **kw,
+        )
+
+    rows = database.read(
+        lambda c: c.execute("SELECT id, repository FROM worker_sessions").fetchall()
+    )
+    assert {r["id"]: r["repository"] for r in rows} == {"s1": "pkg", "s2": None}

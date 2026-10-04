@@ -14,7 +14,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 51
+SCHEMA_VERSION = 52
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -195,7 +195,11 @@ CREATE TABLE worker_sessions (
   -- them, JSON {"phase", "allow", "deny"} (harness hosts included), so a
   -- reattach re-opens its channel with them, never with today's config.
   -- NULL: no `network`, and every row older than this column
-  egress         TEXT
+  egress         TEXT,
+  -- the repository a fanned-out run (`scope: each_repository`) was for: its id
+  -- in the item's frozen target. NULL for a task that is not fanned out, a
+  -- single-repository item's, and every row older than this column
+  repository     TEXT
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -1109,6 +1113,9 @@ FROM worker_sessions""",
         "CHECK (start_side IN ('old', 'new'))",
         "ALTER TABLE review_threads ADD COLUMN quote TEXT",
     ],
+    # Which repository a fanned-out session ran for, so a node's view can say
+    # where each run happened. Additive: an older row reads as no repository.
+    51: ["ALTER TABLE worker_sessions ADD COLUMN repository TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
