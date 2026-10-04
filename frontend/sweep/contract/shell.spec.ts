@@ -52,6 +52,10 @@ const ROWS: Row[] = [
     run: async (p) => { await app(p, "/"); await appToggle(p); await away(p); await p.mouse.move(3, 420); await pause(p); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
   },
   {
+    name: "sidebar: unpinned, keyboard focus on one of its controls reveals it",
+    run: async (p) => { await app(p, "/", { side: "rail" }); await away(p); expect(await sideEdge(p)).toBeLessThan(OPEN); await p.keyboard.press("Tab"); await p.keyboard.press("Tab"); await pause(p, 300); expect(await sideEdge(p)).toBeGreaterThan(OPEN); },
+  },
+  {
     name: "sidebar: a revealed sidebar hides again once the pointer leaves",
     run: async (p) => { await app(p, "/"); await appUnpin(p); await reveal(p); await away(p); expect(await sideEdge(p)).toBeLessThan(OPEN); },
   },
@@ -132,6 +136,10 @@ const ROWS: Row[] = [
   {
     name: "settings: each settings page is reachable from the sidebar (About from the footer) [decided]",
     run: async (p) => { await app(p, "/"); for (const l of ["Policy", "Auto-intake", "Notifications", "Access", "Appearance"]) { await p.getByRole("link", { name: new RegExp(`^${l}`) }).first().click(); await pause(p, 300); } await p.getByRole("link", { name: /^Kraft v\d/ }).click({ timeout: 2000 }); await pause(p, 300); expect(p.url()).toContain("/settings/about"); },
+  },
+  {
+    name: "settings: an address under the retired /ng prefix opens its page, query kept",
+    run: async (p) => { const S = await app(p, (S) => `/ng/work-items/${S.ng.running}?sel=verification`); expect(new URL(p.url()).pathname + new URL(p.url()).search).toBe(`/work-items/${S.ng.running}?sel=verification`); await expect(p.getByRole("complementary", { name: "verification pane" })).toBeVisible(); },
   },
   {
     name: "settings: a settings page has its own URL (reload stays on it)",
