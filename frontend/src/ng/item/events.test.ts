@@ -33,6 +33,7 @@ describe("recent", () => {
   const started = (id: string, hook: string) => at("worker_session_started", { session_id: id, hook_point: hook, node_id: hook === "escalation" ? "verification" : hook.split(".")[0] }, hook === "escalation" ? "verification" : hook.split(".")[0]);
   const exited = (id: string, status: string) => at("worker_session_exited", { session_id: id, status });
   const story = (events: KraftEvent[]) => recent(events).map((r) => r.line);
+  const stamped = (created_at: string, e: KraftEvent): KraftEvent => ({ ...e, created_at });
   it.each([
     ["a live session leads, its node's start folded into it",
       [at("node_started", {}, "verification"), started("s1", "verification.review.code_review")],
@@ -62,6 +63,19 @@ describe("recent", () => {
     ["a skipped gate takes the place of its request",
       [at("gate_requested", { gate: "review_gate" }, "review_gate"), at("node_skipped", { node_id: "review_gate", gate: "review_gate" }, "review_gate"), at("work_item_completed")],
       ["finished", "review_gate skipped"]],
+    // CG-4: a decided gate reads once, and a finished node says how long it ran.
+    ["a decided gate's own finish does not repeat its decision",
+      [at("gate_requested", { gate: "final_review" }, "final_review"), at("gate_approved", { gate: "final_review", by: "human" }, "final_review"), at("node_completed", {}, "final_review")],
+      ["final_review · approved by you"]],
+    ["a finished node says how long it ran",
+      [stamped("2026-10-03T10:00:00Z", at("node_started", {}, "verification")), stamped("2026-10-03T11:04:00Z", at("node_completed", {}, "verification"))],
+      ["verification finished · 1h 4m"]],
+    ["the item's end reads once, in its last node's line",
+      [stamped("2026-10-03T10:00:00Z", at("node_started", {}, "release")), stamped("2026-10-03T10:12:00Z", at("node_completed", {}, "release")), at("work_item_completed")],
+      ["release finished · 12m"]],
+    ["an item completed with no node just finished keeps its own line",
+      [stamped("2026-10-03T10:00:00Z", at("node_started", {}, "plan")), stamped("2026-10-03T10:01:00Z", at("node_completed", {}, "plan")), at("pause_requested"), at("work_item_completed")],
+      ["finished", "paused", "plan finished · 1m"]],
     ["an escalation's turn that ends reads answered",
       [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), exited("s3", "done")],
       ["escalation answered", "escalation on verification: why?"]],
