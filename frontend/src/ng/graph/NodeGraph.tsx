@@ -68,7 +68,14 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
   const shown = expand ?? (phase.mounted ? kept.current : undefined);
   const openStep = shown ? steps.findIndex((st) => st.id === shown.step) : -1;
   const openRow = shown && openStep >= 0 ? steps[openStep].tasks.findIndex((t) => t.id === shown.task) : -1;
-  const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: frameWidth(shown.view), h: frameHeight(shown.view) } : undefined;
+  // The frame never narrows while it stays open on one round: a chip that finishes reads shorter than it did running,
+  // and the canvas would otherwise move every step after it each time a scope ends.
+  const held = useRef({ key: "", w: 0 });
+  if (shown) {
+    const key = `${shown.step}/${shown.task}/${shown.view.round}`;
+    held.current = { key, w: Math.max(key === held.current.key ? held.current.w : 0, frameWidth(shown.view)) };
+  }
+  const open = shown && openRow >= 0 ? { step: openStep, row: openRow, w: held.current.w, h: frameHeight(shown.view) } : undefined;
   const laid = { side: !!side, loop: !!loop, loopTasks: loopTasks.length > 0, footer: !!onFailure };
   const closed = useMemo(() => nodeLayout(steps, laid), [steps, side, loop, loopTasks.length, onFailure]); // eslint-disable-line react-hooks/exhaustive-deps
   const wide = useMemo(() => (open ? nodeLayout(steps, { ...laid, expand: open }) : closed), [closed, open?.step, open?.row, open?.w, open?.h]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -243,6 +250,7 @@ export function NodeGraph({ name, steps, selected, side, loop, rounds, onRound, 
         {shown && open && phase.mounted && (
           <ScopeFrame
             view={shown.view}
+            width={open.w}
             step={shown.step}
             task={shown.task}
             rect={phase.layout ? wide.cols[open.step].open! : { x: closed.cx[open.step] - G.BOX / 2, y: closed.cols[open.step].ys[open.row] - G.BOX / 2, w: G.BOX, h: G.BOX }}

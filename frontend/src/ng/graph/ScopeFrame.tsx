@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { frameWidth, rowHeight, type Chip, type ScopesView } from "../item/scopeView";
+import { rowHeight, type Chip, type ScopesView } from "../item/scopeView";
 import "./graph.css";
 
 type Rove = { ref: (key: string) => (el: HTMLElement | null) => void; tabIndex: (key: string) => number; go: (key: string | undefined) => void; onFocus: (key: string, el: HTMLElement) => void };
@@ -10,6 +10,8 @@ const WORD: Record<Chip["state"], string> = { done: "done", failed: "failed", ru
 
 type Props = {
   view: ScopesView;
+  /** The frame's full width (`frameWidth`, never narrowing while it is open). */
+  width: number;
   step: string;
   task: string;
   rect: { x: number; y: number; w: number; h: number };
@@ -50,7 +52,7 @@ function ChipRow({ fork, children }: { fork: boolean; children: ReactNode }) {
 
 /** The changed-test-scope task open: a frame with one row per repository, in the order the task visits them, and
  *  each repository's scopes as chips, joined in a line when they run one after another, forked when together. */
-export function ScopeFrame({ view, step, task, rect, on, full, out, selectedScope, taskKey, rove, onTask, onScope, onClose }: Props) {
+export function ScopeFrame({ view, width, step, task, rect, on, full, out, selectedScope, taskKey, rove, onTask, onScope, onClose }: Props) {
   // A click on the frame's own background steps back from a scope to the task; the canvas's closes the frame.
   const background = (e: MouseEvent) => {
     if (selectedScope && !(e.target as Element).closest("button")) onTask();
@@ -59,7 +61,7 @@ export function ScopeFrame({ view, step, task, rect, on, full, out, selectedScop
   return (
     <div role="group" aria-label={`${task}, repositories and scopes`} className={`scope-frame${full ? " is-full" : ""}${out ? " is-out" : ""}${on ? " is-on" : ""}`} style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} onClick={background}>
       {/* The contents keep the frame's full width while it grows from the box, so nothing reflows on the way. */}
-      <div className="scope-inner" style={{ width: frameWidth(view) }}>
+      <div className="scope-inner" style={{ width }}>
         <div className="scope-head">
           <button ref={rove.ref(taskKey)} type="button" tabIndex={rove.tabIndex(taskKey)} className="scope-task" aria-pressed={!selectedScope} onFocus={(e) => rove.onFocus(taskKey, e.currentTarget)} onClick={onTask}>{task}</button>
           <span className="scope-sub">round {view.round} · repos in order · scopes {parallel ? "in parallel" : "in order"}</span>

@@ -117,7 +117,7 @@ function Overview({ item, version, reload, onRaise, onMore }: { item: ItemDetail
       </div>
       <ChainOverview item={item} events={events} now={Date.now()} onSelect={openNode} onMore={onMore} where />
       {cancelling && <CancelCard id={item.id} anchor={anchor} onClose={() => setCancelling(false)} onDone={() => { setCancelling(false); reload(); }} />}
-      {escalating && <EscalateCard id={item.id} anchor={anchor} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
+      {escalating && <EscalateCard id={item.id} anchor={anchor} threads={item.escalation_threads} onClose={() => setEscalating(false)} onDone={() => { setEscalating(false); reload(); }} />}
     </div>
   );
 }

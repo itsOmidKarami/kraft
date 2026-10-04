@@ -259,8 +259,9 @@ def test_a_gate_whose_agent_wrote_nothing_reports_no_artifact(client, item_at_sp
     assert not [e for e in events if e["type"] == "artifact_refused"]
 
 
+@pytest.mark.parametrize("route", ["artifact", "artifacts/spec"], ids=["pending-gate", "produced"])
 def test_a_symlink_out_of_the_worktree_is_a_404(
-    client, item_at_spec_gate, worktree, tmp_path, caplog
+    client, item_at_spec_gate, worktree, tmp_path, caplog, route
 ):
     outside = tmp_path / "secret.md"
     outside.write_text("not yours")
@@ -269,7 +270,7 @@ def test_a_symlink_out_of_the_worktree_is_a_404(
     path.symlink_to(outside)
 
     with caplog.at_level("WARNING", logger="kraft.api"):
-        resp = client.get(f"/api/work-items/{item_at_spec_gate}/artifact")
+        resp = client.get(f"/api/work-items/{item_at_spec_gate}/{route}")
     assert resp.status_code == 404
     # Pins the escape branch specifically, not merely "some 404 happened": a
     # regression that made the containment check a no-op would still 404 (the

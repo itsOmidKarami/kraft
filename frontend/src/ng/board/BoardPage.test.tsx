@@ -399,6 +399,17 @@ describe("BoardPage", () => {
     expect(screen.getByRole("complementary", { name: "Item f1 pane" })).toBeInTheDocument();
   });
 
+  // The header's card is told the item's threads; the peek's must be too, or it can never start a fresh one.
+  it("offers a new escalation thread from the peek once the item has one", async () => {
+    const failed = item("f1", "failed", { status: "needs_human", stop: { kind: "failed", node: "verification", task: null, reason: "The forge refused.", resume_at: null } as WorkItem["stop"] });
+    put(failed);
+    stubFetch({ "GET /work-items/f1": [200, { ...failed, worker_sessions: [], escalation_threads: [{ thread: 1, session_id: "s", turns: 2, started_at: "t", ended_at: null, status: "done" }] }], "GET /work-items/f1/events": [200, []] });
+    board("/?sel=f1");
+    const pane = await screen.findByRole("complementary", { name: "Item f1 pane" });
+    await userEvent.click(await within(pane).findByRole("button", { name: "Escalate…" }));
+    expect(screen.getByRole("checkbox", { name: "Start a new thread" })).toBeInTheDocument();
+  });
+
   it("hands focus back to the row when Escape closes the peek with focus on the page", async () => {
     put(item("r1", "running"));
     stubFetch({ "GET /work-items/r1": [200, item("r1", "running")], "GET /work-items/r1/events": [200, []] });

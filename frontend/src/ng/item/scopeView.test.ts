@@ -131,8 +131,9 @@ describe("frameWidth", () => {
     ["forked, only the widest chip counts", of(long, "parallel"), (w: number) => w === 760],
   ])("%s", (_, view, ok) => expect(ok(frameWidth(view))).toBe(true));
 
-  it("does not widen as a running chip's clock ticks", () => {
-    const at = (meta: string) => frameWidth(of([...long.slice(0, 2), chip("just ci-test", meta, "running")]));
+  it("does not widen as a waiting chip starts, nor as a running chip's clock ticks", () => {
+    const at = (meta: string, state: Chip["state"] = "running") => frameWidth(of([...long.slice(0, 2), chip("just ci-test", meta, state)]));
+    expect(at("waiting", "waiting")).toBe(at("running · 5s"));
     expect(at("running · 5s")).toBe(at("running · 59m 59s"));
   });
 });

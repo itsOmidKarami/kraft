@@ -56,6 +56,15 @@ describe("NodeGraph with a task open", () => {
     expect(px(world(), "width")).toBe(before + frameWidth(wide) - 92);
   });
 
+  it("does not narrow while it stays open on the round, as its chips finish and read shorter", () => {
+    const row = (meta: string) => ({ ...view, rows: [{ ...view.rows[0], chips: ["a", "b", "c", "d", "e"].map((x) => ({ ...chip(`just test-${x}-with-a-long-name`), meta })) }, view.rows[1]] });
+    const { rerender } = render(<NodeGraph name="v" steps={steps} expand={{ ...expand, view: row("failed · 1h 12m 30s") }} />);
+    const was = px(frame()!, "width");
+    expect(frameWidth(row("2s"))).toBeLessThan(was);
+    rerender(<NodeGraph name="v" steps={steps} expand={{ ...expand, view: row("2s") }} />);
+    expect(px(frame()!, "width")).toBe(was);
+  });
+
   it("fits the camera to the new world once the move is over, not while the world is still moving", async () => {
     const { rerender } = render(<NodeGraph name="v" steps={steps} />);
     const held = world().style.transform;

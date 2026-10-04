@@ -269,8 +269,9 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} inRound={!!r} />;
   // The plan's sub-tasks, on the one task that works through it, whichever attempt is picked.
   const progress = planTaskPath(frozen) === path ? item.progress : null;
-  // The document the task writes is its output. One file, rewritten by each attempt: offered on the newest only.
-  const produces = (!esc && at === sessions.at(-1) && frozen && taskAt(frozen, path)?.produces) || undefined;
+  // The document the task writes is its output: one file, rewritten by each attempt, so offered on the newest
+  // only, once it is done. A node's own tasks only, the ones GET /artifacts/{kind} reads for (`ResolvedNode.produces`).
+  const produces = (!esc && !rev && !loop && at === sessions.at(-1) && at.status === "done" && frozen && taskAt(frozen, path)?.produces) || undefined;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
     overview: (

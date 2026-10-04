@@ -91,8 +91,11 @@ describe("task pane", () => {
       expect(within(viewer).getByText("written by work_brief.main.author")).toBeInTheDocument();
     });
 
-    it("offers it on the newest attempt only: every attempt rewrites the one file", () => {
-      mount(`${url}&attempt=1`, briefed, [], brief);
+    it.each([
+      ["an earlier attempt: every attempt rewrites the one file", "&attempt=1", briefed],
+      ["a newest attempt that failed: it may have written nothing", "", { ...briefed, worker_sessions: [sess("work_brief.main.author", 1), sess("work_brief.main.author", 2, { status: "failed" })] }],
+    ])("does not offer it on %s", (_, extra, it) => {
+      mount(`${url}${extra}`, it, [], brief);
       expect(within(screen.getByRole("tabpanel")).queryByText("wrote")).toBeNull();
     });
   });

@@ -36,9 +36,10 @@ export const frameHeight = (v: ScopesView) => 40 + 14 + v.rows.reduce((t, r) => 
 
 /** About how wide a chip draws: 11.5px type, its command in monospace (~7px a character), its meta in the UI face
  *  (~6.5px), inside 8px of padding a side, a running chip's 1.5px border, the dot and 6px gaps. A running chip's
- *  clock is counted at its widest, `running · 59m 59s`, so the frame does not widen as the seconds tick. */
+ *  clock is counted at its widest, `running · 59m 59s`, so the frame does not widen as the seconds tick, and so is a
+ *  waiting one's, which it becomes when it starts. */
 const chipWidth = (c: Chip) => {
-  const meta = c.state === "running" ? Math.max(c.meta.length, 17) : c.meta.length;
+  const meta = c.state === "running" || c.state === "waiting" ? Math.max(c.meta.length, 17) : c.meta.length;
   return 19 + 7 + 6 + c.name.length * 7 + (meta ? 6 + meta * 6.5 : 0) + (c.fresh ? 6 + 28 : 0);
 };
 /** A row's chips: in a line, each after the first behind a 6px gap, an arrow and another 6px; forked, the widest
