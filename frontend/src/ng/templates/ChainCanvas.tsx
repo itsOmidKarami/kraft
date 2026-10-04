@@ -3,7 +3,7 @@ import type { ChainArc, ChainNode, Seam } from "../graph/layout";
 import { EDITOR_FIT } from "../graph/camera";
 import { StageGraph } from "../graph/StageGraph";
 import type { Op, Result, Scope } from "./draft/types";
-import { authoredNodes, changeAt, kindOf, problemsAt, type NodeA } from "./draft/view";
+import { authoredNodes, changeAt, kindOf, nodeGlyph, problemsAt, type NodeA } from "./draft/view";
 import { SeamMenu } from "./menus/SeamMenu";
 import { problemWord } from "./problems";
 
@@ -52,10 +52,12 @@ export function ChainCanvas({ scope, result: r, selected, pending, reserve, refu
     const inside = r.changes.some((c) => c.path.startsWith(`${n.id}.`));
     const probs = problemsAt(r, n.id, true);
     const gate = kind === "gate";
+    const glyph = gate ? {} : nodeGlyph(r, n.id);
     return {
       id: n.id,
       kind,
-      icon: typeof n.icon === "string" ? n.icon : r.resolved?.nodes.find((x) => x.id === n.id)?.icon ?? undefined,
+      icon: typeof n.icon === "string" ? n.icon : r.resolved?.nodes.find((x) => x.id === n.id)?.icon ?? glyph.icon,
+      taskKind: glyph.taskKind,
       state: "plain",
       mark: change?.kind === "add" ? "add" : change?.kind === "change" || inside ? "change" : undefined,
       prob: probs.length > 0 || marked.includes(n.id),

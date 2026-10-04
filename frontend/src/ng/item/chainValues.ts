@@ -58,8 +58,14 @@ const glyphKind = (k: string | undefined): TaskKind | undefined => (k && k in KI
  *  subprocess >_, forge git-pull), else none. The API's chain lists bare task ids; the frozen chain has the kinds. */
 export function nodeTaskKind(m: Materialized | null, id: string): TaskKind | undefined {
   const node = m && nodeAt(m, id);
-  const kinds = new Set(node ? stepsOfNode(node).flatMap((s) => s.tasks.map((t) => t.kind)) : []);
-  return kinds.size === 1 ? glyphKind([...kinds][0]) : undefined;
+  return stepsGlyph(node ? stepsOfNode(node) : []).taskKind;
+}
+
+/** A node's glyph from its steps, the item page's rule (WI-3) and the Chains editor's (CG-5): several steps draw
+ *  layers, else the kind its tasks share. Neither: the caller's own icon, or the cube. */
+export function stepsGlyph(steps: { tasks: Record<string, unknown>[] }[]): { icon?: string; taskKind?: TaskKind } {
+  const kinds = new Set(steps.flatMap((s) => s.tasks.map((t) => t.kind)));
+  return { icon: steps.length > 1 ? "layers" : undefined, taskKind: kinds.size === 1 ? glyphKind(String([...kinds][0])) : undefined };
 }
 
 /** The task that writes the document a gate decides on (its `artifact`), by path: the review brief's "written by". */

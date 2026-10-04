@@ -9,7 +9,7 @@ import type { TaskKind } from "../icons";
 import { showToast } from "../ui/Toast";
 import type { ConfigDraft } from "./draft/useConfigDraft";
 import type { Op, Scope } from "./draft/types";
-import { authoredAt, authoredNodes, changeAt, kindOf, normalise, problemsAt, resolvedAt, valueAt, type NodeA, type Step } from "./draft/view";
+import { authoredAt, authoredNodes, changeAt, kindOf, nodeGlyph, normalise, problemsAt, resolvedAt, valueAt, type NodeA, type Step } from "./draft/view";
 import { ExtendMenu } from "./menus/ExtendMenu";
 import { IdCard } from "./menus/IdCard";
 import { TaskMenu, type TaskChoice } from "./menus/TaskMenu";
@@ -76,7 +76,7 @@ export function NodeView({ scope, node, libStep, draft, selected, reserve, onPic
     return a.status === 200;
   };
 
-  const strip: ChainNode[] = nodes.map((n) => ({ id: n.id, kind: kindOf(r, n), icon: typeof n.icon === "string" ? n.icon : undefined, prob: problemsAt(r, n.id, true).length > 0 }));
+  const strip: ChainNode[] = nodes.map((n) => ({ id: n.id, kind: kindOf(r, n), icon: typeof n.icon === "string" ? n.icon : nodeGlyph(r, n.id).icon, taskKind: nodeGlyph(r, n.id).taskKind, prob: problemsAt(r, n.id, true).length > 0 }));
   const top = lib ? null : <ChainStrip nodes={strip} viewing={node} onOpen={onFocusNode} onBack={onBack} />;
   const areaClass = lib ? "tpl-node-area no-strip" : "tpl-node-area";
   if (!own) return <>{top}<div className="tpl-note">There is no {lib ? "component" : "node"} called {node} in {lib ? "the library" : scope.key}.</div></>;
