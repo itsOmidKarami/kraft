@@ -174,6 +174,8 @@ export interface ItemBundle {
   logs: Record<string, any[]>;
   /** GET /work-items/{id}/threads (ux2-W5's gate pane). */
   threads?: any[];
+  /** Bead ids the item names: what GET /work-items/{id}/cancel-preview lists under `beads` (Mark complete's "beads" row). */
+  beads?: string[];
 }
 
 export function logLines(sessionId: string, n: number, long: boolean): any[] {
@@ -801,3 +803,76 @@ export function buildScenario(variant: Variant, theme: { mode?: string; density?
   for (const i of [...board.list, ...board.archived]) docs[i.id] = [];
   return { variant, items, archived, byState, ng, ngBoard: board.list, ngArchived: board.archived, bundles, docs, settings: settingsFor(variant, theme), analytics: analyticsFor(variant) };
 }
+
+/* ── Seeds ──────────────────────────────────────────────────────────────────
+ * What the base scenario lacks, added by mutating a built Scenario before the mocks read it
+ * (`buildScenario(...)` then a seed; the contract suite passes them as `tweak`). Each names the
+ * ng scenario it edits. */
+
+const ngBundle = (sc: string, S: Scenario) => S.bundles[S.ng[sc]];
+
+/** GET /theme answers light (the app reads its mode from the server, not prefers-color-scheme). */
+export const lightMode = (S: Scenario) => { Object.assign(S.settings.theme, { mode: "light" }); };
+
+/** The reviewer on final_review: the frozen chain names it and one finished session ran it. */
+export const withReviewer = (S: Scenario) => {
+  const b = ngBundle("needs-gate", S);
+  const chain = JSON.parse(b.item.materialized_chain);
+  chain.chain.nodes.find((n: any) => n.id === "final_review").auto_review = { id: "auto_review", kind: "agent" };
+  b.item.materialized_chain = JSON.stringify(chain);
+  const from = b.sessions.find((s: any) => s.node_id === "verification" && s.status === "done") ?? b.sessions[0];
+  const sid = "a0".repeat(16);
+  b.sessions.push({ ...from, id: sid, node_id: "final_review", hook_point: "final_review.auto_review", status: "done", attempt: 1, round: 0, session_summary_ref: null });
+  b.logs[sid] = b.logs[from.id];
+  const seq = Math.max(...b.events.map((e: any) => e.seq));
+  b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "worker_session_exited", payload: { session_id: sid, node_id: "final_review", status: "done" }, node_id: "final_review", created_at: b.events[b.events.length - 1].created_at });
+};
+
+/** The base frozen chain names no producer; a gate's "written by" needs `artifact` on the gate and `produces` on a task. */
+export const withProducer = (S: Scenario) => {
+  const b = ngBundle("needs-gate", S);
+  const chain = JSON.parse(b.item.materialized_chain);
+  chain.chain.nodes.find((n: any) => n.id === "final_review").artifact = "review_brief";
+  const brief = chain.chain.nodes.find((n: any) => n.id === "work_brief");
+  brief.steps[0].tasks[0].produces = "review_brief";
+  b.item.materialized_chain = JSON.stringify(chain);
+};
+
+/** The running item's fix round ended: `committed` says whether the fix changed anything (undefined: git could not say). */
+export const withFixRoundOutcome = (committed: boolean | undefined) => (S: Scenario) => {
+  const b = ngBundle("running", S);
+  const start = b.events.find((e: any) => e.type === "fix_cycle_started")!;
+  const seq = Math.max(...b.events.map((e: any) => e.seq));
+  b.events.push({ seq: seq + 1, work_item_id: b.item.id, type: "fix_cycle_finished", payload: { node_id: start.node_id, cycle: start.payload.cycle, ...(committed === undefined ? {} : { committed }) }, node_id: start.node_id, created_at: start.created_at });
+};
+
+const testScopes = (n: number, red: number) => Array.from({ length: n }, (_, i) => ({ command: `pytest tests/s${i}`, scope: `tests/s${i}`, passed: i >= red, exit_code: i >= red ? 0 : 1, session_id: `${(i + 1).toString(16).padStart(32, "0")}` }));
+
+/** The gate's item ran `n` test scopes, the first `red` of them failing. */
+export const withTestResult = (n: number, red: number) => (S: Scenario) => { Object.assign(ngBundle("needs-gate", S).item, { test_result: { scopes: testScopes(n, red), passed: red === 0 } }); };
+
+/** The failed item stopped with `kind` and `facts` (an infra stop's `cause`, say) and kept a branch. */
+export const withStop = (kind: string, facts: Record<string, unknown>, extra: Record<string, unknown> = {}) => (S: Scenario) => {
+  const b = ngBundle("failed", S);
+  b.item.stop = { ...b.item.stop, kind, facts, ...extra };
+  b.item.branch = "kraft/cache-a1b2c3";
+};
+
+/** The failed item also ran `n` test scopes, the first `red` failing. */
+export const withFailedTests = (n: number, red: number) => (S: Scenario) => { withStop("failed", {})(S); Object.assign(ngBundle("failed", S).item, { test_result: { scopes: testScopes(n, red), passed: red === 0 } }); };
+
+/** The capped item's stop names the limit that raises it (a time cap), and the item reports its running time. */
+export const withCapLimit = (S: Scenario) => {
+  const b = ngBundle("capped", S);
+  b.item.stop = { ...b.item.stop, limit: { path: "", key: "total_time_cap_minutes", value: 480, maximum: null } };
+  b.item.running_time = { running_s: 8 * 3600 + 120, cap_minutes: 480 };
+};
+
+/** The running item names beads, so Mark complete says they stay open. */
+export const withBeads = (...ids: string[]) => (S: Scenario) => { ngBundle("running", S).beads = ids; };
+
+/** The escalated item has an escalation thread with `turns` turns. */
+export const withEscalationThread = (turns: number) => (S: Scenario) => {
+  const b = ngBundle("failed", S);
+  b.item.escalation_threads = [{ thread: 1, session_id: "a".repeat(32), turns, started_at: t(0), ended_at: null, status: "done" }];
+};

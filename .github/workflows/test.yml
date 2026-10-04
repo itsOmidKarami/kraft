@@ -194,7 +194,7 @@ jobs:
   test-gate:
     # One check named exactly `test` that stands for every job below that
     # checks the code, not just the Python matrix: a red lint, frontend,
-    # playwright, vscode or e2e job turns it red. The matrix reports as
+    # playwright, ui contract, vscode or e2e job turns it red. The matrix reports as
     # `test (python 3.12)`, ... so a rule naming legs would need an edit
     # whenever the supported range changes; one naming this job never does.
     # Branch protection requires `test` today alongside each of those jobs by
@@ -227,7 +227,7 @@ jobs:
     # succeed; on any other change `docs tests` is the one job expected to skip.
     # Anything else -- failure, cancelled, or a skip nobody asked for -- fails.
     name: test
-    needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e]
+    needs: [changes, lint, test, docs-tests, e2e-cli, frontend, vscode, e2e, ui-contract]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
@@ -254,7 +254,7 @@ jobs:
               docs-tests:skipped:*) ;;           # a code change skips it
               # docs-only: the path-gated jobs skip, and only they may
               test:skipped:false | e2e-cli:skipped:false | frontend:skipped:false) ;;
-              vscode:skipped:false | e2e:skipped:false) ;;
+              vscode:skipped:false | e2e:skipped:false | ui-contract:skipped:false) ;;
               *) fail ;;
             esac
           done <<<"$results"
@@ -438,6 +438,33 @@ jobs:
         working-directory: frontend
       - if: always()
         run: cat e2e-server.log || true
+
+  ui-contract:
+    # The UI contract (frontend/sweep/contract/): what the SPA does in a real
+    # browser, on a mocked /api. The sidebar's pin and reveal, Esc and focus
+    # order, the item header's cards, review, the document viewer, tooltips,
+    # and the icon-only audit, which fails an icon-only control with no name
+    # or tooltip. No Kraft server and no Python: the suite builds the SPA and
+    # serves it with `vite preview`. Same image as `playwright`, whose browsers
+    # match the exact "@playwright/test" pin.
+    name: ui contract
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright test -c sweep/contract/playwright.config.ts
+        working-directory: frontend
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-contract-failures
+          path: frontend/test-results
+          if-no-files-found: ignore
 
   removals-declared:
     # Kraft-79382: a pull request that reverts merged work stays green when
