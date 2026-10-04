@@ -16,8 +16,8 @@ priority_ceiling: 2    # only P2 and below start unattended: the highest-priorit
 # intake. Off by default (no schedules means nothing fires); uncomment and
 # edit to add one.
 # schedules:
-#   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
+#   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron in UTC, minute resolution; 09:00 UTC on weekdays
 #     repo: /path/to/repo
 #     chain: default              # a chain id from chains/
 #     title: "Nightly dependency check"
-#     description: "Filed by the 9am weekday schedule"
+#     description: "Filed by the 09:00 UTC weekday schedule"

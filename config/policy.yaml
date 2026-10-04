@@ -34,7 +34,8 @@ findings:
   loop_severities: [critical, important]
 
 # How many work items may be active at once across every repo, however they
-# were started: a person's Start, auto-intake and a schedule all take a slot.
+# were started: a person's Start and auto-intake each take a slot. A schedule
+# files its item paused, so it takes none until a person starts it.
 max_concurrent: 3
 
 # Spend caps, in dollars. This file turns both on; delete a key to turn that

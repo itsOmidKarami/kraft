@@ -11,9 +11,9 @@
 # review or an approval? Copy this file under a new id, or use `default`.
 #
 # There is no environment-setup node: Kraft prepares the worktree's runtime
-# itself before the first node runs. `implement` uses the plain `implementer`
-# task rather than the `implementation` node, which adds a verification step
-# and a fix loop this chain leaves out on purpose.
+# itself before the first node runs. `verify` uses the plain
+# `verify_changed_scopes` task rather than the library's `verification` node,
+# which adds a code review and a fix loop this chain leaves out on purpose.
 id: quick-task
 
 nodes:
