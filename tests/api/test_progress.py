@@ -8,6 +8,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
 from support.api import _force_node
 from support.harness import git
 
@@ -96,6 +97,7 @@ def _board_row(client, wid: str) -> dict:
 def test_a_report_moves_progress_on_the_detail_and_the_board(client, repo):
     wid = _paused_item(client, repo)
     _worktree(wid)
+    _seed_run(wid, head_sha=None)
     _force_node(wid, "implementation", "active")
 
     response = client.post(f"/api/work-items/{wid}/progress", json={"task": 2})
@@ -262,32 +264,40 @@ def test_a_task_outside_the_plan_is_a_400(client, repo):
 def test_a_plan_without_task_headings_is_a_400_and_no_progress(client, repo):
     wid = _paused_item(client, repo)
     _worktree(wid, plan="# p\n\n## Step one\n")
+    _seed_run(wid, head_sha=None)
     _force_node(wid, "implementation", "active")
 
     assert client.post(f"/api/work-items/{wid}/progress", json={"task": 1}).status_code == 400
     assert client.get(f"/api/work-items/{wid}").json()["progress"] is None
+    assert _board_row(client, wid)["progress"] is None
 
 
-def test_progress_is_null_on_a_rework_run_after_a_gate_rejection(client, repo):
-    """Kraft-hj2q9: bounced back by a rejection, implementation follows the note,
-    so the plan's task list is not shown -- on the detail or the board."""
+@pytest.mark.parametrize("rework", [False, True], ids=["paused", "rework"])
+def test_the_detail_keeps_progress_the_board_drops(client, repo, rework):
+    """Off the running node the board shows no task count, but the detail keeps
+    the plan: paused on the node, where it stands; bounced back by a rejection
+    (Kraft-hj2q9), the plan finished, since the run follows the note instead."""
     wid = _paused_item(client, repo)
     wt = _worktree(wid)
     _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
     _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
-    for n in (1, 2, 3):
-        git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
-    conn = _db()
-    try:
-        events.append(conn, wid, "node_completed", {"node_id": "implementation"})
-        events.append(conn, wid, "gate_rejected", {"gate": "final_review", "note": "fix"})
-        conn.commit()
-    finally:
-        conn.close()
-    _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))  # the bounce
-    _force_node(wid, "implementation", "active")
+    git(wt, "commit", "-q", "--allow-empty", "-m", "feat: Task 1: done")
+    if rework:
+        conn = _db()
+        try:
+            events.append(conn, wid, "node_completed", {"node_id": "implementation"})
+            events.append(conn, wid, "gate_rejected", {"gate": "final_review", "note": "fix"})
+            conn.commit()
+        finally:
+            conn.close()
+        _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))  # the bounce
+    _force_node(wid, "implementation", "active" if rework else "paused")
 
-    assert client.get(f"/api/work-items/{wid}").json()["progress"] is None
+    detail = client.get(f"/api/work-items/{wid}").json()["progress"]
+    assert [t["state"] for t in detail["tasks"]] == (
+        ["done", "done", "done"] if rework else ["done", "current", "pending"]
+    )
+    assert detail["tasks"][0]["sha"] == git_read(wt, "rev-parse", "--short", "HEAD")
     assert _board_row(client, wid)["progress"] is None
 
 

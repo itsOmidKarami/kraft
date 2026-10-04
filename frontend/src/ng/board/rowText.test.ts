@@ -26,6 +26,8 @@ describe("reasonTail", () => {
       [row("paused", { current_node_id: null }), "created paused"],
       [row("running"), "verification"],
       [row("running", { progress: { current: 2, total: 3, title: "x" } as WorkItem["progress"] }), "verification · task 2 of 3"],
+      // A finished plan the detail kept, on a later node: no task left to count.
+      [row("running", { progress: { current: 3, total: 3, title: "x", tasks: [1, 2, 3].map((n) => ({ n, title: "x", state: "done" })) } as WorkItem["progress"] }), "verification"],
       [row("running", { step: { index: 2, count: 3, name: "review", task: "code_review" }, progress: { current: 2, total: 3, title: "x" } as WorkItem["progress"] }), "2 of 3 · review › code_review"],
       [row("running", { step: { index: 2, count: 3 } }), "verification · step 2 of 3"],
       [row("running", { current_node_id: "post_merge_ci" }), "post merge ci"],

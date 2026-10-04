@@ -2,8 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkerSession } from "../../../types";
-import { detail, stubFetch } from "../testkit";
+import type { ChainNode, SessionStatus, TaskProgress, WorkerSession } from "../../../types";
+import { detail, stubFetch, V1 } from "../testkit";
 import { usePaneMemory, Workspace } from "../Workspace";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -25,30 +25,49 @@ const mount = (path: string, it = item, events: unknown[] = []) => {
   );
 };
 const pane = (name: string) => screen.getByRole("complementary", { name: `${name} pane` });
+/** Open the subtitle's attempt menu (its pill reads `pill`) and pick the row whose label starts `row`. */
+const pick = async (pill: RegExp, row: RegExp) => {
+  await userEvent.click(screen.getByRole("button", { name: pill }));
+  await userEvent.click(screen.getByRole("menuitemradio", { name: row }));
+};
 
 describe("task pane", () => {
-  it("opens on the latest attempt; the switcher moves to an earlier one and the URL keeps it", async () => {
+  it("opens on the latest attempt; picking an earlier one in the menu switches the tabs and the URL keeps it", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
-    expect(within(pane("code_review")).getByText(/attempt 2 of 2/)).toBeInTheDocument();
     expect(within(pane("code_review")).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    await userEvent.click(screen.getByRole("button", { name: "Earlier attempt" }));
+    expect(within(screen.getByRole("tabpanel")).getByText("harness")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^attempt 2 of 2/ }));
+    // Newest first, each with how it went; the shown one checked.
+    expect(screen.getAllByRole("menuitemradio").map((r) => [r.textContent, r.getAttribute("aria-checked")])).toEqual([["✓Attempt 2failed · 1m", "true"], ["Attempt 1done · 1m", "false"]]);
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /^Attempt 1/ }));
     expect(screen.getByTestId("where").textContent).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
-    expect(within(pane("code_review")).getByText(/attempt 1 of 2/)).toBeInTheDocument();
+    expect(within(pane("code_review")).getByRole("button", { name: /^attempt 1 of 2/ })).toBeInTheDocument();
+    // Attempt 1 ran on no named harness: Overview reads that session now.
+    expect(within(screen.getByRole("tabpanel")).queryByText("harness")).toBeNull();
   });
 
-  it("drops the pin when › reaches the newest attempt, so the pane follows the next one", async () => {
+  it("drops the pin when the newest attempt is picked, so the pane follows the next one", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&attempt=1");
-    await userEvent.click(screen.getByRole("button", { name: "Later attempt" }));
+    await pick(/^attempt 1 of 2/, /^Attempt 2/);
     expect(screen.getByTestId("where").textContent).toBe("/work-items/w1/nodes/verification?sel=verification.review.code_review");
-    expect(within(pane("code_review")).getByText(/attempt 2 of 2/)).toBeInTheDocument();
+    expect(within(pane("code_review")).getByRole("button", { name: /^attempt 2 of 2/ })).toBeInTheDocument();
   });
 
-  it("puts the attempt switcher above the tabs, outside every tab's panel", async () => {
+  it("puts the attempt menu in the subtitle, between the task's kind and its state, outside every tab's panel", async () => {
     mount("/work-items/w1/nodes/verification?sel=verification.review.code_review&tab=input");
-    const switcher = within(pane("code_review")).getByText(/attempt 2 of 2/);
-    const tablist = within(pane("code_review")).getByRole("tablist");
-    expect(switcher.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const pill = within(pane("code_review")).getByRole("button", { name: "attempt 2 of 2 · round 2" });
+    expect(pill.closest(".pane-sub")).toHaveTextContent(/^agent task · attempt 2 of 2 · round 2▾ · failed$/);
     expect(within(screen.getByRole("tabpanel")).queryByText(/attempt/)).toBeNull();
+  });
+
+  it("closes the menu on Escape and leaves the pane open", async () => {
+    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
+    await userEvent.click(screen.getByRole("button", { name: /^attempt 2 of 2/ }));
+    expect(screen.getByRole("menu", { name: "Attempts" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(pane("code_review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^attempt 2 of 2/ })).toHaveFocus();
   });
 
   it("lists only this attempt's documents under the result", async () => {
@@ -62,9 +81,58 @@ describe("task pane", () => {
     const tabs = within(pane("escalation")).getAllByRole("tab").map((t) => t.textContent);
     expect(tabs).toEqual(["Thread", "Overview", "Input", "Output", "Log", "Config"]);
     expect(within(pane("escalation")).getByRole("tab", { name: "Thread" })).toHaveAttribute("aria-selected", "true");
-    // One turn: no switcher, the subtitle says how it went.
+    // One turn: no menu, the subtitle says how it went.
     expect(within(pane("escalation")).getByText("escalation · agent task · needs you")).toBeInTheDocument();
-    expect(within(pane("escalation")).queryByRole("button", { name: "Earlier attempt" })).toBeNull();
+    expect(within(pane("escalation")).queryByRole("button", { name: /^turn/ })).toBeNull();
+  });
+
+  describe("the plan task's sub-tasks", () => {
+    // `implementation.main.implement` is the one agent task with no skill: the plan task. The reviewer has a skill.
+    const nodes: ChainNode[] = [{ id: "implementation", kind: "exec", gate_after: null, tasks: ["implementation.main.implement"], steps: [["implementation.main.implement"]] }, V1.find((n) => n.id === "verification")!];
+    const frozen = JSON.stringify({ chain: { nodes: [
+      { id: "implementation", kind: "exec", tasks: [{ id: "implement", kind: "agent", skill: null }] },
+      { id: "verification", kind: "exec", steps: [{ id: "checks", tasks: [{ id: "lint", kind: "subprocess" }] }, { id: "review", tasks: [{ id: "code_review", kind: "agent", skill: "kraft:code-review" }] }] },
+    ] } });
+    const st = (n: number, state: "done" | "current" | "pending", sha: string | null = null) => ({ n, title: ["parse", "serve", "render"][n - 1], state, sha });
+    const LIVE: TaskProgress = { current: 2, total: 3, title: "serve", tasks: [st(1, "done", "a1b2c3d"), st(2, "current"), st(3, "pending")] };
+    const DONE: TaskProgress = { current: 3, total: 3, title: "render", tasks: [st(1, "done", "a1b2c3d"), st(2, "done", "e4f5a6b"), st(3, "done")] };
+    const planned = (progress: TaskProgress | null, newest: SessionStatus = "running") => detail({
+      chain_definition: { template_id: "default", nodes }, current_node_id: "implementation", materialized_chain: frozen, progress,
+      worker_sessions: [sess("implementation.main.implement", 1, { status: "failed" }), sess("implementation.main.implement", 2, { status: newest }), sess("verification.review.code_review", 1)],
+    });
+    const progressFact = () => within(screen.getByRole("tabpanel")).queryByText("progress")?.closest("div")?.textContent?.replace(/^progress/, "") ?? null;
+
+    it.each<[string, TaskProgress | null, SessionStatus, string | null, boolean]>([
+      ["running: the current sub-task's title", LIVE, "running", "2 of 3 · serve", true],
+      ["stopped: the count alone", LIVE, "paused", "2 of 3 sub-tasks", true],
+      ["every sub-task done", DONE, "done", "3 of 3 sub-tasks · done", true],
+      ["the first report of a run, before its list: the fact alone", { ...LIVE, tasks: [] }, "running", "2 of 3 · serve", false],
+      ["no progress: nothing", null, "running", null, false],
+    ])("on the plan task's Overview, %s", (_, progress, newest, fact, list) => {
+      mount("/work-items/w1/nodes/implementation?sel=implementation.main.implement", planned(progress, newest));
+      expect(progressFact()).toBe(fact);
+      expect(within(screen.getByRole("tabpanel")).queryByRole("heading", { name: /^Progress/ }) !== null).toBe(list);
+    });
+
+    it("lists the plan's sub-tasks whichever attempt is picked: the current one marked, a done one with its commit", () => {
+      mount("/work-items/w1/nodes/implementation?sel=implementation.main.implement&attempt=1", planned(LIVE));
+      const panel = within(screen.getByRole("tabpanel"));
+      // "Running" is the task's newest session, not the picked one.
+      expect(progressFact()).toBe("2 of 3 · serve");
+      expect(panel.getByRole("heading", { name: "Progress · 3 sub-tasks" })).toBeInTheDocument();
+      const rows = within(panel.getByRole("list", { name: "Sub-tasks" })).getAllByRole("listitem");
+      expect(rows.map((r) => [within(r).getByRole("img").getAttribute("aria-label"), r.textContent, r.getAttribute("aria-current")])).toEqual([
+        ["done", "1parsea1b2c3d", null],
+        ["current", "2servecurrent", "step"],
+        ["pending", "3render", null],
+      ]);
+    });
+
+    it("shows nothing on another agent task", () => {
+      mount("/work-items/w1/nodes/verification?sel=verification.review.code_review", planned(LIVE));
+      expect(progressFact()).toBeNull();
+      expect(within(screen.getByRole("tabpanel")).queryByRole("heading", { name: /^Progress/ })).toBeNull();
+    });
   });
 
   describe("a gate's auto_review", () => {
@@ -81,7 +149,7 @@ describe("task pane", () => {
       // "<gate> › auto_review": the gate links back, the reviewer is text (no step of the chain to open).
       expect(within(p).getByRole("button", { name: "plan_approval" })).toBeInTheDocument();
       expect(within(p).queryByRole("button", { name: "auto_review" })).toBeNull();
-      await userEvent.click(screen.getByRole("button", { name: "Earlier attempt" }));
+      await pick(/^attempt 2 of 2/, /^Attempt 1/);
       expect(screen.getByTestId("where").textContent).toBe(`${url}&attempt=1`);
       expect(within(pane("auto_review")).getByText(/attempt 1 of 2/)).toBeInTheDocument();
     });
@@ -96,15 +164,6 @@ describe("task pane", () => {
       mount(url, reviewed);
       for (const name of ["Retry", "Skip task", "Pause", "Resume"]) expect(within(pane("auto_review")).queryByRole("button", { name })).toBeNull();
     });
-  });
-
-  it("hands focus to the other arrow when one reaches the end", async () => {
-    mount("/work-items/w1/nodes/verification?sel=verification.review.code_review");
-    await userEvent.click(screen.getByRole("button", { name: "Earlier attempt" }));
-    expect(screen.getByRole("button", { name: "Earlier attempt" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Later attempt" })).toHaveFocus();
-    await userEvent.click(screen.getByRole("button", { name: "Later attempt" }));
-    expect(screen.getByRole("button", { name: "Earlier attempt" })).toHaveFocus();
   });
 
   it("names the harness the attempt ran on in Overview", () => {
@@ -129,13 +188,14 @@ describe("task pane", () => {
     expect(screen.getByText("And the merge request?")).toBeInTheDocument();
   });
 
-  it("counts the escalation's sessions as turns, the word its Thread tab uses (R10b-06)", () => {
-    const turns = detail({ worker_sessions: [sess("escalation", 1, { id: "e1", node_id: "verification" }), sess("escalation", 2, { id: "e2", node_id: "verification" })] });
-    mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation", turns);
+  it("counts the escalation's sessions as turns, the word its Thread tab uses (R10b-06)", async () => {
+    const turns = detail({ worker_sessions: [sess("escalation", 1, { id: "e1", node_id: "verification" }), sess("escalation", 2, { id: "e2", node_id: "verification" }), sess("escalation", 3, { id: "e3", node_id: "verification", thread: 2 })] });
+    mount("/work-items/w1/nodes/verification?sel=verification.escalation.escalation&attempt=2", turns);
     const p = pane("escalation");
-    expect(within(p).getByText("turn 2 of 2")).toBeInTheDocument();
-    expect(within(p).queryByText(/attempt 2 of 2/)).toBeNull();
-    expect(within(p).getByRole("button", { name: "Earlier turn" })).toBeInTheDocument();
+    expect(within(p).queryByText(/attempt/)).toBeNull();
+    await userEvent.click(within(p).getByRole("button", { name: "turn 2 of 2 · thread 1" }));
+    // Numbered within each thread, newest first; the thread named once there is more than one.
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["Turn 1 · thread 2done · 1m", "✓Turn 2 · thread 1done · 1m", "Turn 1 · thread 1done · 1m"]);
   });
 
   it("cuts the thread at a turn whose message names no session by the turn's place among its node's", async () => {

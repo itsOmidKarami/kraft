@@ -1,6 +1,7 @@
 """The pure half of implementation progress: what a plan's tasks are, what
-commits say, and how the two signals combine. The DB/git half is exercised
-through the API in test_progress_api.py."""
+commits say, and how the two signals combine -- and `for_detail`, the detail
+read's walk-dependent half, over a real item and worktree. The rest of the
+DB/git half is exercised through the API in tests/api/test_progress.py."""
 
 from __future__ import annotations
 
@@ -275,3 +276,77 @@ def test_a_re_entry_without_a_rejection_is_not_rework():
         _ev("node_started", "implementation"),
     ]
     assert not progress.is_rework(evs, "implementation")
+
+
+#: The walk each `for_detail` row stands on: `+` enters a node, `.` completes
+#: it, `!` rejects a gate.
+_WALKS = {
+    "never_started": [],
+    "rewriting_the_plan": [
+        "+implementation",
+        ".implementation",
+        "!",
+        "+plan",
+    ],
+    "stopped_on_the_node": ["+implementation"],
+    "node_completed": ["+implementation", ".implementation", "+verification"],
+    "rework": ["+implementation", ".implementation", "!", "+implementation"],
+}
+
+
+@pytest.mark.parametrize(
+    ("walk", "current", "states"),
+    [
+        ("never_started", None, None),
+        ("rewriting_the_plan", None, None),
+        ("stopped_on_the_node", 2, ["done", "current", "pending"]),
+        ("node_completed", 3, ["done", "done", "done"]),
+        ("rework", 3, ["done", "done", "done"]),
+    ],
+    ids=list(_WALKS),
+)
+async def test_for_detail_follows_the_implementing_node_past_its_run(
+    walk, current, states, item_on, templates_dir, database
+):
+    """The detail's `progress` outlives the running node: the live position
+    while the item is stopped on it (here, waiting on a person), every task
+    done once it completed or a rejection sent it back for rework, and nothing
+    before it started or while the plan is being rewritten. Each task carries
+    the newest commit naming it."""
+    from support.harness import git, v1_named_chain
+
+    from kraft import events, store
+    from kraft.adapters.agent import artifact_path
+
+    it = await item_on(v1_named_chain(templates_dir, "default"), status="needs_human")
+    git(it.repo, "worktree", "add", "-q", "-b", it.id, str(it.worktree))
+    base = git(it.worktree, "rev-parse", "HEAD")
+    git(it.worktree, "commit", "-q", "--allow-empty", "-m", "feat: Task 1: parse")
+    git(it.worktree, "commit", "-q", "--allow-empty", "-m", "fix: task 1 again")
+    named = git(it.worktree, "rev-parse", "--short", "HEAD")
+    git(it.worktree, "commit", "-q", "--allow-empty", "-m", "fmt: tidy")
+    plan = it.worktree / artifact_path("plan", it.id)
+    plan.parent.mkdir(parents=True)
+    plan.write_text("# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n\n## Task 3 — render\n")
+    await database.write(
+        lambda c: c.execute("UPDATE work_items SET base_ref = ? WHERE id = ?", (base, it.id))
+    )
+    for step in _WALKS[walk]:
+        op, node = step[0], step[1:]
+        if op == "+":
+            await database.write(lambda c, n=node: store.enter_node(c, it.id, n))
+        elif op == ".":
+            await database.write(lambda c, n=node: store.complete_node(c, it.id, n))
+        else:
+            await database.write(
+                lambda c: events.append(c, it.id, "gate_rejected", {"gate": "g", "note": "n"})
+            )
+
+    p = progress.for_detail(database, it.row(), it.worktree)
+
+    if states is None:
+        assert p is None
+        return
+    assert [t.state for t in p.tasks] == states
+    assert (p.current, p.total) == (current, 3)
+    assert [t.sha for t in p.tasks] == [named, None, None]

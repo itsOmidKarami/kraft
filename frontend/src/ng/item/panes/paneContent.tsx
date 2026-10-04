@@ -17,10 +17,10 @@ import { NodeConfig, NodeOverview } from "./NodePane";
 import { GateBody, GateFooter } from "./GatePane";
 import { Log } from "./Log";
 import { PathFooter } from "./PathFooter";
-import { AttemptSwitcher, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
+import { AttemptMenu, TaskConfig, TaskInput, TaskOutput, TaskOverview } from "./TaskPane";
 import { Thread } from "./Thread";
 import { chainName } from "../chainName";
-import { materialized, notStarted, taskKindAt } from "../chainValues";
+import { materialized, notStarted, planTaskPath, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
 
 export type PaneArgs = {
@@ -58,9 +58,8 @@ export type PaneContent = {
   taskKind?: TaskKind;
   gate?: boolean;
   title: string;
-  sub?: string;
-  /** Above the tabs: the attempt every tab shows. */
-  bar?: ReactNode;
+  /** A string, but for a task with more than one attempt: then it holds the attempt menu. */
+  sub?: ReactNode;
   tabs?: { value: string; label: string }[];
   body: ReactNode;
   footer?: ReactNode;
@@ -197,7 +196,7 @@ function stepPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
 
 const TASK_TABS = [{ value: "overview", label: "Overview" }, { value: "input", label: "Input" }, { value: "output", label: "Output" }, { value: "log", label: "Log" }, { value: "config", label: "Config" }];
 
-/** A task's pane (Decisions §5 Pane tabs): the attempt switcher above the tabs,
+/** A task's pane (Decisions §5 Pane tabs): the attempt menu in the subtitle,
  *  so one attempt drives Overview, Input, Output, Log and Config, with Thread
  *  first on the escalation task. */
 function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId: string, task: string, crumbs: Crumbs): PaneContent {
@@ -209,10 +208,13 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
-  const kind = esc ? "agent" : taskKindAt(materialized(item), path) ?? (at?.model ? "agent" : undefined);
+  const frozen = materialized(item);
+  const kind = esc ? "agent" : taskKindAt(frozen, path) ?? (at?.model ? "agent" : undefined);
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
-  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task · ${look.running ? (look.meta ?? "running") : lookWord(look)}` };
+  const lead = `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task`;
+  const state = look.running ? (look.meta ?? "running") : lookWord(look);
+  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${lead} · ${state}` };
   if (!at) {
     // A task that has not run keeps its tabs, each saying why it is empty (LV-5). Config is the
     // draft's while it may override the task (W11). On the node the run stands on it can be skipped
@@ -236,12 +238,14 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     };
   }
   const current = item.current_node_id === node.id;
-  // Stepping onto the newest attempt drops the pin, so the pane follows the next one that starts;
-  // an older attempt stays put while newer ones arrive, and the switcher's count shows them.
-  const switcher = <AttemptSwitcher sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} />;
+  // Picking the newest attempt drops the pin, so the pane follows the next one that starts;
+  // an older attempt stays put while newer ones arrive, and the menu's count shows them.
+  const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} />;
+  // The plan's sub-tasks, on the one task that works through it, whichever attempt is picked.
+  const progress = planTaskPath(frozen) === path ? item.progress : null;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
-    overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} />,
+    overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />,
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
     log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} />,
@@ -250,8 +254,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   const live = sessions.some((s) => ["running", "pending"].includes(s.status));
   return {
     ...head,
-    // One attempt has nothing to switch between: the subtitle already says how it went.
-    bar: sessions.length > 1 ? switcher : undefined,
+    // One attempt has nothing to pick between: the subtitle stays the words it was.
+    sub: sessions.length > 1 ? <>{lead} · {menu} · {state}</> : head.sub,
     tabs,
     body: bodies[tab],
     footer: esc
