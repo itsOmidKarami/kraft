@@ -169,6 +169,13 @@ describe("the node screen (D)", () => {
     expect(where()).toBe("/work-items/w1/review?gate=plan_approval");
   });
 
+  it("a skipped gate says it was skipped, not that it decides when reached (R14b-05)", async () => {
+    const skipped = { seq: 3, work_item_id: "w1", type: "node_skipped", node_id: "plan_approval", payload: { node_id: "plan_approval", gate: "plan_approval" }, created_at: "2026-09-13T09:00:00Z" };
+    mount(item("done"), "/work-items/w1/nodes/plan_approval", { "GET /work-items/w1/events": [200, [skipped]] });
+    expect(await screen.findByText("skipped, no decision needed")).toBeInTheDocument();
+    expect(screen.queryByText("decides when the chain reaches it")).toBeNull();
+  });
+
   it("falls back to the item when the node does not exist", async () => {
     mount(item("running"), "/work-items/w1/nodes/nope");
     await waitFor(() => expect(where()).toBe("/work-items/w1"));

@@ -18,6 +18,12 @@ export function gateDecision(events: KraftEvent[], gate: string) {
   return e ? { by: e.payload.by === "agent" || e.payload.by === "kraft" ? "auto" : "you", at: e.created_at } : null;
 }
 
+/** Whether the gate was skipped rather than decided: its last skip with no request or decision after it (R14b-05). */
+export function gateSkipped(events: KraftEvent[], gate: string): boolean {
+  const at = (type: string) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
+  return at("node_skipped") > Math.max(at("gate_requested"), at("gate_approved"));
+}
+
 /** The gate's pane (Decisions §5 Gate pane, §6 Gates): the change it decides
  *  on, open threads, what it decides on, where reject goes, its status. */
 export function GateBody({ item, version, gate, events }: { item: ItemDetail; version: string; gate: ChainNode; events: KraftEvent[] }) {
@@ -54,7 +60,7 @@ export function GateBody({ item, version, gate, events }: { item: ItemDetail; ve
         {item.test_result && <div><dt>tests</dt><dd><TestsLine result={item.test_result} /></dd></div>}
         {item.gate_artifact && pending && <div><dt>decides on</dt><dd className="is-mono">{item.gate_artifact.split("/").pop()}</dd></div>}
         {to && <div><dt>reject to</dt><dd className="is-mono">{to}</dd></div>}
-        <div><dt>status</dt><dd>{pending ? "waiting for you" : decided ? `passed · ${decided.by}` : item.chain_definition.nodes.findIndex((n) => n.id === gate.id) < item.chain_definition.nodes.findIndex((n) => n.id === item.current_node_id) ? "passed" : "not reached"}</dd></div>
+        <div><dt>status</dt><dd>{pending ? "waiting for you" : decided ? `passed · ${decided.by}` : gateSkipped(events, gate.id) ? "skipped" : item.chain_definition.nodes.findIndex((n) => n.id === gate.id) < item.chain_definition.nodes.findIndex((n) => n.id === item.current_node_id) ? "passed" : "not reached"}</dd></div>
       </dl>
     </>
   );
