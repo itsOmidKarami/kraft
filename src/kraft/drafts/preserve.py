@@ -39,14 +39,19 @@ def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
     own comments. `list_offset` is the `- ` indent to use when `text` has no
     block list to take it from (`list_offset`: another file's)."""
     if not text or not text.strip():
-        return authored.dump(data)
+        return _plainly(data)
     yaml = _yaml()
     try:
         doc = yaml.load(text)
     except YAMLError:
-        return authored.dump(data)
+        return _plainly(data)
+    if doc is None:
+        # Only comments: they stay, the mapping follows them.
+        written = text.rstrip("\n") + "\n" + _plainly(data)
+        _reads_back(written, data)
+        return written
     if not isinstance(doc, CommentedMap):
-        return authored.dump(data)
+        return _plainly(data)
     if offset := _list_offset(text) or list_offset:
         # `  - path: …` under its key, as the file has it, not `- path: …`.
         yaml.indent(mapping=2, sequence=offset + 2, offset=offset)
@@ -56,6 +61,12 @@ def rewrite(text: str | None, data: Mapping, *, list_offset: int = 0) -> str:
     written = _keep_flow_lines(text, out.getvalue())
     _reads_back(written, data)
     return written
+
+
+def _plainly(data: Mapping) -> str:
+    """`data` written with nothing to keep. It may hold ruamel nodes (a
+    `carried` trigger), which PyYAML's dumper cannot represent (R14e-01)."""
+    return authored.dump(plain(data))
 
 
 class RewriteError(ValueError):

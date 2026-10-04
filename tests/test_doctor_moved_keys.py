@@ -1,7 +1,7 @@
 """What `kraft admin doctor` says about the 2.0 moves: the `moved keys` row
 (config keys moved or renamed, still read under their old names, named where
 each lives now) and the `config` row's warning about a `templates/` left
-beside `config/`."""
+beside `config/`, or linked in from elsewhere."""
 
 from __future__ import annotations
 
@@ -51,6 +51,14 @@ def test_doctor_names_each_key_2_0_moved_and_still_reads(tmp_path, monkeypatch):
     )
 
     (live / "intake.yaml").write_text("enabled: false\n")
+    # `triggers:` with nothing under it holds no trigger to move: the start
+    # drops it, and the row has nothing to say about it (R14c-02).
+    (live / "policy.yaml").write_text("default: {attempts: 1, wall_clock_s: 1}\ntriggers:\n")
+    (live / "repos.yaml").write_text("repos: []\n")
+    (live / "theme.yaml").write_text("board: {group_by: chain}\n")
+    check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "moved keys")
+    assert (check["ok"], check.get("warn", False)) == (True, False)
+
     (live / "policy.yaml").write_text("default: {attempts: 1, wall_clock_s: 1}\n")
     (live / "repos.yaml").write_text("repos: []\n")
     (live / "theme.yaml").write_text("board: {group_by: chain}\n")
@@ -58,7 +66,15 @@ def test_doctor_names_each_key_2_0_moved_and_still_reads(tmp_path, monkeypatch):
     assert (check["ok"], check.get("warn", False)) == (True, False)
 
 
-@pytest.mark.parametrize("templates", ["a-directory-of-its-own", "the-link-the-rename-leaves"])
+@pytest.mark.parametrize(
+    "templates",
+    [
+        "a-directory-of-its-own",
+        "the-link-the-rename-leaves",
+        "a-link-to-elsewhere",
+        "a-link-to-elsewhere-named-by-config-dir",
+    ],
+)
 def test_doctor_warns_when_a_1x_templates_directory_sits_beside_config(
     tmp_path, monkeypatch, templates
 ):
@@ -71,10 +87,21 @@ def test_doctor_warns_when_a_1x_templates_directory_sits_beside_config(
     (tmp_path / "config" / "chains").mkdir(parents=True)
     if templates == "a-directory-of-its-own":
         (tmp_path / "templates" / "harnesses").mkdir(parents=True)
+    elif templates.startswith("a-link-to-elsewhere"):
+        dotfiles = tmp_path / "dotfiles"
+        dotfiles.mkdir()
+        (dotfiles / "library.yaml").write_text("tasks: {}\n")
+        (tmp_path / "templates").symlink_to(dotfiles, target_is_directory=True)
+        if templates.endswith("config-dir"):
+            monkeypatch.setenv("KRAFT_CONFIG_DIR", str(dotfiles))
     else:
         (tmp_path / "templates").symlink_to("config", target_is_directory=True)
 
     check = next(r for r in asyncio.run(doctor.run_checks()) if r["name"] == "config")
-    warned = templates == "a-directory-of-its-own"
+    warned = templates in ("a-directory-of-its-own", "a-link-to-elsewhere")
     assert (check["ok"], check.get("warn", False)) == (True, warned), check["detail"]
-    assert ("both exist" in check["detail"]) == warned
+    assert ("both exist" in check["detail"]) == (templates == "a-directory-of-its-own")
+    # A linked 1.x home is not renamed: say where it is and how to read it (R14c-01).
+    assert (f"KRAFT_CONFIG_DIR={tmp_path / 'dotfiles'}" in check["detail"]) == (
+        templates == "a-link-to-elsewhere"
+    )

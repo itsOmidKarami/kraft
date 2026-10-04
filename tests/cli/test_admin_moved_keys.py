@@ -29,6 +29,7 @@ OTHER = {**SCHEDULE, "title": "monthly"}
         "an-intake-that-does-not-load",
         "symlinked-files",
         "nothing-to-move",
+        "a-null-triggers-header",
     ],
 )
 def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case):
@@ -40,7 +41,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     `intake.yaml` that fails turns every schedule in it off. A symlinked file
     is written where it points. A home with nothing to move is not written.
     A schedule is compared as one (Settings writes `description: ''`), and
-    one refused trigger keeps only itself back (R12c-02)."""
+    one refused trigger keeps only itself back (R12c-02). A `triggers:` with
+    no value goes as an empty list does (R14c-02)."""
     home = tmp_path / "config"
     home.mkdir()
     intake = {"enabled": False}
@@ -64,6 +66,8 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
     policy = {"default": {"attempts": 1, "wall_clock_s": 1}}
     if triggers is not None:
         policy["triggers"] = triggers
+    if case == "a-null-triggers-header":
+        policy["triggers"], triggers = None, None
     files = home
     if case == "symlinked-files":
         files = tmp_path / "dotfiles"
@@ -81,6 +85,12 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
         assert after["policy.yaml"]["triggers"] == triggers
         assert "schedules" not in after["intake.yaml"]
         assert lines and "left where they are" in lines[0] and "still read" in lines[0]
+    elif case == "a-null-triggers-header":
+        # The header left behind by deleting the entries goes like `triggers: []`
+        # does (R14c-02), and nothing reaches intake.yaml.
+        assert "triggers" not in after["policy.yaml"]
+        assert after["intake.yaml"] == intake
+        assert lines == ["policy.yaml: dropped an empty triggers list; schedules are intake.yaml's"]
     elif case == "nothing-to-move":
         assert lines == []
         assert {n: (files / n).stat().st_ino for n in before} == before  # not replaced
@@ -109,6 +119,41 @@ def test_carry_moved_keys_moves_only_what_intake_yaml_then_loads(tmp_path, case)
         assert (files / "intake.yaml").read_text().startswith("# mine\n")
     if case == "symlinked-files":
         assert (home / "intake.yaml").is_symlink() and (home / "policy.yaml").is_symlink()
+
+
+@pytest.mark.parametrize("link", ["to-elsewhere", "to-config", "to-elsewhere-named"])
+def test_the_start_says_when_a_templates_link_is_not_read(monkeypatch, tmp_path, capsys, link):
+    """A 1.x `templates/` that links to another directory (a dotfiles repo) is
+    not renamed or merged, so 2.0 seeds its own `config/` and ignores what
+    the link holds: the start names the target and says to set
+    `KRAFT_CONFIG_DIR` (R14c-01). The link the 2.0 rename leaves, or one the
+    variable already names, is not worth a line."""
+    monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("KRAFT_TEMPLATES_DIR", raising=False)
+    monkeypatch.delenv("KRAFT_CONFIG_DIR", raising=False)
+    home = tmp_path / "home"
+    dotfiles = tmp_path / "dotfiles"
+    for place in (home, dotfiles):
+        place.mkdir()
+    (dotfiles / "library.yaml").write_text("tasks: {}\n")
+    if link == "to-config":
+        (home / "config").mkdir()
+        (home / "config" / "library.yaml").write_text("tasks: {}\n")
+        (home / "templates").symlink_to("config", target_is_directory=True)
+    else:
+        (home / "templates").symlink_to(dotfiles, target_is_directory=True)
+    if link == "to-elsewhere-named":
+        monkeypatch.setenv("KRAFT_CONFIG_DIR", str(dotfiles))
+
+    monkeypatch.setattr(cli.admin, "seed_home", lambda _dir: False)  # no bundled defaults here
+
+    cli.admin.prepare_home()
+
+    err = capsys.readouterr().err
+    assert (f"KRAFT_CONFIG_DIR={dotfiles}" in err) == (link == "to-elsewhere")
+    assert ("is a link to" in err) == (link == "to-elsewhere")
+    assert (dotfiles / "library.yaml").read_text() == "tasks: {}\n"  # not moved or merged
+    assert (home / "templates").is_symlink()
 
 
 @pytest.mark.parametrize("where", ["renamed", "pointed-by-hand"])
@@ -302,28 +347,49 @@ def _triggers(comments: str, stays: str) -> tuple[str, list, list]:
     return text, [e for e in entries if e not in stayed], stayed
 
 
+#: What `intake.yaml` holds before the carry; `None` is no file at all.
+INTAKES = {
+    "enabled-false": "enabled: false\n",
+    "absent": None,
+    "zero-bytes": "",
+    "whitespace-only": "  \n\n \n",
+    "comment-only": "# mine\n",
+    "empty-schedules": "schedules: []\n",
+}
+
+
 @pytest.mark.parametrize(
-    ("comments", "stays"),
+    ("comments", "stays", "intake"),
     [
-        pytest.param(c, s, id=f"{c}-{s}")
+        pytest.param(c, s, "enabled-false", id=f"{c}-{s}")
         for c in ("none", "above-first", "above-key", "on-key-line", "between")
         for s in ("all-move", "enabled-false-last", "cron-24-last", "cron-24-first")
+    ]
+    + [
+        pytest.param("above-first", "enabled-false-last", name, id=f"intake-{name}")
+        for name in INTAKES
+        if name != "enabled-false"
     ],
 )
-def test_carried_files_read_back_in_every_layout(tmp_path, comments, stays):
+def test_carried_files_read_back_in_every_layout(tmp_path, comments, stays, intake):
     """A comment above the first trigger with one trigger left behind wrote a
     `policy.yaml` that did not parse, and Kraft refused all work (R13d-01):
     in every layout both files read back as what moved and what stayed,
-    comments kept. One above `triggers:` stays in `policy.yaml`."""
+    comments kept. One above `triggers:` stays in `policy.yaml`. An
+    `intake.yaml` that is absent, empty, blank or only comments takes them
+    too, not a `RepresenterError` that kept every start from coming up
+    (R14e-01)."""
     text, moved, stayed = _triggers(comments, stays)
     (tmp_path / "policy.yaml").write_text(text)
-    (tmp_path / "intake.yaml").write_text("enabled: false\n")
+    if INTAKES[intake] is not None:
+        (tmp_path / "intake.yaml").write_text(INTAKES[intake])
 
     lines = cli.admin.carry_moved_keys(tmp_path)
 
     policy = yaml.safe_load((tmp_path / "policy.yaml").read_text())
-    intake = yaml.safe_load((tmp_path / "intake.yaml").read_text())
-    assert intake["schedules"] == moved
+    filed = (tmp_path / "intake.yaml").read_text()
+    assert yaml.safe_load(filed)["schedules"] == moved
+    assert ("# mine" in filed) == (intake == "comment-only")
     assert policy.get("triggers", []) == stayed
     assert (policy["max_concurrent"], policy["forge_poll_s"]) == (3, 60)
     assert not [line for line in lines if "without its comments" in line]

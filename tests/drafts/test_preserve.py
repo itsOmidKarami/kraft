@@ -178,9 +178,15 @@ def test_an_emptied_mapping_is_written_as_yaml_with_the_comment_after_it(text, d
     ["", "   \n", "- a\n- list\n", "key: [unterminated\n"],
     ids=["empty", "blank", "a-list", "unparsable"],
 )
-def test_rewrite_falls_back_to_a_plain_dump_with_nothing_to_keep(text):
-    out = preserve.rewrite(text, {"a": 1, "b": {"c": [1, 2]}})
-    assert yaml.safe_load(out) == {"a": 1, "b": {"c": [1, 2]}}
+@pytest.mark.parametrize("nodes", [False, True], ids=["plain-values", "ruamel-nodes"])
+def test_rewrite_falls_back_to_a_plain_dump_with_nothing_to_keep(text, nodes):
+    """A `carried` value is a ruamel node, which PyYAML's dumper cannot
+    represent: the fallback writes it as plain values (R14e-01)."""
+    data = {"a": 1, "b": {"c": [{"n": 1}, {"n": 2}]}}
+    if nodes:
+        data["b"] = {"c": preserve.carried("c:\n  - n: 1  # one\n  - n: 2\n", "c")}
+    out = preserve.rewrite(text, data)
+    assert yaml.safe_load(out) == {"a": 1, "b": {"c": [{"n": 1}, {"n": 2}]}}
 
 
 @pytest.mark.parametrize(

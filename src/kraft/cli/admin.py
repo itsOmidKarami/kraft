@@ -32,6 +32,8 @@ from kraft.paths import (
     config_dir,
     default_config_dir,
     default_run_dir,
+    linked_advice,
+    linked_pre_2_config_dir,
     names_default_config_dir,
     pre_2_config_dir,
 )
@@ -379,6 +381,8 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
             data = yaml.safe_load(text) if text.strip() else {}
         except (OSError, ValueError, yaml.YAMLError):
             return None
+        # A file of only comments reads as empty, as `config.read_yaml` reads it.
+        data = {} if data is None else data
         return (path, text, data) if isinstance(data, dict) else None
 
     moved: list[str] = []
@@ -448,7 +452,9 @@ def carry_moved_keys(config_dir: Path) -> list[str]:
                     f"({schedule_refusal(stay, 'triggers')}); fix that and the next start "
                     "moves them"
                 )
-    elif isinstance(triggers, list):
+    elif isinstance(triggers, list) or ("triggers" in new_policy and triggers is None):
+        # `triggers:` with nothing under it is the header left behind once the
+        # entries were deleted: dropped like an empty list (R14c-02).
         del new_policy["triggers"]
         moved.append("policy.yaml: dropped an empty triggers list; schedules are intake.yaml's")
 
@@ -912,6 +918,8 @@ def prepare_home() -> Path:
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
     _warn_if_pre_v1(templates_dir)
+    if linked := linked_pre_2_config_dir():
+        print(f"kraft: {linked_advice(linked)}", file=sys.stderr)
     for line in carry_moved_keys(templates_dir):
         print(f"kraft: {line}", file=sys.stderr)
     return templates_dir

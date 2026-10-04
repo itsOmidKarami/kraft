@@ -90,6 +90,34 @@ def pre_2_config_dir() -> Path | None:
     return None
 
 
+def linked_pre_2_config_dir() -> Path | None:
+    """The directory `$KRAFT_HOME/templates` links to, when it is a 1.x home
+    (see `pre_2_config_dir`) that this process does not read: a dotfiles
+    repo linked in as `templates`. 2.0 reads `config/`, and the link is not
+    renamed, so what it holds is ignored unless `KRAFT_CONFIG_DIR` names it.
+    None for the link the 2.0 rename leaves (`templates -> config`), for none
+    at all, and once the directory in use is the target (R14c-01)."""
+    old = kraft_home() / "templates"
+    if not old.is_symlink() or pre_2_config_dir() is None:
+        return None
+    target = Path(os.path.realpath(old))
+    if target in (
+        Path(os.path.realpath(default_config_dir())),
+        Path(os.path.realpath(config_dir())),
+    ):
+        return None
+    return target
+
+
+def linked_advice(target: Path) -> str:
+    """What to tell an operator whose `templates` link is not read."""
+    return (
+        f"{kraft_home() / 'templates'} is a link to {target}, which is not read: "
+        f"2.0 reads {config_dir()}. "
+        f"Set KRAFT_CONFIG_DIR={target} to use it (Kraft does not move a linked directory)"
+    )
+
+
 def default_skills_dir() -> Path:
     """Where an operator may override a bundled method file.
 

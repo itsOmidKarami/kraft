@@ -30,6 +30,8 @@ from kraft.paths import (
     default_config_dir,
     default_run_dir,
     default_skills_dir,
+    linked_advice,
+    linked_pre_2_config_dir,
 )
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
@@ -201,6 +203,8 @@ def _config_row(templates: Path) -> dict:
             f"merge what {old} holds into {home} and remove it",
             warn=True,
         )
+    if linked := linked_pre_2_config_dir():
+        return _check("config", True, f"{templates}; {linked_advice(linked)}", warn=True)
     return _check("config", True, str(templates))
 
 
@@ -276,7 +280,12 @@ MOVED_KEYS: tuple[tuple[str, str, str, Callable[[dict], bool]], ...] = (
         "policy.yaml's `max_concurrent`",
         lambda d: "max_concurrent" in d,
     ),
-    ("policy.yaml", "triggers", "intake.yaml's `schedules`", lambda d: "triggers" in d),
+    (
+        "policy.yaml",
+        "triggers",
+        "intake.yaml's `schedules`",
+        lambda d: d.get("triggers") is not None,
+    ),
     (
         "repos.yaml",
         "default_chain_template",

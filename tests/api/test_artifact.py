@@ -142,6 +142,33 @@ def test_gate_artifact_carries_its_absolute_path_and_opens_in_an_editor(
     assert launched == [["/usr/bin/code", str(path)]]
 
 
+@pytest.mark.parametrize("link", ["file", "parent-dir"])
+def test_gate_artifact_open_refuses_what_the_read_refuses(
+    client, item_at_spec_gate, worktree, monkeypatch, link
+):
+    """`GET /artifact` walks the path with no symlink followed, so a link
+    inside the worktree is a 404 there; the editor launch refuses it too, not
+    just a link out of the worktree (R14e-03)."""
+    wid = item_at_spec_gate
+    path = _write_artifact(worktree, wid, "# A spec\n")
+    if link == "file":
+        real = worktree / "real.md"
+        path.rename(real)
+        path.symlink_to(real)
+    else:
+        moved = worktree / "moved"
+        path.parent.rename(moved)
+        path.parent.symlink_to(moved)
+    launched = []
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("subprocess.Popen", lambda argv, **kw: launched.append(argv) or object())
+
+    assert client.get(f"/api/work-items/{wid}/artifact").status_code == 404
+    r = client.post(f"/api/work-items/{wid}/artifact/open", json={"editor": "code"})
+    assert r.status_code == 404, r.text
+    assert launched == []
+
+
 @pytest.mark.api_client(default_setup=False, peer=("10.0.0.5", 54321))
 def test_gate_artifact_open_is_refused_for_a_non_loopback_client(client, monkeypatch):
     launched = []
