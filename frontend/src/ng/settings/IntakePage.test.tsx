@@ -67,6 +67,12 @@ describe("Auto-intake page", () => {
     expect(screen.getByText("Auto-intake is off.")).toBeInTheDocument();
   });
 
+  it("says one minute, not 1 minutes (R14b-08)", async () => {
+    vi.mocked(d.getDraft).mockImplementation(() => ok(intakeView({}, { ...INTAKE, interval_s: 60 })));
+    mount();
+    expect(await screen.findByText(/^Every 1 minute, starts ready beads/)).toBeInTheDocument();
+  });
+
   it("says when the next check is, from the last check and the interval, but not for an unpublished interval (ST-3)", async () => {
     const recent = [{ id: 9, at: new Date(Date.now() - 2 * 60_000).toISOString(), ready: 0, started: [], skipped: [] }];
     vi.mocked(http.request).mockImplementation(((path: string) => (path.startsWith("/intake/checks") ? ok(recent) : ok({ repos: [] }))) as never);

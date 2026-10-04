@@ -18,6 +18,12 @@ describe("gateView", () => {
     expect(on.reject).toHaveBeenCalledWith("merge_request");
   });
 
+  it("a skipped gate says so under the diamond, not that it decides after the agent (R14b-05)", () => {
+    const skip: KraftEvent = { seq: 1, work_item_id: "w1", type: "node_skipped", payload: { node_id: "final_review", gate: "final_review" }, node_id: "final_review", created_at: "t" };
+    const v = gateView(detail({ chain_definition: { template_id: "d", nodes } }), reviewed, [skip], 0, { kind: "chain" }, on);
+    expect(v.youSub).toBe("skipped");
+  });
+
   it("draws the auto_review task with its run state and the agent's verdict", () => {
     const s = { id: "s", hook_point: "final_review.review.auto_review", node_id: "final_review", status: "done", attempt: 1, round: 0, created_at: "t", wall_ms: 1 } as WorkerSession;
     const ev: KraftEvent = { seq: 1, work_item_id: "w1", type: "gate_approved", payload: { gate: "final_review", by: "agent" }, node_id: "final_review", created_at: "t" };

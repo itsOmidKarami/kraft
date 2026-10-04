@@ -129,6 +129,18 @@ describe("GateBody", () => {
     expect(screen.getByText("p.md")).toBeInTheDocument();
   });
 
+  // R14b-05: a skipped gate on a finished item was "not reached", though the item had passed it.
+  const skip = (gate_: string): KraftEvent => ({ seq: 3, work_item_id: "w1", type: "node_skipped", payload: { node_id: gate_, gate: gate_ }, node_id: gate_, created_at: "t" });
+  it.each([
+    ["skipped", [skip("plan_approval")], "skipped"],
+    ["skipped, then decided on a retry", [skip("plan_approval"), approved("human")], "passed · you"],
+    ["another gate's skip", [skip("final_review")], "not reached"],
+  ])("a gate that is %s", (_n, events, status) => {
+    stubFetch();
+    render(<GateBody item={detail({ display_status: "done", current_node_id: null })} version="1" gate={gate} events={events} />);
+    expect(screen.getByText("status").nextElementSibling).toHaveTextContent(status);
+  });
+
   const scope = (n: number, passed: boolean, name = `s${n}/**`) => ({ command: `cmd${n}`, scope: name, passed, exit_code: passed ? 0 : 1, session_id: `sess${n}` });
   it.each([
     ["no run: no tests line", null, null],

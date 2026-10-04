@@ -34,7 +34,7 @@ export function Analytics() {
         <span className="ph-spacer" />
         <button type="button" className="ph-pill" onClick={() => sheet.open("range")}>{RANGES.find((r) => r.value === range)!.label}<ChevronDown size={14} aria-hidden="true" /></button>
       </RootHeader>
-      <div className="ph-content">
+      <div className="ph-content" tabIndex={0} role="region" aria-label="Analytics figures">
         {error && <p className="ph-error" role="alert">{error}</p>}
         {!report && !error && <div className="ph-skeleton" aria-busy="true"><span /><span /></div>}
         {report && t && (

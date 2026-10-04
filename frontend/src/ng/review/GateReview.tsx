@@ -9,7 +9,7 @@ import { X } from "../icons";
 import { detailOf, request } from "../http";
 import { OpenInEditor } from "../item/DocViewer";
 import { editorName, useEditors } from "../item/editors";
-import { showToast } from "../ui/Toast";
+import { copyPath } from "../ui/copyPath";
 import { FileTree } from "./FileTree";
 import { approveBlock, drafts } from "./finish";
 import { codeBlock } from "./Thread";
@@ -74,7 +74,7 @@ export function GateReview({ item, gate, doc, by, files, threads, isViewed, appr
                 {by && <span className="rv-muted">written by <span className="rv-mono">{by}</span></span>}
                 <div className="rv-gate-doc-actions">
                   <OpenInEditor editors={editors} open={open} />
-                  <Button onClick={() => navigator.clipboard?.writeText(doc.data.absolute_path ?? doc.data.path).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+                  <Button onClick={() => copyPath(doc.data.absolute_path ?? doc.data.path)}>Copy path</Button>
                 </div>
                 {note && <span className="rv-muted" role="status">{note}</span>}
               </div>

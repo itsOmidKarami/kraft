@@ -5,7 +5,7 @@ import { Button } from "../../ui/Button";
 import { showToast } from "../../ui/Toast";
 import { act } from "../actions";
 import type { Applied } from "../draft/applied";
-import { appliedRows } from "../draft/AppliedRows";
+import { appliedRows } from "../draft/applied";
 import { useDraft } from "../draft/context";
 import { lines } from "../draft/view";
 import { age, recent as recentLines } from "../events";

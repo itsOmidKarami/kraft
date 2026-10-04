@@ -29,6 +29,9 @@ const ALLOWED = [
   "item/chainValues", // the frozen chain and the caps it resolves to: a node's attempts, wall clock and YAML, read as the desktop reads them
   "item/nodeGraph",
   "item/graph",
+  "item/events", // gateSkipped: a skipped gate reads as skipped on both layouts (R14b-05)
+  "item/draft/applied", // appliedRows: what an applied draft set, as the desktop's Config lists it (R14b-04)
+  "item/draft/useApplied", // the applied drafts, folded from the whole event log
   "item/draft/view", // lines(): the draft's changes as the desktop's Start dialog lists them (R10b-12)
   "board/model",
   "board/counts", // the board's counts, one definition for every screen that shows one

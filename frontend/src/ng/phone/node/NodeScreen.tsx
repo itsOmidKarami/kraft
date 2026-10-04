@@ -22,6 +22,8 @@ import { ActionBar, Block, Facts, TabStrip } from "../ui/Rows";
 import { fixLoopWords, nodeBar, overrideWords, plainName, reviewPath, wallWords, type NodeAct } from "./model";
 import { Strip } from "./Strip";
 import { chainName } from "../../item/chainName";
+import { appliedRows } from "../../item/draft/applied";
+import { useApplied } from "../../item/draft/useApplied";
 import { materialized, nodeAt } from "../../item/chainValues";
 import "../areas/areas.css";
 import { yamlOf } from "../areas/yaml";
@@ -45,7 +47,7 @@ export interface PlaceProps {
 }
 
 /** `/work-items/:id/nodes/:node` (W17 brief D): the strip, Overview / Log / Config, and the node's one pair. */
-export function NodeScreen({ item, events, docs, place, node: nodeId, now, reload, setPlace }: PlaceProps) {
+export function NodeScreen({ item, version, events, docs, place, node: nodeId, now, reload, setPlace }: PlaceProps) {
   const navigate = useNavigate();
   const sheet = useSheet();
   const { busy, run } = useDo(reload);
@@ -56,6 +58,10 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
   const sub = nodeSub(graph);
   const tab = (TABS.some((t) => t.id === place.tab) ? place.tab : "overview") as NodeTab;
   const bar = nodeBar(item, api, graph);
+  // An applied draft edits the frozen chain, so `node_overrides` never shows it: read it from the events, as the desktop's Config does.
+  const drafted = appliedRows(useApplied(item.id, version, tab === "config"), nodeId).map((r) => `${r.path} ${r.text} · applied by the draft`);
+  const mine = overrideWords(item, nodeId);
+  const overridden = !!mine || drafted.length > 0;
   const next = item.chain_definition.nodes[item.chain_definition.nodes.findIndex((n) => n.id === nodeId) + 1];
   const { steps, side, loop } = useMemo(() => nodeGraph(item, api, now), [item, api, now]);
   const paths = stepsOf(api).steps;
@@ -167,9 +173,9 @@ export function NodeScreen({ item, events, docs, place, node: nodeId, now, reloa
               ["chain", `${chainName(item)} · frozen at intake`],
               ...(api.fix_loop ? ([["fix loop", fixLoopWords(item, api)]] as [string, React.ReactNode][]) : []),
               ["on failure", api.on_failure?.length ? `${api.on_failure.map(plainName).join(", ")}, once` : gate ? `reject to ${rejectTarget(item.chain_definition.nodes, nodeId) ?? "this gate"}` : "—"],
-              ["overrides", overrideWords(item, nodeId) ? `${overrideWords(item, nodeId)} · changed for this item` : "none"],
+              ["overrides", overridden ? [mine && `${mine} · changed for this item`, ...drafted].filter(Boolean).join(" · ") : "none"],
             ]} />
-            <p className="ph-note">{overrideWords(item, nodeId) ? "An override applies to this item only. The chain file is unchanged." : "No item override on this node."}</p>
+            <p className="ph-note">{overridden ? "An override applies to this item only. The chain file is unchanged." : "No item override on this node."}</p>
           </>
         )}
       </div>

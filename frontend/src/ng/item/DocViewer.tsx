@@ -10,7 +10,7 @@ import { IconButton } from "../ui/IconButton";
 import { Markdown } from "../ui/Markdown";
 import { Menu } from "../ui/Menu";
 import { editorChoices, editorName, SYSTEM_EDITOR, useEditors } from "./editors";
-import { showToast } from "../ui/Toast";
+import { copyPath } from "../ui/copyPath";
 import { detailOf, request } from "../http";
 
 export type DocSource = { kind: "document"; id: string; by?: string } | { kind: "artifact"; workItemId: string; by?: string } | { kind: "attachment"; workItemId: string; attachment: string };
@@ -118,7 +118,7 @@ export function DocViewer({ source, query, onClose, returnTo }: { source: DocSou
           {openable && doc && hasFile && (
             <div className="dv-actions">
               <OpenInEditor editors={editors} open={open} />
-              <Button onClick={() => navigator.clipboard?.writeText(doc.absolute_path ?? copyablePath(doc)).then(() => showToast("Copied path"), () => {})}>Copy path</Button>
+              <Button onClick={() => copyPath(doc.absolute_path ?? copyablePath(doc))}>Copy path</Button>
             </div>
           )}
         </header>

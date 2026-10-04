@@ -82,11 +82,18 @@ export function recent(events: KraftEvent[]): RecentLine[] {
       const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
       if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
       // A decision answers the request: the wait is over and the line that said so goes (CG-3).
-      if (e.type === "gate_approved" || e.type === "gate_rejected") drop((x) => !(x.e.type === "gate_requested" && (s(x.e.payload?.gate) || x.node) === (s(p.gate) || node)));
+      // A skip answers it too (R14b-05): the gate was passed without a decision.
+      if (e.type === "gate_approved" || e.type === "gate_rejected" || e.type === "node_skipped") drop((x) => !(x.e.type === "gate_requested" && (s(x.e.payload?.gate) || x.node) === (s(p.gate) || node)));
       out.push({ e, node, line });
     }
   }
   return out.reverse().map(({ e, line }) => ({ e, line }));
+}
+
+/** Whether the gate was skipped rather than decided: its last skip with no request or decision after it (R14b-05). */
+export function gateSkipped(events: KraftEvent[], gate: string): boolean {
+  const at = (type: string) => events.reduce((n, x, i) => (x.type === type && (x.payload.gate ?? x.payload.node_id ?? x.node_id) === gate ? i : n), -1);
+  return at("node_skipped") > Math.max(at("gate_requested"), at("gate_approved"));
 }
 
 /** "now", "6m", "1h 10m": the Recent column's age. */

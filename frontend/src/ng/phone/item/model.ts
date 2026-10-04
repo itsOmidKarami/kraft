@@ -215,12 +215,12 @@ export function nodeSub(n: ChainNode): { text: string; tone: "warn" | "info" | "
   }
 }
 
-const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string; money?: true }> = {
-  budget_usd: { noun: "budget cap", unit: "dollars", money: true },
-  time_cap_minutes: { noun: "running time cap", unit: "minutes of running time" },
-  total_time_cap_minutes: { noun: "wall-clock cap", unit: "minutes of wall-clock time" },
-  max_attempts: { noun: "attempts cap", unit: "attempts" },
-  timeout_minutes: { noun: "timeout", unit: "minutes per attempt" },
+const LIMIT_WORDS: Record<StopLimit["key"], { noun: string; unit: string; one: string; money?: true }> = {
+  budget_usd: { noun: "budget cap", unit: "dollars", one: "dollar", money: true },
+  time_cap_minutes: { noun: "running time cap", unit: "minutes of running time", one: "minute of running time" },
+  total_time_cap_minutes: { noun: "wall-clock cap", unit: "minutes of wall-clock time", one: "minute of wall-clock time" },
+  max_attempts: { noun: "attempts cap", unit: "attempts", one: "attempt" },
+  timeout_minutes: { noun: "timeout", unit: "minutes per attempt", one: "minute per attempt" },
 };
 export const limitWords = (l: StopLimit) => LIMIT_WORDS[l.key];
 

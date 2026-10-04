@@ -58,6 +58,10 @@ describe("recent", () => {
     ["a gate's decision takes the place of its request, a pending one stays",
       [at("gate_requested", { gate: "plan_approval" }, "plan_approval"), at("gate_approved", { gate: "plan_approval", by: "human" }, "plan_approval"), at("gate_requested", { gate: "final_review" }, "final_review")],
       ["final_review is waiting for you", "plan_approval · approved by you"]],
+    // R14b-05: skipping a gate answers its request as a decision does.
+    ["a skipped gate takes the place of its request",
+      [at("gate_requested", { gate: "review_gate" }, "review_gate"), at("node_skipped", { node_id: "review_gate", gate: "review_gate" }, "review_gate"), at("work_item_completed")],
+      ["finished", "review_gate skipped"]],
     ["an escalation's turn that ends reads answered",
       [at("escalation_message", { message: "why?" }, "verification"), started("s3", "escalation"), exited("s3", "done")],
       ["escalation answered", "escalation on verification: why?"]],

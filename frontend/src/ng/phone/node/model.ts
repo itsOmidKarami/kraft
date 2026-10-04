@@ -1,6 +1,7 @@
 import type { ChainNode as ApiNode, KraftEvent } from "../../../types";
 import type { ChainNode } from "../../graph/layout";
 import { rejectTarget } from "../../item/graph";
+import { gateSkipped } from "../../item/events";
 import type { ItemDetail } from "../../item/useItem";
 import { retryable, skippable } from "../../item/status";
 import { attemptsAt, capAt, materialized } from "../../item/chainValues";
@@ -54,7 +55,7 @@ export function reviewPath(item: ItemDetail, gate: ApiNode, events: KraftEvent[]
     ...(gate.auto_escalate
       ? [{ title: "auto_review", text: "An agent reads it before you do. A decision you make meanwhile wins.", ...(verdict && { chip: verdict.type === "gate_approved" ? { word: "approve", tone: "ok" as const } : { word: "reject", tone: "bad" as const } }) }]
       : []),
-    { title: "you", text: decided ? "approved" : waiting ? "waiting for your decision" : "decides when the chain reaches it" },
+    { title: "you", text: decided ? "approved" : waiting ? "waiting for your decision" : gateSkipped(events, gate.id) ? "skipped, no decision needed" : "decides when the chain reaches it" },
     { title: "on reject", text: target ? `Goes back to ${target} with your note.` : "Reopens the gate with your note." },
   ];
 }

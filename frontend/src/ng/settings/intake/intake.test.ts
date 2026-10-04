@@ -13,6 +13,7 @@ describe("Auto-intake", () => {
     ["0 9 * * 0", "Sundays 09:00 UTC"],
     ["0 9 * * 7", "Sundays 09:00 UTC"],
     ["*/15 * * * *", "every 15 minutes"],
+    ["*/1 * * * *", "every 1 minute"],
     ["0 9 1 * *", "0 9 1 * *"],
     ["nonsense", "nonsense"],
     ["61 9 * * *", "61 9 * * *"],

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { copyablePath, docBody } from "../../../format";
 import { detailOf, request } from "../../http";
 import { Markdown } from "../../ui/Markdown";
-import { showToast } from "../../ui/Toast";
+import { copyPath } from "../../ui/copyPath";
 import { ScreenHeader } from "../nav/ScreenHeader";
 import "./doc.css";
 
@@ -36,7 +36,7 @@ export function Doc({ id, url }: { id?: string; url?: string }) {
               <h1 className="ph-doc-title">{doc.title}</h1>
               <p className="ph-doc-path">{doc.path}</p>
               {/* A session summary or gate artifact lives only in Kraft's index: there is no file path to copy (R13b-02). */}
-              {doc.origin !== "event_ingest" && <button type="button" className="ph-linkbtn" onClick={() => navigator.clipboard?.writeText(copyablePath(doc)).then(() => showToast("Copied path"), () => showToast("Could not copy the path."))}>Copy path</button>}
+              {doc.origin !== "event_ingest" && <button type="button" className="ph-linkbtn" onClick={() => copyPath(copyablePath(doc))}>Copy path</button>}
             </div>
             {doc.content.trim() ? <div className="ph-doc-body"><Markdown text={docBody(doc.content, doc.title)} /></div> : <p className="ph-empty">This document is empty.</p>}
           </>

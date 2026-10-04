@@ -286,8 +286,11 @@ export const dollarsText = (n: number): string => {
 export const copyablePath = (d: { path: string; repo?: string; origin?: string }): string =>
   d.origin === "git_scan" && d.repo && !d.path.startsWith("/") ? `${d.repo.replace(/\/$/, "")}/${d.path}` : d.path;
 
+/** "1 line", "2 lines": the count and its noun, `many` where adding an s is wrong. */
+export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
 /** "1 line", "2 lines". */
-export const lineCount = (n: number): string => `${n} line${n === 1 ? "" : "s"}`;
+export const lineCount = (n: number): string => plural(n, "line");
 
 /** What to say when `dollars` refused what was typed. */
 export const DOLLARS_HINT = "Type the amount plainly, like 1000 or 1.5.";

@@ -19,7 +19,7 @@ const NEW: Target = { path: "search/cache.py", range: { side: "new", start: 5, e
 describe("Composer", () => {
   it("names the range, takes a label and a suggested change prefilled with the lines", async () => {
     const { onSubmit } = compose(NEW);
-    expect(screen.getByRole("group", { name: "Comment: Lines 5–6" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines +5 to +6" })).toBeInTheDocument();
     const add = screen.getByRole("button", { name: "Add to review" });
     expect(add).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Cap it lower" } });
@@ -53,7 +53,7 @@ describe("Composer", () => {
 
   it("offers no suggested change on the old side, nor on a whole file", () => {
     const { unmount } = compose({ path: "a.py", range: { side: "old", start: 4, end: 4 } });
-    expect(screen.getByRole("group", { name: "Comment: Old line 4" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line −4" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "± Suggest change" })).toBeNull();
     unmount();
     compose({ path: "a.py", range: null });
@@ -63,19 +63,19 @@ describe("Composer", () => {
 
   it("names a range across sides by each end's side, and offers no suggested change on it", () => {
     compose({ path: "calc.py", range: { startSide: "old", start: 5, side: "new", end: 6 } });
-    expect(screen.getByRole("group", { name: "Comment: Old 5 – new 6" })).toBeInTheDocument();
-    expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Old 5 – new 6/);
+    expect(screen.getByRole("group", { name: "Comment: Lines −5 to +6" })).toBeInTheDocument();
+    expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Lines −5 to \+6/);
     expect(document.querySelector(".rv-line-chip")).toBeNull();
     expect(screen.queryByRole("button", { name: "± Suggest change" })).toBeNull();
   });
 
   it("says how to comment on several lines when it is on one, and not on a range", () => {
     const { unmount } = compose({ path: "a.py", range: { side: "new", start: 5, end: 5 } });
-    expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Line 5$/);
+    expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Line \+5$/);
     expect(screen.getByText("Drag the + or Shift-click to comment on several lines")).toBeInTheDocument();
     unmount();
     compose(NEW);
-    expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Lines 5–6/);
+    expect(document.querySelector(".rv-range-name")).toHaveTextContent(/^Lines \+5 to \+6/);
     expect(screen.queryByText(/Drag the \+/)).toBeNull();
     expect(screen.getByText("Drag the handles or Shift-click to change the lines")).toBeInTheDocument();
   });
@@ -197,13 +197,13 @@ describe("useComments", () => {
     expect(onRetarget).not.toHaveBeenCalled();
     first.unmount();
     const second = render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
-    expect(screen.getByRole("group", { name: "Comment: Old 2 – new 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Lines −2 to +2" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("half a thought");
     fireEvent.click(screen.getByRole("button", { name: "Back to the last line" }));
     expect(onRetarget).toHaveBeenCalledWith({ path: "a.py", range: { side: "new", start: 2, end: 2 } });
     second.unmount();
     render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
-    expect(screen.getByRole("group", { name: "Comment: Line 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line +2" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("half a thought");
   });
 
@@ -213,7 +213,7 @@ describe("useComments", () => {
     act(() => result.current.retargetTo(P(1, 1), P(1, 1, "old")));
     act(() => result.current.retargetTo(P(1, 2), null));
     render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
-    expect(screen.getByRole("group", { name: "Comment: Line 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comment: Line +2" })).toBeInTheDocument();
   });
 
   // R10b-09: a range edit used to drop a typed suggestion with no word. It is kept and
@@ -230,7 +230,7 @@ describe("useComments", () => {
     render(<>{result.current.after("a.py", { side: "new", line: 2 })}</>);
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("use this");
     expect(screen.getByRole("textbox", { name: "Suggested change" })).toHaveValue("z = CHANGED");
-    expect(screen.getByRole("status")).toHaveTextContent("Your suggested change was written for line 2. Check that it should replace lines 1–2, or remove it.");
+    expect(screen.getByRole("status")).toHaveTextContent("Your suggested change was written for line +2. Check that it should replace lines +1 to +2, or remove it.");
     // R11b-06: moved back to the lines it was written for, the note goes; the suggestion stays.
     act(() => result.current.retargetTo(P(2, 2), P(1, 2)));
     cleanup();

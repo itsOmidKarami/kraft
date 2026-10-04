@@ -4,6 +4,7 @@ import type { GateView } from "../graph/GateView";
 import type { Sel } from "../graph/usePaneSelection";
 import { rejectTarget } from "./graph";
 import { AUTO_REVIEW, sessionLook, sessionsOf } from "./nodeGraph";
+import { gateSkipped } from "./events";
 import { gateDecision } from "./panes/GatePane";
 import { ENDED, materialized, nodeAt } from "./chainValues";
 import { taskName } from "./paths";
@@ -42,6 +43,6 @@ export function gateView(item: ItemDetail, gate: ChainNode, events: KraftEvent[]
     message: own?.message ?? undefined,
     doc: pending && item.gate_artifact ? { label: item.gate_artifact.split("/").pop()!, onClick: on.doc } : undefined,
     reject: to ? { id: to, onClick: () => on.reject(to) } : undefined,
-    youSub: pending ? "waiting" : decided ? decided.by : undefined,
+    youSub: pending ? "waiting" : decided ? decided.by : gateSkipped(events, gate.id) ? "skipped" : undefined,
   };
 }
