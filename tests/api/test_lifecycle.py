@@ -179,7 +179,7 @@ def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
     return r
 
 
-def _rebase_fails(monkeypatch, error):
+def _rebase_fails(monkeypatch, error, message="rebase conflict: could not apply"):
     """`refresh_worktree_base` raises `error`; escalation dispatches are
     recorded, never run. Returns the recorded `(work_item_id, auto)` calls."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
@@ -188,7 +188,7 @@ def _rebase_fails(monkeypatch, error):
     calls = []
 
     async def fail_refresh(*a, **kw):
-        raise error(builtins_mod)("rebase conflict: could not apply")
+        raise error(builtins_mod)(message)
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
         calls.append((work_item_id, auto))
@@ -202,15 +202,24 @@ def _rebase_fails(monkeypatch, error):
 _STOP_STATUS = {"resume": "paused", "retry": "needs_human"}
 
 
+@pytest.mark.parametrize(
+    ("message", "cause"),
+    [
+        ("rebase conflict: could not apply", "git"),
+        ("fatal: Authentication failed for 'https://example.test/r.git'", "forge_auth"),
+        ("fatal: Could not resolve host: example.test", "forge_unreachable"),
+    ],
+    ids=["git", "auth", "unreachable"],
+)
 @pytest.mark.parametrize("verb", ["resume", "retry"])
 def test_a_non_conflict_rebase_failure_goes_to_a_human_even_when_armed(
-    client, repo, monkeypatch, verb
+    client, repo, monkeypatch, verb, message, cause
 ):
     """A git failure that is NOT a conflict (`RebaseConflict` specifically)
     stops for a human naming it; only a conflict gets the resolver path
     (Kraft-s7c04.23). It is not in the stuck set, so no agent is dispatched
     onto it even with `auto_escalate_stuck` armed (Ruling 176)."""
-    calls = _rebase_fails(monkeypatch, lambda b: RuntimeError)
+    calls = _rebase_fails(monkeypatch, lambda b: RuntimeError, message)
     wid = _completed_item(client, repo)
     _force_node(wid, "verify", _STOP_STATUS[verb])
 
@@ -224,8 +233,10 @@ def test_a_non_conflict_rebase_failure_goes_to_a_human_even_when_armed(
         for e in _poll_events(client, wid, "work_item_needs_human")
         if e["type"] == "work_item_needs_human"
     ]
-    assert stops[-1]["payload"]["reason"] == "rebase conflict: could not apply"
+    assert stops[-1]["payload"]["reason"] == message
     assert stops[-1]["payload"]["kind"] == "infra"
+    assert stops[-1]["payload"]["facts"] == {"cause": cause}
+    assert item["stop"]["facts"] == {"cause": cause}
     assert calls == []
 
 

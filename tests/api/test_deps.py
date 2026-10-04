@@ -220,6 +220,7 @@ async def test_guard_marks_needs_human_infra_on_an_ordinary_crash(item_on):
 
     assert it.status() == "needs_human"
     assert it.row()["stop_kind"] == "infra"
+    assert it.events("work_item_needs_human")[-1]["payload"]["facts"] == {"cause": "crash"}
 
 
 def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):

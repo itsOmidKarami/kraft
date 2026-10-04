@@ -79,7 +79,11 @@ async def guard(db, wid: str, coro) -> None:
         logger.exception("executor task crashed for %s", wid)
         reason = f"executor crashed: {exc!r}"
         try:
-            await db.write(lambda c: store.mark_needs_human(c, wid, None, reason, kind="infra"))
+            await db.write(
+                lambda c: store.mark_needs_human(
+                    c, wid, None, reason, kind="infra", facts={"cause": "crash"}
+                )
+            )
         except Exception:  # noqa: BLE001
             logger.exception("could not mark %s needs_human after crash", wid)
 

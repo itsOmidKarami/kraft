@@ -916,9 +916,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             # The claim already flipped this item to 'active'; a failed rebase
             # must not leave it stranded there with no walk behind it.
             reason = str(exc)
+            cause = forge_mod.failure_cause(reason) or "git"
             await st.db.write(
                 lambda c: store.mark_needs_human(
-                    c, wid, row["current_node_id"], reason, kind="infra"
+                    c, wid, row["current_node_id"], reason, kind="infra", facts={"cause": cause}
                 )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
@@ -1241,8 +1242,11 @@ async def _retry(wid: str, body: Retry, request: Request):
             new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             reason = str(exc)
+            cause = forge_mod.failure_cause(reason) or "git"
             await st.db.write(
-                lambda c: store.mark_needs_human(c, wid, node_id, reason, kind="infra")
+                lambda c: store.mark_needs_human(
+                    c, wid, node_id, reason, kind="infra", facts={"cause": cause}
+                )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return deps.work_item_answer(st, wid)

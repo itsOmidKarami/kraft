@@ -760,6 +760,49 @@ def _rate_limit_facts(st, row, task_path: str | None) -> dict:
     return facts
 
 
+def _test_result(st, row) -> dict | None:
+    """`test_result` on the detail response: the latest changed-test-scope
+    verification run, one entry per scope that finished, or None when there is
+    no such run. An area's setup that passed is not a scope and is left out;
+    one that failed is its scopes' result and stays."""
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        return None
+    from kraft.executor import dispatch  # deferred, as `_rate_limit_facts` defers the schema
+    from kraft.templates.models import BuiltinAction, BuiltinTask
+
+    verifies = [
+        (node, t)
+        for node in reversed(chain.chain.nodes)
+        for t in node.tasks()
+        if isinstance(t.task, BuiltinTask)
+        and t.task.ref is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
+    ]
+    if not verifies:
+        return None
+    repo_entry = deps.launch(st, row["repo"]).repo_entry
+    for node, t in verifies:
+        try:
+            results = dispatch.scope_results(st.db, row["id"], node.id, t.path, repo_entry)
+        except config_mod.ConfigError:
+            # An unreadable repos.yaml costs the scope names, not the detail.
+            results = dispatch.scope_results(st.db, row["id"], node.id, t.path, None)
+        scopes = [
+            {
+                "command": r["command"],
+                "scope": r.get("scope"),
+                "passed": r["passed"],
+                "exit_code": r.get("exit_code"),
+                "session_id": r["session_id"],
+            }
+            for r in results
+            if not (r.get("setup") and r["passed"])
+        ]
+        if scopes:
+            return {"scopes": scopes, "passed": all(x["passed"] for x in scopes)}
+    return None
+
+
 def _stop(st, row, sessions, pending_gate: str | None, stop_payload: dict | None) -> dict | None:
     """`stop` on the detail response (B.3): `None` unless the item is
     currently `needs_human`, `waiting` or `rate_limited`."""
@@ -995,6 +1038,7 @@ async def get_work_item(wid: str, request: Request):
             pending,
         ),
         "stop": _stop(st, row, sessions, pending, stop_payload),
+        "test_result": _test_result(st, row),
         # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
         # the frozen chain's total, how many were gates, and the current
         # node's step when it declares more than one.

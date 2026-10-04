@@ -46,6 +46,7 @@ async def test_an_exit_that_neither_hands_off_nor_stops_leaves_the_item_stopped(
 
     assert claimed.status() == "needs_human"
     assert claimed.row()["stop_kind"] == "infra"
+    assert claimed.events("work_item_needs_human")[-1]["payload"]["facts"] == {"cause": "stranded"}
 
 
 async def test_a_raising_exit_stops_the_item_and_still_raises(claimed):
@@ -251,7 +252,9 @@ async def test_an_infra_stop_names_the_newest_infra_cause(item_on):
     status = await stops.stop_for_infra(it.database, it.id, SimpleNamespace(id="implementation"))
 
     assert (status, it.status()) == ("needs_human", "needs_human")
-    assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == "the reviewer errored"
+    stop = it.events("work_item_needs_human")[-1]["payload"]
+    assert stop["reason"] == "the reviewer errored"
+    assert stop["facts"] == {"cause": "ci_infra"}
 
 
 async def test_a_wait_with_no_next_observation_is_looked_at_after_the_default_interval(
