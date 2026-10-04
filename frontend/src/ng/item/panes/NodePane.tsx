@@ -1,7 +1,7 @@
 import { tokens, usd } from "../../../format";
 import type { ChainNode } from "../../../types";
 import { stepsOf, taskName } from "../paths";
-import { sessionsOf } from "../nodeGraph";
+import { loopRounds, sessionsOf } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The node pane's Overview (Decisions §5): progress, fix loop, on failure,
@@ -12,13 +12,13 @@ export function NodeOverview({ item, node, onStep, onNode }: { item: ItemDetail;
   const done = paths.filter((p) => sessionsOf(item, p).at(-1)?.status.startsWith("done")).length;
   const nodes = item.chain_definition.nodes;
   const next = nodes[nodes.findIndex((n) => n.id === node.id) + 1];
-  const rounds = Math.max(0, ...item.worker_sessions.filter((s) => s.node_id === node.id).map((s) => s.round));
+  const rounds = loopRounds(item, node);
   const by = item.usage?.by_node.find((r) => r.node === node.id);
   return (
     <>
       <dl className="item-facts ip-facts">
         {paths.length > 0 && <div><dt>progress</dt><dd>{done} of {paths.length} tasks · {steps.length} {steps.length === 1 ? "step" : "steps"}</dd></div>}
-        {node.fix_loop && <div><dt>fix loop</dt><dd>{rounds ? `round ${rounds + 1}` : "not looped"} · {node.fix_loop}</dd></div>}
+        {node.fix_loop && <div><dt>fix loop</dt><dd>{rounds ? `round ${rounds.latest}${rounds.total ? ` of ${rounds.total}` : ""}` : "not looped"}</dd></div>}
         {node.on_failure?.length ? <div><dt>on failure</dt><dd>{node.on_failure.map(taskName).join(", ")}</dd></div> : null}
         {next && <div><dt>then</dt><dd><button type="button" className="item-link is-strong is-mono" onClick={() => onNode(next.id)}>{next.id}</button></dd></div>}
         {by && <div><dt>ran</dt><dd>{by.sessions} {by.sessions === 1 ? "session" : "sessions"} · {tokens(by.tokens_in + by.tokens_out)} tokens · {usd(by.cost_usd, by.cost_complete)}</dd></div>}

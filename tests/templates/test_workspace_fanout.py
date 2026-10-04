@@ -6,6 +6,7 @@ task's process is a spy wherever what it ran under is the question."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,32 @@ async def test_a_task_opting_in_runs_once_per_selected_repository_and_others_onc
         == "done"
     )
     assert [cwd for cwd, _ in ran] == [worktree]
+
+
+async def test_a_fanned_out_run_is_told_its_repository_and_a_task_that_is_not_is_not(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """A session records the repository it ran for (`worker_sessions.repository`),
+    so a node's view can say where each run happened: the id of each selected
+    repository, root first; no id for a task that runs once in the assembled
+    checkout."""
+    told: list[str | None] = []
+
+    async def run_task(db, run_dirs, *, repository=None, **_):
+        told.append(repository)
+        return "done"
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+    row, node, worktree = await workspace_item(
+        database, run_dirs, tmp_path, [v1_task("each", scope="each_repository"), v1_task("once")]
+    )
+    each, once = node.tasks()
+
+    await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=LAUNCH)
+    assert told == ["ws", "pkg"]
+    told.clear()
+    await dispatch.dispatch_node(database, run_dirs, once, node, row, worktree, launch=LAUNCH)
+    assert told == [None]
 
 
 async def test_a_fanned_out_task_fails_when_any_repository_fails(
@@ -213,3 +240,18 @@ async def test_a_changed_path_in_an_area_runs_its_setup_then_its_scope(
 
     assert status == "done"
     assert commands == [["uv", "sync"], ["just", "test-api"]]
+    # The round's picks are recorded before any of it ran: the setup ahead of its scope.
+    picked = database.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE type = 'test_scopes_selected'"
+        ).fetchall()
+    )
+    assert [json.loads(r["payload"]) for r in picked] == [
+        {
+            "node_id": "v",
+            "hook_point": "v.main.t",
+            "repository": None,
+            "round": 0,
+            "commands": ["uv sync", "just test-api"],
+        }
+    ]

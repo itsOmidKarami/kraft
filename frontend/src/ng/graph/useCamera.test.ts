@@ -120,6 +120,13 @@ describe("useCamera", () => {
     const { h } = mount({ canvas: "chain", world: { W: 2000, H: 250 }, opening: "current", current: { cx: 500, cy: 96 }, reserve: 440 });
     expect(h.result.current.cam).toEqual({ s: 1, tx: 300 - 500, ty: 132 - 96 });
   });
+  it("keeps `clearBottom` px clear at the foot of a fit, so the controls over the canvas cannot cover the world", () => {
+    // A 440px view, 100px of it kept clear: fitted into 340, centred there, the world ends 100px above the foot.
+    const { h } = mount({ canvas: "node", world: { W: 400, H: 200 }, opening: "fit", clearBottom: 100 });
+    expect(h.result.current.cam).toEqual({ s: 1, tx: 320, ty: 70 });
+    expect(h.result.current.cam.ty + 200).toBeLessThanOrEqual(440 - 100);
+    expect(mount({ canvas: "node", world: { W: 400, H: 200 }, opening: "fit" }).h.result.current.cam.ty).toBe(120);
+  });
   it("zooms at the cursor on ⌘-wheel and pans on a plain wheel", () => {
     const { el, h } = mount({ canvas: "chain", world: { W: 100, H: 100 }, opening: "fit" });
     act(() => void el.dispatchEvent(Object.assign(new Event("wheel", { cancelable: true }), { deltaX: 0, deltaY: 50, metaKey: false })));

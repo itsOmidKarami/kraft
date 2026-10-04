@@ -595,7 +595,7 @@ _SCOPES = [
 ]
 
 
-def _exit_session(wid, sid, result, command, status, code) -> None:
+def _exit_session(wid, sid, result, command, status, code, round=0, repository=None) -> None:
     result.with_suffix(".exit").write_text(f"{code}\n")
     _run(
         lambda c: store.create_session(
@@ -608,6 +608,8 @@ def _exit_session(wid, sid, result, command, status, code) -> None:
             result_path=str(result),
             head_sha="abc",
             command=command,
+            round=round,
+            repository=repository,
         )
     )
     _run(lambda c: store.session_exited(c, sid, status))

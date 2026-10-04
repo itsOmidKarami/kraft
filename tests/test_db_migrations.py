@@ -223,6 +223,17 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 51:
         drop_lines = (*drop_lines, "start_side", "quote")
+    if version < 52:
+        drop_lines = (
+            *drop_lines,
+            "repository     TEXT",
+            "-- the repository a fanned-out run",
+            "-- in the item's frozen target. NULL for",
+            "-- single-repository item's, and every row",
+        )
+        # `repository` is the last worker_sessions column: `egress` loses its comma
+        # (harmless when `egress` was already dropped, version < 44).
+        replace = (*replace, ("egress         TEXT,", "egress         TEXT"))
     added = {47: "review_viewed", 48: "config_drafts", 49: "item_drafts", 50: "intake_checks"}
     skip_stmts = (*skip_stmts, *(t for since, t in added.items() if version < since))
     schema = "\n".join(
@@ -518,6 +529,8 @@ ADDED_COLUMNS = [
     (43, "worker_sessions", ("egress",), None),
     # NULL: a row stopped before stop kinds existed has no recorded reason
     (44, "work_items", ("stop_kind",), None),
+    # NULL: a row written before fan-out was recorded names no repository
+    (51, "worker_sessions", ("repository",), None),
 ]
 
 

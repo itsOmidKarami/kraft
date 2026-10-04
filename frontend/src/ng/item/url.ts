@@ -1,6 +1,6 @@
 import type { ChainNode } from "../../types";
 import type { Sel } from "../graph/usePaneSelection";
-import { AUTO_REVIEW, ESCALATION } from "./nodeGraph";
+import { AUTO_REVIEW, ESCALATION, FIX_LOOP } from "./nodeGraph";
 import { stepsOf } from "./paths";
 
 /** Where the item page is: the node view (if any), the selection, its tab and
@@ -11,6 +11,8 @@ export interface Place {
   sel: Sel;
   tab?: string;
   attempt?: number;
+  /** The scope of an open changed-test-scope task, picked: its chip's key (`scopeKey`). Only with that task selected. */
+  scope?: string;
   /** The document id open over the page (`?doc=`), so ⌘K and a pasted link land on it. */
   doc?: string;
   /** The search that opened `doc` (`?q=`), highlighted in it. */
@@ -29,6 +31,8 @@ export function selPath(sel: Sel): string | null {
 export function pathSel(path: string, nodes: ChainNode[]): Sel | null {
   const [n, step, task, ...rest] = path.split(".");
   const node = nodes.find((x) => x.id === n);
+  // A fix loop's repair and judge: `<node>.fix_loop.<task>`, the task `<step>.<task>` in a loop of steps.
+  if (node?.fix_loop && step === FIX_LOOP && task) return { kind: "task", node: n, step, task: [task, ...rest].join(".") };
   if (!node || rest.length) return null;
   if (!step) return { kind: "node", node: n };
   // A gate's reviewer is `<gate>.auto_review`: the chain lists no step there, the frozen chain has its task.
@@ -49,7 +53,7 @@ export function readPlace(nodeParam: string | undefined, search: URLSearchParams
   const raw = search.get("sel");
   const sel = (raw && pathSel(raw, nodes)) || floor;
   const attempt = Number(search.get("attempt"));
-  return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
+  return { node, sel, tab: search.get("tab") ?? undefined, attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : undefined, scope: (sel.kind === "task" && search.get("scope")) || undefined, doc: search.get("doc") || undefined, q: (search.get("doc") && search.get("q")) || undefined };
 }
 
 /** The URL for a place. */
@@ -59,6 +63,7 @@ export function placeUrl(id: string, p: Place): string {
   if (path && path !== p.node) q.set("sel", path);
   if (p.tab) q.set("tab", p.tab);
   if (p.attempt) q.set("attempt", String(p.attempt));
+  if (p.scope && p.sel.kind === "task") q.set("scope", p.scope);
   if (p.doc) q.set("doc", p.doc);
   if (p.doc && p.q) q.set("q", p.q);
   const qs = q.toString();

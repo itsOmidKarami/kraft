@@ -44,6 +44,9 @@ def create_session(
     #: harness whose output names none (codex, cursor) can still be priced
     #: (`_with_launch_model`). None when the launch passed none.
     model: str | None = None,
+    #: The repository a fanned-out run (`scope: each_repository`) is for; None
+    #: for a task that does not fan out.
+    repository: str | None = None,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -81,11 +84,11 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread, command, started_at, harness, sandbox, model) "
+        "round, head_sha, thread, command, started_at, harness, sandbox, model, repository) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
         "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), "
-        "?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -105,6 +108,7 @@ def create_session(
             harness,
             sandbox,
             model,
+            repository,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()

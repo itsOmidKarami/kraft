@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { elapsedBetween, shortId } from "../../../format";
+import { elapsed, elapsedBetween, shortId } from "../../../format";
 import type { KraftEvent, Policy, WorkItemDocument } from "../../../types";
 import type { ChainNode as GraphNode } from "../../graph/layout";
 import type { Sel } from "../../graph/usePaneSelection";
@@ -9,7 +9,7 @@ import type { Applied } from "../draft/applied";
 import { AppliedRows } from "../draft/AppliedRows";
 import { DraftConfig } from "../draft/DraftConfig";
 import { DraftNotes } from "../draft/DraftNotes";
-import { AUTO_REVIEW, ESCALATION, escalationsOf, footerState, isEscalation, lookWord, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
+import { AUTO_REVIEW, ESCALATION, escalationsOf, FIX_LOOP, footerState, isEscalation, JUDGE, lookWord, loopRounds, sessionLook, sessionsOf, stateWord } from "../nodeGraph";
 import { stepsOf, taskName } from "../paths";
 import type { ItemDetail } from "../useItem";
 import { ChainConfig, ChainOverview } from "./ChainPane";
@@ -22,6 +22,8 @@ import { Thread } from "./Thread";
 import { chainName } from "../chainName";
 import { materialized, notStarted, planTaskPath, taskKindAt } from "../chainValues";
 import { NodeOverrideRows } from "./ItemOverrides";
+import { scopePane, ScopeOverview } from "./ScopePane";
+import { isScopeTask, scopesView } from "../scopeView";
 
 export type PaneArgs = {
   item: ItemDetail;
@@ -40,6 +42,10 @@ export type PaneArgs = {
   focus: (node: string) => void;
   editBudget: boolean;
   setEditBudget: (on: boolean) => void;
+  /** The fix-loop round the canvas shows, 1-based, when the node has a loop that ran. */
+  round?: number;
+  /** The scope of an open changed-test-scope task that is picked: its chip's key. */
+  scope?: string;
   attempt?: number;
   /** Pin the tabs to one attempt; undefined follows the newest. */
   setAttempt: (attempt: number | undefined) => void;
@@ -104,7 +110,7 @@ export function paneContent(a: PaneArgs): PaneContent {
   }
   const toNode = { label: node.id, onClick: () => a.pick({ kind: "node", node: node.id }) };
   if (sel.kind === "step") return stepPane(a, node, sel.step, [toChain, toNode]);
-  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);
+  if (sel.kind === "task") return taskPane(a, node, sel.step, sel.task, [toChain, toNode, { label: sel.step, onClick: sel.step === ESCALATION || sel.step === FIX_LOOP || (node.kind === "gate" && sel.step === AUTO_REVIEW) ? undefined : () => a.pick({ kind: "step", node: node.id, step: sel.step }) }]);
   const drawn = a.graph.find((g) => g.id === sel.node);
   const sessions = item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s));
   const started = sessions.map((s) => s.started_at).filter(Boolean).sort().at(-1);
@@ -205,22 +211,37 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   // A gate's reviewer is no step of the chain: its sessions run at `<gate>.auto_review`, and the server addresses nothing under it.
   const rev = node.kind === "gate" && stepId === AUTO_REVIEW;
   const path = esc ? ESCALATION : rev ? `${node.id}.${AUTO_REVIEW}` : `${node.id}.${stepId}.${task}`;
-  const sessions = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
+  // One of an open changed-test-scope task's scopes has its own pane.
+  if (a.scope && !esc && !rev && stepId !== FIX_LOOP) {
+    return scopePane({ item, node, step: stepId, task, scope: a.scope, round: a.round ?? 1, now: a.now, crumbs, tab: a.tab, toTask: () => a.pick({ kind: "task", node: node.id, step: stepId, task }) });
+  }
+  // In a fix-loop node a task's pane is one round's: the step tasks and the judge as the round measured
+  // (the judge after it), the repair as it went on to the next.
+  const loop = !esc && !rev && stepId === FIX_LOOP ? (task === JUDGE ? "judge" : "repair") : null;
+  const rounds = !esc && !rev ? loopRounds(item, node) : undefined;
+  const r = rounds && a.round;
+  const all = esc ? escalationsOf(item, node.id) : sessionsOf(item, path);
+  const sessions = r ? all.filter((s) => s.round === (loop === "repair" ? r : r - 1)) : all;
   const at = sessions.find((s) => s.attempt === a.attempt) ?? sessions.at(-1);
   const look = sessionLook(at, a.now);
   const frozen = materialized(item);
   const kind = esc ? "agent" : taskKindAt(frozen, path) ?? (at?.model ? "agent" : undefined);
   const tabs = esc ? [{ value: "thread", label: "Thread" }, ...TASK_TABS] : TASK_TABS;
   const tab = tabs.some((t) => t.value === a.tab) ? a.tab : tabs[0].value;
-  const lead = `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task`;
-  const state = look.running ? (look.meta ?? "running") : lookWord(look);
-  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: task, sub: `${lead} · ${state}` };
+  const place = r ? (loop === "judge" ? `fix-loop judge · after round ${r}` : loop === "repair" ? `fix-loop repair · between rounds ${r} and ${r + 1}` : `${kind ? `${kind} ` : ""}task · round ${r}${rounds.total ? ` of ${rounds.total}` : ""}`) : null;
+  const lead = place ?? `${esc ? "escalation · " : ""}${kind ? `${kind} ` : ""}task`;
+  // A round's task says how long it took, as the words run on: "running 41s", "done 31s".
+  const took = r && at ? (look.running ? look.meta?.replace(" · ", " ") : look.state === "done" && at.wall_ms != null ? `done ${elapsed(at.wall_ms)}` : undefined) : undefined;
+  // A task the round did not run says so in so many words, as the prototype has it.
+  const state = took ?? (look.running ? (look.meta ?? "running") : at || !r ? lookWord(look) : loop === "judge" && r === 1 ? "skipped · the first repair runs without the judge" : "not run in this round");
+  const head = { crumbs, taskKind: kind as TaskKind | undefined, icon: esc ? "siren" : undefined, title: loop ? taskName(task) : task, sub: `${lead} · ${state}` };
   if (!at) {
     // A task that has not run keeps its tabs, each saying why it is empty (LV-5). Config is the
     // draft's while it may override the task (W11). On the node the run stands on it can be skipped
     // before it runs (`/skip` takes a task of the current node).
     const edit = !esc && !rev && !!a.canEdit?.(node.id);
-    const empty = (text: string) => <p className="item-muted">{text}</p>;
+    // The fix loop's repair and judge do not wait on a step before them: a round either ran them or did not.
+    const empty = (text: string) => <p className="item-muted">{loop ? "Not run in this round." : text}</p>;
     const bodies: Record<string, ReactNode> = {
       thread: empty("No turns yet."),
       overview: empty("Not run yet. It starts when the step before this one finishes."),
@@ -229,7 +250,8 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       log: empty("No log yet. It starts when the step before this one finishes."),
       config: edit ? <DraftConfig path={path} /> : <><dl className="item-facts ip-facts"><div><dt>path</dt><dd className="is-mono">{path}</dd></div></dl><AppliedRows applied={a.applied} path={path} /></>,
     };
-    const here = !esc && !rev && item.current_node_id === node.id;
+    // `/skip` takes no path under a fix loop (422), so its tasks have no Skip.
+    const here = !esc && !rev && !loop && item.current_node_id === node.id;
     return {
       ...head,
       tabs,
@@ -238,14 +260,22 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
     };
   }
   const current = item.current_node_id === node.id;
+  // A changed-test-scope task runs one session per scope: they are its scopes, not attempts at it.
+  const scopes = !esc && !rev && !loop && isScopeTask(item, path);
   // Picking the newest attempt drops the pin, so the pane follows the next one that starts;
   // an older attempt stays put while newer ones arrive, and the menu's count shows them.
-  const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} />;
+  const menu = <AttemptMenu sessions={sessions} at={at} onAt={(n) => a.setAttempt(n === sessions.at(-1)!.attempt ? undefined : n)} now={a.now} turns={esc} inRound={!!r} />;
   // The plan's sub-tasks, on the one task that works through it, whichever attempt is picked.
   const progress = planTaskPath(frozen) === path ? item.progress : null;
   const bodies: Record<string, ReactNode> = {
     thread: <Thread item={item} version={a.version} node={node.id} upTo={at === sessions.at(-1) ? undefined : at} reload={a.reload} onNode={(n) => a.pick({ kind: "node", node: n })} />,
-    overview: <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />,
+    overview: (
+      <>
+        {/* The changed-test-scope task says how its round went, and what its canvas frame means, above the usual facts. */}
+        {scopes && <ScopeOverview view={scopesView(item, path, a.round ?? 1, a.now)} />}
+        <TaskOverview path={path} s={at} docs={a.docs} onDoc={a.onDoc} progress={progress} running={sessionLook(sessions.at(-1), a.now).running} />
+      </>
+    ),
     input: <TaskInput item={item} s={at} current={current} />,
     output: <TaskOutput item={item} s={at} docs={a.docs} onDoc={a.onDoc} />,
     log: <Log key={at.id} sessionId={at.id} running={look.running === true} title={task} crumb={crumbs.map((c) => c.label).join(" › ")} />,
@@ -255,7 +285,7 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
   return {
     ...head,
     // One attempt has nothing to pick between: the subtitle stays the words it was.
-    sub: sessions.length > 1 ? <>{lead} · {menu} · {state}</> : head.sub,
+    sub: sessions.length > 1 && !scopes ? <>{lead} · {menu} · {state}</> : head.sub,
     tabs,
     body: bodies[tab],
     footer: esc
@@ -263,6 +293,9 @@ function taskPane(a: PaneArgs, node: import("../../../types").ChainNode, stepId:
       ? <PathFooter item={item} path={node.id} what="node" state={live ? null : footerState(item, item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s)))} reload={a.reload}
           extra={live ? <button type="button" className="btn btn-secondary" onClick={async () => { const r = await act.stopEscalation(item.id); if (r.ok) a.reload(); }}>Stop escalation</button> : undefined} />
       // `/retry` and `/skip` parse the path against the chain, which has no step on a gate (422): the reviewer has no footer.
-      : rev ? undefined : footerOf(item, path, "task", footerState(item, sessions), a.reload),
+      : rev ? undefined
+      // `/retry` and `/skip` have no path under a fix loop either (422): its tasks retry the node that owns them.
+      : loop ? footerOf(item, node.id, "node", footerState(item, item.worker_sessions.filter((s) => s.node_id === node.id && !isEscalation(s))), a.reload)
+      : footerOf(item, path, "task", footerState(item, sessions), a.reload),
   };
 }

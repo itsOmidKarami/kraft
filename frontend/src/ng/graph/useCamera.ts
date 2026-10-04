@@ -16,11 +16,13 @@ type Opts = {
   cover?: number;
   /** An editor's fit: a floor and a left margin instead of centring (the Templates prototype). */
   fit?: FitRule;
+  /** Px kept clear at the foot of a fit, for controls laid over the canvas. */
+  clearBottom?: number;
 };
 
 /** Pan and zoom for one canvas viewport: pinch or ⌘-scroll zooms at the cursor,
  *  scroll or a background drag pans, fit and current re-frame. */
-export function useCamera({ canvas, world, current, opening, reserve = 0, cover = 0, fit }: Opts) {
+export function useCamera({ canvas, world, current, opening, reserve = 0, cover = 0, fit, clearBottom = 0 }: Opts) {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [cam, setCam] = useState<Cam>({ tx: 0, ty: 0, s: 1 });
@@ -46,8 +48,8 @@ export function useCamera({ canvas, world, current, opening, reserve = 0, cover 
   const cx = current?.cx, cy = current?.cy;
   useEffect(() => {
     if (!view || mode === "free") return;
-    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, view, canvas, asked && fit?.initial ? undefined : fit));
-  }, [mode, asked, view?.w, view?.h, world.W, world.H, cx, cy, canvas, cover]); // eslint-disable-line react-hooks/exhaustive-deps
+    setCam(mode === "current" && cx != null && cy != null ? currentCam(cx, cy, { w: Math.max(0, view.w - cover), h: view.h }) : fitCam(world, { w: view.w, h: Math.max(0, view.h - clearBottom) }, canvas, asked && fit?.initial ? undefined : fit));
+  }, [mode, asked, view?.w, view?.h, world.W, world.H, cx, cy, canvas, cover, clearBottom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Non-passive, on the viewport only: preventDefault stops the page zooming or scrolling.
   useEffect(() => {

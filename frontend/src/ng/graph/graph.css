@@ -49,7 +49,25 @@
 .canvas { position: absolute; inset: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px; cursor: grab; touch-action: none; user-select: none; }
 .canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .canvas-svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.canvas-zoom { position: absolute; bottom: 12px; z-index: 4; }
+.canvas-zoom { position: absolute; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; }
+.round-picker { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.round-btn { display: flex; align-items: center; gap: 6px; padding: 4px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.round-btn:is(:hover, [aria-expanded="true"]) { background: var(--line); }
+.round-btn.is-old { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.round-btn:focus-visible, .round-latest:focus-visible, .round-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.round-latest { padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-sub); font: inherit; font-size: 11.5px; cursor: pointer; }
+.round-latest:hover { background: var(--line); color: var(--text); }
+.round-caret { font-size: 9px; color: var(--text-muted); }
+.round-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+.round-dot.is-ok { background: var(--ok); }
+.round-dot.is-warn { background: var(--warn); }
+.round-dot.is-bad { background: var(--bad); }
+.round-menu { display: flex; flex-direction: column; gap: 1px; min-width: 260px; font-size: 12px; }
+.round-menu-head { padding: 6px 8px 4px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); }
+.round-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); font: inherit; text-align: left; cursor: pointer; }
+.round-row:hover, .round-row[aria-checked="true"] { background: var(--line); color: var(--text); }
+.round-outcome { color: var(--text-muted); }
+.round-foot { margin: 3px 0 0; padding: 6px 8px 4px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-faint); }
 .edge { stroke: var(--stroke); stroke-width: 2; fill: none; }
 .edge.is-todo { stroke-dasharray: 4 4; }
 .dot { fill: var(--stroke); }
@@ -214,3 +232,73 @@
 .pane-facts div { display: flex; justify-content: space-between; gap: 12px; }
 .pane-facts dt { color: var(--text-muted); }
 .pane-facts dd { margin: 0; color: var(--text); }
+
+/* An open changed-test-scope task: a frame of repositories, each with its scopes as chips. */
+.canvas-world.is-glide :is(.graph-node, .step-label, .step-frame, .mark-end, .arc-label, .node-footer, .seam, .scope-frame) { transition: left .42s cubic-bezier(.2,.8,.2,1), top .42s cubic-bezier(.2,.8,.2,1), width .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1); }
+.canvas-world.is-glide :is(.edge, .arc path) { transition: d .42s cubic-bezier(.2,.8,.2,1); }
+.canvas-world.is-glide .dot { transition: cx .42s cubic-bezier(.2,.8,.2,1), cy .42s cubic-bezier(.2,.8,.2,1); }
+.graph-node.is-away { pointer-events: none; }
+.graph-node.is-away .glyph { opacity: 0; transition: opacity .08s linear; }
+.graph-node .glyph { transition: opacity .2s linear .3s; }
+.graph-node.is-away .graph-label, .graph-node.is-away .graph-meta { opacity: 0; }
+.scope-frame { position: absolute; z-index: 3; box-sizing: border-box; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 10px 30px color-mix(in oklab, var(--side) 70%, transparent); opacity: 1; cursor: default; }
+.scope-frame.is-out { opacity: 0; pointer-events: none; transition: opacity .15s linear .42s; }
+.scope-head { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px 0 14px; box-sizing: border-box; }
+.scope-body { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; }
+.scope-head, .scope-body { opacity: 0; transform: translateY(6px); transition: opacity .1s ease, transform .1s cubic-bezier(.2, .8, .2, 1); }
+.scope-frame.is-on :is(.scope-head, .scope-body) { opacity: 1; transform: none; transition: opacity .24s ease .2s, transform .3s cubic-bezier(.2, .8, .2, 1) .2s; }
+.scope-task { padding: 0; border: 0; background: transparent; color: var(--text); font: 600 12px ui-monospace, Menlo, monospace; cursor: pointer; }
+.scope-task:focus-visible, .scope-close:focus-visible, .scope-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.scope-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.scope-close { margin-left: auto; padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--text-sub); font: inherit; font-size: 11px; cursor: pointer; }
+.scope-close:hover { background: var(--line); color: var(--text); }
+.scope-rail { position: absolute; left: 23px; top: 14px; bottom: 28px; border-left: 1.5px solid var(--border); }
+.scope-row { position: relative; display: grid; grid-template-columns: 20px 112px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 40px; box-sizing: border-box; }
+.scope-row.is-fork { align-items: start; }
+.scope-ring { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--stroke); background: var(--surface); color: var(--text-muted); font: 10px ui-monospace, Menlo, monospace; }
+.scope-row.is-fork .scope-ring { margin-top: 8px; }
+.scope-ring.is-done { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+.scope-ring.is-failed { border-color: var(--bad); color: var(--bad); }
+.scope-ring.is-running { border-color: var(--warn); color: var(--warn); }
+.scope-ring.is-unreached { border: 1.5px dashed var(--border); color: var(--text-faint); }
+.scope-repo { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; min-width: 0; }
+.scope-name { font: 11.5px ui-monospace, Menlo, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-name.is-off { color: var(--text-muted); }
+.scope-note { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.scope-note.is-failed { color: var(--bad); }
+.scope-note.is-running { color: var(--warn); }
+/* Commands run long: a row that outgrows the frame scrolls along instead of clipping its last chips (the padding keeps a picked chip's ring in view). */
+.scope-chips { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 0; margin: -4px 0; overflow-x: auto; scrollbar-width: thin; }
+.scope-chips.is-more { mask-image: linear-gradient(to right, var(--text) calc(100% - 24px), transparent); -webkit-mask-image: linear-gradient(to right, var(--text) calc(100% - 24px), transparent); }
+.scope-chips.is-fork { flex-direction: column; align-items: flex-start; gap: 4px; padding: 2px 0; border-left: 1.5px solid var(--border); }
+.scope-item { display: flex; align-items: center; gap: 6px; }
+.scope-tick { width: 10px; border-top: 1.5px solid var(--border); }
+.scope-arrow { color: var(--stroke); font-size: 11px; }
+.scope-chip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: inherit; font: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer; transition: box-shadow .15s; }
+.scope-chip.is-failed { border-color: var(--bad); }
+.scope-chip.is-running { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--bg)); }
+.scope-chip.is-waiting { border-style: dashed; background: transparent; }
+.scope-chip.is-skipped { border: 1px dashed var(--line); background: transparent; opacity: .75; }
+.scope-chip.is-sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-sub); }
+.scope-dot { width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; background: var(--text-faint); }
+.scope-chip.is-done .scope-dot { background: var(--ok); }
+.scope-chip.is-failed .scope-dot { background: var(--bad); }
+.scope-chip.is-running .scope-dot { background: var(--warn); }
+.scope-chip.is-skipped .scope-dot { background: transparent; border: 1px solid var(--stroke); }
+.scope-chip-name { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--text); }
+.scope-chip.is-skipped .scope-chip-name, .scope-chip.is-waiting .scope-chip-name { color: var(--text-muted); }
+.scope-meta { color: var(--text-muted); }
+.scope-new { padding: 0 5px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); font-size: 10px; }
+/* Reduced motion (the canvas carries `is-calm`, from matchMedia: the contract allows no other media query): nothing glides, and the frame and its rows crossfade. */
+.is-calm .scope-frame { animation: scope-in .12s linear; }
+.is-calm .scope-frame.is-out { transition: opacity .12s linear; }
+.is-calm .scope-frame.is-on :is(.scope-head, .scope-body) { transition: opacity .12s linear; transform: none; }
+.is-calm .graph-node .glyph, .is-calm .graph-node.is-away .glyph { transition: opacity .12s linear; }
+@keyframes scope-in { from { opacity: 0; } }
+
+/* The open task's Overview: what its round did, and what the chips mean. */
+.scope-legend { display: flex; flex-direction: column; gap: 9px; margin: 4px 0 18px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 11.5px; line-height: 1.45; color: var(--text-sub); }
+.scope-legend > div { display: flex; gap: 8px; align-items: baseline; }
+.scope-legend .scope-new, .scope-legend .scope-key { flex: none; }
+.scope-key { padding: 0 6px; border: 1px dashed var(--border); border-radius: 6px; font-size: 10.5px; color: var(--text-muted); }
+.scope-key.is-ring { display: block; width: 12px; height: 12px; padding: 0; box-sizing: border-box; border-radius: 50%; align-self: center; }

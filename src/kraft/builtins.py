@@ -1776,6 +1776,7 @@ async def mr_rebase(
     worktree: str,
     branch: str,
     head_sha: str | None = None,
+    repository: str | None = None,
     has_rebase_bounce: bool = False,
     #: The tightest time cap over this task (`caps.at_launch`), the same one
     #: `adapters.subprocess.run_task` kills a launched process at. Threaded
@@ -1848,6 +1849,7 @@ async def mr_rebase(
             log=f"{exc}\n",
             status="config_error",
             head_sha=head_sha,
+            repository=repository,
         )
     except RebaseTimedOut as exc:
         # Recorded the same way a time cap stops any other task
@@ -1867,6 +1869,7 @@ async def mr_rebase(
             log=f"{exc}\n",
             status="capped_out",
             head_sha=head_sha,
+            repository=repository,
         )
         await db.write(
             lambda c: events.append(
@@ -1893,6 +1896,7 @@ async def mr_rebase(
         round=round,
         log=log,
         head_sha=head_sha,
+        repository=repository,
     )
     # The session is `done` either way -- the rebase itself succeeded.
     return BASE_MOVED if ((new_head or moved) and has_rebase_bounce) else recorded
@@ -2004,6 +2008,7 @@ async def start_session(
     round: int,
     head_sha: str | None = None,
     reuse_if_waiting: bool = False,
+    repository: str | None = None,
 ) -> tuple[str, Path, Path]:
     """Create the session row before the in-process work starts, not after.
 
@@ -2035,6 +2040,7 @@ async def start_session(
             round=round,
             head_sha=head_sha,
             reuse_if_waiting=reuse_if_waiting,
+            repository=repository,
         )
     )
     return actual_id, Path(log_str), Path(result_str)
@@ -2110,6 +2116,7 @@ async def _record_done(
     log: str,
     status: str = "done",
     head_sha: str | None = None,
+    repository: str | None = None,
 ) -> str:
     """A session row for a builtin that did its work in-process, before and
     after in one call. Shared so a builtin's bookkeeping cannot drift from
@@ -2128,6 +2135,7 @@ async def _record_done(
         hook_point=hook_point,
         round=round,
         head_sha=head_sha,
+        repository=repository,
     )
     return await finish_session(
         db, log_path, result_path, session_id=session_id, status=status, log=log

@@ -7,12 +7,15 @@ import type { ItemDetail } from "./useItem";
  *  parts those rows show are typed. */
 type Caps = Record<string, number | null | undefined>;
 type Pol = Record<string, unknown> | null | undefined;
-export type MTask = { id: string; kind: string; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
+export type MTask = { id: string; kind: string; ref?: string | null; execution?: string | null; skill?: string | null; produces?: string | null; harness?: string | null; model?: string | null; effort?: string | null; profile?: string | null; prompt?: string | null; command?: unknown; policy?: Pol };
 type MStep = { id: string; tasks: MTask[]; policy?: Pol };
 type MLoop = { max_attempts?: number | null; tasks?: MTask[] | null; steps?: MStep[] | null; judge?: MTask | null };
 export type MNode = { id: string; kind: string; tasks?: MTask[] | null; steps?: MStep[] | null; policy?: Pol; fix_loop?: MLoop | null; auto_review?: MTask | null; message?: string | null; artifact?: string | null };
+/** What the item runs against, frozen at intake: a workspace's root and its members, in the order a fanned-out task visits them. */
+export type MTarget = { kind: string; root?: string | null; mounts?: Record<string, { repository: string; path: string }> };
 export type Materialized = {
   chain: { nodes: MNode[]; policy?: Pol };
+  target?: MTarget | null;
   policy?: Record<string, unknown> & { cap_defaults?: Record<string, Caps>; maxima?: Record<string, unknown> };
 };
 /** The item's own policy override (`policy_override`): item-wide fields, and `paths` by canonical path. */
@@ -40,13 +43,24 @@ export function materialized(item: { materialized_chain?: string | null }): Mate
 /** A node's steps: a `tasks:` node is one step called `main`. */
 export const stepsOfNode = (n: MNode): MStep[] => n.steps ?? (n.tasks ? [{ id: "main", tasks: n.tasks }] : []);
 
+/** A fix loop's own task by what follows `<node>.fix_loop.`: `judge`, or `<step>.<task>`, where a loop written as a
+ *  bare `tasks:` list is one step called `main` (`task-group-shorthand-resolves-to-one-step`). */
+function loopTaskAt(node: MNode | undefined, rest: string[]): MTask | undefined {
+  const loop = node?.fix_loop;
+  if (!loop || !rest.length) return undefined;
+  if (rest.length === 1 && rest[0] === "judge") return loop.judge ?? undefined;
+  if (rest.length !== 2) return undefined;
+  const steps = loop.steps ?? (loop.tasks ? [{ id: "main", tasks: loop.tasks }] : []);
+  return steps.find((x) => x.id === rest[0])?.tasks.find((x) => x.id === rest[1]);
+}
+
 /** The node, step and task a path names, broadest first. */
 function scopes(m: Materialized, path: string) {
   const [n, s, t] = path.split(".");
   const node = m.chain.nodes.find((x) => x.id === n);
   const step = node && s ? stepsOfNode(node).find((x) => x.id === s) : undefined;
   // A gate's reviewer is `<gate>.auto_review`: no step of the chain, but a task of its own.
-  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : undefined;
+  const task = step && t ? step.tasks.find((x) => x.id === t) : node?.kind === "gate" && s === "auto_review" && !t ? node.auto_review ?? undefined : s === "fix_loop" ? loopTaskAt(node, path.split(".").slice(2)) : undefined;
   return { node, step, task };
 }
 
@@ -86,6 +100,16 @@ export function producerOf(m: Materialized | null, gateId: string): string | nul
   for (const n of m.chain.nodes)
     for (const st of stepsOfNode(n)) for (const t of st.tasks) if (t.produces === kind) return `${n.id}.${st.id}.${t.id}`;
   return null;
+}
+
+/** What a node's fix loop launches, by path from the frozen chain: its repair tasks in order, and its judge when it has one. */
+export function loopPaths(m: Materialized | null, node: string): { repair: string[]; judge: string | null } {
+  const loop = m && nodeAt(m, node)?.fix_loop;
+  const at = `${node}.fix_loop`;
+  return {
+    repair: (loop ? loop.steps ?? (loop.tasks ? [{ id: "main", tasks: loop.tasks }] : []) : []).flatMap((st) => st.tasks.map((t) => `${at}.${st.id}.${t.id}`)),
+    judge: loop?.judge ? `${at}.judge` : null,
+  };
 }
 
 /** A task's kind by its path, from the frozen chain. */

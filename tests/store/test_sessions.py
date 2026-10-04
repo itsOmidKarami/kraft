@@ -100,6 +100,8 @@ async def test_session_lifecycle(database):
         ({"thread": 2}, "thread", 2),
         ({"head_sha": "abc123"}, "head_sha", "abc123"),
         ({}, "head_sha", None),
+        ({"repository": "pkg"}, "repository", "pkg"),
+        ({}, "repository", None),
     ],
     ids=[
         "records-the-command",
@@ -108,6 +110,8 @@ async def test_session_lifecycle(database):
         "stores-an-explicit-thread",
         "stores-the-head-sha",
         "head-sha-defaults-null",
+        "stores-the-repository-a-run-was-fanned-out-for",
+        "repository-defaults-null",
     ],
 )
 async def test_create_session_stores_its_column(database, kwargs, column, expected):

@@ -7,24 +7,26 @@ import { lookWord, sessionLook } from "../nodeGraph";
 import type { ItemDetail } from "../useItem";
 
 /** The attempt every tab shows, as a menu in the pane's subtitle (Decisions §6 Attempts): a pill
- *  reading "attempt n of m", one row per session, newest first. On the escalation each session is
+ *  reading "attempt n of m", one row per session, newest first (`inRound`: the sessions of one fix-loop
+ *  round, counted from 1). On the escalation each session is
  *  a turn of its thread, so it reads "turn n of m" as the Thread tab counts them, not
  *  "attempt 5 of 5" beside "5 turns" (R10b-06). */
-export function AttemptMenu({ sessions, at, onAt, now, turns }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number; turns?: boolean }) {
+export function AttemptMenu({ sessions, at, onAt, now, turns, inRound }: { sessions: WorkerSession[]; at: WorkerSession; onAt: (attempt: number) => void; now: number; turns?: boolean; inRound?: boolean }) {
   const threads = new Set(sessions.map((s) => s.thread)).size > 1;
   const items = [...sessions].reverse().map((s): MenuItem => {
     const look = sessionLook(s, now);
     const tone = look.running ? "is-live" : look.state === "failed" ? "is-bad" : look.state === "done" ? "is-ok" : "";
     return {
       // `Menu` keys its rows by label: an attempt number is unique, a turn is unique within its thread.
-      label: turns ? `Turn ${turnOf(sessions, s).n}${threads ? ` · thread ${s.thread}` : ""}` : `Attempt ${s.attempt}`,
+      label: turns ? `Turn ${turnOf(sessions, s).n}${threads ? ` · thread ${s.thread}` : ""}` : `Attempt ${inRound ? sessions.indexOf(s) + 1 : s.attempt}`,
       hint: s.status === "pending" ? "not run yet" : look.running ? look.meta : [lookWord(look), s.wall_ms != null ? elapsed(s.wall_ms) : null].filter(Boolean).join(" · "),
       icon: <span className={`ip-pill-dot ${tone}`} />,
       checked: s === at,
       onSelect: () => onAt(s.attempt),
     };
   });
-  const text = turns ? turnWords(sessions, at) : `attempt ${at.attempt} of ${sessions.at(-1)!.attempt}${at.round ? ` · round ${at.round + 1}` : ""}`;
+  // In a fix-loop round the count is the round's own: the retries of this one task in it.
+  const text = turns ? turnWords(sessions, at) : inRound ? `attempt ${sessions.indexOf(at) + 1} of ${sessions.length}` : `attempt ${at.attempt} of ${sessions.at(-1)!.attempt}${at.round ? ` · round ${at.round + 1}` : ""}`;
   return <Menu label={turns ? "Turns" : "Attempts"} triggerClass="ip-pill" trigger={<>{text}<span className="ip-pill-caret" aria-hidden>▾</span></>} items={items} />;
 }
 

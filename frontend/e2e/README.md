@@ -1,6 +1,6 @@
 # Playwright end-to-end
 
-Nine specs, all against one running orchestrator. Playwright proves the
+Ten specs, all against one running orchestrator. Playwright proves the
 UI↔server contract and real-browser layout; component behaviour (Escape
 handling, which controls a state offers, keyboard paths) is vitest's. Shared
 helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
@@ -12,6 +12,7 @@ helpers (`REPO`, `REPO_NAME`, `connectRepo`, `openComposer`, `createItem`,
 | `planning.spec.ts` | a `default` item at `spec_approval`: read the spec from the gate, reject it with a note (the spec node re-runs and the gate comes back), approve into `plan_approval`, read the plan |
 | `lifecycle.spec.ts` | pause a running agent (`KRAFT_SLOW`), resume it with a steer, see it finish; a deep link to an item loads it |
 | `regression.spec.ts` | each area's write path: connect a repo and publish, publish a chain change, a library component's and a harness's links into Chains, publish a policy cap and the intake interval, Access's port, Notifications' "Send a test", Appearance's density and open-in after a reload |
+| `fixloop.spec.ts` | a verification that went three rounds, opened on its node canvas: the repair and judge on the arc, the round menu (upward, newest first) and `latest ↩`, `test_changed_scopes` opening into its repositories and scopes, a chip opening its scope's pane, Esc stepping scope → task → box, and the frame's move with and without `prefers-reduced-motion`. The fixture library turns every builtin into an inert `true`, so a real run can leave no scope runs or second round: the spec opens a real finished item and answers only that item's detail request with the payload such a run would leave |
 | `search.spec.ts` | Ctrl-K finds an indexed document and opens it; the kind filter narrows documents |
 | `board-responsive.spec.ts` | the peek opens over the list without moving or reflowing a row, at 1440, 1100 and 900 |
 | `attachments.visual.spec.ts` | the composer's spec and plan picker against the real index, the chain it trims, the item that results. Writes screenshots to `frontend/e2e-shots/` |

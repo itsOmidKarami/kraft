@@ -8,7 +8,7 @@ import shlex
 import sqlite3
 import traceback
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -470,6 +470,16 @@ def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Pat
     return runs
 
 
+def _selected_commands(to_run: list[dict]) -> list[str]:
+    """The commands a selection runs, in order: each area's setup once, ahead of its first scope."""
+    out: list[str] = []
+    for scope in to_run:
+        for argv in (scope["setup"], scope["cmd"]):
+            if argv and (command := shlex.join(argv)) not in out:
+                out.append(command)
+    return out
+
+
 async def _run_changed_test_scopes(
     db,
     run_dirs,
@@ -550,6 +560,24 @@ async def _run_changed_test_scopes(
             time_cap=time_cap,
             **{**common, "session_id": uuid.uuid4().hex},
         )
+
+    # What the round picked, before any of it runs: a node's view draws the scopes still to
+    # come beside the ones that have started. One per repository, in the order they run, an
+    # area's setup ahead of its first scope.
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_row["id"],
+            "test_scopes_selected",
+            {
+                "node_id": node.id,
+                "hook_point": task.path,
+                "repository": common.get("repository"),
+                "round": round,
+                "commands": _selected_commands(to_run),
+            },
+        )
+    )
 
     # An area's setup runs once, before the first of its scopes -- including
     # an area nobody chose at intake that the changed paths selected anyway
@@ -644,22 +672,134 @@ def scope_results(
     for command, row in latest.items():
         if row["status"] not in ("done", "failed"):
             continue
-        entry: dict = {"command": command}
-        scopes = [s for s in table if shlex.join(s["cmd"]) == command]
-        setups = [s for s in table if s["setup"] and shlex.join(s["setup"]) == command]
-        if scopes:
-            entry["scope"] = ", ".join(p for s in scopes for p in s["paths"])
+        entry: dict = {"command": command, **_scope_facts(table, command)}
         if (code := _exit_code(row["result_path"])) is not None:
             entry["exit_code"] = code
-        areas = {s["area"] for s in scopes or setups}
-        if len(areas) == 1 and (area := areas.pop()):
-            entry["area"] = area
-        if setups and not scopes:
-            entry["setup"] = True
         entry["passed"] = row["status"] == "done"
         entry["session_id"] = row["id"]
         results.append(entry)
     return results
+
+
+def _scope_facts(table: list[dict], command: str) -> dict:
+    """What the repo's table says a command is: `scope` (the paths it covers),
+    `area` when the scopes sharing it agree on one, and `setup` when it is an
+    area's setup and no scope's own. Empty for a command the table no longer
+    declares."""
+    scopes = [s for s in table if shlex.join(s["cmd"]) == command]
+    setups = [s for s in table if s["setup"] and shlex.join(s["setup"]) == command]
+    facts: dict = {}
+    if scopes:
+        facts["scope"] = ", ".join(p for s in scopes for p in s["paths"])
+    areas = {s["area"] for s in scopes or setups}
+    if len(areas) == 1 and (area := areas.pop()):
+        facts["area"] = area
+    if setups and not scopes:
+        facts["setup"] = True
+    return facts
+
+
+def _scope_order(table: list[dict], command: str) -> float | None:
+    """Where the table lists a command: its scope's index, or half before its
+    area's first scope for that area's setup, which runs ahead of it. None for
+    a command the table no longer declares."""
+    for i, s in enumerate(table):
+        if shlex.join(s["cmd"]) == command:
+            return i
+    for i, s in enumerate(table):
+        if s["setup"] and shlex.join(s["setup"]) == command:
+            return i - 0.5
+    return None
+
+
+def scope_runs(
+    db,
+    work_item_id: str,
+    node_id: str,
+    task_hook: str,
+    entries: Callable[[str | None], RepoEntry | None],
+) -> list[dict]:
+    """Every command the changed-test-scope builtin ran for `task_hook`, in the
+    order it started, across every round, repository and entry into the node:
+    `{session_id, repository, round, command, passed, exit_code?, scope?, area?,
+    setup?, order?, selected?}`. `passed` is None while the command is not finished;
+    `order` is where the table lists it, so a round's scopes draw in its order.
+    A command its round picked (`test_scopes_selected`) and has not started comes
+    last, `pending` and with no session; `selected` marks every entry of a round
+    that recorded its picks, so what it dropped is known before it ends.
+
+    `scope_results` says the same for the latest run only. This is what a
+    node's view reads to draw each round's scopes beside the one before it:
+    which repository ran which scope, and which scope a round picked that the
+    round before did not. `entries` maps a session's repository (None: the
+    item's own) to the entry whose table names its commands, read as today's
+    table, as `scope_results` reads it."""
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT id, status, round, command, repository, result_path FROM worker_sessions "
+            "WHERE work_item_id = ? AND node_id = ? AND hook_point = ? AND command IS NOT NULL "
+            "ORDER BY rowid",
+            (work_item_id, node_id, task_hook),
+        ).fetchall()
+    )
+    # What each round picked (`test_scopes_selected`), the latest per repository and round.
+    picked: dict[tuple[str | None, int], list[str]] = {}
+    for (payload,) in db.read(
+        lambda c: c.execute(
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'test_scopes_selected' "
+            "AND node_id = ? ORDER BY seq",
+            (work_item_id, node_id),
+        ).fetchall()
+    ):
+        p = json.loads(payload)
+        if p.get("hook_point") == task_hook:
+            picked[(p.get("repository"), p["round"])] = p["commands"]
+    tables: dict[str | None, list[dict]] = {}
+    out = []
+
+    def facts(repo: str | None, command: str) -> dict:
+        if repo not in tables:
+            tables[repo] = _scope_table(entries(repo))
+        found = _scope_facts(tables[repo], command)
+        if (order := _scope_order(tables[repo], command)) is not None:
+            found["order"] = order
+        return found
+
+    for row in rows:
+        repo = row["repository"]
+        if repo not in tables:
+            tables[repo] = _scope_table(entries(repo))
+        entry: dict = {
+            "session_id": row["id"],
+            "repository": repo,
+            "round": row["round"],
+            "command": row["command"],
+            "passed": {"done": True, "failed": False}.get(row["status"]),
+            **facts(repo, row["command"]),
+        }
+        if (repo, row["round"]) in picked:
+            entry["selected"] = True
+        if (code := _exit_code(row["result_path"])) is not None:
+            entry["exit_code"] = code
+        out.append(entry)
+    # What a round picked and has not started: no session yet, so nothing but the command.
+    started = {(r["repository"], r["round"], r["command"]) for r in rows}
+    for (repo, rnd), commands in picked.items():
+        for command in commands:
+            if (repo, rnd, command) not in started:
+                out.append(
+                    {
+                        "session_id": None,
+                        "repository": repo,
+                        "round": rnd,
+                        "command": command,
+                        "passed": None,
+                        "pending": True,
+                        "selected": True,
+                        **facts(repo, command),
+                    }
+                )
+    return out
 
 
 def _exit_code(result_path: str | None) -> int | None:
@@ -729,6 +869,7 @@ async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, 
             hook_point=task.path,
             round=kw.get("round", 0),
             head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
+            repository=kw.get("repository"),
         )
         open_rows = [{"id": sid, "log_path": log_path, "result_path": result_path}]
     for r in open_rows:
@@ -819,6 +960,9 @@ async def _dispatch_task(
         hook_point=task.path,
         round=round,
         head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
+        # Only a fanned-out run names its repository: a forge task is never
+        # fanned out, and the rest take it as a keyword like the others here.
+        **({"repository": repository} if repository is not None else {}),
     )
     # A Kit fetched again if its cache went (a retry), before anything below
     # reads the sandbox; a Kit that cannot be used launches nothing.
