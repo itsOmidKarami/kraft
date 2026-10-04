@@ -77,7 +77,7 @@ export function recent(events: KraftEvent[]): RecentLine[] {
       const line = eventLine(e);
       if (!line) continue;
       // A round's outcome joins its start line; with no start left to join, it stands alone.
-      const round = e.type === "fix_cycle_finished" && out.find((x) => x.e.type === "fix_cycle_started" && x.node === node && x.e.payload?.cycle === p.cycle);
+      const round = e.type === "fix_cycle_finished" && [...out].reverse().find((x) => x.e.type === "fix_cycle_started" && x.node === node && x.e.payload?.cycle === p.cycle);
       if (round) { round.line = line; continue; }
       const ran = (x: (typeof out)[number]) => x.e.type === "node_started" || (x.e.type.startsWith("worker_session") && !x.line.startsWith("escalation"));
       if (e.type === "node_completed" || e.type === "node_skipped") drop((x) => x.node !== node || !ran(x));
