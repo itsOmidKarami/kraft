@@ -14,6 +14,7 @@ draft, not an implementation plan.
 ```text
 config/
   policy.yaml       # instance defaults and administrator maxima
+  intake.yaml       # auto-intake and schedules
   harnesses.yaml    # installed agent-runtime profiles
   repos.yaml        # repositories, workspaces, and monorepo areas
   library.yaml      # reusable steering, tasks, steps, and nodes
