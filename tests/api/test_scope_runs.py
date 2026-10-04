@@ -162,7 +162,7 @@ def test_detail_scope_runs_leaves_nothing_pending_in_a_round_the_loop_went_on_pa
     _picks(wid, "ws", 0, ["fe-cmd", "be-cmd"])
     _session(tmp_path, wid, "s0", "fe-cmd", "failed")
     _picks(wid, "ws", 1, ["fe-cmd"])
-    # Round 1 is the newest, so it alone can still start what it picked; round 0's failure is history.
+    # Round 1 is the newest, so it alone can still start what it picked.
     assert _runs(client, wid) == [
         ("s0", "ws", 0, "fe-cmd", False, None),
         (None, "ws", 1, "fe-cmd", None, True),
